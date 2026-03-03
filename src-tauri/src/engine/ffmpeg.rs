@@ -1,4 +1,5 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 use tauri::{AppHandle, Manager};
@@ -6,6 +7,9 @@ use tauri_plugin_shell::ShellExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::AppError;
+
+const MAX_SCREENSHOT_STEM_LEN: usize = 120;
+const FALLBACK_SCREENSHOT_STEM: &str = "channel";
 
 // Compile-time target triple for resolving sidecar binary paths.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -21,7 +25,11 @@ const TARGET_TRIPLE: &str = "x86_64-pc-windows-msvc";
 /// over the system PATH. This bypasses the Tauri shell plugin which can
 /// silently fail for long-running commands.
 fn resolve_binary(app: &AppHandle, name: &str) -> String {
-    let ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
+    let ext = if cfg!(target_os = "windows") {
+        ".exe"
+    } else {
+        ""
+    };
     let sidecar_name = format!("{name}-{TARGET_TRIPLE}{ext}");
 
     if let Ok(dir) = app.path().resource_dir() {
@@ -33,6 +41,139 @@ fn resolve_binary(app: &AppHandle, name: &str) -> String {
 
     // Fall back to system PATH
     name.to_string()
+}
+
+fn trim_windows_unsafe_edges(value: &str) -> String {
+    value
+        .trim_matches(|c: char| c == ' ' || c == '.' || c == '-')
+        .to_string()
+}
+
+fn truncate_stem(value: &str, max_len: usize) -> String {
+    if value.chars().count() <= max_len {
+        return value.to_string();
+    }
+    value.chars().take(max_len).collect()
+}
+
+fn is_windows_reserved_stem(value: &str) -> bool {
+    let upper = value.trim().to_ascii_uppercase();
+    matches!(
+        upper.as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    )
+}
+
+/// Sanitize a screenshot filename stem to be valid across macOS/Linux/Windows.
+pub fn sanitize_screenshot_stem(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut last_was_dash = false;
+
+    for ch in raw.chars() {
+        let normalized = if ch.is_control()
+            || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+        {
+            '-'
+        } else if ch.is_whitespace() {
+            '-'
+        } else {
+            ch
+        };
+
+        if normalized == '-' {
+            if !last_was_dash {
+                out.push('-');
+                last_was_dash = true;
+            }
+        } else {
+            out.push(normalized);
+            last_was_dash = false;
+        }
+    }
+
+    let mut stem = trim_windows_unsafe_edges(&out);
+    if stem.is_empty() {
+        stem = FALLBACK_SCREENSHOT_STEM.to_string();
+    }
+    if is_windows_reserved_stem(&stem) {
+        stem = format!("{stem}-channel");
+    }
+
+    stem = truncate_stem(&stem, MAX_SCREENSHOT_STEM_LEN);
+    stem = trim_windows_unsafe_edges(&stem);
+    if stem.is_empty() {
+        return FALLBACK_SCREENSHOT_STEM.to_string();
+    }
+    stem
+}
+
+/// Build a deterministic screenshot stem for a channel index + name.
+pub fn build_screenshot_file_name(channel_index: usize, channel_name: &str) -> String {
+    let sanitized_name = sanitize_screenshot_stem(channel_name);
+    let prefixed = format!("{}-{}", channel_index + 1, sanitized_name);
+    let mut stem = truncate_stem(&prefixed, MAX_SCREENSHOT_STEM_LEN);
+    stem = trim_windows_unsafe_edges(&stem);
+    if stem.is_empty() {
+        FALLBACK_SCREENSHOT_STEM.to_string()
+    } else {
+        stem
+    }
+}
+
+fn unique_screenshot_output_path(output_dir: &Path, stem: &str) -> PathBuf {
+    let base_stem = sanitize_screenshot_stem(stem);
+    let mut base = truncate_stem(&base_stem, MAX_SCREENSHOT_STEM_LEN);
+    base = trim_windows_unsafe_edges(&base);
+    if base.is_empty() {
+        base = FALLBACK_SCREENSHOT_STEM.to_string();
+    }
+
+    let initial = output_dir.join(format!("{base}.png"));
+    if !initial.exists() {
+        return initial;
+    }
+
+    for n in 2..=9_999usize {
+        let suffix = format!("-{n}");
+        let max_base_len = MAX_SCREENSHOT_STEM_LEN.saturating_sub(suffix.chars().count());
+        let mut truncated_base = truncate_stem(&base, max_base_len);
+        truncated_base = trim_windows_unsafe_edges(&truncated_base);
+        if truncated_base.is_empty() {
+            truncated_base = FALLBACK_SCREENSHOT_STEM.to_string();
+        }
+
+        let candidate = output_dir.join(format!("{truncated_base}{suffix}.png"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    output_dir.join(format!("{base}-{ts}.png"))
 }
 
 /// Run a sidecar command with args, falling back to system PATH.
@@ -95,9 +236,17 @@ async fn run_sidecar(
 /// Check if ffmpeg and ffprobe sidecars are available.
 pub async fn check_availability(app: &AppHandle) -> (bool, bool) {
     let no_cancel = CancellationToken::new();
-    let ffmpeg_ok = run_sidecar(app, "ffmpeg", &["-version"], &no_cancel).await.is_ok();
-    let ffprobe_ok = run_sidecar(app, "ffprobe", &["-version"], &no_cancel).await.is_ok();
-    log::debug!("ffmpeg available: {}, ffprobe available: {}", ffmpeg_ok, ffprobe_ok);
+    let ffmpeg_ok = run_sidecar(app, "ffmpeg", &["-version"], &no_cancel)
+        .await
+        .is_ok();
+    let ffprobe_ok = run_sidecar(app, "ffprobe", &["-version"], &no_cancel)
+        .await
+        .is_ok();
+    log::debug!(
+        "ffmpeg available: {}, ffprobe available: {}",
+        ffmpeg_ok,
+        ffprobe_ok
+    );
     (ffmpeg_ok, ffprobe_ok)
 }
 
@@ -148,7 +297,11 @@ fn parse_ffprobe_fps(raw: &str) -> Option<u32> {
 
     raw.parse::<f64>().ok().and_then(|fps| {
         let rounded = fps.round() as u32;
-        if rounded > 0 { Some(rounded) } else { None }
+        if rounded > 0 {
+            Some(rounded)
+        } else {
+            None
+        }
     })
 }
 
@@ -163,18 +316,28 @@ fn resolution_label(width: Option<u32>, height: Option<u32>) -> String {
 }
 
 /// Get video stream info via ffprobe sidecar.
-pub async fn get_stream_info(app: &AppHandle, url: &str, cancel: &CancellationToken) -> Result<VideoInfo, AppError> {
+pub async fn get_stream_info(
+    app: &AppHandle,
+    url: &str,
+    cancel: &CancellationToken,
+) -> Result<VideoInfo, AppError> {
     log::debug!("Getting stream info for: {}", url);
     let (stdout, stderr) = run_sidecar(
         app,
         "ffprobe",
         &[
-            "-v", "error",
-            "-analyzeduration", "15000000",
-            "-probesize", "15000000",
-            "-select_streams", "v",
-            "-show_entries", "stream=codec_name,width,height,r_frame_rate",
-            "-of", "json",
+            "-v",
+            "error",
+            "-analyzeduration",
+            "15000000",
+            "-probesize",
+            "15000000",
+            "-select_streams",
+            "v",
+            "-show_entries",
+            "stream=codec_name,width,height,r_frame_rate",
+            "-of",
+            "json",
             url,
         ],
         cancel,
@@ -191,9 +354,7 @@ pub async fn get_stream_info(app: &AppHandle, url: &str, cancel: &CancellationTo
     let best = parsed
         .streams
         .iter()
-        .max_by_key(|stream| {
-            stream.width.unwrap_or(0) as u64 * stream.height.unwrap_or(0) as u64
-        })
+        .max_by_key(|stream| stream.width.unwrap_or(0) as u64 * stream.height.unwrap_or(0) as u64)
         .cloned();
 
     let codec = best
@@ -221,15 +382,23 @@ pub async fn get_stream_info(app: &AppHandle, url: &str, cancel: &CancellationTo
 }
 
 /// Get audio stream info via ffprobe sidecar.
-pub async fn get_audio_info(app: &AppHandle, url: &str, cancel: &CancellationToken) -> Result<AudioInfo, AppError> {
+pub async fn get_audio_info(
+    app: &AppHandle,
+    url: &str,
+    cancel: &CancellationToken,
+) -> Result<AudioInfo, AppError> {
     let (stdout, _) = run_sidecar(
         app,
         "ffprobe",
         &[
-            "-v", "error",
-            "-select_streams", "a:0",
-            "-show_entries", "stream=codec_name,bit_rate",
-            "-of", "default=noprint_wrappers=1",
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=codec_name,bit_rate",
+            "-of",
+            "default=noprint_wrappers=1",
             url,
         ],
         cancel,
@@ -268,7 +437,7 @@ pub async fn capture_screenshot(
         return Err(AppError::Cancelled);
     }
 
-    let output_path = Path::new(output_dir).join(format!("{}.png", file_name));
+    let output_path = unique_screenshot_output_path(Path::new(output_dir), file_name);
     let output_str = output_path.to_string_lossy().to_string();
     let timeout_duration = std::time::Duration::from_secs(15);
 
@@ -279,9 +448,12 @@ pub async fn capture_screenshot(
     let mut child = tokio::process::Command::new(&ffmpeg_bin)
         .args([
             "-y",
-            "-user_agent", user_agent,
-            "-i", url,
-            "-frames:v", "1",
+            "-user_agent",
+            user_agent,
+            "-i",
+            url,
+            "-frames:v",
+            "1",
             &output_str,
         ])
         .stdout(std::process::Stdio::null())
@@ -322,16 +494,26 @@ pub async fn capture_screenshot(
 }
 
 /// Profile approximate video bitrate by sampling the stream for 10 seconds.
-pub async fn profile_bitrate(app: &AppHandle, url: &str, user_agent: &str, cancel: &CancellationToken) -> Result<String, AppError> {
+pub async fn profile_bitrate(
+    app: &AppHandle,
+    url: &str,
+    user_agent: &str,
+    cancel: &CancellationToken,
+) -> Result<String, AppError> {
     let (_, stderr) = run_sidecar(
         app,
         "ffmpeg",
         &[
-            "-v", "debug",
-            "-user_agent", user_agent,
-            "-i", url,
-            "-t", "10",
-            "-f", "null",
+            "-v",
+            "debug",
+            "-user_agent",
+            user_agent,
+            "-i",
+            url,
+            "-t",
+            "10",
+            "-f",
+            "null",
             "-",
         ],
         cancel,
@@ -387,7 +569,12 @@ pub fn check_label_mismatch(channel_name: &str, resolution: &str) -> Vec<String>
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_ffprobe_fps, resolution_label};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::{
+        build_screenshot_file_name, parse_ffprobe_fps, resolution_label, sanitize_screenshot_stem,
+        unique_screenshot_output_path, MAX_SCREENSHOT_STEM_LEN,
+    };
 
     #[test]
     fn parse_fractional_fps() {
@@ -407,5 +594,51 @@ mod tests {
         assert_eq!(resolution_label(Some(1920), Some(1080)), "1080p");
         assert_eq!(resolution_label(Some(1280), Some(720)), "720p");
         assert_eq!(resolution_label(Some(854), Some(480)), "SD");
+    }
+
+    #[test]
+    fn sanitize_screenshot_filename_reserved_chars() {
+        assert_eq!(
+            sanitize_screenshot_stem("News: / \"Global\" * HD?"),
+            "News-Global-HD"
+        );
+        assert_eq!(sanitize_screenshot_stem("CON"), "CON-channel");
+        assert_eq!(sanitize_screenshot_stem("   ...   "), "channel");
+    }
+
+    #[test]
+    fn screenshot_filename_max_length() {
+        let input = "a".repeat(MAX_SCREENSHOT_STEM_LEN + 40);
+        let output = sanitize_screenshot_stem(&input);
+        assert!(output.chars().count() <= MAX_SCREENSHOT_STEM_LEN);
+    }
+
+    #[test]
+    fn screenshot_name_builder_uses_index_prefix() {
+        assert_eq!(
+            build_screenshot_file_name(0, "Sports/News: HD"),
+            "1-Sports-News-HD"
+        );
+    }
+
+    #[test]
+    fn unique_path_adds_suffix_when_base_exists() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be monotonic")
+            .as_nanos();
+        let test_dir = std::env::temp_dir().join(format!("iptv-checker-sanitize-{unique}"));
+        std::fs::create_dir_all(&test_dir).expect("temp dir should be creatable");
+
+        let existing = test_dir.join("1-Channel.png");
+        std::fs::write(&existing, b"old").expect("fixture file should be writable");
+
+        let output = unique_screenshot_output_path(&test_dir, "1-Channel");
+        assert_eq!(
+            output.file_name().and_then(|n| n.to_str()),
+            Some("1-Channel-2.png")
+        );
+
+        std::fs::remove_dir_all(&test_dir).expect("temp dir should be removable");
     }
 }

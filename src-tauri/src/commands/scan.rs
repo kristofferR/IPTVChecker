@@ -12,10 +12,7 @@ use crate::models::scan::{ScanConfig, ScanProgress, ScanSummary};
 use crate::state::AppState;
 
 #[tauri::command]
-pub async fn start_scan(
-    app: AppHandle,
-    config: ScanConfig,
-) -> Result<(), AppError> {
+pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppError> {
     let state = app.state::<Arc<AppState>>();
 
     // Prevent multiple simultaneous scans
@@ -30,7 +27,9 @@ pub async fn start_scan(
     if config.concurrency < 1 {
         let mut scanning = state.scanning.lock().await;
         *scanning = false;
-        return Err(AppError::Other("Concurrency must be at least 1".to_string()));
+        return Err(AppError::Other(
+            "Concurrency must be at least 1".to_string(),
+        ));
     }
 
     let cancel_token = CancellationToken::new();
@@ -39,7 +38,12 @@ pub async fn start_scan(
         *token_lock = Some(cancel_token.clone());
     }
 
-    log::info!("Starting scan: {} (concurrency: {}, retries: {})", config.file_path, config.concurrency, config.retries);
+    log::info!(
+        "Starting scan: {} (concurrency: {}, retries: {})",
+        config.file_path,
+        config.concurrency,
+        config.retries
+    );
 
     // Parse the playlist
     let preview = parser::parse_playlist(
@@ -57,14 +61,17 @@ pub async fn start_scan(
     log::info!("Scan: {} channels to check", total);
 
     if total == 0 {
-        let _ = app.emit("scan://complete", ScanSummary {
-            total: 0,
-            alive: 0,
-            dead: 0,
-            geoblocked: 0,
-            low_framerate: 0,
-            mislabeled: 0,
-        });
+        let _ = app.emit(
+            "scan://complete",
+            ScanSummary {
+                total: 0,
+                alive: 0,
+                dead: 0,
+                geoblocked: 0,
+                low_framerate: 0,
+                mislabeled: 0,
+            },
+        );
         let mut scanning = state.scanning.lock().await;
         *scanning = false;
         return Ok(());
@@ -97,7 +104,10 @@ pub async fn start_scan(
         .map(|g| g.replace('|', "").replace(' ', ""))
         .unwrap_or_else(|| "AllGroups".to_string());
 
-    let log_file = format!("{}/{}_{}_checklog.txt", playlist_dir, base_name, group_suffix);
+    let log_file = format!(
+        "{}/{}_{}_checklog.txt",
+        playlist_dir, base_name, group_suffix
+    );
 
     // Always start fresh — GUI scans are explicitly triggered by the user
     let _ = std::fs::write(&log_file, "");
@@ -108,7 +118,10 @@ pub async fn start_scan(
         let dir = match config.screenshots_dir.clone() {
             Some(d) => d,
             None => {
-                let temp = app.path().temp_dir().unwrap_or_else(|_| std::env::temp_dir());
+                let temp = app
+                    .path()
+                    .temp_dir()
+                    .unwrap_or_else(|_| std::env::temp_dir());
                 temp.join("iptv-checker-screenshots")
                     .join(format!("{}_{}", base_name, group_suffix))
                     .to_string_lossy()
@@ -118,7 +131,10 @@ pub async fn start_scan(
         if let Err(e) = std::fs::create_dir_all(&dir) {
             let mut scanning = state.scanning.lock().await;
             *scanning = false;
-            return Err(AppError::Other(format!("Failed to create screenshots directory: {}", e)));
+            return Err(AppError::Other(format!(
+                "Failed to create screenshots directory: {}",
+                e
+            )));
         }
         Some(dir)
     } else {
@@ -296,7 +312,9 @@ pub async fn start_scan(
                     let target_url = stream_url.as_deref().unwrap_or(&channel.url);
 
                     if ffprobe_ok {
-                        if let Ok(info) = ffmpeg::get_stream_info(&task_app, target_url, &cancel).await {
+                        if let Ok(info) =
+                            ffmpeg::get_stream_info(&task_app, target_url, &cancel).await
+                        {
                             result.codec = Some(info.codec);
                             result.resolution = Some(info.resolution.clone());
                             result.width = info.width;
@@ -315,16 +333,18 @@ pub async fn start_scan(
                         }
 
                         if !cancel.is_cancelled() {
-                            if let Ok(audio) = ffmpeg::get_audio_info(&task_app, target_url, &cancel).await {
+                            if let Ok(audio) =
+                                ffmpeg::get_audio_info(&task_app, target_url, &cancel).await
+                            {
                                 result.audio_codec = Some(audio.codec);
-                                result.audio_bitrate =
-                                    audio.bitrate_kbps.map(|b| format!("{}", b));
+                                result.audio_bitrate = audio.bitrate_kbps.map(|b| format!("{}", b));
                             }
                         }
 
                         if !cancel.is_cancelled() && profile_bitrate_flag && ffmpeg_ok {
                             if let Ok(bitrate) =
-                                ffmpeg::profile_bitrate(&task_app, target_url, &user_agent, &cancel).await
+                                ffmpeg::profile_bitrate(&task_app, target_url, &user_agent, &cancel)
+                                    .await
                             {
                                 result.video_bitrate = Some(bitrate);
                             }
@@ -334,13 +354,17 @@ pub async fn start_scan(
                     // Capture screenshot
                     if !cancel.is_cancelled() && !skip_screenshots && ffmpeg_ok {
                         if let Some(ref dir) = screenshots_dir {
-                            let file_name = format!(
-                                "{}-{}",
-                                channel.index + 1,
-                                channel.name.replace('/', "-")
-                            );
-                            if let Ok(path) =
-                                ffmpeg::capture_screenshot(&task_app, target_url, dir, &file_name, &user_agent, &cancel).await
+                            let file_name =
+                                ffmpeg::build_screenshot_file_name(channel.index, &channel.name);
+                            if let Ok(path) = ffmpeg::capture_screenshot(
+                                &task_app,
+                                target_url,
+                                dir,
+                                &file_name,
+                                &user_agent,
+                                &cancel,
+                            )
+                            .await
                             {
                                 result.screenshot_path = Some(path);
                             }
@@ -351,12 +375,7 @@ pub async fn start_scan(
                 // Write checkpoint log
                 let _ = resume::write_log_entry(
                     &log_file,
-                    &format!(
-                        "{} - {} {}",
-                        channel.index + 1,
-                        channel.name,
-                        channel.url
-                    ),
+                    &format!("{} - {} {}", channel.index + 1, channel.name, channel.url),
                 );
 
                 let _ = tx.send(result).await;
