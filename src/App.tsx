@@ -22,6 +22,7 @@ import { StatsPanel } from "./components/StatsPanel";
 import { WarningsPanel } from "./components/WarningsPanel";
 import { ProgressBar } from "./components/ProgressBar";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { KeyboardShortcutsDialog } from "./components/KeyboardShortcutsDialog";
 import { AlertTriangle, FolderOpen, Info, X } from "lucide-react";
 import { detectPlatform } from "./lib/platform";
 import { logger } from "./lib/logger";
@@ -92,6 +93,7 @@ export default function App() {
     useState<ChannelResult | null>(null);
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [menuInfo, setMenuInfo] = useState<string | null>(null);
+  const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
   const [menuExportRequest, setMenuExportRequest] = useState<{
     id: number;
     action: "csv" | "split" | "renamed";
@@ -225,6 +227,11 @@ export default function App() {
     showSettingsRef.current = showSettings;
   }, [showSettings]);
 
+  const showKeyboardShortcutsRef = useRef(showKeyboardShortcuts);
+  useEffect(() => {
+    showKeyboardShortcutsRef.current = showKeyboardShortcuts;
+  }, [showKeyboardShortcuts]);
+
   const pendingPlaybackRef = useRef<ChannelResult | null>(pendingPlaybackChannel);
   useEffect(() => {
     pendingPlaybackRef.current = pendingPlaybackChannel;
@@ -240,9 +247,17 @@ export default function App() {
         e.preventDefault();
         setShowSettings((s) => !s);
       }
+      if ((e.metaKey || e.ctrlKey) && e.key === "/") {
+        e.preventDefault();
+        setShowKeyboardShortcuts(true);
+      }
       if (e.key === "Escape") {
         if (pendingPlaybackRef.current) {
           setPendingPlaybackChannel(null);
+          return;
+        }
+        if (showKeyboardShortcutsRef.current) {
+          setShowKeyboardShortcuts(false);
           return;
         }
         if (showSettingsRef.current) setShowSettings(false);
@@ -362,6 +377,11 @@ export default function App() {
       unlisten.push(
         await listen("menu://check-updates", () =>
           setMenuInfo("Update checking is not configured yet."),
+        ),
+      );
+      unlisten.push(
+        await listen("menu://keyboard-shortcuts", () =>
+          setShowKeyboardShortcuts(true),
         ),
       );
     };
@@ -611,6 +631,12 @@ export default function App() {
           settings={settings}
           onSave={saveSettings}
           onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      {showKeyboardShortcuts && (
+        <KeyboardShortcutsDialog
+          onClose={() => setShowKeyboardShortcuts(false)}
         />
       )}
 

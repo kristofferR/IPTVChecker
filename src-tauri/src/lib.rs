@@ -72,6 +72,8 @@ pub fn run() {
                 .build()?;
 
             let help_menu = SubmenuBuilder::new(app, "Help")
+                .text("menu.help.shortcuts", "Keyboard Shortcuts")
+                .separator()
                 .text("menu.help.check_updates", "Check for Updates")
                 .build()?;
 
@@ -95,6 +97,7 @@ pub fn run() {
                 "menu.scan.start" => Some("menu://start-scan"),
                 "menu.scan.stop" => Some("menu://stop-scan"),
                 "menu.scan.settings" => Some("menu://open-settings"),
+                "menu.help.shortcuts" => Some("menu://keyboard-shortcuts"),
                 "menu.help.check_updates" => Some("menu://check-updates"),
                 _ => None,
             };
