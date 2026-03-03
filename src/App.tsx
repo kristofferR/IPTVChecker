@@ -25,6 +25,34 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { AlertTriangle, FolderOpen, Info, X } from "lucide-react";
 import { detectPlatform } from "./lib/platform";
 
+function errorToString(err: unknown): string {
+  if (typeof err === "string") {
+    return err;
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    "message" in err &&
+    typeof (err as { message?: unknown }).message === "string"
+  ) {
+    return (err as { message: string }).message;
+  }
+  return String(err);
+}
+
+function formatPlaylistOpenError(err: unknown): string {
+  const raw = errorToString(err).replace(/^error:\s*/i, "").trim();
+  if (!raw || raw === "[object Object]") {
+    return "Failed to open playlist. Please verify the file path and playlist format.";
+  }
+  return raw.toLowerCase().startsWith("failed to open playlist")
+    ? raw
+    : `Failed to open playlist: ${raw}`;
+}
+
 export default function App() {
   const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
   const modKey = isMac ? "Cmd" : "Ctrl";
@@ -44,6 +72,9 @@ export default function App() {
   const [ffmpegWarning, setFfmpegWarning] = useState(false);
   const [errorDismissed, setErrorDismissed] = useState(false);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [playlistOpenError, setPlaylistOpenError] = useState<string | null>(
+    null,
+  );
   const [pendingPlaybackChannel, setPendingPlaybackChannel] =
     useState<ChannelResult | null>(null);
   const [sidebarHidden, setSidebarHidden] = useState(false);
@@ -101,31 +132,52 @@ export default function App() {
   }, [playbackError]);
 
   useEffect(() => {
+    if (!playlistOpenError) return;
+    const timer = setTimeout(() => setPlaylistOpenError(null), 10000);
+    return () => clearTimeout(timer);
+  }, [playlistOpenError]);
+
+  useEffect(() => {
     if (!menuInfo) return;
     const timer = setTimeout(() => setMenuInfo(null), 8000);
     return () => clearTimeout(timer);
   }, [menuInfo]);
 
   const handleOpen = useCallback(async () => {
-    const path = await open({
-      multiple: false,
-      filters: [
-        { name: "M3U Playlists", extensions: ["m3u", "m3u8"] },
-      ],
-      directory: false,
-    });
-    if (path) {
+    setPlaylistOpenError(null);
+    try {
+      const path = await open({
+        multiple: false,
+        filters: [
+          { name: "M3U Playlists", extensions: ["m3u", "m3u8"] },
+        ],
+        directory: false,
+      });
+      if (!path) return;
+
+      const selectedPath = Array.isArray(path) ? path[0] : path;
+      if (!selectedPath) return;
+
       const searchTrimmed = channelSearch.trim() || undefined;
-      console.log(`[App] Opening playlist: ${path}, channelSearch: "${searchTrimmed ?? ""}"`);
-      const preview = await openPlaylist(path as string, undefined, searchTrimmed);
+      console.log(`[App] Opening playlist: ${selectedPath}, channelSearch: "${searchTrimmed ?? ""}"`);
+      const preview = await openPlaylist(selectedPath, undefined, searchTrimmed);
       console.log(`[App] Playlist loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`, preview.groups);
       setPlaylist(preview);
       initFromPlaylist(preview.channels);
       setSearch("");
       setGroupFilter("all");
       setStatusFilter("all");
+      setPlaylistOpenError(null);
       setSelectedChannel(null);
       setSelectedChannelIndices([]);
+      setPendingPlaybackChannel(null);
+    } catch (err) {
+      console.error("[App] Failed to open playlist", err);
+      setPlaylistOpenError(formatPlaylistOpenError(err));
+      // Keep app interaction predictable after a failed open attempt.
+      setSelectedChannel(null);
+      setSelectedChannelIndices([]);
+      setPendingPlaybackChannel(null);
     }
   }, [initFromPlaylist, channelSearch]);
 
@@ -388,6 +440,19 @@ export default function App() {
           <span className="flex-1">{playbackError}</span>
           <button
             onClick={() => setPlaybackError(null)}
+            className="p-1 hover:bg-red-500/20 rounded transition-colors"
+            type="button"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {playlistOpenError && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border-b border-red-500/20 text-red-400 text-[13px]">
+          <span className="flex-1">{playlistOpenError}</span>
+          <button
+            onClick={() => setPlaylistOpenError(null)}
             className="p-1 hover:bg-red-500/20 rounded transition-colors"
             type="button"
           >
