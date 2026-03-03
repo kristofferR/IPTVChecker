@@ -4,8 +4,10 @@ import type { ChannelResult } from "../lib/types";
 import type { SortDirection, SortField } from "../lib/filters";
 import { filterResults, sortResults } from "../lib/filters";
 import {
+  COLUMN_DEFINITIONS,
   COLUMN_DEFINITION_MAP,
   DEFAULT_COLUMN_ORDER,
+  DEFAULT_VISIBLE_COLUMN_ORDER,
   DEFAULT_COLUMN_WIDTHS,
   type ColumnKey,
 } from "../lib/tableColumns";
@@ -27,10 +29,10 @@ const ORDER_STORAGE_KEY = "iptv-checker.column-order.v1";
 const WIDTH_STORAGE_KEY = "iptv-checker.column-widths.v1";
 
 function parseStoredOrder(raw: string | null): ColumnKey[] {
-  if (!raw) return DEFAULT_COLUMN_ORDER;
+  if (!raw) return DEFAULT_VISIBLE_COLUMN_ORDER;
   try {
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return DEFAULT_COLUMN_ORDER;
+    if (!Array.isArray(parsed)) return DEFAULT_VISIBLE_COLUMN_ORDER;
 
     const known = new Set(DEFAULT_COLUMN_ORDER);
     const deduped: ColumnKey[] = [];
@@ -41,14 +43,16 @@ function parseStoredOrder(raw: string | null): ColumnKey[] {
       deduped.push(item as ColumnKey);
     }
 
-    if (deduped.length !== DEFAULT_COLUMN_ORDER.length) {
-      for (const key of DEFAULT_COLUMN_ORDER) {
-        if (!deduped.includes(key)) deduped.push(key);
-      }
+    if (deduped.length === 0) {
+      return DEFAULT_VISIBLE_COLUMN_ORDER;
+    }
+
+    for (const key of DEFAULT_VISIBLE_COLUMN_ORDER) {
+      if (!deduped.includes(key)) deduped.push(key);
     }
     return deduped;
   } catch {
-    return DEFAULT_COLUMN_ORDER;
+    return DEFAULT_VISIBLE_COLUMN_ORDER;
   }
 }
 
@@ -97,6 +101,7 @@ export function ChannelTable({
 }: ChannelTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const columnMenuRef = useRef<HTMLDivElement>(null);
   const columnHeaderRefs = useRef<
     Partial<Record<ColumnKey, HTMLDivElement | null>>
   >({});
@@ -111,6 +116,10 @@ export function ChannelTable({
     x: number;
     y: number;
     channel: ChannelResult;
+  } | null>(null);
+  const [columnMenuState, setColumnMenuState] = useState<{
+    x: number;
+    y: number;
   } | null>(null);
   const [draggedColumn, setDraggedColumn] = useState<ColumnKey | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<ColumnKey | null>(null);
@@ -224,6 +233,26 @@ export function ChannelTable({
     };
   }, [contextMenuState]);
 
+  useEffect(() => {
+    if (!columnMenuState) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!columnMenuRef.current) return;
+      const target = event.target as Node;
+      if (!columnMenuRef.current.contains(target)) {
+        setColumnMenuState(null);
+      }
+    };
+
+    const handleScroll = () => setColumnMenuState(null);
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("scroll", handleScroll, true);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("scroll", handleScroll, true);
+    };
+  }, [columnMenuState]);
+
   const selectSingle = useCallback(
     (result: ChannelResult, rowIndex: number) => {
       const next = new Set<number>([result.index]);
@@ -318,6 +347,22 @@ export function ChannelTable({
     [sortField],
   );
 
+  const toggleColumnVisibility = useCallback((key: ColumnKey) => {
+    setColumnOrder((prev) => {
+      if (prev.includes(key)) {
+        if (prev.length <= 1) return prev;
+        return prev.filter((columnKey) => columnKey !== key);
+      }
+
+      const next = [...prev, key];
+      next.sort(
+        (a, b) =>
+          DEFAULT_COLUMN_ORDER.indexOf(a) - DEFAULT_COLUMN_ORDER.indexOf(b),
+      );
+      return next;
+    });
+  }, []);
+
   const moveFocusBy = useCallback(
     (delta: number) => {
       if (filteredResults.length === 0) return;
@@ -395,6 +440,7 @@ export function ChannelTable({
       rowIndex: number,
     ) => {
       setContextMenuState(null);
+      setColumnMenuState(null);
 
       if (event.shiftKey) {
         selectRange(result, rowIndex);
@@ -443,6 +489,7 @@ export function ChannelTable({
       rowIndex: number,
     ) => {
       event.preventDefault();
+      setColumnMenuState(null);
 
       if (!selectedIndices.has(result.index)) {
         selectSingle(result, rowIndex);
@@ -637,6 +684,15 @@ export function ChannelTable({
                   ref={(node) => {
                     columnHeaderRefs.current[column.key] = node;
                   }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setContextMenuState(null);
+                    setColumnMenuState({
+                      x: event.clientX,
+                      y: event.clientY,
+                    });
+                  }}
                   onPointerDown={(event) =>
                     handleColumnPointerDown(column.key, event)
                   }
@@ -647,7 +703,7 @@ export function ChannelTable({
                       ? "bg-blue-500/10 rounded-sm"
                       : ""
                   } cursor-grab active:cursor-grabbing`}
-                  title={`Drag to reorder ${column.label}`}
+                  title={`Drag to reorder ${column.label}. Right-click for column visibility.`}
                 >
                   <button
                     className="h-full px-2 hover:text-text-primary flex items-center gap-1 cursor-pointer"
@@ -764,6 +820,38 @@ export function ChannelTable({
           >
             Scan selected ({selectedIndices.size})
           </button>
+        </div>
+      )}
+
+      {columnMenuState && (
+        <div
+          ref={columnMenuRef}
+          data-no-window-drag
+          className="fixed z-50 w-56 rounded-lg border border-border-app bg-dropdown shadow-2xl py-1"
+          style={{
+            top: `${columnMenuState.y}px`,
+            left: `${columnMenuState.x}px`,
+          }}
+        >
+          <p className="px-3 py-2 text-[11px] uppercase tracking-[0.06em] text-text-tertiary">
+            Visible Columns
+          </p>
+          {COLUMN_DEFINITIONS.map((column) => {
+            const checked = columnOrder.includes(column.key);
+            const disableHide = checked && columnOrder.length <= 1;
+            return (
+              <button
+                key={column.key}
+                onClick={() => toggleColumnVisibility(column.key)}
+                disabled={disableHide}
+                className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none flex items-center justify-between"
+                type="button"
+              >
+                <span>{column.label}</span>
+                <span className="text-[11px] text-text-tertiary">{checked ? "On" : "Off"}</span>
+              </button>
+            );
+          })}
         </div>
       )}
 

@@ -3,6 +3,7 @@ import type { ChannelResult, ChannelStatus } from "./types";
 export type SortField =
   | "index"
   | "name"
+  | "url"
   | "group"
   | "status"
   | "resolution"
@@ -36,6 +37,8 @@ export function sortResults(
         return (a.index - b.index) * dir;
       case "name":
         return a.name.localeCompare(b.name) * dir;
+      case "url":
+        return a.url.localeCompare(b.url) * dir;
       case "group":
         return a.group.localeCompare(b.group) * dir;
       case "status":

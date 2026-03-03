@@ -54,6 +54,12 @@ export function ChannelRow({
             {result.name}
           </span>
         );
+      case "url":
+        return (
+          <span className="truncate px-2 text-text-secondary" title={result.url}>
+            {result.url}
+          </span>
+        );
       case "group":
         return (
           <span className="truncate px-2 text-text-secondary">
@@ -105,22 +111,18 @@ export function ChannelRow({
       onDoubleClick={() => onDoubleClick?.(result)}
       onContextMenu={onContextMenu}
     >
-      {columns.map((column, columnIndex) => {
+      {columns.map((column) => {
         const alignClass =
           column.align === "right"
             ? "justify-end text-right"
             : column.align === "center"
               ? "justify-center text-center"
               : "justify-start text-left";
-        const separatorClass =
-          columnIndex < columns.length - 1
-            ? "border-r border-border-subtle/70"
-            : "";
 
         return (
           <div
             key={column.key}
-            className={`h-full flex items-center ${alignClass} ${separatorClass}`}
+            className={`h-full flex items-center ${alignClass}`}
           >
             {renderCell(column)}
           </div>
