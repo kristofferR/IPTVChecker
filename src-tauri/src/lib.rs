@@ -68,6 +68,8 @@ pub fn run() {
 
             let scan_menu = SubmenuBuilder::new(app, "Scan")
                 .text("menu.scan.start", "Start Scan")
+                .text("menu.scan.pause", "Pause Scan")
+                .text("menu.scan.resume", "Resume Scan")
                 .text("menu.scan.stop", "Stop Scan")
                 .separator()
                 .text("menu.scan.settings", "Scan Settings")
@@ -99,6 +101,8 @@ pub fn run() {
                 "menu.view.clear_filters" => Some("menu://clear-filters"),
                 "menu.view.history" => Some("menu://open-history"),
                 "menu.scan.start" => Some("menu://start-scan"),
+                "menu.scan.pause" => Some("menu://pause-scan"),
+                "menu.scan.resume" => Some("menu://resume-scan"),
                 "menu.scan.stop" => Some("menu://stop-scan"),
                 "menu.scan.settings" => Some("menu://open-settings"),
                 "menu.help.shortcuts" => Some("menu://keyboard-shortcuts"),
@@ -156,6 +160,8 @@ pub fn run() {
             commands::playlist::open_playlist_url,
             commands::player::open_channel_in_player,
             commands::scan::start_scan,
+            commands::scan::pause_scan,
+            commands::scan::resume_scan,
             commands::scan::cancel_scan,
             commands::scan::reset_scan,
             commands::export::export_csv,

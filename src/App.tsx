@@ -181,6 +181,8 @@ export default function App() {
     error,
     start,
     cancel,
+    pause,
+    resume,
     initFromPlaylist,
   } = useScan();
   const channelSearchError = useMemo(
@@ -711,6 +713,16 @@ export default function App() {
         }),
       );
       unlisten.push(
+        await listen("menu://pause-scan", () => {
+          void pause();
+        }),
+      );
+      unlisten.push(
+        await listen("menu://resume-scan", () => {
+          void resume();
+        }),
+      );
+      unlisten.push(
         await listen("menu://stop-scan", () => {
           void cancel();
         }),
@@ -736,7 +748,7 @@ export default function App() {
         off();
       }
     };
-  }, [cancel, checkForUpdates, handleOpen, handleOpenUrl, handleStartScan, openHistoryPanel]);
+  }, [cancel, checkForUpdates, handleOpen, handleOpenUrl, handleStartScan, openHistoryPanel, pause, resume]);
 
   const handleSelectChannel = useCallback((result: ChannelResult) => {
     setSelectedChannel(result);
@@ -756,7 +768,7 @@ export default function App() {
 
   const handleOpenChannel = useCallback(
     (result: ChannelResult) => {
-      if (scanState === "scanning") {
+      if (scanState === "scanning" || scanState === "paused") {
         setPendingPlaybackChannel(result);
         return;
       }
@@ -818,6 +830,8 @@ export default function App() {
         onOpen={handleOpen}
         onOpenUrl={handleOpenUrl}
         onStartScan={handleStartScan}
+        onPauseScan={pause}
+        onResumeScan={resume}
         onStopScan={cancel}
         onOpenHistory={openHistoryPanel}
         onOpenSettings={() => setShowSettings(true)}
@@ -1004,9 +1018,10 @@ export default function App() {
       <StatsPanel
         progress={progress}
         summary={summary}
+        scanState={scanState}
         totalChannels={playlist?.total_channels ?? 0}
       />
-      <ProgressBar progress={progress} />
+      <ProgressBar progress={progress} scanState={scanState} />
 
       {showSettings && (
         <SettingsPanel

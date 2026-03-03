@@ -1,15 +1,18 @@
 import type { ScanProgress, ScanSummary } from "../lib/types";
+import type { ScanState } from "../hooks/useScan";
 
 interface StatsPanelProps {
   progress: ScanProgress | null;
   summary: ScanSummary | null;
   totalChannels: number;
+  scanState: ScanState;
 }
 
 export function StatsPanel({
   progress,
   summary,
   totalChannels,
+  scanState,
 }: StatsPanelProps) {
   const stats = summary ?? progress;
 
@@ -44,6 +47,11 @@ export function StatsPanel({
             </span>
           )}
         </>
+      )}
+      {scanState === "paused" && (
+        <span className="text-yellow-400 font-medium uppercase tracking-[0.04em]">
+          Paused
+        </span>
       )}
     </div>
   );

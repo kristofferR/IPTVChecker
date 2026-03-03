@@ -3,6 +3,7 @@ import {
   History,
   FolderOpen,
   Link2,
+  Pause,
   Play,
   Square,
   Settings,
@@ -21,6 +22,8 @@ interface ToolbarProps {
   onOpen: () => void;
   onOpenUrl: () => void;
   onStartScan: () => void;
+  onPauseScan: () => void;
+  onResumeScan: () => void;
   onStopScan: () => void;
   onOpenHistory: () => void;
   onOpenSettings: () => void;
@@ -45,6 +48,8 @@ export function Toolbar({
   onOpen,
   onOpenUrl,
   onStartScan,
+  onPauseScan,
+  onResumeScan,
   onStopScan,
   onOpenHistory,
   onOpenSettings,
@@ -58,6 +63,8 @@ export function Toolbar({
   scanBlockedReason,
 }: ToolbarProps) {
   const scanning = scanState === "scanning";
+  const paused = scanState === "paused";
+  const inScanSession = scanning || paused;
   const hasResults = results.length > 0;
   const scanLabel = selectedCount > 0 ? `Scan Selected (${selectedCount})` : "Scan";
   const scanDisabledReason = !hasPlaylist
@@ -82,7 +89,7 @@ export function Toolbar({
     >
       <button
         onClick={onOpen}
-        disabled={scanning}
+        disabled={inScanSession}
         className={toolbarBtn}
       >
         <FolderOpen className="w-4 h-4" />
@@ -91,21 +98,40 @@ export function Toolbar({
 
       <button
         onClick={onOpenUrl}
-        disabled={scanning}
+        disabled={inScanSession}
         className={toolbarBtn}
       >
         <Link2 className="w-4 h-4" />
         Open URL
       </button>
 
-      {scanning ? (
-        <button
-          onClick={onStopScan}
-          className={`${toolbarBtn} toolbar-btn-stop`}
-        >
-          <Square className="w-3.5 h-3.5" />
-          Stop
-        </button>
+      {inScanSession ? (
+        <>
+          {scanning ? (
+            <button
+              onClick={onPauseScan}
+              className={toolbarBtn}
+            >
+              <Pause className="w-4 h-4" />
+              Pause
+            </button>
+          ) : (
+            <button
+              onClick={onResumeScan}
+              className={`${toolbarBtn} toolbar-btn-primary`}
+            >
+              <Play className="w-4 h-4" />
+              Resume
+            </button>
+          )}
+          <button
+            onClick={onStopScan}
+            className={`${toolbarBtn} toolbar-btn-stop`}
+          >
+            <Square className="w-3.5 h-3.5" />
+            Stop
+          </button>
+        </>
       ) : (
         <button
           onClick={onStartScan}
@@ -130,7 +156,7 @@ export function Toolbar({
         results={results}
         playlistName={playlistName}
         playlistPath={playlistPath}
-        disabled={!hasResults || scanning}
+        disabled={!hasResults || inScanSession}
         menuRequest={menuExportRequest}
       />
 

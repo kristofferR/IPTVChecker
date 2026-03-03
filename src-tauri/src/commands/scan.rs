@@ -206,10 +206,45 @@ fn mark_scan_finished(scanning: &mut bool) {
     *scanning = false;
 }
 
+fn sanitize_scope_suffix(value: &str) -> String {
+    let sanitized = value
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect::<String>();
+    if sanitized.is_empty() {
+        "Any".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn cleanup_resume_files(log_file: &str, checkpoint_file: &str) {
+    let _ = std::fs::remove_file(log_file);
+    let _ = std::fs::remove_file(checkpoint_file);
+}
+
 async fn cancel_scan_token(state: &AppState) {
     let token = state.cancel_token.lock().await;
     if let Some(ref cancel) = *token {
         cancel.cancel();
+    }
+}
+
+async fn wait_if_paused(state: &AppState, cancel: &CancellationToken) -> bool {
+    loop {
+        if cancel.is_cancelled() {
+            return false;
+        }
+
+        let paused = {
+            let pause_lock = state.paused.lock().await;
+            *pause_lock
+        };
+        if !paused {
+            return true;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
 }
 
@@ -218,12 +253,28 @@ async fn reset_scan_state(state: &AppState) {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     let mut scanning = state.scanning.lock().await;
     mark_scan_finished(&mut scanning);
+    drop(scanning);
+
+    let mut paused = state.paused.lock().await;
+    *paused = false;
+    drop(paused);
+
+    let mut run_id = state.current_run_id.lock().await;
+    *run_id = None;
 }
 
 async fn clear_pre_spawn_scan_state(state: &AppState) {
     let mut scanning = state.scanning.lock().await;
     mark_scan_finished(&mut scanning);
     drop(scanning);
+
+    let mut paused = state.paused.lock().await;
+    *paused = false;
+    drop(paused);
+
+    let mut run_id = state.current_run_id.lock().await;
+    *run_id = None;
+    drop(run_id);
 
     let mut token_lock = state.cancel_token.lock().await;
     *token_lock = None;
@@ -311,6 +362,10 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
         config.validate()?;
         try_mark_scan_started(&mut scanning)?;
     }
+    {
+        let mut paused = state.paused.lock().await;
+        *paused = false;
+    }
 
     let cancel_token = CancellationToken::new();
     {
@@ -318,6 +373,10 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
         *token_lock = Some(cancel_token.clone());
     }
     let run_id = next_scan_run_id();
+    {
+        let mut run_id_lock = state.current_run_id.lock().await;
+        *run_id_lock = Some(run_id.clone());
+    }
 
     log::info!(
         "Starting scan {}: {} (concurrency: {}, retries: {}, retry_backoff: {:?})",
@@ -381,6 +440,56 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
         return Ok(run_id);
     }
 
+    // Resume support
+    let playlist_path = std::path::Path::new(&config.file_path);
+    let base_name = playlist_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let playlist_dir = playlist_path
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| ".".to_string());
+
+    let group_suffix = config
+        .group_filter
+        .as_deref()
+        .map(sanitize_scope_suffix)
+        .unwrap_or_else(|| "AllGroups".to_string());
+    let search_suffix = config
+        .channel_search
+        .as_deref()
+        .map(sanitize_scope_suffix)
+        .unwrap_or_else(|| "AllChannels".to_string());
+    let scope_suffix = format!("{}_{}", group_suffix, search_suffix);
+
+    let log_file = format!("{}/{}_{}_checklog.txt", playlist_dir, base_name, scope_suffix);
+    let checkpoint_file = format!(
+        "{}/{}_{}_checkpoint.jsonl",
+        playlist_dir, base_name, scope_suffix
+    );
+
+    let channel_indices: HashSet<usize> = channels.iter().map(|channel| channel.index).collect();
+    let mut resumed_results = resume::load_checkpoint_results(&checkpoint_file)
+        .into_iter()
+        .filter(|result| channel_indices.contains(&result.index))
+        .collect::<Vec<_>>();
+    resumed_results.sort_by_key(|result| result.index);
+
+    let resumed_indices: HashSet<usize> = resumed_results.iter().map(|result| result.index).collect();
+    if resumed_indices.is_empty() {
+        let _ = std::fs::write(&log_file, "");
+        let _ = std::fs::remove_file(&checkpoint_file);
+    } else {
+        channels.retain(|channel| !resumed_indices.contains(&channel.index));
+        log::info!(
+            "Resuming scan {} with {} completed channels and {} remaining",
+            run_id,
+            resumed_results.len(),
+            channels.len()
+        );
+    }
+
     // Load proxies if configured
     let proxy_list = if config.test_geoblock {
         if let Some(ref proxy_file) = config.proxy_file {
@@ -407,31 +516,6 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
     // Check ffmpeg availability
     let (ffmpeg_available, ffprobe_available) = ffmpeg::check_availability(&app).await;
 
-    // Resume support
-    let playlist_path = std::path::Path::new(&config.file_path);
-    let base_name = playlist_path
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let playlist_dir = playlist_path
-        .parent()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string());
-
-    let group_suffix = config
-        .group_filter
-        .as_deref()
-        .map(|g| g.replace('|', "").replace(' ', ""))
-        .unwrap_or_else(|| "AllGroups".to_string());
-
-    let log_file = format!(
-        "{}/{}_{}_checklog.txt",
-        playlist_dir, base_name, group_suffix
-    );
-
-    // Always start fresh — GUI scans are explicitly triggered by the user
-    let _ = std::fs::write(&log_file, "");
-
     // Screenshots directory — use app temp dir by default (in-app preview only),
     // or a user-specified folder if configured.
     let screenshots_dir = if !config.skip_screenshots && ffmpeg_available {
@@ -443,7 +527,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                     .temp_dir()
                     .unwrap_or_else(|_| std::env::temp_dir());
                 temp.join("iptv-checker-screenshots")
-                    .join(format!("{}_{}", base_name, group_suffix))
+                    .join(format!("{}_{}", base_name, scope_suffix))
                     .to_string_lossy()
                     .to_string()
             }
@@ -464,6 +548,9 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
     let app_handle = app.clone();
     let state_clone = state.inner().clone();
     let run_id_for_task = run_id.clone();
+    let resumed_results_for_events = resumed_results.clone();
+    let log_file_for_task = log_file.clone();
+    let checkpoint_file_for_task = checkpoint_file.clone();
 
     tokio::spawn(async move {
         let client = Arc::new(
@@ -482,6 +569,27 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
         let event_task = tokio::spawn(async move {
             let mut counters = ScanCounters::default();
             let mut completed_results = Vec::with_capacity(total);
+            tokio::task::yield_now().await;
+
+            for result in resumed_results_for_events {
+                counters.apply(&result);
+                completed_results.push(result.clone());
+
+                let _ = app_for_events.emit(
+                    "scan://channel-result",
+                    ScanEvent {
+                        run_id: run_id_for_events.clone(),
+                        payload: result,
+                    },
+                );
+                let _ = app_for_events.emit(
+                    "scan://progress",
+                    ScanEvent {
+                        run_id: run_id_for_events.clone(),
+                        payload: counters.as_progress(total),
+                    },
+                );
+            }
 
             while let Some(result) = rx.recv().await {
                 counters.apply(&result);
@@ -522,6 +630,9 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
             if cancel_token.is_cancelled() {
                 break;
             }
+            if !wait_if_paused(state_clone.as_ref(), &cancel_token).await {
+                break;
+            }
 
             let permit = semaphore.clone().acquire_owned().await;
             if permit.is_err() {
@@ -542,7 +653,8 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
             let skip_screenshots = config.skip_screenshots;
             let profile_bitrate_flag = config.profile_bitrate;
             let screenshots_dir = screenshots_dir.clone();
-            let log_file = log_file.clone();
+            let log_file = log_file_for_task.clone();
+            let checkpoint_file = checkpoint_file_for_task.clone();
             let ffmpeg_ok = ffmpeg_available;
             let ffprobe_ok = ffprobe_available;
             let task_app = app_handle.clone();
@@ -632,6 +744,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                     &log_file,
                     &format!("{} - {} {}", channel.index + 1, channel.name, channel.url),
                 );
+                let _ = resume::write_result_entry(&checkpoint_file, &result);
 
                 let _ = tx.send(result).await;
                 drop(_permit);
@@ -670,6 +783,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                     payload: (),
                 },
             );
+            cleanup_resume_files(&log_file_for_task, &checkpoint_file_for_task);
         } else {
             let history_limit = {
                 let settings = state_clone.settings.lock().await;
@@ -696,12 +810,21 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                     payload: summary,
                 },
             );
+            cleanup_resume_files(&log_file_for_task, &checkpoint_file_for_task);
         }
 
         // Reset scanning state
         let mut scanning = state_clone.scanning.lock().await;
         mark_scan_finished(&mut scanning);
         drop(scanning);
+
+        let mut paused = state_clone.paused.lock().await;
+        *paused = false;
+        drop(paused);
+
+        let mut run_id_lock = state_clone.current_run_id.lock().await;
+        *run_id_lock = None;
+        drop(run_id_lock);
 
         let mut token_lock = state_clone.cancel_token.lock().await;
         *token_lock = None;
@@ -714,6 +837,76 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
 pub async fn cancel_scan(app: AppHandle) -> Result<(), AppError> {
     let state = app.state::<Arc<AppState>>();
     cancel_scan_token(state.inner().as_ref()).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn pause_scan(app: AppHandle) -> Result<(), AppError> {
+    let state = app.state::<Arc<AppState>>();
+    {
+        let scanning = state.scanning.lock().await;
+        if !*scanning {
+            return Err(AppError::Other("No scan is currently running".to_string()));
+        }
+    }
+
+    let run_id = {
+        let run_id_lock = state.current_run_id.lock().await;
+        run_id_lock
+            .clone()
+            .ok_or_else(|| AppError::Other("No active scan run id found".to_string()))?
+    };
+
+    let mut paused = state.paused.lock().await;
+    if *paused {
+        return Ok(());
+    }
+    *paused = true;
+    drop(paused);
+
+    let _ = app.emit(
+        "scan://paused",
+        ScanEvent {
+            run_id,
+            payload: (),
+        },
+    );
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn resume_scan(app: AppHandle) -> Result<(), AppError> {
+    let state = app.state::<Arc<AppState>>();
+    {
+        let scanning = state.scanning.lock().await;
+        if !*scanning {
+            return Err(AppError::Other("No scan is currently running".to_string()));
+        }
+    }
+
+    let run_id = {
+        let run_id_lock = state.current_run_id.lock().await;
+        run_id_lock
+            .clone()
+            .ok_or_else(|| AppError::Other("No active scan run id found".to_string()))?
+    };
+
+    let mut paused = state.paused.lock().await;
+    if !*paused {
+        return Ok(());
+    }
+    *paused = false;
+    drop(paused);
+
+    let _ = app.emit(
+        "scan://resumed",
+        ScanEvent {
+            run_id,
+            payload: (),
+        },
+    );
+
     Ok(())
 }
 
@@ -891,12 +1084,28 @@ mod tests {
             let mut scan_lock = state.scanning.lock().await;
             *scan_lock = true;
         }
+        {
+            let mut paused_lock = state.paused.lock().await;
+            *paused_lock = true;
+        }
+        {
+            let mut run_id_lock = state.current_run_id.lock().await;
+            *run_id_lock = Some("scan-run-test".to_string());
+        }
 
         reset_scan_state(state.as_ref()).await;
 
         assert!(token.is_cancelled());
         let scanning = state.scanning.lock().await;
         assert!(!*scanning);
+        drop(scanning);
+
+        let paused = state.paused.lock().await;
+        assert!(!*paused);
+        drop(paused);
+
+        let run_id = state.current_run_id.lock().await;
+        assert!(run_id.is_none());
     }
 
     #[tokio::test]
@@ -912,6 +1121,14 @@ mod tests {
             let mut scan_lock = state.scanning.lock().await;
             *scan_lock = true;
         }
+        {
+            let mut paused_lock = state.paused.lock().await;
+            *paused_lock = true;
+        }
+        {
+            let mut run_id_lock = state.current_run_id.lock().await;
+            *run_id_lock = Some("scan-run-test".to_string());
+        }
 
         clear_pre_spawn_scan_state(state.as_ref()).await;
 
@@ -921,5 +1138,13 @@ mod tests {
 
         let token_lock = state.cancel_token.lock().await;
         assert!(token_lock.is_none());
+        drop(token_lock);
+
+        let paused = state.paused.lock().await;
+        assert!(!*paused);
+        drop(paused);
+
+        let run_id = state.current_run_id.lock().await;
+        assert!(run_id.is_none());
     }
 }

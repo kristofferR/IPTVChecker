@@ -7,10 +7,10 @@ import type {
   ScanProgress,
   ScanSummary,
 } from "../lib/types";
-import { cancelScan, resetScan, startScan } from "../lib/tauri";
+import { cancelScan, pauseScan, resetScan, resumeScan, startScan } from "../lib/tauri";
 import { logger } from "../lib/logger";
 
-export type ScanState = "idle" | "scanning" | "complete" | "cancelled";
+export type ScanState = "idle" | "scanning" | "paused" | "complete" | "cancelled";
 
 export function useScan() {
   const [results, setResults] = useState<(ChannelResult | null)[]>([]);
@@ -109,6 +109,24 @@ export function useScan() {
           logger.debug("[useScan] scan://cancelled received");
           setScanState("cancelled");
           activeRunId.current = null;
+        }),
+      );
+
+      unlisteners.push(
+        await listen<ScanEvent<null>>("scan://paused", (event) => {
+          if (!activeRunId.current || event.payload.run_id !== activeRunId.current) {
+            return;
+          }
+          setScanState("paused");
+        }),
+      );
+
+      unlisteners.push(
+        await listen<ScanEvent<null>>("scan://resumed", (event) => {
+          if (!activeRunId.current || event.payload.run_id !== activeRunId.current) {
+            return;
+          }
+          setScanState("scanning");
         }),
       );
 
@@ -213,6 +231,22 @@ export function useScan() {
     }
   }, []);
 
+  const pause = useCallback(async () => {
+    try {
+      await pauseScan();
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const resume = useCallback(async () => {
+    try {
+      await resumeScan();
+    } catch {
+      // ignore
+    }
+  }, []);
+
   const initFromPlaylist = useCallback(
     async (channels: { index: number; name: string; group: string; url: string; extinf_line: string; metadata_lines: string[] }[]) => {
       // Cancel any running scan and reset backend state
@@ -269,6 +303,8 @@ export function useScan() {
     error,
     start,
     cancel,
+    pause,
+    resume,
     initFromPlaylist,
   };
 }

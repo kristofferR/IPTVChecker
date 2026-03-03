@@ -8,6 +8,8 @@ pub struct AppState {
     pub settings: Mutex<AppSettings>,
     pub cancel_token: Mutex<Option<CancellationToken>>,
     pub scanning: Mutex<bool>,
+    pub paused: Mutex<bool>,
+    pub current_run_id: Mutex<Option<String>>,
 }
 
 impl AppState {
@@ -16,6 +18,8 @@ impl AppState {
             settings: Mutex::new(AppSettings::default()),
             cancel_token: Mutex::new(None),
             scanning: Mutex::new(false),
+            paused: Mutex::new(false),
+            current_run_id: Mutex::new(None),
         })
     }
 }

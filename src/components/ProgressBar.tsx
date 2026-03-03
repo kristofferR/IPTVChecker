@@ -1,6 +1,13 @@
 import type { ScanProgress } from "../lib/types";
+import type { ScanState } from "../hooks/useScan";
 
-export function ProgressBar({ progress }: { progress: ScanProgress | null }) {
+export function ProgressBar({
+  progress,
+  scanState,
+}: {
+  progress: ScanProgress | null;
+  scanState: ScanState;
+}) {
   if (!progress) return null;
 
   const percent =
@@ -20,6 +27,11 @@ export function ProgressBar({ progress }: { progress: ScanProgress | null }) {
         <span className="text-[12px] text-text-secondary tabular-nums whitespace-nowrap">
           {progress.completed}/{progress.total} ({percent}%)
         </span>
+        {scanState === "paused" && (
+          <span className="text-[12px] text-yellow-400 font-medium uppercase tracking-[0.04em]">
+            Paused
+          </span>
+        )}
       </div>
     </div>
   );

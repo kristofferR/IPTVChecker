@@ -40,6 +40,14 @@ export async function cancelScan(): Promise<void> {
   return invoke("cancel_scan");
 }
 
+export async function pauseScan(): Promise<void> {
+  return invoke("pause_scan");
+}
+
+export async function resumeScan(): Promise<void> {
+  return invoke("resume_scan");
+}
+
 export async function resetScan(): Promise<void> {
   return invoke("reset_scan");
 }
