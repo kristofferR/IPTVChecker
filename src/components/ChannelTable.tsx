@@ -114,6 +114,11 @@ export function ChannelTable({
   } | null>(null);
   const [draggedColumn, setDraggedColumn] = useState<ColumnKey | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<ColumnKey | null>(null);
+  const [dragPreview, setDragPreview] = useState<{
+    x: number;
+    y: number;
+    key: ColumnKey;
+  } | null>(null);
   const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(() =>
     parseStoredOrder(localStorage.getItem(ORDER_STORAGE_KEY)),
   );
@@ -519,6 +524,11 @@ export function ChannelTable({
         const over = findColumnAtX(moveEvent.clientX);
         dropTarget = over && over !== key ? over : null;
         setDragOverColumn(dropTarget);
+        setDragPreview({
+          x: moveEvent.clientX + 14,
+          y: moveEvent.clientY + 14,
+          key,
+        });
       };
 
       const cleanup = () => {
@@ -529,6 +539,7 @@ export function ChannelTable({
         document.body.style.userSelect = "";
         setDraggedColumn(null);
         setDragOverColumn(null);
+        setDragPreview(null);
       };
 
       const onUp = () => {
@@ -745,6 +756,18 @@ export function ChannelTable({
           >
             Scan selected ({selectedIndices.size})
           </button>
+        </div>
+      )}
+
+      {dragPreview && (
+        <div
+          className="fixed z-[70] pointer-events-none px-2.5 py-1.5 rounded-md border border-border-app bg-dropdown/95 shadow-xl text-[12px] font-medium text-text-primary"
+          style={{
+            left: `${dragPreview.x}px`,
+            top: `${dragPreview.y}px`,
+          }}
+        >
+          Moving: {COLUMN_DEFINITION_MAP[dragPreview.key].label}
         </div>
       )}
     </div>
