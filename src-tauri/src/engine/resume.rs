@@ -184,7 +184,7 @@ mod tests {
             metadata_lines: Vec::new(),
             stream_url: None,
             retry_count: None,
-            last_error_reason: None,
+            error_reason: None,
         }
     }
 

@@ -38,7 +38,7 @@ function makeResult(
     metadata_lines: [],
     stream_url: null,
     retry_count: null,
-    last_error_reason: null,
+    error_reason: null,
   };
 }
 

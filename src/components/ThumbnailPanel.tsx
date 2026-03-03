@@ -58,7 +58,10 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
   }
 
   const retryCount = result.retry_count ?? 0;
-  const lastErrorReason = result.last_error_reason?.trim() || null;
+  const lastErrorReason =
+    result.error_reason?.trim() ||
+    result.last_error_reason?.trim() ||
+    null;
 
   return (
     <div className="native-scroll flex flex-col gap-3 p-4 overflow-y-auto">

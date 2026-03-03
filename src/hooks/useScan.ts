@@ -325,7 +325,7 @@ export function useScan() {
                     error_message: null,
                     stream_url: null,
                     retry_count: null,
-                    last_error_reason: null,
+                    error_reason: null,
                   };
           }
 
@@ -437,7 +437,7 @@ export function useScan() {
           metadata_lines: ch.metadata_lines,
           stream_url: null,
           retry_count: null,
-          last_error_reason: null,
+          error_reason: null,
         };
       }
       logger.debug(`[useScan] initFromPlaylist: ${pending.length} channels`);

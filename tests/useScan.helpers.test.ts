@@ -32,7 +32,7 @@ function makeResult(index: number, name = `Channel ${index}`): ChannelResult {
     metadata_lines: [],
     stream_url: null,
     retry_count: null,
-    last_error_reason: null,
+    error_reason: null,
   };
 }
 

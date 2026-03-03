@@ -105,10 +105,46 @@ fn total_attempts(max_retries: u32) -> u32 {
 }
 
 fn summarize_reqwest_error(err: &reqwest::Error) -> String {
+    if err.is_timeout() {
+        return "Timeout".to_string();
+    }
+
+    let raw = err.to_string();
+    let lowered = raw.to_ascii_lowercase();
+
+    if lowered.contains("connection refused") {
+        return "Connection refused".to_string();
+    }
+    if lowered.contains("dns")
+        || lowered.contains("failed to lookup address information")
+        || lowered.contains("name or service not known")
+        || lowered.contains("no such host")
+        || lowered.contains("nodename nor servname")
+    {
+        return "DNS failure".to_string();
+    }
+    if lowered.contains("ssl")
+        || lowered.contains("tls")
+        || lowered.contains("certificate")
+        || lowered.contains("handshake")
+    {
+        return "SSL/TLS error".to_string();
+    }
+    if lowered.contains("invalid url")
+        || lowered.contains("builder error for url")
+        || lowered.contains("unsupported scheme")
+        || lowered.contains("relative url without a base")
+    {
+        return "Invalid URL".to_string();
+    }
+    if lowered.contains("redirect") && (lowered.contains("loop") || lowered.contains("too many")) {
+        return "Redirect loop".to_string();
+    }
+
     if let Some(status) = err.status() {
         return format!("HTTP {}", status.as_u16());
     }
-    err.to_string()
+    raw
 }
 
 fn retry_delay_seconds(backoff: RetryBackoff, retry_index: u32) -> u64 {
@@ -300,7 +336,10 @@ async fn read_stream(
     } else {
         VerifyResult::Dead {
             latency_ms: observed_latency_ms.or(Some(elapsed_millis(request_started_at))),
-            reason: Some(format!("Insufficient stream data: {} bytes", bytes_read)),
+            reason: Some(format!(
+                "No data (insufficient stream data: {} bytes)",
+                bytes_read
+            )),
         }
     }
 }
@@ -326,7 +365,7 @@ async fn verify(
     if redirect_depth > MAX_REDIRECT_DEPTH {
         return VerifyResult::Dead {
             latency_ms: root_latency_ms,
-            reason: Some("Redirect recursion limit exceeded".to_string()),
+            reason: Some("Redirect loop".to_string()),
         };
     }
 
@@ -338,7 +377,7 @@ async fn verify(
     if visited.contains(&normalized) {
         return VerifyResult::Dead {
             latency_ms: root_latency_ms,
-            reason: Some("URL loop detected".to_string()),
+            reason: Some("Redirect loop".to_string()),
         };
     }
     visited.insert(normalized);

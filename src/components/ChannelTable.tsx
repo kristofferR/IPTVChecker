@@ -48,12 +48,17 @@ function buildChannelMetadataSummary(channel: ChannelResult): string {
     : "Unknown";
   const audioCodec = channel.audio_codec ?? "Unknown";
   const streamUrl = channel.stream_url ?? "N/A";
+  const errorReason =
+    channel.error_reason?.trim() ||
+    channel.last_error_reason?.trim() ||
+    "N/A";
 
   return [
     `Name: ${channel.name}`,
     `Group: ${channel.group}`,
     `Playlist: ${channel.playlist}`,
     `Status: ${formatStatusLabel(channel.status)}`,
+    `Error Reason: ${errorReason}`,
     `URL: ${channel.url}`,
     `Stream URL: ${streamUrl}`,
     `Codec: ${channel.codec ?? "Unknown"}`,

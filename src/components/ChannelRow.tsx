@@ -50,6 +50,10 @@ export function ChannelRow({
   onContextMenu,
 }: ChannelRowProps) {
   const isAlive = result.status === "alive";
+  const errorReason =
+    result.error_reason?.trim() ||
+    result.last_error_reason?.trim() ||
+    null;
   const gridTemplateColumns = columns
     .map((column) => `${columnWidths[column.key]}px`)
     .join(" ");
@@ -67,7 +71,18 @@ export function ChannelRow({
           </span>
         );
       case "status":
-        return <StatusBadge status={result.status} />;
+        return (
+          <StatusBadge
+            status={result.status}
+            title={result.status === "dead" ? (errorReason ?? undefined) : undefined}
+          />
+        );
+      case "error":
+        return (
+          <span className="truncate px-2 text-text-secondary" title={errorReason ?? undefined}>
+            {isAlive ? "—" : (errorReason ?? "—")}
+          </span>
+        );
       case "playlist":
         return (
           <span className="truncate px-2 text-text-secondary" title={result.playlist}>

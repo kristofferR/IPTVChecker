@@ -15,6 +15,7 @@ export interface ColumnDefinition {
 export const COLUMN_DEFINITIONS: ColumnDefinition[] = [
   { key: "index", label: "#", defaultWidth: 64, minWidth: 52, align: "left" },
   { key: "status", label: "St", defaultWidth: 56, minWidth: 48, align: "left" },
+  { key: "error", label: "Error", defaultWidth: 240, minWidth: 140, align: "left" },
   { key: "playlist", label: "Playlist", defaultWidth: 190, minWidth: 130, align: "left" },
   { key: "name", label: "Channel Name", defaultWidth: 360, minWidth: 180, align: "left" },
   { key: "url", label: "URL", defaultWidth: 320, minWidth: 180, align: "left" },
@@ -41,7 +42,7 @@ export const DEFAULT_COLUMN_ORDER: ColumnKey[] = COLUMN_DEFINITIONS.map(
 );
 
 export const DEFAULT_VISIBLE_COLUMN_ORDER: ColumnKey[] = DEFAULT_COLUMN_ORDER.filter(
-  (key) => key !== "url" && key !== "latency",
+  (key) => key !== "url" && key !== "latency" && key !== "error",
 );
 
 export const DEFAULT_COLUMN_WIDTHS: Record<ColumnKey, number> =

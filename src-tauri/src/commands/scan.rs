@@ -35,7 +35,7 @@ struct SharedUrlResult {
     low_framerate: bool,
     stream_url: Option<String>,
     retry_count: Option<u32>,
-    last_error_reason: Option<String>,
+    error_reason: Option<String>,
     channel_log: ChannelDebugLog,
 }
 
@@ -44,7 +44,7 @@ impl SharedUrlResult {
         stream_url: Option<String>,
         latency_ms: Option<u64>,
         retry_count: Option<u32>,
-        last_error_reason: Option<String>,
+        error_reason: Option<String>,
         channel_log: ChannelDebugLog,
     ) -> Self {
         Self {
@@ -63,7 +63,7 @@ impl SharedUrlResult {
             low_framerate: false,
             stream_url,
             retry_count,
-            last_error_reason,
+            error_reason,
             channel_log,
         }
     }
@@ -104,7 +104,7 @@ async fn compute_shared_url_result(
     screenshots_dir: Option<&String>,
     screenshot_file_name: &str,
 ) -> Result<SharedUrlResult, AppError> {
-    let (status_str, stream_url, latency_ms, retry_count, last_error_reason, mut channel_log) =
+    let (status_str, stream_url, latency_ms, retry_count, error_reason, mut channel_log) =
         match checker::check_channel_status_with_debug(
         client,
         channel_url,
@@ -165,7 +165,7 @@ async fn compute_shared_url_result(
     };
     channel_log.final_verdict = final_status_str;
     if channel_log.final_reason.is_none() {
-        channel_log.final_reason = last_error_reason.clone();
+        channel_log.final_reason = error_reason.clone();
     }
 
     if status != ChannelStatus::Alive || cancel.is_cancelled() {
@@ -173,7 +173,7 @@ async fn compute_shared_url_result(
             stream_url,
             latency_ms,
             (retry_count > 0).then_some(retry_count),
-            last_error_reason,
+            error_reason,
             channel_log,
         ));
     }
@@ -195,7 +195,7 @@ async fn compute_shared_url_result(
         low_framerate: false,
         stream_url,
         retry_count: (retry_count > 0).then_some(retry_count),
-        last_error_reason,
+        error_reason,
         channel_log,
     };
 
@@ -861,7 +861,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                     metadata_lines: channel.metadata_lines.clone(),
                     stream_url: shared.stream_url.clone(),
                     retry_count: shared.retry_count,
-                    last_error_reason: shared.last_error_reason.clone(),
+                    error_reason: shared.error_reason.clone(),
                 };
 
                 if result.status == ChannelStatus::Alive {
@@ -1105,7 +1105,7 @@ mod tests {
             metadata_lines: Vec::new(),
             stream_url: None,
             retry_count: None,
-            last_error_reason: None,
+            error_reason: None,
         }
     }
 

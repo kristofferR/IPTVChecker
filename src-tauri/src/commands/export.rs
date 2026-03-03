@@ -62,6 +62,7 @@ pub async fn export_csv(
         "Frame Rate".to_string(),
         "Audio Only".to_string(),
         "Audio".to_string(),
+        "Error Reason".to_string(),
     ];
     if include_latency {
         headers.push("Latency".to_string());
@@ -90,6 +91,7 @@ pub async fn export_csv(
             r.audio_codec.as_deref().unwrap_or("Unknown")
         );
         let audio_only = if r.audio_only { "Yes" } else { "No" };
+        let error_reason = r.error_reason.as_deref().unwrap_or_default();
 
         let mut row = vec![
             sanitize_csv_cell(playlist_cell),
@@ -105,6 +107,7 @@ pub async fn export_csv(
             sanitize_csv_cell(&fps),
             audio_only.to_string(),
             sanitize_csv_cell(&audio),
+            sanitize_csv_cell(error_reason),
         ];
         if include_latency {
             row.push(sanitize_csv_cell(&format_latency(r.latency_ms)));
@@ -401,7 +404,7 @@ mod tests {
             metadata_lines: Vec::new(),
             stream_url: None,
             retry_count: None,
-            last_error_reason: None,
+            error_reason: None,
         }
     }
 
@@ -492,14 +495,47 @@ mod tests {
             .from_path(&path)
             .expect("csv file should be readable");
         let headers = reader.headers().expect("headers should parse").clone();
-        assert_eq!(headers.get(13), Some("Latency"));
+        assert_eq!(headers.get(14), Some("Latency"));
 
         let rows: Vec<csv::StringRecord> = reader
             .records()
             .collect::<Result<Vec<_>, _>>()
             .expect("csv rows should parse");
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].get(13), Some("1.2 s"));
+        assert_eq!(rows[0].get(14), Some("1.2 s"));
+
+        std::fs::remove_file(path).expect("temporary csv should be removable");
+    }
+
+    #[tokio::test]
+    async fn export_csv_includes_error_reason_column_value() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be monotonic")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("iptv-export-csv-error-{unique}.csv"));
+        let path_string = path.to_string_lossy().to_string();
+
+        let mut result = sample_result("Channel 1", "Sports", "id-1");
+        result.status = ChannelStatus::Dead;
+        result.error_reason = Some("Timeout".to_string());
+
+        export_csv(vec![result], path_string, "Playlist".to_string(), false)
+            .await
+            .expect("csv export should succeed");
+
+        let mut reader = csv::ReaderBuilder::new()
+            .has_headers(true)
+            .from_path(&path)
+            .expect("csv file should be readable");
+        let headers = reader.headers().expect("headers should parse").clone();
+        assert_eq!(headers.get(13), Some("Error Reason"));
+
+        let rows: Vec<csv::StringRecord> = reader
+            .records()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("csv rows should parse");
+        assert_eq!(rows[0].get(13), Some("Timeout"));
 
         std::fs::remove_file(path).expect("temporary csv should be removable");
     }

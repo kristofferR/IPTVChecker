@@ -12,7 +12,8 @@ export type SortField =
   | "fps"
   | "latency"
   | "bitrate"
-  | "audio";
+  | "audio"
+  | "error";
 
 export type SortDirection = "asc" | "desc";
 
@@ -54,6 +55,29 @@ function compareOptionalNumber(
     return (leftIndex - rightIndex) * dir;
   }
   return (left - right) * dir;
+}
+
+function compareOptionalText(
+  left: string | null | undefined,
+  right: string | null | undefined,
+  dir: 1 | -1,
+  leftIndex: number,
+  rightIndex: number,
+): number {
+  const leftValue = left?.trim() || null;
+  const rightValue = right?.trim() || null;
+
+  if (leftValue == null && rightValue == null) {
+    return (leftIndex - rightIndex) * dir;
+  }
+  if (leftValue == null) return 1;
+  if (rightValue == null) return -1;
+
+  const compared = leftValue.localeCompare(rightValue) * dir;
+  if (compared === 0) {
+    return (leftIndex - rightIndex) * dir;
+  }
+  return compared;
 }
 
 export function sortResults(
@@ -119,6 +143,14 @@ export function sortResults(
         return compareOptionalNumber(
           parseBitrateKbps(a.audio_bitrate),
           parseBitrateKbps(b.audio_bitrate),
+          dir,
+          a.index,
+          b.index,
+        );
+      case "error":
+        return compareOptionalText(
+          a.error_reason ?? a.last_error_reason,
+          b.error_reason ?? b.last_error_reason,
           dir,
           a.index,
           b.index,
