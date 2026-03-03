@@ -183,12 +183,17 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                 <input
                   type="number"
                   value={draft.extended_timeout ?? ""}
-                  onChange={(event) =>
-                    update(
-                      "extended_timeout",
-                      event.target.value ? parseFloat(event.target.value) : null,
-                    )
-                  }
+                  onChange={(event) => {
+                    if (!event.target.value) {
+                      update("extended_timeout", null);
+                    } else {
+                      const value = parseFloat(event.target.value);
+                      update(
+                        "extended_timeout",
+                        Number.isNaN(value) ? null : Math.max(1, value),
+                      );
+                    }
+                  }}
                   placeholder="Disabled"
                   step="1"
                   min="1"
