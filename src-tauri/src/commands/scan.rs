@@ -102,6 +102,13 @@ pub async fn start_scan(
     let state_clone = state.inner().clone();
 
     tokio::spawn(async move {
+        let client = Arc::new(
+            reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(5))
+                .redirect(reqwest::redirect::Policy::limited(10))
+                .build()
+                .unwrap_or_default(),
+        );
         let semaphore = Arc::new(Semaphore::new(config.concurrency as usize));
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ChannelResult>();
 
@@ -176,6 +183,7 @@ pub async fn start_scan(
 
             let tx = tx.clone();
             let cancel = cancel_token.clone();
+            let client = Arc::clone(&client);
             let user_agent = config.user_agent.clone();
             let timeout = config.timeout;
             let retries = config.retries;
@@ -196,6 +204,7 @@ pub async fn start_scan(
                 }
 
                 let (status_str, stream_url) = match checker::check_channel_status(
+                    &client,
                     &channel.url,
                     timeout,
                     retries,

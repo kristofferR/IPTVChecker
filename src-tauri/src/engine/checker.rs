@@ -12,9 +12,6 @@ const MIN_DATA_THRESHOLD: u64 = 1024 * 500;
 const PLAYLIST_SEGMENT_THRESHOLD: u64 = 1024 * 128;
 /// Maximum depth for following nested playlists.
 const MAX_PLAYLIST_DEPTH: u32 = 4;
-/// Initial connection timeout in seconds.
-const INITIAL_TIMEOUT_SECS: u64 = 5;
-
 /// HTTP status codes indicating potential geoblocking.
 const GEOBLOCK_STATUSES: &[u16] = &[403, 451, 426];
 const SECONDARY_GEOBLOCK_STATUSES: &[u16] = &[401, 423, 451];
@@ -214,6 +211,7 @@ async fn verify(
 ///
 /// Returns (ChannelStatus string, Option<stream_url>).
 pub async fn check_channel_status(
+    client: &reqwest::Client,
     url: &str,
     timeout: f64,
     retries: u32,
@@ -221,12 +219,6 @@ pub async fn check_channel_status(
     user_agent: &str,
     cancel_token: &tokio_util::sync::CancellationToken,
 ) -> Result<(String, Option<String>), AppError> {
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(INITIAL_TIMEOUT_SECS))
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .build()
-        .map_err(|e| AppError::Other(format!("Failed to build HTTP client: {}", e)))?;
-
     let mut headers = HeaderMap::new();
     headers.insert(
         USER_AGENT,
