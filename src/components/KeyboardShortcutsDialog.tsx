@@ -11,47 +11,55 @@ interface ShortcutSection {
   entries: ShortcutEntry[];
 }
 
-const SECTIONS: ShortcutSection[] = [
-  {
-    title: "General",
-    entries: [
-      { keys: "Cmd/Ctrl + O", action: "Open playlist" },
-      { keys: "Cmd/Ctrl + ,", action: "Open settings" },
-      { keys: "Cmd/Ctrl + /", action: "Open this shortcuts dialog" },
-      { keys: "Escape", action: "Close open dialogs and overlays" },
-    ],
-  },
-  {
-    title: "Table Navigation",
-    entries: [
-      { keys: "Arrow Up / Down", action: "Move row focus and selection" },
-      { keys: "Double-click", action: "Open selected channel in player" },
-    ],
-  },
-  {
-    title: "Selection",
-    entries: [
-      { keys: "Click", action: "Select single channel" },
-      { keys: "Shift + Click", action: "Select range" },
-      { keys: "Cmd/Ctrl + Click", action: "Toggle row selection" },
-      { keys: "Cmd/Ctrl + A", action: "Select all visible channels" },
-    ],
-  },
-  {
-    title: "Scan & Playback",
-    entries: [
-      { keys: "Scan menu", action: "Start or stop scan" },
-      { keys: "Context menu", action: "Scan selected channels" },
-      { keys: "Double-click row", action: "Open in default player" },
-    ],
-  },
-];
+function buildSections(modifierLabel: string): ShortcutSection[] {
+  return [
+    {
+      title: "General",
+      entries: [
+        { keys: `${modifierLabel} + O`, action: "Open playlist" },
+        { keys: `${modifierLabel} + ,`, action: "Open settings" },
+        { keys: `${modifierLabel} + /`, action: "Open this shortcuts dialog" },
+        { keys: "Escape", action: "Close open dialogs and overlays" },
+      ],
+    },
+    {
+      title: "Table Navigation",
+      entries: [
+        { keys: "Arrow Up / Down", action: "Move row focus and selection" },
+        { keys: "Double-click", action: "Open selected channel in player" },
+      ],
+    },
+    {
+      title: "Selection",
+      entries: [
+        { keys: "Click", action: "Select single channel" },
+        { keys: "Shift + Click", action: "Select range" },
+        { keys: `${modifierLabel} + Click`, action: "Toggle row selection" },
+        { keys: `${modifierLabel} + A`, action: "Select all visible channels" },
+      ],
+    },
+    {
+      title: "Scan & Playback",
+      entries: [
+        { keys: "Scan menu", action: "Start or stop scan" },
+        { keys: "Context menu", action: "Scan selected channels" },
+        { keys: "Double-click row", action: "Open in default player" },
+      ],
+    },
+  ];
+}
 
 interface KeyboardShortcutsDialogProps {
+  modifierLabel: "Cmd" | "Ctrl";
   onClose: () => void;
 }
 
-export function KeyboardShortcutsDialog({ onClose }: KeyboardShortcutsDialogProps) {
+export function KeyboardShortcutsDialog({
+  modifierLabel,
+  onClose,
+}: KeyboardShortcutsDialogProps) {
+  const sections = buildSections(modifierLabel);
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -87,7 +95,7 @@ export function KeyboardShortcutsDialog({ onClose }: KeyboardShortcutsDialogProp
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-5 max-h-[75vh] overflow-y-auto">
-          {SECTIONS.map((section) => (
+          {sections.map((section) => (
             <section
               key={section.title}
               className="rounded-xl border border-border-subtle bg-panel-subtle p-3"

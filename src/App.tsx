@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
 import {
   isPermissionGranted,
   onAction,
@@ -800,6 +800,36 @@ export default function App() {
     })();
   }, [scanState, settings.scan_notifications, summary, playlist, refreshHistory]);
 
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+    if (scanState === "scanning" || scanState === "paused") {
+      const progressPercent =
+        progress && progress.total > 0
+          ? Math.min(100, Math.max(0, (progress.completed / progress.total) * 100))
+          : 0;
+      const status =
+        scanState === "paused"
+          ? ProgressBarStatus.Paused
+          : progress
+            ? ProgressBarStatus.Normal
+            : ProgressBarStatus.Indeterminate;
+
+      void appWindow
+        .setProgressBar({
+          status,
+          progress: progressPercent,
+        })
+        .catch(() => {});
+      return;
+    }
+
+    void appWindow
+      .setProgressBar({
+        status: ProgressBarStatus.None,
+      })
+      .catch(() => {});
+  }, [scanState, progress]);
+
   const handleDroppedPaths = useCallback((paths: string[]) => {
     const playlistPath = paths.find((path) =>
       path.toLowerCase().endsWith(".m3u") || path.toLowerCase().endsWith(".m3u8"),
@@ -1434,6 +1464,7 @@ export default function App() {
 
       {showKeyboardShortcuts && (
         <KeyboardShortcutsDialog
+          modifierLabel={modKey}
           onClose={() => setShowKeyboardShortcuts(false)}
         />
       )}

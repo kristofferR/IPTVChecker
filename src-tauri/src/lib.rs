@@ -175,6 +175,47 @@ pub fn run() {
 
             commands::recent::refresh_recent_menu(&app.handle());
 
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            {
+                use tauri::menu::{MenuBuilder, MenuItemBuilder};
+                use tauri::tray::TrayIconBuilder;
+
+                let open_item = MenuItemBuilder::with_id("tray.open", "Open IPTV Checker")
+                    .build(app)?;
+                let quit_item = MenuItemBuilder::with_id("tray.quit", "Quit").build(app)?;
+
+                let tray_menu = MenuBuilder::new(app)
+                    .item(&open_item)
+                    .separator()
+                    .item(&quit_item)
+                    .build()?;
+
+                let mut tray_builder = TrayIconBuilder::with_id("main")
+                    .menu(&tray_menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app, event| match event.id().as_ref() {
+                        "tray.open" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "tray.quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    });
+
+                if let Some(icon) = app.default_window_icon().cloned() {
+                    tray_builder = tray_builder.icon(icon);
+                }
+
+                if let Err(error) = tray_builder.build(app) {
+                    log::warn!("Failed to initialize system tray: {}", error);
+                }
+            }
+
             Ok(())
         })
         .manage(AppState::new() as Arc<AppState>)
