@@ -295,10 +295,11 @@ async fn run_tool_command(
 /// Check if ffmpeg and ffprobe sidecars are available.
 pub async fn check_availability(app: &AppHandle) -> (bool, bool) {
     let no_cancel = CancellationToken::new();
-    let ffmpeg_ok = run_tool_command(app, "ffmpeg", &["-version"], &no_cancel, None)
+    let version_timeout = Some(std::time::Duration::from_secs(5));
+    let ffmpeg_ok = run_tool_command(app, "ffmpeg", &["-version"], &no_cancel, version_timeout)
         .await
         .is_ok();
-    let ffprobe_ok = run_tool_command(app, "ffprobe", &["-version"], &no_cancel, None)
+    let ffprobe_ok = run_tool_command(app, "ffprobe", &["-version"], &no_cancel, version_timeout)
         .await
         .is_ok();
     log::debug!(
