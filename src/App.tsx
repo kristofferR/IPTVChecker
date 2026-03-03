@@ -25,6 +25,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { KeyboardShortcutsDialog } from "./components/KeyboardShortcutsDialog";
 import { AlertTriangle, FolderOpen, Info, X } from "lucide-react";
 import { detectPlatform } from "./lib/platform";
+import { findDuplicateChannelIndices } from "./lib/duplicates";
 import { logger } from "./lib/logger";
 
 function errorToString(err: unknown): string {
@@ -431,6 +432,10 @@ export default function App() {
   const completedResults = results.filter(
     (r): r is ChannelResult => r != null,
   );
+  const duplicateIndices = useMemo(
+    () => findDuplicateChannelIndices(results),
+    [results],
+  );
 
   // Keep sidebar in sync with live scan results
   const liveSelectedChannel =
@@ -574,6 +579,7 @@ export default function App() {
           {playlist ? (
             <ChannelTable
               results={results}
+              duplicateIndices={duplicateIndices}
               search={search}
               groupFilter={groupFilter}
               statusFilter={statusFilter}
@@ -618,7 +624,10 @@ export default function App() {
         )}
       </div>
 
-      <WarningsPanel results={results} />
+      <WarningsPanel
+        results={results}
+        duplicateCount={duplicateIndices.size}
+      />
       <StatsPanel
         progress={progress}
         summary={summary}

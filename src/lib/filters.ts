@@ -78,6 +78,7 @@ export function filterResults(
   search: string,
   groupFilter: string,
   statusFilter: string,
+  duplicateIndices?: Set<number>,
 ): ChannelResult[] {
   return results.filter((r) => {
     if (search) {
@@ -93,6 +94,9 @@ export function filterResults(
       if (r.group !== groupFilter) return false;
     }
     if (statusFilter && statusFilter !== "all") {
+      if (statusFilter === "duplicates") {
+        return duplicateIndices?.has(r.index) ?? false;
+      }
       if (statusFilter === "geoblocked") {
         if (
           r.status !== "geoblocked" &&

@@ -12,6 +12,7 @@ interface ChannelRowProps {
     result: ChannelResult,
   ) => void;
   selected: boolean;
+  duplicate?: boolean;
   focused?: boolean;
   columns: ColumnDefinition[];
   columnWidths: Record<ColumnKey, number>;
@@ -23,6 +24,7 @@ export function ChannelRow({
   result,
   onClick,
   selected,
+  duplicate,
   focused,
   columns,
   columnWidths,
@@ -101,6 +103,8 @@ export function ChannelRow({
     <div
       className={`channel-row select-none grid items-center h-[34px] px-4 text-sm border-b border-border-subtle cursor-pointer hover:bg-panel-subtle ${
         selected ? "selected bg-panel-subtle" : ""
+      } ${duplicate && !selected ? "bg-amber-500/8" : ""} ${
+        duplicate ? "ring-1 ring-amber-500/20" : ""
       } ${focused ? "ring-1 ring-border-app" : ""}`}
       style={{
         gridTemplateColumns,

@@ -16,6 +16,7 @@ import { ArrowDown, ArrowUp } from "lucide-react";
 
 interface ChannelTableProps {
   results: (ChannelResult | null)[];
+  duplicateIndices: Set<number>;
   search: string;
   groupFilter: string;
   statusFilter: string;
@@ -106,6 +107,7 @@ function keepMenuInViewport(
 
 export function ChannelTable({
   results,
+  duplicateIndices,
   search,
   groupFilter,
   statusFilter,
@@ -177,9 +179,15 @@ export function ChannelTable({
 
   const filteredResults = useMemo(() => {
     const nonNull = results.filter((r): r is ChannelResult => r != null);
-    const filtered = filterResults(nonNull, search, groupFilter, statusFilter);
+    const filtered = filterResults(
+      nonNull,
+      search,
+      groupFilter,
+      statusFilter,
+      duplicateIndices,
+    );
     return sortResults(filtered, sortField, sortDir);
-  }, [results, search, groupFilter, statusFilter, sortField, sortDir]);
+  }, [results, search, groupFilter, statusFilter, duplicateIndices, sortField, sortDir]);
 
   const virtualizer = useVirtualizer({
     count: filteredResults.length,
@@ -819,6 +827,7 @@ export function ChannelTable({
                         handleRowContextMenu(event, result, virtualRow.index)
                       }
                       selected={selectedIndices.has(result.index)}
+                      duplicate={duplicateIndices.has(result.index)}
                       focused={focusedRow === virtualRow.index}
                       columns={columns}
                       columnWidths={columnWidths}
