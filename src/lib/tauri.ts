@@ -4,6 +4,7 @@ import type {
   ChannelResult,
   PlaylistPreview,
   ScanConfig,
+  ScreenshotCacheStats,
 } from "./types";
 
 export async function openPlaylist(
@@ -66,6 +67,14 @@ export async function checkFfmpegAvailable(): Promise<[boolean, boolean]> {
 
 export async function readScreenshot(path: string): Promise<string> {
   return invoke("read_screenshot", { path });
+}
+
+export async function getScreenshotCacheStats(): Promise<ScreenshotCacheStats> {
+  return invoke("get_screenshot_cache_stats");
+}
+
+export async function clearScreenshotCache(): Promise<ScreenshotCacheStats> {
+  return invoke("clear_screenshot_cache");
 }
 
 export async function openChannelInPlayer(channel: {

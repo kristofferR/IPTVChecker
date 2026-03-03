@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { X } from "lucide-react";
-import type { AppSettings } from "../lib/types";
+import { clearScreenshotCache, getScreenshotCacheStats } from "../lib/tauri";
+import type { AppSettings, ScreenshotCacheStats } from "../lib/types";
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -17,8 +18,22 @@ const inputClass =
 const toggleRowClass =
   "flex items-start gap-2.5 p-2.5 rounded-xl border border-border-subtle hover:border-border-app transition-colors";
 
+function formatBytes(totalBytes: number): string {
+  if (totalBytes < 1024) return `${totalBytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = totalBytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(1)} ${units[unitIndex]}`;
+}
+
 export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps) {
   const [draft, setDraft] = useState<AppSettings>(settings);
+  const [cacheStats, setCacheStats] = useState<ScreenshotCacheStats | null>(null);
+  const [cacheBusy, setCacheBusy] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -62,6 +77,19 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
     setDraft((prev) => ({ ...prev, [key]: value }));
   };
 
+  const refreshCacheStats = useCallback(async () => {
+    try {
+      const stats = await getScreenshotCacheStats();
+      setCacheStats(stats);
+    } catch {
+      setCacheStats(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshCacheStats();
+  }, [refreshCacheStats]);
+
   const handleSave = () => {
     onSave(draft);
     onClose();
@@ -84,6 +112,16 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
     });
     if (path) {
       update("screenshots_dir", path as string);
+    }
+  };
+
+  const handleClearScreenshotCache = async () => {
+    setCacheBusy(true);
+    try {
+      const stats = await clearScreenshotCache();
+      setCacheStats(stats);
+    } finally {
+      setCacheBusy(false);
     }
   };
 
@@ -300,6 +338,35 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                     </button>
                   )}
                 </div>
+              </div>
+
+              <div className="rounded-xl border border-border-subtle p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[12px] font-medium">Temp Screenshot Cache</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      {cacheStats
+                        ? `${formatBytes(cacheStats.total_bytes)} (${cacheStats.file_count} files)`
+                        : "Unavailable"}
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleClearScreenshotCache}
+                    disabled={cacheBusy || !cacheStats || cacheStats.file_count === 0}
+                    className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
+                    type="button"
+                  >
+                    {cacheBusy ? "Clearing..." : "Clear Cache"}
+                  </button>
+                </div>
+                {cacheStats && (
+                  <p
+                    className="mt-2 text-[11px] text-text-tertiary truncate"
+                    title={cacheStats.cache_dir}
+                  >
+                    {cacheStats.cache_dir}
+                  </p>
+                )}
               </div>
             </div>
           </section>

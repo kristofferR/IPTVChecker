@@ -95,3 +95,9 @@ export interface AppSettings {
   screenshots_dir: string | null;
   log_level: string;
 }
+
+export interface ScreenshotCacheStats {
+  file_count: number;
+  total_bytes: number;
+  cache_dir: string;
+}

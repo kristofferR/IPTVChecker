@@ -148,6 +148,8 @@ pub fn run() {
             commands::settings::update_settings,
             commands::settings::check_ffmpeg_available,
             commands::settings::read_screenshot,
+            commands::settings::get_screenshot_cache_stats,
+            commands::settings::clear_screenshot_cache,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
