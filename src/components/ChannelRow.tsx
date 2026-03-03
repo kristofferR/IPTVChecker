@@ -93,7 +93,7 @@ export function ChannelRow({
 
   return (
     <div
-      className={`channel-row grid items-center h-[34px] px-4 text-sm border-b border-border-subtle cursor-pointer hover:bg-panel-subtle ${
+      className={`channel-row select-none grid items-center h-[34px] px-4 text-sm border-b border-border-subtle cursor-pointer hover:bg-panel-subtle ${
         selected ? "selected bg-panel-subtle" : ""
       } ${focused ? "ring-1 ring-border-app" : ""}`}
       style={{

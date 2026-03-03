@@ -407,9 +407,23 @@ export function ChannelTable({
         return;
       }
 
+      // Clicking the same single-selected row toggles back to no selection.
+      if (selectedIndices.size === 1 && selectedIndices.has(result.index)) {
+        clearSelection();
+        setFocusedRow(rowIndex);
+        return;
+      }
+
       selectSingle(result, rowIndex);
     },
-    [selectRange, updateSelection, onSelectChannel, selectSingle],
+    [
+      selectRange,
+      updateSelection,
+      onSelectChannel,
+      selectedIndices,
+      clearSelection,
+      selectSingle,
+    ],
   );
 
   const handleRowContextMenu = useCallback(
