@@ -24,6 +24,7 @@ function makeResult(index: number): ChannelResult {
     video_bitrate: null,
     audio_bitrate: null,
     audio_codec: null,
+    audio_only: false,
     screenshot_path: null,
     label_mismatches: [],
     low_framerate: false,

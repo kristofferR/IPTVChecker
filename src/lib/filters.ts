@@ -156,6 +156,9 @@ export function filterResults(
       if (statusFilter === "duplicates") {
         return duplicateIndices?.has(r.index) ?? false;
       }
+      if (statusFilter === "audio_only") {
+        return r.audio_only;
+      }
       if (statusFilter === "geoblocked") {
         if (
           r.status !== "geoblocked" &&

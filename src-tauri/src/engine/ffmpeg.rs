@@ -328,12 +328,43 @@ struct FfprobeOutput {
     streams: Vec<FfprobeVideoStream>,
 }
 
+#[derive(Debug, Deserialize)]
+struct FfprobeTrackOutput {
+    streams: Vec<FfprobeTrackStream>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct FfprobeVideoStream {
     codec_name: Option<String>,
     width: Option<u32>,
     height: Option<u32>,
     r_frame_rate: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct FfprobeTrackStream {
+    codec_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StreamTrackPresence {
+    pub has_video: bool,
+    pub has_audio: bool,
+}
+
+fn parse_stream_track_presence(stdout: &str) -> Result<StreamTrackPresence, serde_json::Error> {
+    let parsed: FfprobeTrackOutput = serde_json::from_str(stdout)?;
+    let mut presence = StreamTrackPresence::default();
+
+    for stream in parsed.streams {
+        match stream.codec_type.as_deref().map(|value| value.to_ascii_lowercase()) {
+            Some(ref codec_type) if codec_type == "video" => presence.has_video = true,
+            Some(ref codec_type) if codec_type == "audio" => presence.has_audio = true,
+            _ => {}
+        }
+    }
+
+    Ok(presence)
 }
 
 fn parse_ffprobe_fps(raw: &str) -> Option<u32> {
@@ -481,6 +512,42 @@ pub async fn get_audio_info(
     })
 }
 
+/// Detect whether a stream has audio tracks, video tracks, or both.
+pub async fn get_stream_track_presence(
+    app: &AppHandle,
+    url: &str,
+    cancel: &CancellationToken,
+) -> Result<StreamTrackPresence, AppError> {
+    let (stdout, stderr) = run_tool_command(
+        app,
+        "ffprobe",
+        &[
+            "-v",
+            "error",
+            "-analyzeduration",
+            "15000000",
+            "-probesize",
+            "15000000",
+            "-show_entries",
+            "stream=codec_type",
+            "-of",
+            "json",
+            url,
+        ],
+        cancel,
+        None,
+    )
+    .await?;
+
+    parse_stream_track_presence(&stdout).map_err(|error| {
+        AppError::Other(format!(
+            "Failed to parse ffprobe stream track presence: {} ({})",
+            error,
+            stderr_excerpt(&stderr)
+        ))
+    })
+}
+
 /// Capture a screenshot frame from a stream via ffmpeg.
 /// Uses the unified command runner for consistent sidecar/PATH resolution
 /// and bounded diagnostics on failures/timeouts.
@@ -617,8 +684,9 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        build_screenshot_file_name, parse_ffprobe_fps, resolution_label, sanitize_screenshot_stem,
-        unique_screenshot_output_path, MAX_SCREENSHOT_STEM_LEN,
+        build_screenshot_file_name, parse_ffprobe_fps, parse_stream_track_presence,
+        resolution_label, sanitize_screenshot_stem, unique_screenshot_output_path,
+        MAX_SCREENSHOT_STEM_LEN,
     };
 
     #[test]
@@ -685,5 +753,21 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&test_dir).expect("temp dir should be removable");
+    }
+
+    #[test]
+    fn parse_stream_track_presence_detects_audio_only_streams() {
+        let output = r#"{"streams":[{"codec_type":"audio"},{"codec_type":"data"}]}"#;
+        let presence = parse_stream_track_presence(output).expect("track presence should parse");
+        assert!(!presence.has_video);
+        assert!(presence.has_audio);
+    }
+
+    #[test]
+    fn parse_stream_track_presence_detects_mixed_streams() {
+        let output = r#"{"streams":[{"codec_type":"video"},{"codec_type":"audio"}]}"#;
+        let presence = parse_stream_track_presence(output).expect("track presence should parse");
+        assert!(presence.has_video);
+        assert!(presence.has_audio);
     }
 }

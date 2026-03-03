@@ -33,6 +33,7 @@ export interface ChannelResult {
   video_bitrate: string | null;
   audio_bitrate: string | null;
   audio_codec: string | null;
+  audio_only: boolean;
   screenshot_path: string | null;
   label_mismatches: string[];
   low_framerate: boolean;

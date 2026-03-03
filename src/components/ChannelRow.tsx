@@ -3,6 +3,7 @@ import type {
   ColumnDefinition,
   ColumnKey,
 } from "../lib/tableColumns";
+import { Radio, Tv } from "lucide-react";
 import { StatusBadge } from "./StatusBadge";
 
 function formatLatency(latencyMs: number): string {
@@ -73,12 +74,24 @@ export function ChannelRow({
             {result.playlist}
           </span>
         );
-      case "name":
+      case "name": {
+        const ChannelKindIcon = result.audio_only ? Radio : Tv;
+        const kindLabel = result.audio_only ? "Audio-only stream" : "Video stream";
         return (
-          <span className="truncate px-2 font-medium">
-            {result.name}
+          <span className="inline-flex min-w-0 items-center gap-1.5 px-2 font-medium">
+            <span
+              className={`shrink-0 ${
+                result.audio_only ? "text-cyan-400" : "text-text-tertiary"
+              }`}
+              aria-label={kindLabel}
+              title={kindLabel}
+            >
+              <ChannelKindIcon className="h-3.5 w-3.5" aria-hidden="true" />
+            </span>
+            <span className="truncate">{result.name}</span>
           </span>
         );
+      }
       case "url":
         return (
           <span className="truncate px-2 text-text-secondary" title={result.url}>

@@ -29,6 +29,7 @@ struct SharedUrlResult {
     video_bitrate: Option<String>,
     audio_bitrate: Option<String>,
     audio_codec: Option<String>,
+    audio_only: bool,
     screenshot_path: Option<String>,
     low_framerate: bool,
     stream_url: Option<String>,
@@ -54,6 +55,7 @@ impl SharedUrlResult {
             video_bitrate: None,
             audio_bitrate: None,
             audio_codec: None,
+            audio_only: false,
             screenshot_path: None,
             low_framerate: false,
             stream_url,
@@ -160,6 +162,7 @@ async fn compute_shared_url_result(
         video_bitrate: None,
         audio_bitrate: None,
         audio_codec: None,
+        audio_only: false,
         screenshot_path: None,
         low_framerate: false,
         stream_url,
@@ -168,13 +171,20 @@ async fn compute_shared_url_result(
     };
 
     if ffprobe_ok {
-        if let Ok(info) = ffmpeg::get_stream_info(app, &target_url, cancel).await {
-            shared.codec = Some(info.codec);
-            shared.resolution = Some(info.resolution.clone());
-            shared.width = info.width;
-            shared.height = info.height;
-            shared.fps = info.fps;
-            shared.low_framerate = info.fps.map(|fps| fps < 29).unwrap_or(false);
+        if let Ok(stream_tracks) = ffmpeg::get_stream_track_presence(app, &target_url, cancel).await
+        {
+            shared.audio_only = stream_tracks.has_audio && !stream_tracks.has_video;
+        }
+
+        if !shared.audio_only {
+            if let Ok(info) = ffmpeg::get_stream_info(app, &target_url, cancel).await {
+                shared.codec = Some(info.codec);
+                shared.resolution = Some(info.resolution.clone());
+                shared.width = info.width;
+                shared.height = info.height;
+                shared.fps = info.fps;
+                shared.low_framerate = info.fps.map(|fps| fps < 29).unwrap_or(false);
+            }
         }
 
         if !cancel.is_cancelled() {
@@ -761,6 +771,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                     video_bitrate: shared.video_bitrate.clone(),
                     audio_bitrate: shared.audio_bitrate.clone(),
                     audio_codec: shared.audio_codec.clone(),
+                    audio_only: shared.audio_only,
                     screenshot_path: shared.screenshot_path.clone(),
                     label_mismatches: Vec::new(),
                     low_framerate: shared.low_framerate,
@@ -977,6 +988,7 @@ mod tests {
             video_bitrate: None,
             audio_bitrate: None,
             audio_codec: None,
+            audio_only: false,
             screenshot_path: None,
             label_mismatches: if mismatched {
                 vec!["Label mismatch".to_string()]

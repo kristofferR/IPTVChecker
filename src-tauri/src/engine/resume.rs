@@ -174,6 +174,7 @@ mod tests {
             video_bitrate: None,
             audio_bitrate: None,
             audio_codec: None,
+            audio_only: false,
             screenshot_path: None,
             label_mismatches: Vec::new(),
             low_framerate: false,

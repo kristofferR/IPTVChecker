@@ -3,6 +3,8 @@ use crate::models::channel::{ChannelResult, ChannelStatus};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+const AUDIO_ONLY_EXPORT_TAG: &str = "#EXTVLCOPT:iptv-checker-audio-only=1";
+
 fn map_csv_error(error: csv::Error) -> AppError {
     AppError::Other(format!("CSV export failed: {}", error))
 }
@@ -55,6 +57,7 @@ pub async fn export_csv(
         "Bit Rate (kbps)".to_string(),
         "Resolution".to_string(),
         "Frame Rate".to_string(),
+        "Audio Only".to_string(),
         "Audio".to_string(),
     ];
     if include_latency {
@@ -83,6 +86,7 @@ pub async fn export_csv(
             r.audio_bitrate.as_deref().unwrap_or("Unknown"),
             r.audio_codec.as_deref().unwrap_or("Unknown")
         );
+        let audio_only = if r.audio_only { "Yes" } else { "No" };
 
         let mut row = vec![
             sanitize_csv_cell(playlist_cell),
@@ -96,6 +100,7 @@ pub async fn export_csv(
             sanitize_csv_cell(&bitrate),
             sanitize_csv_cell(resolution),
             sanitize_csv_cell(&fps),
+            audio_only.to_string(),
             sanitize_csv_cell(&audio),
         ];
         if include_latency {
@@ -198,11 +203,17 @@ pub async fn export_renamed(
             for meta in &r.metadata_lines {
                 writeln!(file, "{}", meta).map_err(AppError::Io)?;
             }
+            if let Some(audio_only_metadata) = audio_only_export_metadata(r) {
+                writeln!(file, "{}", audio_only_metadata).map_err(AppError::Io)?;
+            }
             writeln!(file, "{}", r.url).map_err(AppError::Io)?;
         } else {
             writeln!(file, "{}", r.extinf_line).map_err(AppError::Io)?;
             for meta in &r.metadata_lines {
                 writeln!(file, "{}", meta).map_err(AppError::Io)?;
+            }
+            if let Some(audio_only_metadata) = audio_only_export_metadata(r) {
+                writeln!(file, "{}", audio_only_metadata).map_err(AppError::Io)?;
             }
             writeln!(file, "{}", r.url).map_err(AppError::Io)?;
         }
@@ -226,9 +237,17 @@ fn build_m3u_entry(r: &ChannelResult) -> String {
         entry.push('\n');
         entry.push_str(meta);
     }
+    if let Some(audio_only_metadata) = audio_only_export_metadata(r) {
+        entry.push('\n');
+        entry.push_str(audio_only_metadata);
+    }
     entry.push('\n');
     entry.push_str(&r.url);
     entry
+}
+
+fn audio_only_export_metadata(result: &ChannelResult) -> Option<&'static str> {
+    result.audio_only.then_some(AUDIO_ONLY_EXPORT_TAG)
 }
 
 fn export_target_path(base_path: &str, suffix: &str) -> PathBuf {
@@ -351,6 +370,7 @@ mod tests {
             video_bitrate: Some("5000 kbps".to_string()),
             audio_bitrate: Some("192".to_string()),
             audio_codec: Some("AAC".to_string()),
+            audio_only: false,
             screenshot_path: None,
             label_mismatches: Vec::new(),
             low_framerate: false,
@@ -425,6 +445,7 @@ mod tests {
         assert_eq!(row.get(4), Some("Sports,Live"));
         assert_eq!(row.get(6), Some("'+channel-id"));
         assert!(row.get(5).expect("name should exist").starts_with("'=2+2"));
+        assert_eq!(row.get(11), Some("No"));
 
         std::fs::remove_file(path).expect("temporary csv should be removable");
     }
@@ -450,14 +471,46 @@ mod tests {
             .from_path(&path)
             .expect("csv file should be readable");
         let headers = reader.headers().expect("headers should parse").clone();
-        assert_eq!(headers.get(12), Some("Latency"));
+        assert_eq!(headers.get(13), Some("Latency"));
 
         let rows: Vec<csv::StringRecord> = reader
             .records()
             .collect::<Result<Vec<_>, _>>()
             .expect("csv rows should parse");
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].get(12), Some("1.2 s"));
+        assert_eq!(rows[0].get(13), Some("1.2 s"));
+
+        std::fs::remove_file(path).expect("temporary csv should be removable");
+    }
+
+    #[tokio::test]
+    async fn export_csv_includes_audio_only_flag() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be monotonic")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("iptv-export-csv-audio-only-{unique}.csv"));
+        let path_string = path.to_string_lossy().to_string();
+
+        let mut result = sample_result("Radio 1", "Radio", "radio-1");
+        result.audio_only = true;
+
+        export_csv(vec![result], path_string, "Playlist".to_string(), false)
+            .await
+            .expect("csv export should succeed");
+
+        let mut reader = csv::ReaderBuilder::new()
+            .has_headers(true)
+            .from_path(&path)
+            .expect("csv file should be readable");
+        let headers = reader.headers().expect("headers should parse").clone();
+        assert_eq!(headers.get(11), Some("Audio Only"));
+
+        let rows: Vec<csv::StringRecord> = reader
+            .records()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("csv rows should parse");
+        assert_eq!(rows[0].get(11), Some("Yes"));
 
         std::fs::remove_file(path).expect("temporary csv should be removable");
     }
@@ -479,6 +532,7 @@ mod tests {
             "#EXTVLCOPT:http-user-agent=VLC/3.0.14".to_string(),
         ];
         result.url = "http://example.com/sports/channel1.m3u8".to_string();
+        result.audio_only = true;
 
         export_m3u(vec![result.clone()], path_string)
             .await
@@ -486,10 +540,11 @@ mod tests {
 
         let exported = std::fs::read_to_string(&path).expect("m3u export should be readable");
         let expected = format!(
-            "#EXTM3U\n{}\n{}\n{}\n{}\n",
+            "#EXTM3U\n{}\n{}\n{}\n{}\n{}\n",
             result.extinf_line,
             result.metadata_lines[0],
             result.metadata_lines[1],
+            AUDIO_ONLY_EXPORT_TAG,
             result.url
         );
         assert_eq!(exported, expected);

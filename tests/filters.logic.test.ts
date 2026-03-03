@@ -9,6 +9,7 @@ function makeResult(
     playlist: string;
     group: string;
     status: ChannelStatus;
+    audioOnly?: boolean;
   },
 ): ChannelResult {
   return {
@@ -27,6 +28,7 @@ function makeResult(
     video_bitrate: null,
     audio_bitrate: null,
     audio_codec: null,
+    audio_only: options.audioOnly ?? false,
     screenshot_path: null,
     label_mismatches: [],
     low_framerate: false,
@@ -59,6 +61,7 @@ describe("filterResults", () => {
       playlist: "Primary",
       group: "Sports",
       status: "geoblocked_confirmed",
+      audioOnly: true,
     }),
   ];
 
@@ -87,5 +90,11 @@ describe("filterResults", () => {
     expect(
       filterResults(results, "", "all", "duplicates", duplicateSet).map((r) => r.index),
     ).toEqual([1, 2]);
+  });
+
+  it("supports audio-only status filter", () => {
+    expect(filterResults(results, "", "all", "audio_only").map((r) => r.index)).toEqual(
+      [2],
+    );
   });
 });

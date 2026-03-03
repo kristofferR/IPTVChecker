@@ -23,6 +23,7 @@ function makeResult(
     video_bitrate: videoBitrate,
     audio_bitrate: audioBitrate,
     audio_codec: null,
+    audio_only: false,
     screenshot_path: null,
     label_mismatches: [],
     low_framerate: false,

@@ -54,6 +54,8 @@ pub struct ChannelResult {
     pub video_bitrate: Option<String>,
     pub audio_bitrate: Option<String>,
     pub audio_codec: Option<String>,
+    #[serde(default)]
+    pub audio_only: bool,
     pub screenshot_path: Option<String>,
     pub label_mismatches: Vec<String>,
     pub low_framerate: bool,
