@@ -102,6 +102,10 @@ export async function exportM3u(
   return invoke("export_m3u", { results, path });
 }
 
+export async function exportScanLogJson(path: string): Promise<void> {
+  return invoke("export_scan_log_json", { path });
+}
+
 export async function getSettings(): Promise<AppSettings> {
   return invoke("get_settings");
 }

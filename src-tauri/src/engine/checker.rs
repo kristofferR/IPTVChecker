@@ -1,11 +1,12 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, LOCATION, USER_AGENT};
 use url::Url;
 
 use crate::error::AppError;
 use crate::models::scan::{RetryBackoff, MAX_RETRIES, MIN_RETRIES};
+use crate::models::scan_log::{ChannelAttemptDebugLog, ChannelDebugLog};
 
 /// Minimum data threshold for direct streams (500KB).
 const MIN_DATA_THRESHOLD: u64 = 1024 * 500;
@@ -13,6 +14,8 @@ const MIN_DATA_THRESHOLD: u64 = 1024 * 500;
 const PLAYLIST_SEGMENT_THRESHOLD: u64 = 1024 * 128;
 /// Maximum depth for following nested playlists.
 const MAX_PLAYLIST_DEPTH: u32 = 4;
+/// Maximum depth for following HTTP redirects.
+const MAX_REDIRECT_DEPTH: u32 = 10;
 /// HTTP status codes indicating potential geoblocking.
 const GEOBLOCK_STATUSES: &[u16] = &[403, 451, 426];
 const SECONDARY_GEOBLOCK_STATUSES: &[u16] = &[401, 423, 451];
@@ -24,6 +27,13 @@ fn elapsed_millis(started_at: Instant) -> u64 {
         .elapsed()
         .as_millis()
         .min(u128::from(u64::MAX)) as u64
+}
+
+fn now_epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 /// Internal result from a single verification attempt.
@@ -44,6 +54,24 @@ enum VerifyResult {
     Retry {
         reason: Option<String>,
     },
+}
+
+#[derive(Debug, Clone, Default)]
+struct VerifyMetrics {
+    http_status_codes: Vec<u16>,
+    redirect_chain: Vec<String>,
+    bytes_transferred: u64,
+    ttfb_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChannelCheckOutcome {
+    pub status: String,
+    pub stream_url: Option<String>,
+    pub latency_ms: Option<u64>,
+    pub retries_used: u32,
+    pub last_error_reason: Option<String>,
+    pub debug_log: ChannelDebugLog,
 }
 
 fn classify_non_ok_status(status_code: u16, latency_ms: Option<u64>) -> VerifyResult {
@@ -214,6 +242,7 @@ async fn read_stream(
     min_bytes: u64,
     latency_ms: Option<u64>,
     request_started_at: Instant,
+    metrics: &mut VerifyMetrics,
 ) -> VerifyResult {
     use futures::StreamExt;
 
@@ -232,6 +261,10 @@ async fn read_stream(
                     observed_latency_ms = Some(elapsed_millis(request_started_at));
                 }
                 bytes_read += chunk.len() as u64;
+                metrics.bytes_transferred = metrics.bytes_transferred.saturating_add(chunk.len() as u64);
+                if metrics.ttfb_ms.is_none() {
+                    metrics.ttfb_ms = observed_latency_ms;
+                }
                 if bytes_read >= min_bytes {
                     return VerifyResult::Alive {
                         stream_url: None,
@@ -277,15 +310,23 @@ async fn verify(
     client: &reqwest::Client,
     target_url: &str,
     timeout_secs: f64,
-    depth: u32,
+    playlist_depth: u32,
+    redirect_depth: u32,
     visited: &mut HashSet<String>,
     headers: &HeaderMap,
     root_latency_ms: Option<u64>,
+    metrics: &mut VerifyMetrics,
 ) -> VerifyResult {
-    if depth > MAX_PLAYLIST_DEPTH {
+    if playlist_depth > MAX_PLAYLIST_DEPTH {
         return VerifyResult::Dead {
             latency_ms: root_latency_ms,
             reason: Some("Playlist recursion limit exceeded".to_string()),
+        };
+    }
+    if redirect_depth > MAX_REDIRECT_DEPTH {
+        return VerifyResult::Dead {
+            latency_ms: root_latency_ms,
+            reason: Some("Redirect recursion limit exceeded".to_string()),
         };
     }
 
@@ -297,10 +338,18 @@ async fn verify(
     if visited.contains(&normalized) {
         return VerifyResult::Dead {
             latency_ms: root_latency_ms,
-            reason: Some("Playlist loop detected".to_string()),
+            reason: Some("URL loop detected".to_string()),
         };
     }
     visited.insert(normalized);
+    if metrics
+        .redirect_chain
+        .last()
+        .map(|value| value != target_url)
+        .unwrap_or(true)
+    {
+        metrics.redirect_chain.push(target_url.to_string());
+    }
 
     let request = client
         .get(target_url)
@@ -326,6 +375,54 @@ async fn verify(
     let effective_root_latency = root_latency_ms.or(Some(request_latency_ms));
 
     let status_code = resp.status().as_u16();
+    metrics.http_status_codes.push(status_code);
+    if metrics.ttfb_ms.is_none() {
+        metrics.ttfb_ms = Some(request_latency_ms);
+    }
+
+    if (300..=399).contains(&status_code) {
+        let location = match resp
+            .headers()
+            .get(LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            Some(value) => value,
+            None => {
+                return VerifyResult::Dead {
+                    latency_ms: effective_root_latency,
+                    reason: Some(format!("HTTP {} without Location header", status_code)),
+                };
+            }
+        };
+
+        let next_url = match resp.url().join(location) {
+            Ok(url) => url.to_string(),
+            Err(_) => {
+                return VerifyResult::Dead {
+                    latency_ms: effective_root_latency,
+                    reason: Some(format!(
+                        "HTTP {} with invalid redirect location",
+                        status_code
+                    )),
+                };
+            }
+        };
+
+        return Box::pin(verify(
+            client,
+            &next_url,
+            timeout_secs,
+            playlist_depth,
+            redirect_depth + 1,
+            visited,
+            headers,
+            effective_root_latency,
+            metrics,
+        ))
+        .await;
+    }
 
     if status_code != 200 {
         return classify_non_ok_status(status_code, effective_root_latency);
@@ -361,16 +458,18 @@ async fn verify(
             client,
             &next_url,
             timeout_secs,
-            depth + 1,
+            playlist_depth + 1,
+            redirect_depth,
             visited,
             headers,
             effective_root_latency,
+            metrics,
         ))
         .await;
     }
 
     let min_bytes = if is_direct_stream(&content_type, &final_url) {
-        if depth == 0 {
+        if playlist_depth == 0 {
             MIN_DATA_THRESHOLD
         } else {
             PLAYLIST_SEGMENT_THRESHOLD
@@ -385,14 +484,14 @@ async fn verify(
         };
     } else {
         // Unrecognized content-type — attempt stream read
-        if depth == 0 {
+        if playlist_depth == 0 {
             MIN_DATA_THRESHOLD
         } else {
             PLAYLIST_SEGMENT_THRESHOLD
         }
     };
 
-    let result = read_stream(resp, min_bytes, root_latency_ms, request_started_at).await;
+    let result = read_stream(resp, min_bytes, root_latency_ms, request_started_at, metrics).await;
     match result {
         VerifyResult::Alive { latency_ms, .. } => VerifyResult::Alive {
             stream_url: Some(final_url),
@@ -404,8 +503,8 @@ async fn verify(
 
 /// Check the status of a single channel URL.
 ///
-/// Returns (ChannelStatus string, Option<stream_url>, Option<latency_ms>).
-pub async fn check_channel_status(
+/// Returns status + diagnostics used for structured scan log export.
+pub async fn check_channel_status_with_debug(
     client: &reqwest::Client,
     url: &str,
     timeout: f64,
@@ -414,7 +513,7 @@ pub async fn check_channel_status(
     extended_timeout: Option<f64>,
     user_agent: &str,
     cancel_token: &tokio_util::sync::CancellationToken,
-) -> Result<(String, Option<String>, Option<u64>, u32, Option<String>), AppError> {
+) -> Result<ChannelCheckOutcome, AppError> {
     if !timeout.is_finite() || timeout <= 0.0 {
         return Err(AppError::Other(
             "Invalid timeout: must be greater than 0 seconds".to_string(),
@@ -446,9 +545,11 @@ pub async fn check_channel_status(
         latency_ms: Option<u64>,
         retries_used: u32,
         last_error_reason: Option<String>,
+        successful_attempt: Option<u32>,
+        attempts: Vec<ChannelAttemptDebugLog>,
     }
 
-    let attempt_check = |current_timeout: f64| {
+    let attempt_check = |current_timeout: f64, attempt_offset: u32| {
         let client = client.clone();
         let headers = headers.clone();
         let url = url.to_string();
@@ -456,10 +557,15 @@ pub async fn check_channel_status(
         async move {
             let mut retries_used = 0u32;
             let mut last_error_reason: Option<String> = None;
+            let mut attempt_logs = Vec::<ChannelAttemptDebugLog>::new();
+
             for attempt in 0..attempts {
                 if cancel.is_cancelled() {
                     return Err(AppError::Cancelled);
                 }
+
+                let attempt_number = attempt_offset.saturating_add(attempt).saturating_add(1);
+                let attempt_started_at_epoch_ms = now_epoch_ms();
 
                 log::debug!(
                     "Attempt {}/{} for {} (timeout: {}s, max_retries: {}, backoff: {:?})",
@@ -470,17 +576,42 @@ pub async fn check_channel_status(
                     retries,
                     retry_backoff
                 );
+                let mut metrics = VerifyMetrics::default();
                 let mut visited = HashSet::new();
                 let result = verify(
                     &client,
                     &url,
                     current_timeout,
                     0,
+                    0,
                     &mut visited,
                     &headers,
                     None,
+                    &mut metrics,
                 )
                 .await;
+                let attempt_ended_at_epoch_ms = now_epoch_ms();
+
+                let (verdict, reason_for_log) = match &result {
+                    VerifyResult::Alive { .. } => ("Alive".to_string(), None),
+                    VerifyResult::Dead { reason, .. } => ("Dead".to_string(), reason.clone()),
+                    VerifyResult::Geoblocked { reason, .. } => {
+                        ("Geoblocked".to_string(), reason.clone())
+                    }
+                    VerifyResult::Retry { reason } => ("Retry".to_string(), reason.clone()),
+                };
+                attempt_logs.push(ChannelAttemptDebugLog {
+                    attempt: attempt_number,
+                    timeout_secs: current_timeout,
+                    started_at_epoch_ms: attempt_started_at_epoch_ms,
+                    ended_at_epoch_ms: attempt_ended_at_epoch_ms,
+                    verdict: verdict.clone(),
+                    reason: reason_for_log.clone(),
+                    http_status_codes: metrics.http_status_codes,
+                    redirect_chain: metrics.redirect_chain,
+                    bytes_transferred: metrics.bytes_transferred,
+                    ttfb_ms: metrics.ttfb_ms,
+                });
 
                 match result {
                     VerifyResult::Alive {
@@ -494,6 +625,8 @@ pub async fn check_channel_status(
                             latency_ms,
                             retries_used,
                             last_error_reason,
+                            successful_attempt: Some(attempt_number),
+                            attempts: attempt_logs,
                         });
                     }
                     VerifyResult::Dead { latency_ms, reason } => {
@@ -504,6 +637,8 @@ pub async fn check_channel_status(
                             latency_ms,
                             retries_used,
                             last_error_reason: reason.or(last_error_reason),
+                            successful_attempt: None,
+                            attempts: attempt_logs,
                         });
                     }
                     VerifyResult::Geoblocked { latency_ms, reason } => {
@@ -514,6 +649,8 @@ pub async fn check_channel_status(
                             latency_ms,
                             retries_used,
                             last_error_reason: reason.or(last_error_reason),
+                            successful_attempt: None,
+                            attempts: attempt_logs,
                         });
                     }
                     VerifyResult::Retry { reason } => {
@@ -537,32 +674,117 @@ pub async fn check_channel_status(
                 latency_ms: None,
                 retries_used,
                 last_error_reason,
+                successful_attempt: None,
+                attempts: attempt_logs,
             })
         }
     };
 
-    let first = attempt_check(timeout).await?;
+    let first = attempt_check(timeout, 0).await?;
+    let mut final_outcome = first;
 
     // If dead and extended timeout enabled, retry
-    if first.status == "Dead" {
+    if final_outcome.status == "Dead" {
         if let Some(ext_timeout) = extended_timeout {
-            let second = attempt_check(ext_timeout).await?;
-            return Ok((
-                second.status,
-                second.stream_url,
-                second.latency_ms,
-                first.retries_used.saturating_add(second.retries_used),
-                second.last_error_reason.or(first.last_error_reason),
-            ));
+            let second = attempt_check(ext_timeout, final_outcome.attempts.len() as u32).await?;
+            let mut combined_attempts = final_outcome.attempts;
+            combined_attempts.extend(second.attempts);
+
+            final_outcome = AttemptOutcome {
+                status: second.status,
+                stream_url: second.stream_url,
+                latency_ms: second.latency_ms,
+                retries_used: final_outcome.retries_used.saturating_add(second.retries_used),
+                last_error_reason: second.last_error_reason.or(final_outcome.last_error_reason),
+                successful_attempt: second.successful_attempt,
+                attempts: combined_attempts,
+            };
         }
     }
 
+    let mut http_status_codes = Vec::<u16>::new();
+    let mut redirect_chain = Vec::<String>::new();
+    let mut bytes_transferred: u64 = 0;
+    let mut ttfb_ms: Option<u64> = None;
+    for attempt in &final_outcome.attempts {
+        http_status_codes.extend_from_slice(&attempt.http_status_codes);
+        for url in &attempt.redirect_chain {
+            if redirect_chain.last().map(|value| value != url).unwrap_or(true) {
+                redirect_chain.push(url.clone());
+            }
+        }
+        bytes_transferred = bytes_transferred.saturating_add(attempt.bytes_transferred);
+        if ttfb_ms.is_none() {
+            ttfb_ms = attempt.ttfb_ms;
+        }
+    }
+
+    let check_started_at_epoch_ms = final_outcome
+        .attempts
+        .first()
+        .map(|attempt| attempt.started_at_epoch_ms)
+        .unwrap_or_else(now_epoch_ms);
+    let check_ended_at_epoch_ms = final_outcome
+        .attempts
+        .last()
+        .map(|attempt| attempt.ended_at_epoch_ms)
+        .unwrap_or_else(now_epoch_ms);
+
+    Ok(ChannelCheckOutcome {
+        status: final_outcome.status.clone(),
+        stream_url: final_outcome.stream_url,
+        latency_ms: final_outcome.latency_ms,
+        retries_used: final_outcome.retries_used,
+        last_error_reason: final_outcome.last_error_reason.clone(),
+        debug_log: ChannelDebugLog {
+            channel_index: 0,
+            channel_name: String::new(),
+            channel_url: url.to_string(),
+            check_started_at_epoch_ms,
+            check_ended_at_epoch_ms,
+            retry_attempts: final_outcome.retries_used,
+            successful_attempt: final_outcome.successful_attempt,
+            http_status_codes,
+            redirect_chain,
+            bytes_transferred,
+            ttfb_ms,
+            final_verdict: final_outcome.status,
+            final_reason: final_outcome.last_error_reason,
+            ffprobe_output: None,
+            attempts: final_outcome.attempts,
+        },
+    })
+}
+
+/// Backwards-compatible status check API used by existing call sites.
+pub async fn check_channel_status(
+    client: &reqwest::Client,
+    url: &str,
+    timeout: f64,
+    retries: u32,
+    retry_backoff: RetryBackoff,
+    extended_timeout: Option<f64>,
+    user_agent: &str,
+    cancel_token: &tokio_util::sync::CancellationToken,
+) -> Result<(String, Option<String>, Option<u64>, u32, Option<String>), AppError> {
+    let outcome = check_channel_status_with_debug(
+        client,
+        url,
+        timeout,
+        retries,
+        retry_backoff,
+        extended_timeout,
+        user_agent,
+        cancel_token,
+    )
+    .await?;
+
     Ok((
-        first.status,
-        first.stream_url,
-        first.latency_ms,
-        first.retries_used,
-        first.last_error_reason,
+        outcome.status,
+        outcome.stream_url,
+        outcome.latency_ms,
+        outcome.retries_used,
+        outcome.last_error_reason,
     ))
 }
 

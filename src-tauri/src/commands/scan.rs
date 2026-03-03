@@ -13,6 +13,7 @@ use crate::models::channel::{Channel, ChannelResult, ChannelStatus};
 use crate::models::scan::{
     RetryBackoff, ScanConfig, ScanErrorPayload, ScanEvent, ScanProgress, ScanSummary,
 };
+use crate::models::scan_log::{ChannelDebugLog, ScanDebugLog};
 use crate::state::AppState;
 
 static NEXT_SCAN_RUN_ID: AtomicU64 = AtomicU64::new(1);
@@ -35,6 +36,7 @@ struct SharedUrlResult {
     stream_url: Option<String>,
     retry_count: Option<u32>,
     last_error_reason: Option<String>,
+    channel_log: ChannelDebugLog,
 }
 
 impl SharedUrlResult {
@@ -43,6 +45,7 @@ impl SharedUrlResult {
         latency_ms: Option<u64>,
         retry_count: Option<u32>,
         last_error_reason: Option<String>,
+        channel_log: ChannelDebugLog,
     ) -> Self {
         Self {
             status: ChannelStatus::Dead,
@@ -61,6 +64,7 @@ impl SharedUrlResult {
             stream_url,
             retry_count,
             last_error_reason,
+            channel_log,
         }
     }
 }
@@ -100,8 +104,8 @@ async fn compute_shared_url_result(
     screenshots_dir: Option<&String>,
     screenshot_file_name: &str,
 ) -> Result<SharedUrlResult, AppError> {
-    let (status_str, stream_url, latency_ms, retry_count, last_error_reason) =
-        match checker::check_channel_status(
+    let (status_str, stream_url, latency_ms, retry_count, last_error_reason, mut channel_log) =
+        match checker::check_channel_status_with_debug(
         client,
         channel_url,
         timeout,
@@ -113,9 +117,28 @@ async fn compute_shared_url_result(
     )
     .await
     {
-        Ok(r) => r,
+        Ok(outcome) => (
+            outcome.status,
+            outcome.stream_url,
+            outcome.latency_ms,
+            outcome.retries_used,
+            outcome.last_error_reason,
+            outcome.debug_log,
+        ),
         Err(AppError::Cancelled) => return Err(AppError::Cancelled),
-        Err(error) => ("Dead".to_string(), None, None, 0, Some(error.to_string())),
+        Err(error) => (
+            "Dead".to_string(),
+            None,
+            None,
+            0,
+            Some(error.to_string()),
+            ChannelDebugLog {
+                channel_url: channel_url.to_string(),
+                final_verdict: "Dead".to_string(),
+                final_reason: Some(error.to_string()),
+                ..ChannelDebugLog::default()
+            },
+        ),
     };
 
     let final_status_str = if status_str == "Geoblocked" && test_geoblock {
@@ -140,6 +163,10 @@ async fn compute_shared_url_result(
         "Geoblocked (Unconfirmed)" => ChannelStatus::GeoblockedUnconfirmed,
         _ => ChannelStatus::Dead,
     };
+    channel_log.final_verdict = final_status_str;
+    if channel_log.final_reason.is_none() {
+        channel_log.final_reason = last_error_reason.clone();
+    }
 
     if status != ChannelStatus::Alive || cancel.is_cancelled() {
         return Ok(SharedUrlResult::dead(
@@ -147,6 +174,7 @@ async fn compute_shared_url_result(
             latency_ms,
             (retry_count > 0).then_some(retry_count),
             last_error_reason,
+            channel_log,
         ));
     }
 
@@ -168,6 +196,7 @@ async fn compute_shared_url_result(
         stream_url,
         retry_count: (retry_count > 0).then_some(retry_count),
         last_error_reason,
+        channel_log,
     };
 
     if ffprobe_ok {
@@ -191,6 +220,13 @@ async fn compute_shared_url_result(
             if let Ok(audio) = ffmpeg::get_audio_info(app, &target_url, cancel).await {
                 shared.audio_codec = Some(audio.codec);
                 shared.audio_bitrate = audio.bitrate_kbps.map(|b| format!("{}", b));
+            }
+        }
+
+        if !cancel.is_cancelled() {
+            if let Ok(ffprobe_output) = ffmpeg::collect_ffprobe_output(app, &target_url, cancel).await
+            {
+                shared.channel_log.ffprobe_output = Some(ffprobe_output);
             }
         }
 
@@ -395,6 +431,13 @@ fn next_scan_run_id() -> String {
     )
 }
 
+fn now_epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 #[tauri::command]
 pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, AppError> {
     let state = app.state::<Arc<AppState>>();
@@ -416,9 +459,14 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
         *token_lock = Some(cancel_token.clone());
     }
     let run_id = next_scan_run_id();
+    let scan_started_at_epoch_ms = now_epoch_ms();
     {
         let mut run_id_lock = state.current_run_id.lock().await;
         *run_id_lock = Some(run_id.clone());
+    }
+    {
+        let mut scan_log = state.scan_log.lock().await;
+        *scan_log = None;
     }
 
     log::info!(
@@ -478,6 +526,18 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
             history_limit,
         ) {
             log::warn!("Failed to write scan history for {}: {}", run_id, error);
+        }
+        {
+            let mut scan_log = state.scan_log.lock().await;
+            *scan_log = Some(ScanDebugLog {
+                run_id: run_id.clone(),
+                playlist_path: config.file_path.clone(),
+                source_identity: config.source_identity.clone(),
+                started_at_epoch_ms: scan_started_at_epoch_ms,
+                finished_at_epoch_ms: now_epoch_ms(),
+                summary: summary.clone(),
+                channels: Vec::new(),
+            });
         }
         clear_pre_spawn_scan_state(state.inner().as_ref()).await;
         return Ok(run_id);
@@ -598,12 +658,13 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
     let resumed_results_for_events = resumed_results.clone();
     let log_file_for_task = log_file.clone();
     let checkpoint_file_for_task = checkpoint_file.clone();
+    let scan_started_at_epoch_ms_for_task = scan_started_at_epoch_ms;
 
     tokio::spawn(async move {
         let client = Arc::new(
             reqwest::Client::builder()
                 .connect_timeout(std::time::Duration::from_secs(5))
-                .redirect(reqwest::redirect::Policy::limited(10))
+                .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .unwrap_or_default(),
         );
@@ -671,6 +732,8 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                 HashMap<String, Arc<tokio::sync::OnceCell<Result<SharedUrlResult, AppError>>>>,
             >,
         > = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        let channel_debug_logs: Arc<tokio::sync::Mutex<Vec<ChannelDebugLog>>> =
+            Arc::new(tokio::sync::Mutex::new(Vec::new()));
         let mut handles = Vec::new();
 
         for channel in channels {
@@ -706,6 +769,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
             let ffprobe_ok = ffprobe_available;
             let task_app = app_handle.clone();
             let shared_url_results = Arc::clone(&shared_url_results);
+            let channel_debug_logs = Arc::clone(&channel_debug_logs);
 
             let handle = tokio::spawn(async move {
                 if cancel.is_cancelled() {
@@ -749,11 +813,27 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                     })
                     .await;
 
-                let shared = match shared_result {
+                let mut shared = match shared_result {
                     Ok(value) => value.clone(),
                     Err(AppError::Cancelled) => return,
-                    Err(_) => SharedUrlResult::dead(None, None, None, None),
+                    Err(error) => {
+                        let reason = error.to_string();
+                        SharedUrlResult::dead(
+                            None,
+                            None,
+                            None,
+                            Some(reason.clone()),
+                            ChannelDebugLog {
+                                final_verdict: "Dead".to_string(),
+                                final_reason: Some(reason),
+                                ..ChannelDebugLog::default()
+                            },
+                        )
+                    }
                 };
+                shared.channel_log.channel_index = channel.index;
+                shared.channel_log.channel_name = channel.name.clone();
+                shared.channel_log.channel_url = channel.url.clone();
 
                 let mut result = ChannelResult {
                     index: channel.index,
@@ -797,6 +877,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                     &format!("{} - {} {}", channel.index + 1, channel.name, channel.url),
                 );
                 let _ = resume::write_result_entry(&checkpoint_file, &result);
+                channel_debug_logs.lock().await.push(shared.channel_log.clone());
 
                 let _ = tx.send(result).await;
                 drop(_permit);
@@ -837,6 +918,10 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                     payload: summary.clone(),
                 },
             );
+            {
+                let mut scan_log = state_clone.scan_log.lock().await;
+                *scan_log = None;
+            }
             cleanup_resume_files(&log_file_for_task, &checkpoint_file_for_task);
         } else {
             let history_limit = {
@@ -861,9 +946,27 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                 "scan://complete",
                 ScanEvent {
                     run_id: run_id_for_task.clone(),
-                    payload: summary,
+                    payload: summary.clone(),
                 },
             );
+
+            let mut channel_logs = {
+                let logs = channel_debug_logs.lock().await;
+                logs.clone()
+            };
+            channel_logs.sort_by_key(|entry| entry.channel_index);
+            {
+                let mut scan_log = state_clone.scan_log.lock().await;
+                *scan_log = Some(ScanDebugLog {
+                    run_id: run_id_for_task.clone(),
+                    playlist_path: config.file_path.clone(),
+                    source_identity: config.source_identity.clone(),
+                    started_at_epoch_ms: scan_started_at_epoch_ms_for_task,
+                    finished_at_epoch_ms: now_epoch_ms(),
+                    summary: summary.clone(),
+                    channels: channel_logs,
+                });
+            }
             cleanup_resume_files(&log_file_for_task, &checkpoint_file_for_task);
         }
 

@@ -10,6 +10,7 @@ use crate::error::AppError;
 const MAX_SCREENSHOT_STEM_LEN: usize = 120;
 const FALLBACK_SCREENSHOT_STEM: &str = "channel";
 const MAX_STDERR_EXCERPT_CHARS: usize = 600;
+const MAX_FFPROBE_OUTPUT_CHARS: usize = 16_000;
 
 // Compile-time target triple for resolving sidecar binary paths.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -546,6 +547,36 @@ pub async fn get_stream_track_presence(
             stderr_excerpt(&stderr)
         ))
     })
+}
+
+/// Capture raw ffprobe JSON output for diagnostic export logs.
+pub async fn collect_ffprobe_output(
+    app: &AppHandle,
+    url: &str,
+    cancel: &CancellationToken,
+) -> Result<String, AppError> {
+    let (stdout, _stderr) = run_tool_command(
+        app,
+        "ffprobe",
+        &[
+            "-v",
+            "error",
+            "-show_streams",
+            "-show_format",
+            "-of",
+            "json",
+            url,
+        ],
+        cancel,
+        None,
+    )
+    .await?;
+
+    let mut truncated: String = stdout.chars().take(MAX_FFPROBE_OUTPUT_CHARS).collect();
+    if stdout.chars().count() > MAX_FFPROBE_OUTPUT_CHARS {
+        truncated.push_str("\n...truncated...");
+    }
+    Ok(truncated)
 }
 
 /// Capture a screenshot frame from a stream via ffmpeg.

@@ -9,7 +9,14 @@ import {
   Info,
 } from "lucide-react";
 import type { ChannelResult } from "../lib/types";
-import { exportCsv, exportM3u, exportSplit, exportRenamed } from "../lib/tauri";
+import type { ScanState } from "../hooks/useScan";
+import {
+  exportCsv,
+  exportM3u,
+  exportScanLogJson,
+  exportSplit,
+  exportRenamed,
+} from "../lib/tauri";
 import {
   exportScopeFileSuffix,
   exportScopeLabel,
@@ -53,8 +60,9 @@ interface ExportMenuProps {
   disabled: boolean;
   menuRequest?: {
     id: number;
-    action: "csv" | "split" | "renamed" | "m3u";
+    action: "csv" | "split" | "renamed" | "m3u" | "scanlog";
   } | null;
+  scanState: ScanState;
 }
 
 export function ExportMenu({
@@ -65,9 +73,10 @@ export function ExportMenu({
   playlistPath,
   disabled,
   menuRequest,
+  scanState,
 }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
-  const [busyAction, setBusyAction] = useState<"csv" | "split" | "renamed" | "m3u" | null>(null);
+  const [busyAction, setBusyAction] = useState<"csv" | "split" | "renamed" | "m3u" | "scanlog" | null>(null);
   const [feedback, setFeedback] = useState<{
     kind: "success" | "error" | "info";
     message: string;
@@ -260,6 +269,43 @@ export function ExportMenu({
     }
   }, [scope, sourceStem, resolveScopedResults]);
 
+  const handleExportScanLog = useCallback(async () => {
+    if (scanState !== "complete") {
+      setFeedback({
+        kind: "info",
+        message: "Scan log export is available after a completed scan.",
+      });
+      return;
+    }
+
+    setOpen(false);
+    const path = await save({
+      defaultPath: `${sourceStem}_scan-log.json`,
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+    if (!path) {
+      setFeedback({ kind: "info", message: "Scan log export cancelled." });
+      return;
+    }
+
+    setBusyAction("scanlog");
+    try {
+      await exportScanLogJson(path);
+      setFeedback({
+        kind: "success",
+        message: `Exported structured scan log to ${path}.`,
+      });
+      void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
+    } catch (err) {
+      setFeedback({
+        kind: "error",
+        message: `Scan log export failed: ${String(err)}`,
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  }, [scanState, sourceStem]);
+
   const exporting = busyAction !== null;
 
   useEffect(() => {
@@ -275,6 +321,8 @@ export function ExportMenu({
       void handleExportRenamed();
     } else if (menuRequest.action === "m3u") {
       void handleExportM3u();
+    } else if (menuRequest.action === "scanlog") {
+      void handleExportScanLog();
     }
   }, [
     menuRequest,
@@ -284,6 +332,7 @@ export function ExportMenu({
     handleExportSplit,
     handleExportRenamed,
     handleExportM3u,
+    handleExportScanLog,
   ]);
 
   return (
@@ -361,6 +410,14 @@ export function ExportMenu({
             className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
           >
             Export M3U/M3U8
+          </button>
+          <button
+            onClick={handleExportScanLog}
+            disabled={exporting || scanState !== "complete"}
+            className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
+            title={scanState === "complete" ? undefined : "Complete a scan to enable"}
+          >
+            Export Scan Log (JSON)
           </button>
         </div>
       )}

@@ -16,7 +16,7 @@ import { ExportMenu } from "./ExportMenu";
 
 export interface MenuExportRequest {
   id: number;
-  action: "csv" | "split" | "renamed" | "m3u";
+  action: "csv" | "split" | "renamed" | "m3u" | "scanlog";
 }
 
 interface ToolbarProps {
@@ -185,6 +185,7 @@ export function Toolbar({
         playlistPath={playlistPath}
         disabled={!hasResults || inScanSession}
         menuRequest={menuExportRequest}
+        scanState={scanState}
       />
 
       <button

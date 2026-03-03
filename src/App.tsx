@@ -287,7 +287,7 @@ export default function App() {
   const [updateNotice, setUpdateNotice] = useState<UpdateNotice | null>(null);
   const [menuExportRequest, setMenuExportRequest] = useState<{
     id: number;
-    action: "csv" | "split" | "renamed" | "m3u";
+    action: "csv" | "split" | "renamed" | "m3u" | "scanlog";
   } | null>(null);
 
   const { settings, save: saveSettings } = useSettings();
@@ -1077,7 +1077,7 @@ export default function App() {
 
   useEffect(() => {
     const unlisten: Array<() => void> = [];
-    const queueExport = (action: "csv" | "split" | "renamed" | "m3u") => {
+    const queueExport = (action: "csv" | "split" | "renamed" | "m3u" | "scanlog") => {
       setMenuExportRequest((prev) => ({
         id: (prev?.id ?? 0) + 1,
         action,
@@ -1126,6 +1126,9 @@ export default function App() {
       );
       unlisten.push(
         await listen("menu://export-filtered-m3u", () => queueExport("m3u")),
+      );
+      unlisten.push(
+        await listen("menu://export-scan-log", () => queueExport("scanlog")),
       );
       unlisten.push(
         await listen("menu://toggle-sidebar", () =>

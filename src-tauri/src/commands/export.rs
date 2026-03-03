@@ -1,7 +1,10 @@
 use crate::error::AppError;
 use crate::models::channel::{ChannelResult, ChannelStatus};
+use crate::state::AppState;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tauri::Manager;
 
 const AUDIO_ONLY_EXPORT_TAG: &str = "#EXTVLCOPT:iptv-checker-audio-only=1";
 
@@ -229,6 +232,24 @@ pub async fn export_m3u(results: Vec<ChannelResult>, path: String) -> Result<(),
         .map(build_m3u_entry)
         .collect::<Vec<String>>();
     write_m3u_file(Path::new(&path), &entries)
+}
+
+#[tauri::command]
+pub async fn export_scan_log_json(app: tauri::AppHandle, path: String) -> Result<(), AppError> {
+    let state = app.state::<Arc<AppState>>();
+    let scan_log = {
+        let guard = state.scan_log.lock().await;
+        guard.clone().ok_or_else(|| {
+            AppError::Other(
+                "No completed scan log is available yet. Run a scan first.".to_string(),
+            )
+        })?
+    };
+
+    let bytes = serde_json::to_vec_pretty(&scan_log)
+        .map_err(|error| AppError::Parse(format!("Failed to serialize scan log JSON: {}", error)))?;
+    std::fs::write(path, bytes).map_err(AppError::Io)?;
+    Ok(())
 }
 
 fn build_m3u_entry(r: &ChannelResult) -> String {

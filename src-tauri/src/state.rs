@@ -2,6 +2,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+use crate::models::scan_log::ScanDebugLog;
 use crate::models::settings::AppSettings;
 
 pub struct AppState {
@@ -10,6 +11,7 @@ pub struct AppState {
     pub scanning: Mutex<bool>,
     pub paused: Mutex<bool>,
     pub current_run_id: Mutex<Option<String>>,
+    pub scan_log: Mutex<Option<ScanDebugLog>>,
 }
 
 impl AppState {
@@ -20,6 +22,7 @@ impl AppState {
             scanning: Mutex::new(false),
             paused: Mutex::new(false),
             current_run_id: Mutex::new(None),
+            scan_log: Mutex::new(None),
         })
     }
 }
