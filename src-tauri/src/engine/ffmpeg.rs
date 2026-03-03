@@ -122,10 +122,16 @@ pub async fn get_stream_info(app: &AppHandle, url: &str, cancel: &CancellationTo
                     let n: f64 = num.parse().unwrap_or(0.0);
                     let d: f64 = den.parse().unwrap_or(1.0);
                     if d > 0.0 {
-                        fps = Some((n / d).round() as u32);
+                        let computed = (n / d).round() as u32;
+                        if computed > 0 {
+                            fps = Some(computed);
+                        }
                     }
                 } else {
-                    fps = val.parse::<f64>().ok().map(|f| f.round() as u32);
+                    fps = val.parse::<f64>().ok().and_then(|f| {
+                        let rounded = f.round() as u32;
+                        if rounded > 0 { Some(rounded) } else { None }
+                    });
                 }
             }
         }
