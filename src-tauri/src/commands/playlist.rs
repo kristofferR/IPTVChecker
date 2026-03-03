@@ -3,6 +3,7 @@ use crate::error::AppError;
 use crate::models::playlist::PlaylistPreview;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use std::time::Duration;
 use tauri::Manager;
 use url::Url;
 
@@ -12,6 +13,10 @@ pub struct XtreamOpenRequest {
     pub username: String,
     pub password: String,
 }
+
+const PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const PLAYLIST_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
+const PLAYLIST_DOWNLOAD_MAX_BYTES: u64 = 10 * 1024 * 1024;
 
 fn parse_http_url(value: &str, invalid_message: &str) -> Result<Url, AppError> {
     let trimmed = value.trim();
@@ -88,26 +93,48 @@ fn cleanup_stale_cache_temp_files(cache_path: &std::path::Path) {
     }
 }
 
-async fn download_playlist_to_cache(
-    app: &tauri::AppHandle,
-    source_key: &str,
+fn map_download_error(
+    error: reqwest::Error,
+    error_label: &str,
+    timeout: Duration,
+    when: &str,
+) -> AppError {
+    if error.is_timeout() {
+        return AppError::Other(format!(
+            "Timed out while downloading {} after {} seconds",
+            error_label,
+            timeout.as_secs()
+        ));
+    }
+
+    AppError::Other(format!("Failed to {} downloaded {}: {}", when, error_label, error))
+}
+
+async fn download_playlist_bytes(
     download_url: &Url,
     error_label: &str,
-) -> Result<String, AppError> {
+    connect_timeout: Duration,
+    timeout: Duration,
+    max_bytes: u64,
+) -> Result<Vec<u8>, AppError> {
+    use futures::StreamExt;
+
     let response = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
+        .connect_timeout(connect_timeout)
+        .timeout(timeout)
         .build()
-        .map_err(|_| {
+        .map_err(|error| {
             AppError::Other(format!(
-                "Failed to initialize HTTP client for {}",
-                error_label
+                "Failed to initialize HTTP client for {}: {}",
+                error_label, error
             ))
         })?
         .get(download_url.clone())
         .header(reqwest::header::USER_AGENT, "IPTV-Checker-GUI/1.0")
         .send()
         .await
-        .map_err(|_| AppError::Other(format!("Failed to download {}", error_label)))?;
+        .map_err(|error| map_download_error(error, error_label, timeout, "request"))?;
 
     let status = response.status();
     if !status.is_success() {
@@ -117,10 +144,40 @@ async fn download_playlist_to_cache(
         )));
     }
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|_| AppError::Other(format!("Failed to read downloaded {}", error_label)))?;
+    let mut bytes = Vec::new();
+    let mut total = 0u64;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result
+            .map_err(|error| map_download_error(error, error_label, timeout, "read"))?;
+        total = total.saturating_add(chunk.len() as u64);
+        if total > max_bytes {
+            return Err(AppError::Other(format!(
+                "Downloaded {} exceeds the maximum allowed size ({} MiB)",
+                error_label,
+                max_bytes / (1024 * 1024)
+            )));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+
+    Ok(bytes)
+}
+
+async fn download_playlist_to_cache(
+    app: &tauri::AppHandle,
+    source_key: &str,
+    download_url: &Url,
+    error_label: &str,
+) -> Result<String, AppError> {
+    let bytes = download_playlist_bytes(
+        download_url,
+        error_label,
+        PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT,
+        PLAYLIST_DOWNLOAD_TIMEOUT,
+        PLAYLIST_DOWNLOAD_MAX_BYTES,
+    )
+    .await?;
 
     let cache_path = remote_playlist_cache_path(app, source_key)?;
     cleanup_stale_cache_temp_files(&cache_path);
@@ -297,10 +354,13 @@ pub async fn open_playlist_xtream(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_xtream_download_url, build_xtream_source_key, normalize_url_identity,
-        normalize_xtream_server, cleanup_stale_cache_temp_files,
+        build_xtream_download_url, build_xtream_source_key, cleanup_stale_cache_temp_files,
+        download_playlist_bytes, normalize_url_identity, normalize_xtream_server,
         source_cache_file_name,
     };
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
     use url::Url;
 
     #[test]
@@ -388,6 +448,102 @@ mod tests {
         assert_eq!(
             normalize_url_identity(&parsed),
             "https://example.com/live/list.m3u8"
+        );
+    }
+
+    #[tokio::test]
+    async fn download_playlist_bytes_returns_error_when_response_exceeds_max_bytes() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test server should bind");
+        let address = listener
+            .local_addr()
+            .expect("test server should have local address");
+
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("test server should accept");
+            let mut request = [0u8; 1024];
+            let _ = socket.read(&mut request).await;
+
+            let body = vec![b'a'; 128];
+            let headers = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            socket
+                .write_all(headers.as_bytes())
+                .await
+                .expect("test server should write headers");
+            socket
+                .write_all(&body)
+                .await
+                .expect("test server should write body");
+        });
+
+        let url = Url::parse(&format!("http://{}/playlist.m3u8", address))
+            .expect("test URL should parse");
+        let error = download_playlist_bytes(
+            &url,
+            "playlist URL",
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+            32,
+        )
+        .await
+        .expect_err("oversized response should fail");
+
+        assert!(
+            error
+                .to_string()
+                .contains("exceeds the maximum allowed size"),
+            "unexpected error: {}",
+            error
+        );
+    }
+
+    #[tokio::test]
+    async fn download_playlist_bytes_returns_timeout_error_for_slow_streams() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test server should bind");
+        let address = listener
+            .local_addr()
+            .expect("test server should have local address");
+
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("test server should accept");
+            let mut request = [0u8; 1024];
+            let _ = socket.read(&mut request).await;
+
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .expect("test server should write headers");
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            socket
+                .write_all(b"hello")
+                .await
+                .expect("test server should write delayed body");
+        });
+
+        let url = Url::parse(&format!("http://{}/playlist.m3u8", address))
+            .expect("test URL should parse");
+        let error = download_playlist_bytes(
+            &url,
+            "playlist URL",
+            Duration::from_millis(100),
+            Duration::from_millis(100),
+            1024,
+        )
+        .await
+        .expect_err("slow response should timeout");
+
+        assert!(
+            error.to_string().contains("Timed out while downloading"),
+            "unexpected error: {}",
+            error
         );
     }
 }
