@@ -92,7 +92,10 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
             <input
               type="number"
               value={draft.timeout}
-              onChange={(e) => update("timeout", parseFloat(e.target.value) || 10)}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                update("timeout", Number.isNaN(val) ? 10 : Math.max(0.5, val));
+              }}
               step="0.5"
               min="1"
               className="w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-md text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -126,12 +129,13 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
             <input
               type="number"
               value={draft.concurrency}
-              onChange={(e) =>
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10);
                 update(
                   "concurrency",
-                  Math.max(1, Math.min(20, parseInt(e.target.value) || 1)),
-                )
-              }
+                  Number.isNaN(val) ? 1 : Math.max(1, Math.min(20, val)),
+                );
+              }}
               min="1"
               max="20"
               className="w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-md text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -149,9 +153,10 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
             <input
               type="number"
               value={draft.retries}
-              onChange={(e) =>
-                update("retries", Math.max(1, parseInt(e.target.value) || 6))
-              }
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10);
+                update("retries", Number.isNaN(val) ? 6 : Math.max(1, val));
+              }}
               min="1"
               max="20"
               className="w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-md text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
