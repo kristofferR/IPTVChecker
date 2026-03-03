@@ -8,7 +8,7 @@ use tokio_util::sync::CancellationToken;
 use crate::engine::{checker, ffmpeg, parser, proxy, resume};
 use crate::error::AppError;
 use crate::models::channel::{Channel, ChannelResult, ChannelStatus};
-use crate::models::scan::{ScanConfig, ScanProgress, ScanSummary};
+use crate::models::scan::{RetryBackoff, ScanConfig, ScanProgress, ScanSummary};
 use crate::state::AppState;
 
 #[derive(Debug, Clone)]
@@ -68,6 +68,7 @@ async fn compute_shared_url_result(
     channel_url: &str,
     timeout: f64,
     retries: u32,
+    retry_backoff: RetryBackoff,
     extended_timeout: Option<f64>,
     user_agent: &str,
     cancel: &CancellationToken,
@@ -85,6 +86,7 @@ async fn compute_shared_url_result(
         channel_url,
         timeout,
         retries,
+        retry_backoff,
         extended_timeout,
         user_agent,
         cancel,
@@ -291,10 +293,11 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
     }
 
     log::info!(
-        "Starting scan: {} (concurrency: {}, retries: {})",
+        "Starting scan: {} (concurrency: {}, retries: {}, retry_backoff: {:?})",
         config.file_path,
         config.concurrency,
-        config.retries
+        config.retries,
+        config.retry_backoff
     );
 
     // Parse the playlist
@@ -446,6 +449,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
             let user_agent = config.user_agent.clone();
             let timeout = config.timeout;
             let retries = config.retries;
+            let retry_backoff = config.retry_backoff;
             let extended_timeout = config.extended_timeout;
             let proxy_list = Arc::clone(&proxy_list);
             let test_geoblock = config.test_geoblock;
@@ -483,6 +487,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
                             &channel.url,
                             timeout,
                             retries,
+                            retry_backoff,
                             extended_timeout,
                             &user_agent,
                             &cancel,

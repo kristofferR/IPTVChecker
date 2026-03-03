@@ -282,6 +282,7 @@ export default function App() {
       extended_timeout: settings.extended_timeout,
       concurrency: settings.concurrency,
       retries: settings.retries,
+      retry_backoff: settings.retry_backoff,
       user_agent: settings.user_agent,
       skip_screenshots: settings.skip_screenshots,
       profile_bitrate: settings.profile_bitrate,

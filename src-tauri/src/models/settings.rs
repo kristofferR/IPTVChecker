@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::scan::RetryBackoff;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
@@ -7,6 +9,7 @@ pub struct AppSettings {
     pub extended_timeout: Option<f64>,
     pub concurrency: u32,
     pub retries: u32,
+    pub retry_backoff: RetryBackoff,
     pub user_agent: String,
     pub skip_screenshots: bool,
     pub profile_bitrate: bool,
@@ -34,7 +37,8 @@ impl Default for AppSettings {
             timeout: 10.0,
             extended_timeout: None,
             concurrency: 1,
-            retries: 6,
+            retries: 3,
+            retry_backoff: RetryBackoff::Linear,
             user_agent: "VLC/3.0.14 LibVLC/3.0.14".to_string(),
             skip_screenshots: false,
             profile_bitrate: false,

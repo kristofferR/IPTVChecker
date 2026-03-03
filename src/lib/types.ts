@@ -57,6 +57,7 @@ export interface ScanConfig {
   extended_timeout: number | null;
   concurrency: number;
   retries: number;
+  retry_backoff: RetryBackoff;
   user_agent: string;
   skip_screenshots: boolean;
   profile_bitrate: boolean;
@@ -87,6 +88,7 @@ export interface AppSettings {
   extended_timeout: number | null;
   concurrency: number;
   retries: number;
+  retry_backoff: RetryBackoff;
   user_agent: string;
   skip_screenshots: boolean;
   profile_bitrate: boolean;
@@ -101,3 +103,5 @@ export interface ScreenshotCacheStats {
   total_bytes: number;
   cache_dir: string;
 }
+
+export type RetryBackoff = "none" | "linear" | "exponential";

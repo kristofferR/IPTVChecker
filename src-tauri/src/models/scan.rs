@@ -8,8 +8,22 @@ pub const MIN_EXTENDED_TIMEOUT_SECS: f64 = 1.0;
 pub const MAX_EXTENDED_TIMEOUT_SECS: f64 = 600.0;
 pub const MIN_CONCURRENCY: u32 = 1;
 pub const MAX_CONCURRENCY: u32 = 20;
-pub const MIN_RETRIES: u32 = 1;
-pub const MAX_RETRIES: u32 = 20;
+pub const MIN_RETRIES: u32 = 0;
+pub const MAX_RETRIES: u32 = 10;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RetryBackoff {
+    None,
+    Linear,
+    Exponential,
+}
+
+impl Default for RetryBackoff {
+    fn default() -> Self {
+        Self::Linear
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanConfig {
@@ -21,6 +35,7 @@ pub struct ScanConfig {
     pub extended_timeout: Option<f64>,
     pub concurrency: u32,
     pub retries: u32,
+    pub retry_backoff: RetryBackoff,
     pub user_agent: String,
     pub skip_screenshots: bool,
     pub profile_bitrate: bool,
@@ -103,7 +118,8 @@ mod tests {
             timeout: 10.0,
             extended_timeout: Some(20.0),
             concurrency: 1,
-            retries: 6,
+            retries: 3,
+            retry_backoff: RetryBackoff::Linear,
             user_agent: "VLC/3.0.14 LibVLC/3.0.14".to_string(),
             skip_screenshots: false,
             profile_bitrate: false,
@@ -155,8 +171,11 @@ mod tests {
         assert!(config.validate().is_err());
 
         config.concurrency = 1;
-        config.retries = 0;
-        assert!(config.validate().is_err());
+        config.retries = MIN_RETRIES;
+        assert!(config.validate().is_ok());
+
+        config.retries = MAX_RETRIES;
+        assert!(config.validate().is_ok());
 
         config.retries = MAX_RETRIES + 1;
         assert!(config.validate().is_err());

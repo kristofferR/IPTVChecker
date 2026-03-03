@@ -5,7 +5,7 @@ use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use url::Url;
 
 use crate::error::AppError;
-use crate::models::scan::{MAX_RETRIES, MIN_RETRIES};
+use crate::models::scan::{MAX_RETRIES, MIN_RETRIES, RetryBackoff};
 
 /// Minimum data threshold for direct streams (500KB).
 const MIN_DATA_THRESHOLD: u64 = 1024 * 500;
@@ -49,6 +49,18 @@ fn is_retryable_request_error(err: &reqwest::Error) -> bool {
     err.status()
         .map(|status| RETRYABLE_HTTP_STATUSES.contains(&status.as_u16()))
         .unwrap_or(false)
+}
+
+fn total_attempts(max_retries: u32) -> u32 {
+    max_retries.saturating_add(1)
+}
+
+fn retry_delay_seconds(backoff: RetryBackoff, retry_index: u32) -> u64 {
+    match backoff {
+        RetryBackoff::None => 0,
+        RetryBackoff::Linear => u64::from((retry_index + 1).min(10)),
+        RetryBackoff::Exponential => (1u64 << retry_index.min(5)).min(30),
+    }
 }
 
 fn is_playlist_content_type(content_type: &str, url: &str) -> bool {
@@ -232,6 +244,7 @@ pub async fn check_channel_status(
     url: &str,
     timeout: f64,
     retries: u32,
+    retry_backoff: RetryBackoff,
     extended_timeout: Option<f64>,
     user_agent: &str,
     cancel_token: &tokio_util::sync::CancellationToken,
@@ -250,6 +263,7 @@ pub async fn check_channel_status(
     }
 
     let retries = retries.clamp(MIN_RETRIES, MAX_RETRIES);
+    let attempts = total_attempts(retries);
 
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -265,12 +279,20 @@ pub async fn check_channel_status(
         let url = url.to_string();
         let cancel = cancel_token.clone();
         async move {
-            for attempt in 0..retries {
+            for attempt in 0..attempts {
                 if cancel.is_cancelled() {
                     return Err(AppError::Cancelled);
                 }
 
-                log::debug!("Attempt {}/{} for {} (timeout: {}s)", attempt + 1, retries, url, current_timeout);
+                log::debug!(
+                    "Attempt {}/{} for {} (timeout: {}s, max_retries: {}, backoff: {:?})",
+                    attempt + 1,
+                    attempts,
+                    url,
+                    current_timeout,
+                    retries,
+                    retry_backoff
+                );
                 let mut visited = HashSet::new();
                 let result = verify(&client, &url, current_timeout, 0, &mut visited, &headers).await;
 
@@ -289,9 +311,11 @@ pub async fn check_channel_status(
                     }
                     VerifyResult::Retry => {
                         log::debug!("Retrying channel: {}", url);
-                        if attempt + 1 < retries {
-                            let delay = std::cmp::min(2 + attempt as u64, 5);
-                            tokio::time::sleep(Duration::from_secs(delay)).await;
+                        if attempt < retries {
+                            let delay = retry_delay_seconds(retry_backoff, attempt);
+                            if delay > 0 {
+                                tokio::time::sleep(Duration::from_secs(delay)).await;
+                            }
                         }
                     }
                 }
@@ -369,5 +393,20 @@ mod tests {
         for status in [400u16, 404, 405, 410] {
             assert_eq!(classify_non_ok_status(status), VerifyResult::Dead);
         }
+    }
+
+    #[test]
+    fn test_retry_delay_respects_selected_policy() {
+        assert_eq!(retry_delay_seconds(RetryBackoff::None, 0), 0);
+        assert_eq!(retry_delay_seconds(RetryBackoff::Linear, 0), 1);
+        assert_eq!(retry_delay_seconds(RetryBackoff::Linear, 4), 5);
+        assert_eq!(retry_delay_seconds(RetryBackoff::Exponential, 0), 1);
+        assert_eq!(retry_delay_seconds(RetryBackoff::Exponential, 3), 8);
+    }
+
+    #[test]
+    fn test_total_attempts_includes_initial_request() {
+        assert_eq!(total_attempts(0), 1);
+        assert_eq!(total_attempts(3), 4);
     }
 }

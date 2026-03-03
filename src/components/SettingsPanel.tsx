@@ -212,18 +212,39 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
               </div>
 
               <div>
-                <label className={labelClass}>Retries</label>
+                <label className={labelClass}>Max Retries</label>
                 <input
                   type="number"
                   value={draft.retries}
                   onChange={(event) => {
                     const value = parseInt(event.target.value, 10);
-                    update("retries", Number.isNaN(value) ? 6 : Math.max(1, value));
+                    update(
+                      "retries",
+                      Number.isNaN(value) ? 3 : Math.max(0, Math.min(10, value)),
+                    );
                   }}
-                  min="1"
-                  max="20"
+                  min="0"
+                  max="10"
                   className={inputClass}
                 />
+                <p className="text-[11px] text-text-tertiary mt-1">
+                  Number of retry attempts after the initial request.
+                </p>
+              </div>
+
+              <div>
+                <label className={labelClass}>Retry Backoff</label>
+                <select
+                  value={draft.retry_backoff}
+                  onChange={(event) =>
+                    update("retry_backoff", event.target.value as AppSettings["retry_backoff"])
+                  }
+                  className={inputClass}
+                >
+                  <option value="none">None</option>
+                  <option value="linear">Linear</option>
+                  <option value="exponential">Exponential</option>
+                </select>
               </div>
             </div>
           </section>
