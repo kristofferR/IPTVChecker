@@ -46,6 +46,7 @@ export interface ChannelResult {
 export interface PlaylistPreview {
   file_path: string;
   file_name: string;
+  source_identity: string | null;
   total_channels: number;
   groups: string[];
   channels: Channel[];
@@ -64,6 +65,7 @@ export interface XtreamRecentSource {
 
 export interface ScanConfig {
   file_path: string;
+  source_identity: string | null;
   group_filter: string | null;
   channel_search: string | null;
   selected_indices: number[] | null;

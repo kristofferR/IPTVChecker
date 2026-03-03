@@ -28,6 +28,7 @@ impl Default for RetryBackoff {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanConfig {
     pub file_path: String,
+    pub source_identity: Option<String>,
     pub group_filter: Option<String>,
     pub channel_search: Option<String>,
     pub selected_indices: Option<Vec<usize>>,
@@ -118,6 +119,7 @@ mod tests {
     fn valid_config() -> ScanConfig {
         ScanConfig {
             file_path: "/tmp/test.m3u8".to_string(),
+            source_identity: None,
             group_filter: None,
             channel_search: None,
             selected_indices: None,

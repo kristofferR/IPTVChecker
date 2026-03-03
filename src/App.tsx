@@ -659,7 +659,10 @@ export default function App() {
     setHistoryLoading(true);
     setHistoryError(null);
     try {
-      const items = await getScanHistory(playlist.file_path);
+      const items = await getScanHistory(
+        playlist.file_path,
+        playlist.source_identity,
+      );
       setHistoryEntries(items);
     } catch (err) {
       setHistoryError(errorToString(err));
@@ -674,7 +677,7 @@ export default function App() {
     setHistoryClearing(true);
     setHistoryError(null);
     try {
-      await clearScanHistory(playlist.file_path);
+      await clearScanHistory(playlist.file_path, playlist.source_identity);
       await refreshHistory();
     } catch (err) {
       setHistoryError(errorToString(err));
@@ -962,6 +965,7 @@ export default function App() {
 
     const config: ScanConfig = {
       file_path: playlist.file_path,
+      source_identity: playlist.source_identity ?? null,
       group_filter: groupFilter !== "all" ? groupFilter : null,
       channel_search: channelSearch.trim() || null,
       selected_indices: selection.length > 0 ? selection : null,

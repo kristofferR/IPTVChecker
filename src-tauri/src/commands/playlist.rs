@@ -34,6 +34,17 @@ fn hash_source_key(source_key: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+fn normalize_url_identity(url: &Url) -> String {
+    let mut normalized = url.clone();
+    normalized.set_fragment(None);
+    if (normalized.scheme() == "http" && normalized.port() == Some(80))
+        || (normalized.scheme() == "https" && normalized.port() == Some(443))
+    {
+        let _ = normalized.set_port(None);
+    }
+    normalized.to_string()
+}
+
 fn source_cache_file_name(source_key: &str) -> String {
     format!("{}.m3u8", hash_source_key(source_key))
 }
@@ -207,11 +218,13 @@ pub async fn open_playlist_url(
 ) -> Result<PlaylistPreview, AppError> {
     let mut parsed = parse_http_url(url.trim(), "Invalid playlist URL")?;
     parsed.set_fragment(None);
-
-    let source_key = format!("url:{}", parsed);
+    let normalized_identity = normalize_url_identity(&parsed);
+    let source_key = format!("url:{}", normalized_identity);
     let cached_path =
         download_playlist_to_cache(&app, &source_key, &parsed, "playlist URL").await?;
-    parser::parse_playlist(&cached_path, &group_filter, &channel_search)
+    let mut preview = parser::parse_playlist(&cached_path, &group_filter, &channel_search)?;
+    preview.source_identity = Some(format!("url:{}", normalized_identity));
+    Ok(preview)
 }
 
 #[tauri::command]
@@ -240,16 +253,19 @@ pub async fn open_playlist_xtream(
     let download_url = build_xtream_download_url(&server, &username, &password);
     let cached_path =
         download_playlist_to_cache(&app, &source_key, &download_url, "Xtream playlist").await?;
-
-    parser::parse_playlist(&cached_path, &group_filter, &channel_search)
+    let mut preview = parser::parse_playlist(&cached_path, &group_filter, &channel_search)?;
+    preview.source_identity = Some(source_key);
+    Ok(preview)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        build_xtream_download_url, build_xtream_source_key, normalize_xtream_server,
+        build_xtream_download_url, build_xtream_source_key, normalize_url_identity,
+        normalize_xtream_server,
         source_cache_file_name,
     };
+    use url::Url;
 
     #[test]
     fn normalize_xtream_server_trims_get_php_and_trailing_slash() {
@@ -297,5 +313,15 @@ mod tests {
         assert_eq!(first, second);
         assert_ne!(first, third);
         assert!(first.ends_with(".m3u8"));
+    }
+
+    #[test]
+    fn normalize_url_identity_removes_default_port_and_fragment() {
+        let parsed =
+            Url::parse("https://Example.com:443/live/list.m3u8#frag").expect("URL should parse");
+        assert_eq!(
+            normalize_url_identity(&parsed),
+            "https://example.com/live/list.m3u8"
+        );
     }
 }

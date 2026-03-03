@@ -295,6 +295,7 @@ pub fn parse_playlist(
     Ok(PlaylistPreview {
         file_path: file_path.to_string(),
         file_name: playlist_name,
+        source_identity: None,
         total_channels: channels.len(),
         groups: groups.into_iter().collect(),
         channels,
@@ -364,6 +365,7 @@ fn parse_playlist_directory(
     Ok(PlaylistPreview {
         file_path: dir_path.to_string(),
         file_name: dir_name,
+        source_identity: None,
         total_channels: channels.len(),
         groups: groups.into_iter().collect(),
         channels,

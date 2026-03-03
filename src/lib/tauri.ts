@@ -128,12 +128,22 @@ export async function clearScreenshotCache(): Promise<ScreenshotCacheStats> {
 
 export async function getScanHistory(
   playlistPath: string,
+  sourceIdentity?: string | null,
 ): Promise<ScanHistoryItem[]> {
-  return invoke("get_scan_history", { playlistPath });
+  return invoke("get_scan_history", {
+    playlistPath,
+    sourceIdentity: sourceIdentity ?? null,
+  });
 }
 
-export async function clearScanHistory(playlistPath: string): Promise<number> {
-  return invoke("clear_scan_history", { playlistPath });
+export async function clearScanHistory(
+  playlistPath: string,
+  sourceIdentity?: string | null,
+): Promise<number> {
+  return invoke("clear_scan_history", {
+    playlistPath,
+    sourceIdentity: sourceIdentity ?? null,
+  });
 }
 
 export async function getRecentPlaylists(): Promise<RecentPlaylistEntry[]> {

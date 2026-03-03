@@ -38,7 +38,7 @@ fn now_epoch_ms() -> u64 {
         .as_millis() as u64
 }
 
-fn normalize_playlist_key(playlist_path: &str) -> String {
+fn normalize_playlist_path_key(playlist_path: &str) -> String {
     let trimmed = playlist_path.trim();
     if trimmed.is_empty() {
         return String::new();
@@ -50,6 +50,52 @@ fn normalize_playlist_key(playlist_path: &str) -> String {
     }
 
     trimmed.to_string()
+}
+
+fn normalize_url_identity(url_value: &str) -> Option<String> {
+    let trimmed = url_value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut parsed = reqwest::Url::parse(trimmed).ok()?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return None;
+    }
+    parsed.set_fragment(None);
+
+    if (parsed.scheme() == "http" && parsed.port() == Some(80))
+        || (parsed.scheme() == "https" && parsed.port() == Some(443))
+    {
+        let _ = parsed.set_port(None);
+    }
+
+    Some(parsed.to_string())
+}
+
+fn normalize_source_identity(source_identity: &str) -> Option<String> {
+    let trimmed = source_identity.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some(url_value) = trimmed.strip_prefix("url:") {
+        return Some(
+            normalize_url_identity(url_value)
+                .map(|normalized| format!("url:{}", normalized))
+                .unwrap_or_else(|| trimmed.to_string()),
+        );
+    }
+
+    Some(trimmed.to_string())
+}
+
+fn normalize_playlist_key(playlist_path: &str, source_identity: Option<&str>) -> String {
+    if let Some(identity) = source_identity.and_then(normalize_source_identity) {
+        return identity;
+    }
+
+    normalize_playlist_path_key(playlist_path)
 }
 
 fn build_scope_key(config: &ScanConfig) -> String {
@@ -226,7 +272,7 @@ pub fn append_scan_history(
     let history_path = history_file_path(app)?;
     let mut store = load_history_store(&history_path)?;
 
-    let playlist_key = normalize_playlist_key(&config.file_path);
+    let playlist_key = normalize_playlist_key(&config.file_path, config.source_identity.as_deref());
     let entry = PersistedScanHistoryEntry {
         id: run_id.to_string(),
         playlist_key: playlist_key.clone(),
@@ -257,8 +303,9 @@ pub fn append_scan_history(
 pub async fn get_scan_history(
     app: tauri::AppHandle,
     playlist_path: String,
+    source_identity: Option<String>,
 ) -> Result<Vec<ScanHistoryItem>, AppError> {
-    let playlist_key = normalize_playlist_key(&playlist_path);
+    let playlist_key = normalize_playlist_key(&playlist_path, source_identity.as_deref());
     if playlist_key.is_empty() {
         return Ok(Vec::new());
     }
@@ -305,8 +352,9 @@ pub async fn get_scan_history(
 pub async fn clear_scan_history(
     app: tauri::AppHandle,
     playlist_path: String,
+    source_identity: Option<String>,
 ) -> Result<usize, AppError> {
-    let playlist_key = normalize_playlist_key(&playlist_path);
+    let playlist_key = normalize_playlist_key(&playlist_path, source_identity.as_deref());
     if playlist_key.is_empty() {
         return Ok(0);
     }
@@ -476,5 +524,26 @@ mod tests {
         assert!(kept_sample_ids.contains(&"run-3"));
         assert!(kept_sample_ids.contains(&"run-2"));
         assert!(entries.iter().any(|entry| entry.id == "other-playlist"));
+    }
+
+    #[test]
+    fn normalize_playlist_key_prefers_stable_url_source_identity() {
+        let first = normalize_playlist_key(
+            "/tmp/playlist-cache-a.m3u8",
+            Some("url:https://Example.com:443/live/list.m3u8#frag"),
+        );
+        let second = normalize_playlist_key(
+            "/tmp/playlist-cache-b.m3u8",
+            Some("url:https://example.com/live/list.m3u8"),
+        );
+
+        assert_eq!(first, "url:https://example.com/live/list.m3u8");
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn normalize_playlist_key_falls_back_to_path_when_source_identity_missing() {
+        let key = normalize_playlist_key("/tmp/sample.m3u8", None);
+        assert!(key.ends_with("/tmp/sample.m3u8"));
     }
 }

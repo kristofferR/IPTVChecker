@@ -6,6 +6,7 @@ use super::channel::Channel;
 pub struct PlaylistPreview {
     pub file_path: String,
     pub file_name: String,
+    pub source_identity: Option<String>,
     pub total_channels: usize,
     pub groups: Vec<String>,
     pub channels: Vec<Channel>,
