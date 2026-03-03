@@ -91,6 +91,7 @@ function validateRegexPattern(pattern: string): string | null {
 }
 
 const UPDATE_CHECK_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const OS_PROGRESS_UPDATE_INTERVAL_MS = 2000;
 const UPDATE_LAST_CHECK_KEY = "updates:last-check-epoch-ms";
 const UPDATE_CACHE_KEY = "updates:last-available-release";
 const GITHUB_LATEST_RELEASE_API =
@@ -745,6 +746,8 @@ export default function App() {
     recentPlaylistsRef.current = recentPlaylists;
   }, [recentPlaylists]);
   const previousScanStateRef = useRef(scanState);
+  const osProgressTimerRef = useRef<number | null>(null);
+  const lastOsProgressUpdateMsRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -825,7 +828,14 @@ export default function App() {
 
   useEffect(() => {
     const appWindow = getCurrentWindow();
-    if (scanState === "scanning" || scanState === "paused") {
+    const clearScheduledUpdate = () => {
+      if (osProgressTimerRef.current !== null) {
+        window.clearTimeout(osProgressTimerRef.current);
+        osProgressTimerRef.current = null;
+      }
+    };
+
+    const applyNativeProgressIndicators = () => {
       const progressPercent =
         progress && progress.total > 0
           ? Math.min(100, Math.max(0, (progress.completed / progress.total) * 100))
@@ -843,15 +853,55 @@ export default function App() {
           progress: progressPercent,
         })
         .catch(() => {});
-      return;
+
+      if (isMac) {
+        const badgeLabel = progress
+          ? `${progress.alive}/${progress.dead}`
+          : "...";
+        void appWindow.setBadgeLabel(badgeLabel).catch(() => {});
+      }
+    };
+
+    const clearNativeProgressIndicators = () => {
+      clearScheduledUpdate();
+      lastOsProgressUpdateMsRef.current = 0;
+
+      void appWindow
+        .setProgressBar({
+          status: ProgressBarStatus.None,
+        })
+        .catch(() => {});
+
+      if (isMac) {
+        void appWindow.setBadgeLabel(undefined).catch(() => {});
+      }
+    };
+
+    if (scanState === "scanning" || scanState === "paused") {
+      const now = Date.now();
+      const elapsed = now - lastOsProgressUpdateMsRef.current;
+      const shouldUpdateNow =
+        lastOsProgressUpdateMsRef.current === 0 ||
+        elapsed >= OS_PROGRESS_UPDATE_INTERVAL_MS;
+
+      clearScheduledUpdate();
+      if (shouldUpdateNow) {
+        lastOsProgressUpdateMsRef.current = now;
+        applyNativeProgressIndicators();
+      } else {
+        osProgressTimerRef.current = window.setTimeout(() => {
+          lastOsProgressUpdateMsRef.current = Date.now();
+          osProgressTimerRef.current = null;
+          applyNativeProgressIndicators();
+        }, OS_PROGRESS_UPDATE_INTERVAL_MS - elapsed);
+      }
+
+      return clearScheduledUpdate;
     }
 
-    void appWindow
-      .setProgressBar({
-        status: ProgressBarStatus.None,
-      })
-      .catch(() => {});
-  }, [scanState, progress]);
+    clearNativeProgressIndicators();
+    return clearScheduledUpdate;
+  }, [scanState, progress, isMac]);
 
   const handleDroppedPaths = useCallback((paths: string[]) => {
     const playlistPath = paths.find((path) =>
