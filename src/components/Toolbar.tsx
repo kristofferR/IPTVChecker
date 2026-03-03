@@ -20,6 +20,7 @@ export interface MenuExportRequest {
 }
 
 interface ToolbarProps {
+  useWindowDragRegion: boolean;
   onOpen: () => void;
   onOpenFolder: () => void;
   onOpenUrl: () => void;
@@ -48,6 +49,7 @@ const dragIgnoreSelector =
   "button, input, textarea, select, a, [role='button'], [contenteditable='true'], [data-no-window-drag]";
 
 export function Toolbar({
+  useWindowDragRegion,
   onOpen,
   onOpenFolder,
   onOpenUrl,
@@ -77,6 +79,7 @@ export function Toolbar({
     : scanBlockedReason;
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (!useWindowDragRegion) return;
     if (event.button !== 0) return;
 
     const target = event.target as HTMLElement | null;
@@ -86,10 +89,12 @@ export function Toolbar({
     void appWindow.startDragging();
   };
 
+  const dragRegionAttr = useWindowDragRegion ? true : undefined;
+
   return (
     <div
       onPointerDown={handlePointerDown}
-      data-tauri-drag-region
+      data-tauri-drag-region={dragRegionAttr}
       className="flex items-center gap-1.5 px-3 border-b border-border-app bg-panel pt-[var(--toolbar-pt)] pb-2 pl-[var(--toolbar-pl)]"
     >
       <button
@@ -159,12 +164,16 @@ export function Toolbar({
       )}
 
       {playlistName && (
-        <span data-tauri-drag-region className="text-[13px] text-text-tertiary truncate max-w-64 ml-1" title={playlistName}>
+        <span
+          data-tauri-drag-region={dragRegionAttr}
+          className="text-[13px] text-text-tertiary truncate max-w-64 ml-1"
+          title={playlistName}
+        >
           {playlistName}
         </span>
       )}
 
-      <div data-tauri-drag-region className="flex-1" />
+      <div data-tauri-drag-region={dragRegionAttr} className="flex-1" />
 
       <ExportMenu
         results={results}

@@ -45,7 +45,7 @@ import { HistoryPanel } from "./components/HistoryPanel";
 import { OpenSourceDialog } from "./components/OpenSourceDialog";
 import { AlertTriangle, ExternalLink, FolderOpen, Info, X } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
-import { detectPlatform } from "./lib/platform";
+import { detectPlatform, type Platform } from "./lib/platform";
 import { findDuplicateChannelIndices } from "./lib/duplicates";
 import { filterResults } from "./lib/filters";
 import { logger } from "./lib/logger";
@@ -167,6 +167,13 @@ async function canSendNotifications(): Promise<boolean> {
   }
 }
 
+function inferPlatformFromNavigator(): Platform {
+  const platformName = navigator.platform.toLowerCase();
+  if (platformName.includes("mac")) return "macos";
+  if (platformName.includes("win")) return "windows";
+  return "linux";
+}
+
 type OpenSourceMode = "url" | "xtream";
 
 interface OpenSourceDialogState {
@@ -223,7 +230,8 @@ function recentTitle(entry: RecentPlaylistEntry): string {
 }
 
 export default function App() {
-  const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+  const [platform, setPlatform] = useState<Platform>(inferPlatformFromNavigator);
+  const isMac = platform === "macos";
   const modKey = isMac ? "Cmd" : "Ctrl";
 
   const [playlist, setPlaylist] = useState<PlaylistPreview | null>(null);
@@ -284,14 +292,18 @@ export default function App() {
     [channelSearch],
   );
 
-  // Detect platform and set data attribute for theme
+  useEffect(() => {
+    document.documentElement.dataset.platform = platform;
+  }, [platform]);
+
+  // Detect platform via native plugin and refresh the initial fallback.
   useEffect(() => {
     detectPlatform()
       .then((p) => {
-        document.documentElement.dataset.platform = p;
+        setPlatform(p);
       })
       .catch(() => {
-        // Keep startup platform hint when plugin-os isn't available yet.
+        // Keep navigator-based fallback when plugin-os isn't available yet.
       });
   }, []);
 
@@ -1204,6 +1216,7 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-surface">
       <Toolbar
+        useWindowDragRegion={isMac}
         onOpen={handleOpen}
         onOpenFolder={handleOpenFolder}
         onOpenUrl={handleOpenUrl}
