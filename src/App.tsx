@@ -124,6 +124,10 @@ export default function App() {
       });
   }, []);
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = settings.theme;
+  }, [settings.theme]);
+
   // Check ffmpeg on mount
   useEffect(() => {
     checkFfmpegAvailable().then(([ffmpeg, ffprobe]) => {

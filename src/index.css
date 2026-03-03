@@ -21,6 +21,51 @@
   --toolbar-pl: 1rem;
 }
 
+:root[data-theme="light"]:not([data-platform="macos"]) {
+  color-scheme: light;
+  --text-primary: rgb(24 24 27);
+  --text-secondary: rgb(82 82 91);
+  --text-tertiary: rgb(113 113 122);
+  --panel-bg: rgb(244 244 245);
+  --panel-bg-subtle: rgb(244 244 245 / 0.72);
+  --panel-bg-muted: rgb(244 244 245 / 0.5);
+  --surface-bg: rgb(255 255 255);
+  --input-bg: rgb(255 255 255);
+  --border-color: rgb(212 212 216);
+  --border-subtle: rgb(212 212 216 / 0.75);
+  --btn-bg: rgb(228 228 231);
+  --btn-bg-hover: rgb(212 212 216);
+  --dropdown-bg: rgb(255 255 255);
+  --overlay-bg: rgb(250 250 250);
+}
+
+:root[data-theme="dark"]:not([data-platform="macos"]) {
+  color-scheme: dark;
+}
+
+:root[data-theme="system"]:not([data-platform="macos"]) {
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"]:not([data-platform="macos"]) {
+    --text-primary: rgb(24 24 27);
+    --text-secondary: rgb(82 82 91);
+    --text-tertiary: rgb(113 113 122);
+    --panel-bg: rgb(244 244 245);
+    --panel-bg-subtle: rgb(244 244 245 / 0.72);
+    --panel-bg-muted: rgb(244 244 245 / 0.5);
+    --surface-bg: rgb(255 255 255);
+    --input-bg: rgb(255 255 255);
+    --border-color: rgb(212 212 216);
+    --border-subtle: rgb(212 212 216 / 0.75);
+    --btn-bg: rgb(228 228 231);
+    --btn-bg-hover: rgb(212 212 216);
+    --dropdown-bg: rgb(255 255 255);
+    --overlay-bg: rgb(250 250 250);
+  }
+}
+
 /* macOS: system colors + vibrancy-aware theming */
 [data-platform="macos"] {
   color-scheme: light dark;

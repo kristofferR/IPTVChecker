@@ -6,10 +6,42 @@ use tauri::Manager;
 use tauri_plugin_store::StoreExt;
 
 use crate::error::AppError;
-use crate::models::settings::AppSettings;
+use crate::models::settings::{AppSettings, ThemePreference};
 use crate::state::AppState;
 
 const MAX_SCREENSHOT_BYTES: u64 = 10 * 1024 * 1024;
+
+pub fn apply_theme_preference(
+    app: &tauri::AppHandle,
+    preference: ThemePreference,
+) -> Result<(), AppError> {
+    let Some(window) = app.get_webview_window("main") else {
+        return Err(AppError::Other("Main window not found".to_string()));
+    };
+
+    let theme = match preference {
+        ThemePreference::System => None,
+        ThemePreference::Light => Some(tauri::Theme::Light),
+        ThemePreference::Dark => Some(tauri::Theme::Dark),
+    };
+
+    window
+        .set_theme(theme)
+        .map_err(|error| AppError::Other(format!("Failed to apply theme: {}", error)))?;
+
+    #[cfg(target_os = "macos")]
+    {
+        let material = match preference {
+            ThemePreference::Dark => window_vibrancy::NSVisualEffectMaterial::HudWindow,
+            ThemePreference::Light | ThemePreference::System => {
+                window_vibrancy::NSVisualEffectMaterial::UnderWindowBackground
+            }
+        };
+        let _ = window_vibrancy::apply_vibrancy(&window, material, None, None);
+    }
+
+    Ok(())
+}
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ScreenshotCacheStats {
@@ -145,6 +177,10 @@ pub async fn update_settings(
         if let Ok(value) = serde_json::to_value(&settings) {
             store.set("settings", value);
         }
+    }
+
+    if let Err(error) = apply_theme_preference(&app, settings.theme) {
+        log::warn!("Failed to apply theme preference: {}", error);
     }
 
     Ok(())

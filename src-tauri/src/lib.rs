@@ -130,6 +130,17 @@ pub fn run() {
                 }
             }
 
+            let theme_preference = {
+                let state = app.state::<Arc<AppState>>();
+                let theme = state.settings.blocking_lock().theme;
+                theme
+            };
+            if let Err(error) =
+                commands::settings::apply_theme_preference(&app.handle(), theme_preference)
+            {
+                log::warn!("Failed to apply startup theme preference: {}", error);
+            }
+
             Ok(())
         })
         .manage(AppState::new() as Arc<AppState>)

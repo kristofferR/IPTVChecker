@@ -310,6 +310,27 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
           </section>
 
           <section className={sectionClass}>
+            <h3 className="text-[13px] font-semibold mb-3">Appearance</h3>
+            <div>
+              <label className={labelClass}>Theme</label>
+              <select
+                value={draft.theme}
+                onChange={(event) =>
+                  update("theme", event.target.value as AppSettings["theme"])
+                }
+                className={inputClass}
+              >
+                <option value="system">System</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+              <p className="text-[11px] text-text-tertiary mt-1">
+                Applied immediately and saved for future launches.
+              </p>
+            </div>
+          </section>
+
+          <section className={sectionClass}>
             <h3 className="text-[13px] font-semibold mb-3">Files and Output</h3>
             <div className="space-y-3">
               <div>

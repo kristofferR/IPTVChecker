@@ -10,6 +10,7 @@ const platformHint = navigator.platform.toUpperCase().includes("MAC")
     ? "windows"
     : "linux";
 document.documentElement.dataset.platform = platformHint;
+document.documentElement.dataset.theme = "system";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

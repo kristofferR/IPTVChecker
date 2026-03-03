@@ -2,6 +2,20 @@ use serde::{Deserialize, Serialize};
 
 use super::scan::RetryBackoff;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemePreference {
+    System,
+    Light,
+    Dark,
+}
+
+impl Default for ThemePreference {
+    fn default() -> Self {
+        Self::System
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
@@ -16,6 +30,7 @@ pub struct AppSettings {
     pub proxy_file: Option<String>,
     pub test_geoblock: bool,
     pub screenshots_dir: Option<String>,
+    pub theme: ThemePreference,
     pub log_level: String,
 }
 
@@ -45,6 +60,7 @@ impl Default for AppSettings {
             proxy_file: None,
             test_geoblock: false,
             screenshots_dir: None,
+            theme: ThemePreference::System,
             log_level: "error".to_string(),
         }
     }

@@ -100,6 +100,7 @@ export interface AppSettings {
   proxy_file: string | null;
   test_geoblock: boolean;
   screenshots_dir: string | null;
+  theme: ThemePreference;
   log_level: string;
 }
 
@@ -110,3 +111,4 @@ export interface ScreenshotCacheStats {
 }
 
 export type RetryBackoff = "none" | "linear" | "exponential";
+export type ThemePreference = "system" | "light" | "dark";
