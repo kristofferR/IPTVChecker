@@ -27,6 +27,7 @@ interface ToolbarProps {
   playlistPath: string;
   selectedCount: number;
   menuExportRequest: MenuExportRequest | null;
+  scanBlockedReason: string | null;
 }
 
 const toolbarBtn =
@@ -48,10 +49,14 @@ export function Toolbar({
   playlistPath,
   selectedCount,
   menuExportRequest,
+  scanBlockedReason,
 }: ToolbarProps) {
   const scanning = scanState === "scanning";
   const hasResults = results.length > 0;
   const scanLabel = selectedCount > 0 ? `Scan Selected (${selectedCount})` : "Scan";
+  const scanDisabledReason = !hasPlaylist
+    ? "Open a playlist first"
+    : scanBlockedReason;
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -89,7 +94,8 @@ export function Toolbar({
       ) : (
         <button
           onClick={onStartScan}
-          disabled={!hasPlaylist}
+          disabled={scanDisabledReason !== null}
+          title={scanDisabledReason ?? undefined}
           className={`${toolbarBtn} toolbar-btn-primary`}
         >
           <Play className="w-4 h-4" />

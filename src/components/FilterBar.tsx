@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Filter, Search } from "lucide-react";
 
 interface FilterBarProps {
@@ -11,17 +10,8 @@ interface FilterBarProps {
   onStatusChange: (value: string) => void;
   channelSearch: string;
   onChannelSearchChange: (value: string) => void;
+  channelSearchError: string | null;
   scanState: string;
-}
-
-function isValidRegex(pattern: string): boolean {
-  if (!pattern) return true;
-  try {
-    new RegExp(pattern);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export function FilterBar({
@@ -34,15 +24,10 @@ export function FilterBar({
   onStatusChange,
   channelSearch,
   onChannelSearchChange,
+  channelSearchError,
   scanState,
 }: FilterBarProps) {
-  const [regexValid, setRegexValid] = useState(true);
   const isScanning = scanState === "scanning" || scanState === "paused";
-
-  const handleChannelSearchChange = (value: string) => {
-    setRegexValid(isValidRegex(value));
-    onChannelSearchChange(value);
-  };
 
   return (
     <div className="flex items-center gap-3 px-4 py-2 border-b border-border-app bg-panel-muted">
@@ -56,18 +41,25 @@ export function FilterBar({
           className="native-field w-full min-h-9 pl-9 pr-3 py-1.5 text-[13px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
         />
       </div>
-      <div className="relative flex-1 max-w-48">
-        <Filter className="search-icon absolute left-3 top-1/2 -translate-y-1/2 w-[15px] h-[15px] text-text-tertiary" />
-        <input
-          type="text"
-          placeholder="Pre-scan filter (regex)"
-          value={channelSearch}
-          onChange={(e) => handleChannelSearchChange(e.target.value)}
-          disabled={isScanning}
-          className={`native-field w-full min-h-9 pl-9 pr-3 py-1.5 text-[13px] bg-input border rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 ${
-            !regexValid ? "border-red-500" : "border-border-app"
-          }`}
-        />
+      <div className="flex flex-col flex-1 max-w-48">
+        <div className="relative">
+          <Filter className="search-icon absolute left-3 top-1/2 -translate-y-1/2 w-[15px] h-[15px] text-text-tertiary" />
+          <input
+            type="text"
+            placeholder="Pre-scan filter (regex)"
+            value={channelSearch}
+            onChange={(e) => onChannelSearchChange(e.target.value)}
+            disabled={isScanning}
+            className={`native-field w-full min-h-9 pl-9 pr-3 py-1.5 text-[13px] bg-input border rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 ${
+              channelSearchError ? "border-red-500" : "border-border-app"
+            }`}
+          />
+        </div>
+        {channelSearchError && (
+          <p className="mt-1 text-[11px] text-red-400 truncate" title={channelSearchError}>
+            {channelSearchError}
+          </p>
+        )}
       </div>
       <select
         value={groupFilter}

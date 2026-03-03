@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
@@ -54,6 +54,17 @@ function formatPlaylistOpenError(err: unknown): string {
     : `Failed to open playlist: ${raw}`;
 }
 
+function validateRegexPattern(pattern: string): string | null {
+  const trimmed = pattern.trim();
+  if (!trimmed) return null;
+  try {
+    new RegExp(trimmed);
+    return null;
+  } catch (err) {
+    return errorToString(err);
+  }
+}
+
 export default function App() {
   const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
   const modKey = isMac ? "Cmd" : "Ctrl";
@@ -76,6 +87,7 @@ export default function App() {
   const [playlistOpenError, setPlaylistOpenError] = useState<string | null>(
     null,
   );
+  const [scanInputError, setScanInputError] = useState<string | null>(null);
   const [pendingPlaybackChannel, setPendingPlaybackChannel] =
     useState<ChannelResult | null>(null);
   const [sidebarHidden, setSidebarHidden] = useState(false);
@@ -96,6 +108,10 @@ export default function App() {
     cancel,
     initFromPlaylist,
   } = useScan();
+  const channelSearchError = useMemo(
+    () => validateRegexPattern(channelSearch),
+    [channelSearch],
+  );
 
   // Detect platform and set data attribute for theme
   useEffect(() => {
@@ -137,6 +153,18 @@ export default function App() {
     const timer = setTimeout(() => setPlaylistOpenError(null), 10000);
     return () => clearTimeout(timer);
   }, [playlistOpenError]);
+
+  useEffect(() => {
+    if (!scanInputError) return;
+    const timer = setTimeout(() => setScanInputError(null), 8000);
+    return () => clearTimeout(timer);
+  }, [scanInputError]);
+
+  useEffect(() => {
+    if (!channelSearchError) {
+      setScanInputError(null);
+    }
+  }, [channelSearchError]);
 
   useEffect(() => {
     if (!menuInfo) return;
@@ -238,6 +266,11 @@ export default function App() {
   }, []);
 
   const startScanWithSelection = useCallback(async (selection: number[]) => {
+    if (channelSearchError) {
+      setScanInputError(`Invalid pre-scan regex: ${channelSearchError}`);
+      return;
+    }
+
     if (!playlist) return;
 
     const config: ScanConfig = {
@@ -258,7 +291,7 @@ export default function App() {
     };
 
     await start(config, playlist.total_channels, selection);
-  }, [playlist, settings, groupFilter, channelSearch, start]);
+  }, [playlist, settings, groupFilter, channelSearch, start, channelSearchError]);
 
   const handleStartScan = useCallback(async () => {
     await startScanWithSelection(selectedChannelIndices);
@@ -420,6 +453,9 @@ export default function App() {
         playlistPath={playlist?.file_path ?? ""}
         selectedCount={selectedChannelIndices.length}
         menuExportRequest={menuExportRequest}
+        scanBlockedReason={
+          channelSearchError ? `Invalid pre-scan regex: ${channelSearchError}` : null
+        }
       />
 
       {ffmpegWarning && (
@@ -467,6 +503,19 @@ export default function App() {
         </div>
       )}
 
+      {scanInputError && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border-b border-red-500/20 text-red-400 text-[13px]">
+          <span className="flex-1">{scanInputError}</span>
+          <button
+            onClick={() => setScanInputError(null)}
+            className="p-1 hover:bg-red-500/20 rounded transition-colors"
+            type="button"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {menuInfo && (
         <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-500/10 border-b border-blue-500/20 text-blue-400 text-[13px]">
           <Info className="w-4 h-4" />
@@ -491,6 +540,7 @@ export default function App() {
         onStatusChange={setStatusFilter}
         channelSearch={channelSearch}
         onChannelSearchChange={setChannelSearch}
+        channelSearchError={channelSearchError}
         scanState={scanState}
       />
 
