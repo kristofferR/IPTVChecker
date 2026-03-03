@@ -92,6 +92,9 @@ pub async fn start_scan(
     let log_file = format!("{}/{}_{}_checklog.txt", playlist_dir, base_name, group_suffix);
     let (processed_channels, _last_index) = resume::load_processed_channels(&log_file);
 
+    // Clear the log file after loading — prevents unbounded growth across scans
+    let _ = std::fs::write(&log_file, "");
+
     // Screenshots directory
     let screenshots_dir = if !config.skip_screenshots && ffmpeg_available {
         let dir = config.screenshots_dir.clone().unwrap_or_else(|| {
