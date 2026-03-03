@@ -19,7 +19,7 @@ import { StatsPanel } from "./components/StatsPanel";
 import { WarningsPanel } from "./components/WarningsPanel";
 import { ProgressBar } from "./components/ProgressBar";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, X } from "lucide-react";
 
 export default function App() {
   const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
@@ -34,6 +34,7 @@ export default function App() {
   );
   const [showSettings, setShowSettings] = useState(false);
   const [ffmpegWarning, setFfmpegWarning] = useState(false);
+  const [errorDismissed, setErrorDismissed] = useState(false);
 
   const { settings, save: saveSettings } = useSettings();
   const {
@@ -55,6 +56,15 @@ export default function App() {
       }
     });
   }, []);
+
+  // Auto-dismiss error banner after 10 seconds
+  useEffect(() => {
+    if (error) {
+      setErrorDismissed(false);
+      const timer = setTimeout(() => setErrorDismissed(true), 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [error]);
 
   const handleOpen = useCallback(async () => {
     const path = await open({
@@ -156,9 +166,15 @@ export default function App() {
         </div>
       )}
 
-      {error && (
-        <div className="px-4 py-2 bg-red-500/10 border-b border-red-500/20 text-red-400 text-xs">
-          {error}
+      {error && !errorDismissed && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-red-500/10 border-b border-red-500/20 text-red-400 text-xs">
+          <span className="flex-1">{error}</span>
+          <button
+            onClick={() => setErrorDismissed(true)}
+            className="p-0.5 hover:bg-red-500/20 rounded transition-colors"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
