@@ -148,14 +148,14 @@ pub async fn confirm_geoblock(
     proxy_list: &[String],
     timeout: f64,
 ) -> String {
-    use rand::seq::SliceRandom;
+    use rand::seq::IndexedRandom;
 
-    // Collect sample before any await to avoid Send issues with thread_rng
+    // Collect sample before any await to avoid Send issues with rng
     let sample: Vec<String> = {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let sample_count = std::cmp::min(3, proxy_list.len());
         proxy_list
-            .choose_multiple(&mut rng, sample_count)
+            .sample(&mut rng, sample_count)
             .cloned()
             .collect()
     };
