@@ -54,13 +54,16 @@ fn source_cache_file_name(source_key: &str) -> String {
     format!("{}.m3u8", hash_source_key(source_key))
 }
 
-fn remote_playlist_cache_path(
-    app: &tauri::AppHandle,
+fn app_data_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, AppError> {
+    app.path().app_data_dir().map_err(|error| {
+        AppError::Other(format!("Failed to resolve app data directory: {}", error))
+    })
+}
+
+fn remote_playlist_cache_path_from_data_dir(
+    data_dir: &std::path::Path,
     source_key: &str,
 ) -> Result<std::path::PathBuf, AppError> {
-    let data_dir = app.path().app_data_dir().map_err(|error| {
-        AppError::Other(format!("Failed to resolve app data directory: {}", error))
-    })?;
     let cache_dir = data_dir.join("remote-playlists");
     std::fs::create_dir_all(&cache_dir).map_err(AppError::Io)?;
     Ok(cache_dir.join(source_cache_file_name(source_key)))
@@ -107,7 +110,10 @@ fn map_download_error(
         ));
     }
 
-    AppError::Other(format!("Failed to {} downloaded {}: {}", when, error_label, error))
+    AppError::Other(format!(
+        "Failed to {} downloaded {}: {}",
+        when, error_label, error
+    ))
 }
 
 async fn download_playlist_bytes(
@@ -165,8 +171,7 @@ async fn download_playlist_bytes(
 }
 
 async fn download_playlist_to_cache(
-    app: &tauri::AppHandle,
-    source_key: &str,
+    cache_path: std::path::PathBuf,
     download_url: &Url,
     error_label: &str,
 ) -> Result<String, AppError> {
@@ -179,7 +184,6 @@ async fn download_playlist_to_cache(
     )
     .await?;
 
-    let cache_path = remote_playlist_cache_path(app, source_key)?;
     cleanup_stale_cache_temp_files(&cache_path);
     let tmp_suffix = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -217,6 +221,16 @@ async fn download_playlist_to_cache(
     }
 
     Ok(cache_path.to_string_lossy().to_string())
+}
+
+async fn download_playlist_to_cache_in_data_dir(
+    data_dir: &std::path::Path,
+    source_key: &str,
+    download_url: &Url,
+    error_label: &str,
+) -> Result<String, AppError> {
+    let cache_path = remote_playlist_cache_path_from_data_dir(data_dir, source_key)?;
+    download_playlist_to_cache(cache_path, download_url, error_label).await
 }
 
 fn normalize_xtream_server(server: &str) -> Result<Url, AppError> {
@@ -309,12 +323,23 @@ pub async fn open_playlist_url(
     group_filter: Option<String>,
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
+    let data_dir = app_data_dir(&app)?;
+    open_playlist_url_from_data_dir(&data_dir, &url, group_filter, channel_search).await
+}
+
+pub(crate) async fn open_playlist_url_from_data_dir(
+    data_dir: &std::path::Path,
+    url: &str,
+    group_filter: Option<String>,
+    channel_search: Option<String>,
+) -> Result<PlaylistPreview, AppError> {
     let mut parsed = parse_http_url(url.trim(), "Invalid playlist URL")?;
     parsed.set_fragment(None);
     let normalized_identity = normalize_url_identity(&parsed);
     let source_key = format!("url:{}", normalized_identity);
     let cached_path =
-        download_playlist_to_cache(&app, &source_key, &parsed, "playlist URL").await?;
+        download_playlist_to_cache_in_data_dir(data_dir, &source_key, &parsed, "playlist URL")
+            .await?;
     let mut preview = parser::parse_playlist(&cached_path, &group_filter, &channel_search)?;
     preview.source_identity = Some(format!("url:{}", normalized_identity));
     Ok(preview)
@@ -344,8 +369,14 @@ pub async fn open_playlist_xtream(
     let server = normalize_xtream_server(&source.server)?;
     let source_key = build_xtream_source_key(&server, &username);
     let download_url = build_xtream_download_url(&server, &username, &password);
-    let cached_path =
-        download_playlist_to_cache(&app, &source_key, &download_url, "Xtream playlist").await?;
+    let data_dir = app_data_dir(&app)?;
+    let cached_path = download_playlist_to_cache_in_data_dir(
+        &data_dir,
+        &source_key,
+        &download_url,
+        "Xtream playlist",
+    )
+    .await?;
     let mut preview = parser::parse_playlist(&cached_path, &group_filter, &channel_search)?;
     preview.source_identity = Some(source_key);
     Ok(preview)
@@ -516,9 +547,7 @@ mod tests {
             let _ = socket.read(&mut request).await;
 
             socket
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\n",
-                )
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\n")
                 .await
                 .expect("test server should write headers");
             tokio::time::sleep(Duration::from_millis(250)).await;

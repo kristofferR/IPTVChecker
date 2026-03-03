@@ -270,7 +270,25 @@ pub fn append_scan_history(
     history_limit: usize,
 ) -> Result<(), AppError> {
     let history_path = history_file_path(app)?;
-    let mut store = load_history_store(&history_path)?;
+    append_scan_history_at_path(
+        &history_path,
+        run_id,
+        config,
+        summary,
+        results,
+        history_limit,
+    )
+}
+
+fn append_scan_history_at_path(
+    history_path: &Path,
+    run_id: &str,
+    config: &ScanConfig,
+    summary: &ScanSummary,
+    results: Vec<ChannelResult>,
+    history_limit: usize,
+) -> Result<(), AppError> {
+    let mut store = load_history_store(history_path)?;
 
     let playlist_key = normalize_playlist_key(&config.file_path, config.source_identity.as_deref());
     let entry = PersistedScanHistoryEntry {
@@ -295,23 +313,21 @@ pub fn append_scan_history(
         &playlist_key,
         clamp_history_limit(history_limit),
     );
-    save_history_store(&history_path, &store)?;
+    save_history_store(history_path, &store)?;
     Ok(())
 }
 
-#[tauri::command]
-pub async fn get_scan_history(
-    app: tauri::AppHandle,
-    playlist_path: String,
-    source_identity: Option<String>,
+fn get_scan_history_from_path(
+    history_path: &Path,
+    playlist_path: &str,
+    source_identity: Option<&str>,
 ) -> Result<Vec<ScanHistoryItem>, AppError> {
-    let playlist_key = normalize_playlist_key(&playlist_path, source_identity.as_deref());
+    let playlist_key = normalize_playlist_key(playlist_path, source_identity);
     if playlist_key.is_empty() {
         return Ok(Vec::new());
     }
 
-    let history_path = history_file_path(&app)?;
-    let mut entries = load_history_store(&history_path)?
+    let mut entries = load_history_store(history_path)?
         .entries
         .into_iter()
         .filter(|entry| entry.playlist_key == playlist_key)
@@ -349,6 +365,16 @@ pub async fn get_scan_history(
 }
 
 #[tauri::command]
+pub async fn get_scan_history(
+    app: tauri::AppHandle,
+    playlist_path: String,
+    source_identity: Option<String>,
+) -> Result<Vec<ScanHistoryItem>, AppError> {
+    let history_path = history_file_path(&app)?;
+    get_scan_history_from_path(&history_path, &playlist_path, source_identity.as_deref())
+}
+
+#[tauri::command]
 pub async fn clear_scan_history(
     app: tauri::AppHandle,
     playlist_path: String,
@@ -377,6 +403,13 @@ pub async fn clear_scan_history(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::channel::Channel;
+    use crate::models::playlist::PlaylistPreview;
+    use crate::models::scan::{RetryBackoff, ScanConfig};
+    use std::path::PathBuf;
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     fn sample_result(url: &str, status: ChannelStatus) -> ChannelResult {
         ChannelResult {
@@ -437,6 +470,92 @@ mod tests {
             selected_count: 0,
             scope_key: scope_key.to_string(),
             results,
+        }
+    }
+
+    fn create_test_root_dir(test_name: &str) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("iptv-history-{test_name}-{unique}"))
+    }
+
+    fn build_scan_config(preview: &PlaylistPreview) -> ScanConfig {
+        ScanConfig {
+            file_path: preview.file_path.clone(),
+            source_identity: preview.source_identity.clone(),
+            group_filter: None,
+            channel_search: None,
+            selected_indices: None,
+            timeout: 5.0,
+            extended_timeout: Some(10.0),
+            concurrency: 1,
+            retries: 0,
+            retry_backoff: RetryBackoff::None,
+            user_agent: "IPTVCheckerTests/1.0".to_string(),
+            skip_screenshots: true,
+            profile_bitrate: false,
+            proxy_file: None,
+            test_geoblock: false,
+            screenshots_dir: None,
+        }
+    }
+
+    fn channel_result_from_channel(channel: &Channel, status: ChannelStatus) -> ChannelResult {
+        ChannelResult {
+            index: channel.index,
+            playlist: channel.playlist.clone(),
+            name: channel.name.clone(),
+            group: channel.group.clone(),
+            url: channel.url.clone(),
+            status,
+            codec: None,
+            resolution: None,
+            width: None,
+            height: None,
+            fps: None,
+            latency_ms: None,
+            video_bitrate: None,
+            audio_bitrate: None,
+            audio_codec: None,
+            screenshot_path: None,
+            label_mismatches: Vec::new(),
+            low_framerate: false,
+            error_message: None,
+            channel_id: "id".to_string(),
+            extinf_line: channel.extinf_line.clone(),
+            metadata_lines: channel.metadata_lines.clone(),
+            stream_url: None,
+            retry_count: None,
+            last_error_reason: None,
+        }
+    }
+
+    fn summarize_results(results: &[ChannelResult]) -> ScanSummary {
+        ScanSummary {
+            total: results.len(),
+            alive: results
+                .iter()
+                .filter(|result| result.status == ChannelStatus::Alive)
+                .count(),
+            dead: results
+                .iter()
+                .filter(|result| result.status == ChannelStatus::Dead)
+                .count(),
+            geoblocked: results
+                .iter()
+                .filter(|result| {
+                    matches!(
+                        result.status,
+                        ChannelStatus::Geoblocked
+                            | ChannelStatus::GeoblockedConfirmed
+                            | ChannelStatus::GeoblockedUnconfirmed
+                    )
+                })
+                .count(),
+            low_framerate: 0,
+            mislabeled: 0,
         }
     }
 
@@ -547,5 +666,149 @@ mod tests {
     fn normalize_playlist_key_falls_back_to_path_when_source_identity_missing() {
         let key = normalize_playlist_key("/tmp/sample.m3u8", None);
         assert!(key.ends_with("/tmp/sample.m3u8"));
+    }
+
+    #[tokio::test]
+    async fn url_playlist_history_continues_across_reruns_and_generates_diff() {
+        let test_root = create_test_root_dir("url-history");
+        let data_dir = test_root.join("app-data");
+        let history_path = test_root.join("scan-history.json");
+        std::fs::create_dir_all(&data_dir).expect("test data dir should be created");
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test server should bind");
+        let address = listener
+            .local_addr()
+            .expect("test server should expose local address");
+
+        let first_playlist_body = "\
+#EXTM3U
+#EXTINF:-1 tvg-id=\"alpha\",Alpha
+http://streams.example.com/a.m3u8
+#EXTINF:-1 tvg-id=\"beta\",Beta
+http://streams.example.com/b.m3u8
+";
+        let second_playlist_body = "\
+#EXTM3U
+#EXTINF:-1 tvg-id=\"alpha\",Alpha
+http://streams.example.com/a.m3u8
+#EXTINF:-1 tvg-id=\"charlie\",Charlie
+http://streams.example.com/c.m3u8
+";
+
+        tokio::spawn(async move {
+            for body in [first_playlist_body, second_playlist_body] {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let mut request = [0u8; 4096];
+                let _ = socket.read(&mut request).await;
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/vnd.apple.mpegurl\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                if socket.write_all(response.as_bytes()).await.is_err() {
+                    return;
+                }
+            }
+        });
+
+        let first_preview = crate::commands::playlist::open_playlist_url_from_data_dir(
+            &data_dir,
+            &format!(" http://LOCALHOST:{}/playlist.m3u8#first ", address.port()),
+            None,
+            None,
+        )
+        .await
+        .expect("first URL playlist open should succeed");
+
+        let second_preview = crate::commands::playlist::open_playlist_url_from_data_dir(
+            &data_dir,
+            &format!("http://localhost:{}/playlist.m3u8#second", address.port()),
+            None,
+            None,
+        )
+        .await
+        .expect("second URL playlist open should succeed");
+
+        assert_eq!(first_preview.total_channels, 2);
+        assert_eq!(second_preview.total_channels, 2);
+        assert_eq!(
+            first_preview.source_identity,
+            second_preview.source_identity
+        );
+
+        let first_results = first_preview
+            .channels
+            .iter()
+            .map(|channel| {
+                let status = if channel.url.ends_with("/a.m3u8") {
+                    ChannelStatus::Alive
+                } else {
+                    ChannelStatus::Dead
+                };
+                channel_result_from_channel(channel, status)
+            })
+            .collect::<Vec<_>>();
+        let second_results = second_preview
+            .channels
+            .iter()
+            .map(|channel| {
+                let status = if channel.url.ends_with("/a.m3u8") {
+                    ChannelStatus::Dead
+                } else {
+                    ChannelStatus::Alive
+                };
+                channel_result_from_channel(channel, status)
+            })
+            .collect::<Vec<_>>();
+
+        append_scan_history_at_path(
+            &history_path,
+            "url-run-1",
+            &build_scan_config(&first_preview),
+            &summarize_results(&first_results),
+            first_results,
+            20,
+        )
+        .expect("first history append should succeed");
+
+        std::thread::sleep(Duration::from_millis(2));
+
+        append_scan_history_at_path(
+            &history_path,
+            "url-run-2",
+            &build_scan_config(&second_preview),
+            &summarize_results(&second_results),
+            second_results,
+            20,
+        )
+        .expect("second history append should succeed");
+
+        let history = get_scan_history_from_path(
+            &history_path,
+            "/tmp/unrelated-cache-path.m3u8",
+            second_preview.source_identity.as_deref(),
+        )
+        .expect("history lookup should succeed");
+
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].id, "url-run-2");
+        assert!(history[1].diff.is_none());
+
+        let diff = history[0]
+            .diff
+            .as_ref()
+            .expect("latest run should include diff against previous run");
+        assert_eq!(diff.channels_gained, 1);
+        assert_eq!(diff.channels_lost, 1);
+        assert_eq!(diff.status_changed, 1);
+        assert_eq!(diff.became_alive, 0);
+        assert_eq!(diff.became_dead, 1);
+
+        let _ = std::fs::remove_dir_all(&test_root);
     }
 }
