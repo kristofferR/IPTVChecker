@@ -26,6 +26,36 @@ const STATUS_ORDER: Record<ChannelStatus, number> = {
   pending: 4,
 };
 
+function parseBitrateKbps(value: string | null): number | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const match = trimmed.match(/\d+(\.\d+)?/);
+  if (!match) return null;
+
+  const numeric = Number.parseFloat(match[0]);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function compareOptionalNumber(
+  left: number | null,
+  right: number | null,
+  dir: 1 | -1,
+  leftIndex: number,
+  rightIndex: number,
+): number {
+  if (left == null && right == null) {
+    return (leftIndex - rightIndex) * dir;
+  }
+  if (left == null) return 1;
+  if (right == null) return -1;
+  if (left === right) {
+    return (leftIndex - rightIndex) * dir;
+  }
+  return (left - right) * dir;
+}
+
 export function sortResults(
   results: ChannelResult[],
   field: SortField,
@@ -78,16 +108,20 @@ export function sortResults(
         return (aLatency - bLatency) * dir;
       }
       case "bitrate":
-        return (
-          (parseInt(a.video_bitrate ?? "0") -
-            parseInt(b.video_bitrate ?? "0")) *
-          dir
+        return compareOptionalNumber(
+          parseBitrateKbps(a.video_bitrate),
+          parseBitrateKbps(b.video_bitrate),
+          dir,
+          a.index,
+          b.index,
         );
       case "audio":
-        return (
-          (parseInt(a.audio_bitrate ?? "0") -
-            parseInt(b.audio_bitrate ?? "0")) *
-          dir
+        return compareOptionalNumber(
+          parseBitrateKbps(a.audio_bitrate),
+          parseBitrateKbps(b.audio_bitrate),
+          dir,
+          a.index,
+          b.index,
         );
       default:
         return 0;
