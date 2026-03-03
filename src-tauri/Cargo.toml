@@ -13,7 +13,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
@@ -30,3 +30,6 @@ thiserror = "2"
 rand = "0.8"
 tokio-util = { version = "0.7", features = ["rt"] }
 log = "0.4"
+tauri-plugin-liquid-glass = "0.1"
+tauri-plugin-os = "2"
+window-vibrancy = "0.6"

@@ -12,10 +12,10 @@ interface ChannelRowProps {
 export function ChannelRow({ result, index, onClick, selected, focused }: ChannelRowProps) {
   if (!result) {
     return (
-      <div className="flex items-center h-11 px-4 text-sm text-zinc-600 border-b border-zinc-800">
+      <div className="flex items-center h-11 px-4 text-sm text-text-tertiary border-b border-border-subtle">
         <span className="w-12 tabular-nums">{index + 1}</span>
         <span className="w-8" />
-        <span className="flex-1 text-zinc-500 italic">Checking...</span>
+        <span className="flex-1 italic">Checking...</span>
       </div>
     );
   }
@@ -24,29 +24,29 @@ export function ChannelRow({ result, index, onClick, selected, focused }: Channe
 
   return (
     <div
-      className={`flex items-center h-11 px-4 text-sm border-b border-zinc-800 cursor-pointer transition-colors hover:bg-zinc-800/50 ${
-        selected ? "bg-zinc-700/40" : ""
+      className={`flex items-center h-11 px-4 text-sm border-b border-border-subtle cursor-pointer transition-colors hover:bg-panel-subtle ${
+        selected ? "bg-panel-subtle" : ""
       } ${focused ? "ring-1 ring-blue-500/50" : ""}`}
       onClick={() => onClick(result)}
     >
-      <span className="w-12 text-zinc-500 tabular-nums">{index + 1}</span>
+      <span className="w-12 text-text-tertiary tabular-nums">{index + 1}</span>
       <span className="w-8">
         <StatusBadge status={result.status} />
       </span>
       <span className="flex-1 min-w-0 truncate px-2 font-medium">
         {result.name}
       </span>
-      <span className="w-32 truncate text-zinc-400 px-2">{result.group}</span>
-      <span className="w-16 text-center text-zinc-400 tabular-nums">
+      <span className="w-32 truncate text-text-secondary px-2">{result.group}</span>
+      <span className="w-16 text-center text-text-secondary tabular-nums">
         {isAlive ? (result.resolution ?? "—") : "—"}
       </span>
-      <span className="w-16 text-center text-zinc-400">
+      <span className="w-16 text-center text-text-secondary">
         {isAlive ? (result.codec ?? "—") : "—"}
       </span>
-      <span className="w-12 text-center text-zinc-400 tabular-nums">
+      <span className="w-12 text-center text-text-secondary tabular-nums">
         {isAlive && result.fps ? result.fps : "—"}
       </span>
-      <span className="w-20 text-right text-zinc-400 tabular-nums">
+      <span className="w-20 text-right text-text-secondary tabular-nums">
         {isAlive && result.audio_bitrate
           ? `${result.audio_bitrate} kbps`
           : "—"}

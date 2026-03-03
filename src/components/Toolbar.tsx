@@ -35,11 +35,14 @@ export function Toolbar({
   const hasResults = results.length > 0;
 
   return (
-    <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-700 bg-zinc-800">
+    <div
+      data-tauri-drag-region
+      className="flex items-center gap-2 pr-4 border-b border-border-app bg-panel pt-[var(--toolbar-pt)] pb-2 pl-[var(--toolbar-pl)]"
+    >
       <button
         onClick={onOpen}
         disabled={scanning}
-        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
+        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-btn hover:bg-btn-hover disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
       >
         <FolderOpen className="w-4 h-4" />
         Open
@@ -65,7 +68,7 @@ export function Toolbar({
       )}
 
       {playlistName && (
-        <span className="text-sm text-zinc-400 truncate max-w-48" title={playlistName}>
+        <span className="text-sm text-text-secondary truncate max-w-48" title={playlistName}>
           {playlistName}
         </span>
       )}
@@ -81,7 +84,7 @@ export function Toolbar({
 
       <button
         onClick={onOpenSettings}
-        className="p-1.5 hover:bg-zinc-700 rounded-md transition-colors"
+        className="p-1.5 hover:bg-btn-hover rounded-md transition-colors"
       >
         <Settings className="w-4 h-4" />
       </button>

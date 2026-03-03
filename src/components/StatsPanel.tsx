@@ -14,8 +14,8 @@ export function StatsPanel({
   const stats = summary ?? progress;
 
   return (
-    <div className="flex items-center gap-4 px-4 py-2 text-xs border-t border-zinc-700 bg-zinc-800/50">
-      <span className="text-zinc-400">
+    <div className="flex items-center gap-4 px-4 py-2 text-xs border-t border-border-app bg-panel-subtle">
+      <span className="text-text-secondary">
         {totalChannels} total
       </span>
       {stats && (

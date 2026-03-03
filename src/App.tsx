@@ -19,6 +19,7 @@ import { WarningsPanel } from "./components/WarningsPanel";
 import { ProgressBar } from "./components/ProgressBar";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { AlertTriangle, X } from "lucide-react";
+import { detectPlatform } from "./lib/platform";
 
 export default function App() {
   const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
@@ -46,6 +47,13 @@ export default function App() {
     cancel,
     reset,
   } = useScan();
+
+  // Detect platform and set data attribute for theme
+  useEffect(() => {
+    detectPlatform().then((p) => {
+      document.documentElement.dataset.platform = p;
+    });
+  }, []);
 
   // Check ffmpeg on mount
   useEffect(() => {
@@ -145,7 +153,7 @@ export default function App() {
     : null;
 
   return (
-    <div className="flex flex-col h-screen bg-zinc-900 text-zinc-100">
+    <div className="flex flex-col h-screen bg-surface">
       <Toolbar
         onOpen={handleOpen}
         onStartScan={handleStartScan}
@@ -199,14 +207,14 @@ export default function App() {
               selectedIndex={selectedChannel?.index ?? null}
             />
           ) : (
-            <div className="flex-1 flex items-center justify-center text-zinc-600">
+            <div className="flex-1 flex items-center justify-center text-text-tertiary">
               <div className="text-center">
                 <p className="text-lg font-medium mb-2">
                   No playlist loaded
                 </p>
                 <p className="text-sm">
                   Click Open or press{" "}
-                  <kbd className="px-1.5 py-0.5 bg-zinc-800 rounded text-xs border border-zinc-700">
+                  <kbd className="px-1.5 py-0.5 bg-input rounded text-xs border border-border-app">
                     {modKey}+O
                   </kbd>{" "}
                   to load an M3U playlist
@@ -217,7 +225,7 @@ export default function App() {
         </div>
 
         {selectedChannel && (
-          <div className="w-72 border-l border-zinc-700 bg-zinc-800/30">
+          <div className="w-72 border-l border-border-app bg-panel-muted">
             <ThumbnailPanel
               result={selectedChannel}
               screenshotUrl={screenshotUrl}

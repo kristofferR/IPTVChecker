@@ -10,7 +10,7 @@ interface ThumbnailPanelProps {
 export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
   if (!result) {
     return (
-      <div className="flex items-center justify-center h-full text-zinc-600 text-sm">
+      <div className="flex items-center justify-center h-full text-text-tertiary text-sm">
         Select a channel to view details
       </div>
     );
@@ -24,7 +24,7 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
       </div>
 
       {screenshotUrl && (
-        <div className="rounded-lg overflow-hidden border border-zinc-700 bg-black">
+        <div className="rounded-lg overflow-hidden border border-border-app bg-black">
           <img
             src={screenshotUrl}
             alt={result.name}
@@ -35,26 +35,26 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
 
       <div className="grid grid-cols-2 gap-2 text-xs">
         <div>
-          <span className="text-zinc-500">Status</span>
+          <span className="text-text-tertiary">Status</span>
           <p className="font-medium">{statusLabel(result.status)}</p>
         </div>
         <div>
-          <span className="text-zinc-500">Group</span>
+          <span className="text-text-tertiary">Group</span>
           <p className="font-medium">{result.group}</p>
         </div>
         {result.status === "alive" && (
           <>
             <div>
-              <span className="text-zinc-500">Video</span>
+              <span className="text-text-tertiary">Video</span>
               <p className="font-medium">{formatVideoInfo(result)}</p>
             </div>
             <div>
-              <span className="text-zinc-500">Audio</span>
+              <span className="text-text-tertiary">Audio</span>
               <p className="font-medium">{formatAudioInfo(result)}</p>
             </div>
             {result.resolution && (
               <div>
-                <span className="text-zinc-500">Resolution</span>
+                <span className="text-text-tertiary">Resolution</span>
                 <p className="font-medium">
                   {result.width}x{result.height}
                 </p>
@@ -62,7 +62,7 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
             )}
             {result.fps && (
               <div>
-                <span className="text-zinc-500">Frame Rate</span>
+                <span className="text-text-tertiary">Frame Rate</span>
                 <p className="font-medium">{result.fps} fps</p>
               </div>
             )}

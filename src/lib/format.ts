@@ -32,7 +32,7 @@ export function statusColor(status: ChannelStatus): string {
     case "checking":
       return "text-blue-400";
     case "pending":
-      return "text-zinc-500";
+      return "text-text-tertiary";
   }
 }
 
@@ -49,7 +49,7 @@ export function statusBgColor(status: ChannelStatus): string {
     case "checking":
       return "bg-blue-500/10 text-blue-400 border-blue-500/20";
     case "pending":
-      return "bg-zinc-500/10 text-zinc-500 border-zinc-500/20";
+      return "bg-zinc-500/10 text-text-tertiary border-zinc-500/20";
   }
 }
 
@@ -90,6 +90,23 @@ export function formatVideoInfo(result: ChannelResult): string {
     return `${base} (${result.video_bitrate})`;
   }
   return base;
+}
+
+export function statusDotColor(status: ChannelStatus): string {
+  switch (status) {
+    case "alive":
+      return "bg-green-500";
+    case "dead":
+      return "bg-red-500";
+    case "geoblocked":
+    case "geoblocked_confirmed":
+    case "geoblocked_unconfirmed":
+      return "bg-yellow-500";
+    case "checking":
+      return "bg-blue-500";
+    case "pending":
+      return "bg-zinc-400";
+  }
 }
 
 export function formatAudioInfo(result: ChannelResult): string {

@@ -56,29 +56,29 @@ export function ExportMenu({
       <button
         onClick={() => setOpen(!open)}
         disabled={disabled}
-        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
+        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-btn hover:bg-btn-hover disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
       >
         <Download className="w-4 h-4" />
         Export
         <ChevronDown className="w-3 h-3" />
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-48 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl z-50 py-1">
+        <div className="absolute right-0 top-full mt-1 w-48 bg-dropdown backdrop-blur-xl border border-border-app rounded-lg shadow-xl z-50 py-1">
           <button
             onClick={handleExportCsv}
-            className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-700 transition-colors"
+            className="w-full text-left px-3 py-2 text-sm hover:bg-btn-hover transition-colors"
           >
             Export CSV
           </button>
           <button
             onClick={handleExportSplit}
-            className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-700 transition-colors"
+            className="w-full text-left px-3 py-2 text-sm hover:bg-btn-hover transition-colors"
           >
             Split Playlists
           </button>
           <button
             onClick={handleExportRenamed}
-            className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-700 transition-colors"
+            className="w-full text-left px-3 py-2 text-sm hover:bg-btn-hover transition-colors"
           >
             Renamed Playlist
           </button>

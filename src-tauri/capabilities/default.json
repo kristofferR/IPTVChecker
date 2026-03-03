@@ -32,6 +32,8 @@
     "store:default",
     "core:event:default",
     "core:event:allow-emit",
-    "core:event:allow-listen"
+    "core:event:allow-listen",
+    "liquid-glass:default",
+    "os:default"
   ]
 }

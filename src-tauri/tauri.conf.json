@@ -10,9 +10,12 @@
     "beforeBuildCommand": "bun run build"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "IPTV Checker",
+        "titleBarStyle": "Overlay",
+        "transparent": true,
         "width": 1200,
         "height": 800,
         "minWidth": 800,

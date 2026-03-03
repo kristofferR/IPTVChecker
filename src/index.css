@@ -1,11 +1,77 @@
 @import "tailwindcss";
 
+/* Shared base (opaque dark — used by Windows/Linux) */
+:root {
+  --text-primary: rgb(244 244 245);     /* zinc-100 */
+  --text-secondary: rgb(161 161 170);   /* zinc-400 */
+  --text-tertiary: rgb(113 113 122);    /* zinc-500 */
+  --panel-bg: rgb(39 39 42);
+  --panel-bg-subtle: rgb(39 39 42 / 0.5);
+  --panel-bg-muted: rgb(39 39 42 / 0.3);
+  --surface-bg: rgb(24 24 27);
+  --input-bg: rgb(39 39 42);
+  --border-color: rgb(63 63 70);
+  --border-subtle: rgb(63 63 70 / 0.5);
+  --btn-bg: rgb(63 63 70);
+  --btn-bg-hover: rgb(82 82 91);
+  --dropdown-bg: rgb(39 39 42);
+  --overlay-bg: rgb(24 24 27);
+  --toolbar-pt: 0.5rem;
+  --toolbar-pl: 1rem;
+}
+
+/* macOS: system colors that auto-adapt to light/dark + translucent vibrancy */
+[data-platform="macos"] {
+  color-scheme: light dark;
+  font-size: 13px;
+
+  --text-primary: -apple-system-label;
+  --text-secondary: -apple-system-secondary-label;
+  --text-tertiary: -apple-system-tertiary-label;
+
+  --surface-bg: transparent;
+  --panel-bg: transparent;
+  --panel-bg-subtle: -apple-system-control-background;
+  --panel-bg-muted: transparent;
+  --input-bg: transparent;
+  --border-color: -apple-system-separator;
+  --border-subtle: -apple-system-separator;
+  --btn-bg: -apple-system-control-background;
+  --btn-bg-hover: -apple-system-selected-content-background;
+  --dropdown-bg: transparent;
+  --overlay-bg: transparent;
+  --toolbar-pt: 1.75rem;
+  --toolbar-pl: 5rem;
+}
+
+@theme {
+  --color-panel: var(--panel-bg);
+  --color-panel-subtle: var(--panel-bg-subtle);
+  --color-panel-muted: var(--panel-bg-muted);
+  --color-surface: var(--surface-bg);
+  --color-input: var(--input-bg);
+  --color-border-app: var(--border-color);
+  --color-border-subtle: var(--border-subtle);
+  --color-btn: var(--btn-bg);
+  --color-btn-hover: var(--btn-bg-hover);
+  --color-dropdown: var(--dropdown-bg);
+  --color-overlay: var(--overlay-bg);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+}
+
+html, body {
+  background: var(--surface-bg);
+}
+
 body {
   margin: 0;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
     Ubuntu, Cantarell, sans-serif;
+  color: var(--text-primary);
 }
 
 /* Custom scrollbar */
@@ -19,10 +85,32 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: var(--btn-bg);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
+  background: var(--btn-bg-hover);
+}
+
+/* macOS: restore native form controls */
+[data-platform="macos"] select,
+[data-platform="macos"] input[type="text"],
+[data-platform="macos"] input[type="number"],
+[data-platform="macos"] input[type="search"] {
+  appearance: auto;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: revert;
+  color: -apple-system-label;
+  font: -apple-system-body;
+}
+
+[data-platform="macos"] input[type="checkbox"] {
+  appearance: auto;
+}
+
+[data-platform="macos"] .search-icon {
+  display: none;
 }

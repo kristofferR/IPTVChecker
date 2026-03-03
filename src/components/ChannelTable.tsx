@@ -94,11 +94,11 @@ export function ChannelTable({
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* Header */}
-      <div className="flex items-center h-9 px-4 text-xs font-medium text-zinc-500 uppercase tracking-wider border-b border-zinc-700 bg-zinc-800/50 select-none">
+      <div className="flex items-center h-9 px-4 text-xs font-medium text-text-tertiary uppercase tracking-wider border-b border-border-app bg-panel-subtle select-none">
         {COLUMNS.map((col) => (
           <button
             key={col.key}
-            className={`${col.className} hover:text-zinc-300 transition-colors flex items-center gap-1`}
+            className={`${col.className} hover:text-text-primary transition-colors flex items-center gap-1`}
             onClick={() => handleSort(col.key)}
           >
             {col.label}
@@ -113,7 +113,7 @@ export function ChannelTable({
       </div>
       {/* Virtualized rows */}
       {filteredResults.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm">
+        <div className="flex-1 flex items-center justify-center text-text-tertiary text-sm">
           No channels match the current filters
         </div>
       ) : (

@@ -72,13 +72,13 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
   return (
     <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true" aria-label="Settings">
       <div className="flex-1 bg-black/50" onClick={onClose} />
-      <div ref={panelRef} tabIndex={-1} className="w-96 bg-zinc-900 border-l border-zinc-700 flex flex-col focus:outline-none">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-700">
+      <div ref={panelRef} tabIndex={-1} className="w-96 bg-overlay backdrop-blur-xl border-l border-border-app flex flex-col focus:outline-none">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border-app">
           <h2 className="text-sm font-semibold">Settings</h2>
           <button
             onClick={onClose}
             aria-label="Close settings"
-            className="p-1 hover:bg-zinc-800 rounded transition-colors"
+            className="p-1 hover:bg-btn-hover rounded transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -86,7 +86,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">
+            <label className="block text-xs text-text-secondary mb-1">
               Timeout (seconds)
             </label>
             <input
@@ -98,12 +98,12 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
               }}
               step="0.5"
               min="1"
-              className="w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-md text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">
+            <label className="block text-xs text-text-secondary mb-1">
               Extended Timeout (seconds)
             </label>
             <input
@@ -118,12 +118,12 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
               placeholder="Disabled"
               step="1"
               min="1"
-              className="w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-md text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">
+            <label className="block text-xs text-text-secondary mb-1">
               Concurrency (1 = sequential)
             </label>
             <input
@@ -138,16 +138,16 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
               }}
               min="1"
               max="20"
-              className="w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-md text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
-            <p className="text-xs text-zinc-500 mt-1">
+            <p className="text-xs text-text-tertiary mt-1">
               Most IPTV servers enforce 1 connection. Increase only if your server
               supports multiple connections.
             </p>
           </div>
 
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">
+            <label className="block text-xs text-text-secondary mb-1">
               Retries
             </label>
             <input
@@ -159,19 +159,19 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
               }}
               min="1"
               max="20"
-              className="w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-md text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">
+            <label className="block text-xs text-text-secondary mb-1">
               User Agent
             </label>
             <input
               type="text"
               value={draft.user_agent}
               onChange={(e) => update("user_agent", e.target.value)}
-              className="w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-md text-zinc-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
@@ -181,7 +181,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                 type="checkbox"
                 checked={draft.skip_screenshots}
                 onChange={(e) => update("skip_screenshots", e.target.checked)}
-                className="rounded border-zinc-600"
+                className="rounded border-border-app"
               />
               Skip screenshots
             </label>
@@ -191,7 +191,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                 type="checkbox"
                 checked={draft.profile_bitrate}
                 onChange={(e) => update("profile_bitrate", e.target.checked)}
-                className="rounded border-zinc-600"
+                className="rounded border-border-app"
               />
               Profile video bitrate (slower)
             </label>
@@ -201,14 +201,14 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                 type="checkbox"
                 checked={draft.test_geoblock}
                 onChange={(e) => update("test_geoblock", e.target.checked)}
-                className="rounded border-zinc-600"
+                className="rounded border-border-app"
               />
               Test geoblocks with proxies
             </label>
           </div>
 
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">
+            <label className="block text-xs text-text-secondary mb-1">
               Proxy File
             </label>
             <div className="flex items-center gap-2">
@@ -217,11 +217,11 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                 value={draft.proxy_file ?? ""}
                 readOnly
                 placeholder="No proxy file selected"
-                className="flex-1 px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-md text-zinc-100 placeholder:text-zinc-600 focus:outline-none"
+                className="flex-1 px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none"
               />
               <button
                 onClick={handleSelectProxy}
-                className="px-3 py-1.5 text-sm bg-zinc-700 hover:bg-zinc-600 rounded-md transition-colors"
+                className="px-3 py-1.5 text-sm bg-btn hover:bg-btn-hover rounded-md transition-colors"
               >
                 Browse
               </button>
@@ -229,7 +229,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
           </div>
         </div>
 
-        <div className="flex items-center gap-2 p-4 border-t border-zinc-700">
+        <div className="flex items-center gap-2 p-4 border-t border-border-app">
           <button
             onClick={handleSave}
             className="flex-1 px-3 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 rounded-md transition-colors"
@@ -238,7 +238,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
           </button>
           <button
             onClick={onClose}
-            className="px-3 py-2 text-sm bg-zinc-700 hover:bg-zinc-600 rounded-md transition-colors"
+            className="px-3 py-2 text-sm bg-btn hover:bg-btn-hover rounded-md transition-colors"
           >
             Cancel
           </button>
