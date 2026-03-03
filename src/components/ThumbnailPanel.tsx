@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useState } from "react";
+import { X } from "lucide-react";
 import type { ChannelResult } from "../lib/types";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
 import { StatusBadge } from "./StatusBadge";
@@ -8,6 +10,45 @@ interface ThumbnailPanelProps {
 }
 
 export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
+  const [lightboxRendered, setLightboxRendered] = useState(false);
+  const [lightboxVisible, setLightboxVisible] = useState(false);
+
+  const closeLightbox = useCallback(() => {
+    setLightboxVisible(false);
+  }, []);
+
+  const openLightbox = useCallback(() => {
+    if (!screenshotUrl) return;
+    setLightboxRendered(true);
+    requestAnimationFrame(() => setLightboxVisible(true));
+  }, [screenshotUrl]);
+
+  useEffect(() => {
+    if (!lightboxRendered) return;
+    if (lightboxVisible) return;
+    const timer = setTimeout(() => setLightboxRendered(false), 180);
+    return () => clearTimeout(timer);
+  }, [lightboxRendered, lightboxVisible]);
+
+  useEffect(() => {
+    setLightboxVisible(false);
+    setLightboxRendered(false);
+  }, [result?.index, screenshotUrl]);
+
+  useEffect(() => {
+    if (!lightboxRendered) return;
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeLightbox();
+      }
+    };
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [lightboxRendered, closeLightbox]);
+
   if (!result) {
     return (
       <div className="flex items-center justify-center h-full text-text-tertiary text-[12px]">
@@ -24,13 +65,20 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
       </div>
 
       {screenshotUrl && (
-        <div className="rounded-lg overflow-hidden border border-border-app bg-black">
+        <button
+          type="button"
+          onClick={openLightbox}
+          className="relative rounded-lg overflow-hidden border border-border-app bg-black cursor-zoom-in group"
+        >
           <img
             src={screenshotUrl}
             alt={result.name}
-            className="w-full h-auto"
+            className="w-full h-auto transition-transform duration-200 group-hover:scale-[1.015]"
           />
-        </div>
+          <div className="absolute inset-x-0 bottom-0 px-2 py-1 text-[11px] text-white/90 bg-black/45 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+            Click to enlarge
+          </div>
+        </button>
       )}
 
       <div className="grid grid-cols-2 gap-2 text-[11px]">
@@ -86,6 +134,40 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
           <p className="text-[11px] text-orange-400">
             Low framerate: {result.fps} fps
           </p>
+        </div>
+      )}
+
+      {lightboxRendered && screenshotUrl && (
+        <div
+          className={`fixed inset-0 z-[80] flex items-center justify-center px-6 py-10 transition-all duration-200 ${
+            lightboxVisible ? "bg-black/70 opacity-100" : "bg-black/0 opacity-0"
+          }`}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeLightbox();
+            }
+          }}
+        >
+          <button
+            type="button"
+            onClick={closeLightbox}
+            className="absolute top-5 right-5 p-2 rounded-full bg-black/35 text-white hover:bg-black/55 transition-colors"
+            aria-label="Close image preview"
+          >
+            <X className="w-5 h-5" />
+          </button>
+          <div
+            className={`max-h-full max-w-full transition-all duration-200 ${
+              lightboxVisible ? "opacity-100 scale-100" : "opacity-0 scale-95"
+            }`}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <img
+              src={screenshotUrl}
+              alt={result.name}
+              className="block max-h-[88vh] max-w-[88vw] rounded-xl border border-white/15 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]"
+            />
+          </div>
         </div>
       )}
     </div>
