@@ -1,5 +1,6 @@
 use regex::Regex;
 use std::collections::BTreeSet;
+use std::io::BufRead;
 use std::path::Path;
 
 use crate::error::AppError;
@@ -176,28 +177,6 @@ pub fn get_channel_id(url: &str) -> String {
     segment.replace(".ts", "")
 }
 
-/// Return (stream_url, metadata_lines, end_index) for a channel entry starting at extinf_index.
-fn get_channel_stream_entry(
-    lines: &[String],
-    extinf_index: usize,
-) -> (Option<String>, Vec<String>, usize) {
-    let mut metadata_lines = Vec::new();
-    let mut j = extinf_index + 1;
-    while j < lines.len() {
-        let candidate = lines[j].trim();
-        if candidate.starts_with("#EXTINF") {
-            return (None, metadata_lines, j.saturating_sub(1));
-        }
-        if candidate.is_empty() || candidate.starts_with('#') {
-            metadata_lines.push(candidate.to_string());
-            j += 1;
-            continue;
-        }
-        return (Some(candidate.to_string()), metadata_lines, j);
-    }
-    (None, metadata_lines, lines.len().saturating_sub(1))
-}
-
 /// Check if an #EXTINF line matches the group filter and channel name pattern.
 fn is_line_needed(line: &str, group_filter: &Option<String>, pattern: &Option<Regex>) -> bool {
     if !line.starts_with("#EXTINF") {
@@ -230,10 +209,8 @@ pub fn parse_playlist(
     }
 
     log::info!("Parsing playlist: {}", file_path);
-    let content = std::fs::read(path).map_err(AppError::Io)?;
-    // Read with replacement for invalid UTF-8 bytes
-    let content = String::from_utf8_lossy(&content).to_string();
-    let lines: Vec<String> = content.lines().map(|l| l.trim().to_string()).collect();
+    let file = std::fs::File::open(path).map_err(AppError::Io)?;
+    let reader = std::io::BufReader::new(file);
 
     let pattern = if let Some(ref search) = channel_search {
         Some(
@@ -247,33 +224,51 @@ pub fn parse_playlist(
     let mut channels = Vec::new();
     let mut groups = BTreeSet::new();
     let mut index = 0usize;
-    let mut i = 0;
+    let mut pending_extinf: Option<String> = None;
+    let mut pending_metadata: Vec<String> = Vec::new();
 
-    while i < lines.len() {
-        let line = &lines[i];
-        if is_line_needed(line, group_filter, &pattern) {
-            let (stream_url, metadata_lines, end_index) = get_channel_stream_entry(&lines, i);
-            if let Some(url) = stream_url {
-                let name = get_channel_name(line);
-                let group = get_group_name(line);
-                groups.insert(group.clone());
-                channels.push(Channel {
-                    index,
-                    name,
-                    group,
-                    url,
-                    extinf_line: line.to_string(),
-                    metadata_lines,
-                });
-                index += 1;
-            }
-            i = end_index.max(i);
-        } else if line.starts_with("#EXTINF") {
-            // Not matching but still collect group names for the filter dropdown
-            let group = get_group_name(line);
-            groups.insert(group);
+    for raw_line in reader.split(b'\n') {
+        let raw_line = raw_line.map_err(AppError::Io)?;
+        let mut line = String::from_utf8_lossy(&raw_line).to_string();
+        if line.ends_with('\r') {
+            line.pop();
         }
-        i += 1;
+        let line = line.trim().to_string();
+
+        if line.starts_with("#EXTINF") {
+            // A new EXTINF supersedes any pending entry that never got a stream URL.
+            pending_extinf = None;
+            pending_metadata.clear();
+
+            // Always collect groups for the filter dropdown, even for skipped channels.
+            groups.insert(get_group_name(&line));
+
+            if is_line_needed(&line, group_filter, &pattern) {
+                pending_extinf = Some(line);
+            }
+            continue;
+        }
+
+        if let Some(extinf_line) = pending_extinf.as_ref() {
+            if line.is_empty() || line.starts_with('#') {
+                pending_metadata.push(line);
+                continue;
+            }
+
+            let name = get_channel_name(extinf_line);
+            let group = get_group_name(extinf_line);
+            channels.push(Channel {
+                index,
+                name,
+                group,
+                url: line,
+                extinf_line: extinf_line.clone(),
+                metadata_lines: std::mem::take(&mut pending_metadata),
+            });
+            index += 1;
+
+            pending_extinf = None;
+        }
     }
 
     let file_name = path
@@ -330,6 +325,7 @@ pub fn find_playlists_in_dir(dir_path: &str) -> Result<Vec<String>, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn test_get_channel_name() {
@@ -373,5 +369,41 @@ mod tests {
         assert_eq!(get_channel_id("http://example.com/live/123.ts"), "123");
         assert_eq!(get_channel_id("http://example.com/live/stream"), "stream");
         assert_eq!(get_channel_id(""), "Unknown");
+    }
+
+    #[test]
+    fn test_parse_playlist_streaming_preserves_behavior() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be monotonic")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("iptv-parser-streaming-{unique}.m3u8"));
+
+        let playlist = "\
+#EXTM3U
+#EXTINF:-1 group-title=\"Sports\",Channel One
+#KODIPROP:inputstream=ffmpegdirect
+http://example.com/one.m3u8
+#EXTINF:-1 group-title=\"News\",Channel Two
+http://example.com/two.m3u8
+#EXTINF:-1 group-title=\"Sports\",No URL
+#EXTINF:-1 group-title=\"Sports\",Channel Three
+http://example.com/three.m3u8
+";
+
+        std::fs::write(&path, playlist).expect("playlist fixture should be writable");
+
+        let group_filter = Some("Sports".to_string());
+        let preview = parse_playlist(&path.to_string_lossy(), &group_filter, &None)
+            .expect("streaming parser should parse fixture");
+
+        assert_eq!(preview.total_channels, 2);
+        assert_eq!(preview.channels[0].name, "Channel One");
+        assert_eq!(preview.channels[0].metadata_lines, vec!["#KODIPROP:inputstream=ffmpegdirect"]);
+        assert_eq!(preview.channels[1].name, "Channel Three");
+        assert!(preview.groups.contains(&"Sports".to_string()));
+        assert!(preview.groups.contains(&"News".to_string()));
+
+        std::fs::remove_file(path).expect("fixture file should be removable");
     }
 }
