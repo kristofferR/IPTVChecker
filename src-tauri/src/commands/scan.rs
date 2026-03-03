@@ -268,11 +268,11 @@ pub async fn start_scan(
                 };
 
                 // Get metadata for alive channels
-                if status == ChannelStatus::Alive {
+                if status == ChannelStatus::Alive && !cancel.is_cancelled() {
                     let target_url = stream_url.as_deref().unwrap_or(&channel.url);
 
                     if ffprobe_ok {
-                        if let Ok(info) = ffmpeg::get_stream_info(&task_app, target_url).await {
+                        if let Ok(info) = ffmpeg::get_stream_info(&task_app, target_url, &cancel).await {
                             result.codec = Some(info.codec);
                             result.resolution = Some(info.resolution.clone());
                             result.width = info.width;
@@ -290,15 +290,17 @@ pub async fn start_scan(
                             result.label_mismatches = mismatches;
                         }
 
-                        if let Ok(audio) = ffmpeg::get_audio_info(&task_app, target_url).await {
-                            result.audio_codec = Some(audio.codec);
-                            result.audio_bitrate =
-                                audio.bitrate_kbps.map(|b| format!("{}", b));
+                        if !cancel.is_cancelled() {
+                            if let Ok(audio) = ffmpeg::get_audio_info(&task_app, target_url, &cancel).await {
+                                result.audio_codec = Some(audio.codec);
+                                result.audio_bitrate =
+                                    audio.bitrate_kbps.map(|b| format!("{}", b));
+                            }
                         }
 
-                        if profile_bitrate_flag && ffmpeg_ok {
+                        if !cancel.is_cancelled() && profile_bitrate_flag && ffmpeg_ok {
                             if let Ok(bitrate) =
-                                ffmpeg::profile_bitrate(&task_app, target_url, &user_agent).await
+                                ffmpeg::profile_bitrate(&task_app, target_url, &user_agent, &cancel).await
                             {
                                 result.video_bitrate = Some(bitrate);
                             }
@@ -306,7 +308,7 @@ pub async fn start_scan(
                     }
 
                     // Capture screenshot
-                    if !skip_screenshots && ffmpeg_ok {
+                    if !cancel.is_cancelled() && !skip_screenshots && ffmpeg_ok {
                         if let Some(ref dir) = screenshots_dir {
                             let file_name = format!(
                                 "{}-{}",
@@ -314,7 +316,7 @@ pub async fn start_scan(
                                 channel.name.replace('/', "-")
                             );
                             if let Ok(path) =
-                                ffmpeg::capture_screenshot(&task_app, target_url, dir, &file_name).await
+                                ffmpeg::capture_screenshot(&task_app, target_url, dir, &file_name, &cancel).await
                             {
                                 result.screenshot_path = Some(path);
                             }
