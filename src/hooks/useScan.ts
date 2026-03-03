@@ -7,6 +7,7 @@ import type {
   ScanSummary,
 } from "../lib/types";
 import { cancelScan, resetScan, startScan } from "../lib/tauri";
+import { logger } from "../lib/logger";
 
 export type ScanState = "idle" | "scanning" | "complete" | "cancelled";
 
@@ -37,7 +38,9 @@ export function useScan() {
           updated[result.index] = result;
         }
         const nonNull = updated.filter((r) => r != null).length;
-        console.log(`[useScan] flush: batch=${batch.length}, total array=${updated.length}, non-null=${nonNull}`);
+        logger.debug(
+          `[useScan] flush: batch=${batch.length}, total array=${updated.length}, non-null=${nonNull}`,
+        );
         return updated;
       });
     }
@@ -48,7 +51,9 @@ export function useScan() {
     (result: ChannelResult) => {
       eventCount.current += 1;
       if (eventCount.current <= 5 || eventCount.current % 50 === 0) {
-        console.log(`[useScan] event #${eventCount.current}: index=${result.index} name="${result.name}" status=${result.status}`);
+        logger.debug(
+          `[useScan] event #${eventCount.current}: index=${result.index} name="${result.name}" status=${result.status}`,
+        );
       }
       pendingResults.current.push(result);
       if (rafId.current === null) {
@@ -62,7 +67,7 @@ export function useScan() {
     const unlisteners: (() => void)[] = [];
 
     const setup = async () => {
-      console.log("[useScan] Setting up event listeners");
+      logger.debug("[useScan] Setting up event listeners");
 
       unlisteners.push(
         await listen<ChannelResult>("scan://channel-result", (event) => {
@@ -78,7 +83,7 @@ export function useScan() {
 
       unlisteners.push(
         await listen<ScanSummary>("scan://complete", (event) => {
-          console.log("[useScan] scan://complete received", event.payload);
+          logger.debug("[useScan] scan://complete received", event.payload);
           setSummary(event.payload);
           setScanState("complete");
         }),
@@ -86,20 +91,20 @@ export function useScan() {
 
       unlisteners.push(
         await listen("scan://cancelled", () => {
-          console.log("[useScan] scan://cancelled received");
+          logger.debug("[useScan] scan://cancelled received");
           setScanState("cancelled");
         }),
       );
 
       unlisteners.push(
         await listen<string>("scan://error", (event) => {
-          console.log("[useScan] scan://error received", event.payload);
+          logger.debug("[useScan] scan://error received", event.payload);
           setError(event.payload);
           setScanState("idle");
         }),
       );
 
-      console.log("[useScan] All event listeners registered");
+      logger.debug("[useScan] All event listeners registered");
     };
 
     setup();
@@ -120,7 +125,7 @@ export function useScan() {
       totalChannels: number,
       selectedIndices: number[] = [],
     ) => {
-      console.log(`[useScan] start: totalChannels=${totalChannels}`, config);
+      logger.debug(`[useScan] start: totalChannels=${totalChannels}`, config);
       const selectedSet =
         selectedIndices.length > 0 ? new Set(selectedIndices) : null;
 
@@ -162,9 +167,9 @@ export function useScan() {
 
       try {
         await startScan(config);
-        console.log("[useScan] startScan IPC returned OK");
+        logger.debug("[useScan] startScan IPC returned OK");
       } catch (err) {
-        console.error("[useScan] startScan IPC error:", err);
+        logger.error("[useScan] startScan IPC error:", err);
         setError(String(err));
         setScanState("idle");
       }
@@ -208,7 +213,7 @@ export function useScan() {
         metadata_lines: ch.metadata_lines,
         stream_url: null,
       }));
-      console.log(`[useScan] initFromPlaylist: ${pending.length} channels`);
+      logger.debug(`[useScan] initFromPlaylist: ${pending.length} channels`);
       setResults(pending);
       setProgress(null);
       setSummary(null);

@@ -24,6 +24,7 @@ import { ProgressBar } from "./components/ProgressBar";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { AlertTriangle, FolderOpen, Info, X } from "lucide-react";
 import { detectPlatform } from "./lib/platform";
+import { logger } from "./lib/logger";
 
 function errorToString(err: unknown): string {
   if (typeof err === "string") {
@@ -159,9 +160,14 @@ export default function App() {
       if (!selectedPath) return;
 
       const searchTrimmed = channelSearch.trim() || undefined;
-      console.log(`[App] Opening playlist: ${selectedPath}, channelSearch: "${searchTrimmed ?? ""}"`);
+      logger.debug(
+        `[App] Opening playlist: ${selectedPath}, channelSearch: "${searchTrimmed ?? ""}"`,
+      );
       const preview = await openPlaylist(selectedPath, undefined, searchTrimmed);
-      console.log(`[App] Playlist loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`, preview.groups);
+      logger.debug(
+        `[App] Playlist loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
+        preview.groups,
+      );
       setPlaylist(preview);
       initFromPlaylist(preview.channels);
       setSearch("");
@@ -172,7 +178,7 @@ export default function App() {
       setSelectedChannelIndices([]);
       setPendingPlaybackChannel(null);
     } catch (err) {
-      console.error("[App] Failed to open playlist", err);
+      logger.error("[App] Failed to open playlist", err);
       setPlaylistOpenError(formatPlaylistOpenError(err));
       // Keep app interaction predictable after a failed open attempt.
       setSelectedChannel(null);
