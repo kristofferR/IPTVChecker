@@ -7,12 +7,12 @@ pub mod state;
 use std::sync::Arc;
 
 use state::AppState;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_store::StoreExt;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -23,7 +23,81 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_liquid_glass::init())
-        .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_os::init());
+
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .menu(|app| {
+            use tauri::menu::{AboutMetadata, MenuBuilder, SubmenuBuilder};
+
+            let file_menu = SubmenuBuilder::new(app, "File")
+                .text("menu.file.open", "Open Playlist...")
+                .separator()
+                .text("menu.file.export_csv", "Export CSV")
+                .text("menu.file.export_split", "Export Split Playlists")
+                .text("menu.file.export_renamed", "Export Renamed Playlist")
+                .separator()
+                .quit()
+                .build()?;
+
+            let edit_menu = SubmenuBuilder::new(app, "Edit")
+                .undo()
+                .redo()
+                .separator()
+                .cut()
+                .copy()
+                .paste()
+                .separator()
+                .select_all()
+                .build()?;
+
+            let view_menu = SubmenuBuilder::new(app, "View")
+                .text("menu.view.toggle_sidebar", "Toggle Sidebar")
+                .text("menu.view.clear_filters", "Clear Filters")
+                .build()?;
+
+            let scan_menu = SubmenuBuilder::new(app, "Scan")
+                .text("menu.scan.start", "Start Scan")
+                .text("menu.scan.stop", "Stop Scan")
+                .separator()
+                .text("menu.scan.settings", "Scan Settings")
+                .build()?;
+
+            let help_menu = SubmenuBuilder::new(app, "Help")
+                .about(Some(AboutMetadata::default()))
+                .separator()
+                .text("menu.help.check_updates", "Check for Updates")
+                .build()?;
+
+            MenuBuilder::new(app)
+                .item(&file_menu)
+                .item(&edit_menu)
+                .item(&view_menu)
+                .item(&scan_menu)
+                .item(&help_menu)
+                .build()
+        })
+        .on_menu_event(|app, event| {
+            let frontend_event = match event.id().as_ref() {
+                "menu.file.open" => Some("menu://open-playlist"),
+                "menu.file.export_csv" => Some("menu://export-csv"),
+                "menu.file.export_split" => Some("menu://export-split"),
+                "menu.file.export_renamed" => Some("menu://export-renamed"),
+                "menu.view.toggle_sidebar" => Some("menu://toggle-sidebar"),
+                "menu.view.clear_filters" => Some("menu://clear-filters"),
+                "menu.scan.start" => Some("menu://start-scan"),
+                "menu.scan.stop" => Some("menu://stop-scan"),
+                "menu.scan.settings" => Some("menu://open-settings"),
+                "menu.help.check_updates" => Some("menu://check-updates"),
+                _ => None,
+            };
+
+            if let Some(name) = frontend_event {
+                let _ = app.emit(name, ());
+            }
+        });
+
+    builder
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {

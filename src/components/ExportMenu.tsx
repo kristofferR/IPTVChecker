@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
   Download,
@@ -16,6 +16,10 @@ interface ExportMenuProps {
   playlistName: string;
   playlistPath: string;
   disabled: boolean;
+  menuRequest?: {
+    id: number;
+    action: "csv" | "split" | "renamed";
+  } | null;
 }
 
 export function ExportMenu({
@@ -23,6 +27,7 @@ export function ExportMenu({
   playlistName,
   playlistPath,
   disabled,
+  menuRequest,
 }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [busyAction, setBusyAction] = useState<"csv" | "split" | "renamed" | null>(null);
@@ -31,6 +36,7 @@ export function ExportMenu({
     message: string;
   } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const lastMenuRequestId = useRef<number | null>(null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -59,7 +65,7 @@ export function ExportMenu({
     ? sourceFileName.slice(0, sourceFileName.lastIndexOf("."))
     : sourceFileName;
 
-  const handleExportCsv = async () => {
+  const handleExportCsv = useCallback(async () => {
     setOpen(false);
     const path = await save({
       defaultPath: `${playlistName}_results.csv`,
@@ -85,9 +91,9 @@ export function ExportMenu({
     } finally {
       setBusyAction(null);
     }
-  };
+  }, [playlistName, results]);
 
-  const handleExportSplit = async () => {
+  const handleExportSplit = useCallback(async () => {
     setOpen(false);
     setBusyAction("split");
     try {
@@ -104,9 +110,9 @@ export function ExportMenu({
     } finally {
       setBusyAction(null);
     }
-  };
+  }, [playlistPath, results, sourceDir]);
 
-  const handleExportRenamed = async () => {
+  const handleExportRenamed = useCallback(async () => {
     setOpen(false);
     setBusyAction("renamed");
     try {
@@ -123,9 +129,30 @@ export function ExportMenu({
     } finally {
       setBusyAction(null);
     }
-  };
+  }, [playlistPath, results, sourceDir, sourceStem]);
 
   const exporting = busyAction !== null;
+
+  useEffect(() => {
+    if (!menuRequest || disabled || exporting) return;
+    if (lastMenuRequestId.current === menuRequest.id) return;
+    lastMenuRequestId.current = menuRequest.id;
+
+    if (menuRequest.action === "csv") {
+      void handleExportCsv();
+    } else if (menuRequest.action === "split") {
+      void handleExportSplit();
+    } else if (menuRequest.action === "renamed") {
+      void handleExportRenamed();
+    }
+  }, [
+    menuRequest,
+    disabled,
+    exporting,
+    handleExportCsv,
+    handleExportSplit,
+    handleExportRenamed,
+  ]);
 
   return (
     <div ref={ref} className="relative">

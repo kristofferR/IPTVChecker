@@ -10,6 +10,11 @@ import type { ChannelResult } from "../lib/types";
 import type { ScanState } from "../hooks/useScan";
 import { ExportMenu } from "./ExportMenu";
 
+export interface MenuExportRequest {
+  id: number;
+  action: "csv" | "split" | "renamed";
+}
+
 interface ToolbarProps {
   onOpen: () => void;
   onStartScan: () => void;
@@ -21,6 +26,7 @@ interface ToolbarProps {
   playlistName: string;
   playlistPath: string;
   selectedCount: number;
+  menuExportRequest: MenuExportRequest | null;
 }
 
 const toolbarBtn =
@@ -41,6 +47,7 @@ export function Toolbar({
   playlistName,
   playlistPath,
   selectedCount,
+  menuExportRequest,
 }: ToolbarProps) {
   const scanning = scanState === "scanning";
   const hasResults = results.length > 0;
@@ -103,6 +110,7 @@ export function Toolbar({
         playlistName={playlistName}
         playlistPath={playlistPath}
         disabled={!hasResults || scanning}
+        menuRequest={menuExportRequest}
       />
 
       <button

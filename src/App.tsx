@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   ChannelResult,
@@ -21,7 +22,7 @@ import { StatsPanel } from "./components/StatsPanel";
 import { WarningsPanel } from "./components/WarningsPanel";
 import { ProgressBar } from "./components/ProgressBar";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { AlertTriangle, FolderOpen, X } from "lucide-react";
+import { AlertTriangle, FolderOpen, Info, X } from "lucide-react";
 import { detectPlatform } from "./lib/platform";
 
 export default function App() {
@@ -45,6 +46,12 @@ export default function App() {
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [pendingPlaybackChannel, setPendingPlaybackChannel] =
     useState<ChannelResult | null>(null);
+  const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [menuInfo, setMenuInfo] = useState<string | null>(null);
+  const [menuExportRequest, setMenuExportRequest] = useState<{
+    id: number;
+    action: "csv" | "split" | "renamed";
+  } | null>(null);
 
   const { settings, save: saveSettings } = useSettings();
   const {
@@ -92,6 +99,12 @@ export default function App() {
     const timer = setTimeout(() => setPlaybackError(null), 10000);
     return () => clearTimeout(timer);
   }, [playbackError]);
+
+  useEffect(() => {
+    if (!menuInfo) return;
+    const timer = setTimeout(() => setMenuInfo(null), 8000);
+    return () => clearTimeout(timer);
+  }, [menuInfo]);
 
   const handleOpen = useCallback(async () => {
     const path = await open({
@@ -200,6 +213,71 @@ export default function App() {
     [startScanWithSelection],
   );
 
+  useEffect(() => {
+    const unlisten: Array<() => void> = [];
+    const queueExport = (action: "csv" | "split" | "renamed") => {
+      setMenuExportRequest((prev) => ({
+        id: (prev?.id ?? 0) + 1,
+        action,
+      }));
+    };
+
+    const setup = async () => {
+      unlisten.push(
+        await listen("menu://open-playlist", () => {
+          void handleOpen();
+        }),
+      );
+      unlisten.push(
+        await listen("menu://export-csv", () => queueExport("csv")),
+      );
+      unlisten.push(
+        await listen("menu://export-split", () => queueExport("split")),
+      );
+      unlisten.push(
+        await listen("menu://export-renamed", () => queueExport("renamed")),
+      );
+      unlisten.push(
+        await listen("menu://toggle-sidebar", () =>
+          setSidebarHidden((hidden) => !hidden),
+        ),
+      );
+      unlisten.push(
+        await listen("menu://clear-filters", () => {
+          setSearch("");
+          setChannelSearch("");
+          setGroupFilter("all");
+          setStatusFilter("all");
+        }),
+      );
+      unlisten.push(
+        await listen("menu://start-scan", () => {
+          void handleStartScan();
+        }),
+      );
+      unlisten.push(
+        await listen("menu://stop-scan", () => {
+          void cancel();
+        }),
+      );
+      unlisten.push(
+        await listen("menu://open-settings", () => setShowSettings(true)),
+      );
+      unlisten.push(
+        await listen("menu://check-updates", () =>
+          setMenuInfo("Update checking is not configured yet."),
+        ),
+      );
+    };
+
+    void setup();
+    return () => {
+      for (const off of unlisten) {
+        off();
+      }
+    };
+  }, [cancel, handleOpen, handleStartScan]);
+
   const handleSelectChannel = useCallback((result: ChannelResult) => {
     setSelectedChannel(result);
   }, []);
@@ -283,6 +361,7 @@ export default function App() {
         playlistName={playlist?.file_name ?? ""}
         playlistPath={playlist?.file_path ?? ""}
         selectedCount={selectedChannelIndices.length}
+        menuExportRequest={menuExportRequest}
       />
 
       {ffmpegWarning && (
@@ -310,6 +389,20 @@ export default function App() {
           <button
             onClick={() => setPlaybackError(null)}
             className="p-1 hover:bg-red-500/20 rounded transition-colors"
+            type="button"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {menuInfo && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-500/10 border-b border-blue-500/20 text-blue-400 text-[13px]">
+          <Info className="w-4 h-4" />
+          <span className="flex-1">{menuInfo}</span>
+          <button
+            onClick={() => setMenuInfo(null)}
+            className="p-1 hover:bg-blue-500/20 rounded transition-colors"
             type="button"
           >
             <X className="w-4 h-4" />
@@ -369,7 +462,7 @@ export default function App() {
           )}
         </div>
 
-        {liveSelectedChannel && (
+        {liveSelectedChannel && !sidebarHidden && (
           <div className="w-72 border-l border-border-app bg-panel-muted">
             <ThumbnailPanel
               result={liveSelectedChannel}
