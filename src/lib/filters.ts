@@ -9,6 +9,7 @@ export type SortField =
   | "resolution"
   | "codec"
   | "fps"
+  | "bitrate"
   | "audio";
 
 export type SortDirection = "asc" | "desc";
@@ -59,6 +60,12 @@ export function sortResults(
         return (a.codec ?? "").localeCompare(b.codec ?? "") * dir;
       case "fps":
         return ((a.fps ?? 0) - (b.fps ?? 0)) * dir;
+      case "bitrate":
+        return (
+          (parseInt(a.video_bitrate ?? "0") -
+            parseInt(b.video_bitrate ?? "0")) *
+          dir
+        );
       case "audio":
         return (
           (parseInt(a.audio_bitrate ?? "0") -

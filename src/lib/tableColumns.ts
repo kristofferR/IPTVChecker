@@ -19,6 +19,7 @@ export const COLUMN_DEFINITIONS: ColumnDefinition[] = [
   { key: "resolution", label: "Res", defaultWidth: 96, minWidth: 72, align: "center" },
   { key: "codec", label: "Codec", defaultWidth: 96, minWidth: 72, align: "center" },
   { key: "fps", label: "FPS", defaultWidth: 84, minWidth: 68, align: "center" },
+  { key: "bitrate", label: "Bitrate", defaultWidth: 124, minWidth: 90, align: "right" },
   { key: "audio", label: "Audio", defaultWidth: 126, minWidth: 90, align: "right" },
 ];
 

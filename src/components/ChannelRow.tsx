@@ -86,6 +86,12 @@ export function ChannelRow({
             {isAlive && result.fps ? result.fps : "—"}
           </span>
         );
+      case "bitrate":
+        return (
+          <span className="text-text-secondary tabular-nums">
+            {isAlive && result.video_bitrate ? result.video_bitrate : "—"}
+          </span>
+        );
       case "audio":
         return (
           <span className="text-text-secondary tabular-nums">
