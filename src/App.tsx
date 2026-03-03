@@ -22,6 +22,9 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { AlertTriangle } from "lucide-react";
 
 export default function App() {
+  const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+  const modKey = isMac ? "Cmd" : "Ctrl";
+
   const [playlist, setPlaylist] = useState<PlaylistPreview | null>(null);
   const [search, setSearch] = useState("");
   const [groupFilter, setGroupFilter] = useState("all");
@@ -56,11 +59,11 @@ export default function App() {
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.metaKey && e.key === "o") {
+      if ((e.metaKey || e.ctrlKey) && e.key === "o") {
         e.preventDefault();
         handleOpen();
       }
-      if (e.metaKey && e.key === ".") {
+      if ((e.metaKey || e.ctrlKey) && e.key === ".") {
         e.preventDefault();
         setShowSettings((s) => !s);
       }
@@ -184,7 +187,7 @@ export default function App() {
                 <p className="text-sm">
                   Click Open or press{" "}
                   <kbd className="px-1.5 py-0.5 bg-zinc-800 rounded text-xs border border-zinc-700">
-                    Cmd+O
+                    {modKey}+O
                   </kbd>{" "}
                   to load an M3U playlist
                 </p>
