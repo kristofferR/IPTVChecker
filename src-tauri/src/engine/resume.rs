@@ -97,3 +97,90 @@ pub fn write_result_entry(checkpoint_file: &str, result: &ChannelResult) -> Resu
     writeln!(file, "{}", serialized).map_err(AppError::Io)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::channel::ChannelStatus;
+
+    fn make_result(index: usize, name: &str, status: ChannelStatus) -> ChannelResult {
+        ChannelResult {
+            index,
+            playlist: "fixture.m3u8".to_string(),
+            name: name.to_string(),
+            group: "Group".to_string(),
+            url: format!("https://example.com/stream/{}", index),
+            status,
+            codec: None,
+            resolution: None,
+            width: None,
+            height: None,
+            fps: None,
+            video_bitrate: None,
+            audio_bitrate: None,
+            audio_codec: None,
+            screenshot_path: None,
+            label_mismatches: Vec::new(),
+            low_framerate: false,
+            error_message: None,
+            channel_id: format!("id-{}", index),
+            extinf_line: format!("#EXTINF:-1,{}", name),
+            metadata_lines: Vec::new(),
+            stream_url: None,
+        }
+    }
+
+    fn temp_file(name: &str) -> String {
+        let pid = std::process::id();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        std::env::temp_dir()
+            .join(format!("iptv-checker-{}-{}-{}", name, pid, nanos))
+            .to_string_lossy()
+            .to_string()
+    }
+
+    #[test]
+    fn checkpoint_load_keeps_latest_result_per_index() {
+        let checkpoint_file = temp_file("resume-checkpoint");
+
+        let first = make_result(2, "Old Name", ChannelStatus::Dead);
+        let second = make_result(2, "New Name", ChannelStatus::Alive);
+        let third = make_result(5, "Another", ChannelStatus::Geoblocked);
+
+        write_result_entry(&checkpoint_file, &first).expect("first result write should succeed");
+        write_result_entry(&checkpoint_file, &second).expect("second result write should succeed");
+        write_result_entry(&checkpoint_file, &third).expect("third result write should succeed");
+
+        let loaded = load_checkpoint_results(&checkpoint_file);
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].index, 2);
+        assert_eq!(loaded[0].name, "New Name");
+        assert_eq!(loaded[0].status, ChannelStatus::Alive);
+        assert_eq!(loaded[1].index, 5);
+
+        let _ = std::fs::remove_file(&checkpoint_file);
+    }
+
+    #[test]
+    fn processed_log_load_extracts_urls_and_last_index() {
+        let log_file = temp_file("resume-log");
+
+        write_log_entry(&log_file, "1 - First https://example.com/a")
+            .expect("first log write should succeed");
+        write_log_entry(&log_file, "4 - Fourth https://example.com/b")
+            .expect("second log write should succeed");
+        write_log_entry(&log_file, "not parseable")
+            .expect("non-parseable log write should succeed");
+
+        let (processed, last_index) = load_processed_channels(&log_file);
+        assert_eq!(processed.len(), 2);
+        assert!(processed.contains("https://example.com/a"));
+        assert!(processed.contains("https://example.com/b"));
+        assert_eq!(last_index, 4);
+
+        let _ = std::fs::remove_file(&log_file);
+    }
+}
