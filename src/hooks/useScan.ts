@@ -3,12 +3,17 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   ChannelResult,
   ScanConfig,
+  ScanErrorPayload,
   ScanEvent,
   ScanProgress,
   ScanSummary,
 } from "../lib/types";
 import { cancelScan, pauseScan, resetScan, resumeScan, startScan } from "../lib/tauri";
 import { logger } from "../lib/logger";
+import {
+  pendingScanErrorMessageForRun,
+  runScopedScanErrorMessage,
+} from "../lib/scanErrorEvents";
 
 export type ScanState = "idle" | "scanning" | "paused" | "complete" | "cancelled";
 
@@ -24,6 +29,7 @@ export function useScan() {
   const rafId = useRef<number | null>(null);
   const eventCount = useRef(0);
   const activeRunId = useRef<string | null>(null);
+  const pendingScanError = useRef<ScanEvent<ScanErrorPayload> | null>(null);
 
   // Reset backend scan state on mount (handles app restart with stale flag)
   useEffect(() => {
@@ -65,6 +71,12 @@ export function useScan() {
     [flushResults],
   );
 
+  const applyScanError = useCallback((message: string) => {
+    setError(message);
+    setScanState("idle");
+    activeRunId.current = null;
+  }, []);
+
   useEffect(() => {
     const unlisteners: (() => void)[] = [];
 
@@ -97,6 +109,7 @@ export function useScan() {
           logger.debug("[useScan] scan://complete received", event.payload);
           setSummary(event.payload.payload);
           setScanState("complete");
+          pendingScanError.current = null;
           activeRunId.current = null;
         }),
       );
@@ -109,6 +122,7 @@ export function useScan() {
           logger.debug("[useScan] scan://cancelled received", event.payload);
           setSummary(event.payload.payload);
           setScanState("cancelled");
+          pendingScanError.current = null;
           activeRunId.current = null;
         }),
       );
@@ -132,10 +146,22 @@ export function useScan() {
       );
 
       unlisteners.push(
-        await listen<string>("scan://error", (event) => {
+        await listen<ScanEvent<ScanErrorPayload>>("scan://error", (event) => {
           logger.debug("[useScan] scan://error received", event.payload);
-          setError(event.payload);
-          setScanState("idle");
+
+          const message = runScopedScanErrorMessage(
+            activeRunId.current,
+            event.payload,
+          );
+          if (message) {
+            pendingScanError.current = null;
+            applyScanError(message);
+            return;
+          }
+
+          if (!activeRunId.current) {
+            pendingScanError.current = event.payload;
+          }
         }),
       );
 
@@ -152,7 +178,7 @@ export function useScan() {
         cancelAnimationFrame(rafId.current);
       }
     };
-  }, [queueResult]);
+  }, [queueResult, applyScanError]);
 
   const start = useCallback(
     async (
@@ -210,19 +236,29 @@ export function useScan() {
       pendingResults.current = [];
       eventCount.current = 0;
       activeRunId.current = null;
+      pendingScanError.current = null;
 
       try {
         const runId = await startScan(config);
         activeRunId.current = runId;
         logger.debug(`[useScan] startScan IPC returned run_id=${runId}`);
+        const pendingMessage = pendingScanErrorMessageForRun(
+          pendingScanError.current,
+          runId,
+        );
+        if (pendingMessage) {
+          pendingScanError.current = null;
+          applyScanError(pendingMessage);
+        }
       } catch (err) {
         logger.error("[useScan] startScan IPC error:", err);
+        pendingScanError.current = null;
         setError(String(err));
         setScanState("idle");
         activeRunId.current = null;
       }
     },
-    [],
+    [applyScanError],
   );
 
   const cancel = useCallback(async () => {
@@ -295,6 +331,7 @@ export function useScan() {
       pendingResults.current = [];
       eventCount.current = 0;
       activeRunId.current = null;
+      pendingScanError.current = null;
     },
     [],
   );

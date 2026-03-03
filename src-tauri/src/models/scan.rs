@@ -112,6 +112,12 @@ pub struct ScanEvent<T> {
     pub payload: T,
 }
 
+/// Payload contract for `scan://error`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanErrorPayload {
+    pub message: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

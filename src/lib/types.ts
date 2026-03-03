@@ -104,6 +104,11 @@ export interface ScanEvent<T> {
   payload: T;
 }
 
+// Shared payload contract for scan://error events.
+export interface ScanErrorPayload {
+  message: string;
+}
+
 export interface AppSettings {
   timeout: number;
   extended_timeout: number | null;

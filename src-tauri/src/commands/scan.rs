@@ -10,7 +10,9 @@ use crate::commands::history;
 use crate::engine::{checker, ffmpeg, parser, proxy, resume};
 use crate::error::AppError;
 use crate::models::channel::{Channel, ChannelResult, ChannelStatus};
-use crate::models::scan::{RetryBackoff, ScanConfig, ScanEvent, ScanProgress, ScanSummary};
+use crate::models::scan::{
+    RetryBackoff, ScanConfig, ScanErrorPayload, ScanEvent, ScanProgress, ScanSummary,
+};
 use crate::state::AppState;
 
 static NEXT_SCAN_RUN_ID: AtomicU64 = AtomicU64::new(1);
@@ -220,6 +222,18 @@ fn sanitize_scope_suffix(value: &str) -> String {
 fn cleanup_resume_files(log_file: &str, checkpoint_file: &str) {
     let _ = std::fs::remove_file(log_file);
     let _ = std::fs::remove_file(checkpoint_file);
+}
+
+fn emit_scan_error_event(app: &AppHandle, run_id: &str, message: impl Into<String>) {
+    let _ = app.emit(
+        "scan://error",
+        ScanEvent {
+            run_id: run_id.to_string(),
+            payload: ScanErrorPayload {
+                message: message.into(),
+            },
+        },
+    );
 }
 
 async fn cancel_scan_token(state: &AppState) {
@@ -770,17 +784,19 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
         drop(tx);
 
         // Wait for event forwarding to finish
-        let completed_scan = event_task.await.unwrap_or(CompletedScanData {
-            summary: ScanSummary {
-                total,
-                alive: 0,
-                dead: 0,
-                geoblocked: 0,
-                low_framerate: 0,
-                mislabeled: 0,
-            },
-            results: Vec::new(),
-        });
+        let completed_scan = match event_task.await {
+            Ok(data) => data,
+            Err(error) => {
+                emit_scan_error_event(
+                    &app_handle,
+                    &run_id_for_task,
+                    format!("Scan failed while dispatching progress events: {}", error),
+                );
+                cleanup_resume_files(&log_file_for_task, &checkpoint_file_for_task);
+                clear_pre_spawn_scan_state(state_clone.as_ref()).await;
+                return;
+            }
+        };
         let summary = completed_scan.summary.clone();
 
         if cancel_token.is_cancelled() {
@@ -821,21 +837,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
             cleanup_resume_files(&log_file_for_task, &checkpoint_file_for_task);
         }
 
-        // Reset scanning state
-        let mut scanning = state_clone.scanning.lock().await;
-        mark_scan_finished(&mut scanning);
-        drop(scanning);
-
-        let mut paused = state_clone.paused.lock().await;
-        *paused = false;
-        drop(paused);
-
-        let mut run_id_lock = state_clone.current_run_id.lock().await;
-        *run_id_lock = None;
-        drop(run_id_lock);
-
-        let mut token_lock = state_clone.cancel_token.lock().await;
-        *token_lock = None;
+        clear_pre_spawn_scan_state(state_clone.as_ref()).await;
     });
 
     Ok(run_id)
