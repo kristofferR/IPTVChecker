@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type {
   ChannelResult,
   PlaylistPreview,
@@ -95,6 +96,7 @@ export default function App() {
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [menuInfo, setMenuInfo] = useState<string | null>(null);
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [menuExportRequest, setMenuExportRequest] = useState<{
     id: number;
     action: "csv" | "split" | "renamed";
@@ -179,21 +181,9 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [menuInfo]);
 
-  const handleOpen = useCallback(async () => {
+  const openPlaylistPath = useCallback(async (selectedPath: string) => {
     setPlaylistOpenError(null);
     try {
-      const path = await open({
-        multiple: false,
-        filters: [
-          { name: "M3U Playlists", extensions: ["m3u", "m3u8"] },
-        ],
-        directory: false,
-      });
-      if (!path) return;
-
-      const selectedPath = Array.isArray(path) ? path[0] : path;
-      if (!selectedPath) return;
-
       const searchTrimmed = channelSearch.trim() || undefined;
       logger.debug(
         `[App] Opening playlist: ${selectedPath}, channelSearch: "${searchTrimmed ?? ""}"`,
@@ -221,6 +211,68 @@ export default function App() {
       setPendingPlaybackChannel(null);
     }
   }, [initFromPlaylist, channelSearch]);
+
+  const handleOpen = useCallback(async () => {
+    const path = await open({
+      multiple: false,
+      filters: [
+        { name: "M3U Playlists", extensions: ["m3u", "m3u8"] },
+      ],
+      directory: false,
+    });
+    if (!path) return;
+
+    const selectedPath = Array.isArray(path) ? path[0] : path;
+    if (!selectedPath) return;
+
+    await openPlaylistPath(selectedPath);
+  }, [openPlaylistPath]);
+
+  const handleDroppedPaths = useCallback((paths: string[]) => {
+    const playlistPath = paths.find((path) =>
+      path.toLowerCase().endsWith(".m3u") || path.toLowerCase().endsWith(".m3u8"),
+    );
+
+    if (!playlistPath) {
+      setMenuInfo("Dropped file is not an M3U/M3U8 playlist.");
+      return;
+    }
+
+    void openPlaylistPath(playlistPath);
+  }, [openPlaylistPath]);
+
+  useEffect(() => {
+    let mounted = true;
+    let unlisten: (() => void) | null = null;
+
+    getCurrentWindow()
+      .onDragDropEvent((event) => {
+        if (!mounted) return;
+        const payload = event.payload;
+        if (payload.type === "over" || payload.type === "enter") {
+          setIsDragOver(true);
+          return;
+        }
+        if (payload.type === "drop") {
+          setIsDragOver(false);
+          handleDroppedPaths(payload.paths);
+          return;
+        }
+        setIsDragOver(false);
+      })
+      .then((off) => {
+        unlisten = off;
+      })
+      .catch(() => {
+        // Ignore drag-drop hook errors; fallback is file picker.
+      });
+
+    return () => {
+      mounted = false;
+      setIsDragOver(false);
+      unlisten?.();
+    };
+  }, [handleDroppedPaths]);
 
   // Keyboard shortcuts
   const showSettingsRef = useRef(showSettings);
@@ -647,6 +699,22 @@ export default function App() {
         <KeyboardShortcutsDialog
           onClose={() => setShowKeyboardShortcuts(false)}
         />
+      )}
+
+      {isDragOver && (
+        <div className="fixed inset-0 z-40 pointer-events-none">
+          <div className="absolute inset-0 bg-blue-500/12 backdrop-blur-[1px]" />
+          <div className="absolute inset-0 flex items-center justify-center px-4">
+            <div className="rounded-2xl border-2 border-dashed border-blue-400/70 bg-overlay/90 px-8 py-6 text-center shadow-2xl">
+              <p className="text-[11px] uppercase tracking-[0.08em] text-blue-300 mb-1">
+                Drop Playlist
+              </p>
+              <p className="text-[16px] font-semibold text-text-primary">
+                Release to open `.m3u` / `.m3u8`
+              </p>
+            </div>
+          </div>
+        </div>
       )}
 
       {pendingPlaybackChannel && (
