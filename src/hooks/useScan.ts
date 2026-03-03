@@ -486,7 +486,7 @@ export function useScan() {
           label_mismatches: [],
           low_framerate: false,
           error_message: null,
-          channel_id: ch.url.split("/").pop()?.replace(".ts", "") ?? "Unknown",
+          channel_id: ch.url.split("/").pop()?.replace(".ts", "") || "Unknown",
           extinf_line: ch.extinf_line,
           metadata_lines: ch.metadata_lines,
           stream_url: null,
