@@ -5,6 +5,7 @@ use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use url::Url;
 
 use crate::error::AppError;
+use crate::models::scan::{MAX_RETRIES, MIN_RETRIES};
 
 /// Minimum data threshold for direct streams (500KB).
 const MIN_DATA_THRESHOLD: u64 = 1024 * 500;
@@ -235,6 +236,21 @@ pub async fn check_channel_status(
     user_agent: &str,
     cancel_token: &tokio_util::sync::CancellationToken,
 ) -> Result<(String, Option<String>), AppError> {
+    if !timeout.is_finite() || timeout <= 0.0 {
+        return Err(AppError::Other(
+            "Invalid timeout: must be greater than 0 seconds".to_string(),
+        ));
+    }
+    if let Some(ext) = extended_timeout {
+        if !ext.is_finite() || ext <= 0.0 {
+            return Err(AppError::Other(
+                "Invalid extended timeout: must be greater than 0 seconds".to_string(),
+            ));
+        }
+    }
+
+    let retries = retries.clamp(MIN_RETRIES, MAX_RETRIES);
+
     let mut headers = HeaderMap::new();
     headers.insert(
         USER_AGENT,

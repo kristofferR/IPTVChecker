@@ -198,15 +198,9 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
         if *scanning {
             return Err(AppError::Other("A scan is already in progress".to_string()));
         }
-        *scanning = true;
-    }
 
-    if config.concurrency < 1 {
-        let mut scanning = state.scanning.lock().await;
-        *scanning = false;
-        return Err(AppError::Other(
-            "Concurrency must be at least 1".to_string(),
-        ));
+        config.validate()?;
+        *scanning = true;
     }
 
     let cancel_token = CancellationToken::new();
