@@ -110,7 +110,7 @@ pub async fn start_scan(
                 .unwrap_or_default(),
         );
         let semaphore = Arc::new(Semaphore::new(config.concurrency as usize));
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ChannelResult>();
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<ChannelResult>(256);
 
         // Spawn a task to forward results as events
         let app_for_events = app_handle.clone();
@@ -335,7 +335,7 @@ pub async fn start_scan(
                     ),
                 );
 
-                let _ = tx.send(result);
+                let _ = tx.send(result).await;
                 drop(_permit);
             });
 
