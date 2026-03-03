@@ -89,6 +89,21 @@ function isInputLikeTarget(target: EventTarget | null): boolean {
   );
 }
 
+function keepMenuInViewport(
+  x: number,
+  y: number,
+  menuWidth: number,
+  menuHeight: number,
+): { x: number; y: number } {
+  const padding = 8;
+  const maxX = Math.max(padding, window.innerWidth - menuWidth - padding);
+  const maxY = Math.max(padding, window.innerHeight - menuHeight - padding);
+  return {
+    x: Math.min(Math.max(x, padding), maxX),
+    y: Math.min(Math.max(y, padding), maxY),
+  };
+}
+
 export function ChannelTable({
   results,
   search,
@@ -216,6 +231,28 @@ export function ChannelTable({
   useEffect(() => {
     if (!contextMenuState) return;
 
+    const menu = contextMenuRef.current;
+    if (menu) {
+      const rect = menu.getBoundingClientRect();
+      const next = keepMenuInViewport(
+        contextMenuState.x,
+        contextMenuState.y,
+        rect.width,
+        rect.height,
+      );
+      if (next.x !== contextMenuState.x || next.y !== contextMenuState.y) {
+        setContextMenuState((prev) =>
+          prev
+            ? {
+                ...prev,
+                x: next.x,
+                y: next.y,
+              }
+            : prev,
+        );
+      }
+    }
+
     const handlePointerDown = (event: MouseEvent) => {
       if (!contextMenuRef.current) return;
       const target = event.target as Node;
@@ -235,6 +272,20 @@ export function ChannelTable({
 
   useEffect(() => {
     if (!columnMenuState) return;
+
+    const menu = columnMenuRef.current;
+    if (menu) {
+      const rect = menu.getBoundingClientRect();
+      const next = keepMenuInViewport(
+        columnMenuState.x,
+        columnMenuState.y,
+        rect.width,
+        rect.height,
+      );
+      if (next.x !== columnMenuState.x || next.y !== columnMenuState.y) {
+        setColumnMenuState(next);
+      }
+    }
 
     const handlePointerDown = (event: MouseEvent) => {
       if (!columnMenuRef.current) return;
