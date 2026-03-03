@@ -13,7 +13,7 @@ import { logger } from "../lib/logger";
 export type ScanState = "idle" | "scanning" | "complete" | "cancelled";
 
 export function useScan() {
-  const [results, setResults] = useState<ChannelResult[]>([]);
+  const [results, setResults] = useState<(ChannelResult | null)[]>([]);
   const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [summary, setSummary] = useState<ScanSummary | null>(null);
   const [scanState, setScanState] = useState<ScanState>("idle");
@@ -147,13 +147,20 @@ export function useScan() {
 
       // Reset existing results back to pending status for channels being scanned.
       setResults((prev) => {
-        if (prev.length === totalChannels && prev.some((r) => r != null)) {
-          return prev.map((r) =>
-            r
-              ? selectedSet && !selectedSet.has(r.index)
-                ? r
+        const targetLength = prev.length > 0 ? prev.length : totalChannels;
+
+        if (targetLength > 0 && prev.some((r) => r != null)) {
+          const updated = new Array(targetLength).fill(null);
+
+          for (let i = 0; i < targetLength; i += 1) {
+            const existing = prev[i] ?? null;
+            if (!existing) continue;
+
+            updated[i] =
+              selectedSet && !selectedSet.has(existing.index)
+                ? existing
                 : {
-                    ...r,
+                    ...existing,
                     status: "pending" as const,
                     codec: null,
                     resolution: null,
@@ -168,11 +175,13 @@ export function useScan() {
                     low_framerate: false,
                     error_message: null,
                     stream_url: null,
-                  }
-              : r,
-          );
+                  };
+          }
+
+          return updated;
         }
-        return new Array(totalChannels).fill(null);
+
+        return new Array(targetLength).fill(null);
       });
       setProgress(null);
       setSummary(null);
@@ -209,29 +218,36 @@ export function useScan() {
       // Cancel any running scan and reset backend state
       await resetScan().catch(() => {});
 
-      const pending: ChannelResult[] = channels.map((ch) => ({
-        index: ch.index,
-        name: ch.name,
-        group: ch.group,
-        url: ch.url,
-        status: "pending" as const,
-        codec: null,
-        resolution: null,
-        width: null,
-        height: null,
-        fps: null,
-        video_bitrate: null,
-        audio_bitrate: null,
-        audio_codec: null,
-        screenshot_path: null,
-        label_mismatches: [],
-        low_framerate: false,
-        error_message: null,
-        channel_id: ch.url.split("/").pop()?.replace(".ts", "") ?? "Unknown",
-        extinf_line: ch.extinf_line,
-        metadata_lines: ch.metadata_lines,
-        stream_url: null,
-      }));
+      const maxIndex = channels.reduce(
+        (max, channel) => Math.max(max, channel.index),
+        -1,
+      );
+      const pending = new Array<ChannelResult | null>(maxIndex + 1).fill(null);
+      for (const ch of channels) {
+        pending[ch.index] = {
+          index: ch.index,
+          name: ch.name,
+          group: ch.group,
+          url: ch.url,
+          status: "pending" as const,
+          codec: null,
+          resolution: null,
+          width: null,
+          height: null,
+          fps: null,
+          video_bitrate: null,
+          audio_bitrate: null,
+          audio_codec: null,
+          screenshot_path: null,
+          label_mismatches: [],
+          low_framerate: false,
+          error_message: null,
+          channel_id: ch.url.split("/").pop()?.replace(".ts", "") ?? "Unknown",
+          extinf_line: ch.extinf_line,
+          metadata_lines: ch.metadata_lines,
+          stream_url: null,
+        };
+      }
       logger.debug(`[useScan] initFromPlaylist: ${pending.length} channels`);
       setResults(pending);
       setProgress(null);

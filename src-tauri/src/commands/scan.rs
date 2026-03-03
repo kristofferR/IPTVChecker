@@ -755,6 +755,16 @@ mod tests {
     }
 
     #[test]
+    fn selected_channel_filter_handles_sparse_indices() {
+        let mut channels = vec![make_channel(0), make_channel(2), make_channel(5)];
+        let selected = Some(vec![5, 0]);
+        filter_channels_by_selection(&mut channels, &selected);
+        assert_eq!(channels.len(), 2);
+        assert_eq!(channels[0].index, 0);
+        assert_eq!(channels[1].index, 5);
+    }
+
+    #[test]
     fn concurrent_start_guard_rejects_second_start() {
         let mut scanning = false;
         assert!(try_mark_scan_started(&mut scanning).is_ok());

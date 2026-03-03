@@ -223,7 +223,8 @@ pub fn parse_playlist(
 
     let mut channels = Vec::new();
     let mut groups = BTreeSet::new();
-    let mut index = 0usize;
+    let mut source_index = 0usize;
+    let mut pending_channel = false;
     let mut pending_extinf: Option<String> = None;
     let mut pending_metadata: Vec<String> = Vec::new();
 
@@ -237,6 +238,7 @@ pub fn parse_playlist(
 
         if line.starts_with("#EXTINF") {
             // A new EXTINF supersedes any pending entry that never got a stream URL.
+            pending_channel = true;
             pending_extinf = None;
             pending_metadata.clear();
 
@@ -249,25 +251,29 @@ pub fn parse_playlist(
             continue;
         }
 
-        if let Some(extinf_line) = pending_extinf.as_ref() {
+        if pending_channel {
             if line.is_empty() || line.starts_with('#') {
-                pending_metadata.push(line);
+                if pending_extinf.is_some() {
+                    pending_metadata.push(line);
+                }
                 continue;
             }
 
-            let name = get_channel_name(extinf_line);
-            let group = get_group_name(extinf_line);
-            channels.push(Channel {
-                index,
-                name,
-                group,
-                url: line,
-                extinf_line: extinf_line.clone(),
-                metadata_lines: std::mem::take(&mut pending_metadata),
-            });
-            index += 1;
+            if let Some(extinf_line) = pending_extinf.take() {
+                let name = get_channel_name(&extinf_line);
+                let group = get_group_name(&extinf_line);
+                channels.push(Channel {
+                    index: source_index,
+                    name,
+                    group,
+                    url: line,
+                    extinf_line,
+                    metadata_lines: std::mem::take(&mut pending_metadata),
+                });
+            }
 
-            pending_extinf = None;
+            pending_channel = false;
+            source_index += 1;
         }
     }
 
@@ -403,6 +409,58 @@ http://example.com/three.m3u8
         assert_eq!(preview.channels[1].name, "Channel Three");
         assert!(preview.groups.contains(&"Sports".to_string()));
         assert!(preview.groups.contains(&"News".to_string()));
+
+        std::fs::remove_file(path).expect("fixture file should be removable");
+    }
+
+    #[test]
+    fn test_parse_playlist_keeps_stable_indices_across_filters() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be monotonic")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("iptv-parser-stable-index-{unique}.m3u8"));
+
+        let playlist = "\
+#EXTM3U
+#EXTINF:-1 group-title=\"Sports\",Channel One
+http://example.com/one.m3u8
+#EXTINF:-1 group-title=\"News\",Channel Two
+http://example.com/two.m3u8
+#EXTINF:-1 group-title=\"Sports\",Channel Three
+http://example.com/three.m3u8
+";
+
+        std::fs::write(&path, playlist).expect("playlist fixture should be writable");
+
+        let unfiltered = parse_playlist(&path.to_string_lossy(), &None, &None)
+            .expect("unfiltered parse should succeed");
+        assert_eq!(
+            unfiltered.channels.iter().map(|c| c.index).collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+
+        let sports = parse_playlist(
+            &path.to_string_lossy(),
+            &Some("Sports".to_string()),
+            &None,
+        )
+        .expect("group filtered parse should succeed");
+        assert_eq!(
+            sports.channels.iter().map(|c| c.index).collect::<Vec<_>>(),
+            vec![0, 2]
+        );
+
+        let searched = parse_playlist(
+            &path.to_string_lossy(),
+            &None,
+            &Some("Three".to_string()),
+        )
+        .expect("search filtered parse should succeed");
+        assert_eq!(
+            searched.channels.iter().map(|c| c.index).collect::<Vec<_>>(),
+            vec![2]
+        );
 
         std::fs::remove_file(path).expect("fixture file should be removable");
     }
