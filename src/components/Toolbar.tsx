@@ -1,9 +1,11 @@
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   FolderOpen,
   Play,
   Square,
   Settings,
 } from "lucide-react";
+import type { PointerEvent } from "react";
 import type { ChannelResult } from "../lib/types";
 import type { ScanState } from "../hooks/useScan";
 import { ExportMenu } from "./ExportMenu";
@@ -23,6 +25,10 @@ interface ToolbarProps {
 const toolbarBtn =
   "flex items-center gap-2 px-3 py-1.5 min-h-9 text-[14px] rounded-md toolbar-btn disabled:opacity-40 disabled:pointer-events-none";
 
+const appWindow = getCurrentWindow();
+const dragIgnoreSelector =
+  "button, input, textarea, select, a, [role='button'], [contenteditable='true'], [data-no-window-drag]";
+
 export function Toolbar({
   onOpen,
   onStartScan,
@@ -37,8 +43,19 @@ export function Toolbar({
   const scanning = scanState === "scanning";
   const hasResults = results.length > 0;
 
+  const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+
+    const target = event.target as HTMLElement | null;
+    if (target?.closest(dragIgnoreSelector)) return;
+
+    event.preventDefault();
+    void appWindow.startDragging();
+  };
+
   return (
     <div
+      onPointerDown={handlePointerDown}
       data-tauri-drag-region
       className="flex items-center gap-1.5 px-3 border-b border-border-app bg-panel pt-[var(--toolbar-pt)] pb-2 pl-[var(--toolbar-pl)]"
     >
