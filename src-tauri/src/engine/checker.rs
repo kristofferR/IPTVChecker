@@ -84,8 +84,7 @@ async fn read_stream(
         match chunk_result {
             Ok(chunk) => {
                 if chunk.is_empty() {
-                    stable = false;
-                    break;
+                    continue;
                 }
                 bytes_read += chunk.len() as u64;
                 if bytes_read >= min_bytes {
