@@ -1,6 +1,8 @@
 import type { SortField } from "./filters";
 
 export type ColumnKey = SortField;
+export const COLUMN_ORDER_STORAGE_KEY = "iptv-checker.column-order.v1";
+export const COLUMN_WIDTH_STORAGE_KEY = "iptv-checker.column-widths.v1";
 
 export interface ColumnDefinition {
   key: ColumnKey;
@@ -20,6 +22,7 @@ export const COLUMN_DEFINITIONS: ColumnDefinition[] = [
   { key: "resolution", label: "Res", defaultWidth: 96, minWidth: 72, align: "center" },
   { key: "codec", label: "Codec", defaultWidth: 96, minWidth: 72, align: "center" },
   { key: "fps", label: "FPS", defaultWidth: 84, minWidth: 68, align: "center" },
+  { key: "latency", label: "Latency", defaultWidth: 102, minWidth: 84, align: "right" },
   { key: "bitrate", label: "Bitrate", defaultWidth: 124, minWidth: 90, align: "right" },
   { key: "audio", label: "Audio", defaultWidth: 126, minWidth: 90, align: "right" },
 ];
@@ -38,7 +41,7 @@ export const DEFAULT_COLUMN_ORDER: ColumnKey[] = COLUMN_DEFINITIONS.map(
 );
 
 export const DEFAULT_VISIBLE_COLUMN_ORDER: ColumnKey[] = DEFAULT_COLUMN_ORDER.filter(
-  (key) => key !== "url",
+  (key) => key !== "url" && key !== "latency",
 );
 
 export const DEFAULT_COLUMN_WIDTHS: Record<ColumnKey, number> =

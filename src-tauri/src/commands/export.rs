@@ -22,11 +22,20 @@ fn sanitize_csv_cell(value: &str) -> String {
     }
 }
 
+fn format_latency(latency_ms: Option<u64>) -> String {
+    match latency_ms {
+        Some(ms) if ms < 1000 => format!("{} ms", ms),
+        Some(ms) => format!("{:.1} s", ms as f64 / 1000.0),
+        None => "Unknown".to_string(),
+    }
+}
+
 #[tauri::command]
 pub async fn export_csv(
     results: Vec<ChannelResult>,
     path: String,
     playlist_name: String,
+    include_latency: bool,
 ) -> Result<(), AppError> {
     let file = std::fs::File::create(&path).map_err(AppError::Io)?;
     let mut writer = csv::WriterBuilder::new()
@@ -34,22 +43,24 @@ pub async fn export_csv(
         .from_writer(file);
 
     // Header matching Python CLI format
-    writer
-        .write_record([
-            "Playlist",
-            "Channel Number",
-            "Total Channels in Playlist",
-            "Channel Status",
-            "Group Name",
-            "Channel Name",
-            "Channel ID",
-            "Codec",
-            "Bit Rate (kbps)",
-            "Resolution",
-            "Frame Rate",
-            "Audio",
-        ])
-        .map_err(map_csv_error)?;
+    let mut headers = vec![
+        "Playlist".to_string(),
+        "Channel Number".to_string(),
+        "Total Channels in Playlist".to_string(),
+        "Channel Status".to_string(),
+        "Group Name".to_string(),
+        "Channel Name".to_string(),
+        "Channel ID".to_string(),
+        "Codec".to_string(),
+        "Bit Rate (kbps)".to_string(),
+        "Resolution".to_string(),
+        "Frame Rate".to_string(),
+        "Audio".to_string(),
+    ];
+    if include_latency {
+        headers.push("Latency".to_string());
+    }
+    writer.write_record(headers).map_err(map_csv_error)?;
 
     let total = results.len();
     for (i, r) in results.iter().enumerate() {
@@ -73,22 +84,25 @@ pub async fn export_csv(
             r.audio_codec.as_deref().unwrap_or("Unknown")
         );
 
-        writer
-            .write_record([
-                sanitize_csv_cell(playlist_cell),
-                (i + 1).to_string(),
-                total.to_string(),
-                sanitize_csv_cell(&status_str),
-                sanitize_csv_cell(&r.group),
-                sanitize_csv_cell(&r.name),
-                sanitize_csv_cell(&r.channel_id),
-                sanitize_csv_cell(codec),
-                sanitize_csv_cell(&bitrate),
-                sanitize_csv_cell(resolution),
-                sanitize_csv_cell(&fps),
-                sanitize_csv_cell(&audio),
-            ])
-            .map_err(map_csv_error)?;
+        let mut row = vec![
+            sanitize_csv_cell(playlist_cell),
+            (i + 1).to_string(),
+            total.to_string(),
+            sanitize_csv_cell(&status_str),
+            sanitize_csv_cell(&r.group),
+            sanitize_csv_cell(&r.name),
+            sanitize_csv_cell(&r.channel_id),
+            sanitize_csv_cell(codec),
+            sanitize_csv_cell(&bitrate),
+            sanitize_csv_cell(resolution),
+            sanitize_csv_cell(&fps),
+            sanitize_csv_cell(&audio),
+        ];
+        if include_latency {
+            row.push(sanitize_csv_cell(&format_latency(r.latency_ms)));
+        }
+
+        writer.write_record(row).map_err(map_csv_error)?;
     }
 
     writer.flush().map_err(AppError::Io)?;
@@ -333,6 +347,7 @@ mod tests {
             width: Some(1920),
             height: Some(1080),
             fps: Some(30),
+            latency_ms: Some(230),
             video_bitrate: Some("5000 kbps".to_string()),
             audio_bitrate: Some("192".to_string()),
             audio_codec: Some("AAC".to_string()),
@@ -389,7 +404,7 @@ mod tests {
             "+channel-id",
         )];
 
-        export_csv(results, path_string, "Playlist".to_string())
+        export_csv(results, path_string, "Playlist".to_string(), false)
             .await
             .expect("csv export should succeed");
 
@@ -408,6 +423,39 @@ mod tests {
         assert_eq!(row.get(4), Some("Sports,Live"));
         assert_eq!(row.get(6), Some("'+channel-id"));
         assert!(row.get(5).expect("name should exist").starts_with("'=2+2"));
+
+        std::fs::remove_file(path).expect("temporary csv should be removable");
+    }
+
+    #[tokio::test]
+    async fn export_csv_includes_latency_column_when_enabled() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be monotonic")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("iptv-export-csv-latency-{unique}.csv"));
+        let path_string = path.to_string_lossy().to_string();
+
+        let mut result = sample_result("Channel 1", "Sports", "channel-id");
+        result.latency_ms = Some(1200);
+
+        export_csv(vec![result], path_string, "Playlist".to_string(), true)
+            .await
+            .expect("csv export should succeed");
+
+        let mut reader = csv::ReaderBuilder::new()
+            .has_headers(true)
+            .from_path(&path)
+            .expect("csv file should be readable");
+        let headers = reader.headers().expect("headers should parse").clone();
+        assert_eq!(headers.get(12), Some("Latency"));
+
+        let rows: Vec<csv::StringRecord> = reader
+            .records()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("csv rows should parse");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].get(12), Some("1.2 s"));
 
         std::fs::remove_file(path).expect("temporary csv should be removable");
     }

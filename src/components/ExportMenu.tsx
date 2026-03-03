@@ -11,10 +11,32 @@ import {
 import type { ChannelResult } from "../lib/types";
 import { exportCsv, exportM3u, exportSplit, exportRenamed } from "../lib/tauri";
 import {
+  COLUMN_ORDER_STORAGE_KEY,
+  DEFAULT_VISIBLE_COLUMN_ORDER,
+  type ColumnKey,
+} from "../lib/tableColumns";
+import {
   HapticFeedbackPattern,
   PerformanceTime,
   triggerHaptic,
 } from "../lib/haptics";
+
+function readVisibleColumns(): ColumnKey[] {
+  const raw = localStorage.getItem(COLUMN_ORDER_STORAGE_KEY);
+  if (!raw) {
+    return DEFAULT_VISIBLE_COLUMN_ORDER;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return DEFAULT_VISIBLE_COLUMN_ORDER;
+    }
+    return parsed.filter((value): value is ColumnKey => typeof value === "string");
+  } catch {
+    return DEFAULT_VISIBLE_COLUMN_ORDER;
+  }
+}
 
 interface ExportMenuProps {
   results: ChannelResult[];
@@ -85,7 +107,12 @@ export function ExportMenu({
 
     setBusyAction("csv");
     try {
-      await exportCsv(results, path, playlistName);
+      await exportCsv(
+        results,
+        path,
+        playlistName,
+        readVisibleColumns().includes("latency"),
+      );
       setFeedback({
         kind: "success",
         message: `Exported CSV to ${path}.`,

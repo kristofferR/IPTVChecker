@@ -50,6 +50,7 @@ pub struct ChannelResult {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub fps: Option<u32>,
+    pub latency_ms: Option<u64>,
     pub video_bitrate: Option<String>,
     pub audio_bitrate: Option<String>,
     pub audio_codec: Option<String>,

@@ -5,6 +5,23 @@ import type {
 } from "../lib/tableColumns";
 import { StatusBadge } from "./StatusBadge";
 
+function formatLatency(latencyMs: number): string {
+  if (latencyMs < 1000) {
+    return `${latencyMs} ms`;
+  }
+  return `${(latencyMs / 1000).toFixed(1)} s`;
+}
+
+function latencyTone(latencyMs: number): string {
+  if (latencyMs < 500) {
+    return "text-green-400";
+  }
+  if (latencyMs <= 2000) {
+    return "text-yellow-400";
+  }
+  return "text-red-400";
+}
+
 interface ChannelRowProps {
   result: ChannelResult;
   onClick: (
@@ -92,6 +109,16 @@ export function ChannelRow({
             {isAlive && result.fps ? result.fps : "—"}
           </span>
         );
+      case "latency": {
+        if (result.latency_ms == null) {
+          return <span className="text-text-secondary tabular-nums">—</span>;
+        }
+        return (
+          <span className={`tabular-nums ${latencyTone(result.latency_ms)}`}>
+            {formatLatency(result.latency_ms)}
+          </span>
+        );
+      }
       case "bitrate":
         return (
           <span className="text-text-secondary tabular-nums">

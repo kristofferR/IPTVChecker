@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use url::Url;
@@ -19,27 +19,41 @@ const SECONDARY_GEOBLOCK_STATUSES: &[u16] = &[401, 423, 451];
 /// HTTP status codes that are typically transient and should be retried.
 const RETRYABLE_HTTP_STATUSES: &[u16] = &[408, 425, 429, 500, 502, 503, 504];
 
+fn elapsed_millis(started_at: Instant) -> u64 {
+    started_at
+        .elapsed()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
 /// Internal result from a single verification attempt.
 #[derive(Debug, PartialEq, Eq)]
 enum VerifyResult {
-    Alive(Option<String>),
-    Dead,
-    Geoblocked,
+    Alive {
+        stream_url: Option<String>,
+        latency_ms: Option<u64>,
+    },
+    Dead {
+        latency_ms: Option<u64>,
+    },
+    Geoblocked {
+        latency_ms: Option<u64>,
+    },
     Retry,
 }
 
-fn classify_non_ok_status(status_code: u16) -> VerifyResult {
+fn classify_non_ok_status(status_code: u16, latency_ms: Option<u64>) -> VerifyResult {
     if GEOBLOCK_STATUSES.contains(&status_code)
         || SECONDARY_GEOBLOCK_STATUSES.contains(&status_code)
     {
-        return VerifyResult::Geoblocked;
+        return VerifyResult::Geoblocked { latency_ms };
     }
 
     if RETRYABLE_HTTP_STATUSES.contains(&status_code) {
         return VerifyResult::Retry;
     }
 
-    VerifyResult::Dead
+    VerifyResult::Dead { latency_ms }
 }
 
 fn is_retryable_request_error(err: &reqwest::Error) -> bool {
@@ -183,10 +197,16 @@ fn extract_next_url(base_url: &str, playlist_body: &str) -> Option<String> {
 }
 
 /// Read from a streaming response, checking if we receive enough data.
-async fn read_stream(response: reqwest::Response, min_bytes: u64) -> VerifyResult {
+async fn read_stream(
+    response: reqwest::Response,
+    min_bytes: u64,
+    latency_ms: Option<u64>,
+    request_started_at: Instant,
+) -> VerifyResult {
     use futures::StreamExt;
 
     let mut bytes_read: u64 = 0;
+    let mut observed_latency_ms = latency_ms;
     let mut stable = true;
     let mut stream = response.bytes_stream();
 
@@ -196,9 +216,15 @@ async fn read_stream(response: reqwest::Response, min_bytes: u64) -> VerifyResul
                 if chunk.is_empty() {
                     continue;
                 }
+                if observed_latency_ms.is_none() {
+                    observed_latency_ms = Some(elapsed_millis(request_started_at));
+                }
                 bytes_read += chunk.len() as u64;
                 if bytes_read >= min_bytes {
-                    return VerifyResult::Alive(None);
+                    return VerifyResult::Alive {
+                        stream_url: None,
+                        latency_ms: observed_latency_ms,
+                    };
                 }
             }
             Err(_) => {
@@ -220,9 +246,14 @@ async fn read_stream(response: reqwest::Response, min_bytes: u64) -> VerifyResul
     };
 
     if bytes_read >= fallback {
-        VerifyResult::Alive(None)
+        VerifyResult::Alive {
+            stream_url: None,
+            latency_ms: observed_latency_ms.or(Some(elapsed_millis(request_started_at))),
+        }
     } else {
-        VerifyResult::Dead
+        VerifyResult::Dead {
+            latency_ms: observed_latency_ms.or(Some(elapsed_millis(request_started_at))),
+        }
     }
 }
 
@@ -234,9 +265,12 @@ async fn verify(
     depth: u32,
     visited: &mut HashSet<String>,
     headers: &HeaderMap,
+    root_latency_ms: Option<u64>,
 ) -> VerifyResult {
     if depth > MAX_PLAYLIST_DEPTH {
-        return VerifyResult::Dead;
+        return VerifyResult::Dead {
+            latency_ms: root_latency_ms,
+        };
     }
 
     let normalized = target_url
@@ -245,7 +279,9 @@ async fn verify(
         .unwrap_or(target_url)
         .to_string();
     if visited.contains(&normalized) {
-        return VerifyResult::Dead;
+        return VerifyResult::Dead {
+            latency_ms: root_latency_ms,
+        };
     }
     visited.insert(normalized);
 
@@ -254,20 +290,25 @@ async fn verify(
         .headers(headers.clone())
         .timeout(Duration::from_secs_f64(timeout_secs));
 
+    let request_started_at = Instant::now();
     let resp = match request.send().await {
         Ok(r) => r,
         Err(e) => {
             if is_retryable_request_error(&e) {
                 return VerifyResult::Retry;
             }
-            return VerifyResult::Dead;
+            return VerifyResult::Dead {
+                latency_ms: root_latency_ms,
+            };
         }
     };
+    let request_latency_ms = elapsed_millis(request_started_at);
+    let effective_root_latency = root_latency_ms.or(Some(request_latency_ms));
 
     let status_code = resp.status().as_u16();
 
     if status_code != 200 {
-        return classify_non_ok_status(status_code);
+        return classify_non_ok_status(status_code, effective_root_latency);
     }
 
     let content_type = resp
@@ -295,6 +336,7 @@ async fn verify(
             depth + 1,
             visited,
             headers,
+            effective_root_latency,
         ))
         .await;
     }
@@ -306,7 +348,9 @@ async fn verify(
             PLAYLIST_SEGMENT_THRESHOLD
         }
     } else if content_type.to_lowercase().starts_with("text/") {
-        return VerifyResult::Dead;
+        return VerifyResult::Dead {
+            latency_ms: effective_root_latency,
+        };
     } else {
         // Unrecognized content-type — attempt stream read
         if depth == 0 {
@@ -316,16 +360,19 @@ async fn verify(
         }
     };
 
-    let result = read_stream(resp, min_bytes).await;
-    match &result {
-        VerifyResult::Alive(_) => VerifyResult::Alive(Some(final_url)),
+    let result = read_stream(resp, min_bytes, root_latency_ms, request_started_at).await;
+    match result {
+        VerifyResult::Alive { latency_ms, .. } => VerifyResult::Alive {
+            stream_url: Some(final_url),
+            latency_ms,
+        },
         _ => result,
     }
 }
 
 /// Check the status of a single channel URL.
 ///
-/// Returns (ChannelStatus string, Option<stream_url>).
+/// Returns (ChannelStatus string, Option<stream_url>, Option<latency_ms>).
 pub async fn check_channel_status(
     client: &reqwest::Client,
     url: &str,
@@ -335,7 +382,7 @@ pub async fn check_channel_status(
     extended_timeout: Option<f64>,
     user_agent: &str,
     cancel_token: &tokio_util::sync::CancellationToken,
-) -> Result<(String, Option<String>), AppError> {
+) -> Result<(String, Option<String>, Option<u64>), AppError> {
     if !timeout.is_finite() || timeout <= 0.0 {
         return Err(AppError::Other(
             "Invalid timeout: must be greater than 0 seconds".to_string(),
@@ -382,21 +429,32 @@ pub async fn check_channel_status(
                     retry_backoff
                 );
                 let mut visited = HashSet::new();
-                let result =
-                    verify(&client, &url, current_timeout, 0, &mut visited, &headers).await;
+                let result = verify(
+                    &client,
+                    &url,
+                    current_timeout,
+                    0,
+                    &mut visited,
+                    &headers,
+                    None,
+                )
+                .await;
 
                 match result {
-                    VerifyResult::Alive(stream_url) => {
+                    VerifyResult::Alive {
+                        stream_url,
+                        latency_ms,
+                    } => {
                         log::info!("Channel alive: {}", url);
-                        return Ok(("Alive".to_string(), stream_url));
+                        return Ok(("Alive".to_string(), stream_url, latency_ms));
                     }
-                    VerifyResult::Dead => {
+                    VerifyResult::Dead { latency_ms } => {
                         log::info!("Channel dead: {}", url);
-                        return Ok(("Dead".to_string(), None));
+                        return Ok(("Dead".to_string(), None, latency_ms));
                     }
-                    VerifyResult::Geoblocked => {
+                    VerifyResult::Geoblocked { latency_ms } => {
                         log::info!("Channel geoblocked: {}", url);
-                        return Ok(("Geoblocked".to_string(), None));
+                        return Ok(("Geoblocked".to_string(), None, latency_ms));
                     }
                     VerifyResult::Retry => {
                         log::debug!("Retrying channel: {}", url);
@@ -409,21 +467,21 @@ pub async fn check_channel_status(
                     }
                 }
             }
-            Ok(("Dead".to_string(), None))
+            Ok(("Dead".to_string(), None, None))
         }
     };
 
-    let (status, stream_url) = attempt_check(timeout).await?;
+    let (status, stream_url, latency_ms) = attempt_check(timeout).await?;
 
     // If dead and extended timeout enabled, retry
     if status == "Dead" {
         if let Some(ext_timeout) = extended_timeout {
-            let (status2, stream_url2) = attempt_check(ext_timeout).await?;
-            return Ok((status2, stream_url2));
+            let (status2, stream_url2, latency2) = attempt_check(ext_timeout).await?;
+            return Ok((status2, stream_url2, latency2));
         }
     }
 
-    Ok((status, stream_url))
+    Ok((status, stream_url, latency_ms))
 }
 
 #[cfg(test)]
@@ -499,21 +557,31 @@ mod tests {
     #[test]
     fn test_retryable_status_classification() {
         for status in [408u16, 425, 429, 500, 502, 503, 504] {
-            assert_eq!(classify_non_ok_status(status), VerifyResult::Retry);
+            assert_eq!(classify_non_ok_status(status, Some(900)), VerifyResult::Retry);
         }
     }
 
     #[test]
     fn test_geoblock_status_classification() {
         for status in [401u16, 403, 423, 426, 451] {
-            assert_eq!(classify_non_ok_status(status), VerifyResult::Geoblocked);
+            assert_eq!(
+                classify_non_ok_status(status, Some(321)),
+                VerifyResult::Geoblocked {
+                    latency_ms: Some(321),
+                }
+            );
         }
     }
 
     #[test]
     fn test_terminal_status_classification() {
         for status in [400u16, 404, 405, 410] {
-            assert_eq!(classify_non_ok_status(status), VerifyResult::Dead);
+            assert_eq!(
+                classify_non_ok_status(status, Some(1234)),
+                VerifyResult::Dead {
+                    latency_ms: Some(1234),
+                }
+            );
         }
     }
 

@@ -29,6 +29,7 @@ export interface ChannelResult {
   width: number | null;
   height: number | null;
   fps: number | null;
+  latency_ms: number | null;
   video_bitrate: string | null;
   audio_bitrate: string | null;
   audio_codec: string | null;

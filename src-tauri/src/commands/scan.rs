@@ -18,6 +18,7 @@ static NEXT_SCAN_RUN_ID: AtomicU64 = AtomicU64::new(1);
 #[derive(Debug, Clone)]
 struct SharedUrlResult {
     status: ChannelStatus,
+    latency_ms: Option<u64>,
     codec: Option<String>,
     resolution: Option<String>,
     width: Option<u32>,
@@ -32,9 +33,10 @@ struct SharedUrlResult {
 }
 
 impl SharedUrlResult {
-    fn dead(stream_url: Option<String>) -> Self {
+    fn dead(stream_url: Option<String>, latency_ms: Option<u64>) -> Self {
         Self {
             status: ChannelStatus::Dead,
+            latency_ms,
             codec: None,
             resolution: None,
             width: None,
@@ -85,7 +87,7 @@ async fn compute_shared_url_result(
     screenshots_dir: Option<&String>,
     screenshot_file_name: &str,
 ) -> Result<SharedUrlResult, AppError> {
-    let (status_str, stream_url) = match checker::check_channel_status(
+    let (status_str, stream_url, latency_ms) = match checker::check_channel_status(
         client,
         channel_url,
         timeout,
@@ -99,7 +101,7 @@ async fn compute_shared_url_result(
     {
         Ok(r) => r,
         Err(AppError::Cancelled) => return Err(AppError::Cancelled),
-        Err(_) => ("Dead".to_string(), None),
+        Err(_) => ("Dead".to_string(), None, None),
     };
 
     let final_status_str = if status_str == "Geoblocked" && test_geoblock {
@@ -126,12 +128,13 @@ async fn compute_shared_url_result(
     };
 
     if status != ChannelStatus::Alive || cancel.is_cancelled() {
-        return Ok(SharedUrlResult::dead(stream_url));
+        return Ok(SharedUrlResult::dead(stream_url, latency_ms));
     }
 
     let target_url = stream_url.as_deref().unwrap_or(channel_url).to_string();
     let mut shared = SharedUrlResult {
         status,
+        latency_ms,
         codec: None,
         resolution: None,
         width: None,
@@ -708,7 +711,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                 let shared = match shared_result {
                     Ok(value) => value.clone(),
                     Err(AppError::Cancelled) => return,
-                    Err(_) => SharedUrlResult::dead(None),
+                    Err(_) => SharedUrlResult::dead(None, None),
                 };
 
                 let mut result = ChannelResult {
@@ -723,6 +726,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                     width: shared.width,
                     height: shared.height,
                     fps: shared.fps,
+                    latency_ms: shared.latency_ms,
                     video_bitrate: shared.video_bitrate.clone(),
                     audio_bitrate: shared.audio_bitrate.clone(),
                     audio_codec: shared.audio_codec.clone(),
@@ -948,6 +952,7 @@ mod tests {
             width: None,
             height: None,
             fps: None,
+            latency_ms: None,
             video_bitrate: None,
             audio_bitrate: None,
             audio_codec: None,

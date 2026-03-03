@@ -121,6 +121,7 @@ mod tests {
             width: None,
             height: None,
             fps: None,
+            latency_ms: None,
             video_bitrate: None,
             audio_bitrate: None,
             audio_codec: None,

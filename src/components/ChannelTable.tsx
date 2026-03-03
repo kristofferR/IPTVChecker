@@ -4,6 +4,8 @@ import type { ChannelResult } from "../lib/types";
 import type { SortDirection, SortField } from "../lib/filters";
 import { filterResults, sortResults } from "../lib/filters";
 import {
+  COLUMN_ORDER_STORAGE_KEY,
+  COLUMN_WIDTH_STORAGE_KEY,
   COLUMN_DEFINITIONS,
   COLUMN_DEFINITION_MAP,
   DEFAULT_COLUMN_ORDER,
@@ -25,9 +27,6 @@ interface ChannelTableProps {
   onSelectionChange?: (selectedIndices: number[]) => void;
   onScanSelected?: (selectedIndices: number[]) => void;
 }
-
-const ORDER_STORAGE_KEY = "iptv-checker.column-order.v1";
-const WIDTH_STORAGE_KEY = "iptv-checker.column-widths.v1";
 
 function parseStoredOrder(raw: string | null): ColumnKey[] {
   if (!raw) return DEFAULT_VISIBLE_COLUMN_ORDER;
@@ -147,18 +146,18 @@ export function ChannelTable({
     width: number;
   } | null>(null);
   const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(() =>
-    parseStoredOrder(localStorage.getItem(ORDER_STORAGE_KEY)),
+    parseStoredOrder(localStorage.getItem(COLUMN_ORDER_STORAGE_KEY)),
   );
   const [columnWidths, setColumnWidths] = useState<Record<ColumnKey, number>>(
-    () => parseStoredWidths(localStorage.getItem(WIDTH_STORAGE_KEY)),
+    () => parseStoredWidths(localStorage.getItem(COLUMN_WIDTH_STORAGE_KEY)),
   );
 
   useEffect(() => {
-    localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(columnOrder));
+    localStorage.setItem(COLUMN_ORDER_STORAGE_KEY, JSON.stringify(columnOrder));
   }, [columnOrder]);
 
   useEffect(() => {
-    localStorage.setItem(WIDTH_STORAGE_KEY, JSON.stringify(columnWidths));
+    localStorage.setItem(COLUMN_WIDTH_STORAGE_KEY, JSON.stringify(columnWidths));
   }, [columnWidths]);
 
   const columns = useMemo(

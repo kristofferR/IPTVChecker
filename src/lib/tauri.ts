@@ -71,8 +71,14 @@ export async function exportCsv(
   results: ChannelResult[],
   path: string,
   playlistName: string,
+  includeLatency: boolean,
 ): Promise<void> {
-  return invoke("export_csv", { results, path, playlistName });
+  return invoke("export_csv", {
+    results,
+    path,
+    playlistName,
+    includeLatency,
+  });
 }
 
 export async function exportSplit(

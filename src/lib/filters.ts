@@ -10,6 +10,7 @@ export type SortField =
   | "resolution"
   | "codec"
   | "fps"
+  | "latency"
   | "bitrate"
   | "audio";
 
@@ -63,6 +64,19 @@ export function sortResults(
         return (a.codec ?? "").localeCompare(b.codec ?? "") * dir;
       case "fps":
         return ((a.fps ?? 0) - (b.fps ?? 0)) * dir;
+      case "latency": {
+        const aLatency = a.latency_ms;
+        const bLatency = b.latency_ms;
+        if (aLatency == null && bLatency == null) {
+          return (a.index - b.index) * dir;
+        }
+        if (aLatency == null) return 1;
+        if (bLatency == null) return -1;
+        if (aLatency === bLatency) {
+          return (a.index - b.index) * dir;
+        }
+        return (aLatency - bLatency) * dir;
+      }
       case "bitrate":
         return (
           (parseInt(a.video_bitrate ?? "0") -
