@@ -579,10 +579,10 @@ export function ChannelTable({
             {columns.map((column, columnIndex) => {
               const alignClass =
                 column.align === "right"
-                  ? "justify-self-end"
+                  ? "justify-end"
                   : column.align === "center"
-                    ? "justify-self-center"
-                    : "justify-self-start";
+                    ? "justify-center"
+                    : "justify-start";
 
               return (
                 <div
@@ -595,7 +595,7 @@ export function ChannelTable({
                   onDrop={(event) => {
                     handleColumnDrop(column.key, event);
                   }}
-                  className={`relative flex items-center h-full ${alignClass} ${
+                  className={`relative flex items-center h-full w-full ${alignClass} ${
                     draggedColumn === column.key ? "opacity-45" : ""
                   } ${
                     dragOverColumn === column.key
