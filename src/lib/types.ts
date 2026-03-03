@@ -114,6 +114,7 @@ export interface AppSettings {
   test_geoblock: boolean;
   screenshots_dir: string | null;
   scan_history_limit: number;
+  scan_notifications: boolean;
   theme: ThemePreference;
   log_level: string;
 }

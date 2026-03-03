@@ -2,6 +2,12 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+  isPermissionGranted,
+  onAction,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
 import type {
   ChannelResult,
   PlaylistPreview,
@@ -137,6 +143,26 @@ function readCachedUpdateNotice(): UpdateNotice | null {
     return parsed;
   } catch {
     return null;
+  }
+}
+
+function formatScanNotificationBody(stats: {
+  alive: number;
+  dead: number;
+  geoblocked: number;
+}): string {
+  return `Alive ${stats.alive} | Dead ${stats.dead} | Geoblocked ${stats.geoblocked}`;
+}
+
+async function canSendNotifications(): Promise<boolean> {
+  try {
+    if (await isPermissionGranted()) {
+      return true;
+    }
+    const permission = await requestPermission();
+    return permission === "granted";
+  } catch {
+    return false;
   }
 }
 
@@ -697,6 +723,36 @@ export default function App() {
   const previousScanStateRef = useRef(scanState);
 
   useEffect(() => {
+    let active = true;
+    let actionListener: { unregister: () => Promise<void> } | null = null;
+
+    onAction(() => {
+      if (!active) return;
+      const mainWindow = getCurrentWindow();
+      void mainWindow.unminimize().catch(() => {});
+      void mainWindow.show().catch(() => {});
+      void mainWindow.setFocus().catch(() => {});
+    })
+      .then((listener) => {
+        if (!active) {
+          void listener.unregister();
+          return;
+        }
+        actionListener = listener;
+      })
+      .catch(() => {
+        // Notification action listener unavailable on this platform/runtime.
+      });
+
+    return () => {
+      active = false;
+      if (actionListener) {
+        void actionListener.unregister();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (!playlist) {
       setHistoryEntries([]);
       setHistoryError(null);
@@ -710,16 +766,38 @@ export default function App() {
   useEffect(() => {
     const previousScanState = previousScanStateRef.current;
     previousScanStateRef.current = scanState;
+    const justFinished =
+      previousScanState === "scanning" || previousScanState === "paused";
 
-    if (scanState !== "complete" || !playlist) return;
-    void refreshHistory();
-    if (previousScanState === "scanning" || previousScanState === "paused") {
+    if (scanState === "complete" && playlist) {
+      void refreshHistory();
+    }
+
+    if (!justFinished) return;
+
+    if (scanState === "complete") {
       void triggerHaptic(
         HapticFeedbackPattern.Generic,
         PerformanceTime.DrawCompleted,
       );
     }
-  }, [scanState, summary, playlist, refreshHistory]);
+
+    if (!settings.scan_notifications || !summary) return;
+    if (scanState !== "complete" && scanState !== "cancelled") return;
+
+    const title = scanState === "complete" ? "Scan complete" : "Scan cancelled";
+    const playlistPrefix = playlist ? `${playlist.file_name} | ` : "";
+    const body = `${playlistPrefix}${formatScanNotificationBody(summary)}`;
+
+    void (async () => {
+      if (!(await canSendNotifications())) return;
+      sendNotification({
+        title,
+        body,
+        autoCancel: true,
+      });
+    })();
+  }, [scanState, settings.scan_notifications, summary, playlist, refreshHistory]);
 
   const handleDroppedPaths = useCallback((paths: string[]) => {
     const playlistPath = paths.find((path) =>

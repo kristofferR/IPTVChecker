@@ -20,6 +20,7 @@ pub fn run() {
                 .level(log::LevelFilter::Trace)
                 .build(),
         )
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_liquid_glass::init())
         .plugin(tauri_plugin_os::init());
 

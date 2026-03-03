@@ -443,6 +443,21 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                 </p>
               </div>
 
+              <label className={toggleRowClass}>
+                <input
+                  type="checkbox"
+                  checked={draft.scan_notifications}
+                  onChange={(event) => update("scan_notifications", event.target.checked)}
+                  className="mt-[2px] h-4 w-4 rounded border-border-app"
+                />
+                <span>
+                  <span className="block text-[13px] font-medium">Scan completion notifications</span>
+                  <span className="block text-[11px] text-text-tertiary mt-0.5">
+                    Show native OS notifications when scans complete or are cancelled.
+                  </span>
+                </span>
+              </label>
+
               <div>
               <label className={labelClass}>Log Level</label>
               <select

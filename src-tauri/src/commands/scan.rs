@@ -784,7 +784,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                 "scan://cancelled",
                 ScanEvent {
                     run_id: run_id_for_task.clone(),
-                    payload: (),
+                    payload: summary.clone(),
                 },
             );
             cleanup_resume_files(&log_file_for_task, &checkpoint_file_for_task);

@@ -15,6 +15,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   test_geoblock: false,
   screenshots_dir: null,
   scan_history_limit: 20,
+  scan_notifications: true,
   theme: "system",
   log_level: "error",
 };

@@ -102,11 +102,12 @@ export function useScan() {
       );
 
       unlisteners.push(
-        await listen<ScanEvent<null>>("scan://cancelled", (event) => {
+        await listen<ScanEvent<ScanSummary>>("scan://cancelled", (event) => {
           if (!activeRunId.current || event.payload.run_id !== activeRunId.current) {
             return;
           }
-          logger.debug("[useScan] scan://cancelled received");
+          logger.debug("[useScan] scan://cancelled received", event.payload);
+          setSummary(event.payload.payload);
           setScanState("cancelled");
           activeRunId.current = null;
         }),

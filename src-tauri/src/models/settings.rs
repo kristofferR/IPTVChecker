@@ -31,6 +31,7 @@ pub struct AppSettings {
     pub test_geoblock: bool,
     pub screenshots_dir: Option<String>,
     pub scan_history_limit: u32,
+    pub scan_notifications: bool,
     pub theme: ThemePreference,
     pub log_level: String,
 }
@@ -62,8 +63,27 @@ impl Default for AppSettings {
             test_geoblock: false,
             screenshots_dir: None,
             scan_history_limit: 20,
+            scan_notifications: true,
             theme: ThemePreference::System,
             log_level: "error".to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppSettings;
+
+    #[test]
+    fn default_enables_scan_notifications() {
+        let settings = AppSettings::default();
+        assert!(settings.scan_notifications);
+    }
+
+    #[test]
+    fn deserialize_missing_scan_notifications_defaults_to_true() {
+        let settings: AppSettings = serde_json::from_value(serde_json::json!({}))
+            .expect("settings should deserialize with defaults");
+        assert!(settings.scan_notifications);
     }
 }
