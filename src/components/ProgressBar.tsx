@@ -1,12 +1,28 @@
 import type { ScanProgress } from "../lib/types";
 import type { ScanState } from "../hooks/useScan";
 
+function formatEta(seconds: number | null): string {
+  if (seconds == null || !Number.isFinite(seconds)) return "—";
+  const totalSeconds = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${secs}s`;
+  return `${secs}s`;
+}
+
 export function ProgressBar({
   progress,
   scanState,
+  throughputChannelsPerSecond,
+  etaSeconds,
 }: {
   progress: ScanProgress | null;
   scanState: ScanState;
+  throughputChannelsPerSecond: number | null;
+  etaSeconds: number | null;
 }) {
   if (!progress) return null;
 
@@ -14,6 +30,13 @@ export function ProgressBar({
     progress.total > 0
       ? Math.round((progress.completed / progress.total) * 100)
       : 0;
+
+  const telemetryLabel =
+    throughputChannelsPerSecond == null
+      ? scanState === "scanning"
+        ? "Speed/ETA: collecting sample..."
+        : "Speed/ETA: —"
+      : `${throughputChannelsPerSecond.toFixed(2)} ch/s • ETA ${formatEta(etaSeconds)}`;
 
   return (
     <div className="px-4 py-2 border-t border-border-app bg-panel-subtle">
@@ -32,6 +55,9 @@ export function ProgressBar({
             Paused
           </span>
         )}
+      </div>
+      <div className="mt-1 text-[11px] text-text-tertiary tabular-nums">
+        {telemetryLabel}
       </div>
     </div>
   );

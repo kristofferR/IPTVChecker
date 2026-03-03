@@ -16,6 +16,22 @@ import {
 } from "../lib/scanErrorEvents";
 
 export type ScanState = "idle" | "scanning" | "paused" | "complete" | "cancelled";
+interface ScanTelemetry {
+  throughputChannelsPerSecond: number | null;
+  etaSeconds: number | null;
+}
+
+const EMPTY_TELEMETRY: ScanTelemetry = {
+  throughputChannelsPerSecond: null,
+  etaSeconds: null,
+};
+
+interface RunClockState {
+  runId: string;
+  startedAtMs: number;
+  pausedAtMs: number | null;
+  accumulatedPausedMs: number;
+}
 
 export function useScan() {
   const [results, setResults] = useState<(ChannelResult | null)[]>([]);
@@ -23,6 +39,7 @@ export function useScan() {
   const [summary, setSummary] = useState<ScanSummary | null>(null);
   const [scanState, setScanState] = useState<ScanState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [telemetry, setTelemetry] = useState<ScanTelemetry>(EMPTY_TELEMETRY);
 
   // Batch incoming results with requestAnimationFrame
   const pendingResults = useRef<ChannelResult[]>([]);
@@ -30,6 +47,7 @@ export function useScan() {
   const eventCount = useRef(0);
   const activeRunId = useRef<string | null>(null);
   const pendingScanError = useRef<ScanEvent<ScanErrorPayload> | null>(null);
+  const runClock = useRef<RunClockState | null>(null);
 
   // Reset backend scan state on mount (handles app restart with stale flag)
   useEffect(() => {
@@ -74,7 +92,9 @@ export function useScan() {
   const applyScanError = useCallback((message: string) => {
     setError(message);
     setScanState("idle");
+    setTelemetry(EMPTY_TELEMETRY);
     activeRunId.current = null;
+    runClock.current = null;
   }, []);
 
   useEffect(() => {
@@ -97,7 +117,40 @@ export function useScan() {
           if (!activeRunId.current || event.payload.run_id !== activeRunId.current) {
             return;
           }
-          setProgress(event.payload.payload);
+          const nextProgress = event.payload.payload;
+          setProgress(nextProgress);
+
+          const now = performance.now();
+          const activeRun = runClock.current;
+          if (!activeRun || activeRun.runId !== event.payload.run_id) {
+            return;
+          }
+
+          const pausedNowMs =
+            activeRun.pausedAtMs == null ? 0 : now - activeRun.pausedAtMs;
+          const activeElapsedMs = Math.max(
+            0,
+            now - activeRun.startedAtMs - activeRun.accumulatedPausedMs - pausedNowMs,
+          );
+          const activeElapsedSeconds = activeElapsedMs / 1000;
+
+          if (nextProgress.completed < 2 || activeElapsedSeconds < 1) {
+            setTelemetry(EMPTY_TELEMETRY);
+            return;
+          }
+
+          const throughput = nextProgress.completed / activeElapsedSeconds;
+          if (!Number.isFinite(throughput) || throughput <= 0) {
+            setTelemetry(EMPTY_TELEMETRY);
+            return;
+          }
+
+          const remaining = Math.max(0, nextProgress.total - nextProgress.completed);
+          const etaSeconds = remaining > 0 ? remaining / throughput : 0;
+          setTelemetry({
+            throughputChannelsPerSecond: throughput,
+            etaSeconds: Number.isFinite(etaSeconds) ? etaSeconds : null,
+          });
         }),
       );
 
@@ -109,8 +162,10 @@ export function useScan() {
           logger.debug("[useScan] scan://complete received", event.payload);
           setSummary(event.payload.payload);
           setScanState("complete");
+          setTelemetry(EMPTY_TELEMETRY);
           pendingScanError.current = null;
           activeRunId.current = null;
+          runClock.current = null;
         }),
       );
 
@@ -122,8 +177,10 @@ export function useScan() {
           logger.debug("[useScan] scan://cancelled received", event.payload);
           setSummary(event.payload.payload);
           setScanState("cancelled");
+          setTelemetry(EMPTY_TELEMETRY);
           pendingScanError.current = null;
           activeRunId.current = null;
+          runClock.current = null;
         }),
       );
 
@@ -131,6 +188,10 @@ export function useScan() {
         await listen<ScanEvent<null>>("scan://paused", (event) => {
           if (!activeRunId.current || event.payload.run_id !== activeRunId.current) {
             return;
+          }
+          const activeRun = runClock.current;
+          if (activeRun && activeRun.runId === event.payload.run_id) {
+            activeRun.pausedAtMs = performance.now();
           }
           setScanState("paused");
         }),
@@ -140,6 +201,16 @@ export function useScan() {
         await listen<ScanEvent<null>>("scan://resumed", (event) => {
           if (!activeRunId.current || event.payload.run_id !== activeRunId.current) {
             return;
+          }
+          const now = performance.now();
+          const activeRun = runClock.current;
+          if (
+            activeRun &&
+            activeRun.runId === event.payload.run_id &&
+            activeRun.pausedAtMs != null
+          ) {
+            activeRun.accumulatedPausedMs += now - activeRun.pausedAtMs;
+            activeRun.pausedAtMs = null;
           }
           setScanState("scanning");
         }),
@@ -233,14 +304,22 @@ export function useScan() {
       setSummary(null);
       setError(null);
       setScanState("scanning");
+      setTelemetry(EMPTY_TELEMETRY);
       pendingResults.current = [];
       eventCount.current = 0;
       activeRunId.current = null;
       pendingScanError.current = null;
+      runClock.current = null;
 
       try {
         const runId = await startScan(config);
         activeRunId.current = runId;
+        runClock.current = {
+          runId,
+          startedAtMs: performance.now(),
+          pausedAtMs: null,
+          accumulatedPausedMs: 0,
+        };
         logger.debug(`[useScan] startScan IPC returned run_id=${runId}`);
         const pendingMessage = pendingScanErrorMessageForRun(
           pendingScanError.current,
@@ -255,7 +334,9 @@ export function useScan() {
         pendingScanError.current = null;
         setError(String(err));
         setScanState("idle");
+        setTelemetry(EMPTY_TELEMETRY);
         activeRunId.current = null;
+        runClock.current = null;
       }
     },
     [applyScanError],
@@ -328,10 +409,12 @@ export function useScan() {
       setSummary(null);
       setError(null);
       setScanState("idle");
+      setTelemetry(EMPTY_TELEMETRY);
       pendingResults.current = [];
       eventCount.current = 0;
       activeRunId.current = null;
       pendingScanError.current = null;
+      runClock.current = null;
     },
     [],
   );
@@ -342,6 +425,7 @@ export function useScan() {
     summary,
     scanState,
     error,
+    telemetry,
     start,
     cancel,
     pause,

@@ -296,6 +296,7 @@ export default function App() {
     summary,
     scanState,
     error,
+    telemetry,
     start,
     cancel,
     pause,
@@ -1473,7 +1474,12 @@ export default function App() {
         scanState={scanState}
         totalChannels={playlist?.total_channels ?? 0}
       />
-      <ProgressBar progress={progress} scanState={scanState} />
+      <ProgressBar
+        progress={progress}
+        scanState={scanState}
+        throughputChannelsPerSecond={telemetry.throughputChannelsPerSecond}
+        etaSeconds={telemetry.etaSeconds}
+      />
 
       {openSourceDialogState && (
         <OpenSourceDialog
