@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter, Manager};
@@ -10,6 +10,183 @@ use crate::error::AppError;
 use crate::models::channel::{ChannelResult, ChannelStatus};
 use crate::models::scan::{ScanConfig, ScanProgress, ScanSummary};
 use crate::state::AppState;
+
+#[derive(Debug, Clone)]
+struct SharedUrlResult {
+    status: ChannelStatus,
+    codec: Option<String>,
+    resolution: Option<String>,
+    width: Option<u32>,
+    height: Option<u32>,
+    fps: Option<u32>,
+    video_bitrate: Option<String>,
+    audio_bitrate: Option<String>,
+    audio_codec: Option<String>,
+    screenshot_path: Option<String>,
+    low_framerate: bool,
+    stream_url: Option<String>,
+}
+
+impl SharedUrlResult {
+    fn dead(stream_url: Option<String>) -> Self {
+        Self {
+            status: ChannelStatus::Dead,
+            codec: None,
+            resolution: None,
+            width: None,
+            height: None,
+            fps: None,
+            video_bitrate: None,
+            audio_bitrate: None,
+            audio_codec: None,
+            screenshot_path: None,
+            low_framerate: false,
+            stream_url,
+        }
+    }
+}
+
+fn canonicalize_stream_url(url: &str) -> String {
+    let trimmed = url.trim();
+    let Ok(mut parsed) = reqwest::Url::parse(trimmed) else {
+        return trimmed.to_string();
+    };
+    parsed.set_fragment(None);
+
+    if (parsed.scheme() == "http" && parsed.port() == Some(80))
+        || (parsed.scheme() == "https" && parsed.port() == Some(443))
+    {
+        let _ = parsed.set_port(None);
+    }
+
+    parsed.to_string()
+}
+
+async fn compute_shared_url_result(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    channel_url: &str,
+    timeout: f64,
+    retries: u32,
+    extended_timeout: Option<f64>,
+    user_agent: &str,
+    cancel: &CancellationToken,
+    proxy_list: &Option<Vec<String>>,
+    test_geoblock: bool,
+    ffmpeg_ok: bool,
+    ffprobe_ok: bool,
+    profile_bitrate_flag: bool,
+    skip_screenshots: bool,
+    screenshots_dir: Option<&String>,
+    screenshot_file_name: &str,
+) -> Result<SharedUrlResult, AppError> {
+    let (status_str, stream_url) = match checker::check_channel_status(
+        client,
+        channel_url,
+        timeout,
+        retries,
+        extended_timeout,
+        user_agent,
+        cancel,
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(AppError::Cancelled) => return Err(AppError::Cancelled),
+        Err(_) => ("Dead".to_string(), None),
+    };
+
+    let final_status_str = if status_str == "Geoblocked" && test_geoblock {
+        if let Some(proxies) = proxy_list {
+            if !proxies.is_empty() {
+                proxy::confirm_geoblock(channel_url, proxies, timeout).await
+            } else {
+                status_str
+            }
+        } else {
+            status_str
+        }
+    } else {
+        status_str
+    };
+
+    let status = match final_status_str.as_str() {
+        "Alive" => ChannelStatus::Alive,
+        "Dead" => ChannelStatus::Dead,
+        "Geoblocked" => ChannelStatus::Geoblocked,
+        "Geoblocked (Confirmed)" => ChannelStatus::GeoblockedConfirmed,
+        "Geoblocked (Unconfirmed)" => ChannelStatus::GeoblockedUnconfirmed,
+        _ => ChannelStatus::Dead,
+    };
+
+    if status != ChannelStatus::Alive || cancel.is_cancelled() {
+        return Ok(SharedUrlResult::dead(stream_url));
+    }
+
+    let target_url = stream_url
+        .as_deref()
+        .unwrap_or(channel_url)
+        .to_string();
+    let mut shared = SharedUrlResult {
+        status,
+        codec: None,
+        resolution: None,
+        width: None,
+        height: None,
+        fps: None,
+        video_bitrate: None,
+        audio_bitrate: None,
+        audio_codec: None,
+        screenshot_path: None,
+        low_framerate: false,
+        stream_url,
+    };
+
+    if ffprobe_ok {
+        if let Ok(info) = ffmpeg::get_stream_info(app, &target_url, cancel).await {
+            shared.codec = Some(info.codec);
+            shared.resolution = Some(info.resolution.clone());
+            shared.width = info.width;
+            shared.height = info.height;
+            shared.fps = info.fps;
+            shared.low_framerate = info.fps.map(|fps| fps < 29).unwrap_or(false);
+        }
+
+        if !cancel.is_cancelled() {
+            if let Ok(audio) = ffmpeg::get_audio_info(app, &target_url, cancel).await {
+                shared.audio_codec = Some(audio.codec);
+                shared.audio_bitrate = audio.bitrate_kbps.map(|b| format!("{}", b));
+            }
+        }
+
+        if !cancel.is_cancelled() && profile_bitrate_flag && ffmpeg_ok {
+            if let Ok(bitrate) =
+                ffmpeg::profile_bitrate(app, &target_url, user_agent, cancel).await
+            {
+                shared.video_bitrate = Some(bitrate);
+            }
+        }
+    }
+
+    if !cancel.is_cancelled() && !skip_screenshots && ffmpeg_ok {
+        if let Some(dir) = screenshots_dir {
+            if let Ok(path) = ffmpeg::capture_screenshot(
+                app,
+                &target_url,
+                dir,
+                screenshot_file_name,
+                user_agent,
+                cancel,
+            )
+            .await
+            {
+                shared.screenshot_path = Some(path);
+            }
+        }
+    }
+
+    Ok(shared)
+}
 
 #[tauri::command]
 pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppError> {
@@ -208,6 +385,11 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
 
         // Process channels
         let proxy_list = Arc::new(proxy_list);
+        let shared_url_results: Arc<
+            tokio::sync::Mutex<
+                HashMap<String, Arc<tokio::sync::OnceCell<Result<SharedUrlResult, AppError>>>>,
+            >,
+        > = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
         let mut handles = Vec::new();
 
         for channel in channels {
@@ -237,50 +419,53 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
             let ffmpeg_ok = ffmpeg_available;
             let ffprobe_ok = ffprobe_available;
             let task_app = app_handle.clone();
+            let shared_url_results = Arc::clone(&shared_url_results);
 
             let handle = tokio::spawn(async move {
                 if cancel.is_cancelled() {
                     return;
                 }
 
-                let (status_str, stream_url) = match checker::check_channel_status(
-                    &client,
-                    &channel.url,
-                    timeout,
-                    retries,
-                    extended_timeout,
-                    &user_agent,
-                    &cancel,
-                )
-                .await
-                {
-                    Ok(r) => r,
+                let canonical_url = canonicalize_stream_url(&channel.url);
+                let result_cell = {
+                    let mut cache = shared_url_results.lock().await;
+                    cache
+                        .entry(canonical_url)
+                        .or_insert_with(|| Arc::new(tokio::sync::OnceCell::new()))
+                        .clone()
+                };
+
+                let screenshot_file_name =
+                    ffmpeg::build_screenshot_file_name(channel.index, &channel.name);
+
+                let shared_result = result_cell
+                    .get_or_init(|| async {
+                        compute_shared_url_result(
+                            &task_app,
+                            &client,
+                            &channel.url,
+                            timeout,
+                            retries,
+                            extended_timeout,
+                            &user_agent,
+                            &cancel,
+                            &proxy_list,
+                            test_geoblock,
+                            ffmpeg_ok,
+                            ffprobe_ok,
+                            profile_bitrate_flag,
+                            skip_screenshots,
+                            screenshots_dir.as_ref(),
+                            &screenshot_file_name,
+                        )
+                        .await
+                    })
+                    .await;
+
+                let shared = match shared_result {
+                    Ok(value) => value.clone(),
                     Err(AppError::Cancelled) => return,
-                    Err(_) => ("Dead".to_string(), None),
-                };
-
-                // Handle geoblock proxy confirmation
-                let final_status_str = if status_str == "Geoblocked" && test_geoblock {
-                    if let Some(ref proxies) = *proxy_list {
-                        if !proxies.is_empty() {
-                            proxy::confirm_geoblock(&channel.url, proxies, timeout).await
-                        } else {
-                            status_str
-                        }
-                    } else {
-                        status_str
-                    }
-                } else {
-                    status_str
-                };
-
-                let status = match final_status_str.as_str() {
-                    "Alive" => ChannelStatus::Alive,
-                    "Dead" => ChannelStatus::Dead,
-                    "Geoblocked" => ChannelStatus::Geoblocked,
-                    "Geoblocked (Confirmed)" => ChannelStatus::GeoblockedConfirmed,
-                    "Geoblocked (Unconfirmed)" => ChannelStatus::GeoblockedUnconfirmed,
-                    _ => ChannelStatus::Dead,
+                    Err(_) => SharedUrlResult::dead(None),
                 };
 
                 let mut result = ChannelResult {
@@ -288,87 +473,29 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
                     name: channel.name.clone(),
                     group: channel.group.clone(),
                     url: channel.url.clone(),
-                    status: status.clone(),
-                    codec: None,
-                    resolution: None,
-                    width: None,
-                    height: None,
-                    fps: None,
-                    video_bitrate: None,
-                    audio_bitrate: None,
-                    audio_codec: None,
-                    screenshot_path: None,
+                    status: shared.status.clone(),
+                    codec: shared.codec.clone(),
+                    resolution: shared.resolution.clone(),
+                    width: shared.width,
+                    height: shared.height,
+                    fps: shared.fps,
+                    video_bitrate: shared.video_bitrate.clone(),
+                    audio_bitrate: shared.audio_bitrate.clone(),
+                    audio_codec: shared.audio_codec.clone(),
+                    screenshot_path: shared.screenshot_path.clone(),
                     label_mismatches: Vec::new(),
-                    low_framerate: false,
+                    low_framerate: shared.low_framerate,
                     error_message: None,
                     channel_id: parser::get_channel_id(&channel.url),
                     extinf_line: channel.extinf_line.clone(),
                     metadata_lines: channel.metadata_lines.clone(),
-                    stream_url: stream_url.clone(),
+                    stream_url: shared.stream_url.clone(),
                 };
 
-                // Get metadata for alive channels
-                if status == ChannelStatus::Alive && !cancel.is_cancelled() {
-                    let target_url = stream_url.as_deref().unwrap_or(&channel.url);
-
-                    if ffprobe_ok {
-                        if let Ok(info) =
-                            ffmpeg::get_stream_info(&task_app, target_url, &cancel).await
-                        {
-                            result.codec = Some(info.codec);
-                            result.resolution = Some(info.resolution.clone());
-                            result.width = info.width;
-                            result.height = info.height;
-                            result.fps = info.fps;
-
-                            if let Some(fps) = info.fps {
-                                if fps < 29 {
-                                    result.low_framerate = true;
-                                }
-                            }
-
-                            let mismatches =
-                                ffmpeg::check_label_mismatch(&channel.name, &info.resolution);
-                            result.label_mismatches = mismatches;
-                        }
-
-                        if !cancel.is_cancelled() {
-                            if let Ok(audio) =
-                                ffmpeg::get_audio_info(&task_app, target_url, &cancel).await
-                            {
-                                result.audio_codec = Some(audio.codec);
-                                result.audio_bitrate = audio.bitrate_kbps.map(|b| format!("{}", b));
-                            }
-                        }
-
-                        if !cancel.is_cancelled() && profile_bitrate_flag && ffmpeg_ok {
-                            if let Ok(bitrate) =
-                                ffmpeg::profile_bitrate(&task_app, target_url, &user_agent, &cancel)
-                                    .await
-                            {
-                                result.video_bitrate = Some(bitrate);
-                            }
-                        }
-                    }
-
-                    // Capture screenshot
-                    if !cancel.is_cancelled() && !skip_screenshots && ffmpeg_ok {
-                        if let Some(ref dir) = screenshots_dir {
-                            let file_name =
-                                ffmpeg::build_screenshot_file_name(channel.index, &channel.name);
-                            if let Ok(path) = ffmpeg::capture_screenshot(
-                                &task_app,
-                                target_url,
-                                dir,
-                                &file_name,
-                                &user_agent,
-                                &cancel,
-                            )
-                            .await
-                            {
-                                result.screenshot_path = Some(path);
-                            }
-                        }
+                if result.status == ChannelStatus::Alive {
+                    if let Some(ref resolution) = result.resolution {
+                        result.label_mismatches =
+                            ffmpeg::check_label_mismatch(&channel.name, resolution);
                     }
                 }
 
@@ -450,4 +577,26 @@ pub async fn reset_scan(app: AppHandle) -> Result<(), AppError> {
 
     log::info!("Scan state reset");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonicalize_stream_url;
+
+    #[test]
+    fn canonicalize_stream_url_removes_default_port_and_fragment() {
+        assert_eq!(
+            canonicalize_stream_url(" http://Example.com:80/live/stream#frag "),
+            "http://example.com/live/stream"
+        );
+        assert_eq!(
+            canonicalize_stream_url("https://Example.com:443/live/stream?token=abc#part"),
+            "https://example.com/live/stream?token=abc"
+        );
+    }
+
+    #[test]
+    fn canonicalize_stream_url_for_non_url_is_trim_only() {
+        assert_eq!(canonicalize_stream_url("  not-a-valid-url  "), "not-a-valid-url");
+    }
 }
