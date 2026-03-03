@@ -219,6 +219,15 @@ async fn reset_scan_state(state: &AppState) {
     mark_scan_finished(&mut scanning);
 }
 
+async fn clear_pre_spawn_scan_state(state: &AppState) {
+    let mut scanning = state.scanning.lock().await;
+    mark_scan_finished(&mut scanning);
+    drop(scanning);
+
+    let mut token_lock = state.cancel_token.lock().await;
+    *token_lock = None;
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 struct ScanCounters {
     completed: usize,
@@ -320,8 +329,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
     ) {
         Ok(preview) => preview,
         Err(error) => {
-            let mut scanning = state.scanning.lock().await;
-            *scanning = false;
+            clear_pre_spawn_scan_state(state.inner().as_ref()).await;
             return Err(error);
         }
     };
@@ -346,8 +354,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                 },
             },
         );
-        let mut scanning = state.scanning.lock().await;
-        *scanning = false;
+        clear_pre_spawn_scan_state(state.inner().as_ref()).await;
         return Ok(run_id);
     }
 
@@ -360,8 +367,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                     Some(proxy_list)
                 }
                 Err(error) => {
-                    let mut scanning = state.scanning.lock().await;
-                    *scanning = false;
+                    clear_pre_spawn_scan_state(state.inner().as_ref()).await;
                     return Err(AppError::Other(format!(
                         "Failed to load proxy file '{}': {}",
                         proxy_file, error
@@ -420,8 +426,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
             }
         };
         if let Err(e) = std::fs::create_dir_all(&dir) {
-            let mut scanning = state.scanning.lock().await;
-            *scanning = false;
+            clear_pre_spawn_scan_state(state.inner().as_ref()).await;
             return Err(AppError::Other(format!(
                 "Failed to create screenshots directory: {}",
                 e
@@ -646,6 +651,10 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
         // Reset scanning state
         let mut scanning = state_clone.scanning.lock().await;
         mark_scan_finished(&mut scanning);
+        drop(scanning);
+
+        let mut token_lock = state_clone.cancel_token.lock().await;
+        *token_lock = None;
     });
 
     Ok(run_id)
@@ -838,5 +847,29 @@ mod tests {
         assert!(token.is_cancelled());
         let scanning = state.scanning.lock().await;
         assert!(!*scanning);
+    }
+
+    #[tokio::test]
+    async fn clear_pre_spawn_scan_state_clears_flag_and_token() {
+        let state = AppState::new();
+        let token = CancellationToken::new();
+
+        {
+            let mut token_lock = state.cancel_token.lock().await;
+            *token_lock = Some(token);
+        }
+        {
+            let mut scan_lock = state.scanning.lock().await;
+            *scan_lock = true;
+        }
+
+        clear_pre_spawn_scan_state(state.as_ref()).await;
+
+        let scanning = state.scanning.lock().await;
+        assert!(!*scanning);
+        drop(scanning);
+
+        let token_lock = state.cancel_token.lock().await;
+        assert!(token_lock.is_none());
     }
 }
