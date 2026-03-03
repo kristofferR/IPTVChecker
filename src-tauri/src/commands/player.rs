@@ -8,6 +8,10 @@ use serde::Deserialize;
 use crate::error::AppError;
 
 static NEXT_TEMP_PLAYLIST_ID: AtomicU64 = AtomicU64::new(0);
+const TEMP_PLAYLIST_PREFIX: &str = "iptv-checker-single-channel-";
+const TEMP_PLAYLIST_EXTENSION: &str = "m3u8";
+const TEMP_PLAYLIST_DELETE_DELAY: std::time::Duration = std::time::Duration::from_secs(120);
+const STALE_TEMP_PLAYLIST_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
 
 #[derive(Debug, Deserialize)]
 pub struct PlayerChannel {
@@ -80,8 +84,58 @@ fn build_unique_temp_playlist_path(temp_dir: &Path) -> PathBuf {
     let sequence = NEXT_TEMP_PLAYLIST_ID.fetch_add(1, Ordering::Relaxed);
 
     temp_dir.join(format!(
-        "iptv-checker-single-channel-{pid}-{unix_nanos}-{sequence}.m3u8"
+        "{TEMP_PLAYLIST_PREFIX}{pid}-{unix_nanos}-{sequence}.{TEMP_PLAYLIST_EXTENSION}"
     ))
+}
+
+fn is_temp_playlist_file(path: &Path) -> bool {
+    let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    file_name.starts_with(TEMP_PLAYLIST_PREFIX) && extension == TEMP_PLAYLIST_EXTENSION
+}
+
+fn cleanup_stale_temp_playlists_in_dir(
+    temp_dir: &Path,
+    max_age: std::time::Duration,
+    now: SystemTime,
+) {
+    let Ok(entries) = std::fs::read_dir(temp_dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() || !is_temp_playlist_file(&path) {
+            continue;
+        }
+
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let Ok(modified) = metadata.modified() else {
+            continue;
+        };
+        let Ok(age) = now.duration_since(modified) else {
+            continue;
+        };
+        if age >= max_age {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+fn spawn_temp_playlist_cleanup(
+    path: PathBuf,
+    delay: std::time::Duration,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        std::thread::sleep(delay);
+        let _ = std::fs::remove_file(path);
+    })
 }
 
 #[tauri::command]
@@ -101,13 +155,33 @@ pub async fn open_channel_in_player(channel: PlayerChannel) -> Result<(), AppErr
     content.push_str(channel.url.trim());
     content.push('\n');
 
+    let temp_dir = std::env::temp_dir();
+    cleanup_stale_temp_playlists_in_dir(
+        &temp_dir,
+        STALE_TEMP_PLAYLIST_MAX_AGE,
+        SystemTime::now(),
+    );
+
     let temp_path = write_unique_temp_playlist(&content)?;
-    open_with_system_default(&temp_path)
+    match open_with_system_default(&temp_path) {
+        Ok(()) => {
+            let _ = spawn_temp_playlist_cleanup(temp_path, TEMP_PLAYLIST_DELETE_DELAY);
+            Ok(())
+        }
+        Err(error) => {
+            let _ = std::fs::remove_file(temp_path);
+            Err(error)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{build_unique_temp_playlist_path, write_unique_temp_playlist_in_dir};
+    use super::{
+        build_unique_temp_playlist_path, cleanup_stale_temp_playlists_in_dir, is_temp_playlist_file,
+        spawn_temp_playlist_cleanup, write_unique_temp_playlist_in_dir,
+    };
+    use std::time::{Duration, SystemTime};
 
     fn test_temp_dir(prefix: &str) -> std::path::PathBuf {
         let unix_nanos = std::time::SystemTime::now()
@@ -152,6 +226,63 @@ mod tests {
             "#EXTM3U\nB\n"
         );
 
+        std::fs::remove_dir_all(&root).expect("Failed to remove test directory");
+    }
+
+    #[test]
+    fn cleanup_stale_temp_playlists_in_dir_removes_only_old_generated_files() {
+        let root = test_temp_dir("iptv-player-cleanup-stale");
+        std::fs::create_dir_all(&root).expect("Failed to create test directory");
+
+        let stale = root.join("iptv-checker-single-channel-stale.m3u8");
+        let fresh = root.join("iptv-checker-single-channel-fresh.m3u8");
+        let keep_other = root.join("other.m3u8");
+        let keep_tmp = root.join("iptv-checker-single-channel-temp.tmp");
+
+        std::fs::write(&stale, "#EXTM3U\nstale\n").expect("stale file should be writable");
+        std::fs::write(&fresh, "#EXTM3U\nfresh\n").expect("fresh file should be writable");
+        std::fs::write(&keep_other, "#EXTM3U\nother\n").expect("other file should be writable");
+        std::fs::write(&keep_tmp, "#EXTM3U\ntmp\n").expect("tmp file should be writable");
+
+        let stale_file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&stale)
+            .expect("stale file should be openable");
+        let stale_modified = SystemTime::now()
+            .checked_sub(Duration::from_secs(2 * 60 * 60))
+            .expect("time subtraction should succeed");
+        stale_file
+            .set_times(std::fs::FileTimes::new().set_modified(stale_modified))
+            .expect("stale mtime should be set");
+
+        cleanup_stale_temp_playlists_in_dir(
+            &root,
+            Duration::from_secs(60 * 60),
+            SystemTime::now(),
+        );
+
+        assert!(!stale.exists());
+        assert!(fresh.exists());
+        assert!(keep_other.exists());
+        assert!(keep_tmp.exists());
+        assert!(is_temp_playlist_file(&fresh));
+        assert!(!is_temp_playlist_file(&keep_other));
+
+        std::fs::remove_dir_all(&root).expect("Failed to remove test directory");
+    }
+
+    #[test]
+    fn spawn_temp_playlist_cleanup_removes_file_after_delay() {
+        let root = test_temp_dir("iptv-player-cleanup-delay");
+        std::fs::create_dir_all(&root).expect("Failed to create test directory");
+
+        let path = root.join("iptv-checker-single-channel-delayed.m3u8");
+        std::fs::write(&path, "#EXTM3U\ndelayed\n").expect("delayed file should be writable");
+
+        let handle = spawn_temp_playlist_cleanup(path.clone(), Duration::from_millis(10));
+        handle.join().expect("cleanup thread should complete");
+
+        assert!(!path.exists());
         std::fs::remove_dir_all(&root).expect("Failed to remove test directory");
     }
 }
