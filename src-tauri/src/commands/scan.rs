@@ -26,6 +26,12 @@ pub async fn start_scan(
         *scanning = true;
     }
 
+    if config.concurrency < 1 {
+        let mut scanning = state.scanning.lock().await;
+        *scanning = false;
+        return Err(AppError::Other("Concurrency must be at least 1".to_string()));
+    }
+
     let cancel_token = CancellationToken::new();
     {
         let mut token_lock = state.cancel_token.lock().await;
