@@ -1,5 +1,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  History,
   FolderOpen,
   Link2,
   Play,
@@ -21,6 +22,7 @@ interface ToolbarProps {
   onOpenUrl: () => void;
   onStartScan: () => void;
   onStopScan: () => void;
+  onOpenHistory: () => void;
   onOpenSettings: () => void;
   scanState: ScanState;
   hasPlaylist: boolean;
@@ -44,6 +46,7 @@ export function Toolbar({
   onOpenUrl,
   onStartScan,
   onStopScan,
+  onOpenHistory,
   onOpenSettings,
   scanState,
   hasPlaylist,
@@ -130,6 +133,15 @@ export function Toolbar({
         disabled={!hasResults || scanning}
         menuRequest={menuExportRequest}
       />
+
+      <button
+        onClick={onOpenHistory}
+        disabled={!hasPlaylist}
+        className={`${toolbarBtn} px-2.5`}
+      >
+        <History className="w-4 h-4" />
+        History
+      </button>
 
       <button
         onClick={onOpenSettings}

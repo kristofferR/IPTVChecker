@@ -63,6 +63,7 @@ pub fn run() {
             let view_menu = SubmenuBuilder::new(app, "View")
                 .text("menu.view.toggle_sidebar", "Toggle Sidebar")
                 .text("menu.view.clear_filters", "Clear Filters")
+                .text("menu.view.history", "Scan History")
                 .build()?;
 
             let scan_menu = SubmenuBuilder::new(app, "Scan")
@@ -96,6 +97,7 @@ pub fn run() {
                 "menu.file.export_renamed" => Some("menu://export-renamed"),
                 "menu.view.toggle_sidebar" => Some("menu://toggle-sidebar"),
                 "menu.view.clear_filters" => Some("menu://clear-filters"),
+                "menu.view.history" => Some("menu://open-history"),
                 "menu.scan.start" => Some("menu://start-scan"),
                 "menu.scan.stop" => Some("menu://stop-scan"),
                 "menu.scan.settings" => Some("menu://open-settings"),
@@ -165,6 +167,8 @@ pub fn run() {
             commands::settings::read_screenshot,
             commands::settings::get_screenshot_cache_stats,
             commands::settings::clear_screenshot_cache,
+            commands::history::get_scan_history,
+            commands::history::clear_scan_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

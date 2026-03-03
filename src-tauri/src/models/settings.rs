@@ -30,6 +30,7 @@ pub struct AppSettings {
     pub proxy_file: Option<String>,
     pub test_geoblock: bool,
     pub screenshots_dir: Option<String>,
+    pub scan_history_limit: u32,
     pub theme: ThemePreference,
     pub log_level: String,
 }
@@ -60,6 +61,7 @@ impl Default for AppSettings {
             proxy_file: None,
             test_geoblock: false,
             screenshots_dir: None,
+            scan_history_limit: 20,
             theme: ThemePreference::System,
             log_level: "error".to_string(),
         }

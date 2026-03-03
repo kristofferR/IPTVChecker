@@ -6,8 +6,11 @@ import type {
   ChannelResult,
   PlaylistPreview,
   ScanConfig,
+  ScanHistoryItem,
 } from "./lib/types";
 import {
+  clearScanHistory,
+  getScanHistory,
   openPlaylist,
   openPlaylistUrl,
   checkFfmpegAvailable,
@@ -25,6 +28,7 @@ import { WarningsPanel } from "./components/WarningsPanel";
 import { ProgressBar } from "./components/ProgressBar";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { KeyboardShortcutsDialog } from "./components/KeyboardShortcutsDialog";
+import { HistoryPanel } from "./components/HistoryPanel";
 import { AlertTriangle, FolderOpen, Info, X } from "lucide-react";
 import { detectPlatform } from "./lib/platform";
 import { findDuplicateChannelIndices } from "./lib/duplicates";
@@ -97,7 +101,12 @@ export default function App() {
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [menuInfo, setMenuInfo] = useState<string | null>(null);
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [historyEntries, setHistoryEntries] = useState<ScanHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyClearing, setHistoryClearing] = useState(false);
   const [menuExportRequest, setMenuExportRequest] = useState<{
     id: number;
     action: "csv" | "split" | "renamed";
@@ -203,6 +212,7 @@ export default function App() {
       setSelectedChannel(null);
       setSelectedChannelIndices([]);
       setPendingPlaybackChannel(null);
+      setShowHistory(false);
     } catch (err) {
       logger.error("[App] Failed to open playlist", err);
       setPlaylistOpenError(formatPlaylistOpenError(err));
@@ -210,6 +220,7 @@ export default function App() {
       setSelectedChannel(null);
       setSelectedChannelIndices([]);
       setPendingPlaybackChannel(null);
+      setShowHistory(false);
     }
   }, [initFromPlaylist, channelSearch]);
 
@@ -258,14 +269,75 @@ export default function App() {
       setSelectedChannel(null);
       setSelectedChannelIndices([]);
       setPendingPlaybackChannel(null);
+      setShowHistory(false);
     } catch (err) {
       logger.error("[App] Failed to open playlist URL", err);
       setPlaylistOpenError(formatPlaylistOpenError(err));
       setSelectedChannel(null);
       setSelectedChannelIndices([]);
       setPendingPlaybackChannel(null);
+      setShowHistory(false);
     }
   }, [channelSearch, initFromPlaylist]);
+
+  const refreshHistory = useCallback(async () => {
+    if (!playlist) {
+      setHistoryEntries([]);
+      setHistoryError(null);
+      return;
+    }
+
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const items = await getScanHistory(playlist.file_path);
+      setHistoryEntries(items);
+    } catch (err) {
+      setHistoryError(errorToString(err));
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [playlist]);
+
+  const handleClearHistory = useCallback(async () => {
+    if (!playlist) return;
+
+    setHistoryClearing(true);
+    setHistoryError(null);
+    try {
+      await clearScanHistory(playlist.file_path);
+      await refreshHistory();
+    } catch (err) {
+      setHistoryError(errorToString(err));
+    } finally {
+      setHistoryClearing(false);
+    }
+  }, [playlist, refreshHistory]);
+
+  const openHistoryPanel = useCallback(() => {
+    if (!playlist) {
+      setMenuInfo("Open a playlist first to view scan history.");
+      return;
+    }
+    setShowHistory(true);
+    void refreshHistory();
+  }, [playlist, refreshHistory]);
+
+  useEffect(() => {
+    if (!playlist) {
+      setHistoryEntries([]);
+      setHistoryError(null);
+      setShowHistory(false);
+      return;
+    }
+
+    void refreshHistory();
+  }, [playlist, refreshHistory]);
+
+  useEffect(() => {
+    if (scanState !== "complete" || !playlist) return;
+    void refreshHistory();
+  }, [scanState, summary, playlist, refreshHistory]);
 
   const handleDroppedPaths = useCallback((paths: string[]) => {
     const playlistPath = paths.find((path) =>
@@ -352,12 +424,16 @@ export default function App() {
           setShowKeyboardShortcuts(false);
           return;
         }
+        if (showHistory) {
+          setShowHistory(false);
+          return;
+        }
         if (showSettingsRef.current) setShowSettings(false);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleOpen]);
+  }, [handleOpen, showHistory]);
 
   useEffect(() => {
     const handler = (event: MouseEvent) => {
@@ -459,6 +535,9 @@ export default function App() {
         }),
       );
       unlisten.push(
+        await listen("menu://open-history", () => openHistoryPanel()),
+      );
+      unlisten.push(
         await listen("menu://start-scan", () => {
           void handleStartScan();
         }),
@@ -489,7 +568,7 @@ export default function App() {
         off();
       }
     };
-  }, [cancel, handleOpen, handleOpenUrl, handleStartScan]);
+  }, [cancel, handleOpen, handleOpenUrl, handleStartScan, openHistoryPanel]);
 
   const handleSelectChannel = useCallback((result: ChannelResult) => {
     setSelectedChannel(result);
@@ -572,6 +651,7 @@ export default function App() {
         onOpenUrl={handleOpenUrl}
         onStartScan={handleStartScan}
         onStopScan={cancel}
+        onOpenHistory={openHistoryPanel}
         onOpenSettings={() => setShowSettings(true)}
         scanState={scanState}
         hasPlaylist={playlist !== null}
@@ -743,6 +823,23 @@ export default function App() {
       {showKeyboardShortcuts && (
         <KeyboardShortcutsDialog
           onClose={() => setShowKeyboardShortcuts(false)}
+        />
+      )}
+
+      {showHistory && playlist && (
+        <HistoryPanel
+          playlistName={playlist.file_name}
+          entries={historyEntries}
+          loading={historyLoading}
+          error={historyError}
+          clearing={historyClearing}
+          onRefresh={() => {
+            void refreshHistory();
+          }}
+          onClear={() => {
+            void handleClearHistory();
+          }}
+          onClose={() => setShowHistory(false)}
         />
       )}
 

@@ -14,6 +14,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   proxy_file: null,
   test_geoblock: false,
   screenshots_dir: null,
+  scan_history_limit: 20,
   theme: "system",
   log_level: "error",
 };

@@ -100,8 +100,27 @@ export interface AppSettings {
   proxy_file: string | null;
   test_geoblock: boolean;
   screenshots_dir: string | null;
+  scan_history_limit: number;
   theme: ThemePreference;
   log_level: string;
+}
+
+export interface ScanHistoryDiff {
+  channels_gained: number;
+  channels_lost: number;
+  status_changed: number;
+  became_alive: number;
+  became_dead: number;
+}
+
+export interface ScanHistoryItem {
+  id: string;
+  scanned_at_epoch_ms: number;
+  summary: ScanSummary;
+  group_filter: string | null;
+  channel_search: string | null;
+  selected_count: number;
+  diff: ScanHistoryDiff | null;
 }
 
 export interface ScreenshotCacheStats {

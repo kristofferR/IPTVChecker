@@ -415,7 +415,29 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
 
           <section className={sectionClass}>
             <h3 className="text-[13px] font-semibold mb-3">Diagnostics</h3>
-            <div>
+            <div className="space-y-3">
+              <div>
+                <label className={labelClass}>Scan History Retention</label>
+                <input
+                  type="number"
+                  value={draft.scan_history_limit}
+                  onChange={(event) => {
+                    const value = parseInt(event.target.value, 10);
+                    update(
+                      "scan_history_limit",
+                      Number.isNaN(value) ? 20 : Math.max(1, Math.min(200, value)),
+                    );
+                  }}
+                  min="1"
+                  max="200"
+                  className={inputClass}
+                />
+                <p className="text-[11px] text-text-tertiary mt-1">
+                  Max completed scans to keep per playlist.
+                </p>
+              </div>
+
+              <div>
               <label className={labelClass}>Log Level</label>
               <select
                 value={draft.log_level}
@@ -428,6 +450,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                 <option value="debug">Debug</option>
                 <option value="trace">Trace</option>
               </select>
+              </div>
             </div>
           </section>
         </div>

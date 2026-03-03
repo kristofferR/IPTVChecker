@@ -10,6 +10,8 @@ use crate::models::settings::{AppSettings, ThemePreference};
 use crate::state::AppState;
 
 const MAX_SCREENSHOT_BYTES: u64 = 10 * 1024 * 1024;
+const MIN_SCAN_HISTORY_LIMIT: u32 = 1;
+const MAX_SCAN_HISTORY_LIMIT: u32 = 200;
 
 pub fn apply_theme_preference(
     app: &tauri::AppHandle,
@@ -167,6 +169,15 @@ pub async fn update_settings(
     app: tauri::AppHandle,
     settings: AppSettings,
 ) -> Result<(), AppError> {
+    if settings.scan_history_limit < MIN_SCAN_HISTORY_LIMIT
+        || settings.scan_history_limit > MAX_SCAN_HISTORY_LIMIT
+    {
+        return Err(AppError::Other(format!(
+            "Invalid scan history limit: must be between {} and {}",
+            MIN_SCAN_HISTORY_LIMIT, MAX_SCAN_HISTORY_LIMIT
+        )));
+    }
+
     let state = app.state::<Arc<AppState>>();
     let mut current = state.settings.lock().await;
     log::set_max_level(settings.level_filter());

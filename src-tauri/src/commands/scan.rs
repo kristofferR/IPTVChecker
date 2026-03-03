@@ -6,6 +6,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
+use crate::commands::history;
 use crate::engine::{checker, ffmpeg, parser, proxy, resume};
 use crate::error::AppError;
 use crate::models::channel::{Channel, ChannelResult, ChannelStatus};
@@ -238,6 +239,12 @@ struct ScanCounters {
     mislabeled: usize,
 }
 
+#[derive(Debug, Clone)]
+struct CompletedScanData {
+    summary: ScanSummary,
+    results: Vec<ChannelResult>,
+}
+
 impl ScanCounters {
     fn apply(&mut self, result: &ChannelResult) {
         match result.status {
@@ -340,20 +347,36 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
     log::info!("Scan: {} channels to check", total);
 
     if total == 0 {
+        let summary = ScanSummary {
+            total: 0,
+            alive: 0,
+            dead: 0,
+            geoblocked: 0,
+            low_framerate: 0,
+            mislabeled: 0,
+        };
+
         let _ = app.emit(
             "scan://complete",
             ScanEvent {
                 run_id: run_id.clone(),
-                payload: ScanSummary {
-                    total: 0,
-                    alive: 0,
-                    dead: 0,
-                    geoblocked: 0,
-                    low_framerate: 0,
-                    mislabeled: 0,
-                },
+                payload: summary.clone(),
             },
         );
+        let history_limit = {
+            let settings = state.settings.lock().await;
+            settings.scan_history_limit as usize
+        };
+        if let Err(error) = history::append_scan_history(
+            &app,
+            &run_id,
+            &config,
+            &summary,
+            Vec::new(),
+            history_limit,
+        ) {
+            log::warn!("Failed to write scan history for {}: {}", run_id, error);
+        }
         clear_pre_spawn_scan_state(state.inner().as_ref()).await;
         return Ok(run_id);
     }
@@ -458,9 +481,11 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
         let run_id_for_events = run_id_for_task.clone();
         let event_task = tokio::spawn(async move {
             let mut counters = ScanCounters::default();
+            let mut completed_results = Vec::with_capacity(total);
 
             while let Some(result) = rx.recv().await {
                 counters.apply(&result);
+                completed_results.push(result.clone());
 
                 let _ = app_for_events.emit(
                     "scan://channel-result",
@@ -478,7 +503,10 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                 );
             }
 
-            counters.as_summary(total)
+            CompletedScanData {
+                summary: counters.as_summary(total),
+                results: completed_results,
+            }
         });
 
         // Process channels
@@ -621,14 +649,18 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
         drop(tx);
 
         // Wait for event forwarding to finish
-        let summary = event_task.await.unwrap_or(ScanSummary {
-            total,
-            alive: 0,
-            dead: 0,
-            geoblocked: 0,
-            low_framerate: 0,
-            mislabeled: 0,
+        let completed_scan = event_task.await.unwrap_or(CompletedScanData {
+            summary: ScanSummary {
+                total,
+                alive: 0,
+                dead: 0,
+                geoblocked: 0,
+                low_framerate: 0,
+                mislabeled: 0,
+            },
+            results: Vec::new(),
         });
+        let summary = completed_scan.summary.clone();
 
         if cancel_token.is_cancelled() {
             let _ = app_handle.emit(
@@ -639,6 +671,24 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                 },
             );
         } else {
+            let history_limit = {
+                let settings = state_clone.settings.lock().await;
+                settings.scan_history_limit as usize
+            };
+            if let Err(error) = history::append_scan_history(
+                &app_handle,
+                &run_id_for_task,
+                &config,
+                &summary,
+                completed_scan.results,
+                history_limit,
+            ) {
+                log::warn!(
+                    "Failed to write scan history for {}: {}",
+                    run_id_for_task,
+                    error
+                );
+            }
             let _ = app_handle.emit(
                 "scan://complete",
                 ScanEvent {

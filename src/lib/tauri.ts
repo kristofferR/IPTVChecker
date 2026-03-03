@@ -4,6 +4,7 @@ import type {
   ChannelResult,
   PlaylistPreview,
   ScanConfig,
+  ScanHistoryItem,
   ScreenshotCacheStats,
 } from "./types";
 
@@ -87,6 +88,16 @@ export async function getScreenshotCacheStats(): Promise<ScreenshotCacheStats> {
 
 export async function clearScreenshotCache(): Promise<ScreenshotCacheStats> {
   return invoke("clear_screenshot_cache");
+}
+
+export async function getScanHistory(
+  playlistPath: string,
+): Promise<ScanHistoryItem[]> {
+  return invoke("get_scan_history", { playlistPath });
+}
+
+export async function clearScanHistory(playlistPath: string): Promise<number> {
+  return invoke("clear_scan_history", { playlistPath });
 }
 
 export async function openChannelInPlayer(channel: {
