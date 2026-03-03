@@ -11,6 +11,8 @@ const MAX_SCREENSHOT_STEM_LEN: usize = 120;
 const FALLBACK_SCREENSHOT_STEM: &str = "channel";
 const MAX_STDERR_EXCERPT_CHARS: usize = 600;
 const MAX_FFPROBE_OUTPUT_CHARS: usize = 16_000;
+const FFPROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const FFMPEG_BITRATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 // Compile-time target triple for resolving sidecar binary paths.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -429,7 +431,7 @@ pub async fn get_stream_info(
             url,
         ],
         cancel,
-        None,
+        Some(FFPROBE_TIMEOUT),
     )
     .await?;
 
@@ -492,7 +494,7 @@ pub async fn get_audio_info(
             url,
         ],
         cancel,
-        None,
+        Some(FFPROBE_TIMEOUT),
     )
     .await?;
 
@@ -536,7 +538,7 @@ pub async fn get_stream_track_presence(
             url,
         ],
         cancel,
-        None,
+        Some(FFPROBE_TIMEOUT),
     )
     .await?;
 
@@ -568,7 +570,7 @@ pub async fn collect_ffprobe_output(
             url,
         ],
         cancel,
-        None,
+        Some(FFPROBE_TIMEOUT),
     )
     .await?;
 
@@ -659,7 +661,7 @@ pub async fn profile_bitrate(
             "-",
         ],
         cancel,
-        None,
+        Some(FFMPEG_BITRATE_TIMEOUT),
     )
     .await?;
 
