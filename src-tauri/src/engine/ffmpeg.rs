@@ -2,15 +2,22 @@ use std::path::Path;
 
 use tauri::AppHandle;
 use tauri_plugin_shell::ShellExt;
+use tokio_util::sync::CancellationToken;
 
 use crate::error::AppError;
 
 /// Run a sidecar command with args, falling back to system PATH.
+/// Respects cancellation token — kills child process on cancel.
 async fn run_sidecar(
     app: &AppHandle,
     name: &str,
     args: &[&str],
+    cancel: &CancellationToken,
 ) -> Result<(String, String), AppError> {
+    if cancel.is_cancelled() {
+        return Err(AppError::Cancelled);
+    }
+
     // Try sidecar first
     if let Ok(cmd) = app.shell().sidecar(format!("binaries/{}", name)) {
         if let Ok(output) = cmd.args(args).output().await {
@@ -20,23 +27,47 @@ async fn run_sidecar(
         }
     }
 
-    // Fallback to system PATH
-    let output = tokio::process::Command::new(name)
+    // Fallback to system PATH — with cancellation support
+    let mut child = tokio::process::Command::new(name)
         .args(args)
-        .output()
-        .await
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .map_err(|_| AppError::FfmpegNotAvailable)?;
 
-    Ok((
-        String::from_utf8_lossy(&output.stdout).to_string(),
-        String::from_utf8_lossy(&output.stderr).to_string(),
-    ))
+    let mut stdout_pipe = child.stdout.take();
+    let mut stderr_pipe = child.stderr.take();
+
+    tokio::select! {
+        _ = cancel.cancelled() => {
+            let _ = child.kill().await;
+            Err(AppError::Cancelled)
+        }
+        status = child.wait() => {
+            let _ = status.map_err(|_| AppError::FfmpegNotAvailable)?;
+            let mut stdout_buf = Vec::new();
+            let mut stderr_buf = Vec::new();
+            if let Some(ref mut pipe) = stdout_pipe {
+                use tokio::io::AsyncReadExt;
+                let _ = pipe.read_to_end(&mut stdout_buf).await;
+            }
+            if let Some(ref mut pipe) = stderr_pipe {
+                use tokio::io::AsyncReadExt;
+                let _ = pipe.read_to_end(&mut stderr_buf).await;
+            }
+            Ok((
+                String::from_utf8_lossy(&stdout_buf).to_string(),
+                String::from_utf8_lossy(&stderr_buf).to_string(),
+            ))
+        }
+    }
 }
 
 /// Check if ffmpeg and ffprobe sidecars are available.
 pub async fn check_availability(app: &AppHandle) -> (bool, bool) {
-    let ffmpeg_ok = run_sidecar(app, "ffmpeg", &["-version"]).await.is_ok();
-    let ffprobe_ok = run_sidecar(app, "ffprobe", &["-version"]).await.is_ok();
+    let no_cancel = CancellationToken::new();
+    let ffmpeg_ok = run_sidecar(app, "ffmpeg", &["-version"], &no_cancel).await.is_ok();
+    let ffprobe_ok = run_sidecar(app, "ffprobe", &["-version"], &no_cancel).await.is_ok();
     (ffmpeg_ok, ffprobe_ok)
 }
 
@@ -58,7 +89,7 @@ pub struct AudioInfo {
 }
 
 /// Get video stream info via ffprobe sidecar.
-pub async fn get_stream_info(app: &AppHandle, url: &str) -> Result<VideoInfo, AppError> {
+pub async fn get_stream_info(app: &AppHandle, url: &str, cancel: &CancellationToken) -> Result<VideoInfo, AppError> {
     let (stdout, _) = run_sidecar(
         app,
         "ffprobe",
@@ -69,6 +100,7 @@ pub async fn get_stream_info(app: &AppHandle, url: &str) -> Result<VideoInfo, Ap
             "-of", "default=noprint_wrappers=1",
             url,
         ],
+        cancel,
     )
     .await?;
 
@@ -90,10 +122,16 @@ pub async fn get_stream_info(app: &AppHandle, url: &str) -> Result<VideoInfo, Ap
                     let n: f64 = num.parse().unwrap_or(0.0);
                     let d: f64 = den.parse().unwrap_or(1.0);
                     if d > 0.0 {
-                        fps = Some((n / d).round() as u32);
+                        let computed = (n / d).round() as u32;
+                        if computed > 0 {
+                            fps = Some(computed);
+                        }
                     }
                 } else {
-                    fps = val.parse::<f64>().ok().map(|f| f.round() as u32);
+                    fps = val.parse::<f64>().ok().and_then(|f| {
+                        let rounded = f.round() as u32;
+                        if rounded > 0 { Some(rounded) } else { None }
+                    });
                 }
             }
         }
@@ -117,7 +155,7 @@ pub async fn get_stream_info(app: &AppHandle, url: &str) -> Result<VideoInfo, Ap
 }
 
 /// Get audio stream info via ffprobe sidecar.
-pub async fn get_audio_info(app: &AppHandle, url: &str) -> Result<AudioInfo, AppError> {
+pub async fn get_audio_info(app: &AppHandle, url: &str, cancel: &CancellationToken) -> Result<AudioInfo, AppError> {
     let (stdout, _) = run_sidecar(
         app,
         "ffprobe",
@@ -128,6 +166,7 @@ pub async fn get_audio_info(app: &AppHandle, url: &str) -> Result<AudioInfo, App
             "-of", "default=noprint_wrappers=1",
             url,
         ],
+        cancel,
     )
     .await?;
 
@@ -154,7 +193,12 @@ pub async fn capture_screenshot(
     url: &str,
     output_dir: &str,
     file_name: &str,
+    cancel: &CancellationToken,
 ) -> Result<String, AppError> {
+    if cancel.is_cancelled() {
+        return Err(AppError::Cancelled);
+    }
+
     let output_path = Path::new(output_dir).join(format!("{}.png", file_name));
     let output_str = output_path.to_string_lossy().to_string();
 
@@ -166,11 +210,22 @@ pub async fn capture_screenshot(
             .await;
         output.map(|o| o.status.success()).unwrap_or(false)
     } else {
-        let result = tokio::process::Command::new("ffmpeg")
+        let mut child = tokio::process::Command::new("ffmpeg")
             .args(["-y", "-i", url, "-ss", "00:00:02", "-frames:v", "1", &output_str])
-            .output()
-            .await;
-        result.map(|o| o.status.success()).unwrap_or(false)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|_| AppError::FfmpegNotAvailable)?;
+
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                let _ = child.kill().await;
+                return Err(AppError::Cancelled);
+            }
+            result = child.wait() => {
+                result.map(|s| s.success()).unwrap_or(false)
+            }
+        }
     };
 
     if success && output_path.exists() {
@@ -184,7 +239,7 @@ pub async fn capture_screenshot(
 }
 
 /// Profile approximate video bitrate by sampling the stream for 10 seconds.
-pub async fn profile_bitrate(app: &AppHandle, url: &str, user_agent: &str) -> Result<String, AppError> {
+pub async fn profile_bitrate(app: &AppHandle, url: &str, user_agent: &str, cancel: &CancellationToken) -> Result<String, AppError> {
     let (_, stderr) = run_sidecar(
         app,
         "ffmpeg",
@@ -196,6 +251,7 @@ pub async fn profile_bitrate(app: &AppHandle, url: &str, user_agent: &str) -> Re
             "-f", "null",
             "-",
         ],
+        cancel,
     )
     .await?;
 

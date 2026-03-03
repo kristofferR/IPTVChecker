@@ -26,6 +26,12 @@ pub async fn start_scan(
         *scanning = true;
     }
 
+    if config.concurrency < 1 {
+        let mut scanning = state.scanning.lock().await;
+        *scanning = false;
+        return Err(AppError::Other("Concurrency must be at least 1".to_string()));
+    }
+
     let cancel_token = CancellationToken::new();
     {
         let mut token_lock = state.cancel_token.lock().await;
@@ -84,14 +90,21 @@ pub async fn start_scan(
         .unwrap_or_else(|| "AllGroups".to_string());
 
     let log_file = format!("{}/{}_{}_checklog.txt", playlist_dir, base_name, group_suffix);
-    let (processed_channels, _last_index) = resume::load_processed_channels(&log_file);
+    let (processed_channels, _) = resume::load_processed_channels(&log_file);
+
+    // Clear the log file after loading — prevents unbounded growth across scans
+    let _ = std::fs::write(&log_file, "");
 
     // Screenshots directory
     let screenshots_dir = if !config.skip_screenshots && ffmpeg_available {
         let dir = config.screenshots_dir.clone().unwrap_or_else(|| {
             format!("{}/{}_{}_screenshots", playlist_dir, base_name, group_suffix)
         });
-        std::fs::create_dir_all(&dir).ok();
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            let mut scanning = state.scanning.lock().await;
+            *scanning = false;
+            return Err(AppError::Other(format!("Failed to create screenshots directory: {}", e)));
+        }
         Some(dir)
     } else {
         None
@@ -102,8 +115,15 @@ pub async fn start_scan(
     let state_clone = state.inner().clone();
 
     tokio::spawn(async move {
+        let client = Arc::new(
+            reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(5))
+                .redirect(reqwest::redirect::Policy::limited(10))
+                .build()
+                .unwrap_or_default(),
+        );
         let semaphore = Arc::new(Semaphore::new(config.concurrency as usize));
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ChannelResult>();
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<ChannelResult>(256);
 
         // Spawn a task to forward results as events
         let app_for_events = app_handle.clone();
@@ -156,6 +176,7 @@ pub async fn start_scan(
         });
 
         // Process channels
+        let proxy_list = Arc::new(proxy_list);
         let mut handles = Vec::new();
 
         for channel in channels {
@@ -163,8 +184,7 @@ pub async fn start_scan(
                 break;
             }
 
-            let identifier = format!("{} {}", channel.name, channel.url);
-            if processed_channels.contains(&identifier) {
+            if processed_channels.contains(&channel.url) {
                 continue;
             }
 
@@ -176,11 +196,12 @@ pub async fn start_scan(
 
             let tx = tx.clone();
             let cancel = cancel_token.clone();
+            let client = Arc::clone(&client);
             let user_agent = config.user_agent.clone();
             let timeout = config.timeout;
             let retries = config.retries;
             let extended_timeout = config.extended_timeout;
-            let proxy_list = proxy_list.clone();
+            let proxy_list = Arc::clone(&proxy_list);
             let test_geoblock = config.test_geoblock;
             let skip_screenshots = config.skip_screenshots;
             let profile_bitrate_flag = config.profile_bitrate;
@@ -196,6 +217,7 @@ pub async fn start_scan(
                 }
 
                 let (status_str, stream_url) = match checker::check_channel_status(
+                    &client,
                     &channel.url,
                     timeout,
                     retries,
@@ -212,7 +234,7 @@ pub async fn start_scan(
 
                 // Handle geoblock proxy confirmation
                 let final_status_str = if status_str == "Geoblocked" && test_geoblock {
-                    if let Some(ref proxies) = proxy_list {
+                    if let Some(ref proxies) = *proxy_list {
                         if !proxies.is_empty() {
                             proxy::confirm_geoblock(&channel.url, proxies, timeout).await
                         } else {
@@ -259,11 +281,11 @@ pub async fn start_scan(
                 };
 
                 // Get metadata for alive channels
-                if status == ChannelStatus::Alive {
+                if status == ChannelStatus::Alive && !cancel.is_cancelled() {
                     let target_url = stream_url.as_deref().unwrap_or(&channel.url);
 
                     if ffprobe_ok {
-                        if let Ok(info) = ffmpeg::get_stream_info(&task_app, target_url).await {
+                        if let Ok(info) = ffmpeg::get_stream_info(&task_app, target_url, &cancel).await {
                             result.codec = Some(info.codec);
                             result.resolution = Some(info.resolution.clone());
                             result.width = info.width;
@@ -271,7 +293,7 @@ pub async fn start_scan(
                             result.fps = info.fps;
 
                             if let Some(fps) = info.fps {
-                                if fps <= 30 {
+                                if fps < 29 {
                                     result.low_framerate = true;
                                 }
                             }
@@ -281,15 +303,17 @@ pub async fn start_scan(
                             result.label_mismatches = mismatches;
                         }
 
-                        if let Ok(audio) = ffmpeg::get_audio_info(&task_app, target_url).await {
-                            result.audio_codec = Some(audio.codec);
-                            result.audio_bitrate =
-                                audio.bitrate_kbps.map(|b| format!("{}", b));
+                        if !cancel.is_cancelled() {
+                            if let Ok(audio) = ffmpeg::get_audio_info(&task_app, target_url, &cancel).await {
+                                result.audio_codec = Some(audio.codec);
+                                result.audio_bitrate =
+                                    audio.bitrate_kbps.map(|b| format!("{}", b));
+                            }
                         }
 
-                        if profile_bitrate_flag && ffmpeg_ok {
+                        if !cancel.is_cancelled() && profile_bitrate_flag && ffmpeg_ok {
                             if let Ok(bitrate) =
-                                ffmpeg::profile_bitrate(&task_app, target_url, &user_agent).await
+                                ffmpeg::profile_bitrate(&task_app, target_url, &user_agent, &cancel).await
                             {
                                 result.video_bitrate = Some(bitrate);
                             }
@@ -297,7 +321,7 @@ pub async fn start_scan(
                     }
 
                     // Capture screenshot
-                    if !skip_screenshots && ffmpeg_ok {
+                    if !cancel.is_cancelled() && !skip_screenshots && ffmpeg_ok {
                         if let Some(ref dir) = screenshots_dir {
                             let file_name = format!(
                                 "{}-{}",
@@ -305,7 +329,7 @@ pub async fn start_scan(
                                 channel.name.replace('/', "-")
                             );
                             if let Ok(path) =
-                                ffmpeg::capture_screenshot(&task_app, target_url, dir, &file_name).await
+                                ffmpeg::capture_screenshot(&task_app, target_url, dir, &file_name, &cancel).await
                             {
                                 result.screenshot_path = Some(path);
                             }
@@ -324,7 +348,7 @@ pub async fn start_scan(
                     ),
                 );
 
-                let _ = tx.send(result);
+                let _ = tx.send(result).await;
                 drop(_permit);
             });
 
