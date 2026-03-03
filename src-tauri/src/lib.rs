@@ -29,10 +29,19 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     let builder = builder
         .menu(|app| {
-            use tauri::menu::{AboutMetadata, MenuBuilder, SubmenuBuilder};
+            use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+
+            let settings_menu_item = MenuItemBuilder::with_id(
+                "menu.app.settings",
+                "Settings...",
+            )
+            .accelerator("Cmd+,")
+            .build(app)?;
 
             let app_menu = SubmenuBuilder::new(app, "IPTV Checker")
                 .about(Some(AboutMetadata::default()))
+                .separator()
+                .item(&settings_menu_item)
                 .separator()
                 .services()
                 .separator()
@@ -103,6 +112,7 @@ pub fn run() {
         })
         .on_menu_event(|app, event| {
             let frontend_event = match event.id().as_ref() {
+                "menu.app.settings" => Some("menu://open-settings"),
                 "menu.file.open" => Some("menu://open-playlist"),
                 "menu.file.open_folder" => Some("menu://open-folder"),
                 "menu.file.open_url" => Some("menu://open-url"),

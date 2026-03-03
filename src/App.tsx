@@ -662,7 +662,7 @@ export default function App() {
         e.preventDefault();
         handleOpen();
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === ".") {
+      if ((e.metaKey || e.ctrlKey) && e.key === ",") {
         e.preventDefault();
         setShowSettings((s) => !s);
       }
