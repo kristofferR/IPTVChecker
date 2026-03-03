@@ -1,5 +1,6 @@
 use crate::error::AppError;
 use crate::models::channel::{ChannelResult, ChannelStatus};
+use std::path::{Path, PathBuf};
 
 #[tauri::command]
 pub async fn export_csv(results: Vec<ChannelResult>, path: String, playlist_name: String) -> Result<(), AppError> {
@@ -76,26 +77,16 @@ pub async fn export_split(
         }
     }
 
-    let base = std::path::Path::new(&base_path);
-    let stem = base
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "playlist".to_string());
-    let dir = base
-        .parent()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string());
-
     if !working.is_empty() {
-        let path = format!("{}/{}_working.m3u8", dir, stem);
+        let path = export_target_path(&base_path, "working");
         write_m3u_file(&path, &working)?;
     }
     if !dead.is_empty() {
-        let path = format!("{}/{}_dead.m3u8", dir, stem);
+        let path = export_target_path(&base_path, "dead");
         write_m3u_file(&path, &dead)?;
     }
     if !geoblocked.is_empty() {
-        let path = format!("{}/{}_geoblocked.m3u8", dir, stem);
+        let path = export_target_path(&base_path, "geoblocked");
         write_m3u_file(&path, &geoblocked)?;
     }
 
@@ -109,17 +100,7 @@ pub async fn export_renamed(
 ) -> Result<(), AppError> {
     use std::io::Write;
 
-    let base = std::path::Path::new(&base_path);
-    let stem = base
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "playlist".to_string());
-    let dir = base
-        .parent()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string());
-
-    let path = format!("{}/{}_renamed.m3u8", dir, stem);
+    let path = export_target_path(&base_path, "renamed");
     let mut file = std::fs::File::create(&path).map_err(AppError::Io)?;
     writeln!(file, "#EXTM3U").map_err(AppError::Io)?;
 
@@ -165,7 +146,26 @@ fn build_m3u_entry(r: &ChannelResult) -> String {
     entry
 }
 
-fn write_m3u_file(path: &str, entries: &[String]) -> Result<(), AppError> {
+fn export_target_path(base_path: &str, suffix: &str) -> PathBuf {
+    let base = Path::new(base_path);
+    let stem = base
+        .file_stem()
+        .and_then(|s| {
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string_lossy().to_string())
+            }
+        })
+        .unwrap_or_else(|| "playlist".to_string());
+    let parent = base
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    parent.join(format!("{}_{}.m3u8", stem, suffix))
+}
+
+fn write_m3u_file(path: &Path, entries: &[String]) -> Result<(), AppError> {
     use std::io::Write;
     let mut file = std::fs::File::create(path).map_err(AppError::Io)?;
     writeln!(file, "#EXTM3U").map_err(AppError::Io)?;
@@ -211,5 +211,29 @@ fn format_audio_info(r: &ChannelResult) -> String {
             format!("{} kbps {}", bitrate, codec)
         }
         _ => "Unknown".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::export_target_path;
+    use std::path::Path;
+
+    #[test]
+    fn export_target_path_uses_parent_directory_join() {
+        let path = export_target_path("/tmp/iptv/source.m3u8", "working");
+        assert_eq!(path, Path::new("/tmp/iptv").join("source_working.m3u8"));
+    }
+
+    #[test]
+    fn export_target_path_handles_relative_paths() {
+        let path = export_target_path("source.m3u8", "dead");
+        assert_eq!(path, Path::new(".").join("source_dead.m3u8"));
+    }
+
+    #[test]
+    fn export_target_path_handles_missing_extension() {
+        let path = export_target_path("/tmp/iptv/source", "renamed");
+        assert_eq!(path, Path::new("/tmp/iptv").join("source_renamed.m3u8"));
     }
 }
