@@ -28,6 +28,41 @@ interface ChannelTableProps {
   onScanSelected?: (selectedIndices: number[]) => void;
 }
 
+type CopyAction = "name" | "url" | "m3u" | "metadata";
+
+function buildM3uEntryText(channel: ChannelResult): string {
+  return [channel.extinf_line, ...channel.metadata_lines, channel.url].join("\n");
+}
+
+function formatStatusLabel(status: ChannelResult["status"]): string {
+  return status
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function buildChannelMetadataSummary(channel: ChannelResult): string {
+  const videoBitrate = channel.video_bitrate ?? "Unknown";
+  const audioBitrate = channel.audio_bitrate
+    ? `${channel.audio_bitrate} kbps`
+    : "Unknown";
+  const audioCodec = channel.audio_codec ?? "Unknown";
+  const streamUrl = channel.stream_url ?? "N/A";
+
+  return [
+    `Name: ${channel.name}`,
+    `Group: ${channel.group}`,
+    `Playlist: ${channel.playlist}`,
+    `Status: ${formatStatusLabel(channel.status)}`,
+    `URL: ${channel.url}`,
+    `Stream URL: ${streamUrl}`,
+    `Codec: ${channel.codec ?? "Unknown"}`,
+    `Resolution: ${channel.resolution ?? "Unknown"}`,
+    `Video Bitrate: ${videoBitrate}`,
+    `Audio: ${audioBitrate} ${audioCodec}`,
+  ].join("\n");
+}
+
 function parseStoredOrder(raw: string | null): ColumnKey[] {
   if (!raw) return DEFAULT_VISIBLE_COLUMN_ORDER;
   try {
@@ -130,6 +165,7 @@ export function ChannelTable({
 }: ChannelTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const copyFeedbackTimerRef = useRef<number | null>(null);
   const columnMenuRef = useRef<HTMLDivElement>(null);
   const columnHeaderRefs = useRef<
     Partial<Record<ColumnKey, HTMLDivElement | null>>
@@ -146,6 +182,7 @@ export function ChannelTable({
     y: number;
     channel: ChannelResult;
   } | null>(null);
+  const [copiedAction, setCopiedAction] = useState<CopyAction | null>(null);
   const [columnMenuState, setColumnMenuState] = useState<{
     x: number;
     y: number;
@@ -264,7 +301,10 @@ export function ChannelTable({
   }, [filteredResults, updateSelection]);
 
   useEffect(() => {
-    if (!contextMenuState) return;
+    if (!contextMenuState) {
+      setCopiedAction(null);
+      return;
+    }
 
     const menu = contextMenuRef.current;
     if (menu) {
@@ -304,6 +344,34 @@ export function ChannelTable({
       window.removeEventListener("scroll", handleScroll, true);
     };
   }, [contextMenuState]);
+
+  useEffect(
+    () => () => {
+      if (copyFeedbackTimerRef.current !== null) {
+        window.clearTimeout(copyFeedbackTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const markCopied = useCallback((action: CopyAction) => {
+    if (copyFeedbackTimerRef.current !== null) {
+      window.clearTimeout(copyFeedbackTimerRef.current);
+    }
+    setCopiedAction(action);
+    copyFeedbackTimerRef.current = window.setTimeout(() => {
+      setCopiedAction(null);
+      copyFeedbackTimerRef.current = null;
+    }, 1200);
+  }, []);
+
+  const copyText = useCallback(
+    async (action: CopyAction, text: string) => {
+      await navigator.clipboard.writeText(text);
+      markCopied(action);
+    },
+    [markCopied],
+  );
 
   useEffect(() => {
     if (!columnMenuState) return;
@@ -596,6 +664,7 @@ export function ChannelTable({
         selectSingle(result, rowIndex);
       }
 
+      setCopiedAction(null);
       setContextMenuState({
         x: event.clientX,
         y: event.clientY,
@@ -618,15 +687,23 @@ export function ChannelTable({
 
   const handleCopyChannelName = useCallback(async () => {
     if (!contextMenuState) return;
-    await navigator.clipboard.writeText(contextMenuState.channel.name);
-    setContextMenuState(null);
-  }, [contextMenuState]);
+    await copyText("name", contextMenuState.channel.name);
+  }, [contextMenuState, copyText]);
 
   const handleCopyChannelUrl = useCallback(async () => {
     if (!contextMenuState) return;
-    await navigator.clipboard.writeText(contextMenuState.channel.url);
-    setContextMenuState(null);
-  }, [contextMenuState]);
+    await copyText("url", contextMenuState.channel.url);
+  }, [contextMenuState, copyText]);
+
+  const handleCopyM3uEntry = useCallback(async () => {
+    if (!contextMenuState) return;
+    await copyText("m3u", buildM3uEntryText(contextMenuState.channel));
+  }, [contextMenuState, copyText]);
+
+  const handleCopyAllMetadata = useCallback(async () => {
+    if (!contextMenuState) return;
+    await copyText("metadata", buildChannelMetadataSummary(contextMenuState.channel));
+  }, [contextMenuState, copyText]);
 
   const handleOpenInPlayer = useCallback(() => {
     if (!contextMenuState) return;
@@ -904,14 +981,28 @@ export function ChannelTable({
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
-            Copy Channel Name
+            {copiedAction === "name" ? "Copied!" : "Copy Channel Name"}
           </button>
           <button
             onClick={handleCopyChannelUrl}
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
-            Copy Channel URL
+            {copiedAction === "url" ? "Copied!" : "Copy URL"}
+          </button>
+          <button
+            onClick={handleCopyM3uEntry}
+            className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+            type="button"
+          >
+            {copiedAction === "m3u" ? "Copied!" : "Copy M3U Entry"}
+          </button>
+          <button
+            onClick={handleCopyAllMetadata}
+            className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+            type="button"
+          >
+            {copiedAction === "metadata" ? "Copied!" : "Copy All Metadata"}
           </button>
           <div className="h-px my-1 bg-border-subtle" />
           <button
