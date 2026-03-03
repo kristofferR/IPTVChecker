@@ -147,8 +147,15 @@ fn load_history_store(path: &Path) -> Result<ScanHistoryStore, AppError> {
         return Ok(ScanHistoryStore::default());
     }
 
-    serde_json::from_slice::<ScanHistoryStore>(&bytes)
-        .map_err(|error| AppError::Parse(format!("Failed to parse scan history store: {}", error)))
+    match serde_json::from_slice::<ScanHistoryStore>(&bytes) {
+        Ok(store) => Ok(store),
+        Err(error) => {
+            log::warn!("Scan history file is corrupt, resetting: {}", error);
+            let backup = path.with_extension("json.corrupt");
+            let _ = std::fs::rename(path, &backup);
+            Ok(ScanHistoryStore::default())
+        }
+    }
 }
 
 fn save_history_store(path: &Path, store: &ScanHistoryStore) -> Result<(), AppError> {
@@ -158,8 +165,19 @@ fn save_history_store(path: &Path, store: &ScanHistoryStore) -> Result<(), AppEr
 
     let tmp_path = path.with_extension("json.tmp");
     std::fs::write(&tmp_path, bytes).map_err(AppError::Io)?;
-    std::fs::rename(&tmp_path, path).map_err(AppError::Io)?;
-    Ok(())
+    match std::fs::rename(&tmp_path, path) {
+        Ok(()) => Ok(()),
+        Err(first_error) => {
+            if path.exists() {
+                std::fs::remove_file(path).map_err(AppError::Io)?;
+                std::fs::rename(&tmp_path, path).map_err(AppError::Io)?;
+                Ok(())
+            } else {
+                let _ = std::fs::remove_file(&tmp_path);
+                Err(AppError::Io(first_error))
+            }
+        }
+    }
 }
 
 fn enforce_playlist_retention(
