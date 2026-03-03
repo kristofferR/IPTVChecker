@@ -131,8 +131,8 @@ export default function App() {
     (r): r is ChannelResult => r !== null,
   );
 
-  const screenshotUrl = selectedChannel?.screenshot_path
-    ? convertFileSrc(selectedChannel.screenshot_path)
+  const screenshotUrl = selectedChannel?.screenshot_path?.trim()
+    ? convertFileSrc(selectedChannel.screenshot_path.trim())
     : null;
 
   return (
