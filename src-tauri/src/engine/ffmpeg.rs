@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use serde::Deserialize;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_shell::ShellExt;
 use tokio_util::sync::CancellationToken;
@@ -117,63 +118,98 @@ pub struct AudioInfo {
     pub bitrate_kbps: Option<u32>,
 }
 
+#[derive(Debug, Deserialize)]
+struct FfprobeOutput {
+    streams: Vec<FfprobeVideoStream>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct FfprobeVideoStream {
+    codec_name: Option<String>,
+    width: Option<u32>,
+    height: Option<u32>,
+    r_frame_rate: Option<String>,
+}
+
+fn parse_ffprobe_fps(raw: &str) -> Option<u32> {
+    if raw.is_empty() {
+        return None;
+    }
+
+    if let Some((num, den)) = raw.split_once('/') {
+        let n: f64 = num.parse().ok()?;
+        let d: f64 = den.parse().ok()?;
+        if d <= 0.0 {
+            return None;
+        }
+        let computed = (n / d).round() as u32;
+        return if computed > 0 { Some(computed) } else { None };
+    }
+
+    raw.parse::<f64>().ok().and_then(|fps| {
+        let rounded = fps.round() as u32;
+        if rounded > 0 { Some(rounded) } else { None }
+    })
+}
+
+fn resolution_label(width: Option<u32>, height: Option<u32>) -> String {
+    match (width, height) {
+        (Some(w), Some(h)) if w >= 3840 && h >= 2160 => "4K".to_string(),
+        (Some(w), Some(h)) if w >= 1920 && h >= 1080 => "1080p".to_string(),
+        (Some(w), Some(h)) if w >= 1280 && h >= 720 => "720p".to_string(),
+        (Some(_), Some(_)) => "SD".to_string(),
+        _ => "Unknown".to_string(),
+    }
+}
+
 /// Get video stream info via ffprobe sidecar.
 pub async fn get_stream_info(app: &AppHandle, url: &str, cancel: &CancellationToken) -> Result<VideoInfo, AppError> {
     log::debug!("Getting stream info for: {}", url);
-    let (stdout, _) = run_sidecar(
+    let (stdout, stderr) = run_sidecar(
         app,
         "ffprobe",
         &[
             "-v", "error",
-            "-select_streams", "v:0",
+            "-analyzeduration", "15000000",
+            "-probesize", "15000000",
+            "-select_streams", "v",
             "-show_entries", "stream=codec_name,width,height,r_frame_rate",
-            "-of", "default=noprint_wrappers=1",
+            "-of", "json",
             url,
         ],
         cancel,
     )
     .await?;
 
-    let mut codec = String::from("Unknown");
-    let mut width: Option<u32> = None;
-    let mut height: Option<u32> = None;
-    let mut fps: Option<u32> = None;
+    let parsed: FfprobeOutput = serde_json::from_str(&stdout).map_err(|err| {
+        AppError::Other(format!(
+            "Failed to parse ffprobe stream info: {} ({})",
+            err, stderr
+        ))
+    })?;
 
-    for line in stdout.lines() {
-        if let Some(val) = line.strip_prefix("codec_name=") {
-            codec = val.to_uppercase();
-        } else if let Some(val) = line.strip_prefix("width=") {
-            width = val.parse().ok();
-        } else if let Some(val) = line.strip_prefix("height=") {
-            height = val.parse().ok();
-        } else if let Some(val) = line.strip_prefix("r_frame_rate=") {
-            if !val.is_empty() {
-                if let Some((num, den)) = val.split_once('/') {
-                    let n: f64 = num.parse().unwrap_or(0.0);
-                    let d: f64 = den.parse().unwrap_or(1.0);
-                    if d > 0.0 {
-                        let computed = (n / d).round() as u32;
-                        if computed > 0 {
-                            fps = Some(computed);
-                        }
-                    }
-                } else {
-                    fps = val.parse::<f64>().ok().and_then(|f| {
-                        let rounded = f.round() as u32;
-                        if rounded > 0 { Some(rounded) } else { None }
-                    });
-                }
-            }
-        }
-    }
+    let best = parsed
+        .streams
+        .iter()
+        .max_by_key(|stream| {
+            stream.width.unwrap_or(0) as u64 * stream.height.unwrap_or(0) as u64
+        })
+        .cloned();
 
-    let resolution = match (width, height) {
-        (Some(w), Some(h)) if w >= 3840 && h >= 2160 => "4K".to_string(),
-        (Some(w), Some(h)) if w >= 1920 && h >= 1080 => "1080p".to_string(),
-        (Some(w), Some(h)) if w >= 1280 && h >= 720 => "720p".to_string(),
-        (Some(_), Some(_)) => "SD".to_string(),
-        _ => "Unknown".to_string(),
-    };
+    let codec = best
+        .as_ref()
+        .and_then(|stream| stream.codec_name.as_ref())
+        .map(|value| value.to_uppercase())
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    let width = best.as_ref().and_then(|stream| stream.width);
+    let height = best.as_ref().and_then(|stream| stream.height);
+    let fps = best
+        .as_ref()
+        .and_then(|stream| stream.r_frame_rate.as_deref())
+        .and_then(parse_ffprobe_fps);
+
+    let resolution = resolution_label(width, height);
 
     Ok(VideoInfo {
         codec,
@@ -347,4 +383,29 @@ pub fn check_label_mismatch(channel_name: &str, resolution: &str) -> Vec<String>
     }
 
     mismatches
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_ffprobe_fps, resolution_label};
+
+    #[test]
+    fn parse_fractional_fps() {
+        assert_eq!(parse_ffprobe_fps("30000/1001"), Some(30));
+        assert_eq!(parse_ffprobe_fps("24000/1001"), Some(24));
+    }
+
+    #[test]
+    fn parse_decimal_fps() {
+        assert_eq!(parse_ffprobe_fps("29.97"), Some(30));
+        assert_eq!(parse_ffprobe_fps(""), None);
+    }
+
+    #[test]
+    fn map_resolution_labels() {
+        assert_eq!(resolution_label(Some(3840), Some(2160)), "4K");
+        assert_eq!(resolution_label(Some(1920), Some(1080)), "1080p");
+        assert_eq!(resolution_label(Some(1280), Some(720)), "720p");
+        assert_eq!(resolution_label(Some(854), Some(480)), "SD");
+    }
 }
