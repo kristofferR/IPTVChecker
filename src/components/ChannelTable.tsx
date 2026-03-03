@@ -48,7 +48,7 @@ export function ChannelTable({
   const virtualizer = useVirtualizer({
     count: filteredResults.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 44,
+    estimateSize: () => 34,
     overscan: 20,
   });
 
@@ -94,11 +94,11 @@ export function ChannelTable({
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* Header */}
-      <div className="flex items-center h-9 px-4 text-xs font-medium text-text-tertiary uppercase tracking-wider border-b border-border-app bg-panel-subtle select-none">
+      <div className="flex items-center h-8 px-4 text-[11px] font-semibold text-text-secondary border-b border-border-app bg-panel-subtle select-none">
         {COLUMNS.map((col) => (
           <button
             key={col.key}
-            className={`${col.className} hover:text-text-primary transition-colors flex items-center gap-1`}
+            className={`${col.className} hover:text-text-primary flex items-center gap-1`}
             onClick={() => handleSort(col.key)}
           >
             {col.label}
@@ -117,7 +117,12 @@ export function ChannelTable({
           No channels match the current filters
         </div>
       ) : (
-        <div ref={parentRef} tabIndex={0} onKeyDown={handleKeyDown} className="flex-1 overflow-auto focus:outline-none">
+        <div
+          ref={parentRef}
+          tabIndex={0}
+          onKeyDown={handleKeyDown}
+          className="native-scroll flex-1 overflow-auto focus:outline-none"
+        >
           <div
             style={{
               height: `${virtualizer.getTotalSize()}px`,

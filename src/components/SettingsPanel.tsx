@@ -78,13 +78,13 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
           <button
             onClick={onClose}
             aria-label="Close settings"
-            className="p-1 hover:bg-btn-hover rounded transition-colors"
+            className="p-1 hover:bg-btn-hover rounded"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="native-scroll flex-1 overflow-y-auto p-4 space-y-4">
           <div>
             <label className="block text-xs text-text-secondary mb-1">
               Timeout (seconds)
@@ -98,7 +98,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
               }}
               step="0.5"
               min="1"
-              className="w-full px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="native-field w-full px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
@@ -118,7 +118,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
               placeholder="Disabled"
               step="1"
               min="1"
-              className="w-full px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="native-field w-full px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
@@ -138,7 +138,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
               }}
               min="1"
               max="20"
-              className="w-full px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="native-field w-full px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
             <p className="text-xs text-text-tertiary mt-1">
               Most IPTV servers enforce 1 connection. Increase only if your server
@@ -159,7 +159,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
               }}
               min="1"
               max="20"
-              className="w-full px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="native-field w-full px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
@@ -171,7 +171,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
               type="text"
               value={draft.user_agent}
               onChange={(e) => update("user_agent", e.target.value)}
-              className="w-full px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="native-field w-full px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
@@ -217,11 +217,11 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                 value={draft.proxy_file ?? ""}
                 readOnly
                 placeholder="No proxy file selected"
-                className="flex-1 px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none"
+                className="native-field flex-1 px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none"
               />
               <button
                 onClick={handleSelectProxy}
-                className="macos-btn px-3 py-1.5 text-sm bg-btn hover:bg-btn-hover rounded-md transition-colors"
+                className="macos-btn px-3 py-1.5 text-sm bg-btn hover:bg-btn-hover rounded-md"
               >
                 Browse
               </button>
@@ -232,13 +232,13 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
         <div className="flex items-center gap-2 p-4 border-t border-border-app">
           <button
             onClick={handleSave}
-            className="flex-1 px-3 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 rounded-md transition-colors"
+            className="macos-btn macos-btn-primary flex-1 px-3 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 rounded-md"
           >
             Save Settings
           </button>
           <button
             onClick={onClose}
-            className="macos-btn px-3 py-2 text-sm bg-btn hover:bg-btn-hover rounded-md transition-colors"
+            className="macos-btn px-3 py-2 text-sm bg-btn hover:bg-btn-hover rounded-md"
           >
             Cancel
           </button>

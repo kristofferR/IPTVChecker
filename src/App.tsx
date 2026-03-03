@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import type {
   ChannelResult,
   PlaylistPreview,
@@ -50,9 +49,13 @@ export default function App() {
 
   // Detect platform and set data attribute for theme
   useEffect(() => {
-    detectPlatform().then((p) => {
-      document.documentElement.dataset.platform = p;
-    });
+    detectPlatform()
+      .then((p) => {
+        document.documentElement.dataset.platform = p;
+      })
+      .catch(() => {
+        // Keep startup platform hint when plugin-os isn't available yet.
+      });
   }, []);
 
   // Check ffmpeg on mount
@@ -89,8 +92,6 @@ export default function App() {
       setGroupFilter("all");
       setStatusFilter("all");
       setSelectedChannel(null);
-      // Update window title
-      getCurrentWindow().setTitle(`IPTV Checker - ${preview.file_name}`);
     }
   }, [reset]);
 

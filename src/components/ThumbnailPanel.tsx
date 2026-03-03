@@ -17,7 +17,7 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
   }
 
   return (
-    <div className="flex flex-col gap-3 p-4 overflow-y-auto">
+    <div className="native-scroll flex flex-col gap-3 p-4 overflow-y-auto">
       <div className="flex items-center gap-2">
         <StatusBadge status={result.status} />
         <h3 className="text-sm font-semibold truncate">{result.name}</h3>

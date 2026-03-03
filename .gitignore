@@ -24,5 +24,8 @@ Thumbs.db
 src-tauri/binaries/
 src-tauri/gen/
 
+# Test playlists
+test-playlists/
+
 # Bun
 bun.lockb

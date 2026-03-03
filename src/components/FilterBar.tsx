@@ -28,13 +28,13 @@ export function FilterBar({
           placeholder="Search channels..."
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
-          className="w-full pl-8 pr-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+          className="native-field w-full pl-8 pr-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
         />
       </div>
       <select
         value={groupFilter}
         onChange={(e) => onGroupChange(e.target.value)}
-        className="px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
+        className="native-field px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
       >
         <option value="all">All Groups</option>
         {groups.map((g) => (
@@ -46,7 +46,7 @@ export function FilterBar({
       <select
         value={statusFilter}
         onChange={(e) => onStatusChange(e.target.value)}
-        className="px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
+        className="native-field px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
       >
         <option value="all">All Status</option>
         <option value="alive">Alive</option>

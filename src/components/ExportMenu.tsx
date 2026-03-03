@@ -56,7 +56,7 @@ export function ExportMenu({
       <button
         onClick={() => setOpen(!open)}
         disabled={disabled}
-        className="macos-btn flex items-center gap-1.5 px-3 py-1.5 text-sm bg-btn hover:bg-btn-hover disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
+        className="flex items-center gap-1.5 px-2.5 py-1 text-sm rounded-md toolbar-btn disabled:opacity-40 disabled:pointer-events-none"
       >
         <Download className="w-4 h-4" />
         Export
@@ -66,19 +66,19 @@ export function ExportMenu({
         <div className="macos-popover absolute right-0 top-full mt-1 w-48 bg-dropdown backdrop-blur-xl border border-border-app rounded-lg shadow-xl z-50 py-1">
           <button
             onClick={handleExportCsv}
-            className="w-full text-left px-3 py-2 text-sm hover:bg-btn-hover transition-colors"
+            className="w-full text-left px-3 py-2 text-sm hover:bg-btn-hover"
           >
             Export CSV
           </button>
           <button
             onClick={handleExportSplit}
-            className="w-full text-left px-3 py-2 text-sm hover:bg-btn-hover transition-colors"
+            className="w-full text-left px-3 py-2 text-sm hover:bg-btn-hover"
           >
             Split Playlists
           </button>
           <button
             onClick={handleExportRenamed}
-            className="w-full text-left px-3 py-2 text-sm hover:bg-btn-hover transition-colors"
+            className="w-full text-left px-3 py-2 text-sm hover:bg-btn-hover"
           >
             Renamed Playlist
           </button>

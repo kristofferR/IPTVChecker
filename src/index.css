@@ -16,6 +16,7 @@
   --btn-bg-hover: rgb(82 82 91);
   --dropdown-bg: rgb(39 39 42);
   --overlay-bg: rgb(24 24 27);
+  --focus-ring: rgb(59 130 246 / 0.45);
   --toolbar-pt: 0.5rem;
   --toolbar-pl: 1rem;
 }
@@ -34,7 +35,7 @@
   --border-subtle: -apple-system-separator;
   --input-bg: transparent;
   --toolbar-pt: 1.75rem;
-  --toolbar-pl: 5rem;
+  --toolbar-pl: 78px;
 
   /* Light mode defaults (vibrancy is light gray, tint dark to contrast) */
   --panel-bg: rgb(0 0 0 / 0.03);
@@ -44,6 +45,7 @@
   --btn-bg-hover: rgb(255 255 255 / 0.85);
   --dropdown-bg: rgb(255 255 255 / 0.97);
   --overlay-bg: rgb(246 246 246 / 0.97);
+  --focus-ring: rgb(10 132 255 / 0.45);
 }
 
 /* macOS dark mode: vibrancy is dark, tint light to contrast */
@@ -89,33 +91,193 @@ body {
   color: var(--text-primary);
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
+/* Toolbar buttons (non-macOS fallback: solid background) */
+.toolbar-btn {
   background: var(--btn-bg);
-  border-radius: 4px;
+  color: var(--text-primary);
 }
 
-::-webkit-scrollbar-thumb:hover {
+.toolbar-btn:hover {
   background: var(--btn-bg-hover);
 }
 
-/* macOS: native button styling (subtle shadow + border like NSButton) */
+/* Native-feeling scroll containers on macOS */
+[data-platform="macos"] .native-scroll {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: auto;
+  overscroll-behavior: auto;
+}
+
+/* macOS toolbar buttons (borderless, subtle hover like NSToolbarItem) */
+[data-platform="macos"] .toolbar-btn {
+  background: transparent;
+  color: var(--text-primary);
+}
+
+[data-platform="macos"] .toolbar-btn:hover {
+  background: rgb(0 0 0 / 0.06);
+}
+
+[data-platform="macos"] .toolbar-btn:active {
+  background: rgb(0 0 0 / 0.1);
+}
+
+[data-platform="macos"] .toolbar-btn-primary {
+  background: rgb(10 132 255 / 0.18);
+  color: rgb(0 84 186);
+}
+
+[data-platform="macos"] .toolbar-btn-primary:hover {
+  background: rgb(10 132 255 / 0.24);
+}
+
+[data-platform="macos"] .toolbar-btn-stop {
+  color: rgb(220 38 38);
+}
+
+/* macOS controls */
 [data-platform="macos"] .macos-btn {
-  box-shadow: 0 0.5px 1px rgb(0 0 0 / 0.06), 0 0 0 0.5px rgb(0 0 0 / 0.06);
+  border: 0.5px solid rgb(0 0 0 / 0.12);
+  background: linear-gradient(
+    180deg,
+    rgb(255 255 255 / 0.9) 0%,
+    rgb(255 255 255 / 0.7) 100%
+  );
+  box-shadow: 0 0.5px 1px rgb(0 0 0 / 0.08);
+  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+[data-platform="macos"] .macos-btn:hover {
+  background: linear-gradient(
+    180deg,
+    rgb(255 255 255 / 0.96) 0%,
+    rgb(255 255 255 / 0.78) 100%
+  );
+}
+
+[data-platform="macos"] .macos-btn:active {
+  background: linear-gradient(
+    180deg,
+    rgb(255 255 255 / 0.7) 0%,
+    rgb(255 255 255 / 0.86) 100%
+  );
+}
+
+[data-platform="macos"] .macos-btn-primary {
+  color: white;
+  border-color: rgb(0 80 188 / 0.48);
+  background: linear-gradient(180deg, rgb(23 153 255) 0%, rgb(10 112 232) 100%);
+}
+
+[data-platform="macos"] .macos-btn-primary:hover {
+  background: linear-gradient(180deg, rgb(30 161 255) 0%, rgb(17 121 240) 100%);
+}
+
+[data-platform="macos"] .macos-btn-destructive {
+  color: white;
+  border-color: rgb(144 13 28 / 0.45);
+  background: linear-gradient(180deg, rgb(255 87 100) 0%, rgb(232 55 72) 100%);
+}
+
+[data-platform="macos"] .macos-btn-destructive:hover {
+  background: linear-gradient(180deg, rgb(255 100 113) 0%, rgb(240 67 83) 100%);
+}
+
+[data-platform="macos"] .native-field {
+  border-radius: 7px;
+  border: 1px solid rgb(0 0 0 / 0.16);
+  background: rgb(255 255 255 / 0.72);
+  box-shadow: inset 0 0.5px 1px rgb(0 0 0 / 0.06);
+}
+
+[data-platform="macos"] .native-field:focus {
+  border-color: rgb(10 132 255 / 0.7);
+  box-shadow: 0 0 0 3px var(--focus-ring), inset 0 0.5px 1px rgb(0 0 0 / 0.04);
+}
+
+[data-platform="macos"] .channel-row:hover {
+  background: rgb(0 0 0 / 0.045);
+}
+
+[data-platform="macos"] .channel-row.selected {
+  background: rgb(10 132 255 / 0.16);
 }
 
 @media (prefers-color-scheme: dark) {
+  [data-platform="macos"] .toolbar-btn:hover {
+    background: rgb(255 255 255 / 0.08);
+  }
+
+  [data-platform="macos"] .toolbar-btn:active {
+    background: rgb(255 255 255 / 0.12);
+  }
+
+  [data-platform="macos"] .toolbar-btn-primary {
+    color: rgb(130 195 255);
+    background: rgb(10 132 255 / 0.25);
+  }
+
+  [data-platform="macos"] .toolbar-btn-primary:hover {
+    background: rgb(10 132 255 / 0.32);
+  }
+
+  [data-platform="macos"] .toolbar-btn-stop {
+    color: rgb(248 113 113);
+  }
+
   [data-platform="macos"] .macos-btn {
-    box-shadow: 0 0.5px 1px rgb(0 0 0 / 0.25), 0 0 0 0.5px rgb(255 255 255 / 0.06);
+    border-color: rgb(255 255 255 / 0.13);
+    background: linear-gradient(
+      180deg,
+      rgb(69 69 74 / 0.82) 0%,
+      rgb(52 52 56 / 0.82) 100%
+    );
+    box-shadow: 0 0.5px 1px rgb(0 0 0 / 0.32);
+  }
+
+  [data-platform="macos"] .macos-btn:hover {
+    background: linear-gradient(
+      180deg,
+      rgb(80 80 86 / 0.84) 0%,
+      rgb(58 58 64 / 0.84) 100%
+    );
+  }
+
+  [data-platform="macos"] .macos-btn:active {
+    background: linear-gradient(
+      180deg,
+      rgb(50 50 54 / 0.84) 0%,
+      rgb(72 72 78 / 0.84) 100%
+    );
+  }
+
+  [data-platform="macos"] .macos-btn-primary {
+    border-color: rgb(88 163 255 / 0.6);
+    background: linear-gradient(180deg, rgb(26 146 255) 0%, rgb(12 111 222) 100%);
+  }
+
+  [data-platform="macos"] .macos-btn-destructive {
+    border-color: rgb(255 112 128 / 0.5);
+    background: linear-gradient(180deg, rgb(255 96 109) 0%, rgb(212 57 70) 100%);
+  }
+
+  [data-platform="macos"] .native-field {
+    border-color: rgb(255 255 255 / 0.14);
+    background: rgb(45 45 49 / 0.75);
+    box-shadow: inset 0 0.5px 1px rgb(0 0 0 / 0.35);
+  }
+
+  [data-platform="macos"] .native-field:focus {
+    border-color: rgb(89 180 255 / 0.78);
+    box-shadow: 0 0 0 3px rgb(10 132 255 / 0.34), inset 0 0.5px 1px rgb(0 0 0 / 0.2);
+  }
+
+  [data-platform="macos"] .channel-row:hover {
+    background: rgb(255 255 255 / 0.06);
+  }
+
+  [data-platform="macos"] .channel-row.selected {
+    background: rgb(10 132 255 / 0.22);
   }
 }
 
@@ -160,45 +322,6 @@ body {
   padding-inline: 8px;
 }
 
-/* macOS: use overlay scrollbars */
-[data-platform="macos"] {
-  overflow: overlay;
-}
-
-[data-platform="macos"] ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-[data-platform="macos"] ::-webkit-scrollbar-thumb {
-  background: rgb(0 0 0 / 0.15);
-  border-radius: 3px;
-}
-
-@media (prefers-color-scheme: dark) {
-  [data-platform="macos"] ::-webkit-scrollbar-thumb {
-    background: rgb(255 255 255 / 0.2);
-  }
-}
-
-/* macOS: restore native form controls */
-[data-platform="macos"] select,
-[data-platform="macos"] input[type="text"],
-[data-platform="macos"] input[type="number"],
-[data-platform="macos"] input[type="search"] {
-  appearance: auto;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  padding: revert;
-  color: -apple-system-label;
-  font: -apple-system-body;
-}
-
 [data-platform="macos"] input[type="checkbox"] {
   appearance: auto;
-}
-
-[data-platform="macos"] .search-icon {
-  display: none;
 }

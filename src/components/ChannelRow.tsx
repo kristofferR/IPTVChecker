@@ -12,7 +12,7 @@ interface ChannelRowProps {
 export function ChannelRow({ result, index, onClick, selected, focused }: ChannelRowProps) {
   if (!result) {
     return (
-      <div className="flex items-center h-11 px-4 text-sm text-text-tertiary border-b border-border-subtle">
+      <div className="flex items-center h-[34px] px-4 text-sm text-text-tertiary border-b border-border-subtle">
         <span className="w-12 tabular-nums">{index + 1}</span>
         <span className="w-8" />
         <span className="flex-1 italic">Checking...</span>
@@ -24,9 +24,9 @@ export function ChannelRow({ result, index, onClick, selected, focused }: Channe
 
   return (
     <div
-      className={`flex items-center h-11 px-4 text-sm border-b border-border-subtle cursor-pointer transition-colors hover:bg-panel-subtle ${
-        selected ? "bg-panel-subtle" : ""
-      } ${focused ? "ring-1 ring-blue-500/50" : ""}`}
+      className={`channel-row flex items-center h-[34px] px-4 text-sm border-b border-border-subtle cursor-pointer hover:bg-panel-subtle ${
+        selected ? "selected bg-panel-subtle" : ""
+      } ${focused ? "ring-1 ring-border-app" : ""}`}
       onClick={() => onClick(result)}
     >
       <span className="w-12 text-text-tertiary tabular-nums">{index + 1}</span>
