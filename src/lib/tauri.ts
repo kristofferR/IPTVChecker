@@ -19,6 +19,18 @@ export async function openPlaylist(
   });
 }
 
+export async function openPlaylistUrl(
+  url: string,
+  groupFilter?: string,
+  channelSearch?: string,
+): Promise<PlaylistPreview> {
+  return invoke("open_playlist_url", {
+    url,
+    groupFilter: groupFilter ?? null,
+    channelSearch: channelSearch ?? null,
+  });
+}
+
 export async function startScan(config: ScanConfig): Promise<string> {
   return invoke("start_scan", { config });
 }

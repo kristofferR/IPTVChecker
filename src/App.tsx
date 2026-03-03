@@ -9,6 +9,7 @@ import type {
 } from "./lib/types";
 import {
   openPlaylist,
+  openPlaylistUrl,
   checkFfmpegAvailable,
   readScreenshot,
   openChannelInPlayer,
@@ -228,6 +229,44 @@ export default function App() {
     await openPlaylistPath(selectedPath);
   }, [openPlaylistPath]);
 
+  const handleOpenUrl = useCallback(async () => {
+    const raw = window.prompt("Enter playlist URL (http:// or https://):");
+    const url = raw?.trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) {
+      setPlaylistOpenError("Playlist URL must start with http:// or https://");
+      return;
+    }
+
+    setPlaylistOpenError(null);
+    try {
+      const searchTrimmed = channelSearch.trim() || undefined;
+      logger.debug(
+        `[App] Opening playlist URL: ${url}, channelSearch: "${searchTrimmed ?? ""}"`,
+      );
+      const preview = await openPlaylistUrl(url, undefined, searchTrimmed);
+      logger.debug(
+        `[App] Playlist URL loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
+        preview.groups,
+      );
+      setPlaylist(preview);
+      initFromPlaylist(preview.channels);
+      setSearch("");
+      setGroupFilter("all");
+      setStatusFilter("all");
+      setPlaylistOpenError(null);
+      setSelectedChannel(null);
+      setSelectedChannelIndices([]);
+      setPendingPlaybackChannel(null);
+    } catch (err) {
+      logger.error("[App] Failed to open playlist URL", err);
+      setPlaylistOpenError(formatPlaylistOpenError(err));
+      setSelectedChannel(null);
+      setSelectedChannelIndices([]);
+      setPendingPlaybackChannel(null);
+    }
+  }, [channelSearch, initFromPlaylist]);
+
   const handleDroppedPaths = useCallback((paths: string[]) => {
     const playlistPath = paths.find((path) =>
       path.toLowerCase().endsWith(".m3u") || path.toLowerCase().endsWith(".m3u8"),
@@ -393,6 +432,11 @@ export default function App() {
         }),
       );
       unlisten.push(
+        await listen("menu://open-url", () => {
+          void handleOpenUrl();
+        }),
+      );
+      unlisten.push(
         await listen("menu://export-csv", () => queueExport("csv")),
       );
       unlisten.push(
@@ -445,7 +489,7 @@ export default function App() {
         off();
       }
     };
-  }, [cancel, handleOpen, handleStartScan]);
+  }, [cancel, handleOpen, handleOpenUrl, handleStartScan]);
 
   const handleSelectChannel = useCallback((result: ChannelResult) => {
     setSelectedChannel(result);
@@ -525,6 +569,7 @@ export default function App() {
     <div className="flex flex-col h-screen bg-surface">
       <Toolbar
         onOpen={handleOpen}
+        onOpenUrl={handleOpenUrl}
         onStartScan={handleStartScan}
         onStopScan={cancel}
         onOpenSettings={() => setShowSettings(true)}

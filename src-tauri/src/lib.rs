@@ -42,6 +42,7 @@ pub fn run() {
 
             let file_menu = SubmenuBuilder::new(app, "File")
                 .text("menu.file.open", "Open Playlist...")
+                .text("menu.file.open_url", "Open URL...")
                 .separator()
                 .text("menu.file.export_csv", "Export CSV")
                 .text("menu.file.export_split", "Export Split Playlists")
@@ -89,6 +90,7 @@ pub fn run() {
         .on_menu_event(|app, event| {
             let frontend_event = match event.id().as_ref() {
                 "menu.file.open" => Some("menu://open-playlist"),
+                "menu.file.open_url" => Some("menu://open-url"),
                 "menu.file.export_csv" => Some("menu://export-csv"),
                 "menu.file.export_split" => Some("menu://export-split"),
                 "menu.file.export_renamed" => Some("menu://export-renamed"),
@@ -149,6 +151,7 @@ pub fn run() {
         .manage(AppState::new() as Arc<AppState>)
         .invoke_handler(tauri::generate_handler![
             commands::playlist::open_playlist,
+            commands::playlist::open_playlist_url,
             commands::player::open_channel_in_player,
             commands::scan::start_scan,
             commands::scan::cancel_scan,

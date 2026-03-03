@@ -1,6 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   FolderOpen,
+  Link2,
   Play,
   Square,
   Settings,
@@ -17,6 +18,7 @@ export interface MenuExportRequest {
 
 interface ToolbarProps {
   onOpen: () => void;
+  onOpenUrl: () => void;
   onStartScan: () => void;
   onStopScan: () => void;
   onOpenSettings: () => void;
@@ -39,6 +41,7 @@ const dragIgnoreSelector =
 
 export function Toolbar({
   onOpen,
+  onOpenUrl,
   onStartScan,
   onStopScan,
   onOpenSettings,
@@ -81,6 +84,15 @@ export function Toolbar({
       >
         <FolderOpen className="w-4 h-4" />
         Open
+      </button>
+
+      <button
+        onClick={onOpenUrl}
+        disabled={scanning}
+        className={toolbarBtn}
+      >
+        <Link2 className="w-4 h-4" />
+        Open URL
       </button>
 
       {scanning ? (
