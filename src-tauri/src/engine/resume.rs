@@ -4,6 +4,47 @@ use std::path::Path;
 use crate::error::AppError;
 use crate::models::channel::ChannelResult;
 
+const REDACTED_QUERY_VALUE: &str = "REDACTED";
+
+fn sanitize_url_for_persistence(url: &str) -> String {
+    let trimmed = url.trim();
+    let Ok(mut parsed) = url::Url::parse(trimmed) else {
+        return trimmed.to_string();
+    };
+
+    let _ = parsed.set_username("");
+    let _ = parsed.set_password(None);
+    parsed.set_fragment(None);
+
+    let query_keys: Vec<String> = parsed
+        .query_pairs()
+        .map(|(key, _)| key.to_string())
+        .collect();
+    parsed.set_query(None);
+    if !query_keys.is_empty() {
+        let mut serializer = parsed.query_pairs_mut();
+        for key in query_keys {
+            serializer.append_pair(&key, REDACTED_QUERY_VALUE);
+        }
+    }
+
+    parsed.to_string()
+}
+
+fn sanitize_log_entry(entry: &str) -> String {
+    entry
+        .split_whitespace()
+        .map(|token| {
+            if token.starts_with("http://") || token.starts_with("https://") {
+                sanitize_url_for_persistence(token)
+            } else {
+                token.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Load processed channels from a checkpoint log file.
 /// Returns (set of channel URLs, last_index).
 pub fn load_processed_channels(log_file: &str) -> (HashSet<String>, usize) {
@@ -55,7 +96,8 @@ pub fn write_log_entry(log_file: &str, entry: &str) -> Result<(), AppError> {
         .open(log_file)
         .map_err(AppError::Io)?;
 
-    writeln!(file, "{}", entry).map_err(AppError::Io)?;
+    let sanitized = sanitize_log_entry(entry);
+    writeln!(file, "{}", sanitized).map_err(AppError::Io)?;
     Ok(())
 }
 
@@ -89,7 +131,14 @@ pub fn load_checkpoint_results(checkpoint_file: &str) -> Vec<ChannelResult> {
 pub fn write_result_entry(checkpoint_file: &str, result: &ChannelResult) -> Result<(), AppError> {
     use std::io::Write;
 
-    let serialized = serde_json::to_string(result).map_err(|error| {
+    let mut sanitized = result.clone();
+    sanitized.url = sanitize_url_for_persistence(&sanitized.url);
+    sanitized.stream_url = sanitized
+        .stream_url
+        .as_deref()
+        .map(sanitize_url_for_persistence);
+
+    let serialized = serde_json::to_string(&sanitized).map_err(|error| {
         AppError::Parse(format!("Failed to serialize checkpoint result: {}", error))
     })?;
 
@@ -188,5 +237,72 @@ mod tests {
         assert_eq!(last_index, 4);
 
         let _ = std::fs::remove_file(&log_file);
+    }
+
+    #[test]
+    fn sanitize_url_for_persistence_redacts_credentials_and_query_values() {
+        let sanitized = sanitize_url_for_persistence(
+            "https://demo:secret@example.com/live.m3u8?token=abc123&password=hunter2#frag",
+        );
+        assert_eq!(
+            sanitized,
+            "https://example.com/live.m3u8?token=REDACTED&password=REDACTED"
+        );
+        assert!(!sanitized.contains("demo"));
+        assert!(!sanitized.contains("secret"));
+        assert!(!sanitized.contains("abc123"));
+        assert!(!sanitized.contains("hunter2"));
+    }
+
+    #[test]
+    fn write_log_entry_redacts_raw_secrets_in_urls() {
+        let log_file = temp_file("resume-log-redaction");
+
+        write_log_entry(
+            &log_file,
+            "7 - Secret Channel https://demo:secret@example.com/live.m3u8?token=abc123",
+        )
+        .expect("log write should succeed");
+
+        let persisted = std::fs::read_to_string(&log_file).expect("log should be readable");
+        assert!(persisted.contains("token=REDACTED"));
+        assert!(!persisted.contains("abc123"));
+        assert!(!persisted.contains("secret@example.com"));
+
+        let _ = std::fs::remove_file(&log_file);
+    }
+
+    #[test]
+    fn write_result_entry_redacts_url_and_stream_url() {
+        let checkpoint_file = temp_file("resume-checkpoint-redaction");
+
+        let mut result = make_result(8, "Secret", ChannelStatus::Alive);
+        result.url = "https://demo:secret@example.com/live.m3u8?token=abc123".to_string();
+        result.stream_url = Some(
+            "https://stream.example.com/hls.m3u8?auth=xyz987&session=abcd".to_string(),
+        );
+
+        write_result_entry(&checkpoint_file, &result).expect("result write should succeed");
+
+        let persisted =
+            std::fs::read_to_string(&checkpoint_file).expect("checkpoint should be readable");
+        assert!(!persisted.contains("abc123"));
+        assert!(!persisted.contains("xyz987"));
+        assert!(persisted.contains("token=REDACTED"));
+        assert!(persisted.contains("auth=REDACTED"));
+        assert!(persisted.contains("session=REDACTED"));
+
+        let loaded = load_checkpoint_results(&checkpoint_file);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(
+            loaded[0].url,
+            "https://example.com/live.m3u8?token=REDACTED"
+        );
+        assert_eq!(
+            loaded[0].stream_url.as_deref(),
+            Some("https://stream.example.com/hls.m3u8?auth=REDACTED&session=REDACTED")
+        );
+
+        let _ = std::fs::remove_file(&checkpoint_file);
     }
 }
