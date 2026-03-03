@@ -31,12 +31,19 @@ export function ProgressBar({
       ? Math.round((progress.completed / progress.total) * 100)
       : 0;
 
-  const telemetryLabel =
-    throughputChannelsPerSecond == null
-      ? scanState === "scanning"
-        ? "Speed/ETA: collecting sample..."
-        : "Speed/ETA: —"
-      : `${throughputChannelsPerSecond.toFixed(2)} ch/s • ETA ${formatEta(etaSeconds)}`;
+  let telemetryLabel: string;
+  if (scanState === "paused") {
+    telemetryLabel = "—";
+  } else if (throughputChannelsPerSecond == null) {
+    telemetryLabel = "Calculating speed…";
+  } else {
+    const chPerMin = throughputChannelsPerSecond * 60;
+    const throughputDisplay =
+      chPerMin >= 10
+        ? `${Math.round(chPerMin)} ch/min`
+        : `${chPerMin.toFixed(1)} ch/min`;
+    telemetryLabel = `${throughputDisplay} · ~${formatEta(etaSeconds)} remaining`;
+  }
 
   return (
     <div className="px-4 py-2 border-t border-border-app bg-panel-subtle">

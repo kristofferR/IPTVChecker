@@ -30,6 +30,13 @@ const EMPTY_TELEMETRY: ScanTelemetry = {
   etaSeconds: null,
 };
 
+/** Number of recent completions used for rolling throughput average. */
+const SLIDING_WINDOW_SIZE = 20;
+/** Minimum completions before showing speed/ETA (avoids noisy early values). */
+const MIN_SAMPLES_FOR_TELEMETRY = 5;
+/** Only refresh the telemetry display this often (ms) to prevent flicker. */
+const TELEMETRY_THROTTLE_MS = 2000;
+
 interface RunClockState {
   runId: string;
   startedAtMs: number;
@@ -52,6 +59,10 @@ export function useScan() {
   const activeRunId = useRef<string | null>(null);
   const pendingScanError = useRef<ScanEvent<ScanErrorPayload> | null>(null);
   const runClock = useRef<RunClockState | null>(null);
+  /** Active-elapsed-ms timestamp for each channel completion (sliding window source). */
+  const completionActiveMs = useRef<number[]>([]);
+  /** Wall-clock time of last telemetry state update (for throttle). */
+  const lastTelemetryUpdateMs = useRef(0);
 
   // Reset backend scan state on mount (handles app restart with stale flag)
   useEffect(() => {
@@ -115,6 +126,21 @@ export function useScan() {
             return;
           }
           queueResult(event.payload.payload);
+
+          // Record completion time (in active-elapsed-ms) for sliding-window throughput
+          const clock = runClock.current;
+          if (clock) {
+            const pauseMs =
+              clock.pausedAtMs != null
+                ? performance.now() - clock.pausedAtMs
+                : 0;
+            const activeMs =
+              performance.now() -
+              clock.startedAtMs -
+              clock.accumulatedPausedMs -
+              pauseMs;
+            completionActiveMs.current.push(activeMs);
+          }
         }),
       );
 
@@ -131,37 +157,49 @@ export function useScan() {
           const nextProgress = event.payload.payload;
           setProgress(nextProgress);
 
+          // Throttle telemetry updates to avoid flicker (issue #79)
           const now = performance.now();
-          const activeRun = runClock.current;
-          if (!activeRun || activeRun.runId !== event.payload.run_id) {
+          if (
+            now - lastTelemetryUpdateMs.current < TELEMETRY_THROTTLE_MS &&
+            lastTelemetryUpdateMs.current > 0
+          ) {
             return;
           }
 
-          const pausedNowMs =
-            activeRun.pausedAtMs == null ? 0 : now - activeRun.pausedAtMs;
-          const activeElapsedMs = Math.max(
-            0,
-            now - activeRun.startedAtMs - activeRun.accumulatedPausedMs - pausedNowMs,
-          );
-          const activeElapsedSeconds = activeElapsedMs / 1000;
-
-          if (nextProgress.completed < 2 || activeElapsedSeconds < 1) {
+          // Sliding-window throughput: use last N completion timestamps
+          const samples = completionActiveMs.current;
+          if (samples.length < MIN_SAMPLES_FOR_TELEMETRY) {
             setTelemetry(EMPTY_TELEMETRY);
             return;
           }
 
-          const throughput = nextProgress.completed / activeElapsedSeconds;
+          const windowStart = Math.max(0, samples.length - SLIDING_WINDOW_SIZE);
+          const firstMs = samples[windowStart];
+          const lastMs = samples[samples.length - 1];
+          const windowDurationSec = (lastMs - firstMs) / 1000;
+          const windowCount = samples.length - 1 - windowStart;
+
+          if (windowDurationSec <= 0 || windowCount <= 0) {
+            setTelemetry(EMPTY_TELEMETRY);
+            return;
+          }
+
+          const throughput = windowCount / windowDurationSec;
           if (!Number.isFinite(throughput) || throughput <= 0) {
             setTelemetry(EMPTY_TELEMETRY);
             return;
           }
 
-          const remaining = Math.max(0, nextProgress.total - nextProgress.completed);
+          const remaining = Math.max(
+            0,
+            nextProgress.total - nextProgress.completed,
+          );
           const etaSeconds = remaining > 0 ? remaining / throughput : 0;
           setTelemetry({
             throughputChannelsPerSecond: throughput,
             etaSeconds: Number.isFinite(etaSeconds) ? etaSeconds : null,
           });
+          lastTelemetryUpdateMs.current = now;
         }),
       );
 
@@ -344,6 +382,8 @@ export function useScan() {
       activeRunId.current = null;
       pendingScanError.current = null;
       runClock.current = null;
+      completionActiveMs.current = [];
+      lastTelemetryUpdateMs.current = 0;
 
       try {
         const runId = await startScan(config);
@@ -452,6 +492,8 @@ export function useScan() {
       activeRunId.current = null;
       pendingScanError.current = null;
       runClock.current = null;
+      completionActiveMs.current = [];
+      lastTelemetryUpdateMs.current = 0;
     },
     [],
   );
