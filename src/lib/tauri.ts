@@ -26,6 +26,10 @@ export async function cancelScan(): Promise<void> {
   return invoke("cancel_scan");
 }
 
+export async function resetScan(): Promise<void> {
+  return invoke("reset_scan");
+}
+
 export async function exportCsv(
   results: ChannelResult[],
   path: string,

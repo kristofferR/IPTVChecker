@@ -45,7 +45,7 @@ export default function App() {
     error,
     start,
     cancel,
-    reset,
+    initFromPlaylist,
   } = useScan();
 
   // Detect platform and set data attribute for theme
@@ -87,15 +87,17 @@ export default function App() {
     });
     if (path) {
       const searchTrimmed = channelSearch.trim() || undefined;
+      console.log(`[App] Opening playlist: ${path}, channelSearch: "${searchTrimmed ?? ""}"`);
       const preview = await openPlaylist(path as string, undefined, searchTrimmed);
+      console.log(`[App] Playlist loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`, preview.groups);
       setPlaylist(preview);
-      reset();
+      initFromPlaylist(preview.channels);
       setSearch("");
       setGroupFilter("all");
       setStatusFilter("all");
       setSelectedChannel(null);
     }
-  }, [reset, channelSearch]);
+  }, [initFromPlaylist, channelSearch]);
 
   // Keyboard shortcuts
   const showSettingsRef = useRef(showSettings);
@@ -148,11 +150,17 @@ export default function App() {
   }, []);
 
   const completedResults = results.filter(
-    (r): r is ChannelResult => r !== null,
+    (r): r is ChannelResult => r != null,
   );
 
-  const screenshotUrl = selectedChannel?.screenshot_path?.trim()
-    ? convertFileSrc(selectedChannel.screenshot_path.trim())
+  // Keep sidebar in sync with live scan results
+  const liveSelectedChannel =
+    selectedChannel != null
+      ? (results[selectedChannel.index] ?? selectedChannel)
+      : null;
+
+  const screenshotUrl = liveSelectedChannel?.screenshot_path?.trim()
+    ? convertFileSrc(liveSelectedChannel.screenshot_path.trim())
     : null;
 
   return (
@@ -230,10 +238,10 @@ export default function App() {
           )}
         </div>
 
-        {selectedChannel && (
+        {liveSelectedChannel && (
           <div className="w-72 border-l border-border-app bg-panel-muted">
             <ThumbnailPanel
-              result={selectedChannel}
+              result={liveSelectedChannel}
               screenshotUrl={screenshotUrl}
             />
           </div>

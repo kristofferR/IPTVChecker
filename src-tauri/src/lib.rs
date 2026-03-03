@@ -56,6 +56,7 @@ pub fn run() {
             commands::playlist::open_playlist,
             commands::scan::start_scan,
             commands::scan::cancel_scan,
+            commands::scan::reset_scan,
             commands::export::export_csv,
             commands::export::export_split,
             commands::export::export_renamed,

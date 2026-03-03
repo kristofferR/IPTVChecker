@@ -93,9 +93,8 @@ pub async fn start_scan(
         .unwrap_or_else(|| "AllGroups".to_string());
 
     let log_file = format!("{}/{}_{}_checklog.txt", playlist_dir, base_name, group_suffix);
-    let (processed_channels, _) = resume::load_processed_channels(&log_file);
 
-    // Clear the log file after loading — prevents unbounded growth across scans
+    // Always start fresh — GUI scans are explicitly triggered by the user
     let _ = std::fs::write(&log_file, "");
 
     // Screenshots directory
@@ -185,10 +184,6 @@ pub async fn start_scan(
         for channel in channels {
             if cancel_token.is_cancelled() {
                 break;
-            }
-
-            if processed_channels.contains(&channel.url) {
-                continue;
             }
 
             let permit = semaphore.clone().acquire_owned().await;
@@ -397,5 +392,30 @@ pub async fn cancel_scan(app: AppHandle) -> Result<(), AppError> {
     if let Some(ref cancel) = *token {
         cancel.cancel();
     }
+    Ok(())
+}
+
+/// Cancel any running scan and force-reset the scanning flag.
+/// Called when opening a new playlist or on app startup to ensure clean state.
+#[tauri::command]
+pub async fn reset_scan(app: AppHandle) -> Result<(), AppError> {
+    let state = app.state::<Arc<AppState>>();
+
+    // Cancel any running scan
+    {
+        let token = state.cancel_token.lock().await;
+        if let Some(ref cancel) = *token {
+            cancel.cancel();
+        }
+    }
+
+    // Give spawned tasks a moment to observe cancellation
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // Force-reset the flag
+    let mut scanning = state.scanning.lock().await;
+    *scanning = false;
+
+    log::info!("Scan state reset");
     Ok(())
 }

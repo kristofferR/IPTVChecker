@@ -40,9 +40,13 @@ export function ChannelTable({
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
 
   const filteredResults = useMemo(() => {
-    const nonNull = results.filter((r): r is ChannelResult => r !== null);
+    const nonNull = results.filter((r): r is ChannelResult => r != null);
     const filtered = filterResults(nonNull, search, groupFilter, statusFilter);
-    return sortResults(filtered, sortField, sortDir);
+    const sorted = sortResults(filtered, sortField, sortDir);
+    console.log(
+      `[ChannelTable] results=${results.length} nonNull=${nonNull.length} filtered=${filtered.length} | search="${search}" group="${groupFilter}" status="${statusFilter}"`,
+    );
+    return sorted;
   }, [results, search, groupFilter, statusFilter, sortField, sortDir]);
 
   const virtualizer = useVirtualizer({

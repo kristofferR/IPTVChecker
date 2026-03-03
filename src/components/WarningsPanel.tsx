@@ -6,7 +6,7 @@ interface WarningsPanelProps {
 }
 
 export function WarningsPanel({ results }: WarningsPanelProps) {
-  const nonNull = results.filter((r): r is ChannelResult => r !== null);
+  const nonNull = results.filter((r): r is ChannelResult => r != null);
   const lowFps = nonNull.filter((r) => r.low_framerate);
   const mislabeled = nonNull.filter((r) => r.label_mismatches.length > 0);
 
