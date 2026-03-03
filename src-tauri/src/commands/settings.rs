@@ -31,6 +31,17 @@ pub fn apply_theme_preference(
         .set_theme(theme)
         .map_err(|error| AppError::Other(format!("Failed to apply theme: {}", error)))?;
 
+    #[cfg(target_os = "macos")]
+    {
+        let material = match preference {
+            ThemePreference::Dark => window_vibrancy::NSVisualEffectMaterial::HudWindow,
+            ThemePreference::Light | ThemePreference::System => {
+                window_vibrancy::NSVisualEffectMaterial::UnderWindowBackground
+            }
+        };
+        let _ = window_vibrancy::apply_vibrancy(&window, material, None, None);
+    }
+
     Ok(())
 }
 
