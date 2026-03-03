@@ -1,5 +1,5 @@
 [package]
-name = "iptv-checker-gui"
+name = "iptv-checker"
 version = "0.1.0"
 description = "Cross-platform IPTV Stream Checker"
 authors = []

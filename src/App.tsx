@@ -60,6 +60,10 @@ export default function App() {
         e.preventDefault();
         handleOpen();
       }
+      if (e.metaKey && e.key === ".") {
+        e.preventDefault();
+        setShowSettings((s) => !s);
+      }
       if (e.key === "Escape") {
         if (showSettings) setShowSettings(false);
       }
