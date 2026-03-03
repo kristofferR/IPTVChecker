@@ -181,12 +181,31 @@ fn is_direct_stream(content_type: &str, url: &str) -> bool {
         || path.ends_with(".aac")
 }
 
+/// Split an HLS attribute list on commas, skipping commas inside quoted values.
+fn split_hls_attributes(line: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let bytes = line.as_bytes();
+    let mut start = 0;
+    let mut in_quote = false;
+
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'"' {
+            in_quote = !in_quote;
+        } else if b == b',' && !in_quote {
+            parts.push(&line[start..i]);
+            start = i + 1;
+        }
+    }
+    parts.push(&line[start..]);
+    parts
+}
+
 fn parse_variant_score(stream_inf_line: &str) -> (u64, u64, u64) {
     let mut resolution_pixels = 0u64;
     let mut average_bandwidth = 0u64;
     let mut bandwidth = 0u64;
 
-    for raw_attribute in stream_inf_line.split(',') {
+    for raw_attribute in split_hls_attributes(stream_inf_line) {
         let Some((raw_key, raw_value)) = raw_attribute.split_once('=') else {
             continue;
         };
@@ -948,5 +967,24 @@ mod tests {
     fn test_total_attempts_includes_initial_request() {
         assert_eq!(total_attempts(0), 1);
         assert_eq!(total_attempts(3), 4);
+    }
+
+    #[test]
+    fn test_parse_variant_score_with_codecs_before_resolution() {
+        let attrs = r#"BANDWIDTH=5188040,CODECS="avc1.64101f,mp4a.40.2",RESOLUTION=1280x720"#;
+        let (res, _avg, bw) = parse_variant_score(attrs);
+        assert_eq!(res, 1280 * 720);
+        assert_eq!(bw, 5188040);
+    }
+
+    #[test]
+    fn test_split_hls_attributes_respects_quotes() {
+        let parts = split_hls_attributes(
+            r#"BANDWIDTH=5000,CODECS="avc1,mp4a",RESOLUTION=1920x1080"#,
+        );
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0], "BANDWIDTH=5000");
+        assert_eq!(parts[1], r#"CODECS="avc1,mp4a""#);
+        assert_eq!(parts[2], "RESOLUTION=1920x1080");
     }
 }
