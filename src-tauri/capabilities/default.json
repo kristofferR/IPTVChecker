@@ -30,6 +30,7 @@
     "fs:allow-exists",
     "fs:allow-mkdir",
     "store:default",
+    "log:default",
     "core:event:default",
     "core:event:allow-emit",
     "core:event:allow-listen",

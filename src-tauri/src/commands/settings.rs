@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use tauri::Manager;
+use tauri_plugin_store::StoreExt;
 
 use crate::error::AppError;
 use crate::models::settings::AppSettings;
@@ -20,7 +21,16 @@ pub async fn update_settings(
 ) -> Result<(), AppError> {
     let state = app.state::<Arc<AppState>>();
     let mut current = state.settings.lock().await;
-    *current = settings;
+    log::set_max_level(settings.level_filter());
+    *current = settings.clone();
+
+    // Persist to store
+    if let Ok(store) = app.store("settings.json") {
+        if let Ok(value) = serde_json::to_value(&settings) {
+            store.set("settings", value);
+        }
+    }
+
     Ok(())
 }
 

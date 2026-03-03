@@ -7,6 +7,7 @@ use crate::error::AppError;
 
 /// Load proxies from a file. Supports plain text and JSON formats.
 pub fn load_proxy_list(proxy_file: &str) -> Result<Vec<String>, AppError> {
+    log::info!("Loading proxies from: {}", proxy_file);
     let content = std::fs::read_to_string(proxy_file).map_err(|_| {
         AppError::FileNotFound(format!("Proxy file not found: {}", proxy_file))
     })?;
@@ -161,6 +162,7 @@ pub async fn confirm_geoblock(
     };
 
     for proxy in &sample {
+        log::debug!("Testing geoblock via proxy: {}", proxy);
         if test_with_proxy(url, proxy, timeout, 3).await {
             return "Geoblocked (Confirmed)".to_string();
         }

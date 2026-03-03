@@ -92,4 +92,5 @@ export interface AppSettings {
   proxy_file: string | null;
   test_geoblock: boolean;
   screenshots_dir: string | null;
+  log_level: string;
 }

@@ -225,6 +225,8 @@ pub async fn check_channel_status(
         HeaderValue::from_str(user_agent).unwrap_or_else(|_| HeaderValue::from_static("VLC/3.0.14 LibVLC/3.0.14")),
     );
 
+    log::info!("Checking channel: {}", url);
+
     let attempt_check = |current_timeout: f64| {
         let client = client.clone();
         let headers = headers.clone();
@@ -236,14 +238,25 @@ pub async fn check_channel_status(
                     return Err(AppError::Cancelled);
                 }
 
+                log::debug!("Attempt {}/{} for {} (timeout: {}s)", attempt + 1, retries, url, current_timeout);
                 let mut visited = HashSet::new();
                 let result = verify(&client, &url, current_timeout, 0, &mut visited, &headers).await;
 
                 match result {
-                    VerifyResult::Alive(stream_url) => return Ok(("Alive".to_string(), stream_url)),
-                    VerifyResult::Dead => return Ok(("Dead".to_string(), None)),
-                    VerifyResult::Geoblocked => return Ok(("Geoblocked".to_string(), None)),
+                    VerifyResult::Alive(stream_url) => {
+                        log::info!("Channel alive: {}", url);
+                        return Ok(("Alive".to_string(), stream_url));
+                    }
+                    VerifyResult::Dead => {
+                        log::info!("Channel dead: {}", url);
+                        return Ok(("Dead".to_string(), None));
+                    }
+                    VerifyResult::Geoblocked => {
+                        log::info!("Channel geoblocked: {}", url);
+                        return Ok(("Geoblocked".to_string(), None));
+                    }
                     VerifyResult::Retry => {
+                        log::debug!("Retrying channel: {}", url);
                         if attempt + 1 < retries {
                             let delay = std::cmp::min(2 + attempt as u64, 5);
                             tokio::time::sleep(Duration::from_secs(delay)).await;

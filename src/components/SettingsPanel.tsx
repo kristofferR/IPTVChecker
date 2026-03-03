@@ -69,6 +69,16 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
     }
   };
 
+  const handleSelectScreenshotsDir = async () => {
+    const path = await open({
+      multiple: false,
+      directory: true,
+    });
+    if (path) {
+      update("screenshots_dir", path as string);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true" aria-label="Settings">
       <div className="flex-1 bg-black/50" onClick={onClose} />
@@ -226,6 +236,52 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                 Browse
               </button>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-text-secondary mb-1">
+              Screenshots Directory
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={draft.screenshots_dir ?? ""}
+                readOnly
+                placeholder="Default (next to playlist)"
+                className="native-field flex-1 px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none"
+              />
+              <button
+                onClick={handleSelectScreenshotsDir}
+                className="macos-btn px-3 py-1.5 text-sm bg-btn hover:bg-btn-hover rounded-md"
+              >
+                Browse
+              </button>
+              {draft.screenshots_dir && (
+                <button
+                  onClick={() => update("screenshots_dir", null)}
+                  className="macos-btn px-3 py-1.5 text-sm bg-btn hover:bg-btn-hover rounded-md"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-text-secondary mb-1">
+              Log Level
+            </label>
+            <select
+              value={draft.log_level}
+              onChange={(e) => update("log_level", e.target.value)}
+              className="native-field w-full px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="error">Error</option>
+              <option value="warn">Warning</option>
+              <option value="info">Info</option>
+              <option value="debug">Debug</option>
+              <option value="trace">Trace</option>
+            </select>
           </div>
         </div>
 

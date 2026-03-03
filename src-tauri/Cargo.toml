@@ -30,6 +30,7 @@ thiserror = "2"
 rand = "0.10"
 tokio-util = { version = "0.7", features = ["rt"] }
 log = "0.4"
+tauri-plugin-log = "2"
 tauri-plugin-liquid-glass = "0.1"
 tauri-plugin-os = "2"
 window-vibrancy = "0.7"

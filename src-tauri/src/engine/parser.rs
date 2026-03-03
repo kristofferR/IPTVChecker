@@ -102,6 +102,7 @@ pub fn parse_playlist(
         return Err(AppError::FileNotFound(file_path.to_string()));
     }
 
+    log::info!("Parsing playlist: {}", file_path);
     let content = std::fs::read(path).map_err(AppError::Io)?;
     // Read with replacement for invalid UTF-8 bytes
     let content = String::from_utf8_lossy(&content).to_string();
@@ -153,6 +154,7 @@ pub fn parse_playlist(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| file_path.to_string());
 
+    log::info!("Parsed {} channels in {} groups", channels.len(), groups.len());
     Ok(PlaylistPreview {
         file_path: file_path.to_string(),
         file_name,

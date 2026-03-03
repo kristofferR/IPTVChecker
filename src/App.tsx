@@ -26,6 +26,7 @@ export default function App() {
 
   const [playlist, setPlaylist] = useState<PlaylistPreview | null>(null);
   const [search, setSearch] = useState("");
+  const [channelSearch, setChannelSearch] = useState("");
   const [groupFilter, setGroupFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedChannel, setSelectedChannel] = useState<ChannelResult | null>(
@@ -85,7 +86,8 @@ export default function App() {
       directory: false,
     });
     if (path) {
-      const preview = await openPlaylist(path as string);
+      const searchTrimmed = channelSearch.trim() || undefined;
+      const preview = await openPlaylist(path as string, undefined, searchTrimmed);
       setPlaylist(preview);
       reset();
       setSearch("");
@@ -93,7 +95,7 @@ export default function App() {
       setStatusFilter("all");
       setSelectedChannel(null);
     }
-  }, [reset]);
+  }, [reset, channelSearch]);
 
   // Keyboard shortcuts
   const showSettingsRef = useRef(showSettings);
@@ -125,7 +127,7 @@ export default function App() {
     const config: ScanConfig = {
       file_path: playlist.file_path,
       group_filter: groupFilter !== "all" ? groupFilter : null,
-      channel_search: null,
+      channel_search: channelSearch.trim() || null,
       timeout: settings.timeout,
       extended_timeout: settings.extended_timeout,
       concurrency: settings.concurrency,
@@ -139,7 +141,7 @@ export default function App() {
     };
 
     await start(config, playlist.total_channels);
-  }, [playlist, settings, groupFilter, start]);
+  }, [playlist, settings, groupFilter, channelSearch, start]);
 
   const handleSelectChannel = useCallback((result: ChannelResult) => {
     setSelectedChannel(result);
@@ -194,6 +196,9 @@ export default function App() {
         onGroupChange={setGroupFilter}
         statusFilter={statusFilter}
         onStatusChange={setStatusFilter}
+        channelSearch={channelSearch}
+        onChannelSearchChange={setChannelSearch}
+        scanState={scanState}
       />
 
       <div className="flex flex-1 min-h-0">

@@ -38,6 +38,8 @@ pub async fn start_scan(
         *token_lock = Some(cancel_token.clone());
     }
 
+    log::info!("Starting scan: {} (concurrency: {}, retries: {})", config.file_path, config.concurrency, config.retries);
+
     // Parse the playlist
     let preview = parser::parse_playlist(
         &config.file_path,
@@ -47,6 +49,7 @@ pub async fn start_scan(
 
     let channels = preview.channels;
     let total = channels.len();
+    log::info!("Scan: {} channels to check", total);
 
     if total == 0 {
         let _ = app.emit("scan://complete", ScanSummary {

@@ -68,6 +68,7 @@ pub async fn check_availability(app: &AppHandle) -> (bool, bool) {
     let no_cancel = CancellationToken::new();
     let ffmpeg_ok = run_sidecar(app, "ffmpeg", &["-version"], &no_cancel).await.is_ok();
     let ffprobe_ok = run_sidecar(app, "ffprobe", &["-version"], &no_cancel).await.is_ok();
+    log::debug!("ffmpeg available: {}, ffprobe available: {}", ffmpeg_ok, ffprobe_ok);
     (ffmpeg_ok, ffprobe_ok)
 }
 
@@ -90,6 +91,7 @@ pub struct AudioInfo {
 
 /// Get video stream info via ffprobe sidecar.
 pub async fn get_stream_info(app: &AppHandle, url: &str, cancel: &CancellationToken) -> Result<VideoInfo, AppError> {
+    log::debug!("Getting stream info for: {}", url);
     let (stdout, _) = run_sidecar(
         app,
         "ffprobe",
@@ -229,6 +231,7 @@ pub async fn capture_screenshot(
     };
 
     if success && output_path.exists() {
+        log::debug!("Screenshot captured: {}", output_str);
         Ok(output_str)
     } else {
         Err(AppError::Other(format!(

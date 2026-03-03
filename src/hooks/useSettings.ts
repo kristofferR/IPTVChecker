@@ -13,6 +13,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   proxy_file: null,
   test_geoblock: false,
   screenshots_dir: null,
+  log_level: "error",
 };
 
 export function useSettings() {
