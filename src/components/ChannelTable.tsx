@@ -307,47 +307,74 @@ export function ChannelTable({
     [sortField],
   );
 
+  const moveFocusBy = useCallback(
+    (delta: number) => {
+      if (filteredResults.length === 0) return;
+
+      setFocusedRow((prev) => {
+        const selectedRow = filteredResults.findIndex((result) =>
+          selectedIndices.has(result.index),
+        );
+        const current = prev ?? (selectedRow >= 0 ? selectedRow : 0);
+        const next = Math.min(
+          filteredResults.length - 1,
+          Math.max(0, current + delta),
+        );
+
+        const result = filteredResults[next];
+        if (result) {
+          const selected = new Set<number>([result.index]);
+          setSelectedIndices(selected);
+          emitSelection(selected);
+          setSelectionAnchor(result.index);
+          onSelectChannel(result);
+        }
+
+        virtualizer.scrollToIndex(next, { align: "auto" });
+        return next;
+      });
+    },
+    [
+      filteredResults,
+      selectedIndices,
+      emitSelection,
+      onSelectChannel,
+      virtualizer,
+    ],
+  );
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isInputLikeTarget(event.target)) return;
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        moveFocusBy(1);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        moveFocusBy(-1);
+      }
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [moveFocusBy]);
+
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
       if (filteredResults.length === 0) return;
 
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        setFocusedRow((prev) => {
-          const next =
-            prev === null ? 0 : Math.min(prev + 1, filteredResults.length - 1);
-          const result = filteredResults[next];
-          if (result) {
-            const selected = new Set<number>([result.index]);
-            setSelectedIndices(selected);
-            emitSelection(selected);
-            setSelectionAnchor(result.index);
-            onSelectChannel(result);
-          }
-          virtualizer.scrollToIndex(next, { align: "auto" });
-          return next;
-        });
+        moveFocusBy(1);
       } else if (event.key === "ArrowUp") {
         event.preventDefault();
-        setFocusedRow((prev) => {
-          const next = prev === null ? 0 : Math.max(prev - 1, 0);
-          const result = filteredResults[next];
-          if (result) {
-            const selected = new Set<number>([result.index]);
-            setSelectedIndices(selected);
-            emitSelection(selected);
-            setSelectionAnchor(result.index);
-            onSelectChannel(result);
-          }
-          virtualizer.scrollToIndex(next, { align: "auto" });
-          return next;
-        });
+        moveFocusBy(-1);
       } else if (event.key === "Enter" && focusedRow !== null) {
         const result = filteredResults[focusedRow];
         if (result) onSelectChannel(result);
       }
     },
-    [filteredResults, focusedRow, onSelectChannel, virtualizer, emitSelection],
+    [filteredResults, focusedRow, onSelectChannel, moveFocusBy],
   );
 
   const handleRowClick = useCallback(
