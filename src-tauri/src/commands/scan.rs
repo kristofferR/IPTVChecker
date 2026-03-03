@@ -163,6 +163,7 @@ pub async fn start_scan(
         });
 
         // Process channels
+        let proxy_list = Arc::new(proxy_list);
         let mut handles = Vec::new();
 
         for channel in channels {
@@ -188,7 +189,7 @@ pub async fn start_scan(
             let timeout = config.timeout;
             let retries = config.retries;
             let extended_timeout = config.extended_timeout;
-            let proxy_list = proxy_list.clone();
+            let proxy_list = Arc::clone(&proxy_list);
             let test_geoblock = config.test_geoblock;
             let skip_screenshots = config.skip_screenshots;
             let profile_bitrate_flag = config.profile_bitrate;
@@ -221,7 +222,7 @@ pub async fn start_scan(
 
                 // Handle geoblock proxy confirmation
                 let final_status_str = if status_str == "Geoblocked" && test_geoblock {
-                    if let Some(ref proxies) = proxy_list {
+                    if let Some(ref proxies) = *proxy_list {
                         if !proxies.is_empty() {
                             proxy::confirm_geoblock(&channel.url, proxies, timeout).await
                         } else {
