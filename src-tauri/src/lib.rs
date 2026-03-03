@@ -31,12 +31,9 @@ pub fn run() {
         .menu(|app| {
             use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 
-            let settings_menu_item = MenuItemBuilder::with_id(
-                "menu.app.settings",
-                "Settings...",
-            )
-            .accelerator("Cmd+,")
-            .build(app)?;
+            let settings_menu_item = MenuItemBuilder::with_id("menu.app.settings", "Settings...")
+                .accelerator("Cmd+,")
+                .build(app)?;
 
             let app_menu = SubmenuBuilder::new(app, "IPTV Checker")
                 .about(Some(AboutMetadata::default()))
@@ -69,17 +66,6 @@ pub fn run() {
                 .text("menu.file.export_renamed", "Export Renamed Playlist")
                 .build()?;
 
-            let edit_menu = SubmenuBuilder::new(app, "Edit")
-                .undo()
-                .redo()
-                .separator()
-                .cut()
-                .copy()
-                .paste()
-                .separator()
-                .select_all()
-                .build()?;
-
             let view_menu = SubmenuBuilder::new(app, "View")
                 .text("menu.view.toggle_sidebar", "Toggle Sidebar")
                 .text("menu.view.clear_filters", "Clear Filters")
@@ -104,7 +90,6 @@ pub fn run() {
             MenuBuilder::new(app)
                 .item(&app_menu)
                 .item(&file_menu)
-                .item(&edit_menu)
                 .item(&view_menu)
                 .item(&scan_menu)
                 .item(&help_menu)
