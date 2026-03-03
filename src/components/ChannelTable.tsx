@@ -74,10 +74,6 @@ function parseStoredWidths(raw: string | null): Record<ColumnKey, number> {
   return widths;
 }
 
-function isColumnKey(value: string): value is ColumnKey {
-  return DEFAULT_COLUMN_ORDER.includes(value as ColumnKey);
-}
-
 function isInputLikeTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName.toLowerCase();
@@ -101,6 +97,9 @@ export function ChannelTable({
 }: ChannelTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const columnHeaderRefs = useRef<
+    Partial<Record<ColumnKey, HTMLDivElement | null>>
+  >({});
   const [sortField, setSortField] = useState<SortField>("index");
   const [sortDir, setSortDir] = useState<SortDirection>("asc");
   const [focusedRow, setFocusedRow] = useState<number | null>(null);
@@ -481,56 +480,80 @@ export function ChannelTable({
     setContextMenuState(null);
   }, [contextMenuState, onOpenChannel]);
 
-  const handleColumnDragStart = useCallback(
-    (key: ColumnKey, event: React.DragEvent<HTMLDivElement>) => {
+  const findColumnAtX = useCallback(
+    (x: number): ColumnKey | null => {
+      for (const column of columns) {
+        const node = columnHeaderRefs.current[column.key];
+        if (!node) continue;
+        const rect = node.getBoundingClientRect();
+        if (x >= rect.left && x <= rect.right) {
+          return column.key;
+        }
+      }
+      return null;
+    },
+    [columns],
+  );
+
+  const handleColumnPointerDown = useCallback(
+    (key: ColumnKey, event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
       const target = event.target as HTMLElement | null;
-      if (target?.closest("[data-col-resize='true']")) {
-        event.preventDefault();
-        return;
-      }
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", key);
-      setDraggedColumn(key);
-      setDragOverColumn(null);
-    },
-    [],
-  );
+      if (target?.closest("[data-col-resize='true']")) return;
 
-  const handleColumnDragEnter = useCallback(
-    (targetKey: ColumnKey) => {
-      if (!draggedColumn || draggedColumn === targetKey) {
+      const startX = event.clientX;
+      let moved = false;
+      let dropTarget: ColumnKey | null = null;
+
+      const onMove = (moveEvent: PointerEvent) => {
+        const delta = Math.abs(moveEvent.clientX - startX);
+        if (!moved && delta < 4) return;
+
+        if (!moved) {
+          moved = true;
+          document.body.style.cursor = "grabbing";
+          document.body.style.userSelect = "none";
+          setDraggedColumn(key);
+        }
+
+        const over = findColumnAtX(moveEvent.clientX);
+        dropTarget = over && over !== key ? over : null;
+        setDragOverColumn(dropTarget);
+      };
+
+      const cleanup = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        setDraggedColumn(null);
         setDragOverColumn(null);
-        return;
-      }
-      setDragOverColumn(targetKey);
+      };
+
+      const onUp = () => {
+        if (moved && dropTarget) {
+          setColumnOrder((prev) => {
+            const fromIndex = prev.indexOf(key);
+            const toIndex = prev.indexOf(dropTarget as ColumnKey);
+            if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+              return prev;
+            }
+
+            const next = [...prev];
+            next.splice(fromIndex, 1);
+            next.splice(toIndex, 0, key);
+            return next;
+          });
+        }
+        cleanup();
+      };
+
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
     },
-    [draggedColumn],
-  );
-
-  const handleColumnDrop = useCallback(
-    (targetKey: ColumnKey, event: React.DragEvent<HTMLDivElement>) => {
-      event.preventDefault();
-
-      const transfer = event.dataTransfer.getData("text/plain");
-      const sourceKey =
-        transfer && isColumnKey(transfer) ? transfer : draggedColumn;
-
-      setColumnOrder((prev) => {
-        if (!sourceKey || sourceKey === targetKey) return prev;
-
-        const fromIndex = prev.indexOf(sourceKey);
-        const toIndex = prev.indexOf(targetKey);
-        if (fromIndex < 0 || toIndex < 0) return prev;
-
-        const next = [...prev];
-        next.splice(fromIndex, 1);
-        next.splice(toIndex, 0, sourceKey);
-        return next;
-      });
-      setDraggedColumn(null);
-      setDragOverColumn(null);
-    },
-    [draggedColumn],
+    [findColumnAtX],
   );
 
   const handleResizeStart = useCallback(
@@ -592,22 +615,12 @@ export function ChannelTable({
               return (
                 <div
                   key={column.key}
-                  draggable
-                  onDragStart={(event) =>
-                    handleColumnDragStart(column.key, event)
+                  ref={(node) => {
+                    columnHeaderRefs.current[column.key] = node;
+                  }}
+                  onPointerDown={(event) =>
+                    handleColumnPointerDown(column.key, event)
                   }
-                  onDragEnd={() => {
-                    setDraggedColumn(null);
-                    setDragOverColumn(null);
-                  }}
-                  onDragOver={(event) => {
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = "move";
-                  }}
-                  onDragEnter={() => handleColumnDragEnter(column.key)}
-                  onDrop={(event) => {
-                    handleColumnDrop(column.key, event);
-                  }}
                   className={`relative flex items-center h-full w-full ${alignClass} ${
                     draggedColumn === column.key ? "opacity-45" : ""
                   } ${
@@ -621,7 +634,6 @@ export function ChannelTable({
                     className="h-full px-2 hover:text-text-primary flex items-center gap-1 cursor-pointer"
                     onClick={() => handleSort(column.key)}
                     type="button"
-                    draggable={false}
                   >
                     {column.label}
                     {sortField === column.key &&
