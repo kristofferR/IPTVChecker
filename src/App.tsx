@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -56,25 +56,6 @@ export default function App() {
     });
   }, []);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "o") {
-        e.preventDefault();
-        handleOpen();
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === ".") {
-        e.preventDefault();
-        setShowSettings((s) => !s);
-      }
-      if (e.key === "Escape") {
-        if (showSettings) setShowSettings(false);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [showSettings]);
-
   const handleOpen = useCallback(async () => {
     const path = await open({
       multiple: false,
@@ -95,6 +76,30 @@ export default function App() {
       getCurrentWindow().setTitle(`IPTV Checker - ${preview.file_name}`);
     }
   }, [reset]);
+
+  // Keyboard shortcuts
+  const showSettingsRef = useRef(showSettings);
+  useEffect(() => {
+    showSettingsRef.current = showSettings;
+  }, [showSettings]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "o") {
+        e.preventDefault();
+        handleOpen();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === ".") {
+        e.preventDefault();
+        setShowSettings((s) => !s);
+      }
+      if (e.key === "Escape") {
+        if (showSettingsRef.current) setShowSettings(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [handleOpen]);
 
   const handleStartScan = useCallback(async () => {
     if (!playlist) return;
