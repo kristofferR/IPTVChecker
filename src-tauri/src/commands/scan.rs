@@ -291,7 +291,7 @@ pub async fn start_scan(
                             result.fps = info.fps;
 
                             if let Some(fps) = info.fps {
-                                if fps <= 30 {
+                                if fps < 29 {
                                     result.low_framerate = true;
                                 }
                             }
