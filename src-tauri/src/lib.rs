@@ -40,7 +40,7 @@ pub fn run() {
                 .quit()
                 .build()?;
 
-            let file_menu = SubmenuBuilder::new(app, "File")
+            let file_menu = SubmenuBuilder::with_id(app, "menu.file", "File")
                 .text("menu.file.open", "Open Playlist...")
                 .text("menu.file.open_folder", "Open Folder...")
                 .text("menu.file.open_url", "Open URL...")

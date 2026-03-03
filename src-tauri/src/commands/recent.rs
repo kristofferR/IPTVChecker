@@ -103,8 +103,13 @@ fn update_recent_menu(app: &tauri::AppHandle, entries: &[RecentPlaylistEntry]) {
         return;
     };
     let Some(recent_submenu) = menu
-        .get("menu.file.open_recent")
+        .get("menu.file")
         .and_then(|item| item.as_submenu().cloned())
+        .and_then(|file_submenu| {
+            file_submenu
+                .get("menu.file.open_recent")
+                .and_then(|item| item.as_submenu().cloned())
+        })
     else {
         return;
     };
