@@ -10,7 +10,7 @@ interface ThumbnailPanelProps {
 export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
   if (!result) {
     return (
-      <div className="flex items-center justify-center h-full text-text-tertiary text-sm">
+      <div className="flex items-center justify-center h-full text-text-tertiary text-[12px]">
         Select a channel to view details
       </div>
     );
@@ -20,7 +20,7 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
     <div className="native-scroll flex flex-col gap-3 p-4 overflow-y-auto">
       <div className="flex items-center gap-2">
         <StatusBadge status={result.status} />
-        <h3 className="text-sm font-semibold truncate">{result.name}</h3>
+        <h3 className="text-[14px] font-semibold truncate">{result.name}</h3>
       </div>
 
       {screenshotUrl && (
@@ -33,29 +33,29 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-2 text-xs">
+      <div className="grid grid-cols-2 gap-2 text-[11px]">
         <div>
           <span className="text-text-tertiary">Status</span>
-          <p className="font-medium">{statusLabel(result.status)}</p>
+          <p className="font-medium text-[12px]">{statusLabel(result.status)}</p>
         </div>
         <div>
           <span className="text-text-tertiary">Group</span>
-          <p className="font-medium">{result.group}</p>
+          <p className="font-medium text-[12px]">{result.group}</p>
         </div>
         {result.status === "alive" && (
           <>
             <div>
               <span className="text-text-tertiary">Video</span>
-              <p className="font-medium">{formatVideoInfo(result)}</p>
+              <p className="font-medium text-[12px]">{formatVideoInfo(result)}</p>
             </div>
             <div>
               <span className="text-text-tertiary">Audio</span>
-              <p className="font-medium">{formatAudioInfo(result)}</p>
+              <p className="font-medium text-[12px]">{formatAudioInfo(result)}</p>
             </div>
             {result.resolution && (
               <div>
                 <span className="text-text-tertiary">Resolution</span>
-                <p className="font-medium">
+                <p className="font-medium text-[12px]">
                   {result.width}x{result.height}
                 </p>
               </div>
@@ -63,7 +63,7 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
             {result.fps && (
               <div>
                 <span className="text-text-tertiary">Frame Rate</span>
-                <p className="font-medium">{result.fps} fps</p>
+                <p className="font-medium text-[12px]">{result.fps} fps</p>
               </div>
             )}
           </>
@@ -72,9 +72,9 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
 
       {result.label_mismatches.length > 0 && (
         <div className="p-2 rounded bg-orange-500/10 border border-orange-500/20">
-          <p className="text-xs font-medium text-orange-400">Label Mismatch</p>
+          <p className="text-[12px] font-medium text-orange-400">Label Mismatch</p>
           {result.label_mismatches.map((m, i) => (
-            <p key={i} className="text-xs text-orange-300">
+            <p key={i} className="text-[11px] text-orange-300">
               {m}
             </p>
           ))}
@@ -83,7 +83,7 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
 
       {result.low_framerate && (
         <div className="p-2 rounded bg-orange-500/10 border border-orange-500/20">
-          <p className="text-xs text-orange-400">
+          <p className="text-[11px] text-orange-400">
             Low framerate: {result.fps} fps
           </p>
         </div>

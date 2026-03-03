@@ -21,7 +21,7 @@ interface ToolbarProps {
 }
 
 const toolbarBtn =
-  "flex items-center gap-1.5 px-2.5 py-1 text-sm rounded-md toolbar-btn disabled:opacity-40 disabled:pointer-events-none";
+  "flex items-center gap-2 px-3 py-1.5 min-h-9 text-[14px] rounded-md toolbar-btn disabled:opacity-40 disabled:pointer-events-none";
 
 export function Toolbar({
   onOpen,
@@ -40,7 +40,7 @@ export function Toolbar({
   return (
     <div
       data-tauri-drag-region
-      className="flex items-center gap-1 px-3 border-b border-border-app bg-panel pt-[var(--toolbar-pt)] pb-1.5 pl-[var(--toolbar-pl)]"
+      className="flex items-center gap-1.5 px-3 border-b border-border-app bg-panel pt-[var(--toolbar-pt)] pb-2 pl-[var(--toolbar-pl)]"
     >
       <button
         onClick={onOpen}
@@ -71,7 +71,7 @@ export function Toolbar({
       )}
 
       {playlistName && (
-        <span data-tauri-drag-region className="text-xs text-text-tertiary truncate max-w-48 ml-1" title={playlistName}>
+        <span data-tauri-drag-region className="text-[13px] text-text-tertiary truncate max-w-64 ml-1" title={playlistName}>
           {playlistName}
         </span>
       )}
@@ -87,7 +87,7 @@ export function Toolbar({
 
       <button
         onClick={onOpenSettings}
-        className={`${toolbarBtn} px-1.5`}
+        className={`${toolbarBtn} px-2 min-w-9 justify-center`}
       >
         <Settings className="w-4 h-4" />
       </button>

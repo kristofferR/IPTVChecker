@@ -13,16 +13,16 @@ export function WarningsPanel({ results }: WarningsPanelProps) {
   if (lowFps.length === 0 && mislabeled.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-4 px-4 py-1.5 text-xs border-t border-border-app bg-orange-500/5">
+    <div className="flex items-center gap-4 px-4 py-2 text-[13px] border-t border-border-app bg-orange-500/5">
       {lowFps.length > 0 && (
         <span className="flex items-center gap-1 text-orange-400">
-          <AlertTriangle className="w-3 h-3" />
+          <AlertTriangle className="w-3.5 h-3.5" />
           {lowFps.length} low fps
         </span>
       )}
       {mislabeled.length > 0 && (
         <span className="flex items-center gap-1 text-orange-400">
-          <AlertTriangle className="w-3 h-3" />
+          <AlertTriangle className="w-3.5 h-3.5" />
           {mislabeled.length} mislabeled
         </span>
       )}

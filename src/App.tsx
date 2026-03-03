@@ -199,20 +199,20 @@ export default function App() {
       />
 
       {ffmpegWarning && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-yellow-500/10 border-b border-yellow-500/20 text-yellow-400 text-xs">
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-yellow-500/10 border-b border-yellow-500/20 text-yellow-400 text-[13px]">
           <AlertTriangle className="w-4 h-4" />
           ffmpeg/ffprobe not found. Screenshots and media info will be disabled.
         </div>
       )}
 
       {error && !errorDismissed && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-red-500/10 border-b border-red-500/20 text-red-400 text-xs">
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border-b border-red-500/20 text-red-400 text-[13px]">
           <span className="flex-1">{error}</span>
           <button
             onClick={() => setErrorDismissed(true)}
-            className="p-0.5 hover:bg-red-500/20 rounded transition-colors"
+            className="p-1 hover:bg-red-500/20 rounded transition-colors"
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
       )}
@@ -247,9 +247,9 @@ export default function App() {
                 <p className="text-lg font-medium mb-2">
                   No playlist loaded
                 </p>
-                <p className="text-sm">
+                <p className="text-[15px]">
                   Click Open or press{" "}
-                  <kbd className="px-1.5 py-0.5 bg-input rounded text-xs border border-border-app">
+                  <kbd className="px-2 py-0.5 bg-input rounded text-[13px] border border-border-app">
                     {modKey}+O
                   </kbd>{" "}
                   to load an M3U playlist
