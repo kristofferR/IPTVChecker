@@ -53,9 +53,5 @@ pub async fn open_playlist_url(
     let temp_path = std::env::temp_dir().join(format!("iptv-url-{unique}.m3u8"));
 
     std::fs::write(&temp_path, &bytes).map_err(AppError::Io)?;
-    parser::parse_playlist(
-        &temp_path.to_string_lossy(),
-        &group_filter,
-        &channel_search,
-    )
+    parser::parse_playlist(&temp_path.to_string_lossy(), &group_filter, &channel_search)
 }

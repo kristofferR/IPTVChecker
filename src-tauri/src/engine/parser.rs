@@ -493,7 +493,10 @@ http://example.com/three.m3u8
 
         assert_eq!(preview.total_channels, 2);
         assert_eq!(preview.channels[0].name, "Channel One");
-        assert_eq!(preview.channels[0].metadata_lines, vec!["#KODIPROP:inputstream=ffmpegdirect"]);
+        assert_eq!(
+            preview.channels[0].metadata_lines,
+            vec!["#KODIPROP:inputstream=ffmpegdirect"]
+        );
         assert_eq!(preview.channels[1].name, "Channel Three");
         assert!(preview.groups.contains(&"Sports".to_string()));
         assert!(preview.groups.contains(&"News".to_string()));
@@ -524,29 +527,29 @@ http://example.com/three.m3u8
         let unfiltered = parse_playlist(&path.to_string_lossy(), &None, &None)
             .expect("unfiltered parse should succeed");
         assert_eq!(
-            unfiltered.channels.iter().map(|c| c.index).collect::<Vec<_>>(),
+            unfiltered
+                .channels
+                .iter()
+                .map(|c| c.index)
+                .collect::<Vec<_>>(),
             vec![0, 1, 2]
         );
 
-        let sports = parse_playlist(
-            &path.to_string_lossy(),
-            &Some("Sports".to_string()),
-            &None,
-        )
-        .expect("group filtered parse should succeed");
+        let sports = parse_playlist(&path.to_string_lossy(), &Some("Sports".to_string()), &None)
+            .expect("group filtered parse should succeed");
         assert_eq!(
             sports.channels.iter().map(|c| c.index).collect::<Vec<_>>(),
             vec![0, 2]
         );
 
-        let searched = parse_playlist(
-            &path.to_string_lossy(),
-            &None,
-            &Some("Three".to_string()),
-        )
-        .expect("search filtered parse should succeed");
+        let searched = parse_playlist(&path.to_string_lossy(), &None, &Some("Three".to_string()))
+            .expect("search filtered parse should succeed");
         assert_eq!(
-            searched.channels.iter().map(|c| c.index).collect::<Vec<_>>(),
+            searched
+                .channels
+                .iter()
+                .map(|c| c.index)
+                .collect::<Vec<_>>(),
             vec![2]
         );
 
@@ -588,7 +591,11 @@ http://example.com/beta.m3u8
             .expect("directory parse should succeed");
         assert_eq!(preview.total_channels, 2);
         assert_eq!(
-            preview.channels.iter().map(|channel| channel.index).collect::<Vec<_>>(),
+            preview
+                .channels
+                .iter()
+                .map(|channel| channel.index)
+                .collect::<Vec<_>>(),
             vec![0, 1]
         );
         assert_eq!(

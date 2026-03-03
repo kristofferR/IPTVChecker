@@ -23,7 +23,11 @@ fn sanitize_csv_cell(value: &str) -> String {
 }
 
 #[tauri::command]
-pub async fn export_csv(results: Vec<ChannelResult>, path: String, playlist_name: String) -> Result<(), AppError> {
+pub async fn export_csv(
+    results: Vec<ChannelResult>,
+    path: String,
+    playlist_name: String,
+) -> Result<(), AppError> {
     let file = std::fs::File::create(&path).map_err(AppError::Io)?;
     let mut writer = csv::WriterBuilder::new()
         .has_headers(false)
@@ -92,10 +96,7 @@ pub async fn export_csv(results: Vec<ChannelResult>, path: String, playlist_name
 }
 
 #[tauri::command]
-pub async fn export_split(
-    results: Vec<ChannelResult>,
-    base_path: String,
-) -> Result<(), AppError> {
+pub async fn export_split(results: Vec<ChannelResult>, base_path: String) -> Result<(), AppError> {
     #[derive(Default)]
     struct SplitBuckets {
         working: Vec<String>,
@@ -228,7 +229,11 @@ fn export_target_path(base_path: &str, suffix: &str) -> PathBuf {
 
 fn playlist_file_key(playlist: &str) -> String {
     let trimmed = playlist.trim();
-    let raw = if trimmed.is_empty() { "playlist" } else { trimmed };
+    let raw = if trimmed.is_empty() {
+        "playlist"
+    } else {
+        trimmed
+    };
     let stem = Path::new(raw)
         .file_stem()
         .and_then(|value| value.to_str())
@@ -393,10 +398,7 @@ mod tests {
         assert_eq!(row.get(0), Some("Playlist"));
         assert_eq!(row.get(4), Some("Sports,Live"));
         assert_eq!(row.get(6), Some("'+channel-id"));
-        assert!(row
-            .get(5)
-            .expect("name should exist")
-            .starts_with("'=2+2"));
+        assert!(row.get(5).expect("name should exist").starts_with("'=2+2"));
 
         std::fs::remove_file(path).expect("temporary csv should be removable");
     }

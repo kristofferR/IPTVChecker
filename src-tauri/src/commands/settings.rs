@@ -165,10 +165,7 @@ pub async fn get_settings(app: tauri::AppHandle) -> Result<AppSettings, AppError
 }
 
 #[tauri::command]
-pub async fn update_settings(
-    app: tauri::AppHandle,
-    settings: AppSettings,
-) -> Result<(), AppError> {
+pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<(), AppError> {
     if settings.scan_history_limit < MIN_SCAN_HISTORY_LIMIT
         || settings.scan_history_limit > MAX_SCAN_HISTORY_LIMIT
     {
@@ -266,7 +263,8 @@ mod tests {
         let nested = root.join("nested");
         std::fs::create_dir_all(&nested).expect("nested dir should be created");
         std::fs::write(root.join("a.png"), vec![0u8; 5]).expect("fixture file should be writable");
-        std::fs::write(nested.join("b.png"), vec![0u8; 7]).expect("fixture file should be writable");
+        std::fs::write(nested.join("b.png"), vec![0u8; 7])
+            .expect("fixture file should be writable");
 
         let (bytes, files) = collect_dir_stats(&root).expect("stats should be readable");
         assert_eq!(files, 2);
@@ -288,8 +286,11 @@ mod tests {
         std::fs::write(&outside, vec![0u8; 16]).expect("outside fixture should be writable");
 
         let traversal = safe_dir.join("../outside.png");
-        let allowed = vec![safe_dir.canonicalize().expect("safe dir should canonicalize")];
-        let error = validate_screenshot_path(&traversal, &allowed).expect_err("path should be rejected");
+        let allowed = vec![safe_dir
+            .canonicalize()
+            .expect("safe dir should canonicalize")];
+        let error =
+            validate_screenshot_path(&traversal, &allowed).expect_err("path should be rejected");
 
         assert!(error.to_string().contains("outside allowed directories"));
         std::fs::remove_dir_all(&root).expect("fixture root should be removable");
@@ -315,8 +316,11 @@ mod tests {
         std::os::windows::fs::symlink_file(&outside, &symlink_path)
             .expect("symlink should be created");
 
-        let allowed = vec![safe_dir.canonicalize().expect("safe dir should canonicalize")];
-        let error = validate_screenshot_path(&symlink_path, &allowed).expect_err("symlink escape should be rejected");
+        let allowed = vec![safe_dir
+            .canonicalize()
+            .expect("safe dir should canonicalize")];
+        let error = validate_screenshot_path(&symlink_path, &allowed)
+            .expect_err("symlink escape should be rejected");
 
         assert!(error.to_string().contains("outside allowed directories"));
         std::fs::remove_dir_all(&root).expect("fixture root should be removable");

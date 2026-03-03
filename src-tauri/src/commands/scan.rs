@@ -129,10 +129,7 @@ async fn compute_shared_url_result(
         return Ok(SharedUrlResult::dead(stream_url));
     }
 
-    let target_url = stream_url
-        .as_deref()
-        .unwrap_or(channel_url)
-        .to_string();
+    let target_url = stream_url.as_deref().unwrap_or(channel_url).to_string();
     let mut shared = SharedUrlResult {
         status,
         codec: None,
@@ -166,8 +163,7 @@ async fn compute_shared_url_result(
         }
 
         if !cancel.is_cancelled() && profile_bitrate_flag && ffmpeg_ok {
-            if let Ok(bitrate) =
-                ffmpeg::profile_bitrate(app, &target_url, user_agent, cancel).await
+            if let Ok(bitrate) = ffmpeg::profile_bitrate(app, &target_url, user_agent, cancel).await
             {
                 shared.video_bitrate = Some(bitrate);
             }
@@ -338,7 +334,10 @@ impl ScanCounters {
     }
 }
 
-fn filter_channels_by_selection(channels: &mut Vec<Channel>, selected_indices: &Option<Vec<usize>>) {
+fn filter_channels_by_selection(
+    channels: &mut Vec<Channel>,
+    selected_indices: &Option<Vec<usize>>,
+) {
     if let Some(selected_indices) = selected_indices {
         let selected: HashSet<usize> = selected_indices.iter().copied().collect();
         channels.retain(|channel| selected.contains(&channel.index));
@@ -463,7 +462,10 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
         .unwrap_or_else(|| "AllChannels".to_string());
     let scope_suffix = format!("{}_{}", group_suffix, search_suffix);
 
-    let log_file = format!("{}/{}_{}_checklog.txt", playlist_dir, base_name, scope_suffix);
+    let log_file = format!(
+        "{}/{}_{}_checklog.txt",
+        playlist_dir, base_name, scope_suffix
+    );
     let checkpoint_file = format!(
         "{}/{}_{}_checkpoint.jsonl",
         playlist_dir, base_name, scope_suffix
@@ -476,7 +478,8 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
         .collect::<Vec<_>>();
     resumed_results.sort_by_key(|result| result.index);
 
-    let resumed_indices: HashSet<usize> = resumed_results.iter().map(|result| result.index).collect();
+    let resumed_indices: HashSet<usize> =
+        resumed_results.iter().map(|result| result.index).collect();
     if resumed_indices.is_empty() {
         let _ = std::fs::write(&log_file, "");
         let _ = std::fs::remove_file(&checkpoint_file);
@@ -989,7 +992,10 @@ mod tests {
 
     #[test]
     fn canonicalize_stream_url_for_non_url_is_trim_only() {
-        assert_eq!(canonicalize_stream_url("  not-a-valid-url  "), "not-a-valid-url");
+        assert_eq!(
+            canonicalize_stream_url("  not-a-valid-url  "),
+            "not-a-valid-url"
+        );
     }
 
     #[test]

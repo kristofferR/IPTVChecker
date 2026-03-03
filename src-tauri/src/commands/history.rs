@@ -84,10 +84,9 @@ fn clamp_history_limit(limit: usize) -> usize {
 }
 
 fn history_file_path(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| AppError::Other(format!("Failed to resolve app data directory: {}", error)))?;
+    let data_dir = app.path().app_data_dir().map_err(|error| {
+        AppError::Other(format!("Failed to resolve app data directory: {}", error))
+    })?;
     std::fs::create_dir_all(&data_dir).map_err(AppError::Io)?;
     Ok(data_dir.join(HISTORY_FILE_NAME))
 }
@@ -107,8 +106,9 @@ fn load_history_store(path: &Path) -> Result<ScanHistoryStore, AppError> {
 }
 
 fn save_history_store(path: &Path, store: &ScanHistoryStore) -> Result<(), AppError> {
-    let bytes = serde_json::to_vec_pretty(store)
-        .map_err(|error| AppError::Parse(format!("Failed to serialize scan history store: {}", error)))?;
+    let bytes = serde_json::to_vec_pretty(store).map_err(|error| {
+        AppError::Parse(format!("Failed to serialize scan history store: {}", error))
+    })?;
 
     let tmp_path = path.with_extension("json.tmp");
     std::fs::write(&tmp_path, bytes).map_err(AppError::Io)?;
@@ -234,7 +234,11 @@ pub fn append_scan_history(
         summary: summary.clone(),
         group_filter: config.group_filter.clone(),
         channel_search: config.channel_search.clone(),
-        selected_count: config.selected_indices.as_ref().map(|v| v.len()).unwrap_or(0),
+        selected_count: config
+            .selected_indices
+            .as_ref()
+            .map(|v| v.len())
+            .unwrap_or(0),
         scope_key: build_scope_key(config),
         results,
     };
@@ -310,7 +314,9 @@ pub async fn clear_scan_history(
     let history_path = history_file_path(&app)?;
     let mut store = load_history_store(&history_path)?;
     let before = store.entries.len();
-    store.entries.retain(|entry| entry.playlist_key != playlist_key);
+    store
+        .entries
+        .retain(|entry| entry.playlist_key != playlist_key);
     let removed = before.saturating_sub(store.entries.len());
 
     if removed > 0 {
@@ -417,9 +423,24 @@ mod tests {
     #[test]
     fn enforce_playlist_retention_keeps_newest_entries_per_playlist() {
         let mut entries = vec![
-            sample_entry("run-1", 1, "scope", vec![sample_result("http://example.com/1", ChannelStatus::Alive)]),
-            sample_entry("run-2", 2, "scope", vec![sample_result("http://example.com/2", ChannelStatus::Alive)]),
-            sample_entry("run-3", 3, "scope", vec![sample_result("http://example.com/3", ChannelStatus::Alive)]),
+            sample_entry(
+                "run-1",
+                1,
+                "scope",
+                vec![sample_result("http://example.com/1", ChannelStatus::Alive)],
+            ),
+            sample_entry(
+                "run-2",
+                2,
+                "scope",
+                vec![sample_result("http://example.com/2", ChannelStatus::Alive)],
+            ),
+            sample_entry(
+                "run-3",
+                3,
+                "scope",
+                vec![sample_result("http://example.com/3", ChannelStatus::Alive)],
+            ),
             PersistedScanHistoryEntry {
                 id: "other-playlist".to_string(),
                 playlist_key: "/tmp/other.m3u8".to_string(),
@@ -436,7 +457,10 @@ mod tests {
                 channel_search: None,
                 selected_count: 0,
                 scope_key: "scope".to_string(),
-                results: vec![sample_result("http://example.com/other", ChannelStatus::Alive)],
+                results: vec![sample_result(
+                    "http://example.com/other",
+                    ChannelStatus::Alive,
+                )],
             },
         ];
 

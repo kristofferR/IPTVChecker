@@ -210,12 +210,7 @@ async fn run_tool_command(
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|err| {
-            log::warn!(
-                "Failed to spawn {} using '{}': {}",
-                name,
-                resolved_bin,
-                err
-            );
+            log::warn!("Failed to spawn {} using '{}': {}", name, resolved_bin, err);
             AppError::FfmpegNotAvailable
         })?;
 

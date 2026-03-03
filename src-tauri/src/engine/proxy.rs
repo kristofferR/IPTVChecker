@@ -95,7 +95,10 @@ pub fn load_proxy_list(proxy_file: &str) -> Result<Vec<String>, AppError> {
         let details = if invalid_entries.is_empty() {
             "No proxy entries found".to_string()
         } else {
-            format!("No valid proxy entries found. Invalid entries: {}", invalid_entries.join(", "))
+            format!(
+                "No valid proxy entries found. Invalid entries: {}",
+                invalid_entries.join(", ")
+            )
         };
         return Err(AppError::Other(details));
     }
@@ -112,12 +115,7 @@ pub fn load_proxy_list(proxy_file: &str) -> Result<Vec<String>, AppError> {
 }
 
 /// Test stream access through a specific proxy.
-pub async fn test_with_proxy(
-    url: &str,
-    proxy: &str,
-    timeout: f64,
-    retries: u32,
-) -> bool {
+pub async fn test_with_proxy(url: &str, proxy: &str, timeout: f64, retries: u32) -> bool {
     let proxy_url = match reqwest::Proxy::all(proxy) {
         Ok(p) => p,
         Err(_) => return false,
@@ -173,7 +171,9 @@ pub async fn test_with_proxy(
             || content_type.contains("application/x-mpegurl")
             || content_type.contains("application/octet-stream")
             || content_type.contains("application/mp4")
-            || stream_extensions.iter().any(|ext| stream_path.ends_with(ext));
+            || stream_extensions
+                .iter()
+                .any(|ext| stream_path.ends_with(ext));
 
         if is_stream {
             // Read 500KB to verify
@@ -193,21 +193,14 @@ pub async fn test_with_proxy(
 }
 
 /// Confirm geoblock by testing with up to 3 random proxies.
-pub async fn confirm_geoblock(
-    url: &str,
-    proxy_list: &[String],
-    timeout: f64,
-) -> String {
+pub async fn confirm_geoblock(url: &str, proxy_list: &[String], timeout: f64) -> String {
     use rand::seq::IndexedRandom;
 
     // Collect sample before any await to avoid Send issues with rng
     let sample: Vec<String> = {
         let mut rng = rand::rng();
         let sample_count = std::cmp::min(3, proxy_list.len());
-        proxy_list
-            .sample(&mut rng, sample_count)
-            .cloned()
-            .collect()
+        proxy_list.sample(&mut rng, sample_count).cloned().collect()
     };
 
     for proxy in &sample {
@@ -266,8 +259,8 @@ mod tests {
         )
         .expect("fixture file should be writable");
 
-        let proxies =
-            load_proxy_list(path.to_str().expect("path should be utf-8")).expect("proxy list should load");
+        let proxies = load_proxy_list(path.to_str().expect("path should be utf-8"))
+            .expect("proxy list should load");
         assert_eq!(proxies.len(), 2);
         assert!(proxies.iter().any(|p| p == "http://127.0.0.1:8080"));
         assert!(proxies.iter().any(|p| p == "http://localhost:3128"));

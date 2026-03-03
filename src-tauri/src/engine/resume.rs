@@ -26,7 +26,11 @@ pub fn load_processed_channels(log_file: &str) -> (HashSet<String>, usize) {
             continue;
         }
         // Extract URL: last whitespace-separated token starting with http:// or https://
-        if let Some(url) = line.split_whitespace().rev().find(|t| t.starts_with("http://") || t.starts_with("https://")) {
+        if let Some(url) = line
+            .split_whitespace()
+            .rev()
+            .find(|t| t.starts_with("http://") || t.starts_with("https://"))
+        {
             processed.insert(url.to_string());
         }
         // Extract index for last_index tracking
@@ -85,8 +89,9 @@ pub fn load_checkpoint_results(checkpoint_file: &str) -> Vec<ChannelResult> {
 pub fn write_result_entry(checkpoint_file: &str, result: &ChannelResult) -> Result<(), AppError> {
     use std::io::Write;
 
-    let serialized = serde_json::to_string(result)
-        .map_err(|error| AppError::Parse(format!("Failed to serialize checkpoint result: {}", error)))?;
+    let serialized = serde_json::to_string(result).map_err(|error| {
+        AppError::Parse(format!("Failed to serialize checkpoint result: {}", error))
+    })?;
 
     let mut file = std::fs::OpenOptions::new()
         .create(true)

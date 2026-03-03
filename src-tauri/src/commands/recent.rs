@@ -201,7 +201,9 @@ pub async fn add_recent_playlist(
 ) -> Result<Vec<RecentPlaylistEntry>, AppError> {
     let value = recent.value.trim().to_string();
     if value.is_empty() {
-        return Err(AppError::Other("Recent playlist value cannot be empty".to_string()));
+        return Err(AppError::Other(
+            "Recent playlist value cannot be empty".to_string(),
+        ));
     }
 
     if recent.kind == RecentPlaylistKind::File && !Path::new(&value).exists() {
