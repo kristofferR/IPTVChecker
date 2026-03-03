@@ -50,6 +50,17 @@ export interface PlaylistPreview {
   channels: Channel[];
 }
 
+export interface XtreamOpenRequest {
+  server: string;
+  username: string;
+  password: string;
+}
+
+export interface XtreamRecentSource {
+  server: string;
+  username: string;
+}
+
 export interface ScanConfig {
   file_path: string;
   group_filter: string | null;
@@ -131,7 +142,7 @@ export interface ScreenshotCacheStats {
   cache_dir: string;
 }
 
-export type RecentPlaylistKind = "file" | "url";
+export type RecentPlaylistKind = "file" | "url" | "xtream";
 
 export interface RecentPlaylistEntry {
   kind: RecentPlaylistKind;

@@ -8,6 +8,7 @@ import type {
   RecentPlaylistEntry,
   RecentPlaylistKind,
   ScreenshotCacheStats,
+  XtreamOpenRequest,
 } from "./types";
 
 export async function openPlaylist(
@@ -29,6 +30,18 @@ export async function openPlaylistUrl(
 ): Promise<PlaylistPreview> {
   return invoke("open_playlist_url", {
     url,
+    groupFilter: groupFilter ?? null,
+    channelSearch: channelSearch ?? null,
+  });
+}
+
+export async function openPlaylistXtream(
+  source: XtreamOpenRequest,
+  groupFilter?: string,
+  channelSearch?: string,
+): Promise<PlaylistPreview> {
+  return invoke("open_playlist_xtream", {
+    source,
     groupFilter: groupFilter ?? null,
     channelSearch: channelSearch ?? null,
   });

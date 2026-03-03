@@ -8,6 +8,8 @@ import type {
   RecentPlaylistEntry,
   ScanConfig,
   ScanHistoryItem,
+  XtreamOpenRequest,
+  XtreamRecentSource,
 } from "./lib/types";
 import {
   addRecentPlaylist,
@@ -16,6 +18,7 @@ import {
   getRecentPlaylists,
   getScanHistory,
   openPlaylist,
+  openPlaylistXtream,
   openPlaylistUrl,
   checkFfmpegAvailable,
   readScreenshot,
@@ -33,6 +36,7 @@ import { ProgressBar } from "./components/ProgressBar";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { KeyboardShortcutsDialog } from "./components/KeyboardShortcutsDialog";
 import { HistoryPanel } from "./components/HistoryPanel";
+import { OpenSourceDialog } from "./components/OpenSourceDialog";
 import { AlertTriangle, ExternalLink, FolderOpen, Info, X } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { detectPlatform } from "./lib/platform";
@@ -136,6 +140,61 @@ function readCachedUpdateNotice(): UpdateNotice | null {
   }
 }
 
+type OpenSourceMode = "url" | "xtream";
+
+interface OpenSourceDialogState {
+  mode: OpenSourceMode;
+  initialUrl: string;
+  initialXtream: XtreamRecentSource | null;
+}
+
+function serializeXtreamRecent(source: XtreamRecentSource): string {
+  return JSON.stringify({
+    server: source.server.trim(),
+    username: source.username.trim(),
+  });
+}
+
+function parseXtreamRecent(value: string): XtreamRecentSource | null {
+  try {
+    const parsed = JSON.parse(value) as Partial<XtreamRecentSource>;
+    const server = typeof parsed.server === "string" ? parsed.server.trim() : "";
+    const username =
+      typeof parsed.username === "string" ? parsed.username.trim() : "";
+    if (!server || !username) {
+      return null;
+    }
+    return { server, username };
+  } catch {
+    return null;
+  }
+}
+
+function recentValueLabel(entry: RecentPlaylistEntry): string {
+  if (entry.kind === "file") {
+    return `Path - ${entry.value}`;
+  }
+  if (entry.kind === "url") {
+    return `URL - ${entry.value}`;
+  }
+  const source = parseXtreamRecent(entry.value);
+  if (!source) {
+    return "Xtream - Invalid source";
+  }
+  return `Xtream - ${source.server} (${source.username})`;
+}
+
+function recentTitle(entry: RecentPlaylistEntry): string {
+  if (entry.kind !== "xtream") {
+    return entry.value;
+  }
+  const source = parseXtreamRecent(entry.value);
+  if (!source) {
+    return entry.value;
+  }
+  return `${source.server} (${source.username})`;
+}
+
 export default function App() {
   const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
   const modKey = isMac ? "Cmd" : "Ctrl";
@@ -165,6 +224,8 @@ export default function App() {
   const [menuInfo, setMenuInfo] = useState<string | null>(null);
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [openSourceDialogState, setOpenSourceDialogState] =
+    useState<OpenSourceDialogState | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [historyEntries, setHistoryEntries] = useState<ScanHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -458,7 +519,7 @@ export default function App() {
     await openPlaylistPath(selectedPath);
   }, [openPlaylistPath]);
 
-  const openPlaylistUrlValue = useCallback(async (url: string) => {
+  const openPlaylistUrlValue = useCallback(async (url: string): Promise<boolean> => {
     setPlaylistOpenError(null);
     try {
       const searchTrimmed = channelSearch.trim() || undefined;
@@ -486,6 +547,7 @@ export default function App() {
       } catch {
         // Ignore recent-list update failures.
       }
+      return true;
     } catch (err) {
       logger.error("[App] Failed to open playlist URL", err);
       setPlaylistOpenError(formatPlaylistOpenError(err));
@@ -494,20 +556,71 @@ export default function App() {
       setPendingPlaybackChannel(null);
       setShowHistory(false);
       void refreshRecentPlaylists();
+      return false;
     }
   }, [channelSearch, initFromPlaylist, refreshRecentPlaylists]);
 
-  const handleOpenUrl = useCallback(async () => {
-    const raw = window.prompt("Enter playlist URL (http:// or https://):");
-    const url = raw?.trim();
-    if (!url) return;
-    if (!/^https?:\/\//i.test(url)) {
-      setPlaylistOpenError("Playlist URL must start with http:// or https://");
-      return;
-    }
+  const openPlaylistXtreamValue = useCallback(
+    async (source: XtreamOpenRequest): Promise<boolean> => {
+      setPlaylistOpenError(null);
+      try {
+        const searchTrimmed = channelSearch.trim() || undefined;
+        logger.debug(
+          `[App] Opening Xtream playlist: server=${source.server}, username=${source.username}, channelSearch="${searchTrimmed ?? ""}"`,
+        );
+        const preview = await openPlaylistXtream(source, undefined, searchTrimmed);
+        logger.debug(
+          `[App] Xtream playlist loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
+          preview.groups,
+        );
+        setPlaylist(preview);
+        initFromPlaylist(preview.channels);
+        setSearch("");
+        setGroupFilter("all");
+        setStatusFilter("all");
+        setPlaylistOpenError(null);
+        setSelectedChannel(null);
+        setSelectedChannelIndices([]);
+        setPendingPlaybackChannel(null);
+        setShowHistory(false);
+        try {
+          const entries = await addRecentPlaylist(
+            "xtream",
+            serializeXtreamRecent({
+              server: source.server,
+              username: source.username,
+            }),
+          );
+          setRecentPlaylists(entries);
+        } catch {
+          // Ignore recent-list update failures.
+        }
+        return true;
+      } catch (err) {
+        logger.error("[App] Failed to open Xtream playlist", err);
+        setPlaylistOpenError(formatPlaylistOpenError(err));
+        setSelectedChannel(null);
+        setSelectedChannelIndices([]);
+        setPendingPlaybackChannel(null);
+        setShowHistory(false);
+        void refreshRecentPlaylists();
+        return false;
+      }
+    },
+    [channelSearch, initFromPlaylist, refreshRecentPlaylists],
+  );
 
-    await openPlaylistUrlValue(url);
-  }, [openPlaylistUrlValue]);
+  const openSourceDialog = useCallback((state: OpenSourceDialogState) => {
+    setOpenSourceDialogState(state);
+  }, []);
+
+  const handleOpenUrl = useCallback(() => {
+    openSourceDialog({
+      mode: "url",
+      initialUrl: "",
+      initialXtream: null,
+    });
+  }, [openSourceDialog]);
 
   const refreshHistory = useCallback(async () => {
     if (!playlist) {
@@ -558,9 +671,23 @@ export default function App() {
         void openPlaylistUrlValue(entry.value);
         return;
       }
+      if (entry.kind === "xtream") {
+        const source = parseXtreamRecent(entry.value);
+        if (!source) {
+          setMenuInfo("This Xtream recent entry is invalid.");
+          void refreshRecentPlaylists();
+          return;
+        }
+        openSourceDialog({
+          mode: "xtream",
+          initialUrl: "",
+          initialXtream: source,
+        });
+        return;
+      }
       void openPlaylistPath(entry.value);
     },
-    [openPlaylistPath, openPlaylistUrlValue],
+    [openPlaylistPath, openPlaylistUrlValue, openSourceDialog, refreshRecentPlaylists],
   );
 
   const recentPlaylistsRef = useRef<RecentPlaylistEntry[]>(recentPlaylists);
@@ -651,6 +778,11 @@ export default function App() {
     showKeyboardShortcutsRef.current = showKeyboardShortcuts;
   }, [showKeyboardShortcuts]);
 
+  const openSourceDialogRef = useRef(openSourceDialogState);
+  useEffect(() => {
+    openSourceDialogRef.current = openSourceDialogState;
+  }, [openSourceDialogState]);
+
   const pendingPlaybackRef = useRef<ChannelResult | null>(pendingPlaybackChannel);
   useEffect(() => {
     pendingPlaybackRef.current = pendingPlaybackChannel;
@@ -673,6 +805,10 @@ export default function App() {
       if (e.key === "Escape") {
         if (pendingPlaybackRef.current) {
           setPendingPlaybackChannel(null);
+          return;
+        }
+        if (openSourceDialogRef.current) {
+          setOpenSourceDialogState(null);
           return;
         }
         if (showKeyboardShortcutsRef.current) {
@@ -1143,13 +1279,13 @@ export default function App() {
                           onClick={() => handleOpenRecent(entry)}
                           className="w-full text-left px-3 py-2 rounded-lg border border-border-subtle hover:border-border-app hover:bg-panel-subtle transition-colors"
                           type="button"
-                          title={entry.value}
+                          title={recentTitle(entry)}
                         >
                           <span className="text-[13px] text-text-primary block truncate">
                             {entry.label}
                           </span>
                           <span className="text-[11px] text-text-tertiary block truncate mt-0.5">
-                            {entry.kind === "url" ? "URL" : "Path"} • {entry.value}
+                            {recentValueLabel(entry)}
                           </span>
                         </button>
                       ))}
@@ -1182,6 +1318,17 @@ export default function App() {
         totalChannels={playlist?.total_channels ?? 0}
       />
       <ProgressBar progress={progress} scanState={scanState} />
+
+      {openSourceDialogState && (
+        <OpenSourceDialog
+          initialMode={openSourceDialogState.mode}
+          initialUrl={openSourceDialogState.initialUrl}
+          initialXtream={openSourceDialogState.initialXtream}
+          onOpenUrl={openPlaylistUrlValue}
+          onOpenXtream={openPlaylistXtreamValue}
+          onClose={() => setOpenSourceDialogState(null)}
+        />
+      )}
 
       {showSettings && (
         <SettingsPanel

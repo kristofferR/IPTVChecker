@@ -178,6 +178,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::playlist::open_playlist,
             commands::playlist::open_playlist_url,
+            commands::playlist::open_playlist_xtream,
             commands::player::open_channel_in_player,
             commands::scan::start_scan,
             commands::scan::pause_scan,
