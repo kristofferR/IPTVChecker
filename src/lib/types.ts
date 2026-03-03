@@ -131,5 +131,13 @@ export interface ScreenshotCacheStats {
   cache_dir: string;
 }
 
+export type RecentPlaylistKind = "file" | "url";
+
+export interface RecentPlaylistEntry {
+  kind: RecentPlaylistKind;
+  value: string;
+  label: string;
+}
+
 export type RetryBackoff = "none" | "linear" | "exponential";
 export type ThemePreference = "system" | "light" | "dark";

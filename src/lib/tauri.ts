@@ -5,6 +5,8 @@ import type {
   PlaylistPreview,
   ScanConfig,
   ScanHistoryItem,
+  RecentPlaylistEntry,
+  RecentPlaylistKind,
   ScreenshotCacheStats,
 } from "./types";
 
@@ -106,6 +108,23 @@ export async function getScanHistory(
 
 export async function clearScanHistory(playlistPath: string): Promise<number> {
   return invoke("clear_scan_history", { playlistPath });
+}
+
+export async function getRecentPlaylists(): Promise<RecentPlaylistEntry[]> {
+  return invoke("get_recent_playlists");
+}
+
+export async function addRecentPlaylist(
+  kind: RecentPlaylistKind,
+  value: string,
+): Promise<RecentPlaylistEntry[]> {
+  return invoke("add_recent_playlist", {
+    recent: { kind, value },
+  });
+}
+
+export async function clearRecentPlaylists(): Promise<RecentPlaylistEntry[]> {
+  return invoke("clear_recent_playlists");
 }
 
 export async function openChannelInPlayer(channel: {

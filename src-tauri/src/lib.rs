@@ -44,6 +44,22 @@ pub fn run() {
                 .text("menu.file.open", "Open Playlist...")
                 .text("menu.file.open_folder", "Open Folder...")
                 .text("menu.file.open_url", "Open URL...")
+                .item(
+                    &SubmenuBuilder::with_id(app, "menu.file.open_recent", "Open Recent")
+                        .text("menu.file.recent.0", "No recent playlists")
+                        .text("menu.file.recent.1", "—")
+                        .text("menu.file.recent.2", "—")
+                        .text("menu.file.recent.3", "—")
+                        .text("menu.file.recent.4", "—")
+                        .text("menu.file.recent.5", "—")
+                        .text("menu.file.recent.6", "—")
+                        .text("menu.file.recent.7", "—")
+                        .text("menu.file.recent.8", "—")
+                        .text("menu.file.recent.9", "—")
+                        .separator()
+                        .text("menu.file.recent.clear", "Clear Recent")
+                        .build()?,
+                )
                 .separator()
                 .text("menu.file.export_csv", "Export CSV")
                 .text("menu.file.export_split", "Export Split Playlists")
@@ -96,6 +112,17 @@ pub fn run() {
                 "menu.file.open" => Some("menu://open-playlist"),
                 "menu.file.open_folder" => Some("menu://open-folder"),
                 "menu.file.open_url" => Some("menu://open-url"),
+                "menu.file.recent.0" => Some("menu://open-recent-0"),
+                "menu.file.recent.1" => Some("menu://open-recent-1"),
+                "menu.file.recent.2" => Some("menu://open-recent-2"),
+                "menu.file.recent.3" => Some("menu://open-recent-3"),
+                "menu.file.recent.4" => Some("menu://open-recent-4"),
+                "menu.file.recent.5" => Some("menu://open-recent-5"),
+                "menu.file.recent.6" => Some("menu://open-recent-6"),
+                "menu.file.recent.7" => Some("menu://open-recent-7"),
+                "menu.file.recent.8" => Some("menu://open-recent-8"),
+                "menu.file.recent.9" => Some("menu://open-recent-9"),
+                "menu.file.recent.clear" => Some("menu://clear-recent"),
                 "menu.file.export_csv" => Some("menu://export-csv"),
                 "menu.file.export_split" => Some("menu://export-split"),
                 "menu.file.export_renamed" => Some("menu://export-renamed"),
@@ -154,6 +181,8 @@ pub fn run() {
                 log::warn!("Failed to apply startup theme preference: {}", error);
             }
 
+            commands::recent::refresh_recent_menu(&app.handle());
+
             Ok(())
         })
         .manage(AppState::new() as Arc<AppState>)
@@ -177,6 +206,9 @@ pub fn run() {
             commands::settings::clear_screenshot_cache,
             commands::history::get_scan_history,
             commands::history::clear_scan_history,
+            commands::recent::get_recent_playlists,
+            commands::recent::add_recent_playlist,
+            commands::recent::clear_recent_playlists,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

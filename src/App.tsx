@@ -5,11 +5,15 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type {
   ChannelResult,
   PlaylistPreview,
+  RecentPlaylistEntry,
   ScanConfig,
   ScanHistoryItem,
 } from "./lib/types";
 import {
+  addRecentPlaylist,
+  clearRecentPlaylists,
   clearScanHistory,
+  getRecentPlaylists,
   getScanHistory,
   openPlaylist,
   openPlaylistUrl,
@@ -165,6 +169,7 @@ export default function App() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyClearing, setHistoryClearing] = useState(false);
+  const [recentPlaylists, setRecentPlaylists] = useState<RecentPlaylistEntry[]>([]);
   const [appVersion, setAppVersion] = useState<string>("");
   const [updateNotice, setUpdateNotice] = useState<UpdateNotice | null>(null);
   const [menuExportRequest, setMenuExportRequest] = useState<{
@@ -252,6 +257,28 @@ export default function App() {
     const timer = setTimeout(() => setMenuInfo(null), 8000);
     return () => clearTimeout(timer);
   }, [menuInfo]);
+
+  const refreshRecentPlaylists = useCallback(async () => {
+    try {
+      const entries = await getRecentPlaylists();
+      setRecentPlaylists(entries);
+    } catch {
+      // Ignore recent-list load failures.
+    }
+  }, []);
+
+  const handleClearRecentPlaylists = useCallback(async () => {
+    try {
+      const entries = await clearRecentPlaylists();
+      setRecentPlaylists(entries);
+    } catch {
+      // Ignore clear failures.
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshRecentPlaylists();
+  }, [refreshRecentPlaylists]);
 
   const checkForUpdates = useCallback(
     async (force: boolean, knownCurrentVersion?: string) => {
@@ -383,6 +410,12 @@ export default function App() {
       setSelectedChannelIndices([]);
       setPendingPlaybackChannel(null);
       setShowHistory(false);
+      try {
+        const entries = await addRecentPlaylist("file", selectedPath);
+        setRecentPlaylists(entries);
+      } catch {
+        // Ignore recent-list update failures.
+      }
     } catch (err) {
       logger.error("[App] Failed to open playlist", err);
       setPlaylistOpenError(formatPlaylistOpenError(err));
@@ -391,8 +424,9 @@ export default function App() {
       setSelectedChannelIndices([]);
       setPendingPlaybackChannel(null);
       setShowHistory(false);
+      void refreshRecentPlaylists();
     }
-  }, [initFromPlaylist, channelSearch]);
+  }, [initFromPlaylist, channelSearch, refreshRecentPlaylists]);
 
   const handleOpen = useCallback(async () => {
     const path = await open({
@@ -423,15 +457,7 @@ export default function App() {
     await openPlaylistPath(selectedPath);
   }, [openPlaylistPath]);
 
-  const handleOpenUrl = useCallback(async () => {
-    const raw = window.prompt("Enter playlist URL (http:// or https://):");
-    const url = raw?.trim();
-    if (!url) return;
-    if (!/^https?:\/\//i.test(url)) {
-      setPlaylistOpenError("Playlist URL must start with http:// or https://");
-      return;
-    }
-
+  const openPlaylistUrlValue = useCallback(async (url: string) => {
     setPlaylistOpenError(null);
     try {
       const searchTrimmed = channelSearch.trim() || undefined;
@@ -453,6 +479,12 @@ export default function App() {
       setSelectedChannelIndices([]);
       setPendingPlaybackChannel(null);
       setShowHistory(false);
+      try {
+        const entries = await addRecentPlaylist("url", url);
+        setRecentPlaylists(entries);
+      } catch {
+        // Ignore recent-list update failures.
+      }
     } catch (err) {
       logger.error("[App] Failed to open playlist URL", err);
       setPlaylistOpenError(formatPlaylistOpenError(err));
@@ -460,8 +492,21 @@ export default function App() {
       setSelectedChannelIndices([]);
       setPendingPlaybackChannel(null);
       setShowHistory(false);
+      void refreshRecentPlaylists();
     }
-  }, [channelSearch, initFromPlaylist]);
+  }, [channelSearch, initFromPlaylist, refreshRecentPlaylists]);
+
+  const handleOpenUrl = useCallback(async () => {
+    const raw = window.prompt("Enter playlist URL (http:// or https://):");
+    const url = raw?.trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) {
+      setPlaylistOpenError("Playlist URL must start with http:// or https://");
+      return;
+    }
+
+    await openPlaylistUrlValue(url);
+  }, [openPlaylistUrlValue]);
 
   const refreshHistory = useCallback(async () => {
     if (!playlist) {
@@ -505,6 +550,22 @@ export default function App() {
     setShowHistory(true);
     void refreshHistory();
   }, [playlist, refreshHistory]);
+
+  const handleOpenRecent = useCallback(
+    (entry: RecentPlaylistEntry) => {
+      if (entry.kind === "url") {
+        void openPlaylistUrlValue(entry.value);
+        return;
+      }
+      void openPlaylistPath(entry.value);
+    },
+    [openPlaylistPath, openPlaylistUrlValue],
+  );
+
+  const recentPlaylistsRef = useRef<RecentPlaylistEntry[]>(recentPlaylists);
+  useEffect(() => {
+    recentPlaylistsRef.current = recentPlaylists;
+  }, [recentPlaylists]);
 
   useEffect(() => {
     if (!playlist) {
@@ -700,6 +761,21 @@ export default function App() {
           void handleOpenUrl();
         }),
       );
+      for (let i = 0; i < 10; i += 1) {
+        const eventName = `menu://open-recent-${i}`;
+        unlisten.push(
+          await listen(eventName, () => {
+            const entry = recentPlaylistsRef.current[i];
+            if (!entry) return;
+            handleOpenRecent(entry);
+          }),
+        );
+      }
+      unlisten.push(
+        await listen("menu://clear-recent", () => {
+          void handleClearRecentPlaylists();
+        }),
+      );
       unlisten.push(
         await listen("menu://export-csv", () => queueExport("csv")),
       );
@@ -766,7 +842,7 @@ export default function App() {
         off();
       }
     };
-  }, [cancel, checkForUpdates, handleOpen, handleOpenFolder, handleOpenUrl, handleStartScan, openHistoryPanel, pause, resume]);
+  }, [cancel, checkForUpdates, handleClearRecentPlaylists, handleOpen, handleOpenFolder, handleOpenRecent, handleOpenUrl, handleStartScan, openHistoryPanel, pause, resume]);
 
   const handleSelectChannel = useCallback((result: ChannelResult) => {
     setSelectedChannel(result);
@@ -1023,6 +1099,43 @@ export default function App() {
                   <FolderOpen className="w-4 h-4" />
                   Open Folder
                 </button>
+
+                {recentPlaylists.length > 0 && (
+                  <div className="mt-6 text-left mx-auto max-w-xl">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[12px] uppercase tracking-[0.08em] text-text-tertiary">
+                        Open Recent
+                      </p>
+                      <button
+                        onClick={() => {
+                          void handleClearRecentPlaylists();
+                        }}
+                        className="text-[12px] text-text-tertiary hover:text-text-primary transition-colors"
+                        type="button"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    <div className="space-y-1">
+                      {recentPlaylists.map((entry) => (
+                        <button
+                          key={`${entry.kind}:${entry.value}`}
+                          onClick={() => handleOpenRecent(entry)}
+                          className="w-full text-left px-3 py-2 rounded-lg border border-border-subtle hover:border-border-app hover:bg-panel-subtle transition-colors"
+                          type="button"
+                          title={entry.value}
+                        >
+                          <span className="text-[13px] text-text-primary block truncate">
+                            {entry.label}
+                          </span>
+                          <span className="text-[11px] text-text-tertiary block truncate mt-0.5">
+                            {entry.kind === "url" ? "URL" : "Path"} • {entry.value}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
