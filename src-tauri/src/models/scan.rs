@@ -5,6 +5,7 @@ pub struct ScanConfig {
     pub file_path: String,
     pub group_filter: Option<String>,
     pub channel_search: Option<String>,
+    pub selected_indices: Option<Vec<usize>>,
     pub timeout: f64,
     pub extended_timeout: Option<f64>,
     pub concurrency: u32,

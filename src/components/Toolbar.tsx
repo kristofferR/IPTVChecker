@@ -20,6 +20,7 @@ interface ToolbarProps {
   results: ChannelResult[];
   playlistName: string;
   playlistPath: string;
+  selectedCount: number;
 }
 
 const toolbarBtn =
@@ -39,9 +40,11 @@ export function Toolbar({
   results,
   playlistName,
   playlistPath,
+  selectedCount,
 }: ToolbarProps) {
   const scanning = scanState === "scanning";
   const hasResults = results.length > 0;
+  const scanLabel = selectedCount > 0 ? `Scan Selected (${selectedCount})` : "Scan";
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -83,7 +86,7 @@ export function Toolbar({
           className={`${toolbarBtn} toolbar-btn-primary`}
         >
           <Play className="w-4 h-4" />
-          Scan
+          {scanLabel}
         </button>
       )}
 

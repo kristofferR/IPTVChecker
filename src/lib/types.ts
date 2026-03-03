@@ -52,6 +52,7 @@ export interface ScanConfig {
   file_path: string;
   group_filter: string | null;
   channel_search: string | null;
+  selected_indices: number[] | null;
   timeout: number;
   extended_timeout: number | null;
   concurrency: number;

@@ -19,7 +19,8 @@ interface ChannelTableProps {
   statusFilter: string;
   onSelectChannel: (result: ChannelResult) => void;
   onOpenChannel?: (result: ChannelResult) => void;
-  selectedIndex: number | null;
+  onSelectionChange?: (selectedIndices: number[]) => void;
+  onScanSelected?: (selectedIndices: number[]) => void;
 }
 
 const ORDER_STORAGE_KEY = "iptv-checker.column-order.v1";
@@ -73,6 +74,17 @@ function parseStoredWidths(raw: string | null): Record<ColumnKey, number> {
   return widths;
 }
 
+function isInputLikeTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName.toLowerCase();
+  return (
+    tag === "input" ||
+    tag === "textarea" ||
+    tag === "select" ||
+    target.isContentEditable
+  );
+}
+
 export function ChannelTable({
   results,
   search,
@@ -80,21 +92,28 @@ export function ChannelTable({
   statusFilter,
   onSelectChannel,
   onOpenChannel,
-  selectedIndex,
+  onSelectionChange,
+  onScanSelected,
 }: ChannelTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
   const [sortField, setSortField] = useState<SortField>("index");
   const [sortDir, setSortDir] = useState<SortDirection>("asc");
-  const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
+  const [focusedRow, setFocusedRow] = useState<number | null>(null);
+  const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
+  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [contextMenuPos, setContextMenuPos] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   const [draggedColumn, setDraggedColumn] = useState<ColumnKey | null>(null);
   const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(() =>
-    parseStoredOrder(globalThis.localStorage?.getItem(ORDER_STORAGE_KEY) ?? null),
+    parseStoredOrder(localStorage.getItem(ORDER_STORAGE_KEY)),
   );
   const [columnWidths, setColumnWidths] = useState<Record<ColumnKey, number>>(
-    () =>
-      parseStoredWidths(
-        globalThis.localStorage?.getItem(WIDTH_STORAGE_KEY) ?? null,
-      ),
+    () => parseStoredWidths(localStorage.getItem(WIDTH_STORAGE_KEY)),
   );
 
   useEffect(() => {
@@ -134,6 +153,148 @@ export function ChannelTable({
     overscan: 20,
   });
 
+  const emitSelection = useCallback(
+    (next: Set<number>) => {
+      const ordered = Array.from(next).sort((a, b) => a - b);
+      onSelectionChange?.(ordered);
+    },
+    [onSelectionChange],
+  );
+
+  const updateSelection = useCallback(
+    (updater: (prev: Set<number>) => Set<number>) => {
+      setSelectedIndices((prev) => {
+        const next = updater(prev);
+        if (next === prev) return prev;
+        emitSelection(next);
+        return next;
+      });
+    },
+    [emitSelection],
+  );
+
+  useEffect(() => {
+    const visible = new Set(filteredResults.map((r) => r.index));
+
+    updateSelection((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set(Array.from(prev).filter((idx) => visible.has(idx)));
+      return next.size === prev.size ? prev : next;
+    });
+
+    setSelectionAnchor((prev) =>
+      prev !== null && visible.has(prev) ? prev : null,
+    );
+
+    setFocusedRow((prev) => {
+      if (filteredResults.length === 0) return null;
+      if (prev === null) return 0;
+      return Math.min(prev, filteredResults.length - 1);
+    });
+  }, [filteredResults, updateSelection]);
+
+  useEffect(() => {
+    if (!contextMenuPos) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!contextMenuRef.current) return;
+      const target = event.target as Node;
+      if (!contextMenuRef.current.contains(target)) {
+        setContextMenuPos(null);
+      }
+    };
+
+    const handleScroll = () => setContextMenuPos(null);
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("scroll", handleScroll, true);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("scroll", handleScroll, true);
+    };
+  }, [contextMenuPos]);
+
+  const selectSingle = useCallback(
+    (result: ChannelResult, rowIndex: number) => {
+      const next = new Set<number>([result.index]);
+      setSelectedIndices(next);
+      emitSelection(next);
+      setSelectionAnchor(result.index);
+      setFocusedRow(rowIndex);
+      onSelectChannel(result);
+    },
+    [emitSelection, onSelectChannel],
+  );
+
+  const selectRange = useCallback(
+    (clickedResult: ChannelResult, clickedRow: number) => {
+      if (selectionAnchor === null) {
+        selectSingle(clickedResult, clickedRow);
+        return;
+      }
+
+      const anchorRow = filteredResults.findIndex(
+        (result) => result.index === selectionAnchor,
+      );
+      if (anchorRow < 0) {
+        selectSingle(clickedResult, clickedRow);
+        return;
+      }
+
+      const start = Math.min(anchorRow, clickedRow);
+      const end = Math.max(anchorRow, clickedRow);
+      const next = new Set<number>();
+      for (let i = start; i <= end; i += 1) {
+        next.add(filteredResults[i].index);
+      }
+
+      setSelectedIndices(next);
+      emitSelection(next);
+      setFocusedRow(clickedRow);
+      onSelectChannel(clickedResult);
+    },
+    [selectionAnchor, filteredResults, selectSingle, emitSelection, onSelectChannel],
+  );
+
+  const selectAllVisible = useCallback(() => {
+    if (filteredResults.length === 0) return;
+    const next = new Set(filteredResults.map((result) => result.index));
+    setSelectedIndices(next);
+    emitSelection(next);
+    setSelectionAnchor(filteredResults[0].index);
+    setFocusedRow(0);
+    onSelectChannel(filteredResults[0]);
+  }, [filteredResults, emitSelection, onSelectChannel]);
+
+  const clearSelection = useCallback(() => {
+    const next = new Set<number>();
+    setSelectedIndices(next);
+    emitSelection(next);
+    setSelectionAnchor(null);
+    setContextMenuPos(null);
+  }, [emitSelection]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (isInputLikeTarget(event.target)) return;
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a") {
+        event.preventDefault();
+        selectAllVisible();
+        return;
+      }
+
+      if (event.key === "Escape") {
+        if (selectedIndices.size > 0 || contextMenuPos) {
+          event.preventDefault();
+          clearSelection();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [selectAllVisible, selectedIndices.size, contextMenuPos, clearSelection]);
+
   const handleSort = useCallback(
     (field: SortField) => {
       if (sortField === field) {
@@ -147,31 +308,109 @@ export function ChannelTable({
   );
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+    (event: React.KeyboardEvent) => {
       if (filteredResults.length === 0) return;
 
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setFocusedIndex((prev) => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setFocusedRow((prev) => {
           const next =
             prev === null ? 0 : Math.min(prev + 1, filteredResults.length - 1);
+          const result = filteredResults[next];
+          if (result) {
+            const selected = new Set<number>([result.index]);
+            setSelectedIndices(selected);
+            emitSelection(selected);
+            setSelectionAnchor(result.index);
+            onSelectChannel(result);
+          }
           virtualizer.scrollToIndex(next, { align: "auto" });
           return next;
         });
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setFocusedIndex((prev) => {
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setFocusedRow((prev) => {
           const next = prev === null ? 0 : Math.max(prev - 1, 0);
+          const result = filteredResults[next];
+          if (result) {
+            const selected = new Set<number>([result.index]);
+            setSelectedIndices(selected);
+            emitSelection(selected);
+            setSelectionAnchor(result.index);
+            onSelectChannel(result);
+          }
           virtualizer.scrollToIndex(next, { align: "auto" });
           return next;
         });
-      } else if (e.key === "Enter" && focusedIndex !== null) {
-        const result = filteredResults[focusedIndex];
+      } else if (event.key === "Enter" && focusedRow !== null) {
+        const result = filteredResults[focusedRow];
         if (result) onSelectChannel(result);
       }
     },
-    [filteredResults, focusedIndex, onSelectChannel, virtualizer],
+    [filteredResults, focusedRow, onSelectChannel, virtualizer, emitSelection],
   );
+
+  const handleRowClick = useCallback(
+    (
+      event: React.MouseEvent<HTMLDivElement>,
+      result: ChannelResult,
+      rowIndex: number,
+    ) => {
+      setContextMenuPos(null);
+
+      if (event.shiftKey) {
+        selectRange(result, rowIndex);
+        return;
+      }
+
+      if (event.metaKey || event.ctrlKey) {
+        updateSelection((prev) => {
+          const next = new Set(prev);
+          if (next.has(result.index)) {
+            next.delete(result.index);
+          } else {
+            next.add(result.index);
+          }
+          return next;
+        });
+        setSelectionAnchor(result.index);
+        setFocusedRow(rowIndex);
+        onSelectChannel(result);
+        return;
+      }
+
+      selectSingle(result, rowIndex);
+    },
+    [selectRange, updateSelection, onSelectChannel, selectSingle],
+  );
+
+  const handleRowContextMenu = useCallback(
+    (
+      event: React.MouseEvent<HTMLDivElement>,
+      result: ChannelResult,
+      rowIndex: number,
+    ) => {
+      event.preventDefault();
+
+      if (!selectedIndices.has(result.index)) {
+        selectSingle(result, rowIndex);
+      }
+
+      setContextMenuPos({ x: event.clientX, y: event.clientY });
+    },
+    [selectedIndices, selectSingle],
+  );
+
+  const handleScanSelected = useCallback(() => {
+    const ordered = Array.from(selectedIndices).sort((a, b) => a - b);
+    if (ordered.length === 0) {
+      setContextMenuPos(null);
+      return;
+    }
+
+    onScanSelected?.(ordered);
+    setContextMenuPos(null);
+  }, [selectedIndices, onScanSelected]);
 
   const handleColumnDragStart = useCallback(
     (key: ColumnKey, event: React.DragEvent<HTMLDivElement>) => {
@@ -326,10 +565,15 @@ export function ChannelTable({
                   >
                     <ChannelRow
                       result={result}
-                      onClick={onSelectChannel}
+                      onClick={(event, clickedResult) =>
+                        handleRowClick(event, clickedResult, virtualRow.index)
+                      }
                       onDoubleClick={onOpenChannel}
-                      selected={selectedIndex === result.index}
-                      focused={focusedIndex === virtualRow.index}
+                      onContextMenu={(event) =>
+                        handleRowContextMenu(event, result, virtualRow.index)
+                      }
+                      selected={selectedIndices.has(result.index)}
+                      focused={focusedRow === virtualRow.index}
                       columns={columns}
                       columnWidths={columnWidths}
                     />
@@ -340,6 +584,27 @@ export function ChannelTable({
           )}
         </div>
       </div>
+
+      {contextMenuPos && (
+        <div
+          ref={contextMenuRef}
+          data-no-window-drag
+          className="fixed z-50 w-52 rounded-lg border border-border-app bg-dropdown shadow-2xl py-1"
+          style={{
+            top: `${contextMenuPos.y}px`,
+            left: `${contextMenuPos.x}px`,
+          }}
+        >
+          <button
+            onClick={handleScanSelected}
+            disabled={selectedIndices.size === 0}
+            className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
+            type="button"
+          >
+            Scan selected ({selectedIndices.size})
+          </button>
+        </div>
+      )}
     </div>
   );
 }

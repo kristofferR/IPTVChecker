@@ -115,14 +115,39 @@ export function useScan() {
   }, [queueResult]);
 
   const start = useCallback(
-    async (config: ScanConfig, totalChannels: number) => {
+    async (
+      config: ScanConfig,
+      totalChannels: number,
+      selectedIndices: number[] = [],
+    ) => {
       console.log(`[useScan] start: totalChannels=${totalChannels}`, config);
-      // Reset existing results back to pending status instead of nulling them out
+      const selectedSet =
+        selectedIndices.length > 0 ? new Set(selectedIndices) : null;
+
+      // Reset existing results back to pending status for channels being scanned.
       setResults((prev) => {
         if (prev.length === totalChannels && prev.some((r) => r != null)) {
           return prev.map((r) =>
             r
-              ? { ...r, status: "pending" as const, codec: null, resolution: null, width: null, height: null, fps: null, video_bitrate: null, audio_bitrate: null, audio_codec: null, screenshot_path: null, label_mismatches: [], low_framerate: false, error_message: null, stream_url: null }
+              ? selectedSet && !selectedSet.has(r.index)
+                ? r
+                : {
+                    ...r,
+                    status: "pending" as const,
+                    codec: null,
+                    resolution: null,
+                    width: null,
+                    height: null,
+                    fps: null,
+                    video_bitrate: null,
+                    audio_bitrate: null,
+                    audio_codec: null,
+                    screenshot_path: null,
+                    label_mismatches: [],
+                    low_framerate: false,
+                    error_message: null,
+                    stream_url: null,
+                  }
               : r,
           );
         }

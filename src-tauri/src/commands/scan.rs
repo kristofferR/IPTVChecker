@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter, Manager};
@@ -47,7 +48,11 @@ pub async fn start_scan(
         &config.channel_search,
     )?;
 
-    let channels = preview.channels;
+    let mut channels = preview.channels;
+    if let Some(selected_indices) = &config.selected_indices {
+        let selected: HashSet<usize> = selected_indices.iter().copied().collect();
+        channels.retain(|channel| selected.contains(&channel.index));
+    }
     let total = channels.len();
     log::info!("Scan: {} channels to check", total);
 

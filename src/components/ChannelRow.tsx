@@ -7,12 +7,16 @@ import { StatusBadge } from "./StatusBadge";
 
 interface ChannelRowProps {
   result: ChannelResult;
-  onClick: (result: ChannelResult) => void;
+  onClick: (
+    event: React.MouseEvent<HTMLDivElement>,
+    result: ChannelResult,
+  ) => void;
   selected: boolean;
   focused?: boolean;
   columns: ColumnDefinition[];
   columnWidths: Record<ColumnKey, number>;
   onDoubleClick?: (result: ChannelResult) => void;
+  onContextMenu?: (event: React.MouseEvent<HTMLDivElement>) => void;
 }
 
 export function ChannelRow({
@@ -23,6 +27,7 @@ export function ChannelRow({
   columns,
   columnWidths,
   onDoubleClick,
+  onContextMenu,
 }: ChannelRowProps) {
   const isAlive = result.status === "alive";
   const gridTemplateColumns = columns
@@ -96,8 +101,9 @@ export function ChannelRow({
         width: `${tableWidth}px`,
         minWidth: `${tableWidth}px`,
       }}
-      onClick={() => onClick(result)}
+      onClick={(event) => onClick(event, result)}
       onDoubleClick={() => onDoubleClick?.(result)}
+      onContextMenu={onContextMenu}
     >
       {columns.map((column) => {
         const alignClass =

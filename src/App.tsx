@@ -36,6 +36,9 @@ export default function App() {
   const [selectedChannel, setSelectedChannel] = useState<ChannelResult | null>(
     null,
   );
+  const [selectedChannelIndices, setSelectedChannelIndices] = useState<number[]>(
+    [],
+  );
   const [showSettings, setShowSettings] = useState(false);
   const [ffmpegWarning, setFfmpegWarning] = useState(false);
   const [errorDismissed, setErrorDismissed] = useState(false);
@@ -109,6 +112,7 @@ export default function App() {
       setGroupFilter("all");
       setStatusFilter("all");
       setSelectedChannel(null);
+      setSelectedChannelIndices([]);
     }
   }, [initFromPlaylist, channelSearch]);
 
@@ -145,13 +149,14 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [handleOpen]);
 
-  const handleStartScan = useCallback(async () => {
+  const startScanWithSelection = useCallback(async (selection: number[]) => {
     if (!playlist) return;
 
     const config: ScanConfig = {
       file_path: playlist.file_path,
       group_filter: groupFilter !== "all" ? groupFilter : null,
       channel_search: channelSearch.trim() || null,
+      selected_indices: selection.length > 0 ? selection : null,
       timeout: settings.timeout,
       extended_timeout: settings.extended_timeout,
       concurrency: settings.concurrency,
@@ -164,8 +169,19 @@ export default function App() {
       screenshots_dir: settings.screenshots_dir,
     };
 
-    await start(config, playlist.total_channels);
+    await start(config, playlist.total_channels, selection);
   }, [playlist, settings, groupFilter, channelSearch, start]);
+
+  const handleStartScan = useCallback(async () => {
+    await startScanWithSelection(selectedChannelIndices);
+  }, [selectedChannelIndices, startScanWithSelection]);
+
+  const handleScanSelected = useCallback(
+    (indices: number[]) => {
+      void startScanWithSelection(indices);
+    },
+    [startScanWithSelection],
+  );
 
   const handleSelectChannel = useCallback((result: ChannelResult) => {
     setSelectedChannel(result);
@@ -249,6 +265,7 @@ export default function App() {
         results={completedResults}
         playlistName={playlist?.file_name ?? ""}
         playlistPath={playlist?.file_path ?? ""}
+        selectedCount={selectedChannelIndices.length}
       />
 
       {ffmpegWarning && (
@@ -306,7 +323,8 @@ export default function App() {
               statusFilter={statusFilter}
               onSelectChannel={handleSelectChannel}
               onOpenChannel={handleOpenChannel}
-              selectedIndex={selectedChannel?.index ?? null}
+              onSelectionChange={setSelectedChannelIndices}
+              onScanSelected={handleScanSelected}
             />
           ) : (
             <div className="flex-1 flex items-center justify-center text-text-tertiary">
