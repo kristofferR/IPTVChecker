@@ -2,24 +2,53 @@ use crate::error::AppError;
 use crate::models::channel::{ChannelResult, ChannelStatus};
 use std::path::{Path, PathBuf};
 
+fn map_csv_error(error: csv::Error) -> AppError {
+    AppError::Other(format!("CSV export failed: {}", error))
+}
+
+fn sanitize_csv_cell(value: &str) -> String {
+    let sanitized = value.replace('\u{0000}', "");
+    let starts_with_formula = sanitized
+        .chars()
+        .find(|c| !c.is_whitespace())
+        .map(|c| matches!(c, '=' | '+' | '-' | '@'))
+        .unwrap_or(false);
+
+    if starts_with_formula {
+        format!("'{}", sanitized)
+    } else {
+        sanitized
+    }
+}
+
 #[tauri::command]
 pub async fn export_csv(results: Vec<ChannelResult>, path: String, playlist_name: String) -> Result<(), AppError> {
-    use std::io::Write;
+    let file = std::fs::File::create(&path).map_err(AppError::Io)?;
+    let mut writer = csv::WriterBuilder::new()
+        .has_headers(false)
+        .from_writer(file);
 
-    let mut file = std::fs::File::create(&path).map_err(AppError::Io)?;
-
-    // CSV header matching Python CLI format
-    writeln!(
-        file,
-        "Playlist,Channel Number,Total Channels in Playlist,Channel Status,Group Name,Channel Name,Channel ID,Codec,Bit Rate (kbps),Resolution,Frame Rate,Audio"
-    )
-    .map_err(AppError::Io)?;
+    // Header matching Python CLI format
+    writer
+        .write_record([
+            "Playlist",
+            "Channel Number",
+            "Total Channels in Playlist",
+            "Channel Status",
+            "Group Name",
+            "Channel Name",
+            "Channel ID",
+            "Codec",
+            "Bit Rate (kbps)",
+            "Resolution",
+            "Frame Rate",
+            "Audio",
+        ])
+        .map_err(map_csv_error)?;
 
     let total = results.len();
     for (i, r) in results.iter().enumerate() {
         let status_str = r.status.to_string();
-        let group = r.group.replace('"', "\"\"").replace('\n', " ").replace('\r', "");
-        let name = r.name.replace('"', "\"\"").replace('\n', " ").replace('\r', "");
         let codec = r.codec.as_deref().unwrap_or("Unknown");
         let bitrate = r
             .video_bitrate
@@ -34,25 +63,25 @@ pub async fn export_csv(results: Vec<ChannelResult>, path: String, playlist_name
             r.audio_codec.as_deref().unwrap_or("Unknown")
         );
 
-        writeln!(
-            file,
-            "{},{},{},{},\"{}\",\"{}\",{},{},{},{},{},{}",
-            playlist_name,
-            i + 1,
-            total,
-            status_str,
-            group,
-            name,
-            r.channel_id,
-            codec,
-            bitrate,
-            resolution,
-            fps,
-            audio
-        )
-        .map_err(AppError::Io)?;
+        writer
+            .write_record([
+                sanitize_csv_cell(&playlist_name),
+                (i + 1).to_string(),
+                total.to_string(),
+                sanitize_csv_cell(&status_str),
+                sanitize_csv_cell(&r.group),
+                sanitize_csv_cell(&r.name),
+                sanitize_csv_cell(&r.channel_id),
+                sanitize_csv_cell(codec),
+                sanitize_csv_cell(&bitrate),
+                sanitize_csv_cell(resolution),
+                sanitize_csv_cell(&fps),
+                sanitize_csv_cell(&audio),
+            ])
+            .map_err(map_csv_error)?;
     }
 
+    writer.flush().map_err(AppError::Io)?;
     Ok(())
 }
 
@@ -216,8 +245,35 @@ fn format_audio_info(r: &ChannelResult) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::export_target_path;
+    use super::*;
     use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn sample_result(name: &str, group: &str, channel_id: &str) -> ChannelResult {
+        ChannelResult {
+            index: 0,
+            name: name.to_string(),
+            group: group.to_string(),
+            url: "http://example.com/live.m3u8".to_string(),
+            status: ChannelStatus::Alive,
+            codec: Some("H264".to_string()),
+            resolution: Some("1080p".to_string()),
+            width: Some(1920),
+            height: Some(1080),
+            fps: Some(30),
+            video_bitrate: Some("5000 kbps".to_string()),
+            audio_bitrate: Some("192".to_string()),
+            audio_codec: Some("AAC".to_string()),
+            screenshot_path: None,
+            label_mismatches: Vec::new(),
+            low_framerate: false,
+            error_message: None,
+            channel_id: channel_id.to_string(),
+            extinf_line: "#EXTINF:-1,Sample".to_string(),
+            metadata_lines: Vec::new(),
+            stream_url: None,
+        }
+    }
 
     #[test]
     fn export_target_path_uses_parent_directory_join() {
@@ -235,5 +291,55 @@ mod tests {
     fn export_target_path_handles_missing_extension() {
         let path = export_target_path("/tmp/iptv/source", "renamed");
         assert_eq!(path, Path::new("/tmp/iptv").join("source_renamed.m3u8"));
+    }
+
+    #[test]
+    fn sanitize_csv_cell_blocks_formula_prefixes() {
+        assert_eq!(sanitize_csv_cell("=SUM(A1:A2)"), "'=SUM(A1:A2)");
+        assert_eq!(sanitize_csv_cell("+cmd"), "'+cmd");
+        assert_eq!(sanitize_csv_cell("-1"), "'-1");
+        assert_eq!(sanitize_csv_cell("@x"), "'@x");
+        assert_eq!(sanitize_csv_cell("safe value"), "safe value");
+    }
+
+    #[tokio::test]
+    async fn export_csv_round_trips_and_mitigates_formulas() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be monotonic")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("iptv-export-csv-{unique}.csv"));
+        let path_string = path.to_string_lossy().to_string();
+
+        let results = vec![sample_result(
+            "=2+2,\"quoted\"\nline",
+            "Sports,Live",
+            "+channel-id",
+        )];
+
+        export_csv(results, path_string, "Playlist".to_string())
+            .await
+            .expect("csv export should succeed");
+
+        let mut reader = csv::ReaderBuilder::new()
+            .has_headers(true)
+            .from_path(&path)
+            .expect("csv file should be readable");
+        let rows: Vec<csv::StringRecord> = reader
+            .records()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("csv rows should parse");
+
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(row.get(0), Some("Playlist"));
+        assert_eq!(row.get(4), Some("Sports,Live"));
+        assert_eq!(row.get(6), Some("'+channel-id"));
+        assert!(row
+            .get(5)
+            .expect("name should exist")
+            .starts_with("'=2+2"));
+
+        std::fs::remove_file(path).expect("temporary csv should be removable");
     }
 }
