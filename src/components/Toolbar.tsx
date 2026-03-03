@@ -45,7 +45,6 @@ interface ToolbarProps {
 const toolbarBtn =
   "flex items-center gap-2 px-3 py-1.5 min-h-9 text-[14px] rounded-md toolbar-btn disabled:opacity-40 disabled:pointer-events-none";
 
-const appWindow = getCurrentWindow();
 const dragIgnoreSelector =
   "button, input, textarea, select, a, [role='button'], [contenteditable='true'], [data-no-window-drag]";
 
@@ -71,6 +70,7 @@ export function Toolbar({
   menuExportRequest,
   scanBlockedReason,
 }: ToolbarProps) {
+  const appWindow = getCurrentWindow();
   const scanning = scanState === "scanning";
   const paused = scanState === "paused";
   const inScanSession = scanning || paused;
