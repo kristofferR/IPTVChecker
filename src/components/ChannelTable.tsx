@@ -104,9 +104,10 @@ export function ChannelTable({
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(
     () => new Set(),
   );
-  const [contextMenuPos, setContextMenuPos] = useState<{
+  const [contextMenuState, setContextMenuState] = useState<{
     x: number;
     y: number;
+    channel: ChannelResult;
   } | null>(null);
   const [draggedColumn, setDraggedColumn] = useState<ColumnKey | null>(null);
   const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(() =>
@@ -194,24 +195,24 @@ export function ChannelTable({
   }, [filteredResults, updateSelection]);
 
   useEffect(() => {
-    if (!contextMenuPos) return;
+    if (!contextMenuState) return;
 
     const handlePointerDown = (event: MouseEvent) => {
       if (!contextMenuRef.current) return;
       const target = event.target as Node;
       if (!contextMenuRef.current.contains(target)) {
-        setContextMenuPos(null);
+        setContextMenuState(null);
       }
     };
 
-    const handleScroll = () => setContextMenuPos(null);
+    const handleScroll = () => setContextMenuState(null);
     window.addEventListener("mousedown", handlePointerDown);
     window.addEventListener("scroll", handleScroll, true);
     return () => {
       window.removeEventListener("mousedown", handlePointerDown);
       window.removeEventListener("scroll", handleScroll, true);
     };
-  }, [contextMenuPos]);
+  }, [contextMenuState]);
 
   const selectSingle = useCallback(
     (result: ChannelResult, rowIndex: number) => {
@@ -270,7 +271,7 @@ export function ChannelTable({
     setSelectedIndices(next);
     emitSelection(next);
     setSelectionAnchor(null);
-    setContextMenuPos(null);
+    setContextMenuState(null);
   }, [emitSelection]);
 
   useEffect(() => {
@@ -284,7 +285,7 @@ export function ChannelTable({
       }
 
       if (event.key === "Escape") {
-        if (selectedIndices.size > 0 || contextMenuPos) {
+        if (selectedIndices.size > 0 || contextMenuState) {
           event.preventDefault();
           clearSelection();
         }
@@ -293,7 +294,7 @@ export function ChannelTable({
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [selectAllVisible, selectedIndices.size, contextMenuPos, clearSelection]);
+  }, [selectAllVisible, selectedIndices.size, contextMenuState, clearSelection]);
 
   const handleSort = useCallback(
     (field: SortField) => {
@@ -383,7 +384,7 @@ export function ChannelTable({
       result: ChannelResult,
       rowIndex: number,
     ) => {
-      setContextMenuPos(null);
+      setContextMenuState(null);
 
       if (event.shiftKey) {
         selectRange(result, rowIndex);
@@ -423,7 +424,11 @@ export function ChannelTable({
         selectSingle(result, rowIndex);
       }
 
-      setContextMenuPos({ x: event.clientX, y: event.clientY });
+      setContextMenuState({
+        x: event.clientX,
+        y: event.clientY,
+        channel: result,
+      });
     },
     [selectedIndices, selectSingle],
   );
@@ -431,13 +436,31 @@ export function ChannelTable({
   const handleScanSelected = useCallback(() => {
     const ordered = Array.from(selectedIndices).sort((a, b) => a - b);
     if (ordered.length === 0) {
-      setContextMenuPos(null);
+      setContextMenuState(null);
       return;
     }
 
     onScanSelected?.(ordered);
-    setContextMenuPos(null);
+    setContextMenuState(null);
   }, [selectedIndices, onScanSelected]);
+
+  const handleCopyChannelName = useCallback(async () => {
+    if (!contextMenuState) return;
+    await navigator.clipboard.writeText(contextMenuState.channel.name);
+    setContextMenuState(null);
+  }, [contextMenuState]);
+
+  const handleCopyChannelUrl = useCallback(async () => {
+    if (!contextMenuState) return;
+    await navigator.clipboard.writeText(contextMenuState.channel.url);
+    setContextMenuState(null);
+  }, [contextMenuState]);
+
+  const handleOpenInPlayer = useCallback(() => {
+    if (!contextMenuState) return;
+    onOpenChannel?.(contextMenuState.channel);
+    setContextMenuState(null);
+  }, [contextMenuState, onOpenChannel]);
 
   const handleColumnDragStart = useCallback(
     (key: ColumnKey, event: React.DragEvent<HTMLDivElement>) => {
@@ -503,6 +526,7 @@ export function ChannelTable({
         ref={parentRef}
         tabIndex={0}
         onKeyDown={handleKeyDown}
+        onContextMenu={(event) => event.preventDefault()}
         className="native-scroll flex-1 overflow-auto focus:outline-none"
       >
         <div style={{ minWidth: `${tableWidth}px`, minHeight: "100%" }}>
@@ -612,16 +636,38 @@ export function ChannelTable({
         </div>
       </div>
 
-      {contextMenuPos && (
+      {contextMenuState && (
         <div
           ref={contextMenuRef}
           data-no-window-drag
-          className="fixed z-50 w-52 rounded-lg border border-border-app bg-dropdown shadow-2xl py-1"
+          className="fixed z-50 w-56 rounded-lg border border-border-app bg-dropdown shadow-2xl py-1"
           style={{
-            top: `${contextMenuPos.y}px`,
-            left: `${contextMenuPos.x}px`,
+            top: `${contextMenuState.y}px`,
+            left: `${contextMenuState.x}px`,
           }}
         >
+          <button
+            onClick={handleOpenInPlayer}
+            className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+            type="button"
+          >
+            Open in Default Player
+          </button>
+          <button
+            onClick={handleCopyChannelName}
+            className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+            type="button"
+          >
+            Copy Channel Name
+          </button>
+          <button
+            onClick={handleCopyChannelUrl}
+            className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+            type="button"
+          >
+            Copy Channel URL
+          </button>
+          <div className="h-px my-1 bg-border-subtle" />
           <button
             onClick={handleScanSelected}
             disabled={selectedIndices.size === 0}

@@ -149,6 +149,23 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [handleOpen]);
 
+  useEffect(() => {
+    const handler = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.closest(
+          "input, textarea, select, [contenteditable='true'], [data-allow-native-context]",
+        )
+      ) {
+        return;
+      }
+      event.preventDefault();
+    };
+
+    window.addEventListener("contextmenu", handler);
+    return () => window.removeEventListener("contextmenu", handler);
+  }, []);
+
   const startScanWithSelection = useCallback(async (selection: number[]) => {
     if (!playlist) return;
 
