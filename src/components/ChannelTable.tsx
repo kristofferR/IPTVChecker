@@ -37,6 +37,7 @@ export function ChannelTable({
   const parentRef = useRef<HTMLDivElement>(null);
   const [sortField, setSortField] = useState<SortField>("index");
   const [sortDir, setSortDir] = useState<SortDirection>("asc");
+  const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
 
   const filteredResults = useMemo(() => {
     const nonNull = results.filter((r): r is ChannelResult => r !== null);
@@ -61,6 +62,33 @@ export function ChannelTable({
       }
     },
     [sortField],
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (filteredResults.length === 0) return;
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setFocusedIndex((prev) => {
+          const next =
+            prev === null ? 0 : Math.min(prev + 1, filteredResults.length - 1);
+          virtualizer.scrollToIndex(next);
+          return next;
+        });
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setFocusedIndex((prev) => {
+          const next = prev === null ? 0 : Math.max(prev - 1, 0);
+          virtualizer.scrollToIndex(next);
+          return next;
+        });
+      } else if (e.key === "Enter" && focusedIndex !== null) {
+        const result = filteredResults[focusedIndex];
+        if (result) onSelectChannel(result);
+      }
+    },
+    [filteredResults, focusedIndex, onSelectChannel, virtualizer],
   );
 
   return (
@@ -89,7 +117,7 @@ export function ChannelTable({
           No channels match the current filters
         </div>
       ) : (
-        <div ref={parentRef} className="flex-1 overflow-auto">
+        <div ref={parentRef} tabIndex={0} onKeyDown={handleKeyDown} className="flex-1 overflow-auto focus:outline-none">
           <div
             style={{
               height: `${virtualizer.getTotalSize()}px`,
@@ -116,6 +144,7 @@ export function ChannelTable({
                     index={result?.index ?? virtualRow.index}
                     onClick={onSelectChannel}
                     selected={selectedIndex === result?.index}
+                    focused={focusedIndex === virtualRow.index}
                   />
                 </div>
               );

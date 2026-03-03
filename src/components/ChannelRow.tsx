@@ -7,9 +7,10 @@ interface ChannelRowProps {
   index: number;
   onClick: (result: ChannelResult) => void;
   selected: boolean;
+  focused?: boolean;
 }
 
-export function ChannelRow({ result, index, onClick, selected }: ChannelRowProps) {
+export function ChannelRow({ result, index, onClick, selected, focused }: ChannelRowProps) {
   if (!result) {
     return (
       <div className="flex items-center h-11 px-4 text-sm text-zinc-600 border-b border-zinc-800">
@@ -26,7 +27,7 @@ export function ChannelRow({ result, index, onClick, selected }: ChannelRowProps
     <div
       className={`flex items-center h-11 px-4 text-sm border-b border-zinc-800 cursor-pointer transition-colors hover:bg-zinc-800/50 ${
         selected ? "bg-zinc-700/40" : ""
-      }`}
+      } ${focused ? "ring-1 ring-blue-500/50" : ""}`}
       onClick={() => onClick(result)}
     >
       <span className="w-12 text-zinc-500 tabular-nums">{index + 1}</span>
