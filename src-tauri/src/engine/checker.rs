@@ -5,7 +5,7 @@ use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use url::Url;
 
 use crate::error::AppError;
-use crate::models::scan::{MAX_RETRIES, MIN_RETRIES, RetryBackoff};
+use crate::models::scan::{RetryBackoff, MAX_RETRIES, MIN_RETRIES};
 
 /// Minimum data threshold for direct streams (500KB).
 const MIN_DATA_THRESHOLD: u64 = 1024 * 500;
@@ -29,7 +29,8 @@ enum VerifyResult {
 }
 
 fn classify_non_ok_status(status_code: u16) -> VerifyResult {
-    if GEOBLOCK_STATUSES.contains(&status_code) || SECONDARY_GEOBLOCK_STATUSES.contains(&status_code)
+    if GEOBLOCK_STATUSES.contains(&status_code)
+        || SECONDARY_GEOBLOCK_STATUSES.contains(&status_code)
     {
         return VerifyResult::Geoblocked;
     }
@@ -42,7 +43,8 @@ fn classify_non_ok_status(status_code: u16) -> VerifyResult {
 }
 
 fn is_retryable_request_error(err: &reqwest::Error) -> bool {
-    if err.is_timeout() || err.is_connect() || err.is_request() || err.is_body() || err.is_decode() {
+    if err.is_timeout() || err.is_connect() || err.is_request() || err.is_body() || err.is_decode()
+    {
         return true;
     }
 
@@ -89,26 +91,99 @@ fn is_direct_stream(content_type: &str, url: &str) -> bool {
         || path.ends_with(".aac")
 }
 
-/// Extract the first non-comment URI from an HLS playlist body, resolving relative URLs.
+fn parse_variant_score(stream_inf_line: &str) -> (u64, u64, u64) {
+    let mut resolution_pixels = 0u64;
+    let mut average_bandwidth = 0u64;
+    let mut bandwidth = 0u64;
+
+    for raw_attribute in stream_inf_line.split(',') {
+        let Some((raw_key, raw_value)) = raw_attribute.split_once('=') else {
+            continue;
+        };
+
+        let key = raw_key.trim().to_ascii_uppercase();
+        let value = raw_value.trim().trim_matches('"').trim_matches('\'');
+
+        match key.as_str() {
+            "RESOLUTION" => {
+                if let Some((raw_width, raw_height)) = value.split_once('x') {
+                    if let (Ok(width), Ok(height)) = (
+                        raw_width.trim().parse::<u64>(),
+                        raw_height.trim().parse::<u64>(),
+                    ) {
+                        resolution_pixels = width.saturating_mul(height);
+                    }
+                }
+            }
+            "AVERAGE-BANDWIDTH" => {
+                if let Ok(parsed) = value.parse::<u64>() {
+                    average_bandwidth = parsed;
+                }
+            }
+            "BANDWIDTH" => {
+                if let Ok(parsed) = value.parse::<u64>() {
+                    bandwidth = parsed;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    (resolution_pixels, average_bandwidth, bandwidth)
+}
+
+/// Extract a playable URI from an HLS playlist body, resolving relative URLs.
+///
+/// For master playlists, prefer the highest-quality variant by RESOLUTION, then
+/// AVERAGE-BANDWIDTH, then BANDWIDTH. For media playlists, use the first segment URI.
 fn extract_next_url(base_url: &str, playlist_body: &str) -> Option<String> {
     let base = Url::parse(base_url).ok()?;
+    let mut first_uri: Option<String> = None;
+    let mut variant_candidates: Vec<(String, (u64, u64, u64))> = Vec::new();
+    let mut pending_variant_score: Option<(u64, u64, u64)> = None;
 
     for raw_line in playlist_body.lines() {
         let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
+        if line.is_empty() {
             continue;
         }
-        // First non-comment, non-empty line is the URI
-        return Some(base.join(line).ok()?.to_string());
+
+        if let Some(attributes) = line.strip_prefix("#EXT-X-STREAM-INF:") {
+            pending_variant_score = Some(parse_variant_score(attributes));
+            continue;
+        }
+
+        if line.starts_with('#') {
+            continue;
+        }
+
+        let resolved = match base.join(line) {
+            Ok(url) => url.to_string(),
+            Err(_) => continue,
+        };
+
+        if let Some(score) = pending_variant_score.take() {
+            variant_candidates.push((resolved, score));
+            continue;
+        }
+
+        if first_uri.is_none() {
+            first_uri = Some(resolved);
+        }
     }
-    None
+
+    if let Some((best_url, _)) = variant_candidates
+        .into_iter()
+        .max_by_key(|(_, score)| *score)
+    {
+        return Some(best_url);
+    }
+
+    first_uri
 }
 
 /// Read from a streaming response, checking if we receive enough data.
-async fn read_stream(
-    response: reqwest::Response,
-    min_bytes: u64,
-) -> VerifyResult {
+async fn read_stream(response: reqwest::Response, min_bytes: u64) -> VerifyResult {
     use futures::StreamExt;
 
     let mut bytes_read: u64 = 0;
@@ -164,7 +239,11 @@ async fn verify(
         return VerifyResult::Dead;
     }
 
-    let normalized = target_url.split('#').next().unwrap_or(target_url).to_string();
+    let normalized = target_url
+        .split('#')
+        .next()
+        .unwrap_or(target_url)
+        .to_string();
     if visited.contains(&normalized) {
         return VerifyResult::Dead;
     }
@@ -209,7 +288,15 @@ async fn verify(
             Some(u) => u,
             None => return VerifyResult::Retry,
         };
-        return Box::pin(verify(client, &next_url, timeout_secs, depth + 1, visited, headers)).await;
+        return Box::pin(verify(
+            client,
+            &next_url,
+            timeout_secs,
+            depth + 1,
+            visited,
+            headers,
+        ))
+        .await;
     }
 
     let min_bytes = if is_direct_stream(&content_type, &final_url) {
@@ -268,7 +355,8 @@ pub async fn check_channel_status(
     let mut headers = HeaderMap::new();
     headers.insert(
         USER_AGENT,
-        HeaderValue::from_str(user_agent).unwrap_or_else(|_| HeaderValue::from_static("VLC/3.0.14 LibVLC/3.0.14")),
+        HeaderValue::from_str(user_agent)
+            .unwrap_or_else(|_| HeaderValue::from_static("VLC/3.0.14 LibVLC/3.0.14")),
     );
 
     log::info!("Checking channel: {}", url);
@@ -294,7 +382,8 @@ pub async fn check_channel_status(
                     retry_backoff
                 );
                 let mut visited = HashSet::new();
-                let result = verify(&client, &url, current_timeout, 0, &mut visited, &headers).await;
+                let result =
+                    verify(&client, &url, current_timeout, 0, &mut visited, &headers).await;
 
                 match result {
                     VerifyResult::Alive(stream_url) => {
@@ -343,7 +432,8 @@ mod tests {
 
     #[test]
     fn test_extract_next_url_simple() {
-        let playlist = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1280000\nhttp://example.com/low.m3u8\n";
+        let playlist =
+            "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1280000\nhttp://example.com/low.m3u8\n";
         let result = extract_next_url("http://example.com/master.m3u8", playlist);
         assert_eq!(result, Some("http://example.com/low.m3u8".to_string()));
     }
@@ -355,6 +445,38 @@ mod tests {
         assert_eq!(
             result,
             Some("http://example.com/live/low/index.m3u8".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_next_url_prefers_highest_master_variant() {
+        let playlist = r#"#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=511680,AVERAGE-BANDWIDTH=393600,RESOLUTION=426x240,CODECS="avc1.4d5015,mp4a.40.2"
+240p-cc/index.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=5188040,AVERAGE-BANDWIDTH=3990800,RESOLUTION=1280x720,CODECS="avc1.64101f,mp4a.40.2"
+720p-cc/index.m3u8
+#EXT-X-STREAM-INF:BANDWIDTH=8048040,AVERAGE-BANDWIDTH=6190800,RESOLUTION=1920x1080,CODECS="avc1.641028,mp4a.40.2"
+1080p-cc/index.m3u8
+"#;
+
+        let result = extract_next_url(
+            "https://raycom-accdn-firetv.amagi.tv/playlist.m3u8",
+            playlist,
+        );
+
+        assert_eq!(
+            result,
+            Some("https://raycom-accdn-firetv.amagi.tv/1080p-cc/index.m3u8".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_next_url_media_playlist_uses_first_segment() {
+        let playlist = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nchunk-001.ts\n#EXTINF:4,\nchunk-002.ts\n";
+        let result = extract_next_url("http://example.com/live/720p/index.m3u8", playlist);
+        assert_eq!(
+            result,
+            Some("http://example.com/live/720p/chunk-001.ts".to_string())
         );
     }
 
