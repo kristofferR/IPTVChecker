@@ -1,3 +1,4 @@
+use crate::engine::parser::find_unquoted_comma;
 use crate::error::AppError;
 use crate::models::channel::{ChannelResult, ChannelStatus};
 use crate::state::AppState;
@@ -198,8 +199,8 @@ pub async fn export_renamed(
             let audio_info = format_audio_info(r);
             let renamed_name = format!("{} ({} | Audio: {})", r.name, video_info, audio_info);
 
-            // Replace channel name in EXTINF line
-            let extinf = if let Some(pos) = r.extinf_line.find(',') {
+            // Replace channel name in EXTINF line (respecting quoted attribute values)
+            let extinf = if let Some(pos) = find_unquoted_comma(&r.extinf_line) {
                 format!("{},{}", &r.extinf_line[..pos], renamed_name)
             } else {
                 r.extinf_line.clone()

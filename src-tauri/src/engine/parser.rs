@@ -9,7 +9,7 @@ use crate::models::playlist::PlaylistPreview;
 
 const PLAYLIST_GROUP_PREFIX: &str = "Playlist: ";
 
-fn find_unquoted_comma(input: &str) -> Option<usize> {
+pub fn find_unquoted_comma(input: &str) -> Option<usize> {
     let bytes = input.as_bytes();
     let mut quoted_by: Option<u8> = None;
     let mut escaped = false;
