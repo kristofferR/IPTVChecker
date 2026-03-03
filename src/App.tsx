@@ -3,7 +3,6 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type {
-  AppSettings,
   ChannelResult,
   PlaylistPreview,
   ScanConfig,

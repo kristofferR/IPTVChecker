@@ -1,5 +1,4 @@
 import type { ChannelResult } from "../lib/types";
-import { formatAudioInfo, formatVideoInfo } from "../lib/format";
 import { StatusBadge } from "./StatusBadge";
 
 interface ChannelRowProps {
