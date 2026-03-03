@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { X } from "lucide-react";
 import type { AppSettings } from "../lib/types";
@@ -11,10 +11,44 @@ interface SettingsPanelProps {
 
 export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps) {
   const [draft, setDraft] = useState<AppSettings>(settings);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setDraft(settings);
   }, [settings]);
+
+  // Focus trap
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+
+    const previouslyFocused = document.activeElement as HTMLElement;
+    panel.focus();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+
+      const focusableElements = panel.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      const first = focusableElements[0];
+      const last = focusableElements[focusableElements.length - 1];
+
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    panel.addEventListener("keydown", handleKeyDown);
+    return () => {
+      panel.removeEventListener("keydown", handleKeyDown);
+      previouslyFocused?.focus();
+    };
+  }, []);
 
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setDraft((prev) => ({ ...prev, [key]: value }));
@@ -36,13 +70,14 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex">
+    <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true" aria-label="Settings">
       <div className="flex-1 bg-black/50" onClick={onClose} />
-      <div className="w-96 bg-zinc-900 border-l border-zinc-700 flex flex-col">
+      <div ref={panelRef} tabIndex={-1} className="w-96 bg-zinc-900 border-l border-zinc-700 flex flex-col focus:outline-none">
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-700">
           <h2 className="text-sm font-semibold">Settings</h2>
           <button
             onClick={onClose}
+            aria-label="Close settings"
             className="p-1 hover:bg-zinc-800 rounded transition-colors"
           >
             <X className="w-4 h-4" />
