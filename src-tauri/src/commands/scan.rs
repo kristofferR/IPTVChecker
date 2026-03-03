@@ -356,6 +356,29 @@ async fn clear_pre_spawn_scan_state(state: &AppState) {
     *token_lock = None;
 }
 
+/// Clear scan state only if the current run_id still matches the finishing scan.
+/// This prevents a finishing scan from accidentally wiping state that belongs to
+/// a new scan that started during the cleanup window.
+async fn clear_scan_state_for_run(state: &AppState, finished_run_id: &str) {
+    let mut run_id = state.current_run_id.lock().await;
+    if run_id.as_deref() != Some(finished_run_id) {
+        return;
+    }
+    *run_id = None;
+    drop(run_id);
+
+    let mut scanning = state.scanning.lock().await;
+    mark_scan_finished(&mut scanning);
+    drop(scanning);
+
+    let mut paused = state.paused.lock().await;
+    *paused = false;
+    drop(paused);
+
+    let mut token_lock = state.cancel_token.lock().await;
+    *token_lock = None;
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 struct ScanCounters {
     completed: usize,
@@ -904,7 +927,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                     format!("Scan failed while dispatching progress events: {}", error),
                 );
                 cleanup_resume_files(&log_file_for_task, &checkpoint_file_for_task);
-                clear_pre_spawn_scan_state(state_clone.as_ref()).await;
+                clear_scan_state_for_run(state_clone.as_ref(), &run_id_for_task).await;
                 return;
             }
         };
@@ -970,7 +993,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
             cleanup_resume_files(&log_file_for_task, &checkpoint_file_for_task);
         }
 
-        clear_pre_spawn_scan_state(state_clone.as_ref()).await;
+        clear_scan_state_for_run(state_clone.as_ref(), &run_id_for_task).await;
     });
 
     Ok(run_id)
