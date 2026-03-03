@@ -1,47 +1,14 @@
 {
   "identifier": "default",
-  "description": "Default capability for the main window",
+  "description": "Least-privilege capability for the main window. Granted permissions are limited to: core IPC defaults for command invocation, dialog open/save for playlist and export pickers, event listen/unlisten for backend and menu events, start-dragging for the custom toolbar titlebar behavior, and OS info for platform detection.",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "shell:default",
-    "shell:allow-open",
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        {
-          "name": "binaries/ffmpeg",
-          "sidecar": true,
-          "args": true
-        },
-        {
-          "name": "binaries/ffprobe",
-          "sidecar": true,
-          "args": true
-        }
-      ]
-    },
-    "dialog:default",
     "dialog:allow-open",
     "dialog:allow-save",
-    "fs:default",
-    {
-      "identifier": "fs:allow-read",
-      "allow": [
-        { "path": "$TEMP/**" },
-        { "path": "$HOME/**" }
-      ]
-    },
-    "fs:allow-write",
-    "fs:allow-exists",
-    "fs:allow-mkdir",
-    "store:default",
-    "log:default",
-    "core:event:default",
-    "core:event:allow-emit",
     "core:event:allow-listen",
+    "core:event:allow-unlisten",
     "core:window:allow-start-dragging",
-    "liquid-glass:default",
     "os:default"
   ]
 }

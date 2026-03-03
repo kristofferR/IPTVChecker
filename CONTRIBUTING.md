@@ -24,3 +24,12 @@ bun run build
 cd src-tauri && cargo test
 ```
 
+## Release Security Checklist
+
+Before creating a release build, verify:
+
+- `src-tauri/tauri.conf.json` keeps a non-null CSP and does not add broad remote origins.
+- `src-tauri/capabilities/default.json` permissions remain least-privilege for current UI features.
+- No new Tauri plugins are enabled without corresponding capability review.
+- Local file access stays mediated by backend commands with path validation (no broad frontend fs access).
+- `bun run build` and `cd src-tauri && cargo test` pass after any security-related config changes.
