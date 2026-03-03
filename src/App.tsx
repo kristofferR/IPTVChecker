@@ -1187,6 +1187,13 @@ export default function App() {
       ),
     [completedResults, search, groupFilter, statusFilter, duplicateIndices],
   );
+  const selectedExportResults = useMemo(() => {
+    if (selectedChannelIndices.length === 0) {
+      return [];
+    }
+    const selected = new Set(selectedChannelIndices);
+    return completedResults.filter((result) => selected.has(result.index));
+  }, [completedResults, selectedChannelIndices]);
 
   // Keep sidebar in sync with live scan results
   const liveSelectedChannel =
@@ -1237,6 +1244,7 @@ export default function App() {
         hasPlaylist={playlist !== null}
         results={completedResults}
         filteredResults={filteredExportResults}
+        selectedResults={selectedExportResults}
         playlistName={playlist?.file_name ?? ""}
         playlistPath={playlist?.file_path ?? ""}
         selectedCount={selectedChannelIndices.length}

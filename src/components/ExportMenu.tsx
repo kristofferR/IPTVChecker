@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
   Download,
@@ -10,6 +10,12 @@ import {
 } from "lucide-react";
 import type { ChannelResult } from "../lib/types";
 import { exportCsv, exportM3u, exportSplit, exportRenamed } from "../lib/tauri";
+import {
+  exportScopeFileSuffix,
+  exportScopeLabel,
+  resolveExportScopeResults,
+  type ExportScope,
+} from "../lib/exportScope";
 import {
   COLUMN_ORDER_STORAGE_KEY,
   DEFAULT_VISIBLE_COLUMN_ORDER,
@@ -41,6 +47,7 @@ function readVisibleColumns(): ColumnKey[] {
 interface ExportMenuProps {
   results: ChannelResult[];
   filteredResults: ChannelResult[];
+  selectedResults: ChannelResult[];
   playlistName: string;
   playlistPath: string;
   disabled: boolean;
@@ -53,6 +60,7 @@ interface ExportMenuProps {
 export function ExportMenu({
   results,
   filteredResults,
+  selectedResults,
   playlistName,
   playlistPath,
   disabled,
@@ -64,6 +72,7 @@ export function ExportMenu({
     kind: "success" | "error" | "info";
     message: string;
   } | null>(null);
+  const [scope, setScope] = useState<ExportScope>("all");
   const ref = useRef<HTMLDivElement>(null);
   const lastMenuRequestId = useRef<number | null>(null);
 
@@ -94,10 +103,54 @@ export function ExportMenu({
     ? sourceFileName.slice(0, sourceFileName.lastIndexOf("."))
     : sourceFileName;
 
+  const scopeCounts = useMemo(
+    () => ({
+      all: results.length,
+      filtered: filteredResults.length,
+      selected: selectedResults.length,
+    }),
+    [results, filteredResults, selectedResults],
+  );
+
+  const resolveScopedResults = useCallback((): ChannelResult[] | null => {
+    const scoped = resolveExportScopeResults(
+      scope,
+      results,
+      filteredResults,
+      selectedResults,
+    );
+    if (scoped.length > 0) {
+      return scoped;
+    }
+
+    if (scope === "selected") {
+      setFeedback({
+        kind: "info",
+        message: "No selected channels to export.",
+      });
+      return null;
+    }
+    if (scope === "filtered") {
+      setFeedback({
+        kind: "info",
+        message: "No channels match the current filters.",
+      });
+      return null;
+    }
+    setFeedback({
+      kind: "info",
+      message: "No channels available to export.",
+    });
+    return null;
+  }, [scope, results, filteredResults, selectedResults]);
+
   const handleExportCsv = useCallback(async () => {
+    const scoped = resolveScopedResults();
+    if (!scoped) return;
+
     setOpen(false);
     const path = await save({
-      defaultPath: `${playlistName}_results.csv`,
+      defaultPath: `${playlistName}_${exportScopeFileSuffix(scope)}.csv`,
       filters: [{ name: "CSV", extensions: ["csv"] }],
     });
     if (!path) {
@@ -108,14 +161,14 @@ export function ExportMenu({
     setBusyAction("csv");
     try {
       await exportCsv(
-        results,
+        scoped,
         path,
         playlistName,
         readVisibleColumns().includes("latency"),
       );
       setFeedback({
         kind: "success",
-        message: `Exported CSV to ${path}.`,
+        message: `Exported ${exportScopeLabel(scope)} CSV (${scoped.length} channels) to ${path}.`,
       });
       void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
     } catch (err) {
@@ -126,16 +179,19 @@ export function ExportMenu({
     } finally {
       setBusyAction(null);
     }
-  }, [playlistName, results]);
+  }, [playlistName, scope, resolveScopedResults]);
 
   const handleExportSplit = useCallback(async () => {
+    const scoped = resolveScopedResults();
+    if (!scoped) return;
+
     setOpen(false);
     setBusyAction("split");
     try {
-      await exportSplit(results, playlistPath);
+      await exportSplit(scoped, playlistPath);
       setFeedback({
         kind: "success",
-        message: `Split playlists exported to ${sourceDir}.`,
+        message: `Exported ${exportScopeLabel(scope)} split playlists (${scoped.length} channels) to ${sourceDir}.`,
       });
       void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
     } catch (err) {
@@ -146,16 +202,19 @@ export function ExportMenu({
     } finally {
       setBusyAction(null);
     }
-  }, [playlistPath, results, sourceDir]);
+  }, [playlistPath, scope, sourceDir, resolveScopedResults]);
 
   const handleExportRenamed = useCallback(async () => {
+    const scoped = resolveScopedResults();
+    if (!scoped) return;
+
     setOpen(false);
     setBusyAction("renamed");
     try {
-      await exportRenamed(results, playlistPath);
+      await exportRenamed(scoped, playlistPath);
       setFeedback({
         kind: "success",
-        message: `Renamed playlist exported to ${sourceDir}/${sourceStem}_renamed.m3u8.`,
+        message: `Exported ${exportScopeLabel(scope)} renamed playlist (${scoped.length} channels) to ${sourceDir}/${sourceStem}_renamed.m3u8.`,
       });
       void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
     } catch (err) {
@@ -166,44 +225,40 @@ export function ExportMenu({
     } finally {
       setBusyAction(null);
     }
-  }, [playlistPath, results, sourceDir, sourceStem]);
+  }, [playlistPath, scope, sourceDir, sourceStem, resolveScopedResults]);
 
   const handleExportM3u = useCallback(async () => {
+    const scoped = resolveScopedResults();
+    if (!scoped) return;
+
     setOpen(false);
-    if (filteredResults.length === 0) {
-      setFeedback({
-        kind: "info",
-        message: "No channels match the current filters.",
-      });
-      return;
-    }
 
     const path = await save({
-      defaultPath: `${sourceStem}_filtered.m3u8`,
+      defaultPath: `${sourceStem}_${exportScopeFileSuffix(scope)}.m3u8`,
       filters: [{ name: "M3U Playlist", extensions: ["m3u8", "m3u"] }],
     });
     if (!path) {
-      setFeedback({ kind: "info", message: "Filtered M3U export cancelled." });
+      setFeedback({ kind: "info", message: "M3U export cancelled." });
       return;
     }
 
     setBusyAction("m3u");
     try {
-      await exportM3u(filteredResults, path);
+      await exportM3u(scoped, path);
       setFeedback({
         kind: "success",
-        message: `Exported filtered playlist to ${path}.`,
+        message: `Exported ${exportScopeLabel(scope)} M3U (${scoped.length} channels) to ${path}.`,
       });
       void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
     } catch (err) {
       setFeedback({
         kind: "error",
-        message: `Filtered M3U export failed: ${String(err)}`,
+        message: `M3U export failed: ${String(err)}`,
       });
     } finally {
       setBusyAction(null);
     }
-  }, [filteredResults, sourceStem]);
+  }, [scope, sourceStem, resolveScopedResults]);
 
   const exporting = busyAction !== null;
 
@@ -247,7 +302,38 @@ export function ExportMenu({
         {!exporting && <ChevronDown className="w-[14px] h-[14px]" />}
       </button>
       {open && (
-        <div className="macos-popover absolute right-0 top-full mt-1 w-48 bg-dropdown backdrop-blur-xl border border-border-app rounded-lg shadow-xl z-50 py-1">
+        <div className="macos-popover absolute right-0 top-full mt-1 w-64 bg-dropdown backdrop-blur-xl border border-border-app rounded-lg shadow-xl z-50 py-1">
+          <div className="px-3 pt-2 pb-1.5 border-b border-border-subtle">
+            <p className="text-[11px] uppercase tracking-[0.04em] text-text-tertiary mb-1.5">
+              Export Scope
+            </p>
+            <div className="grid grid-cols-3 gap-1">
+              {(
+                [
+                  ["all", "All"],
+                  ["filtered", "Filtered"],
+                  ["selected", "Selected"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  disabled={exporting}
+                  onClick={() => setScope(value)}
+                  className={`rounded-md px-2 py-1 text-[11px] text-left transition-colors ${
+                    scope === value
+                      ? "bg-btn-hover text-text-primary"
+                      : "text-text-secondary hover:bg-btn-hover/70"
+                  }`}
+                >
+                  <span className="block leading-tight">{label}</span>
+                  <span className="block leading-tight text-[10px] text-text-tertiary">
+                    {scopeCounts[value]}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
           <button
             onClick={handleExportCsv}
             disabled={exporting}
@@ -271,10 +357,10 @@ export function ExportMenu({
           </button>
           <button
             onClick={handleExportM3u}
-            disabled={exporting || filteredResults.length === 0}
+            disabled={exporting}
             className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
           >
-            Filtered M3U/M3U8
+            Export M3U/M3U8
           </button>
         </div>
       )}

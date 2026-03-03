@@ -34,6 +34,7 @@ interface ToolbarProps {
   hasPlaylist: boolean;
   results: ChannelResult[];
   filteredResults: ChannelResult[];
+  selectedResults: ChannelResult[];
   playlistName: string;
   playlistPath: string;
   selectedCount: number;
@@ -63,6 +64,7 @@ export function Toolbar({
   hasPlaylist,
   results,
   filteredResults,
+  selectedResults,
   playlistName,
   playlistPath,
   selectedCount,
@@ -178,6 +180,7 @@ export function Toolbar({
       <ExportMenu
         results={results}
         filteredResults={filteredResults}
+        selectedResults={selectedResults}
         playlistName={playlistName}
         playlistPath={playlistPath}
         disabled={!hasResults || inScanSession}
