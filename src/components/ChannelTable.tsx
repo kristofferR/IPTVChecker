@@ -118,6 +118,7 @@ export function ChannelTable({
     x: number;
     y: number;
     key: ColumnKey;
+    width: number;
   } | null>(null);
   const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(() =>
     parseStoredOrder(localStorage.getItem(ORDER_STORAGE_KEY)),
@@ -509,6 +510,12 @@ export function ChannelTable({
       const startX = event.clientX;
       let moved = false;
       let dropTarget: ColumnKey | null = null;
+      const sourceNode = columnHeaderRefs.current[key];
+      const sourceRect = sourceNode?.getBoundingClientRect();
+      const previewWidth = Math.max(
+        72,
+        Math.round(sourceRect?.width ?? columnWidths[key]),
+      );
 
       const onMove = (moveEvent: PointerEvent) => {
         const delta = Math.abs(moveEvent.clientX - startX);
@@ -516,7 +523,7 @@ export function ChannelTable({
 
         if (!moved) {
           moved = true;
-          document.body.style.cursor = "grabbing";
+          document.body.style.cursor = "none";
           document.body.style.userSelect = "none";
           setDraggedColumn(key);
         }
@@ -525,9 +532,10 @@ export function ChannelTable({
         dropTarget = over && over !== key ? over : null;
         setDragOverColumn(dropTarget);
         setDragPreview({
-          x: moveEvent.clientX + 14,
-          y: moveEvent.clientY + 14,
+          x: moveEvent.clientX,
+          y: moveEvent.clientY,
           key,
+          width: previewWidth,
         });
       };
 
@@ -564,7 +572,7 @@ export function ChannelTable({
       window.addEventListener("pointerup", onUp);
       window.addEventListener("pointercancel", onUp);
     },
-    [findColumnAtX],
+    [findColumnAtX, columnWidths],
   );
 
   const handleResizeStart = useCallback(
@@ -761,13 +769,21 @@ export function ChannelTable({
 
       {dragPreview && (
         <div
-          className="fixed z-[70] pointer-events-none px-2.5 py-1.5 rounded-md border border-border-app bg-dropdown/95 shadow-xl text-[12px] font-medium text-text-primary"
+          className="fixed z-[70] pointer-events-none h-8 px-2 text-[11px] font-semibold text-text-secondary border border-border-app rounded-md bg-panel-subtle/95 backdrop-blur-md shadow-lg flex items-center justify-start select-none"
           style={{
             left: `${dragPreview.x}px`,
             top: `${dragPreview.y}px`,
+            width: `${dragPreview.width}px`,
+            transform: "translate(-50%, -50%)",
           }}
         >
-          Moving: {COLUMN_DEFINITION_MAP[dragPreview.key].label}
+          {COLUMN_DEFINITION_MAP[dragPreview.key].label}
+          {sortField === dragPreview.key &&
+            (sortDir === "asc" ? (
+              <ArrowUp className="w-3 h-3 ml-1.5" />
+            ) : (
+              <ArrowDown className="w-3 h-3 ml-1.5" />
+            ))}
         </div>
       )}
     </div>
