@@ -83,6 +83,11 @@ export interface ScanSummary {
   mislabeled: number;
 }
 
+export interface ScanEvent<T> {
+  run_id: string;
+  payload: T;
+}
+
 export interface AppSettings {
   timeout: number;
   extended_timeout: number | null;

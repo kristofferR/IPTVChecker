@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use tauri::{AppHandle, Emitter, Manager};
@@ -8,8 +9,10 @@ use tokio_util::sync::CancellationToken;
 use crate::engine::{checker, ffmpeg, parser, proxy, resume};
 use crate::error::AppError;
 use crate::models::channel::{Channel, ChannelResult, ChannelStatus};
-use crate::models::scan::{RetryBackoff, ScanConfig, ScanProgress, ScanSummary};
+use crate::models::scan::{RetryBackoff, ScanConfig, ScanEvent, ScanProgress, ScanSummary};
 use crate::state::AppState;
+
+static NEXT_SCAN_RUN_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone)]
 struct SharedUrlResult {
@@ -275,8 +278,15 @@ fn filter_channels_by_selection(channels: &mut Vec<Channel>, selected_indices: &
     }
 }
 
+fn next_scan_run_id() -> String {
+    format!(
+        "scan-run-{}",
+        NEXT_SCAN_RUN_ID.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
 #[tauri::command]
-pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppError> {
+pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, AppError> {
     let state = app.state::<Arc<AppState>>();
 
     // Prevent multiple simultaneous scans
@@ -291,9 +301,11 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
         let mut token_lock = state.cancel_token.lock().await;
         *token_lock = Some(cancel_token.clone());
     }
+    let run_id = next_scan_run_id();
 
     log::info!(
-        "Starting scan: {} (concurrency: {}, retries: {}, retry_backoff: {:?})",
+        "Starting scan {}: {} (concurrency: {}, retries: {}, retry_backoff: {:?})",
+        run_id,
         config.file_path,
         config.concurrency,
         config.retries,
@@ -322,18 +334,21 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
     if total == 0 {
         let _ = app.emit(
             "scan://complete",
-            ScanSummary {
-                total: 0,
-                alive: 0,
-                dead: 0,
-                geoblocked: 0,
-                low_framerate: 0,
-                mislabeled: 0,
+            ScanEvent {
+                run_id: run_id.clone(),
+                payload: ScanSummary {
+                    total: 0,
+                    alive: 0,
+                    dead: 0,
+                    geoblocked: 0,
+                    low_framerate: 0,
+                    mislabeled: 0,
+                },
             },
         );
         let mut scanning = state.scanning.lock().await;
         *scanning = false;
-        return Ok(());
+        return Ok(run_id);
     }
 
     // Load proxies if configured
@@ -420,6 +435,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
     // Spawn the scan task
     let app_handle = app.clone();
     let state_clone = state.inner().clone();
+    let run_id_for_task = run_id.clone();
 
     tokio::spawn(async move {
         let client = Arc::new(
@@ -434,14 +450,27 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
 
         // Spawn a task to forward results as events
         let app_for_events = app_handle.clone();
+        let run_id_for_events = run_id_for_task.clone();
         let event_task = tokio::spawn(async move {
             let mut counters = ScanCounters::default();
 
             while let Some(result) = rx.recv().await {
                 counters.apply(&result);
 
-                let _ = app_for_events.emit("scan://channel-result", &result);
-                let _ = app_for_events.emit("scan://progress", counters.as_progress(total));
+                let _ = app_for_events.emit(
+                    "scan://channel-result",
+                    ScanEvent {
+                        run_id: run_id_for_events.clone(),
+                        payload: result,
+                    },
+                );
+                let _ = app_for_events.emit(
+                    "scan://progress",
+                    ScanEvent {
+                        run_id: run_id_for_events.clone(),
+                        payload: counters.as_progress(total),
+                    },
+                );
             }
 
             counters.as_summary(total)
@@ -597,9 +626,21 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
         });
 
         if cancel_token.is_cancelled() {
-            let _ = app_handle.emit("scan://cancelled", ());
+            let _ = app_handle.emit(
+                "scan://cancelled",
+                ScanEvent {
+                    run_id: run_id_for_task.clone(),
+                    payload: (),
+                },
+            );
         } else {
-            let _ = app_handle.emit("scan://complete", &summary);
+            let _ = app_handle.emit(
+                "scan://complete",
+                ScanEvent {
+                    run_id: run_id_for_task.clone(),
+                    payload: summary,
+                },
+            );
         }
 
         // Reset scanning state
@@ -607,7 +648,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
         mark_scan_finished(&mut scanning);
     });
 
-    Ok(())
+    Ok(run_id)
 }
 
 #[tauri::command]
@@ -718,6 +759,13 @@ mod tests {
         let mut scanning = false;
         assert!(try_mark_scan_started(&mut scanning).is_ok());
         assert!(try_mark_scan_started(&mut scanning).is_err());
+    }
+
+    #[test]
+    fn generated_run_ids_are_unique() {
+        let first = next_scan_run_id();
+        let second = next_scan_run_id();
+        assert_ne!(first, second);
     }
 
     #[test]

@@ -105,6 +105,12 @@ pub struct ScanSummary {
     pub mislabeled: usize,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanEvent<T> {
+    pub run_id: String,
+    pub payload: T,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

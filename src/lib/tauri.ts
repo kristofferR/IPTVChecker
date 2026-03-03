@@ -19,7 +19,7 @@ export async function openPlaylist(
   });
 }
 
-export async function startScan(config: ScanConfig): Promise<void> {
+export async function startScan(config: ScanConfig): Promise<string> {
   return invoke("start_scan", { config });
 }
 

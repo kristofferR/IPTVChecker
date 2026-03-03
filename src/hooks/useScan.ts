@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   ChannelResult,
   ScanConfig,
+  ScanEvent,
   ScanProgress,
   ScanSummary,
 } from "../lib/types";
@@ -22,6 +23,7 @@ export function useScan() {
   const pendingResults = useRef<ChannelResult[]>([]);
   const rafId = useRef<number | null>(null);
   const eventCount = useRef(0);
+  const activeRunId = useRef<string | null>(null);
 
   // Reset backend scan state on mount (handles app restart with stale flag)
   useEffect(() => {
@@ -70,29 +72,43 @@ export function useScan() {
       logger.debug("[useScan] Setting up event listeners");
 
       unlisteners.push(
-        await listen<ChannelResult>("scan://channel-result", (event) => {
-          queueResult(event.payload);
+        await listen<ScanEvent<ChannelResult>>("scan://channel-result", (event) => {
+          if (!activeRunId.current || event.payload.run_id !== activeRunId.current) {
+            return;
+          }
+          queueResult(event.payload.payload);
         }),
       );
 
       unlisteners.push(
-        await listen<ScanProgress>("scan://progress", (event) => {
-          setProgress(event.payload);
+        await listen<ScanEvent<ScanProgress>>("scan://progress", (event) => {
+          if (!activeRunId.current || event.payload.run_id !== activeRunId.current) {
+            return;
+          }
+          setProgress(event.payload.payload);
         }),
       );
 
       unlisteners.push(
-        await listen<ScanSummary>("scan://complete", (event) => {
+        await listen<ScanEvent<ScanSummary>>("scan://complete", (event) => {
+          if (!activeRunId.current || event.payload.run_id !== activeRunId.current) {
+            return;
+          }
           logger.debug("[useScan] scan://complete received", event.payload);
-          setSummary(event.payload);
+          setSummary(event.payload.payload);
           setScanState("complete");
+          activeRunId.current = null;
         }),
       );
 
       unlisteners.push(
-        await listen("scan://cancelled", () => {
+        await listen<ScanEvent<null>>("scan://cancelled", (event) => {
+          if (!activeRunId.current || event.payload.run_id !== activeRunId.current) {
+            return;
+          }
           logger.debug("[useScan] scan://cancelled received");
           setScanState("cancelled");
+          activeRunId.current = null;
         }),
       );
 
@@ -164,14 +180,17 @@ export function useScan() {
       setScanState("scanning");
       pendingResults.current = [];
       eventCount.current = 0;
+      activeRunId.current = null;
 
       try {
-        await startScan(config);
-        logger.debug("[useScan] startScan IPC returned OK");
+        const runId = await startScan(config);
+        activeRunId.current = runId;
+        logger.debug(`[useScan] startScan IPC returned run_id=${runId}`);
       } catch (err) {
         logger.error("[useScan] startScan IPC error:", err);
         setError(String(err));
         setScanState("idle");
+        activeRunId.current = null;
       }
     },
     [],
@@ -221,6 +240,7 @@ export function useScan() {
       setScanState("idle");
       pendingResults.current = [];
       eventCount.current = 0;
+      activeRunId.current = null;
     },
     [],
   );
