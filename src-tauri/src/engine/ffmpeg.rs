@@ -3,13 +3,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 use tauri::{AppHandle, Manager};
-use tauri_plugin_shell::ShellExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::AppError;
 
 const MAX_SCREENSHOT_STEM_LEN: usize = 120;
 const FALLBACK_SCREENSHOT_STEM: &str = "channel";
+const MAX_STDERR_EXCERPT_CHARS: usize = 600;
 
 // Compile-time target triple for resolving sidecar binary paths.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -41,6 +41,19 @@ fn resolve_binary(app: &AppHandle, name: &str) -> String {
 
     // Fall back to system PATH
     name.to_string()
+}
+
+fn stderr_excerpt(stderr: &str) -> String {
+    let trimmed = stderr.trim();
+    if trimmed.is_empty() {
+        return "no stderr output".to_string();
+    }
+
+    let mut excerpt: String = trimmed.chars().take(MAX_STDERR_EXCERPT_CHARS).collect();
+    if trimmed.chars().count() > MAX_STDERR_EXCERPT_CHARS {
+        excerpt.push_str("...");
+    }
+    excerpt
 }
 
 fn trim_windows_unsafe_edges(value: &str) -> String {
@@ -176,70 +189,118 @@ fn unique_screenshot_output_path(output_dir: &Path, stem: &str) -> PathBuf {
     output_dir.join(format!("{base}-{ts}.png"))
 }
 
-/// Run a sidecar command with args, falling back to system PATH.
-/// Respects cancellation token — kills child process on cancel.
-async fn run_sidecar(
+/// Run an ffmpeg/ffprobe command via resolved binary path with cancellation
+/// and optional timeout handling.
+async fn run_tool_command(
     app: &AppHandle,
     name: &str,
     args: &[&str],
     cancel: &CancellationToken,
+    timeout: Option<std::time::Duration>,
 ) -> Result<(String, String), AppError> {
     if cancel.is_cancelled() {
         return Err(AppError::Cancelled);
     }
 
-    // Try sidecar first
-    if let Ok(cmd) = app.shell().sidecar(format!("binaries/{}", name)) {
-        if let Ok(output) = cmd.args(args).output().await {
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            return Ok((stdout, stderr));
-        }
-    }
+    let resolved_bin = resolve_binary(app, name);
 
-    // Fallback to system PATH — with cancellation support
-    let mut child = tokio::process::Command::new(name)
+    let mut child = tokio::process::Command::new(&resolved_bin)
         .args(args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|_| AppError::FfmpegNotAvailable)?;
+        .map_err(|err| {
+            log::warn!(
+                "Failed to spawn {} using '{}': {}",
+                name,
+                resolved_bin,
+                err
+            );
+            AppError::FfmpegNotAvailable
+        })?;
 
     let mut stdout_pipe = child.stdout.take();
     let mut stderr_pipe = child.stderr.take();
 
-    tokio::select! {
-        _ = cancel.cancelled() => {
-            let _ = child.kill().await;
-            Err(AppError::Cancelled)
-        }
-        status = child.wait() => {
-            let _ = status.map_err(|_| AppError::FfmpegNotAvailable)?;
-            let mut stdout_buf = Vec::new();
-            let mut stderr_buf = Vec::new();
-            if let Some(ref mut pipe) = stdout_pipe {
-                use tokio::io::AsyncReadExt;
-                let _ = pipe.read_to_end(&mut stdout_buf).await;
+    let status = if let Some(timeout_duration) = timeout {
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                let _ = child.kill().await;
+                return Err(AppError::Cancelled);
             }
-            if let Some(ref mut pipe) = stderr_pipe {
-                use tokio::io::AsyncReadExt;
-                let _ = pipe.read_to_end(&mut stderr_buf).await;
+            _ = tokio::time::sleep(timeout_duration) => {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+
+                let mut stderr_buf = Vec::new();
+                if let Some(ref mut pipe) = stderr_pipe {
+                    use tokio::io::AsyncReadExt;
+                    let _ = pipe.read_to_end(&mut stderr_buf).await;
+                }
+
+                let stderr = String::from_utf8_lossy(&stderr_buf).to_string();
+                return Err(AppError::Other(format!(
+                    "{} timed out after {:.1}s (binary: {}) - {}",
+                    name,
+                    timeout_duration.as_secs_f64(),
+                    resolved_bin,
+                    stderr_excerpt(&stderr)
+                )));
             }
-            Ok((
-                String::from_utf8_lossy(&stdout_buf).to_string(),
-                String::from_utf8_lossy(&stderr_buf).to_string(),
-            ))
+            status = child.wait() => {
+                status.map_err(|_| AppError::FfmpegNotAvailable)?
+            }
         }
+    } else {
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                let _ = child.kill().await;
+                return Err(AppError::Cancelled);
+            }
+            status = child.wait() => {
+                status.map_err(|_| AppError::FfmpegNotAvailable)?
+            }
+        }
+    };
+
+    let mut stdout_buf = Vec::new();
+    let mut stderr_buf = Vec::new();
+    if let Some(ref mut pipe) = stdout_pipe {
+        use tokio::io::AsyncReadExt;
+        let _ = pipe.read_to_end(&mut stdout_buf).await;
     }
+    if let Some(ref mut pipe) = stderr_pipe {
+        use tokio::io::AsyncReadExt;
+        let _ = pipe.read_to_end(&mut stderr_buf).await;
+    }
+
+    let stdout = String::from_utf8_lossy(&stdout_buf).to_string();
+    let stderr = String::from_utf8_lossy(&stderr_buf).to_string();
+
+    if !status.success() {
+        let exit_code = status
+            .code()
+            .map(|code| code.to_string())
+            .unwrap_or_else(|| "terminated by signal".to_string());
+        return Err(AppError::Other(format!(
+            "{} failed (binary: {}, exit: {}) - {}",
+            name,
+            resolved_bin,
+            exit_code,
+            stderr_excerpt(&stderr)
+        )));
+    }
+
+    Ok((stdout, stderr))
 }
 
 /// Check if ffmpeg and ffprobe sidecars are available.
 pub async fn check_availability(app: &AppHandle) -> (bool, bool) {
     let no_cancel = CancellationToken::new();
-    let ffmpeg_ok = run_sidecar(app, "ffmpeg", &["-version"], &no_cancel)
+    let ffmpeg_ok = run_tool_command(app, "ffmpeg", &["-version"], &no_cancel, None)
         .await
         .is_ok();
-    let ffprobe_ok = run_sidecar(app, "ffprobe", &["-version"], &no_cancel)
+    let ffprobe_ok = run_tool_command(app, "ffprobe", &["-version"], &no_cancel, None)
         .await
         .is_ok();
     log::debug!(
@@ -322,7 +383,7 @@ pub async fn get_stream_info(
     cancel: &CancellationToken,
 ) -> Result<VideoInfo, AppError> {
     log::debug!("Getting stream info for: {}", url);
-    let (stdout, stderr) = run_sidecar(
+    let (stdout, stderr) = run_tool_command(
         app,
         "ffprobe",
         &[
@@ -341,13 +402,15 @@ pub async fn get_stream_info(
             url,
         ],
         cancel,
+        None,
     )
     .await?;
 
     let parsed: FfprobeOutput = serde_json::from_str(&stdout).map_err(|err| {
         AppError::Other(format!(
             "Failed to parse ffprobe stream info: {} ({})",
-            err, stderr
+            err,
+            stderr_excerpt(&stderr)
         ))
     })?;
 
@@ -387,7 +450,7 @@ pub async fn get_audio_info(
     url: &str,
     cancel: &CancellationToken,
 ) -> Result<AudioInfo, AppError> {
-    let (stdout, _) = run_sidecar(
+    let (stdout, _) = run_tool_command(
         app,
         "ffprobe",
         &[
@@ -402,6 +465,7 @@ pub async fn get_audio_info(
             url,
         ],
         cancel,
+        None,
     )
     .await?;
 
@@ -423,8 +487,8 @@ pub async fn get_audio_info(
 }
 
 /// Capture a screenshot frame from a stream via ffmpeg.
-/// Uses tokio::process::Command directly for reliability — the Tauri shell
-/// plugin sidecar execution can silently fail for long-running ffmpeg tasks.
+/// Uses the unified command runner for consistent sidecar/PATH resolution
+/// and bounded diagnostics on failures/timeouts.
 pub async fn capture_screenshot(
     app: &AppHandle,
     url: &str,
@@ -441,12 +505,12 @@ pub async fn capture_screenshot(
     let output_str = output_path.to_string_lossy().to_string();
     let timeout_duration = std::time::Duration::from_secs(15);
 
-    let ffmpeg_bin = resolve_binary(app, "ffmpeg");
-
     // Capture the first available frame — no seeking (-ss) since live IPTV
     // streams don't support it reliably and it causes hangs.
-    let mut child = tokio::process::Command::new(&ffmpeg_bin)
-        .args([
+    let (_stdout, stderr) = run_tool_command(
+        app,
+        "ffmpeg",
+        &[
             "-y",
             "-user_agent",
             user_agent,
@@ -455,40 +519,25 @@ pub async fn capture_screenshot(
             "-frames:v",
             "1",
             &output_str,
-        ])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|_| AppError::FfmpegNotAvailable)?;
+        ],
+        cancel,
+        Some(timeout_duration),
+    )
+    .await?;
 
-    let success = tokio::select! {
-        _ = cancel.cancelled() => {
-            let _ = child.kill().await;
-            return Err(AppError::Cancelled);
-        }
-        _ = tokio::time::sleep(timeout_duration) => {
-            let _ = child.kill().await;
-            log::warn!("Screenshot capture timed out for {}", file_name);
-            false
-        }
-        result = child.wait() => {
-            result.map(|s| s.success()).unwrap_or(false)
-        }
-    };
-
-    if success && output_path.exists() {
+    if output_path.exists() {
         log::debug!("Screenshot captured: {}", output_str);
         Ok(output_str)
     } else {
         log::warn!(
-            "Screenshot capture failed for {} (success={}, exists={})",
+            "Screenshot capture failed for {} (exists={}) - {}",
             file_name,
-            success,
-            output_path.exists()
+            output_path.exists(),
+            stderr_excerpt(&stderr)
         );
         Err(AppError::Other(format!(
-            "Failed to capture screenshot for {}",
-            file_name
+            "Failed to capture screenshot for {} - output file missing",
+            file_name,
         )))
     }
 }
@@ -500,7 +549,7 @@ pub async fn profile_bitrate(
     user_agent: &str,
     cancel: &CancellationToken,
 ) -> Result<String, AppError> {
-    let (_, stderr) = run_sidecar(
+    let (_, stderr) = run_tool_command(
         app,
         "ffmpeg",
         &[
@@ -517,6 +566,7 @@ pub async fn profile_bitrate(
             "-",
         ],
         cancel,
+        None,
     )
     .await?;
 
