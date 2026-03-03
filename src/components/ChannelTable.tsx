@@ -84,39 +84,45 @@ export function ChannelTable({
         ))}
       </div>
       {/* Virtualized rows */}
-      <div ref={parentRef} className="flex-1 overflow-auto">
-        <div
-          style={{
-            height: `${virtualizer.getTotalSize()}px`,
-            width: "100%",
-            position: "relative",
-          }}
-        >
-          {virtualizer.getVirtualItems().map((virtualRow) => {
-            const result = filteredResults[virtualRow.index];
-            return (
-              <div
-                key={virtualRow.key}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  height: `${virtualRow.size}px`,
-                  transform: `translateY(${virtualRow.start}px)`,
-                }}
-              >
-                <ChannelRow
-                  result={result}
-                  index={result?.index ?? virtualRow.index}
-                  onClick={onSelectChannel}
-                  selected={selectedIndex === result?.index}
-                />
-              </div>
-            );
-          })}
+      {filteredResults.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm">
+          No channels match the current filters
         </div>
-      </div>
+      ) : (
+        <div ref={parentRef} className="flex-1 overflow-auto">
+          <div
+            style={{
+              height: `${virtualizer.getTotalSize()}px`,
+              width: "100%",
+              position: "relative",
+            }}
+          >
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const result = filteredResults[virtualRow.index];
+              return (
+                <div
+                  key={virtualRow.key}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    height: `${virtualRow.size}px`,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  <ChannelRow
+                    result={result}
+                    index={result?.index ?? virtualRow.index}
+                    onClick={onSelectChannel}
+                    selected={selectedIndex === result?.index}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
