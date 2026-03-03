@@ -1851,6 +1851,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-liquid-glass",
  "tauri-plugin-log",
+ "tauri-plugin-macos-haptics",
  "tauri-plugin-os",
  "tauri-plugin-store",
  "thiserror 2.0.18",
@@ -4326,6 +4327,19 @@ dependencies = [
  "tauri-plugin",
  "thiserror 2.0.18",
  "time",
+]
+
+[[package]]
+name = "tauri-plugin-macos-haptics"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f523e7bb1878d974b2b81eade37a1893b1bdd3eacc3af9fd38bd4434ec72a47"
+dependencies = [
+ "cocoa",
+ "objc",
+ "serde",
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]

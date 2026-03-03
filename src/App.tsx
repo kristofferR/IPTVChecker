@@ -38,6 +38,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { detectPlatform } from "./lib/platform";
 import { findDuplicateChannelIndices } from "./lib/duplicates";
 import { logger } from "./lib/logger";
+import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/haptics";
 
 function errorToString(err: unknown): string {
   if (typeof err === "string") {
@@ -566,6 +567,7 @@ export default function App() {
   useEffect(() => {
     recentPlaylistsRef.current = recentPlaylists;
   }, [recentPlaylists]);
+  const previousScanStateRef = useRef(scanState);
 
   useEffect(() => {
     if (!playlist) {
@@ -579,8 +581,17 @@ export default function App() {
   }, [playlist, refreshHistory]);
 
   useEffect(() => {
+    const previousScanState = previousScanStateRef.current;
+    previousScanStateRef.current = scanState;
+
     if (scanState !== "complete" || !playlist) return;
     void refreshHistory();
+    if (previousScanState === "scanning" || previousScanState === "paused") {
+      void triggerHaptic(
+        HapticFeedbackPattern.Generic,
+        PerformanceTime.DrawCompleted,
+      );
+    }
   }, [scanState, summary, playlist, refreshHistory]);
 
   const handleDroppedPaths = useCallback((paths: string[]) => {
@@ -699,10 +710,10 @@ export default function App() {
   const startScanWithSelection = useCallback(async (selection: number[]) => {
     if (channelSearchError) {
       setScanInputError(`Invalid pre-scan regex: ${channelSearchError}`);
-      return;
+      return false;
     }
 
-    if (!playlist) return;
+    if (!playlist) return false;
 
     const config: ScanConfig = {
       file_path: playlist.file_path,
@@ -723,15 +734,24 @@ export default function App() {
     };
 
     await start(config, playlist.total_channels, selection);
+    return true;
   }, [playlist, settings, groupFilter, channelSearch, start, channelSearchError]);
 
   const handleStartScan = useCallback(async () => {
-    await startScanWithSelection(selectedChannelIndices);
+    const started = await startScanWithSelection(selectedChannelIndices);
+    if (started) {
+      void triggerHaptic(HapticFeedbackPattern.LevelChange, PerformanceTime.Now);
+    }
   }, [selectedChannelIndices, startScanWithSelection]);
 
   const handleScanSelected = useCallback(
     (indices: number[]) => {
-      void startScanWithSelection(indices);
+      void (async () => {
+        const started = await startScanWithSelection(indices);
+        if (started) {
+          void triggerHaptic(HapticFeedbackPattern.LevelChange, PerformanceTime.Now);
+        }
+      })();
     },
     [startScanWithSelection],
   );

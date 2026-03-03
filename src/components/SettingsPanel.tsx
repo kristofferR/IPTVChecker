@@ -2,6 +2,11 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { X } from "lucide-react";
 import { clearScreenshotCache, getScreenshotCacheStats } from "../lib/tauri";
+import {
+  HapticFeedbackPattern,
+  PerformanceTime,
+  triggerHaptic,
+} from "../lib/haptics";
 import type { AppSettings, ScreenshotCacheStats } from "../lib/types";
 
 interface SettingsPanelProps {
@@ -92,6 +97,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
 
   const handleSave = () => {
     onSave(draft);
+    void triggerHaptic(HapticFeedbackPattern.LevelChange, PerformanceTime.Now);
     onClose();
   };
 

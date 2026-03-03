@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Least-privilege capability for the main window. Granted permissions are limited to: core IPC defaults for command invocation, dialog open/save for playlist and export pickers, event listen/unlisten for backend and menu events, start-dragging for the custom toolbar titlebar behavior, and OS info for platform detection.",
+  "description": "Least-privilege capability for the main window. Granted permissions are limited to: core IPC defaults for command invocation, dialog open/save for playlist and export pickers, event listen/unlisten for backend and menu events, start-dragging for the custom toolbar titlebar behavior, OS info for platform detection, and macOS haptics feedback commands.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -9,6 +9,7 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:window:allow-start-dragging",
-    "os:default"
+    "os:default",
+    "macos-haptics:default"
   ]
 }

@@ -24,6 +24,9 @@ pub fn run() {
         .plugin(tauri_plugin_os::init());
 
     #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_plugin_macos_haptics::init());
+
+    #[cfg(target_os = "macos")]
     let builder = builder
         .menu(|app| {
             use tauri::menu::{AboutMetadata, MenuBuilder, SubmenuBuilder};

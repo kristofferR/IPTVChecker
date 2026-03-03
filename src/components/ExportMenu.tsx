@@ -10,6 +10,11 @@ import {
 } from "lucide-react";
 import type { ChannelResult } from "../lib/types";
 import { exportCsv, exportSplit, exportRenamed } from "../lib/tauri";
+import {
+  HapticFeedbackPattern,
+  PerformanceTime,
+  triggerHaptic,
+} from "../lib/haptics";
 
 interface ExportMenuProps {
   results: ChannelResult[];
@@ -83,6 +88,7 @@ export function ExportMenu({
         kind: "success",
         message: `Exported CSV to ${path}.`,
       });
+      void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
     } catch (err) {
       setFeedback({
         kind: "error",
@@ -102,6 +108,7 @@ export function ExportMenu({
         kind: "success",
         message: `Split playlists exported to ${sourceDir}.`,
       });
+      void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
     } catch (err) {
       setFeedback({
         kind: "error",
@@ -121,6 +128,7 @@ export function ExportMenu({
         kind: "success",
         message: `Renamed playlist exported to ${sourceDir}/${sourceStem}_renamed.m3u8.`,
       });
+      void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
     } catch (err) {
       setFeedback({
         kind: "error",
