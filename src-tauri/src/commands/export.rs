@@ -17,8 +17,8 @@ pub async fn export_csv(results: Vec<ChannelResult>, path: String, playlist_name
     let total = results.len();
     for (i, r) in results.iter().enumerate() {
         let status_str = r.status.to_string();
-        let group = r.group.replace('"', "\"\"");
-        let name = r.name.replace('"', "\"\"");
+        let group = r.group.replace('"', "\"\"").replace('\n', " ").replace('\r', "");
+        let name = r.name.replace('"', "\"\"").replace('\n', " ").replace('\r', "");
         let codec = r.codec.as_deref().unwrap_or("Unknown");
         let bitrate = r
             .video_bitrate
