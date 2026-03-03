@@ -20,7 +20,7 @@
   --toolbar-pl: 1rem;
 }
 
-/* macOS: system colors that auto-adapt to light/dark + translucent vibrancy */
+/* macOS: system colors + vibrancy-aware theming */
 [data-platform="macos"] {
   color-scheme: light dark;
   font-size: 13px;
@@ -30,18 +30,33 @@
   --text-tertiary: -apple-system-tertiary-label;
 
   --surface-bg: transparent;
-  --panel-bg: transparent;
-  --panel-bg-subtle: -apple-system-control-background;
-  --panel-bg-muted: transparent;
-  --input-bg: transparent;
   --border-color: -apple-system-separator;
   --border-subtle: -apple-system-separator;
-  --btn-bg: -apple-system-control-background;
-  --btn-bg-hover: -apple-system-selected-content-background;
-  --dropdown-bg: transparent;
-  --overlay-bg: transparent;
+  --input-bg: transparent;
   --toolbar-pt: 1.75rem;
   --toolbar-pl: 5rem;
+
+  /* Light mode defaults (vibrancy is light gray, tint dark to contrast) */
+  --panel-bg: rgb(0 0 0 / 0.03);
+  --panel-bg-subtle: rgb(0 0 0 / 0.02);
+  --panel-bg-muted: transparent;
+  --btn-bg: rgb(255 255 255 / 0.65);
+  --btn-bg-hover: rgb(255 255 255 / 0.85);
+  --dropdown-bg: rgb(255 255 255 / 0.97);
+  --overlay-bg: rgb(246 246 246 / 0.97);
+}
+
+/* macOS dark mode: vibrancy is dark, tint light to contrast */
+@media (prefers-color-scheme: dark) {
+  [data-platform="macos"] {
+    --panel-bg: rgb(255 255 255 / 0.06);
+    --panel-bg-subtle: rgb(255 255 255 / 0.04);
+    --panel-bg-muted: rgb(255 255 255 / 0.02);
+    --btn-bg: rgb(255 255 255 / 0.1);
+    --btn-bg-hover: rgb(255 255 255 / 0.15);
+    --dropdown-bg: rgb(30 30 32 / 0.9);
+    --overlay-bg: rgb(30 30 32 / 0.9);
+  }
 }
 
 @theme {
@@ -91,6 +106,79 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--btn-bg-hover);
+}
+
+/* macOS: native button styling (subtle shadow + border like NSButton) */
+[data-platform="macos"] .macos-btn {
+  box-shadow: 0 0.5px 1px rgb(0 0 0 / 0.06), 0 0 0 0.5px rgb(0 0 0 / 0.06);
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-platform="macos"] .macos-btn {
+    box-shadow: 0 0.5px 1px rgb(0 0 0 / 0.25), 0 0 0 0.5px rgb(255 255 255 / 0.06);
+  }
+}
+
+/* macOS: sheet panel (settings, inspectors) */
+[data-platform="macos"] .macos-sheet {
+  background: rgb(246 246 246 / 0.97);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: -1px 0 30px rgb(0 0 0 / 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-platform="macos"] .macos-sheet {
+    background: rgb(38 38 40 / 0.95);
+    box-shadow: -1px 0 30px rgb(0 0 0 / 0.4);
+  }
+}
+
+/* macOS: popover / dropdown menu */
+[data-platform="macos"] .macos-popover {
+  background: rgb(255 255 255 / 0.97);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
+  box-shadow: 0 4px 24px rgb(0 0 0 / 0.12), 0 0 0 0.5px rgb(0 0 0 / 0.06);
+  border-color: transparent;
+  border-radius: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-platform="macos"] .macos-popover {
+    background: rgb(38 38 40 / 0.93);
+    box-shadow: 0 4px 24px rgb(0 0 0 / 0.4), 0 0 0 0.5px rgb(255 255 255 / 0.08);
+  }
+}
+
+/* macOS: popover menu item hover (accent highlight like NSMenu) */
+[data-platform="macos"] .macos-popover button:hover {
+  background: -apple-system-selected-content-background;
+  color: white;
+  border-radius: 5px;
+  margin-inline: 4px;
+  padding-inline: 8px;
+}
+
+/* macOS: use overlay scrollbars */
+[data-platform="macos"] {
+  overflow: overlay;
+}
+
+[data-platform="macos"] ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+[data-platform="macos"] ::-webkit-scrollbar-thumb {
+  background: rgb(0 0 0 / 0.15);
+  border-radius: 3px;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-platform="macos"] ::-webkit-scrollbar-thumb {
+    background: rgb(255 255 255 / 0.2);
+  }
 }
 
 /* macOS: restore native form controls */

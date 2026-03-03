@@ -42,7 +42,7 @@ export function Toolbar({
       <button
         onClick={onOpen}
         disabled={scanning}
-        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-btn hover:bg-btn-hover disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
+        className="macos-btn flex items-center gap-1.5 px-3 py-1.5 text-sm bg-btn hover:bg-btn-hover disabled:opacity-50 disabled:cursor-not-allowed rounded-md transition-colors"
       >
         <FolderOpen className="w-4 h-4" />
         Open
@@ -84,7 +84,7 @@ export function Toolbar({
 
       <button
         onClick={onOpenSettings}
-        className="p-1.5 hover:bg-btn-hover rounded-md transition-colors"
+        className="macos-btn p-1.5 bg-btn hover:bg-btn-hover rounded-md transition-colors"
       >
         <Settings className="w-4 h-4" />
       </button>

@@ -72,7 +72,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
   return (
     <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true" aria-label="Settings">
       <div className="flex-1 bg-black/50" onClick={onClose} />
-      <div ref={panelRef} tabIndex={-1} className="w-96 bg-overlay backdrop-blur-xl border-l border-border-app flex flex-col focus:outline-none">
+      <div ref={panelRef} tabIndex={-1} className="macos-sheet w-96 bg-overlay backdrop-blur-xl border-l border-border-app flex flex-col focus:outline-none">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-app">
           <h2 className="text-sm font-semibold">Settings</h2>
           <button
@@ -221,7 +221,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
               />
               <button
                 onClick={handleSelectProxy}
-                className="px-3 py-1.5 text-sm bg-btn hover:bg-btn-hover rounded-md transition-colors"
+                className="macos-btn px-3 py-1.5 text-sm bg-btn hover:bg-btn-hover rounded-md transition-colors"
               >
                 Browse
               </button>
@@ -238,7 +238,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
           </button>
           <button
             onClick={onClose}
-            className="px-3 py-2 text-sm bg-btn hover:bg-btn-hover rounded-md transition-colors"
+            className="macos-btn px-3 py-2 text-sm bg-btn hover:bg-btn-hover rounded-md transition-colors"
           >
             Cancel
           </button>
