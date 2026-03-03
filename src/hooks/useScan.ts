@@ -292,6 +292,8 @@ export function useScan() {
                     low_framerate: false,
                     error_message: null,
                     stream_url: null,
+                    retry_count: null,
+                    last_error_reason: null,
                   };
           }
 
@@ -401,6 +403,8 @@ export function useScan() {
           extinf_line: ch.extinf_line,
           metadata_lines: ch.metadata_lines,
           stream_url: null,
+          retry_count: null,
+          last_error_reason: null,
         };
       }
       logger.debug(`[useScan] initFromPlaylist: ${pending.length} channels`);

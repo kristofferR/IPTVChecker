@@ -57,6 +57,9 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
     );
   }
 
+  const retryCount = result.retry_count ?? 0;
+  const lastErrorReason = result.last_error_reason?.trim() || null;
+
   return (
     <div className="native-scroll flex flex-col gap-3 p-4 overflow-y-auto">
       <div className="flex items-center gap-2">
@@ -134,6 +137,22 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
           <p className="text-[11px] text-orange-400">
             Low framerate: {result.fps} fps
           </p>
+        </div>
+      )}
+
+      {(retryCount > 0 || lastErrorReason) && (
+        <div className="p-2 rounded bg-panel-subtle border border-border-subtle">
+          <p className="text-[12px] font-medium text-text-primary">Diagnostics</p>
+          {retryCount > 0 && (
+            <p className="text-[11px] text-text-secondary mt-1">
+              Retries used: {retryCount}
+            </p>
+          )}
+          {lastErrorReason && (
+            <p className="text-[11px] text-text-secondary mt-1 break-words">
+              Last error: {lastErrorReason}
+            </p>
+          )}
         </div>
       )}
 

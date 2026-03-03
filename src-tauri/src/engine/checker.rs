@@ -35,25 +35,30 @@ enum VerifyResult {
     },
     Dead {
         latency_ms: Option<u64>,
+        reason: Option<String>,
     },
     Geoblocked {
         latency_ms: Option<u64>,
+        reason: Option<String>,
     },
-    Retry,
+    Retry {
+        reason: Option<String>,
+    },
 }
 
 fn classify_non_ok_status(status_code: u16, latency_ms: Option<u64>) -> VerifyResult {
+    let reason = Some(format!("HTTP {}", status_code));
     if GEOBLOCK_STATUSES.contains(&status_code)
         || SECONDARY_GEOBLOCK_STATUSES.contains(&status_code)
     {
-        return VerifyResult::Geoblocked { latency_ms };
+        return VerifyResult::Geoblocked { latency_ms, reason };
     }
 
     if RETRYABLE_HTTP_STATUSES.contains(&status_code) {
-        return VerifyResult::Retry;
+        return VerifyResult::Retry { reason };
     }
 
-    VerifyResult::Dead { latency_ms }
+    VerifyResult::Dead { latency_ms, reason }
 }
 
 fn is_retryable_request_error(err: &reqwest::Error) -> bool {
@@ -69,6 +74,13 @@ fn is_retryable_request_error(err: &reqwest::Error) -> bool {
 
 fn total_attempts(max_retries: u32) -> u32 {
     max_retries.saturating_add(1)
+}
+
+fn summarize_reqwest_error(err: &reqwest::Error) -> String {
+    if let Some(status) = err.status() {
+        return format!("HTTP {}", status.as_u16());
+    }
+    err.to_string()
 }
 
 fn retry_delay_seconds(backoff: RetryBackoff, retry_index: u32) -> u64 {
@@ -235,7 +247,9 @@ async fn read_stream(
     }
 
     if !stable {
-        return VerifyResult::Retry;
+        return VerifyResult::Retry {
+            reason: Some("Stream read interrupted".to_string()),
+        };
     }
 
     // Fallback threshold logic
@@ -253,6 +267,7 @@ async fn read_stream(
     } else {
         VerifyResult::Dead {
             latency_ms: observed_latency_ms.or(Some(elapsed_millis(request_started_at))),
+            reason: Some(format!("Insufficient stream data: {} bytes", bytes_read)),
         }
     }
 }
@@ -270,6 +285,7 @@ async fn verify(
     if depth > MAX_PLAYLIST_DEPTH {
         return VerifyResult::Dead {
             latency_ms: root_latency_ms,
+            reason: Some("Playlist recursion limit exceeded".to_string()),
         };
     }
 
@@ -281,6 +297,7 @@ async fn verify(
     if visited.contains(&normalized) {
         return VerifyResult::Dead {
             latency_ms: root_latency_ms,
+            reason: Some("Playlist loop detected".to_string()),
         };
     }
     visited.insert(normalized);
@@ -295,10 +312,13 @@ async fn verify(
         Ok(r) => r,
         Err(e) => {
             if is_retryable_request_error(&e) {
-                return VerifyResult::Retry;
+                return VerifyResult::Retry {
+                    reason: Some(summarize_reqwest_error(&e)),
+                };
             }
             return VerifyResult::Dead {
                 latency_ms: root_latency_ms,
+                reason: Some(summarize_reqwest_error(&e)),
             };
         }
     };
@@ -323,11 +343,19 @@ async fn verify(
     if is_playlist_content_type(&content_type, &final_url) {
         let playlist_text = match resp.text().await {
             Ok(t) if !t.is_empty() => t,
-            _ => return VerifyResult::Retry,
+            _ => {
+                return VerifyResult::Retry {
+                    reason: Some("Empty playlist body".to_string()),
+                };
+            }
         };
         let next_url = match extract_next_url(&final_url, &playlist_text) {
             Some(u) => u,
-            None => return VerifyResult::Retry,
+            None => {
+                return VerifyResult::Retry {
+                    reason: Some("No playable URI found in playlist".to_string()),
+                };
+            }
         };
         return Box::pin(verify(
             client,
@@ -350,6 +378,10 @@ async fn verify(
     } else if content_type.to_lowercase().starts_with("text/") {
         return VerifyResult::Dead {
             latency_ms: effective_root_latency,
+            reason: Some(format!(
+                "Unexpected text content type: {}",
+                content_type
+            )),
         };
     } else {
         // Unrecognized content-type — attempt stream read
@@ -382,7 +414,7 @@ pub async fn check_channel_status(
     extended_timeout: Option<f64>,
     user_agent: &str,
     cancel_token: &tokio_util::sync::CancellationToken,
-) -> Result<(String, Option<String>, Option<u64>), AppError> {
+) -> Result<(String, Option<String>, Option<u64>, u32, Option<String>), AppError> {
     if !timeout.is_finite() || timeout <= 0.0 {
         return Err(AppError::Other(
             "Invalid timeout: must be greater than 0 seconds".to_string(),
@@ -408,12 +440,22 @@ pub async fn check_channel_status(
 
     log::info!("Checking channel: {}", url);
 
+    struct AttemptOutcome {
+        status: String,
+        stream_url: Option<String>,
+        latency_ms: Option<u64>,
+        retries_used: u32,
+        last_error_reason: Option<String>,
+    }
+
     let attempt_check = |current_timeout: f64| {
         let client = client.clone();
         let headers = headers.clone();
         let url = url.to_string();
         let cancel = cancel_token.clone();
         async move {
+            let mut retries_used = 0u32;
+            let mut last_error_reason: Option<String> = None;
             for attempt in 0..attempts {
                 if cancel.is_cancelled() {
                     return Err(AppError::Cancelled);
@@ -446,19 +488,41 @@ pub async fn check_channel_status(
                         latency_ms,
                     } => {
                         log::info!("Channel alive: {}", url);
-                        return Ok(("Alive".to_string(), stream_url, latency_ms));
+                        return Ok(AttemptOutcome {
+                            status: "Alive".to_string(),
+                            stream_url,
+                            latency_ms,
+                            retries_used,
+                            last_error_reason,
+                        });
                     }
-                    VerifyResult::Dead { latency_ms } => {
+                    VerifyResult::Dead { latency_ms, reason } => {
                         log::info!("Channel dead: {}", url);
-                        return Ok(("Dead".to_string(), None, latency_ms));
+                        return Ok(AttemptOutcome {
+                            status: "Dead".to_string(),
+                            stream_url: None,
+                            latency_ms,
+                            retries_used,
+                            last_error_reason: reason.or(last_error_reason),
+                        });
                     }
-                    VerifyResult::Geoblocked { latency_ms } => {
+                    VerifyResult::Geoblocked { latency_ms, reason } => {
                         log::info!("Channel geoblocked: {}", url);
-                        return Ok(("Geoblocked".to_string(), None, latency_ms));
+                        return Ok(AttemptOutcome {
+                            status: "Geoblocked".to_string(),
+                            stream_url: None,
+                            latency_ms,
+                            retries_used,
+                            last_error_reason: reason.or(last_error_reason),
+                        });
                     }
-                    VerifyResult::Retry => {
+                    VerifyResult::Retry { reason } => {
+                        if let Some(reason) = reason {
+                            last_error_reason = Some(reason);
+                        }
                         log::debug!("Retrying channel: {}", url);
                         if attempt < retries {
+                            retries_used = retries_used.saturating_add(1);
                             let delay = retry_delay_seconds(retry_backoff, attempt);
                             if delay > 0 {
                                 tokio::time::sleep(Duration::from_secs(delay)).await;
@@ -467,21 +531,39 @@ pub async fn check_channel_status(
                     }
                 }
             }
-            Ok(("Dead".to_string(), None, None))
+            Ok(AttemptOutcome {
+                status: "Dead".to_string(),
+                stream_url: None,
+                latency_ms: None,
+                retries_used,
+                last_error_reason,
+            })
         }
     };
 
-    let (status, stream_url, latency_ms) = attempt_check(timeout).await?;
+    let first = attempt_check(timeout).await?;
 
     // If dead and extended timeout enabled, retry
-    if status == "Dead" {
+    if first.status == "Dead" {
         if let Some(ext_timeout) = extended_timeout {
-            let (status2, stream_url2, latency2) = attempt_check(ext_timeout).await?;
-            return Ok((status2, stream_url2, latency2));
+            let second = attempt_check(ext_timeout).await?;
+            return Ok((
+                second.status,
+                second.stream_url,
+                second.latency_ms,
+                first.retries_used.saturating_add(second.retries_used),
+                second.last_error_reason.or(first.last_error_reason),
+            ));
         }
     }
 
-    Ok((status, stream_url, latency_ms))
+    Ok((
+        first.status,
+        first.stream_url,
+        first.latency_ms,
+        first.retries_used,
+        first.last_error_reason,
+    ))
 }
 
 #[cfg(test)]
@@ -557,7 +639,12 @@ mod tests {
     #[test]
     fn test_retryable_status_classification() {
         for status in [408u16, 425, 429, 500, 502, 503, 504] {
-            assert_eq!(classify_non_ok_status(status, Some(900)), VerifyResult::Retry);
+            assert_eq!(
+                classify_non_ok_status(status, Some(900)),
+                VerifyResult::Retry {
+                    reason: Some(format!("HTTP {}", status)),
+                }
+            );
         }
     }
 
@@ -568,6 +655,7 @@ mod tests {
                 classify_non_ok_status(status, Some(321)),
                 VerifyResult::Geoblocked {
                     latency_ms: Some(321),
+                    reason: Some(format!("HTTP {}", status)),
                 }
             );
         }
@@ -580,6 +668,7 @@ mod tests {
                 classify_non_ok_status(status, Some(1234)),
                 VerifyResult::Dead {
                     latency_ms: Some(1234),
+                    reason: Some(format!("HTTP {}", status)),
                 }
             );
         }

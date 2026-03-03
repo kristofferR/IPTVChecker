@@ -41,6 +41,8 @@ export interface ChannelResult {
   extinf_line: string;
   metadata_lines: string[];
   stream_url: string | null;
+  retry_count?: number | null;
+  last_error_reason?: string | null;
 }
 
 export interface PlaylistPreview {

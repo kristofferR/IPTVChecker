@@ -32,10 +32,17 @@ struct SharedUrlResult {
     screenshot_path: Option<String>,
     low_framerate: bool,
     stream_url: Option<String>,
+    retry_count: Option<u32>,
+    last_error_reason: Option<String>,
 }
 
 impl SharedUrlResult {
-    fn dead(stream_url: Option<String>, latency_ms: Option<u64>) -> Self {
+    fn dead(
+        stream_url: Option<String>,
+        latency_ms: Option<u64>,
+        retry_count: Option<u32>,
+        last_error_reason: Option<String>,
+    ) -> Self {
         Self {
             status: ChannelStatus::Dead,
             latency_ms,
@@ -50,6 +57,8 @@ impl SharedUrlResult {
             screenshot_path: None,
             low_framerate: false,
             stream_url,
+            retry_count,
+            last_error_reason,
         }
     }
 }
@@ -89,7 +98,8 @@ async fn compute_shared_url_result(
     screenshots_dir: Option<&String>,
     screenshot_file_name: &str,
 ) -> Result<SharedUrlResult, AppError> {
-    let (status_str, stream_url, latency_ms) = match checker::check_channel_status(
+    let (status_str, stream_url, latency_ms, retry_count, last_error_reason) =
+        match checker::check_channel_status(
         client,
         channel_url,
         timeout,
@@ -103,7 +113,7 @@ async fn compute_shared_url_result(
     {
         Ok(r) => r,
         Err(AppError::Cancelled) => return Err(AppError::Cancelled),
-        Err(_) => ("Dead".to_string(), None, None),
+        Err(error) => ("Dead".to_string(), None, None, 0, Some(error.to_string())),
     };
 
     let final_status_str = if status_str == "Geoblocked" && test_geoblock {
@@ -130,7 +140,12 @@ async fn compute_shared_url_result(
     };
 
     if status != ChannelStatus::Alive || cancel.is_cancelled() {
-        return Ok(SharedUrlResult::dead(stream_url, latency_ms));
+        return Ok(SharedUrlResult::dead(
+            stream_url,
+            latency_ms,
+            (retry_count > 0).then_some(retry_count),
+            last_error_reason,
+        ));
     }
 
     let target_url = stream_url.as_deref().unwrap_or(channel_url).to_string();
@@ -148,6 +163,8 @@ async fn compute_shared_url_result(
         screenshot_path: None,
         low_framerate: false,
         stream_url,
+        retry_count: (retry_count > 0).then_some(retry_count),
+        last_error_reason,
     };
 
     if ffprobe_ok {
@@ -725,7 +742,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                 let shared = match shared_result {
                     Ok(value) => value.clone(),
                     Err(AppError::Cancelled) => return,
-                    Err(_) => SharedUrlResult::dead(None, None),
+                    Err(_) => SharedUrlResult::dead(None, None, None, None),
                 };
 
                 let mut result = ChannelResult {
@@ -752,6 +769,8 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                     extinf_line: channel.extinf_line.clone(),
                     metadata_lines: channel.metadata_lines.clone(),
                     stream_url: shared.stream_url.clone(),
+                    retry_count: shared.retry_count,
+                    last_error_reason: shared.last_error_reason.clone(),
                 };
 
                 if result.status == ChannelStatus::Alive {
@@ -970,6 +989,8 @@ mod tests {
             extinf_line: "#EXTINF:-1,Test".to_string(),
             metadata_lines: Vec::new(),
             stream_url: None,
+            retry_count: None,
+            last_error_reason: None,
         }
     }
 

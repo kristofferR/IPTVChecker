@@ -62,4 +62,8 @@ pub struct ChannelResult {
     pub extinf_line: String,
     pub metadata_lines: Vec<String>,
     pub stream_url: Option<String>,
+    #[serde(default)]
+    pub retry_count: Option<u32>,
+    #[serde(default)]
+    pub last_error_reason: Option<String>,
 }

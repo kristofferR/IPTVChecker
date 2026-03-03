@@ -182,6 +182,8 @@ mod tests {
             extinf_line: format!("#EXTINF:-1,{}", name),
             metadata_lines: Vec::new(),
             stream_url: None,
+            retry_count: None,
+            last_error_reason: None,
         }
     }
 

@@ -403,6 +403,8 @@ mod tests {
             extinf_line: "#EXTINF:-1,Channel".to_string(),
             metadata_lines: Vec::new(),
             stream_url: None,
+            retry_count: None,
+            last_error_reason: None,
         }
     }
 
