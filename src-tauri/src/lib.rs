@@ -30,14 +30,24 @@ pub fn run() {
         .menu(|app| {
             use tauri::menu::{AboutMetadata, MenuBuilder, SubmenuBuilder};
 
+            let app_menu = SubmenuBuilder::new(app, "IPTV Checker")
+                .about(Some(AboutMetadata::default()))
+                .separator()
+                .services()
+                .separator()
+                .hide()
+                .hide_others()
+                .show_all()
+                .separator()
+                .quit()
+                .build()?;
+
             let file_menu = SubmenuBuilder::new(app, "File")
                 .text("menu.file.open", "Open Playlist...")
                 .separator()
                 .text("menu.file.export_csv", "Export CSV")
                 .text("menu.file.export_split", "Export Split Playlists")
                 .text("menu.file.export_renamed", "Export Renamed Playlist")
-                .separator()
-                .quit()
                 .build()?;
 
             let edit_menu = SubmenuBuilder::new(app, "Edit")
@@ -64,12 +74,11 @@ pub fn run() {
                 .build()?;
 
             let help_menu = SubmenuBuilder::new(app, "Help")
-                .about(Some(AboutMetadata::default()))
-                .separator()
                 .text("menu.help.check_updates", "Check for Updates")
                 .build()?;
 
             MenuBuilder::new(app)
+                .item(&app_menu)
                 .item(&file_menu)
                 .item(&edit_menu)
                 .item(&view_menu)
