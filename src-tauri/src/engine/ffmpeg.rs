@@ -686,6 +686,28 @@ pub async fn profile_bitrate(
     Ok(format!("{} kbps", bitrate_kbps))
 }
 
+/// Check if `word` appears in `haystack` as a standalone word (surrounded by
+/// non-alphanumeric characters or string boundaries).
+fn contains_word(haystack: &str, word: &str) -> bool {
+    let h = haystack.as_bytes();
+    let w = word.as_bytes();
+    if w.is_empty() || h.len() < w.len() {
+        return false;
+    }
+    for start in 0..=h.len() - w.len() {
+        if &h[start..start + w.len()] != w {
+            continue;
+        }
+        let before_ok = start == 0 || !h[start - 1].is_ascii_alphanumeric();
+        let after_ok =
+            start + w.len() == h.len() || !h[start + w.len()].is_ascii_alphanumeric();
+        if before_ok && after_ok {
+            return true;
+        }
+    }
+    false
+}
+
 /// Check label mismatch between channel name and actual resolution.
 pub fn check_label_mismatch(channel_name: &str, resolution: &str) -> Vec<String> {
     let name_lower = channel_name.to_lowercase();
@@ -699,7 +721,7 @@ pub fn check_label_mismatch(channel_name: &str, resolution: &str) -> Vec<String>
         if resolution != "1080p" {
             mismatches.push(format!("Expected 1080p, got {}", resolution));
         }
-    } else if name_lower.contains("hd") {
+    } else if contains_word(&name_lower, "hd") {
         if resolution != "1080p" && resolution != "720p" {
             mismatches.push(format!("Expected 720p or 1080p, got {}", resolution));
         }
@@ -715,9 +737,9 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        build_screenshot_file_name, parse_ffprobe_fps, parse_stream_track_presence,
-        resolution_label, sanitize_screenshot_stem, unique_screenshot_output_path,
-        MAX_SCREENSHOT_STEM_LEN,
+        build_screenshot_file_name, check_label_mismatch, contains_word, parse_ffprobe_fps,
+        parse_stream_track_presence, resolution_label, sanitize_screenshot_stem,
+        unique_screenshot_output_path, MAX_SCREENSHOT_STEM_LEN,
     };
 
     #[test]
@@ -800,5 +822,35 @@ mod tests {
         let presence = parse_stream_track_presence(output).expect("track presence should parse");
         assert!(presence.has_video);
         assert!(presence.has_audio);
+    }
+
+    #[test]
+    fn contains_word_matches_standalone() {
+        // Note: contains_word is case-sensitive; check_label_mismatch lowercases first
+        assert!(contains_word("sports hd", "hd"));
+        assert!(contains_word("hd channel", "hd"));
+        assert!(contains_word("[hd]", "hd"));
+        assert!(contains_word("(hd)", "hd"));
+        assert!(contains_word("sports|hd", "hd"));
+        assert!(contains_word("hd", "hd"));
+    }
+
+    #[test]
+    fn contains_word_rejects_substrings() {
+        assert!(!contains_word("ahmad tv", "hd"));
+        assert!(!contains_word("shahd channel", "hd"));
+        assert!(!contains_word("shadow tv", "hd"));
+        assert!(!contains_word("fahd news", "hd"));
+    }
+
+    #[test]
+    fn label_mismatch_hd_word_boundary() {
+        // "HD" as standalone word should trigger mismatch
+        assert!(!check_label_mismatch("Sports HD", "1080p").is_empty() == false);
+        assert!(check_label_mismatch("Sports HD", "480p").len() == 1);
+
+        // "hd" as part of a name should NOT trigger mismatch
+        assert!(check_label_mismatch("Ahmad TV", "480p").is_empty());
+        assert!(check_label_mismatch("Shahd Channel", "480p").is_empty());
     }
 }
