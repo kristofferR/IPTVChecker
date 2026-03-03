@@ -174,6 +174,21 @@ function inferPlatformFromNavigator(): Platform {
   return "linux";
 }
 
+function shouldSkipUpdateCheck(
+  force: boolean,
+  now: number,
+  lastCheckedRaw: string | null,
+): boolean {
+  const lastChecked = lastCheckedRaw
+    ? Number.parseInt(lastCheckedRaw, 10)
+    : Number.NaN;
+  return (
+    !force &&
+    Number.isFinite(lastChecked) &&
+    now - lastChecked < UPDATE_CHECK_COOLDOWN_MS
+  );
+}
+
 type OpenSourceMode = "url" | "xtream";
 
 interface OpenSourceDialogState {
@@ -385,19 +400,9 @@ export default function App() {
     async (force: boolean, knownCurrentVersion?: string) => {
       const now = Date.now();
       const lastCheckedRaw = localStorage.getItem(UPDATE_LAST_CHECK_KEY);
-      const lastChecked = lastCheckedRaw
-        ? Number.parseInt(lastCheckedRaw, 10)
-        : Number.NaN;
-
-      if (
-        !force &&
-        Number.isFinite(lastChecked) &&
-        now - lastChecked < UPDATE_CHECK_COOLDOWN_MS
-      ) {
+      if (shouldSkipUpdateCheck(force, now, lastCheckedRaw)) {
         return;
       }
-
-      localStorage.setItem(UPDATE_LAST_CHECK_KEY, String(now));
 
       try {
         const currentVersion = normalizeVersion(
@@ -424,6 +429,8 @@ export default function App() {
         if (!latestVersion) {
           throw new Error("Latest release version is missing");
         }
+
+        localStorage.setItem(UPDATE_LAST_CHECK_KEY, String(now));
 
         if (compareVersions(latestVersion, currentVersion) > 0) {
           const notice: UpdateNotice = {
