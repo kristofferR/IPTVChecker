@@ -181,8 +181,7 @@ pub async fn start_scan(
                 break;
             }
 
-            let identifier = format!("{} {}", channel.name, channel.url);
-            if processed_channels.contains(&identifier) {
+            if processed_channels.contains(&channel.url) {
                 continue;
             }
 
