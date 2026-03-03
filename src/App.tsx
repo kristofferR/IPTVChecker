@@ -1,12 +1,11 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import type {
   ChannelResult,
   PlaylistPreview,
   ScanConfig,
 } from "./lib/types";
-import { openPlaylist, checkFfmpegAvailable } from "./lib/tauri";
+import { openPlaylist, checkFfmpegAvailable, readScreenshot } from "./lib/tauri";
 import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
 import { Toolbar } from "./components/Toolbar";
@@ -159,9 +158,31 @@ export default function App() {
       ? (results[selectedChannel.index] ?? selectedChannel)
       : null;
 
-  const screenshotUrl = liveSelectedChannel?.screenshot_path?.trim()
-    ? convertFileSrc(liveSelectedChannel.screenshot_path.trim())
-    : null;
+  // Load screenshot via custom Tauri command (bypasses fs/asset scope issues)
+  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
+  const screenshotPathRef = useRef<string | null>(null);
+  useEffect(() => {
+    const path = liveSelectedChannel?.screenshot_path?.trim() || null;
+    if (path === screenshotPathRef.current) return;
+    screenshotPathRef.current = path;
+
+    if (!path) {
+      setScreenshotUrl(null);
+      return;
+    }
+
+    let stale = false;
+    readScreenshot(path)
+      .then((dataUrl) => {
+        if (!stale) setScreenshotUrl(dataUrl);
+      })
+      .catch(() => {
+        if (!stale) setScreenshotUrl(null);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [liveSelectedChannel?.screenshot_path]);
 
   return (
     <div className="flex flex-col h-screen bg-surface">

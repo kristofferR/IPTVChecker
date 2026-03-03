@@ -25,7 +25,13 @@
     "dialog:allow-open",
     "dialog:allow-save",
     "fs:default",
-    "fs:allow-read",
+    {
+      "identifier": "fs:allow-read",
+      "allow": [
+        { "path": "$TEMP/**" },
+        { "path": "$HOME/**" }
+      ]
+    },
     "fs:allow-write",
     "fs:allow-exists",
     "fs:allow-mkdir",

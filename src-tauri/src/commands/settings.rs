@@ -39,3 +39,16 @@ pub async fn check_ffmpeg_available(app: tauri::AppHandle) -> Result<(bool, bool
     let (ffmpeg, ffprobe) = crate::engine::ffmpeg::check_availability(&app).await;
     Ok((ffmpeg, ffprobe))
 }
+
+/// Read a screenshot file and return it as a base64-encoded data URL.
+/// This bypasses asset protocol / fs scope restrictions.
+#[tauri::command]
+pub async fn read_screenshot(path: String) -> Result<String, AppError> {
+    use base64::Engine;
+    let bytes = std::fs::read(&path)
+        .map_err(|e| AppError::Other(format!("Failed to read screenshot: {}", e)))?;
+    Ok(format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(&bytes)
+    ))
+}

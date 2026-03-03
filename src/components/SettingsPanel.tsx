@@ -240,14 +240,14 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
 
           <div>
             <label className="block text-xs text-text-secondary mb-1">
-              Screenshots Directory
+              Save Screenshots To
             </label>
             <div className="flex items-center gap-2">
               <input
                 type="text"
                 value={draft.screenshots_dir ?? ""}
                 readOnly
-                placeholder="Default (next to playlist)"
+                placeholder="Not saved (in-app preview only)"
                 className="native-field flex-1 px-3 py-1.5 text-sm bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none"
               />
               <button

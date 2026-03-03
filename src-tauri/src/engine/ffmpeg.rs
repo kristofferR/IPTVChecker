@@ -1,10 +1,38 @@
 use std::path::Path;
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_shell::ShellExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::AppError;
+
+// Compile-time target triple for resolving sidecar binary paths.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const TARGET_TRIPLE: &str = "aarch64-apple-darwin";
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+const TARGET_TRIPLE: &str = "x86_64-apple-darwin";
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const TARGET_TRIPLE: &str = "x86_64-unknown-linux-gnu";
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+const TARGET_TRIPLE: &str = "x86_64-pc-windows-msvc";
+
+/// Resolve the path to an executable, preferring the bundled sidecar binary
+/// over the system PATH. This bypasses the Tauri shell plugin which can
+/// silently fail for long-running commands.
+fn resolve_binary(app: &AppHandle, name: &str) -> String {
+    let ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
+    let sidecar_name = format!("{name}-{TARGET_TRIPLE}{ext}");
+
+    if let Ok(dir) = app.path().resource_dir() {
+        let path = dir.join(&sidecar_name);
+        if path.exists() {
+            return path.to_string_lossy().to_string();
+        }
+    }
+
+    // Fall back to system PATH
+    name.to_string()
+}
 
 /// Run a sidecar command with args, falling back to system PATH.
 /// Respects cancellation token — kills child process on cancel.
@@ -189,12 +217,15 @@ pub async fn get_audio_info(app: &AppHandle, url: &str, cancel: &CancellationTok
     })
 }
 
-/// Capture a screenshot frame from a stream via ffmpeg sidecar.
+/// Capture a screenshot frame from a stream via ffmpeg.
+/// Uses tokio::process::Command directly for reliability — the Tauri shell
+/// plugin sidecar execution can silently fail for long-running ffmpeg tasks.
 pub async fn capture_screenshot(
     app: &AppHandle,
     url: &str,
     output_dir: &str,
     file_name: &str,
+    user_agent: &str,
     cancel: &CancellationToken,
 ) -> Result<String, AppError> {
     if cancel.is_cancelled() {
@@ -203,30 +234,37 @@ pub async fn capture_screenshot(
 
     let output_path = Path::new(output_dir).join(format!("{}.png", file_name));
     let output_str = output_path.to_string_lossy().to_string();
+    let timeout_duration = std::time::Duration::from_secs(15);
 
-    // Try sidecar first, then system PATH
-    let success = if let Ok(cmd) = app.shell().sidecar("binaries/ffmpeg") {
-        let output = cmd
-            .args(["-y", "-i", url, "-ss", "00:00:02", "-frames:v", "1", &output_str])
-            .output()
-            .await;
-        output.map(|o| o.status.success()).unwrap_or(false)
-    } else {
-        let mut child = tokio::process::Command::new("ffmpeg")
-            .args(["-y", "-i", url, "-ss", "00:00:02", "-frames:v", "1", &output_str])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .map_err(|_| AppError::FfmpegNotAvailable)?;
+    let ffmpeg_bin = resolve_binary(app, "ffmpeg");
 
-        tokio::select! {
-            _ = cancel.cancelled() => {
-                let _ = child.kill().await;
-                return Err(AppError::Cancelled);
-            }
-            result = child.wait() => {
-                result.map(|s| s.success()).unwrap_or(false)
-            }
+    // Capture the first available frame — no seeking (-ss) since live IPTV
+    // streams don't support it reliably and it causes hangs.
+    let mut child = tokio::process::Command::new(&ffmpeg_bin)
+        .args([
+            "-y",
+            "-user_agent", user_agent,
+            "-i", url,
+            "-frames:v", "1",
+            &output_str,
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|_| AppError::FfmpegNotAvailable)?;
+
+    let success = tokio::select! {
+        _ = cancel.cancelled() => {
+            let _ = child.kill().await;
+            return Err(AppError::Cancelled);
+        }
+        _ = tokio::time::sleep(timeout_duration) => {
+            let _ = child.kill().await;
+            log::warn!("Screenshot capture timed out for {}", file_name);
+            false
+        }
+        result = child.wait() => {
+            result.map(|s| s.success()).unwrap_or(false)
         }
     };
 
@@ -234,6 +272,12 @@ pub async fn capture_screenshot(
         log::debug!("Screenshot captured: {}", output_str);
         Ok(output_str)
     } else {
+        log::warn!(
+            "Screenshot capture failed for {} (success={}, exists={})",
+            file_name,
+            success,
+            output_path.exists()
+        );
         Err(AppError::Other(format!(
             "Failed to capture screenshot for {}",
             file_name

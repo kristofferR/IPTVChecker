@@ -63,3 +63,7 @@ export async function updateSettings(settings: AppSettings): Promise<void> {
 export async function checkFfmpegAvailable(): Promise<[boolean, boolean]> {
   return invoke("check_ffmpeg_available");
 }
+
+export async function readScreenshot(path: string): Promise<string> {
+  return invoke("read_screenshot", { path });
+}

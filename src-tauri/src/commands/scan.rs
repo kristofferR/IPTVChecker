@@ -97,11 +97,19 @@ pub async fn start_scan(
     // Always start fresh — GUI scans are explicitly triggered by the user
     let _ = std::fs::write(&log_file, "");
 
-    // Screenshots directory
+    // Screenshots directory — use app temp dir by default (in-app preview only),
+    // or a user-specified folder if configured.
     let screenshots_dir = if !config.skip_screenshots && ffmpeg_available {
-        let dir = config.screenshots_dir.clone().unwrap_or_else(|| {
-            format!("{}/{}_{}_screenshots", playlist_dir, base_name, group_suffix)
-        });
+        let dir = match config.screenshots_dir.clone() {
+            Some(d) => d,
+            None => {
+                let temp = app.path().temp_dir().unwrap_or_else(|_| std::env::temp_dir());
+                temp.join("iptv-checker-screenshots")
+                    .join(format!("{}_{}", base_name, group_suffix))
+                    .to_string_lossy()
+                    .to_string()
+            }
+        };
         if let Err(e) = std::fs::create_dir_all(&dir) {
             let mut scanning = state.scanning.lock().await;
             *scanning = false;
@@ -327,7 +335,7 @@ pub async fn start_scan(
                                 channel.name.replace('/', "-")
                             );
                             if let Ok(path) =
-                                ffmpeg::capture_screenshot(&task_app, target_url, dir, &file_name, &cancel).await
+                                ffmpeg::capture_screenshot(&task_app, target_url, dir, &file_name, &user_agent, &cancel).await
                             {
                                 result.screenshot_path = Some(path);
                             }
