@@ -10,7 +10,7 @@ import {
   type ColumnKey,
 } from "../lib/tableColumns";
 import { ChannelRow } from "./ChannelRow";
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowUp, GripVertical } from "lucide-react";
 
 interface ChannelTableProps {
   results: (ChannelResult | null)[];
@@ -74,6 +74,10 @@ function parseStoredWidths(raw: string | null): Record<ColumnKey, number> {
   return widths;
 }
 
+function isColumnKey(value: string): value is ColumnKey {
+  return DEFAULT_COLUMN_ORDER.includes(value as ColumnKey);
+}
+
 function isInputLikeTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName.toLowerCase();
@@ -110,6 +114,7 @@ export function ChannelTable({
     channel: ChannelResult;
   } | null>(null);
   const [draggedColumn, setDraggedColumn] = useState<ColumnKey | null>(null);
+  const [dragOverColumn, setDragOverColumn] = useState<ColumnKey | null>(null);
   const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(() =>
     parseStoredOrder(localStorage.getItem(ORDER_STORAGE_KEY)),
   );
@@ -481,25 +486,44 @@ export function ChannelTable({
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", key);
       setDraggedColumn(key);
+      setDragOverColumn(null);
     },
     [],
   );
 
-  const handleColumnDrop = useCallback(
+  const handleColumnDragEnter = useCallback(
     (targetKey: ColumnKey) => {
-      setColumnOrder((prev) => {
-        if (!draggedColumn || draggedColumn === targetKey) return prev;
+      if (!draggedColumn || draggedColumn === targetKey) {
+        setDragOverColumn(null);
+        return;
+      }
+      setDragOverColumn(targetKey);
+    },
+    [draggedColumn],
+  );
 
-        const fromIndex = prev.indexOf(draggedColumn);
+  const handleColumnDrop = useCallback(
+    (targetKey: ColumnKey, event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+
+      const transfer = event.dataTransfer.getData("text/plain");
+      const sourceKey =
+        transfer && isColumnKey(transfer) ? transfer : draggedColumn;
+
+      setColumnOrder((prev) => {
+        if (!sourceKey || sourceKey === targetKey) return prev;
+
+        const fromIndex = prev.indexOf(sourceKey);
         const toIndex = prev.indexOf(targetKey);
         if (fromIndex < 0 || toIndex < 0) return prev;
 
         const next = [...prev];
         next.splice(fromIndex, 1);
-        next.splice(toIndex, 0, draggedColumn);
+        next.splice(toIndex, 0, sourceKey);
         return next;
       });
       setDraggedColumn(null);
+      setDragOverColumn(null);
     },
     [draggedColumn],
   );
@@ -552,7 +576,7 @@ export function ChannelTable({
               minWidth: `${tableWidth}px`,
             }}
           >
-            {columns.map((column) => {
+            {columns.map((column, columnIndex) => {
               const alignClass =
                 column.align === "right"
                   ? "justify-self-end"
@@ -563,20 +587,36 @@ export function ChannelTable({
               return (
                 <div
                   key={column.key}
-                  draggable
-                  onDragStart={(event) =>
-                    handleColumnDragStart(column.key, event)
-                  }
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) => {
+                  onDragOver={(event) => {
                     event.preventDefault();
-                    handleColumnDrop(column.key);
+                    event.dataTransfer.dropEffect = "move";
                   }}
-                  onDragEnd={() => setDraggedColumn(null)}
+                  onDragEnter={() => handleColumnDragEnter(column.key)}
+                  onDrop={(event) => {
+                    handleColumnDrop(column.key, event);
+                  }}
                   className={`relative flex items-center h-full ${alignClass} ${
-                    draggedColumn === column.key ? "opacity-50" : ""
+                    draggedColumn === column.key ? "opacity-45" : ""
+                  } ${
+                    dragOverColumn === column.key
+                      ? "bg-blue-500/10 rounded-sm"
+                      : ""
                   }`}
                 >
+                  <div
+                    draggable
+                    onDragStart={(event) =>
+                      handleColumnDragStart(column.key, event)
+                    }
+                    onDragEnd={() => {
+                      setDraggedColumn(null);
+                      setDragOverColumn(null);
+                    }}
+                    className="h-full px-1.5 flex items-center cursor-grab active:cursor-grabbing text-text-tertiary hover:text-text-primary"
+                    title={`Drag to reorder ${column.label}`}
+                  >
+                    <GripVertical className="w-3 h-3" />
+                  </div>
                   <button
                     className="h-full px-2 hover:text-text-primary flex items-center gap-1 cursor-pointer"
                     onClick={() => handleSort(column.key)}
@@ -597,6 +637,9 @@ export function ChannelTable({
                     onMouseDown={(event) => handleResizeStart(event, column.key)}
                     onClick={(event) => event.stopPropagation()}
                   />
+                  {columnIndex < columns.length - 1 && (
+                    <div className="pointer-events-none absolute right-0 top-1.5 bottom-1.5 w-px bg-border-subtle/80" />
+                  )}
                 </div>
               );
             })}

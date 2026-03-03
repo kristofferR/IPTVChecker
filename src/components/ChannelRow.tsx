@@ -105,16 +105,23 @@ export function ChannelRow({
       onDoubleClick={() => onDoubleClick?.(result)}
       onContextMenu={onContextMenu}
     >
-      {columns.map((column) => {
+      {columns.map((column, columnIndex) => {
         const alignClass =
           column.align === "right"
-            ? "justify-self-end text-right"
+            ? "justify-end text-right"
             : column.align === "center"
-              ? "justify-self-center text-center"
-              : "justify-self-start text-left";
+              ? "justify-center text-center"
+              : "justify-start text-left";
+        const separatorClass =
+          columnIndex < columns.length - 1
+            ? "border-r border-border-subtle/70"
+            : "";
 
         return (
-          <div key={column.key} className={alignClass}>
+          <div
+            key={column.key}
+            className={`h-full flex items-center ${alignClass} ${separatorClass}`}
+          >
             {renderCell(column)}
           </div>
         );
