@@ -16,7 +16,7 @@ export function ChannelRow({ result, index, onClick, selected, focused }: Channe
       <div className="flex items-center h-11 px-4 text-sm text-zinc-600 border-b border-zinc-800">
         <span className="w-12 tabular-nums">{index + 1}</span>
         <span className="w-8" />
-        <span className="flex-1">—</span>
+        <span className="flex-1 text-zinc-500 italic">Checking...</span>
       </div>
     );
   }
