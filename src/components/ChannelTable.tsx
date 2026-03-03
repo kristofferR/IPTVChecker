@@ -78,6 +78,19 @@ function parseStoredWidths(raw: string | null): Record<ColumnKey, number> {
   return widths;
 }
 
+function columnOrderMatchesDefaults(columnOrder: ColumnKey[]): boolean {
+  if (columnOrder.length !== DEFAULT_VISIBLE_COLUMN_ORDER.length) return false;
+  return DEFAULT_VISIBLE_COLUMN_ORDER.every(
+    (key, index) => columnOrder[index] === key,
+  );
+}
+
+function columnWidthsMatchDefaults(widths: Record<ColumnKey, number>): boolean {
+  return DEFAULT_COLUMN_ORDER.every(
+    (key) => widths[key] === DEFAULT_COLUMN_WIDTHS[key],
+  );
+}
+
 function isInputLikeTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName.toLowerCase();
@@ -153,12 +166,27 @@ export function ChannelTable({
   );
 
   useEffect(() => {
+    if (columnOrderMatchesDefaults(columnOrder)) {
+      localStorage.removeItem(COLUMN_ORDER_STORAGE_KEY);
+      return;
+    }
     localStorage.setItem(COLUMN_ORDER_STORAGE_KEY, JSON.stringify(columnOrder));
   }, [columnOrder]);
 
   useEffect(() => {
+    if (columnWidthsMatchDefaults(columnWidths)) {
+      localStorage.removeItem(COLUMN_WIDTH_STORAGE_KEY);
+      return;
+    }
     localStorage.setItem(COLUMN_WIDTH_STORAGE_KEY, JSON.stringify(columnWidths));
   }, [columnWidths]);
+
+  const hasColumnCustomizations = useMemo(
+    () =>
+      !columnOrderMatchesDefaults(columnOrder) ||
+      !columnWidthsMatchDefaults(columnWidths),
+    [columnOrder, columnWidths],
+  );
 
   const columns = useMemo(
     () => columnOrder.map((key) => COLUMN_DEFINITION_MAP[key]),
@@ -420,6 +448,21 @@ export function ChannelTable({
       return next;
     });
   }, []);
+
+  const resetColumnsToDefaults = useCallback(() => {
+    if (hasColumnCustomizations) {
+      const confirmed = window.confirm(
+        "Reset table columns to defaults? This restores default order, widths, and visibility.",
+      );
+      if (!confirmed) return;
+    }
+
+    localStorage.removeItem(COLUMN_ORDER_STORAGE_KEY);
+    localStorage.removeItem(COLUMN_WIDTH_STORAGE_KEY);
+    setColumnOrder([...DEFAULT_VISIBLE_COLUMN_ORDER]);
+    setColumnWidths({ ...DEFAULT_COLUMN_WIDTHS });
+    setColumnMenuState(null);
+  }, [hasColumnCustomizations]);
 
   const moveFocusBy = useCallback(
     (delta: number) => {
@@ -911,6 +954,15 @@ export function ChannelTable({
               </button>
             );
           })}
+          <div className="h-px my-1 bg-border-subtle" />
+          <button
+            onClick={resetColumnsToDefaults}
+            disabled={!hasColumnCustomizations}
+            className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
+            type="button"
+          >
+            Reset to Defaults
+          </button>
         </div>
       )}
 
