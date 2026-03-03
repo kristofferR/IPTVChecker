@@ -8,15 +8,17 @@
     "build": "tsgo --build && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsgo --noEmit",
+    "setup:ffmpeg": "bash scripts/download-ffmpeg.sh"
   },
   "dependencies": {
+    "@tanstack/react-virtual": "^3",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-fs": "^2",
+    "@tauri-apps/plugin-os": "^2.3.2",
     "@tauri-apps/plugin-shell": "^2",
     "@tauri-apps/plugin-store": "^2",
-    "@tanstack/react-virtual": "^3",
     "lucide-react": "^0.474",
     "react": "^19",
     "react-dom": "^19"

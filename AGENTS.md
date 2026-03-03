@@ -40,6 +40,7 @@ lib/        — Types, Tauri invoke wrappers, formatting helpers, sort/filter lo
 
 ## Commands
 - `bun install` — install frontend dependencies
+- `bun run setup:ffmpeg` — download ffmpeg/ffprobe binaries for the current platform
 - `bun tauri dev` — run in dev mode (hot-reload frontend + Rust rebuild)
 - `bun tauri build` — production build
 - `cd src-tauri && cargo test` — run Rust tests
