@@ -64,6 +64,12 @@ export function Toolbar({
         </button>
       )}
 
+      {playlistName && (
+        <span className="text-sm text-zinc-400 truncate max-w-48" title={playlistName}>
+          {playlistName}
+        </span>
+      )}
+
       <div className="flex-1" />
 
       <ExportMenu
