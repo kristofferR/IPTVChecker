@@ -7,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::engine::{checker, ffmpeg, parser, proxy, resume};
 use crate::error::AppError;
-use crate::models::channel::{ChannelResult, ChannelStatus};
+use crate::models::channel::{Channel, ChannelResult, ChannelStatus};
 use crate::models::scan::{ScanConfig, ScanProgress, ScanSummary};
 use crate::state::AppState;
 
@@ -266,6 +266,13 @@ impl ScanCounters {
     }
 }
 
+fn filter_channels_by_selection(channels: &mut Vec<Channel>, selected_indices: &Option<Vec<usize>>) {
+    if let Some(selected_indices) = selected_indices {
+        let selected: HashSet<usize> = selected_indices.iter().copied().collect();
+        channels.retain(|channel| selected.contains(&channel.index));
+    }
+}
+
 #[tauri::command]
 pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppError> {
     let state = app.state::<Arc<AppState>>();
@@ -298,10 +305,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
     )?;
 
     let mut channels = preview.channels;
-    if let Some(selected_indices) = &config.selected_indices {
-        let selected: HashSet<usize> = selected_indices.iter().copied().collect();
-        channels.retain(|channel| selected.contains(&channel.index));
-    }
+    filter_channels_by_selection(&mut channels, &config.selected_indices);
     let total = channels.len();
     log::info!("Scan: {} channels to check", total);
 
@@ -635,6 +639,17 @@ mod tests {
         }
     }
 
+    fn make_channel(index: usize) -> Channel {
+        Channel {
+            index,
+            name: format!("Channel {}", index),
+            group: "Test".to_string(),
+            url: format!("http://example.com/{}.m3u8", index),
+            extinf_line: "#EXTINF:-1,Test".to_string(),
+            metadata_lines: Vec::new(),
+        }
+    }
+
     #[test]
     fn canonicalize_stream_url_removes_default_port_and_fragment() {
         assert_eq!(
@@ -650,6 +665,23 @@ mod tests {
     #[test]
     fn canonicalize_stream_url_for_non_url_is_trim_only() {
         assert_eq!(canonicalize_stream_url("  not-a-valid-url  "), "not-a-valid-url");
+    }
+
+    #[test]
+    fn selected_channel_filter_keeps_all_when_none() {
+        let mut channels = vec![make_channel(0), make_channel(1), make_channel(2)];
+        filter_channels_by_selection(&mut channels, &None);
+        assert_eq!(channels.len(), 3);
+    }
+
+    #[test]
+    fn selected_channel_filter_keeps_only_selected_indices() {
+        let mut channels = vec![make_channel(0), make_channel(1), make_channel(2)];
+        let selected = Some(vec![2, 0]);
+        filter_channels_by_selection(&mut channels, &selected);
+        assert_eq!(channels.len(), 2);
+        assert_eq!(channels[0].index, 0);
+        assert_eq!(channels[1].index, 2);
     }
 
     #[test]
