@@ -97,7 +97,11 @@ pub async fn start_scan(
         let dir = config.screenshots_dir.clone().unwrap_or_else(|| {
             format!("{}/{}_{}_screenshots", playlist_dir, base_name, group_suffix)
         });
-        std::fs::create_dir_all(&dir).ok();
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            let mut scanning = state.scanning.lock().await;
+            *scanning = false;
+            return Err(AppError::Other(format!("Failed to create screenshots directory: {}", e)));
+        }
         Some(dir)
     } else {
         None
