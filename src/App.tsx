@@ -1223,8 +1223,9 @@ export default function App() {
     void launchChannelInPlayer(channel);
   }, [pendingPlaybackChannel, launchChannelInPlayer]);
 
-  const completedResults = results.filter(
-    (r): r is ChannelResult => r != null,
+  const completedResults = useMemo(
+    () => results.filter((r): r is ChannelResult => r != null),
+    [results],
   );
   const duplicateIndices = useMemo(
     () => findDuplicateChannelIndices(results),
