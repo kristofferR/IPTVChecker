@@ -1,5 +1,6 @@
 use crate::error::AppError;
 use crate::models::channel::{ChannelResult, ChannelStatus};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 fn map_csv_error(error: csv::Error) -> AppError {
@@ -48,6 +49,11 @@ pub async fn export_csv(results: Vec<ChannelResult>, path: String, playlist_name
 
     let total = results.len();
     for (i, r) in results.iter().enumerate() {
+        let playlist_cell = if r.playlist.trim().is_empty() {
+            playlist_name.as_str()
+        } else {
+            r.playlist.as_str()
+        };
         let status_str = r.status.to_string();
         let codec = r.codec.as_deref().unwrap_or("Unknown");
         let bitrate = r
@@ -65,7 +71,7 @@ pub async fn export_csv(results: Vec<ChannelResult>, path: String, playlist_name
 
         writer
             .write_record([
-                sanitize_csv_cell(&playlist_name),
+                sanitize_csv_cell(playlist_cell),
                 (i + 1).to_string(),
                 total.to_string(),
                 sanitize_csv_cell(&status_str),
@@ -90,33 +96,59 @@ pub async fn export_split(
     results: Vec<ChannelResult>,
     base_path: String,
 ) -> Result<(), AppError> {
-    let mut working = Vec::new();
-    let mut dead = Vec::new();
-    let mut geoblocked = Vec::new();
+    #[derive(Default)]
+    struct SplitBuckets {
+        working: Vec<String>,
+        dead: Vec<String>,
+        geoblocked: Vec<String>,
+    }
+
+    let mut playlists: BTreeMap<String, SplitBuckets> = BTreeMap::new();
 
     for r in &results {
+        let playlist_key = playlist_file_key(&r.playlist);
+        let buckets = playlists.entry(playlist_key).or_default();
         let entry = build_m3u_entry(r);
         match r.status {
-            ChannelStatus::Alive => working.push(entry),
-            ChannelStatus::Dead => dead.push(entry),
+            ChannelStatus::Alive => buckets.working.push(entry),
+            ChannelStatus::Dead => buckets.dead.push(entry),
             ChannelStatus::Geoblocked
             | ChannelStatus::GeoblockedConfirmed
-            | ChannelStatus::GeoblockedUnconfirmed => geoblocked.push(entry),
+            | ChannelStatus::GeoblockedUnconfirmed => buckets.geoblocked.push(entry),
             _ => {}
         }
     }
 
-    if !working.is_empty() {
-        let path = export_target_path(&base_path, "working");
-        write_m3u_file(&path, &working)?;
-    }
-    if !dead.is_empty() {
-        let path = export_target_path(&base_path, "dead");
-        write_m3u_file(&path, &dead)?;
-    }
-    if !geoblocked.is_empty() {
-        let path = export_target_path(&base_path, "geoblocked");
-        write_m3u_file(&path, &geoblocked)?;
+    let split_by_playlist = playlists.len() > 1;
+
+    for (playlist, buckets) in playlists {
+        if !buckets.working.is_empty() {
+            let suffix = if split_by_playlist {
+                format!("{}_working", playlist)
+            } else {
+                "working".to_string()
+            };
+            let path = export_target_path(&base_path, &suffix);
+            write_m3u_file(&path, &buckets.working)?;
+        }
+        if !buckets.dead.is_empty() {
+            let suffix = if split_by_playlist {
+                format!("{}_dead", playlist)
+            } else {
+                "dead".to_string()
+            };
+            let path = export_target_path(&base_path, &suffix);
+            write_m3u_file(&path, &buckets.dead)?;
+        }
+        if !buckets.geoblocked.is_empty() {
+            let suffix = if split_by_playlist {
+                format!("{}_geoblocked", playlist)
+            } else {
+                "geoblocked".to_string()
+            };
+            let path = export_target_path(&base_path, &suffix);
+            write_m3u_file(&path, &buckets.geoblocked)?;
+        }
     }
 
     Ok(())
@@ -194,6 +226,31 @@ fn export_target_path(base_path: &str, suffix: &str) -> PathBuf {
     parent.join(format!("{}_{}.m3u8", stem, suffix))
 }
 
+fn playlist_file_key(playlist: &str) -> String {
+    let trimmed = playlist.trim();
+    let raw = if trimmed.is_empty() { "playlist" } else { trimmed };
+    let stem = Path::new(raw)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(raw);
+    let sanitized = stem
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let compact = sanitized.trim_matches('_').to_string();
+    if compact.is_empty() {
+        "playlist".to_string()
+    } else {
+        compact
+    }
+}
+
 fn write_m3u_file(path: &Path, entries: &[String]) -> Result<(), AppError> {
     use std::io::Write;
     let mut file = std::fs::File::create(path).map_err(AppError::Io)?;
@@ -252,6 +309,7 @@ mod tests {
     fn sample_result(name: &str, group: &str, channel_id: &str) -> ChannelResult {
         ChannelResult {
             index: 0,
+            playlist: String::new(),
             name: name.to_string(),
             group: group.to_string(),
             url: "http://example.com/live.m3u8".to_string(),

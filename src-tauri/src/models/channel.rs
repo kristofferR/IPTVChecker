@@ -29,6 +29,7 @@ impl std::fmt::Display for ChannelStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Channel {
     pub index: usize,
+    pub playlist: String,
     pub name: String,
     pub group: String,
     pub url: String,
@@ -39,6 +40,7 @@ pub struct Channel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelResult {
     pub index: usize,
+    pub playlist: String,
     pub name: String,
     pub group: String,
     pub url: String,

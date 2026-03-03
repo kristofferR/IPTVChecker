@@ -248,7 +248,7 @@ export function useScan() {
   }, []);
 
   const initFromPlaylist = useCallback(
-    async (channels: { index: number; name: string; group: string; url: string; extinf_line: string; metadata_lines: string[] }[]) => {
+    async (channels: { index: number; playlist: string; name: string; group: string; url: string; extinf_line: string; metadata_lines: string[] }[]) => {
       // Cancel any running scan and reset backend state
       await resetScan().catch(() => {});
 
@@ -260,6 +260,7 @@ export function useScan() {
       for (const ch of channels) {
         pending[ch.index] = {
           index: ch.index,
+          playlist: ch.playlist,
           name: ch.name,
           group: ch.group,
           url: ch.url,

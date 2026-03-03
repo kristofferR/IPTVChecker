@@ -42,6 +42,7 @@ pub fn run() {
 
             let file_menu = SubmenuBuilder::new(app, "File")
                 .text("menu.file.open", "Open Playlist...")
+                .text("menu.file.open_folder", "Open Folder...")
                 .text("menu.file.open_url", "Open URL...")
                 .separator()
                 .text("menu.file.export_csv", "Export CSV")
@@ -93,6 +94,7 @@ pub fn run() {
         .on_menu_event(|app, event| {
             let frontend_event = match event.id().as_ref() {
                 "menu.file.open" => Some("menu://open-playlist"),
+                "menu.file.open_folder" => Some("menu://open-folder"),
                 "menu.file.open_url" => Some("menu://open-url"),
                 "menu.file.export_csv" => Some("menu://export-csv"),
                 "menu.file.export_split" => Some("menu://export-split"),

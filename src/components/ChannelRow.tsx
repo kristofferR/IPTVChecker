@@ -50,6 +50,12 @@ export function ChannelRow({
         );
       case "status":
         return <StatusBadge status={result.status} />;
+      case "playlist":
+        return (
+          <span className="truncate px-2 text-text-secondary" title={result.playlist}>
+            {result.playlist}
+          </span>
+        );
       case "name":
         return (
           <span className="truncate px-2 font-medium">

@@ -13,6 +13,7 @@ export interface ColumnDefinition {
 export const COLUMN_DEFINITIONS: ColumnDefinition[] = [
   { key: "index", label: "#", defaultWidth: 64, minWidth: 52, align: "left" },
   { key: "status", label: "St", defaultWidth: 56, minWidth: 48, align: "left" },
+  { key: "playlist", label: "Playlist", defaultWidth: 190, minWidth: 130, align: "left" },
   { key: "name", label: "Channel Name", defaultWidth: 360, minWidth: 180, align: "left" },
   { key: "url", label: "URL", defaultWidth: 320, minWidth: 180, align: "left" },
   { key: "group", label: "Group", defaultWidth: 220, minWidth: 120, align: "left" },

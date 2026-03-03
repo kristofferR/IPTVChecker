@@ -9,6 +9,7 @@ export type ChannelStatus =
 
 export interface Channel {
   index: number;
+  playlist: string;
   name: string;
   group: string;
   url: string;
@@ -18,6 +19,7 @@ export interface Channel {
 
 export interface ChannelResult {
   index: number;
+  playlist: string;
   name: string;
   group: string;
   url: string;

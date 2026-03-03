@@ -410,6 +410,19 @@ export default function App() {
     await openPlaylistPath(selectedPath);
   }, [openPlaylistPath]);
 
+  const handleOpenFolder = useCallback(async () => {
+    const path = await open({
+      multiple: false,
+      directory: true,
+    });
+    if (!path) return;
+
+    const selectedPath = Array.isArray(path) ? path[0] : path;
+    if (!selectedPath) return;
+
+    await openPlaylistPath(selectedPath);
+  }, [openPlaylistPath]);
+
   const handleOpenUrl = useCallback(async () => {
     const raw = window.prompt("Enter playlist URL (http:// or https://):");
     const url = raw?.trim();
@@ -678,6 +691,11 @@ export default function App() {
         }),
       );
       unlisten.push(
+        await listen("menu://open-folder", () => {
+          void handleOpenFolder();
+        }),
+      );
+      unlisten.push(
         await listen("menu://open-url", () => {
           void handleOpenUrl();
         }),
@@ -748,7 +766,7 @@ export default function App() {
         off();
       }
     };
-  }, [cancel, checkForUpdates, handleOpen, handleOpenUrl, handleStartScan, openHistoryPanel, pause, resume]);
+  }, [cancel, checkForUpdates, handleOpen, handleOpenFolder, handleOpenUrl, handleStartScan, openHistoryPanel, pause, resume]);
 
   const handleSelectChannel = useCallback((result: ChannelResult) => {
     setSelectedChannel(result);
@@ -828,6 +846,7 @@ export default function App() {
     <div className="flex flex-col h-screen bg-surface">
       <Toolbar
         onOpen={handleOpen}
+        onOpenFolder={handleOpenFolder}
         onOpenUrl={handleOpenUrl}
         onStartScan={handleStartScan}
         onPauseScan={pause}
@@ -995,6 +1014,14 @@ export default function App() {
                 >
                   <FolderOpen className="w-4 h-4" />
                   Open File
+                </button>
+                <button
+                  onClick={handleOpenFolder}
+                  className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors ml-2"
+                  type="button"
+                >
+                  <FolderOpen className="w-4 h-4" />
+                  Open Folder
                 </button>
               </div>
             </div>

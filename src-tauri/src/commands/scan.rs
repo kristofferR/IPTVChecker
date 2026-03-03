@@ -710,6 +710,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
 
                 let mut result = ChannelResult {
                     index: channel.index,
+                    playlist: channel.playlist.clone(),
                     name: channel.name.clone(),
                     group: channel.group.clone(),
                     url: channel.url.clone(),
@@ -934,6 +935,7 @@ mod tests {
     ) -> ChannelResult {
         ChannelResult {
             index,
+            playlist: "fixture.m3u8".to_string(),
             name: format!("Channel {}", index),
             group: "Test".to_string(),
             url: format!("http://example.com/{}.m3u8", index),
@@ -964,6 +966,7 @@ mod tests {
     fn make_channel(index: usize) -> Channel {
         Channel {
             index,
+            playlist: "fixture.m3u8".to_string(),
             name: format!("Channel {}", index),
             group: "Test".to_string(),
             url: format!("http://example.com/{}.m3u8", index),

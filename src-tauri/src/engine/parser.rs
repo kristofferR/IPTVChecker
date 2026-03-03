@@ -7,6 +7,8 @@ use crate::error::AppError;
 use crate::models::channel::Channel;
 use crate::models::playlist::PlaylistPreview;
 
+const PLAYLIST_GROUP_PREFIX: &str = "Playlist: ";
+
 fn find_unquoted_comma(input: &str) -> Option<usize> {
     let bytes = input.as_bytes();
     let mut quoted_by: Option<u8> = None;
@@ -207,10 +209,17 @@ pub fn parse_playlist(
     if !path.exists() {
         return Err(AppError::FileNotFound(file_path.to_string()));
     }
+    if path.is_dir() {
+        return parse_playlist_directory(file_path, group_filter, channel_search);
+    }
 
     log::info!("Parsing playlist: {}", file_path);
     let file = std::fs::File::open(path).map_err(AppError::Io)?;
     let reader = std::io::BufReader::new(file);
+    let playlist_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| file_path.to_string());
 
     let pattern = if let Some(ref search) = channel_search {
         Some(
@@ -264,6 +273,7 @@ pub fn parse_playlist(
                 let group = get_group_name(&extinf_line);
                 channels.push(Channel {
                     index: source_index,
+                    playlist: playlist_name.clone(),
                     name,
                     group,
                     url: line,
@@ -277,11 +287,6 @@ pub fn parse_playlist(
         }
     }
 
-    let file_name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| file_path.to_string());
-
     log::info!(
         "Parsed {} channels in {} groups",
         channels.len(),
@@ -289,7 +294,76 @@ pub fn parse_playlist(
     );
     Ok(PlaylistPreview {
         file_path: file_path.to_string(),
-        file_name,
+        file_name: playlist_name,
+        total_channels: channels.len(),
+        groups: groups.into_iter().collect(),
+        channels,
+    })
+}
+
+fn parse_playlist_directory(
+    dir_path: &str,
+    group_filter: &Option<String>,
+    channel_search: &Option<String>,
+) -> Result<PlaylistPreview, AppError> {
+    let files = find_playlists_in_dir(dir_path)?;
+    if files.is_empty() {
+        return Err(AppError::FileNotFound(
+            "No .m3u/.m3u8 files found in directory".to_string(),
+        ));
+    }
+
+    let pattern = if let Some(ref search) = channel_search {
+        Some(
+            Regex::new(&format!("(?i){}", search))
+                .map_err(|e| AppError::Parse(format!("Invalid regex '{}': {}", search, e)))?,
+        )
+    } else {
+        None
+    };
+
+    let mut channels = Vec::new();
+    let mut groups = BTreeSet::new();
+    let mut source_index = 0usize;
+
+    for file in files {
+        let parsed = parse_playlist(&file, &None, &None)?;
+        for mut channel in parsed.channels {
+            let playlist_group = format!("{}{}", PLAYLIST_GROUP_PREFIX, channel.playlist);
+            groups.insert(channel.group.clone());
+            groups.insert(playlist_group.clone());
+
+            let include_group = if let Some(ref selected_group) = group_filter {
+                let selected = selected_group.trim().to_lowercase();
+                channel.group.trim().to_lowercase() == selected
+                    || playlist_group.trim().to_lowercase() == selected
+            } else {
+                true
+            };
+
+            let include_search = if let Some(ref pat) = pattern {
+                pat.is_match(&channel.name)
+            } else {
+                true
+            };
+
+            channel.index = source_index;
+            source_index += 1;
+
+            if include_group && include_search {
+                channels.push(channel);
+            }
+        }
+    }
+
+    let dir_name = Path::new(dir_path)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| dir_path.to_string());
+
+    Ok(PlaylistPreview {
+        file_path: dir_path.to_string(),
+        file_name: dir_name,
         total_channels: channels.len(),
         groups: groups.into_iter().collect(),
         channels,
@@ -307,25 +381,39 @@ pub fn find_playlists_in_dir(dir_path: &str) -> Result<Vec<String>, AppError> {
     }
 
     let mut playlists = Vec::new();
+    collect_playlists_recursive(path, &mut playlists)?;
+
+    Ok(playlists)
+}
+
+fn collect_playlists_recursive(path: &Path, playlists: &mut Vec<String>) -> Result<(), AppError> {
     let mut entries: Vec<_> = std::fs::read_dir(path)
         .map_err(AppError::Io)?
         .filter_map(|e| e.ok())
         .collect();
-    entries.sort_by_key(|e| e.file_name());
+    entries.sort_by_key(|entry| entry.file_name());
 
     for entry in entries {
         let entry_path = entry.path();
-        if entry_path.is_file() {
-            if let Some(ext) = entry_path.extension() {
-                let ext_lower = ext.to_string_lossy().to_lowercase();
-                if ext_lower == "m3u" || ext_lower == "m3u8" {
-                    playlists.push(entry_path.to_string_lossy().to_string());
-                }
+        let file_type = entry.file_type().map_err(AppError::Io)?;
+        if file_type.is_dir() {
+            collect_playlists_recursive(&entry_path, playlists)?;
+            continue;
+        }
+
+        if !file_type.is_file() {
+            continue;
+        }
+
+        if let Some(ext) = entry_path.extension() {
+            let ext_lower = ext.to_string_lossy().to_lowercase();
+            if ext_lower == "m3u" || ext_lower == "m3u8" {
+                playlists.push(entry_path.to_string_lossy().to_string());
             }
         }
     }
 
-    Ok(playlists)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -463,5 +551,69 @@ http://example.com/three.m3u8
         );
 
         std::fs::remove_file(path).expect("fixture file should be removable");
+    }
+
+    #[test]
+    fn test_parse_playlist_directory_combines_sources_recursively() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be monotonic")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("iptv-parser-dir-{unique}"));
+        let nested = root.join("nested");
+        std::fs::create_dir_all(&nested).expect("nested fixture dir should be created");
+
+        let first = root.join("first.m3u8");
+        let second = nested.join("second.m3u");
+        std::fs::write(
+            &first,
+            "\
+#EXTM3U
+#EXTINF:-1 group-title=\"Sports\",Alpha
+http://example.com/alpha.m3u8
+",
+        )
+        .expect("first fixture should be writable");
+        std::fs::write(
+            &second,
+            "\
+#EXTM3U
+#EXTINF:-1 group-title=\"News\",Beta
+http://example.com/beta.m3u8
+",
+        )
+        .expect("second fixture should be writable");
+
+        let preview = parse_playlist(&root.to_string_lossy(), &None, &None)
+            .expect("directory parse should succeed");
+        assert_eq!(preview.total_channels, 2);
+        assert_eq!(
+            preview.channels.iter().map(|channel| channel.index).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+        assert_eq!(
+            preview
+                .channels
+                .iter()
+                .map(|channel| channel.playlist.clone())
+                .collect::<Vec<_>>(),
+            vec!["first.m3u8".to_string(), "second.m3u".to_string()]
+        );
+        assert!(preview.groups.contains(&"Sports".to_string()));
+        assert!(preview.groups.contains(&"News".to_string()));
+        assert!(preview.groups.contains(&"Playlist: first.m3u8".to_string()));
+        assert!(preview.groups.contains(&"Playlist: second.m3u".to_string()));
+
+        let playlist_filtered = parse_playlist(
+            &root.to_string_lossy(),
+            &Some("Playlist: second.m3u".to_string()),
+            &None,
+        )
+        .expect("playlist-filtered directory parse should succeed");
+        assert_eq!(playlist_filtered.total_channels, 1);
+        assert_eq!(playlist_filtered.channels[0].name, "Beta");
+        assert_eq!(playlist_filtered.channels[0].index, 1);
+
+        std::fs::remove_dir_all(root).expect("fixture directory should be removable");
     }
 }

@@ -327,6 +327,7 @@ mod tests {
     fn sample_result(url: &str, status: ChannelStatus) -> ChannelResult {
         ChannelResult {
             index: 0,
+            playlist: "fixture.m3u8".to_string(),
             name: "Channel".to_string(),
             group: "Group".to_string(),
             url: url.to_string(),

@@ -2,6 +2,7 @@ import type { ChannelResult, ChannelStatus } from "./types";
 
 export type SortField =
   | "index"
+  | "playlist"
   | "name"
   | "url"
   | "group"
@@ -36,6 +37,8 @@ export function sortResults(
     switch (field) {
       case "index":
         return (a.index - b.index) * dir;
+      case "playlist":
+        return a.playlist.localeCompare(b.playlist) * dir;
       case "name":
         return a.name.localeCompare(b.name) * dir;
       case "url":
@@ -92,6 +95,7 @@ export function filterResults(
       const q = search.toLowerCase();
       if (
         !r.name.toLowerCase().includes(q) &&
+        !r.playlist.toLowerCase().includes(q) &&
         !r.group.toLowerCase().includes(q)
       ) {
         return false;
