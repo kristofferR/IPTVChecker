@@ -63,6 +63,8 @@ export function useScan() {
   const completionActiveMs = useRef<number[]>([]);
   /** Wall-clock time of last telemetry state update (for throttle). */
   const lastTelemetryUpdateMs = useRef(0);
+  /** Set immediately on cancel click; suppresses incoming results during drain. */
+  const cancelling = useRef(false);
 
   // Reset backend scan state on mount (handles app restart with stale flag)
   useEffect(() => {
@@ -118,6 +120,7 @@ export function useScan() {
       unlisteners.push(
         await listen<ScanEvent<ChannelResult>>("scan://channel-result", (event) => {
           if (
+            cancelling.current ||
             !isRunScopedEventForActiveRun(
               activeRunId.current,
               event.payload.run_id,
@@ -147,6 +150,7 @@ export function useScan() {
       unlisteners.push(
         await listen<ScanEvent<ScanProgress>>("scan://progress", (event) => {
           if (
+            cancelling.current ||
             !isRunScopedEventForActiveRun(
               activeRunId.current,
               event.payload.run_id,
@@ -234,6 +238,7 @@ export function useScan() {
             return;
           }
           logger.debug("[useScan] scan://cancelled received", event.payload);
+          cancelling.current = false;
           setSummary(event.payload.payload);
           setScanState("cancelled");
           setTelemetry(EMPTY_TELEMETRY);
@@ -382,6 +387,7 @@ export function useScan() {
       activeRunId.current = null;
       pendingScanError.current = null;
       runClock.current = null;
+      cancelling.current = false;
       completionActiveMs.current = [];
       lastTelemetryUpdateMs.current = 0;
 
@@ -417,6 +423,14 @@ export function useScan() {
   );
 
   const cancel = useCallback(async () => {
+    // Suppress incoming results immediately so in-flight completions
+    // don't burst into the UI while the backend drains (issue #81).
+    cancelling.current = true;
+    pendingResults.current = [];
+    if (rafId.current !== null) {
+      cancelAnimationFrame(rafId.current);
+      rafId.current = null;
+    }
     try {
       await cancelScan();
     } catch {
