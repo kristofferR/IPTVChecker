@@ -6,10 +6,143 @@ use crate::error::AppError;
 use crate::models::channel::Channel;
 use crate::models::playlist::PlaylistPreview;
 
+fn find_unquoted_comma(input: &str) -> Option<usize> {
+    let bytes = input.as_bytes();
+    let mut quoted_by: Option<u8> = None;
+    let mut escaped = false;
+
+    for (i, &byte) in bytes.iter().enumerate() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+
+        if quoted_by.is_some() && byte == b'\\' {
+            escaped = true;
+            continue;
+        }
+
+        match quoted_by {
+            Some(quote) if byte == quote => quoted_by = None,
+            None if byte == b'"' || byte == b'\'' => quoted_by = Some(byte),
+            None if byte == b',' => return Some(i),
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn parse_extinf_attributes(extinf_line: &str) -> Vec<(String, String)> {
+    let header_end = find_unquoted_comma(extinf_line).unwrap_or(extinf_line.len());
+    let header = &extinf_line[..header_end];
+    let payload = header
+        .split_once(':')
+        .map(|(_, after_colon)| after_colon)
+        .unwrap_or(header);
+
+    let bytes = payload.as_bytes();
+    let mut i = 0usize;
+    let mut attrs = Vec::new();
+
+    while i < bytes.len() {
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            break;
+        }
+        if bytes[i] == b',' {
+            i += 1;
+            continue;
+        }
+
+        let key_start = i;
+        while i < bytes.len()
+            && !bytes[i].is_ascii_whitespace()
+            && bytes[i] != b'='
+            && bytes[i] != b','
+        {
+            i += 1;
+        }
+        let key_end = i;
+
+        let mut eq_pos = i;
+        while eq_pos < bytes.len() && bytes[eq_pos].is_ascii_whitespace() {
+            eq_pos += 1;
+        }
+        if eq_pos >= bytes.len() || bytes[eq_pos] != b'=' {
+            i = key_end;
+            while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b',' {
+                i += 1;
+            }
+            continue;
+        }
+        i = eq_pos + 1;
+
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() || key_start == key_end {
+            continue;
+        }
+
+        let value = if bytes[i] == b'"' || bytes[i] == b'\'' {
+            let quote = bytes[i];
+            i += 1;
+            let value_start = i;
+            let mut escaped = false;
+            while i < bytes.len() {
+                let byte = bytes[i];
+                if escaped {
+                    escaped = false;
+                    i += 1;
+                    continue;
+                }
+                if byte == b'\\' {
+                    escaped = true;
+                    i += 1;
+                    continue;
+                }
+                if byte == quote {
+                    break;
+                }
+                i += 1;
+            }
+
+            let mut raw = payload[value_start..i].to_string();
+            if quote == b'"' {
+                raw = raw.replace("\\\"", "\"");
+            } else {
+                raw = raw.replace("\\'", "'");
+            }
+            raw = raw.replace("\\\\", "\\");
+
+            if i < bytes.len() && bytes[i] == quote {
+                i += 1;
+            }
+            raw.trim().to_string()
+        } else {
+            let value_start = i;
+            while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b',' {
+                i += 1;
+            }
+            payload[value_start..i].trim().to_string()
+        };
+
+        let key = payload[key_start..key_end].trim().to_ascii_lowercase();
+        if !key.is_empty() && !value.is_empty() {
+            attrs.push((key, value));
+        }
+    }
+
+    attrs
+}
+
 /// Extract channel name from #EXTINF line (text after the last comma).
 pub fn get_channel_name(extinf_line: &str) -> String {
     if extinf_line.starts_with("#EXTINF") {
-        if let Some(pos) = extinf_line.find(',') {
+        if let Some(pos) = find_unquoted_comma(extinf_line) {
             let name = extinf_line[pos + 1..].trim();
             if !name.is_empty() {
                 return name.to_string();
@@ -21,18 +154,12 @@ pub fn get_channel_name(extinf_line: &str) -> String {
 
 /// Extract group-title attribute from #EXTINF line.
 pub fn get_group_name(extinf_line: &str) -> String {
-    if let Some(pos) = extinf_line.find("group-title=") {
-        let after = &extinf_line[pos + 12..];
-        // Strip surrounding quotes
-        let after = after.trim_start_matches('"');
-        if let Some(end) = after.find('"') {
-            return after[..end].to_string();
+    if extinf_line.starts_with("#EXTINF") {
+        for (key, value) in parse_extinf_attributes(extinf_line) {
+            if key == "group-title" {
+                return value;
+            }
         }
-        // No closing quote — take until comma
-        if let Some(end) = after.find(',') {
-            return after[..end].to_string();
-        }
-        return after.to_string();
     }
     "Unknown Group".to_string()
 }
@@ -154,7 +281,11 @@ pub fn parse_playlist(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| file_path.to_string());
 
-    log::info!("Parsed {} channels in {} groups", channels.len(), groups.len());
+    log::info!(
+        "Parsed {} channels in {} groups",
+        channels.len(),
+        groups.len()
+    );
     Ok(PlaylistPreview {
         file_path: file_path.to_string(),
         file_name,
@@ -202,13 +333,16 @@ mod tests {
 
     #[test]
     fn test_get_channel_name() {
-        assert_eq!(
-            get_channel_name("#EXTINF:-1,ESPN HD"),
-            "ESPN HD"
-        );
+        assert_eq!(get_channel_name("#EXTINF:-1,ESPN HD"), "ESPN HD");
         assert_eq!(
             get_channel_name("#EXTINF:-1 group-title=\"Sports\",BBC One"),
             "BBC One"
+        );
+        assert_eq!(
+            get_channel_name(
+                "#EXTINF:-1 tvg-name=\"News, International\" group-title=\"World\",Channel, HD"
+            ),
+            "Channel, HD"
         );
         assert_eq!(get_channel_name("not an extinf line"), "Unknown Channel");
     }
@@ -219,16 +353,25 @@ mod tests {
             get_group_name("#EXTINF:-1 group-title=\"Sports\",ESPN"),
             "Sports"
         );
+        assert_eq!(
+            get_group_name("#EXTINF:-1 group-title='Kids & Family',Cartoon"),
+            "Kids & Family"
+        );
+        assert_eq!(
+            get_group_name("#EXTINF:-1 group-title=Documentary,HistoryTV"),
+            "Documentary"
+        );
+        assert_eq!(
+            get_group_name("#EXTINF:-1 group-title = \"Sports Plus\",ESPN"),
+            "Sports Plus"
+        );
         assert_eq!(get_group_name("#EXTINF:-1,ESPN"), "Unknown Group");
     }
 
     #[test]
     fn test_get_channel_id() {
         assert_eq!(get_channel_id("http://example.com/live/123.ts"), "123");
-        assert_eq!(
-            get_channel_id("http://example.com/live/stream"),
-            "stream"
-        );
+        assert_eq!(get_channel_id("http://example.com/live/stream"), "stream");
         assert_eq!(get_channel_id(""), "Unknown");
     }
 }
