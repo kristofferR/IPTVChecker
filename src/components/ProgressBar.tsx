@@ -31,18 +31,22 @@ export function ProgressBar({
       ? Math.round((progress.completed / progress.total) * 100)
       : 0;
 
-  let telemetryLabel: string;
-  if (scanState === "paused") {
-    telemetryLabel = "—";
-  } else if (throughputChannelsPerSecond == null) {
-    telemetryLabel = "Calculating speed…";
-  } else {
-    const chPerMin = throughputChannelsPerSecond * 60;
-    const throughputDisplay =
-      chPerMin >= 10
-        ? `${Math.round(chPerMin)} ch/min`
-        : `${chPerMin.toFixed(1)} ch/min`;
-    telemetryLabel = `${throughputDisplay} · ~${formatEta(etaSeconds)} remaining`;
+  const showTelemetry = scanState === "scanning" || scanState === "paused";
+
+  let telemetryLabel: string | null = null;
+  if (showTelemetry) {
+    if (scanState === "paused") {
+      telemetryLabel = "—";
+    } else if (throughputChannelsPerSecond == null) {
+      telemetryLabel = "Calculating speed…";
+    } else {
+      const chPerMin = throughputChannelsPerSecond * 60;
+      const throughputDisplay =
+        chPerMin >= 10
+          ? `${Math.round(chPerMin)} ch/min`
+          : `${chPerMin.toFixed(1)} ch/min`;
+      telemetryLabel = `${throughputDisplay} · ~${formatEta(etaSeconds)} remaining`;
+    }
   }
 
   return (
@@ -63,9 +67,11 @@ export function ProgressBar({
           </span>
         )}
       </div>
-      <div className="mt-1 text-[11px] text-text-tertiary tabular-nums">
-        {telemetryLabel}
-      </div>
+      {telemetryLabel != null && (
+        <div className="mt-1 text-[11px] text-text-tertiary tabular-nums">
+          {telemetryLabel}
+        </div>
+      )}
     </div>
   );
 }
