@@ -29,7 +29,8 @@ import { ProgressBar } from "./components/ProgressBar";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { KeyboardShortcutsDialog } from "./components/KeyboardShortcutsDialog";
 import { HistoryPanel } from "./components/HistoryPanel";
-import { AlertTriangle, FolderOpen, Info, X } from "lucide-react";
+import { AlertTriangle, ExternalLink, FolderOpen, Info, X } from "lucide-react";
+import { getVersion } from "@tauri-apps/api/app";
 import { detectPlatform } from "./lib/platform";
 import { findDuplicateChannelIndices } from "./lib/duplicates";
 import { logger } from "./lib/logger";
@@ -73,6 +74,63 @@ function validateRegexPattern(pattern: string): string | null {
   }
 }
 
+const UPDATE_CHECK_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const UPDATE_LAST_CHECK_KEY = "updates:last-check-epoch-ms";
+const UPDATE_CACHE_KEY = "updates:last-available-release";
+const GITHUB_LATEST_RELEASE_API =
+  "https://api.github.com/repos/kristofferR/IPTVChecker-GUI/releases/latest";
+const GITHUB_RELEASES_PAGE =
+  "https://github.com/kristofferR/IPTVChecker-GUI/releases";
+
+interface UpdateNotice {
+  latest_version: string;
+  release_url: string;
+  checked_at_epoch_ms: number;
+}
+
+function normalizeVersion(version: string): string {
+  return version.trim().replace(/^v/i, "");
+}
+
+function parseVersionParts(version: string): number[] {
+  const numeric = normalizeVersion(version)
+    .split(".")
+    .map((part) => {
+      const matched = part.match(/^\d+/);
+      return matched ? Number.parseInt(matched[0], 10) : 0;
+    });
+  return numeric.length > 0 ? numeric : [0];
+}
+
+function compareVersions(left: string, right: string): number {
+  const leftParts = parseVersionParts(left);
+  const rightParts = parseVersionParts(right);
+  const maxLength = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < maxLength; index += 1) {
+    const a = leftParts[index] ?? 0;
+    const b = rightParts[index] ?? 0;
+    if (a > b) return 1;
+    if (a < b) return -1;
+  }
+
+  return 0;
+}
+
+function readCachedUpdateNotice(): UpdateNotice | null {
+  const raw = localStorage.getItem(UPDATE_CACHE_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as UpdateNotice;
+    if (!parsed.latest_version || !parsed.release_url) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
   const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
   const modKey = isMac ? "Cmd" : "Ctrl";
@@ -107,6 +165,8 @@ export default function App() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyClearing, setHistoryClearing] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>("");
+  const [updateNotice, setUpdateNotice] = useState<UpdateNotice | null>(null);
   const [menuExportRequest, setMenuExportRequest] = useState<{
     id: number;
     action: "csv" | "split" | "renamed";
@@ -190,6 +250,114 @@ export default function App() {
     const timer = setTimeout(() => setMenuInfo(null), 8000);
     return () => clearTimeout(timer);
   }, [menuInfo]);
+
+  const checkForUpdates = useCallback(
+    async (force: boolean, knownCurrentVersion?: string) => {
+      const now = Date.now();
+      const lastCheckedRaw = localStorage.getItem(UPDATE_LAST_CHECK_KEY);
+      const lastChecked = lastCheckedRaw
+        ? Number.parseInt(lastCheckedRaw, 10)
+        : Number.NaN;
+
+      if (
+        !force &&
+        Number.isFinite(lastChecked) &&
+        now - lastChecked < UPDATE_CHECK_COOLDOWN_MS
+      ) {
+        return;
+      }
+
+      localStorage.setItem(UPDATE_LAST_CHECK_KEY, String(now));
+
+      try {
+        const currentVersion = normalizeVersion(
+          knownCurrentVersion ?? (await getVersion()),
+        );
+        setAppVersion(currentVersion);
+
+        const response = await fetch(GITHUB_LATEST_RELEASE_API, {
+          headers: {
+            Accept: "application/vnd.github+json",
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const release = (await response.json()) as {
+          tag_name?: string;
+          html_url?: string;
+        };
+
+        const latestVersion = normalizeVersion(release.tag_name ?? "");
+        if (!latestVersion) {
+          throw new Error("Latest release version is missing");
+        }
+
+        if (compareVersions(latestVersion, currentVersion) > 0) {
+          const notice: UpdateNotice = {
+            latest_version: latestVersion,
+            release_url: release.html_url || GITHUB_RELEASES_PAGE,
+            checked_at_epoch_ms: now,
+          };
+          setUpdateNotice(notice);
+          localStorage.setItem(UPDATE_CACHE_KEY, JSON.stringify(notice));
+          if (force) {
+            setMenuInfo(`Update available: v${latestVersion}`);
+          }
+          return;
+        }
+
+        setUpdateNotice(null);
+        localStorage.removeItem(UPDATE_CACHE_KEY);
+        if (force) {
+          setMenuInfo(`You're up to date (v${currentVersion}).`);
+        }
+      } catch (err) {
+        if (force) {
+          setMenuInfo(`Update check failed: ${errorToString(err)}`);
+        }
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const runInitialUpdateCheck = async () => {
+      let currentVersion = "";
+      try {
+        currentVersion = normalizeVersion(await getVersion());
+        if (!cancelled) {
+          setAppVersion(currentVersion);
+        }
+      } catch {
+        currentVersion = "";
+      }
+
+      if (cancelled) return;
+
+      const cachedNotice = readCachedUpdateNotice();
+      if (
+        cachedNotice &&
+        currentVersion &&
+        compareVersions(cachedNotice.latest_version, currentVersion) > 0
+      ) {
+        setUpdateNotice(cachedNotice);
+      } else if (cachedNotice) {
+        localStorage.removeItem(UPDATE_CACHE_KEY);
+      }
+
+      await checkForUpdates(false, currentVersion || undefined);
+    };
+
+    void runInitialUpdateCheck();
+    return () => {
+      cancelled = true;
+    };
+  }, [checkForUpdates]);
 
   const openPlaylistPath = useCallback(async (selectedPath: string) => {
     setPlaylistOpenError(null);
@@ -551,9 +719,9 @@ export default function App() {
         await listen("menu://open-settings", () => setShowSettings(true)),
       );
       unlisten.push(
-        await listen("menu://check-updates", () =>
-          setMenuInfo("Update checking is not configured yet."),
-        ),
+        await listen("menu://check-updates", () => {
+          void checkForUpdates(true);
+        }),
       );
       unlisten.push(
         await listen("menu://keyboard-shortcuts", () =>
@@ -568,7 +736,7 @@ export default function App() {
         off();
       }
     };
-  }, [cancel, handleOpen, handleOpenUrl, handleStartScan, openHistoryPanel]);
+  }, [cancel, checkForUpdates, handleOpen, handleOpenUrl, handleStartScan, openHistoryPanel]);
 
   const handleSelectChannel = useCallback((result: ChannelResult) => {
     setSelectedChannel(result);
@@ -730,6 +898,34 @@ export default function App() {
           <button
             onClick={() => setMenuInfo(null)}
             className="p-1 hover:bg-blue-500/20 rounded transition-colors"
+            type="button"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {updateNotice && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-emerald-500/10 border-b border-emerald-500/20 text-emerald-300 text-[13px]">
+          <span className="flex-1">
+            Update available: <strong>v{updateNotice.latest_version}</strong>
+            {appVersion ? ` (current v${appVersion})` : ""}.
+          </span>
+          <a
+            href={updateNotice.release_url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-emerald-400/30 hover:bg-emerald-500/15 transition-colors"
+          >
+            Download
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+          <button
+            onClick={() => {
+              setUpdateNotice(null);
+              localStorage.removeItem(UPDATE_CACHE_KEY);
+            }}
+            className="p-1 hover:bg-emerald-500/20 rounded transition-colors"
             type="button"
           >
             <X className="w-4 h-4" />
