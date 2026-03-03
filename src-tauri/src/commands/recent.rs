@@ -99,6 +99,8 @@ fn sanitize_recent_playlists(entries: Vec<RecentPlaylistEntry>) -> Vec<RecentPla
 
 #[cfg(target_os = "macos")]
 fn update_recent_menu(app: &tauri::AppHandle, entries: &[RecentPlaylistEntry]) {
+    use tauri::menu::{MenuItem, PredefinedMenuItem};
+
     let Some(menu) = app.menu() else {
         return;
     };
@@ -114,32 +116,54 @@ fn update_recent_menu(app: &tauri::AppHandle, entries: &[RecentPlaylistEntry]) {
         return;
     };
 
-    for slot in 0..RECENT_SLOT_COUNT {
-        let id = format!("menu.file.recent.{}", slot);
-        let Some(item_kind) = recent_submenu.get(&id) else {
-            continue;
-        };
-        let Some(item) = item_kind.as_menuitem() else {
-            continue;
-        };
-
-        if let Some(entry) = entries.get(slot) {
-            let prefix = match entry.kind {
-                RecentPlaylistKind::File => "File",
-                RecentPlaylistKind::Url => "URL",
-            };
-            let _ = item.set_text(format!("{}. [{}] {}", slot + 1, prefix, entry.label));
-            let _ = item.set_enabled(true);
-        } else {
-            let placeholder = if slot == 0 { "No recent playlists" } else { "—" };
-            let _ = item.set_text(placeholder);
-            let _ = item.set_enabled(false);
+    if let Ok(items) = recent_submenu.items() {
+        for index in (0..items.len()).rev() {
+            let item = &items[index];
+            if item.id() == &"menu.file.recent.clear" {
+                continue;
+            }
+            let _ = recent_submenu.remove_at(index);
         }
+    }
+
+    let visible_entries = entries.iter().take(RECENT_SLOT_COUNT).enumerate();
+    let mut inserted_any = false;
+    for (slot, entry) in visible_entries {
+        let prefix = match entry.kind {
+            RecentPlaylistKind::File => "File",
+            RecentPlaylistKind::Url => "URL",
+        };
+        let Ok(item) = MenuItem::with_id(
+            app,
+            format!("menu.file.recent.{}", slot),
+            format!("{}. [{}] {}", slot + 1, prefix, entry.label),
+            true,
+            None::<&str>,
+        ) else {
+            continue;
+        };
+        let _ = recent_submenu.insert(&item, slot);
+        inserted_any = true;
+    }
+
+    if inserted_any {
+        if let Ok(separator) = PredefinedMenuItem::separator(app) {
+            let entry_count = entries.len().min(RECENT_SLOT_COUNT);
+            let _ = recent_submenu.insert(&separator, entry_count);
+        }
+    } else if let Ok(empty_item) = MenuItem::with_id(
+        app,
+        "menu.file.recent.empty",
+        "No recent playlists",
+        false,
+        None::<&str>,
+    ) {
+        let _ = recent_submenu.insert(&empty_item, 0);
     }
 
     if let Some(clear_item_kind) = recent_submenu.get("menu.file.recent.clear") {
         if let Some(clear_item) = clear_item_kind.as_menuitem() {
-            let _ = clear_item.set_enabled(!entries.is_empty());
+            let _ = clear_item.set_enabled(inserted_any);
         }
     }
 }

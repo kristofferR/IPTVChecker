@@ -47,15 +47,6 @@ pub fn run() {
                 .item(
                     &SubmenuBuilder::with_id(app, "menu.file.open_recent", "Open Recent")
                         .text("menu.file.recent.0", "No recent playlists")
-                        .text("menu.file.recent.1", "—")
-                        .text("menu.file.recent.2", "—")
-                        .text("menu.file.recent.3", "—")
-                        .text("menu.file.recent.4", "—")
-                        .text("menu.file.recent.5", "—")
-                        .text("menu.file.recent.6", "—")
-                        .text("menu.file.recent.7", "—")
-                        .text("menu.file.recent.8", "—")
-                        .text("menu.file.recent.9", "—")
                         .separator()
                         .text("menu.file.recent.clear", "Clear Recent")
                         .build()?,
