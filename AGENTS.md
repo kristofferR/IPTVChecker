@@ -6,7 +6,7 @@ Cross-platform GUI application for validating IPTV playlists. Built with Tauri v
 Ports all functionality from the CLI tool at `/Users/kristoffer/Code/Scripts/IPTV_checker/IPTV_checker.py`.
 
 ## GitHub
-- **Repo:** `kristofferR/IPTVChecker-GUI` (private)
+- **Repo:** `kristofferR/IPTVChecker`
 - **Git identity:** kristofferR (`git use-personal`)
 
 ## Stack
