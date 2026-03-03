@@ -61,6 +61,33 @@ fn remote_playlist_cache_path(
     Ok(cache_dir.join(source_cache_file_name(source_key)))
 }
 
+fn cleanup_stale_cache_temp_files(cache_path: &std::path::Path) {
+    let Some(parent) = cache_path.parent() else {
+        return;
+    };
+    let Some(cache_name) = cache_path.file_name().and_then(|name| name.to_str()) else {
+        return;
+    };
+    let temp_prefix = format!("{}.", cache_name);
+
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if name.starts_with(&temp_prefix) && name.ends_with(".tmp") {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 async fn download_playlist_to_cache(
     app: &tauri::AppHandle,
     source_key: &str,
@@ -96,6 +123,7 @@ async fn download_playlist_to_cache(
         .map_err(|_| AppError::Other(format!("Failed to read downloaded {}", error_label)))?;
 
     let cache_path = remote_playlist_cache_path(app, source_key)?;
+    cleanup_stale_cache_temp_files(&cache_path);
     let tmp_suffix = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -109,18 +137,26 @@ async fn download_playlist_to_cache(
         tmp_suffix
     ));
 
-    std::fs::write(&tmp_path, &bytes).map_err(AppError::Io)?;
+    let persist_result = (|| -> Result<(), AppError> {
+        std::fs::write(&tmp_path, &bytes).map_err(AppError::Io)?;
 
-    match std::fs::rename(&tmp_path, &cache_path) {
-        Ok(()) => {}
-        Err(first_error) => {
-            if cache_path.exists() {
-                std::fs::remove_file(&cache_path).map_err(AppError::Io)?;
-                std::fs::rename(&tmp_path, &cache_path).map_err(AppError::Io)?;
-            } else {
-                return Err(AppError::Io(first_error));
+        match std::fs::rename(&tmp_path, &cache_path) {
+            Ok(()) => {}
+            Err(first_error) => {
+                if cache_path.exists() {
+                    std::fs::remove_file(&cache_path).map_err(AppError::Io)?;
+                    std::fs::rename(&tmp_path, &cache_path).map_err(AppError::Io)?;
+                } else {
+                    return Err(AppError::Io(first_error));
+                }
             }
         }
+        Ok(())
+    })();
+
+    if let Err(error) = persist_result {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(error);
     }
 
     Ok(cache_path.to_string_lossy().to_string())
@@ -262,7 +298,7 @@ pub async fn open_playlist_xtream(
 mod tests {
     use super::{
         build_xtream_download_url, build_xtream_source_key, normalize_url_identity,
-        normalize_xtream_server,
+        normalize_xtream_server, cleanup_stale_cache_temp_files,
         source_cache_file_name,
     };
     use url::Url;
@@ -313,6 +349,36 @@ mod tests {
         assert_eq!(first, second);
         assert_ne!(first, third);
         assert!(first.ends_with(".m3u8"));
+    }
+
+    #[test]
+    fn cleanup_stale_cache_temp_files_removes_only_matching_temp_files() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be monotonic")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("iptv-cache-cleanup-{unique}"));
+        std::fs::create_dir_all(&root).expect("temp dir should be created");
+
+        let cache_path = root.join("playlist-cache.m3u8");
+        let stale_a = root.join("playlist-cache.m3u8.111.tmp");
+        let stale_b = root.join("playlist-cache.m3u8.222.tmp");
+        let keep_other = root.join("other-file.tmp");
+        let keep_cache = root.join("playlist-cache.m3u8");
+
+        std::fs::write(&stale_a, b"stale").expect("stale file should be writable");
+        std::fs::write(&stale_b, b"stale").expect("stale file should be writable");
+        std::fs::write(&keep_other, b"keep").expect("other file should be writable");
+        std::fs::write(&keep_cache, b"keep").expect("cache file should be writable");
+
+        cleanup_stale_cache_temp_files(&cache_path);
+
+        assert!(!stale_a.exists());
+        assert!(!stale_b.exists());
+        assert!(keep_other.exists());
+        assert!(keep_cache.exists());
+
+        std::fs::remove_dir_all(root).expect("temp dir should be removable");
     }
 
     #[test]
