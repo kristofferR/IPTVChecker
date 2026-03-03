@@ -9,7 +9,7 @@ import {
   Info,
 } from "lucide-react";
 import type { ChannelResult } from "../lib/types";
-import { exportCsv, exportSplit, exportRenamed } from "../lib/tauri";
+import { exportCsv, exportM3u, exportSplit, exportRenamed } from "../lib/tauri";
 import {
   HapticFeedbackPattern,
   PerformanceTime,
@@ -18,24 +18,26 @@ import {
 
 interface ExportMenuProps {
   results: ChannelResult[];
+  filteredResults: ChannelResult[];
   playlistName: string;
   playlistPath: string;
   disabled: boolean;
   menuRequest?: {
     id: number;
-    action: "csv" | "split" | "renamed";
+    action: "csv" | "split" | "renamed" | "m3u";
   } | null;
 }
 
 export function ExportMenu({
   results,
+  filteredResults,
   playlistName,
   playlistPath,
   disabled,
   menuRequest,
 }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
-  const [busyAction, setBusyAction] = useState<"csv" | "split" | "renamed" | null>(null);
+  const [busyAction, setBusyAction] = useState<"csv" | "split" | "renamed" | "m3u" | null>(null);
   const [feedback, setFeedback] = useState<{
     kind: "success" | "error" | "info";
     message: string;
@@ -139,6 +141,43 @@ export function ExportMenu({
     }
   }, [playlistPath, results, sourceDir, sourceStem]);
 
+  const handleExportM3u = useCallback(async () => {
+    setOpen(false);
+    if (filteredResults.length === 0) {
+      setFeedback({
+        kind: "info",
+        message: "No channels match the current filters.",
+      });
+      return;
+    }
+
+    const path = await save({
+      defaultPath: `${sourceStem}_filtered.m3u8`,
+      filters: [{ name: "M3U Playlist", extensions: ["m3u8", "m3u"] }],
+    });
+    if (!path) {
+      setFeedback({ kind: "info", message: "Filtered M3U export cancelled." });
+      return;
+    }
+
+    setBusyAction("m3u");
+    try {
+      await exportM3u(filteredResults, path);
+      setFeedback({
+        kind: "success",
+        message: `Exported filtered playlist to ${path}.`,
+      });
+      void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
+    } catch (err) {
+      setFeedback({
+        kind: "error",
+        message: `Filtered M3U export failed: ${String(err)}`,
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  }, [filteredResults, sourceStem]);
+
   const exporting = busyAction !== null;
 
   useEffect(() => {
@@ -152,6 +191,8 @@ export function ExportMenu({
       void handleExportSplit();
     } else if (menuRequest.action === "renamed") {
       void handleExportRenamed();
+    } else if (menuRequest.action === "m3u") {
+      void handleExportM3u();
     }
   }, [
     menuRequest,
@@ -160,6 +201,7 @@ export function ExportMenu({
     handleExportCsv,
     handleExportSplit,
     handleExportRenamed,
+    handleExportM3u,
   ]);
 
   return (
@@ -199,6 +241,13 @@ export function ExportMenu({
             className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
           >
             Renamed Playlist
+          </button>
+          <button
+            onClick={handleExportM3u}
+            disabled={exporting || filteredResults.length === 0}
+            className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
+          >
+            Filtered M3U/M3U8
           </button>
         </div>
       )}

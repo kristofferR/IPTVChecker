@@ -65,6 +65,7 @@ pub fn run() {
                 .text("menu.file.export_csv", "Export CSV")
                 .text("menu.file.export_split", "Export Split Playlists")
                 .text("menu.file.export_renamed", "Export Renamed Playlist")
+                .text("menu.file.export_filtered_m3u", "Export Filtered M3U/M3U8")
                 .build()?;
 
             let view_menu = SubmenuBuilder::new(app, "View")
@@ -116,6 +117,7 @@ pub fn run() {
                 "menu.file.export_csv" => Some("menu://export-csv"),
                 "menu.file.export_split" => Some("menu://export-split"),
                 "menu.file.export_renamed" => Some("menu://export-renamed"),
+                "menu.file.export_filtered_m3u" => Some("menu://export-filtered-m3u"),
                 "menu.view.toggle_sidebar" => Some("menu://toggle-sidebar"),
                 "menu.view.clear_filters" => Some("menu://clear-filters"),
                 "menu.view.history" => Some("menu://open-history"),
@@ -189,6 +191,7 @@ pub fn run() {
             commands::export::export_csv,
             commands::export::export_split,
             commands::export::export_renamed,
+            commands::export::export_m3u,
             commands::settings::get_settings,
             commands::settings::update_settings,
             commands::settings::check_ffmpeg_available,

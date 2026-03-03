@@ -197,6 +197,15 @@ pub async fn export_renamed(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn export_m3u(results: Vec<ChannelResult>, path: String) -> Result<(), AppError> {
+    let entries = results
+        .iter()
+        .map(build_m3u_entry)
+        .collect::<Vec<String>>();
+    write_m3u_file(Path::new(&path), &entries)
+}
+
 fn build_m3u_entry(r: &ChannelResult) -> String {
     let mut entry = r.extinf_line.clone();
     for meta in &r.metadata_lines {
@@ -401,5 +410,40 @@ mod tests {
         assert!(row.get(5).expect("name should exist").starts_with("'=2+2"));
 
         std::fs::remove_file(path).expect("temporary csv should be removable");
+    }
+
+    #[tokio::test]
+    async fn export_m3u_writes_header_and_original_extinf_metadata() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be monotonic")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("iptv-export-m3u-{unique}.m3u8"));
+        let path_string = path.to_string_lossy().to_string();
+
+        let mut result = sample_result("Channel 1", "Sports", "id-1");
+        result.extinf_line =
+            "#EXTINF:-1 tvg-id=\"id-1\" group-title=\"Sports\",Channel 1".to_string();
+        result.metadata_lines = vec![
+            "#KODIPROP:inputstream.ffmpegdirect.is_realtime_stream=true".to_string(),
+            "#EXTVLCOPT:http-user-agent=VLC/3.0.14".to_string(),
+        ];
+        result.url = "http://example.com/sports/channel1.m3u8".to_string();
+
+        export_m3u(vec![result.clone()], path_string)
+            .await
+            .expect("m3u export should succeed");
+
+        let exported = std::fs::read_to_string(&path).expect("m3u export should be readable");
+        let expected = format!(
+            "#EXTM3U\n{}\n{}\n{}\n{}\n",
+            result.extinf_line,
+            result.metadata_lines[0],
+            result.metadata_lines[1],
+            result.url
+        );
+        assert_eq!(exported, expected);
+
+        std::fs::remove_file(path).expect("temporary m3u should be removable");
     }
 }

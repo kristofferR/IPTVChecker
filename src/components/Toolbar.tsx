@@ -16,7 +16,7 @@ import { ExportMenu } from "./ExportMenu";
 
 export interface MenuExportRequest {
   id: number;
-  action: "csv" | "split" | "renamed";
+  action: "csv" | "split" | "renamed" | "m3u";
 }
 
 interface ToolbarProps {
@@ -32,6 +32,7 @@ interface ToolbarProps {
   scanState: ScanState;
   hasPlaylist: boolean;
   results: ChannelResult[];
+  filteredResults: ChannelResult[];
   playlistName: string;
   playlistPath: string;
   selectedCount: number;
@@ -59,6 +60,7 @@ export function Toolbar({
   scanState,
   hasPlaylist,
   results,
+  filteredResults,
   playlistName,
   playlistPath,
   selectedCount,
@@ -166,6 +168,7 @@ export function Toolbar({
 
       <ExportMenu
         results={results}
+        filteredResults={filteredResults}
         playlistName={playlistName}
         playlistPath={playlistPath}
         disabled={!hasResults || inScanSession}

@@ -89,6 +89,13 @@ export async function exportRenamed(
   return invoke("export_renamed", { results, basePath });
 }
 
+export async function exportM3u(
+  results: ChannelResult[],
+  path: string,
+): Promise<void> {
+  return invoke("export_m3u", { results, path });
+}
+
 export async function getSettings(): Promise<AppSettings> {
   return invoke("get_settings");
 }

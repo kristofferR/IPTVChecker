@@ -47,6 +47,7 @@ import { AlertTriangle, ExternalLink, FolderOpen, Info, X } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { detectPlatform } from "./lib/platform";
 import { findDuplicateChannelIndices } from "./lib/duplicates";
+import { filterResults } from "./lib/filters";
 import { logger } from "./lib/logger";
 import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/haptics";
 
@@ -262,7 +263,7 @@ export default function App() {
   const [updateNotice, setUpdateNotice] = useState<UpdateNotice | null>(null);
   const [menuExportRequest, setMenuExportRequest] = useState<{
     id: number;
-    action: "csv" | "split" | "renamed";
+    action: "csv" | "split" | "renamed" | "m3u";
   } | null>(null);
 
   const { settings, save: saveSettings } = useSettings();
@@ -972,7 +973,7 @@ export default function App() {
 
   useEffect(() => {
     const unlisten: Array<() => void> = [];
-    const queueExport = (action: "csv" | "split" | "renamed") => {
+    const queueExport = (action: "csv" | "split" | "renamed" | "m3u") => {
       setMenuExportRequest((prev) => ({
         id: (prev?.id ?? 0) + 1,
         action,
@@ -1018,6 +1019,9 @@ export default function App() {
       );
       unlisten.push(
         await listen("menu://export-renamed", () => queueExport("renamed")),
+      );
+      unlisten.push(
+        await listen("menu://export-filtered-m3u", () => queueExport("m3u")),
       );
       unlisten.push(
         await listen("menu://toggle-sidebar", () =>
@@ -1119,6 +1123,17 @@ export default function App() {
     () => findDuplicateChannelIndices(results),
     [results],
   );
+  const filteredExportResults = useMemo(
+    () =>
+      filterResults(
+        completedResults,
+        search,
+        groupFilter,
+        statusFilter,
+        duplicateIndices,
+      ),
+    [completedResults, search, groupFilter, statusFilter, duplicateIndices],
+  );
 
   // Keep sidebar in sync with live scan results
   const liveSelectedChannel =
@@ -1167,6 +1182,7 @@ export default function App() {
         scanState={scanState}
         hasPlaylist={playlist !== null}
         results={completedResults}
+        filteredResults={filteredExportResults}
         playlistName={playlist?.file_name ?? ""}
         playlistPath={playlist?.file_path ?? ""}
         selectedCount={selectedChannelIndices.length}
