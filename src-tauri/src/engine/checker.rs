@@ -15,14 +15,39 @@ const MAX_PLAYLIST_DEPTH: u32 = 4;
 /// HTTP status codes indicating potential geoblocking.
 const GEOBLOCK_STATUSES: &[u16] = &[403, 451, 426];
 const SECONDARY_GEOBLOCK_STATUSES: &[u16] = &[401, 423, 451];
+/// HTTP status codes that are typically transient and should be retried.
+const RETRYABLE_HTTP_STATUSES: &[u16] = &[408, 425, 429, 500, 502, 503, 504];
 
 /// Internal result from a single verification attempt.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 enum VerifyResult {
     Alive(Option<String>),
     Dead,
     Geoblocked,
     Retry,
+}
+
+fn classify_non_ok_status(status_code: u16) -> VerifyResult {
+    if GEOBLOCK_STATUSES.contains(&status_code) || SECONDARY_GEOBLOCK_STATUSES.contains(&status_code)
+    {
+        return VerifyResult::Geoblocked;
+    }
+
+    if RETRYABLE_HTTP_STATUSES.contains(&status_code) {
+        return VerifyResult::Retry;
+    }
+
+    VerifyResult::Dead
+}
+
+fn is_retryable_request_error(err: &reqwest::Error) -> bool {
+    if err.is_timeout() || err.is_connect() || err.is_request() || err.is_body() || err.is_decode() {
+        return true;
+    }
+
+    err.status()
+        .map(|status| RETRYABLE_HTTP_STATUSES.contains(&status.as_u16()))
+        .unwrap_or(false)
 }
 
 fn is_playlist_content_type(content_type: &str, url: &str) -> bool {
@@ -96,7 +121,7 @@ async fn read_stream(
     }
 
     if !stable {
-        return VerifyResult::Dead;
+        return VerifyResult::Retry;
     }
 
     // Fallback threshold logic
@@ -140,7 +165,7 @@ async fn verify(
     let resp = match request.send().await {
         Ok(r) => r,
         Err(e) => {
-            if e.is_connect() || e.is_timeout() {
+            if is_retryable_request_error(&e) {
                 return VerifyResult::Retry;
             }
             return VerifyResult::Dead;
@@ -149,17 +174,8 @@ async fn verify(
 
     let status_code = resp.status().as_u16();
 
-    if status_code == 429 {
-        return VerifyResult::Retry;
-    }
-    if GEOBLOCK_STATUSES.contains(&status_code) {
-        return VerifyResult::Geoblocked;
-    }
     if status_code != 200 {
-        if SECONDARY_GEOBLOCK_STATUSES.contains(&status_code) {
-            return VerifyResult::Geoblocked;
-        }
-        return VerifyResult::Dead;
+        return classify_non_ok_status(status_code);
     }
 
     let content_type = resp
@@ -174,11 +190,11 @@ async fn verify(
     if is_playlist_content_type(&content_type, &final_url) {
         let playlist_text = match resp.text().await {
             Ok(t) if !t.is_empty() => t,
-            _ => return VerifyResult::Dead,
+            _ => return VerifyResult::Retry,
         };
         let next_url = match extract_next_url(&final_url, &playlist_text) {
             Some(u) => u,
-            None => return VerifyResult::Dead,
+            None => return VerifyResult::Retry,
         };
         return Box::pin(verify(client, &next_url, timeout_secs, depth + 1, visited, headers)).await;
     }
@@ -316,5 +332,26 @@ mod tests {
             "video/mp4",
             "http://example.com/video.mp4"
         ));
+    }
+
+    #[test]
+    fn test_retryable_status_classification() {
+        for status in [408u16, 425, 429, 500, 502, 503, 504] {
+            assert_eq!(classify_non_ok_status(status), VerifyResult::Retry);
+        }
+    }
+
+    #[test]
+    fn test_geoblock_status_classification() {
+        for status in [401u16, 403, 423, 426, 451] {
+            assert_eq!(classify_non_ok_status(status), VerifyResult::Geoblocked);
+        }
+    }
+
+    #[test]
+    fn test_terminal_status_classification() {
+        for status in [400u16, 404, 405, 410] {
+            assert_eq!(classify_non_ok_status(status), VerifyResult::Dead);
+        }
     }
 }
