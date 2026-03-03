@@ -188,6 +188,84 @@ async fn compute_shared_url_result(
     Ok(shared)
 }
 
+fn try_mark_scan_started(scanning: &mut bool) -> Result<(), AppError> {
+    if *scanning {
+        return Err(AppError::Other("A scan is already in progress".to_string()));
+    }
+    *scanning = true;
+    Ok(())
+}
+
+fn mark_scan_finished(scanning: &mut bool) {
+    *scanning = false;
+}
+
+async fn cancel_scan_token(state: &AppState) {
+    let token = state.cancel_token.lock().await;
+    if let Some(ref cancel) = *token {
+        cancel.cancel();
+    }
+}
+
+async fn reset_scan_state(state: &AppState) {
+    cancel_scan_token(state).await;
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let mut scanning = state.scanning.lock().await;
+    mark_scan_finished(&mut scanning);
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct ScanCounters {
+    completed: usize,
+    alive: usize,
+    dead: usize,
+    geoblocked: usize,
+    low_framerate: usize,
+    mislabeled: usize,
+}
+
+impl ScanCounters {
+    fn apply(&mut self, result: &ChannelResult) {
+        match result.status {
+            ChannelStatus::Alive => self.alive += 1,
+            ChannelStatus::Dead => self.dead += 1,
+            ChannelStatus::Geoblocked
+            | ChannelStatus::GeoblockedConfirmed
+            | ChannelStatus::GeoblockedUnconfirmed => self.geoblocked += 1,
+            _ => {}
+        }
+
+        if result.low_framerate {
+            self.low_framerate += 1;
+        }
+        if !result.label_mismatches.is_empty() {
+            self.mislabeled += 1;
+        }
+        self.completed += 1;
+    }
+
+    fn as_progress(&self, total: usize) -> ScanProgress {
+        ScanProgress {
+            completed: self.completed,
+            total,
+            alive: self.alive,
+            dead: self.dead,
+            geoblocked: self.geoblocked,
+        }
+    }
+
+    fn as_summary(&self, total: usize) -> ScanSummary {
+        ScanSummary {
+            total,
+            alive: self.alive,
+            dead: self.dead,
+            geoblocked: self.geoblocked,
+            low_framerate: self.low_framerate,
+            mislabeled: self.mislabeled,
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppError> {
     let state = app.state::<Arc<AppState>>();
@@ -195,12 +273,8 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
     // Prevent multiple simultaneous scans
     {
         let mut scanning = state.scanning.lock().await;
-        if *scanning {
-            return Err(AppError::Other("A scan is already in progress".to_string()));
-        }
-
         config.validate()?;
-        *scanning = true;
+        try_mark_scan_started(&mut scanning)?;
     }
 
     let cancel_token = CancellationToken::new();
@@ -330,51 +404,16 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
         // Spawn a task to forward results as events
         let app_for_events = app_handle.clone();
         let event_task = tokio::spawn(async move {
-            let mut alive = 0usize;
-            let mut dead = 0usize;
-            let mut geoblocked = 0usize;
-            let mut low_framerate = 0usize;
-            let mut mislabeled = 0usize;
-            let mut completed = 0usize;
+            let mut counters = ScanCounters::default();
 
             while let Some(result) = rx.recv().await {
-                match result.status {
-                    ChannelStatus::Alive => alive += 1,
-                    ChannelStatus::Dead => dead += 1,
-                    ChannelStatus::Geoblocked
-                    | ChannelStatus::GeoblockedConfirmed
-                    | ChannelStatus::GeoblockedUnconfirmed => geoblocked += 1,
-                    _ => {}
-                }
-                if result.low_framerate {
-                    low_framerate += 1;
-                }
-                if !result.label_mismatches.is_empty() {
-                    mislabeled += 1;
-                }
-                completed += 1;
+                counters.apply(&result);
 
                 let _ = app_for_events.emit("scan://channel-result", &result);
-                let _ = app_for_events.emit(
-                    "scan://progress",
-                    ScanProgress {
-                        completed,
-                        total,
-                        alive,
-                        dead,
-                        geoblocked,
-                    },
-                );
+                let _ = app_for_events.emit("scan://progress", counters.as_progress(total));
             }
 
-            ScanSummary {
-                total,
-                alive,
-                dead,
-                geoblocked,
-                low_framerate,
-                mislabeled,
-            }
+            counters.as_summary(total)
         });
 
         // Process channels
@@ -532,7 +571,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
 
         // Reset scanning state
         let mut scanning = state_clone.scanning.lock().await;
-        *scanning = false;
+        mark_scan_finished(&mut scanning);
     });
 
     Ok(())
@@ -541,10 +580,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
 #[tauri::command]
 pub async fn cancel_scan(app: AppHandle) -> Result<(), AppError> {
     let state = app.state::<Arc<AppState>>();
-    let token = state.cancel_token.lock().await;
-    if let Some(ref cancel) = *token {
-        cancel.cancel();
-    }
+    cancel_scan_token(state.inner().as_ref()).await;
     Ok(())
 }
 
@@ -553,21 +589,7 @@ pub async fn cancel_scan(app: AppHandle) -> Result<(), AppError> {
 #[tauri::command]
 pub async fn reset_scan(app: AppHandle) -> Result<(), AppError> {
     let state = app.state::<Arc<AppState>>();
-
-    // Cancel any running scan
-    {
-        let token = state.cancel_token.lock().await;
-        if let Some(ref cancel) = *token {
-            cancel.cancel();
-        }
-    }
-
-    // Give spawned tasks a moment to observe cancellation
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
-    // Force-reset the flag
-    let mut scanning = state.scanning.lock().await;
-    *scanning = false;
+    reset_scan_state(state.inner().as_ref()).await;
 
     log::info!("Scan state reset");
     Ok(())
@@ -575,7 +597,43 @@ pub async fn reset_scan(app: AppHandle) -> Result<(), AppError> {
 
 #[cfg(test)]
 mod tests {
-    use super::canonicalize_stream_url;
+    use super::*;
+    use tokio_util::sync::CancellationToken;
+
+    fn make_result(
+        index: usize,
+        status: ChannelStatus,
+        low_framerate: bool,
+        mismatched: bool,
+    ) -> ChannelResult {
+        ChannelResult {
+            index,
+            name: format!("Channel {}", index),
+            group: "Test".to_string(),
+            url: format!("http://example.com/{}.m3u8", index),
+            status,
+            codec: None,
+            resolution: None,
+            width: None,
+            height: None,
+            fps: None,
+            video_bitrate: None,
+            audio_bitrate: None,
+            audio_codec: None,
+            screenshot_path: None,
+            label_mismatches: if mismatched {
+                vec!["Label mismatch".to_string()]
+            } else {
+                Vec::new()
+            },
+            low_framerate,
+            error_message: None,
+            channel_id: "id".to_string(),
+            extinf_line: "#EXTINF:-1,Test".to_string(),
+            metadata_lines: Vec::new(),
+            stream_url: None,
+        }
+    }
 
     #[test]
     fn canonicalize_stream_url_removes_default_port_and_fragment() {
@@ -592,5 +650,74 @@ mod tests {
     #[test]
     fn canonicalize_stream_url_for_non_url_is_trim_only() {
         assert_eq!(canonicalize_stream_url("  not-a-valid-url  "), "not-a-valid-url");
+    }
+
+    #[test]
+    fn concurrent_start_guard_rejects_second_start() {
+        let mut scanning = false;
+        assert!(try_mark_scan_started(&mut scanning).is_ok());
+        assert!(try_mark_scan_started(&mut scanning).is_err());
+    }
+
+    #[test]
+    fn scan_counters_follow_event_order() {
+        let mut counters = ScanCounters::default();
+        let total = 3usize;
+
+        let alive = make_result(0, ChannelStatus::Alive, true, true);
+        counters.apply(&alive);
+        let progress = counters.as_progress(total);
+        assert_eq!(progress.completed, 1);
+        assert_eq!(progress.alive, 1);
+        assert_eq!(progress.dead, 0);
+        assert_eq!(progress.geoblocked, 0);
+
+        let geoblocked = make_result(1, ChannelStatus::Geoblocked, false, false);
+        counters.apply(&geoblocked);
+        let dead = make_result(2, ChannelStatus::Dead, false, false);
+        counters.apply(&dead);
+
+        let summary = counters.as_summary(total);
+        assert_eq!(summary.total, 3);
+        assert_eq!(summary.alive, 1);
+        assert_eq!(summary.dead, 1);
+        assert_eq!(summary.geoblocked, 1);
+        assert_eq!(summary.low_framerate, 1);
+        assert_eq!(summary.mislabeled, 1);
+    }
+
+    #[tokio::test]
+    async fn cancel_scan_token_cancels_active_token() {
+        let state = AppState::new();
+        let token = CancellationToken::new();
+
+        {
+            let mut lock = state.cancel_token.lock().await;
+            *lock = Some(token.clone());
+        }
+
+        cancel_scan_token(state.as_ref()).await;
+        assert!(token.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn reset_scan_state_cancels_token_and_clears_flag() {
+        let state = AppState::new();
+        let token = CancellationToken::new();
+
+        {
+            let mut token_lock = state.cancel_token.lock().await;
+            *token_lock = Some(token.clone());
+        }
+        {
+            let mut scan_lock = state.scanning.lock().await;
+            *scan_lock = true;
+        }
+
+        reset_scan_state(state.as_ref()).await;
+
+        assert!(token.is_cancelled());
+        let scanning = state.scanning.lock().await;
+        assert!(!*scanning);
     }
 }
