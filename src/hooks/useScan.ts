@@ -14,6 +14,10 @@ import {
   pendingScanErrorMessageForRun,
   runScopedScanErrorMessage,
 } from "../lib/scanErrorEvents";
+import {
+  applyResultBatch,
+  isRunScopedEventForActiveRun,
+} from "./useScan.helpers";
 
 export type ScanState = "idle" | "scanning" | "paused" | "complete" | "cancelled";
 interface ScanTelemetry {
@@ -59,10 +63,7 @@ export function useScan() {
       const batch = pendingResults.current;
       pendingResults.current = [];
       setResults((prev) => {
-        const updated = [...prev];
-        for (const result of batch) {
-          updated[result.index] = result;
-        }
+        const updated = applyResultBatch(prev, batch);
         const nonNull = updated.filter((r) => r != null).length;
         logger.debug(
           `[useScan] flush: batch=${batch.length}, total array=${updated.length}, non-null=${nonNull}`,
@@ -105,7 +106,12 @@ export function useScan() {
 
       unlisteners.push(
         await listen<ScanEvent<ChannelResult>>("scan://channel-result", (event) => {
-          if (!activeRunId.current || event.payload.run_id !== activeRunId.current) {
+          if (
+            !isRunScopedEventForActiveRun(
+              activeRunId.current,
+              event.payload.run_id,
+            )
+          ) {
             return;
           }
           queueResult(event.payload.payload);
@@ -114,7 +120,12 @@ export function useScan() {
 
       unlisteners.push(
         await listen<ScanEvent<ScanProgress>>("scan://progress", (event) => {
-          if (!activeRunId.current || event.payload.run_id !== activeRunId.current) {
+          if (
+            !isRunScopedEventForActiveRun(
+              activeRunId.current,
+              event.payload.run_id,
+            )
+          ) {
             return;
           }
           const nextProgress = event.payload.payload;
@@ -156,7 +167,12 @@ export function useScan() {
 
       unlisteners.push(
         await listen<ScanEvent<ScanSummary>>("scan://complete", (event) => {
-          if (!activeRunId.current || event.payload.run_id !== activeRunId.current) {
+          if (
+            !isRunScopedEventForActiveRun(
+              activeRunId.current,
+              event.payload.run_id,
+            )
+          ) {
             return;
           }
           logger.debug("[useScan] scan://complete received", event.payload);
@@ -171,7 +187,12 @@ export function useScan() {
 
       unlisteners.push(
         await listen<ScanEvent<ScanSummary>>("scan://cancelled", (event) => {
-          if (!activeRunId.current || event.payload.run_id !== activeRunId.current) {
+          if (
+            !isRunScopedEventForActiveRun(
+              activeRunId.current,
+              event.payload.run_id,
+            )
+          ) {
             return;
           }
           logger.debug("[useScan] scan://cancelled received", event.payload);
@@ -186,7 +207,12 @@ export function useScan() {
 
       unlisteners.push(
         await listen<ScanEvent<null>>("scan://paused", (event) => {
-          if (!activeRunId.current || event.payload.run_id !== activeRunId.current) {
+          if (
+            !isRunScopedEventForActiveRun(
+              activeRunId.current,
+              event.payload.run_id,
+            )
+          ) {
             return;
           }
           const activeRun = runClock.current;
@@ -199,7 +225,12 @@ export function useScan() {
 
       unlisteners.push(
         await listen<ScanEvent<null>>("scan://resumed", (event) => {
-          if (!activeRunId.current || event.payload.run_id !== activeRunId.current) {
+          if (
+            !isRunScopedEventForActiveRun(
+              activeRunId.current,
+              event.payload.run_id,
+            )
+          ) {
             return;
           }
           const now = performance.now();

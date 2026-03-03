@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "typecheck": "tsgo --noEmit",
+    "test:frontend": "bun test tests",
     "setup:ffmpeg": "bash scripts/download-ffmpeg.sh"
   },
   "dependencies": {
