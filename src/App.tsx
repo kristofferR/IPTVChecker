@@ -21,7 +21,7 @@ import { StatsPanel } from "./components/StatsPanel";
 import { WarningsPanel } from "./components/WarningsPanel";
 import { ProgressBar } from "./components/ProgressBar";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { AlertTriangle, X } from "lucide-react";
+import { AlertTriangle, FolderOpen, X } from "lucide-react";
 import { detectPlatform } from "./lib/platform";
 
 export default function App() {
@@ -328,17 +328,25 @@ export default function App() {
             />
           ) : (
             <div className="flex-1 flex items-center justify-center text-text-tertiary">
-              <div className="text-center">
+              <div className="text-center px-4">
                 <p className="text-lg font-medium mb-2">
                   No playlist loaded
                 </p>
-                <p className="text-[15px]">
+                <p className="text-[15px] mb-4">
                   Click Open or press{" "}
                   <kbd className="px-2 py-0.5 bg-input rounded text-[13px] border border-border-app">
                     {modKey}+O
                   </kbd>{" "}
                   to load an M3U playlist
                 </p>
+                <button
+                  onClick={handleOpen}
+                  className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-600/25 transition-colors"
+                  type="button"
+                >
+                  <FolderOpen className="w-4 h-4" />
+                  Open File
+                </button>
               </div>
             </div>
           )}
