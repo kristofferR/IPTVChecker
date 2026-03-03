@@ -301,11 +301,18 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
     );
 
     // Parse the playlist
-    let preview = parser::parse_playlist(
+    let preview = match parser::parse_playlist(
         &config.file_path,
         &config.group_filter,
         &config.channel_search,
-    )?;
+    ) {
+        Ok(preview) => preview,
+        Err(error) => {
+            let mut scanning = state.scanning.lock().await;
+            *scanning = false;
+            return Err(error);
+        }
+    };
 
     let mut channels = preview.channels;
     filter_channels_by_selection(&mut channels, &config.selected_indices);
@@ -330,8 +337,25 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<(), AppErr
     }
 
     // Load proxies if configured
-    let proxy_list = if let Some(ref proxy_file) = config.proxy_file {
-        proxy::load_proxy_list(proxy_file).ok()
+    let proxy_list = if config.test_geoblock {
+        if let Some(ref proxy_file) = config.proxy_file {
+            match proxy::load_proxy_list(proxy_file) {
+                Ok(proxy_list) => {
+                    log::info!("Loaded {} proxies from {}", proxy_list.len(), proxy_file);
+                    Some(proxy_list)
+                }
+                Err(error) => {
+                    let mut scanning = state.scanning.lock().await;
+                    *scanning = false;
+                    return Err(AppError::Other(format!(
+                        "Failed to load proxy file '{}': {}",
+                        proxy_file, error
+                    )));
+                }
+            }
+        } else {
+            None
+        }
     } else {
         None
     };
