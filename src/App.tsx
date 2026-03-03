@@ -5,7 +5,12 @@ import type {
   PlaylistPreview,
   ScanConfig,
 } from "./lib/types";
-import { openPlaylist, checkFfmpegAvailable, readScreenshot } from "./lib/tauri";
+import {
+  openPlaylist,
+  checkFfmpegAvailable,
+  readScreenshot,
+  openChannelInPlayer,
+} from "./lib/tauri";
 import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
 import { Toolbar } from "./components/Toolbar";
@@ -34,6 +39,9 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [ffmpegWarning, setFfmpegWarning] = useState(false);
   const [errorDismissed, setErrorDismissed] = useState(false);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [pendingPlaybackChannel, setPendingPlaybackChannel] =
+    useState<ChannelResult | null>(null);
 
   const { settings, save: saveSettings } = useSettings();
   const {
@@ -76,6 +84,12 @@ export default function App() {
     }
   }, [error]);
 
+  useEffect(() => {
+    if (!playbackError) return;
+    const timer = setTimeout(() => setPlaybackError(null), 10000);
+    return () => clearTimeout(timer);
+  }, [playbackError]);
+
   const handleOpen = useCallback(async () => {
     const path = await open({
       multiple: false,
@@ -104,6 +118,11 @@ export default function App() {
     showSettingsRef.current = showSettings;
   }, [showSettings]);
 
+  const pendingPlaybackRef = useRef<ChannelResult | null>(pendingPlaybackChannel);
+  useEffect(() => {
+    pendingPlaybackRef.current = pendingPlaybackChannel;
+  }, [pendingPlaybackChannel]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "o") {
@@ -115,6 +134,10 @@ export default function App() {
         setShowSettings((s) => !s);
       }
       if (e.key === "Escape") {
+        if (pendingPlaybackRef.current) {
+          setPendingPlaybackChannel(null);
+          return;
+        }
         if (showSettingsRef.current) setShowSettings(false);
       }
     };
@@ -147,6 +170,36 @@ export default function App() {
   const handleSelectChannel = useCallback((result: ChannelResult) => {
     setSelectedChannel(result);
   }, []);
+
+  const launchChannelInPlayer = useCallback(async (result: ChannelResult) => {
+    try {
+      await openChannelInPlayer({
+        extinf_line: result.extinf_line,
+        metadata_lines: result.metadata_lines,
+        url: result.url,
+      });
+    } catch (err) {
+      setPlaybackError(String(err));
+    }
+  }, []);
+
+  const handleOpenChannel = useCallback(
+    (result: ChannelResult) => {
+      if (scanState === "scanning") {
+        setPendingPlaybackChannel(result);
+        return;
+      }
+      void launchChannelInPlayer(result);
+    },
+    [scanState, launchChannelInPlayer],
+  );
+
+  const handleProceedPlayback = useCallback(() => {
+    if (!pendingPlaybackChannel) return;
+    const channel = pendingPlaybackChannel;
+    setPendingPlaybackChannel(null);
+    void launchChannelInPlayer(channel);
+  }, [pendingPlaybackChannel, launchChannelInPlayer]);
 
   const completedResults = results.filter(
     (r): r is ChannelResult => r != null,
@@ -217,6 +270,19 @@ export default function App() {
         </div>
       )}
 
+      {playbackError && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border-b border-red-500/20 text-red-400 text-[13px]">
+          <span className="flex-1">{playbackError}</span>
+          <button
+            onClick={() => setPlaybackError(null)}
+            className="p-1 hover:bg-red-500/20 rounded transition-colors"
+            type="button"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       <FilterBar
         search={search}
         onSearchChange={setSearch}
@@ -239,6 +305,7 @@ export default function App() {
               groupFilter={groupFilter}
               statusFilter={statusFilter}
               onSelectChannel={handleSelectChannel}
+              onOpenChannel={handleOpenChannel}
               selectedIndex={selectedChannel?.index ?? null}
             />
           ) : (
@@ -283,6 +350,37 @@ export default function App() {
           onSave={saveSettings}
           onClose={() => setShowSettings(false)}
         />
+      )}
+
+      {pendingPlaybackChannel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-xl rounded-xl border border-border-app bg-overlay p-5 shadow-2xl">
+            <h2 className="text-[16px] font-semibold mb-2">
+              Scan currently running
+            </h2>
+            <p className="text-[14px] text-text-secondary leading-relaxed">
+              A scan is currently running. Playing a channel while scanning may
+              interfere with the scan or cause playback issues if the server&apos;s
+              max connection limit is exceeded.
+            </p>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setPendingPlaybackChannel(null)}
+                className="macos-btn px-3 py-2 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleProceedPlayback}
+                className="macos-btn macos-btn-primary px-3 py-2 min-h-9 text-[13px] font-medium bg-blue-600 hover:bg-blue-500 rounded-md"
+                type="button"
+              >
+                Proceed
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -54,6 +54,7 @@ pub fn run() {
         .manage(AppState::new() as Arc<AppState>)
         .invoke_handler(tauri::generate_handler![
             commands::playlist::open_playlist,
+            commands::player::open_channel_in_player,
             commands::scan::start_scan,
             commands::scan::cancel_scan,
             commands::scan::reset_scan,

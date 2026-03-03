@@ -18,6 +18,7 @@ interface ChannelTableProps {
   groupFilter: string;
   statusFilter: string;
   onSelectChannel: (result: ChannelResult) => void;
+  onOpenChannel?: (result: ChannelResult) => void;
   selectedIndex: number | null;
 }
 
@@ -78,6 +79,7 @@ export function ChannelTable({
   groupFilter,
   statusFilter,
   onSelectChannel,
+  onOpenChannel,
   selectedIndex,
 }: ChannelTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
@@ -325,6 +327,7 @@ export function ChannelTable({
                     <ChannelRow
                       result={result}
                       onClick={onSelectChannel}
+                      onDoubleClick={onOpenChannel}
                       selected={selectedIndex === result.index}
                       focused={focusedIndex === virtualRow.index}
                       columns={columns}

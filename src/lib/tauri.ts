@@ -67,3 +67,11 @@ export async function checkFfmpegAvailable(): Promise<[boolean, boolean]> {
 export async function readScreenshot(path: string): Promise<string> {
   return invoke("read_screenshot", { path });
 }
+
+export async function openChannelInPlayer(channel: {
+  extinf_line: string;
+  metadata_lines: string[];
+  url: string;
+}): Promise<void> {
+  return invoke("open_channel_in_player", { channel });
+}
