@@ -1,3 +1,5 @@
+import { attachConsole } from "@tauri-apps/plugin-log";
+
 export type LogLevel = "debug" | "info" | "warn" | "error" | "silent";
 
 const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
@@ -31,6 +33,9 @@ function shouldLog(level: Exclude<LogLevel, "silent">): boolean {
   return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[ACTIVE_LOG_LEVEL];
 }
 
+// Bridge frontend console.* calls to the Rust log plugin → terminal output
+attachConsole();
+
 export const logger = {
   level: ACTIVE_LOG_LEVEL,
   debug(...args: unknown[]) {
@@ -54,4 +59,3 @@ export const logger = {
     }
   },
 };
-

@@ -9,6 +9,7 @@
         "@tauri-apps/api": "^2",
         "@tauri-apps/plugin-dialog": "^2",
         "@tauri-apps/plugin-fs": "^2",
+        "@tauri-apps/plugin-log": "^2.8.0",
         "@tauri-apps/plugin-notification": "^2",
         "@tauri-apps/plugin-os": "^2.3.2",
         "@tauri-apps/plugin-shell": "^2",
@@ -18,6 +19,7 @@
         "react-dom": "^19",
         "tauri-plugin-liquid-glass-api": "^0.1.6",
         "tauri-plugin-macos-haptics-api": "^1.0.0",
+        "tauri-plugin-mcp": "^0.1.0",
       },
       "devDependencies": {
         "@tailwindcss/vite": "^4",
@@ -249,6 +251,8 @@
 
     "@tauri-apps/plugin-fs": ["@tauri-apps/plugin-fs@2.4.5", "", { "dependencies": { "@tauri-apps/api": "^2.8.0" } }, "sha512-dVxWWGE6VrOxC7/jlhyE+ON/Cc2REJlM35R3PJX3UvFw2XwYhLGQVAIyrehenDdKjotipjYEVc4YjOl3qq90fA=="],
 
+    "@tauri-apps/plugin-log": ["@tauri-apps/plugin-log@2.8.0", "", { "dependencies": { "@tauri-apps/api": "^2.8.0" } }, "sha512-a+7rOq3MJwpTOLLKbL8d0qGZ85hgHw5pNOWusA9o3cf7cEgtYHiGY/+O8fj8MvywQIGqFv0da2bYQDlrqLE7rw=="],
+
     "@tauri-apps/plugin-notification": ["@tauri-apps/plugin-notification@2.3.3", "", { "dependencies": { "@tauri-apps/api": "^2.8.0" } }, "sha512-Zw+ZH18RJb41G4NrfHgIuofJiymusqN+q8fGUIIV7vyCH+5sSn5coqRv/MWB9qETsUs97vmU045q7OyseCV3Qg=="],
 
     "@tauri-apps/plugin-os": ["@tauri-apps/plugin-os@2.3.2", "", { "dependencies": { "@tauri-apps/api": "^2.8.0" } }, "sha512-n+nXWeuSeF9wcEsSPmRnBEGrRgOy6jjkSU+UVCOV8YUGKb2erhDOxis7IqRXiRVHhY8XMKks00BJ0OAdkpf6+A=="],
@@ -390,6 +394,8 @@
     "tauri-plugin-liquid-glass-api": ["tauri-plugin-liquid-glass-api@0.1.6", "", { "peerDependencies": { "@tauri-apps/api": "^2.0.0" } }, "sha512-93sppeXhn6WbzUheAFUWhqVICxZS6pNQzPBq2UcNFLdSP2icH94lDXmmHE9DhesxhiJiGITJ4bj8wNjWcQ/zCw=="],
 
     "tauri-plugin-macos-haptics-api": ["tauri-plugin-macos-haptics-api@1.0.0", "", { "dependencies": { "@tauri-apps/api": ">=2.0.1" } }, "sha512-KIpNeik8xcJ4OfQPG3T6mTiAv5uOlsDrsE3SYB8VyTeifpsVHXSLJSLojUM1+9ilXNokRe03GrQAk56OZPA8WA=="],
+
+    "tauri-plugin-mcp": ["tauri-plugin-mcp@0.1.0", "", { "dependencies": { "@tauri-apps/api": ">=2.2.0" } }, "sha512-deml377Ax032+AabqGc5wkhJygn6XtOggqTWPVNIQ8DUksFRdy2cvX1xZWF7xLG3dO0QUBt/P7CRyJ3IRNV+0w=="],
 
     "tinyglobby": ["tinyglobby@0.2.15", "", { "dependencies": { "fdir": "^6.5.0", "picomatch": "^4.0.3" } }, "sha512-j2Zq4NyQYG5XMST4cbs02Ak8iJUdxRM0XI5QyxXuZOzKOINmWurp3smXu3y5wDcJrptwpSjgXHzIQxR0omXljQ=="],
 

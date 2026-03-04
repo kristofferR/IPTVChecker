@@ -13,6 +13,7 @@
     "os:default",
     "notification:default",
     "macos-haptics:default",
-    "liquid-glass:default"
+    "liquid-glass:default",
+    "log:default"
   ]
 }

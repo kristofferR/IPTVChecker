@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "tauri-mcp": {
+      "type": "stdio",
+      "command": "bun",
+      "args": [
+        "run",
+        "/Users/kristoffer/.bun/install/global/node_modules/tauri-plugin-mcp-server/build/index.js"
+      ],
+      "env": {
+        "TAURI_MCP_IPC_PATH": "/tmp/tauri-mcp-iptv-checker.sock"
+      }
+    }
+  }
+}

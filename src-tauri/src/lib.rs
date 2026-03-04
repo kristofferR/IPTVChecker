@@ -18,11 +18,20 @@ pub fn run() {
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Trace)
+                .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout))
+                .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview))
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_liquid_glass::init())
         .plugin(tauri_plugin_os::init());
+
+    #[cfg(debug_assertions)]
+    let builder = builder.plugin(tauri_plugin_mcp::init_with_config(
+        tauri_plugin_mcp::PluginConfig::new("iptv-checker".to_string())
+            .start_socket_server(true)
+            .socket_path("/tmp/tauri-mcp-iptv-checker.sock".into()),
+    ));
 
     #[cfg(target_os = "macos")]
     let builder = builder.plugin(tauri_plugin_macos_haptics::init());
@@ -136,6 +145,7 @@ pub fn run() {
             };
 
             if let Some(name) = frontend_event {
+                log::debug!("menu event → emitting: {name}");
                 let _ = app.emit(name, ());
             }
         });

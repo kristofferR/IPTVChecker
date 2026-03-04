@@ -1139,9 +1139,11 @@ export default function App() {
         await listen("menu://export-scan-log", () => queueExport("scanlog")),
       );
       unlisten.push(
-        await listen("menu://toggle-sidebar", () =>
-          setSidebarHidden((hidden) => !hidden),
-        ),
+        await listen("menu://toggle-sidebar", () => {
+          setSidebarHidden((hidden) => {
+            return !hidden;
+          });
+        }),
       );
       unlisten.push(
         await listen("menu://toggle-prescan-filter", () => {
@@ -1661,6 +1663,7 @@ export default function App() {
           </div>
         </div>
       )}
+
     </div>
   );
 }
