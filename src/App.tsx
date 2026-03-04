@@ -1344,7 +1344,7 @@ export default function App() {
         statusFilter={statusFilter}
         onStatusChange={setStatusFilter}
       />
-      {isMac && <div ref={headerPortalRef} />}
+      {isMac && <div ref={headerPortalRef} style={liveSelectedChannel && !sidebarHidden ? { marginRight: "18rem" } : undefined} />}
       </div>
 
       <div className="flex flex-col flex-1 min-h-0">

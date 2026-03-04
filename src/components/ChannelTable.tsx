@@ -855,6 +855,7 @@ export function ChannelTable({
         ? "h-8 select-none overflow-hidden border-t border-border-subtle"
         : "absolute top-0 left-0 right-0 z-10 h-8 bg-panel select-none overflow-hidden"
       }
+      style={portalTarget ? { maskImage: "linear-gradient(to right, black calc(100% - 24px), transparent)" } : undefined}
     >
       <div
         className="grid items-center h-8 px-4 text-[11px] font-semibold text-text-secondary"
