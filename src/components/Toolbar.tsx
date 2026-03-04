@@ -8,6 +8,7 @@ import {
   Play,
   Square,
   Settings,
+  Search,
 } from "lucide-react";
 import {
   SFPlayFill,
@@ -50,6 +51,13 @@ interface ToolbarProps {
   selectedCount: number;
   menuExportRequest: MenuExportRequest | null;
   scanBlockedReason: string | null;
+  search: string;
+  onSearchChange: (value: string) => void;
+  groups: string[];
+  groupFilter: string;
+  onGroupChange: (value: string) => void;
+  statusFilter: string;
+  onStatusChange: (value: string) => void;
 }
 
 const toolbarBtn =
@@ -82,6 +90,13 @@ export function Toolbar({
   selectedCount,
   menuExportRequest,
   scanBlockedReason,
+  search,
+  onSearchChange,
+  groups,
+  groupFilter,
+  onGroupChange,
+  statusFilter,
+  onStatusChange,
 }: ToolbarProps) {
   const appWindow = getCurrentWindow();
   const isMac = useWindowDragRegion;
@@ -122,7 +137,7 @@ export function Toolbar({
     <div
       onPointerDown={handlePointerDown}
       data-tauri-drag-region={dragRegionAttr}
-      className={`flex items-center px-3 border-b border-border-app bg-panel pt-[var(--toolbar-pt)] pb-2 pl-[var(--toolbar-pl)] ${isMac ? "gap-3" : "gap-1.5"}`}
+      className={`flex items-center px-3 bg-panel pt-[var(--toolbar-pt)] pb-2 pl-[var(--toolbar-pl)] relative glass-material ${isMac ? "gap-3" : "gap-1.5"}`}
     >
       {/* Source group: Open, Open Folder, Open URL */}
       <div className={isMac ? "toolbar-group" : "flex items-center gap-1.5"}>
@@ -213,6 +228,45 @@ export function Toolbar({
       )}
 
       <div data-tauri-drag-region={dragRegionAttr} className="flex-1" />
+
+      {/* Filters: Search, Group, Status */}
+      <div className="flex items-center gap-1.5" data-no-window-drag>
+        <div className="relative">
+          <Search className="search-icon absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary" />
+          <input
+            type="search"
+            placeholder="Search..."
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            className="native-field h-7 w-40 pl-7 pr-2 text-[12px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+          />
+        </div>
+        <select
+          value={groupFilter}
+          onChange={(e) => onGroupChange(e.target.value)}
+          className="native-field h-7 text-[12px] px-2 bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
+        >
+          <option value="all">All Groups</option>
+          {groups.map((g) => (
+            <option key={g} value={g}>
+              {g}
+            </option>
+          ))}
+        </select>
+        <select
+          value={statusFilter}
+          onChange={(e) => onStatusChange(e.target.value)}
+          className="native-field h-7 text-[12px] px-2 bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
+        >
+          <option value="all">All Status</option>
+          <option value="alive">Alive</option>
+          <option value="dead">Dead</option>
+          <option value="geoblocked">Geoblocked</option>
+          <option value="audio_only">Audio Only</option>
+          <option value="duplicates">Duplicates</option>
+          <option value="pending">Pending</option>
+        </select>
+      </div>
 
       {/* Actions group: Export, History, Settings */}
       <div className={isMac ? "toolbar-group" : "flex items-center gap-1.5"}>

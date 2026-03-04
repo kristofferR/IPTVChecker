@@ -34,6 +34,7 @@ pub struct AppSettings {
     pub scan_notifications: bool,
     pub theme: ThemePreference,
     pub log_level: String,
+    pub show_prescan_filter: bool,
 }
 
 impl AppSettings {
@@ -66,6 +67,7 @@ impl Default for AppSettings {
             scan_notifications: true,
             theme: ThemePreference::System,
             log_level: "error".to_string(),
+            show_prescan_filter: false,
         }
     }
 }

@@ -322,22 +322,39 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
 
           <section className={sectionClass}>
             <h3 className="text-[13px] font-semibold mb-3">Appearance</h3>
-            <div>
-              <label className={labelClass}>Theme</label>
-              <select
-                value={draft.theme}
-                onChange={(event) =>
-                  update("theme", event.target.value as AppSettings["theme"])
-                }
-                className={inputClass}
-              >
-                <option value="system">System</option>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
-              </select>
-              <p className="text-[11px] text-text-tertiary mt-1">
-                Applied immediately and saved for future launches.
-              </p>
+            <div className="space-y-3">
+              <div>
+                <label className={labelClass}>Theme</label>
+                <select
+                  value={draft.theme}
+                  onChange={(event) =>
+                    update("theme", event.target.value as AppSettings["theme"])
+                  }
+                  className={inputClass}
+                >
+                  <option value="system">System</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+                <p className="text-[11px] text-text-tertiary mt-1">
+                  Applied immediately and saved for future launches.
+                </p>
+              </div>
+
+              <label className={toggleRowClass}>
+                <input
+                  type="checkbox"
+                  checked={draft.show_prescan_filter}
+                  onChange={(event) => update("show_prescan_filter", event.target.checked)}
+                  className="mt-[2px] h-4 w-4 rounded border-border-app"
+                />
+                <span>
+                  <span className="block text-[13px] font-medium">Show pre-scan filter bar</span>
+                  <span className="block text-[11px] text-text-tertiary mt-0.5">
+                    Display the regex filter bar for narrowing channels before scanning.
+                  </span>
+                </span>
+              </label>
             </div>
           </section>
 

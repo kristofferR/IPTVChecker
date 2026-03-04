@@ -129,6 +129,7 @@ export interface AppSettings {
   scan_notifications: boolean;
   theme: ThemePreference;
   log_level: string;
+  show_prescan_filter: boolean;
 }
 
 export interface ScanHistoryDiff {

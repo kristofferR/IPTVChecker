@@ -292,6 +292,10 @@ export default function App() {
   } | null>(null);
 
   const { settings, save: saveSettings } = useSettings();
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const saveSettingsRef = useRef(saveSettings);
+  saveSettingsRef.current = saveSettings;
   const {
     results,
     progress,
@@ -1140,6 +1144,12 @@ export default function App() {
         ),
       );
       unlisten.push(
+        await listen("menu://toggle-prescan-filter", () => {
+          const current = settingsRef.current;
+          void saveSettingsRef.current({ ...current, show_prescan_filter: !current.show_prescan_filter });
+        }),
+      );
+      unlisten.push(
         await listen("menu://clear-filters", () => {
           setSearch("");
           setChannelSearch("");
@@ -1286,8 +1296,23 @@ export default function App() {
     };
   }, [liveSelectedChannel?.screenshot_path]);
 
+  const headerPortalRef = useRef<HTMLDivElement>(null);
+  const toolbarMeasureRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = toolbarMeasureRef.current;
+    if (!el) return;
+    const update = () => {
+      document.documentElement.style.setProperty("--toolbar-height", `${el.offsetHeight}px`);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div className="flex flex-col h-screen bg-surface">
+      <div ref={toolbarMeasureRef} className="relative z-20">
       <Toolbar
         useWindowDragRegion={isMac}
         onOpen={handleOpen}
@@ -1311,9 +1336,18 @@ export default function App() {
         scanBlockedReason={
           channelSearchError ? `Invalid pre-scan regex: ${channelSearchError}` : null
         }
+        search={search}
+        onSearchChange={setSearch}
+        groups={playlist?.groups ?? []}
+        groupFilter={groupFilter}
+        onGroupChange={setGroupFilter}
+        statusFilter={statusFilter}
+        onStatusChange={setStatusFilter}
       />
+      {isMac && <div ref={headerPortalRef} />}
+      </div>
 
-      <div className="flex flex-col flex-1 min-h-0 bg-content">
+      <div className="flex flex-col flex-1 min-h-0">
       {ffmpegWarning && (
         <div className="flex items-center gap-2 px-4 py-2.5 bg-yellow-500/10 border-b border-yellow-500/20 text-yellow-400 text-[13px]">
           <AlertTriangle className="w-4 h-4" />
@@ -1415,17 +1449,11 @@ export default function App() {
       )}
 
       <FilterBar
-        search={search}
-        onSearchChange={setSearch}
-        groups={playlist?.groups ?? []}
-        groupFilter={groupFilter}
-        onGroupChange={setGroupFilter}
-        statusFilter={statusFilter}
-        onStatusChange={setStatusFilter}
         channelSearch={channelSearch}
         onChannelSearchChange={setChannelSearch}
         channelSearchError={channelSearchError}
         scanState={scanState}
+        visible={settings.show_prescan_filter}
       />
 
       <div className="flex flex-1 min-h-0">
@@ -1441,6 +1469,7 @@ export default function App() {
               onOpenChannel={handleOpenChannel}
               onSelectionChange={setSelectedChannelIndices}
               onScanSelected={handleScanSelected}
+              headerPortalRef={isMac ? headerPortalRef : undefined}
             />
           ) : (
             <div className="flex-1 flex items-center justify-center text-text-tertiary">

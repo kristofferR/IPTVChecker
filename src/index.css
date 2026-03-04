@@ -443,3 +443,8 @@ body {
 [data-platform="macos"] input[type="checkbox"] {
   appearance: auto;
 }
+
+[data-platform="macos"] .glass-material {
+  -apple-visual-effect: -apple-system-glass-material;
+  background: transparent !important;
+}

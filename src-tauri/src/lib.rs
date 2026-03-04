@@ -71,6 +71,7 @@ pub fn run() {
 
             let view_menu = SubmenuBuilder::new(app, "View")
                 .text("menu.view.toggle_sidebar", "Toggle Sidebar")
+                .text("menu.view.toggle_prescan_filter", "Show Pre-scan Filter")
                 .text("menu.view.clear_filters", "Clear Filters")
                 .text("menu.view.history", "Scan History")
                 .build()?;
@@ -121,6 +122,7 @@ pub fn run() {
                 "menu.file.export_filtered_m3u" => Some("menu://export-filtered-m3u"),
                 "menu.file.export_scan_log" => Some("menu://export-scan-log"),
                 "menu.view.toggle_sidebar" => Some("menu://toggle-sidebar"),
+                "menu.view.toggle_prescan_filter" => Some("menu://toggle-prescan-filter"),
                 "menu.view.clear_filters" => Some("menu://clear-filters"),
                 "menu.view.history" => Some("menu://open-history"),
                 "menu.scan.start" => Some("menu://start-scan"),
@@ -165,6 +167,49 @@ pub fn run() {
             }
 
             commands::recent::refresh_recent_menu(&app.handle());
+
+            // Enable _useSystemAppearance on WKWebView so CSS
+            // `-apple-visual-effect: -apple-system-glass-material` works.
+            #[cfg(target_os = "macos")]
+            {
+                use cocoa::base::{id, nil, NO};
+                use objc::runtime::{Class, BOOL, YES};
+                use objc::{msg_send, sel, sel_impl};
+
+                unsafe fn find_webview(view: id) -> Option<id> {
+                    if view == nil {
+                        return None;
+                    }
+                    if let Some(cls) = Class::get("WKWebView") {
+                        let is_wk: BOOL = msg_send![view, isKindOfClass: cls];
+                        if is_wk != NO {
+                            return Some(view);
+                        }
+                    }
+                    let subviews: id = msg_send![view, subviews];
+                    let count: usize = msg_send![subviews, count];
+                    for i in 0..count {
+                        let subview: id = msg_send![subviews, objectAtIndex: i];
+                        if let Some(wv) = find_webview(subview) {
+                            return Some(wv);
+                        }
+                    }
+                    None
+                }
+
+                if let Some(window) = app.get_webview_window("main") {
+                    let ns_window: id = window.ns_window().unwrap() as id;
+                    unsafe {
+                        let content_view: id = msg_send![ns_window, contentView];
+                        if let Some(webview) = find_webview(content_view) {
+                            let config: id = msg_send![webview, configuration];
+                            let prefs: id = msg_send![config, preferences];
+                            let _: () =
+                                msg_send![prefs, _setUseSystemAppearance: YES];
+                        }
+                    }
+                }
+            }
 
             #[cfg(any(target_os = "windows", target_os = "linux"))]
             {

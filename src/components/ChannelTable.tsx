@@ -1,4 +1,5 @@
-import { useRef, useState, useMemo, useCallback, useEffect } from "react";
+import { useRef, useState, useMemo, useCallback, useEffect, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ChannelResult } from "../lib/types";
 import type { SortDirection, SortField } from "../lib/filters";
@@ -26,6 +27,7 @@ interface ChannelTableProps {
   onOpenChannel?: (result: ChannelResult) => void;
   onSelectionChange?: (selectedIndices: number[]) => void;
   onScanSelected?: (selectedIndices: number[]) => void;
+  headerPortalRef?: RefObject<HTMLDivElement | null>;
 }
 
 type CopyAction = "name" | "url" | "m3u" | "metadata";
@@ -167,6 +169,7 @@ export function ChannelTable({
   onOpenChannel,
   onSelectionChange,
   onScanSelected,
+  headerPortalRef,
 }: ChannelTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -835,85 +838,112 @@ export function ChannelTable({
     [columnWidths],
   );
 
+  const headerRef = useRef<HTMLDivElement>(null);
+
+  const syncHeaderScroll = useCallback(() => {
+    if (headerRef.current && parentRef.current) {
+      headerRef.current.scrollLeft = parentRef.current.scrollLeft;
+    }
+  }, []);
+
+  const portalTarget = headerPortalRef?.current;
+
+  const headerElement = (
+    <div
+      ref={headerRef}
+      className={portalTarget
+        ? "h-8 select-none overflow-hidden border-t border-border-subtle"
+        : "absolute top-0 left-0 right-0 z-10 h-8 bg-panel select-none overflow-hidden"
+      }
+    >
+      <div
+        className="grid items-center h-8 px-4 text-[11px] font-semibold text-text-secondary"
+        style={{
+          gridTemplateColumns,
+          width: `${tableWidth}px`,
+          minWidth: `${tableWidth}px`,
+        }}
+      >
+        {columns.map((column) => {
+          const alignClass =
+            column.align === "right"
+              ? "justify-end"
+              : column.align === "center"
+                ? "justify-center"
+                : "justify-start";
+
+          return (
+            <div
+              key={column.key}
+              ref={(node) => {
+                columnHeaderRefs.current[column.key] = node;
+              }}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setContextMenuState(null);
+                setColumnMenuState({
+                  x: event.clientX,
+                  y: event.clientY,
+                });
+              }}
+              onPointerDown={(event) =>
+                handleColumnPointerDown(column.key, event)
+              }
+              className={`relative flex items-center h-full w-full ${alignClass} ${
+                draggedColumn === column.key ? "opacity-45" : ""
+              } ${
+                dragOverColumn === column.key
+                  ? "bg-blue-500/10 rounded-sm"
+                  : ""
+              } cursor-grab active:cursor-grabbing`}
+              title={`Drag to reorder ${column.label}. Right-click for column visibility.`}
+            >
+              <button
+                className="h-full px-2 hover:text-text-primary flex items-center gap-1 cursor-pointer"
+                onClick={() => handleSort(column.key)}
+                type="button"
+              >
+                {column.label}
+                {sortField === column.key &&
+                  (sortDir === "asc" ? (
+                    <ArrowUp className="w-3 h-3" />
+                  ) : (
+                    <ArrowDown className="w-3 h-3" />
+                  ))}
+              </button>
+              <div
+                role="separator"
+                aria-label={`Resize ${column.label} column`}
+                className="absolute top-0 right-0 h-full w-2 cursor-col-resize hover:bg-blue-500/20"
+                onMouseDown={(event) => handleResizeStart(event, column.key)}
+                onClick={(event) => event.stopPropagation()}
+                draggable={false}
+                data-col-resize="true"
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div className="flex flex-col flex-1 min-h-0 relative">
+      {/* Column header — portaled into toolbar on macOS, or inline fallback */}
+      {portalTarget ? createPortal(headerElement, portalTarget) : headerElement}
+
+      {/* Scroll container — extends behind toolbar, content scrolls behind header */}
       <div
         ref={parentRef}
         tabIndex={0}
         onKeyDown={handleKeyDown}
         onContextMenu={(event) => event.preventDefault()}
-        className="native-scroll flex-1 overflow-auto focus:outline-none"
+        onScroll={syncHeaderScroll}
+        className="native-scroll absolute left-0 right-0 bottom-0 overflow-auto focus:outline-none"
+        style={{ top: "calc(-1 * var(--toolbar-height, 0px))" }}
       >
-        <div style={{ minWidth: `${tableWidth}px`, minHeight: "100%" }}>
-          <div
-            className="sticky top-0 z-10 grid items-center h-8 px-4 text-[11px] font-semibold text-text-secondary border-b border-border-app bg-panel-subtle select-none"
-            style={{
-              gridTemplateColumns,
-              width: `${tableWidth}px`,
-              minWidth: `${tableWidth}px`,
-            }}
-          >
-            {columns.map((column) => {
-              const alignClass =
-                column.align === "right"
-                  ? "justify-end"
-                  : column.align === "center"
-                    ? "justify-center"
-                    : "justify-start";
-
-              return (
-                <div
-                  key={column.key}
-                  ref={(node) => {
-                    columnHeaderRefs.current[column.key] = node;
-                  }}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setContextMenuState(null);
-                    setColumnMenuState({
-                      x: event.clientX,
-                      y: event.clientY,
-                    });
-                  }}
-                  onPointerDown={(event) =>
-                    handleColumnPointerDown(column.key, event)
-                  }
-                  className={`relative flex items-center h-full w-full ${alignClass} ${
-                    draggedColumn === column.key ? "opacity-45" : ""
-                  } ${
-                    dragOverColumn === column.key
-                      ? "bg-blue-500/10 rounded-sm"
-                      : ""
-                  } cursor-grab active:cursor-grabbing`}
-                  title={`Drag to reorder ${column.label}. Right-click for column visibility.`}
-                >
-                  <button
-                    className="h-full px-2 hover:text-text-primary flex items-center gap-1 cursor-pointer"
-                    onClick={() => handleSort(column.key)}
-                    type="button"
-                  >
-                    {column.label}
-                    {sortField === column.key &&
-                      (sortDir === "asc" ? (
-                        <ArrowUp className="w-3 h-3" />
-                      ) : (
-                        <ArrowDown className="w-3 h-3" />
-                      ))}
-                  </button>
-                  <div
-                    role="separator"
-                    aria-label={`Resize ${column.label} column`}
-                    className="absolute top-0 right-0 h-full w-2 cursor-col-resize hover:bg-blue-500/20"
-                    onMouseDown={(event) => handleResizeStart(event, column.key)}
-                    onClick={(event) => event.stopPropagation()}
-                    draggable={false}
-                    data-col-resize="true"
-                  />
-                </div>
-              );
-            })}
-          </div>
+        <div style={{ minWidth: `${tableWidth}px`, minHeight: "100%", paddingTop: `calc(var(--toolbar-height, 0px)${portalTarget ? "" : " + 2rem"})` }}>
 
           {filteredResults.length === 0 ? (
             <div className="flex items-center justify-center text-text-tertiary text-sm min-h-64">

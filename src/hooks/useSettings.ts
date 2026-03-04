@@ -18,6 +18,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   scan_notifications: true,
   theme: "system",
   log_level: "error",
+  show_prescan_filter: false,
 };
 
 export function useSettings() {
