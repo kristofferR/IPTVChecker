@@ -1083,7 +1083,32 @@ export default function App() {
     [startScanWithSelection],
   );
 
+  // Refs for menu event handlers so listeners never need re-registration
+  const handleOpenRef = useRef(handleOpen);
+  handleOpenRef.current = handleOpen;
+  const handleOpenFolderRef = useRef(handleOpenFolder);
+  handleOpenFolderRef.current = handleOpenFolder;
+  const handleOpenUrlRef = useRef(handleOpenUrl);
+  handleOpenUrlRef.current = handleOpenUrl;
+  const handleOpenRecentRef = useRef(handleOpenRecent);
+  handleOpenRecentRef.current = handleOpenRecent;
+  const handleClearRecentRef = useRef(handleClearRecentPlaylists);
+  handleClearRecentRef.current = handleClearRecentPlaylists;
+  const handleStartScanRef = useRef(handleStartScan);
+  handleStartScanRef.current = handleStartScan;
+  const pauseRef = useRef(pause);
+  pauseRef.current = pause;
+  const resumeRef = useRef(resume);
+  resumeRef.current = resume;
+  const cancelRef = useRef(cancel);
+  cancelRef.current = cancel;
+  const openHistoryPanelRef = useRef(openHistoryPanel);
+  openHistoryPanelRef.current = openHistoryPanel;
+  const checkForUpdatesRef = useRef(checkForUpdates);
+  checkForUpdatesRef.current = checkForUpdates;
+
   useEffect(() => {
+    let cancelled = false;
     const unlisten: Array<() => void> = [];
     const queueExport = (action: "csv" | "split" | "renamed" | "m3u" | "scanlog") => {
       setMenuExportRequest((prev) => ({
@@ -1093,117 +1118,57 @@ export default function App() {
     };
 
     const setup = async () => {
-      unlisten.push(
-        await listen("menu://open-playlist", () => {
-          void handleOpen();
-        }),
-      );
-      unlisten.push(
-        await listen("menu://open-folder", () => {
-          void handleOpenFolder();
-        }),
-      );
-      unlisten.push(
-        await listen("menu://open-url", () => {
-          void handleOpenUrl();
-        }),
-      );
-      for (let i = 0; i < 10; i += 1) {
-        const eventName = `menu://open-recent-${i}`;
-        unlisten.push(
-          await listen(eventName, () => {
+      const listeners = await Promise.all([
+        listen("menu://open-playlist", () => void handleOpenRef.current()),
+        listen("menu://open-folder", () => void handleOpenFolderRef.current()),
+        listen("menu://open-url", () => void handleOpenUrlRef.current()),
+        ...Array.from({ length: 10 }, (_, i) =>
+          listen(`menu://open-recent-${i}`, () => {
             const entry = recentPlaylistsRef.current[i];
-            if (!entry) return;
-            handleOpenRecent(entry);
+            if (entry) handleOpenRecentRef.current(entry);
           }),
-        );
-      }
-      unlisten.push(
-        await listen("menu://clear-recent", () => {
-          void handleClearRecentPlaylists();
-        }),
-      );
-      unlisten.push(
-        await listen("menu://export-csv", () => queueExport("csv")),
-      );
-      unlisten.push(
-        await listen("menu://export-split", () => queueExport("split")),
-      );
-      unlisten.push(
-        await listen("menu://export-renamed", () => queueExport("renamed")),
-      );
-      unlisten.push(
-        await listen("menu://export-filtered-m3u", () => queueExport("m3u")),
-      );
-      unlisten.push(
-        await listen("menu://export-scan-log", () => queueExport("scanlog")),
-      );
-      unlisten.push(
-        await listen("menu://toggle-sidebar", () => {
-          setSidebarHidden((hidden) => {
-            return !hidden;
-          });
-        }),
-      );
-      unlisten.push(
-        await listen("menu://toggle-prescan-filter", () => {
+        ),
+        listen("menu://clear-recent", () => void handleClearRecentRef.current()),
+        listen("menu://export-csv", () => queueExport("csv")),
+        listen("menu://export-split", () => queueExport("split")),
+        listen("menu://export-renamed", () => queueExport("renamed")),
+        listen("menu://export-filtered-m3u", () => queueExport("m3u")),
+        listen("menu://export-scan-log", () => queueExport("scanlog")),
+        listen("menu://toggle-sidebar", () => setSidebarHidden((h) => !h)),
+        listen("menu://toggle-prescan-filter", () => {
           const current = settingsRef.current;
           void saveSettingsRef.current({ ...current, show_prescan_filter: !current.show_prescan_filter });
         }),
-      );
-      unlisten.push(
-        await listen("menu://clear-filters", () => {
+        listen("menu://clear-filters", () => {
           setSearch("");
           setChannelSearch("");
           setGroupFilter("all");
           setStatusFilter("all");
         }),
-      );
-      unlisten.push(
-        await listen("menu://open-history", () => openHistoryPanel()),
-      );
-      unlisten.push(
-        await listen("menu://start-scan", () => {
-          void handleStartScan();
-        }),
-      );
-      unlisten.push(
-        await listen("menu://pause-scan", () => {
-          void pause();
-        }),
-      );
-      unlisten.push(
-        await listen("menu://resume-scan", () => {
-          void resume();
-        }),
-      );
-      unlisten.push(
-        await listen("menu://stop-scan", () => {
-          void cancel();
-        }),
-      );
-      unlisten.push(
-        await listen("menu://open-settings", () => setShowSettings(true)),
-      );
-      unlisten.push(
-        await listen("menu://check-updates", () => {
-          void checkForUpdates(true);
-        }),
-      );
-      unlisten.push(
-        await listen("menu://keyboard-shortcuts", () =>
-          setShowKeyboardShortcuts(true),
-        ),
-      );
+        listen("menu://open-history", () => openHistoryPanelRef.current()),
+        listen("menu://start-scan", () => void handleStartScanRef.current()),
+        listen("menu://pause-scan", () => void pauseRef.current()),
+        listen("menu://resume-scan", () => void resumeRef.current()),
+        listen("menu://stop-scan", () => void cancelRef.current()),
+        listen("menu://open-settings", () => setShowSettings(true)),
+        listen("menu://check-updates", () => void checkForUpdatesRef.current(true)),
+        listen("menu://keyboard-shortcuts", () => setShowKeyboardShortcuts(true)),
+      ]);
+      if (cancelled) {
+        for (const off of listeners) off();
+      } else {
+        unlisten.push(...listeners);
+      }
     };
 
     void setup();
     return () => {
+      cancelled = true;
       for (const off of unlisten) {
         off();
       }
     };
-  }, [cancel, checkForUpdates, handleClearRecentPlaylists, handleOpen, handleOpenFolder, handleOpenRecent, handleOpenUrl, handleStartScan, openHistoryPanel, pause, resume]);
+  }, []);
 
   const handleSelectChannel = useCallback((result: ChannelResult) => {
     setSelectedChannel(result);

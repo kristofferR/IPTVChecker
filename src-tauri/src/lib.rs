@@ -109,6 +109,7 @@ pub fn run() {
                 .build()
         })
         .on_menu_event(|app, event| {
+            log::debug!("menu event: id={}", event.id().as_ref());
             let frontend_event = match event.id().as_ref() {
                 "menu.app.settings" => Some("menu://open-settings"),
                 "menu.file.open" => Some("menu://open-playlist"),
@@ -145,7 +146,7 @@ pub fn run() {
             };
 
             if let Some(name) = frontend_event {
-                log::debug!("menu event → emitting: {name}");
+                log::debug!("menu event → frontend: {name}");
                 let _ = app.emit(name, ());
             }
         });
