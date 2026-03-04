@@ -852,7 +852,7 @@ export function ChannelTable({
     <div
       ref={headerRef}
       className={portalTarget
-        ? "h-8 select-none overflow-hidden border-t border-border-subtle"
+        ? "h-8 select-none overflow-hidden"
         : "absolute top-0 left-0 right-0 z-10 h-8 bg-panel select-none overflow-hidden"
       }
       style={portalTarget ? { maskImage: "linear-gradient(to right, black calc(100% - 24px), transparent)" } : undefined}
