@@ -54,3 +54,35 @@ lib/        — Types, Tauri invoke wrappers, formatting helpers, sort/filter lo
 - Rust: snake_case, 4-space indentation, thiserror for errors, serde for serialization
 - TypeScript: strict mode, no unused locals/params, types in `lib/types.ts` mirror Rust models
 - Components: functional with hooks, Tailwind for styling, no CSS-in-JS
+
+## MCP Tools (tauri-plugin-mcp)
+
+Debug-only Tauri plugin that exposes the app's webview to Claude Code via MCP tools (`mcp__tauri-mcp__*`). Requires `bun tauri dev` to be running (creates IPC socket at `/tmp/tauri-mcp-iptv-checker.sock`).
+
+### Available tools and usage patterns
+
+**Inspecting the app:**
+- `query_page(mode='app_info')` — app version, windows, monitors
+- `query_page(mode='state')` — URL, title, scroll position, viewport size
+- `query_page(mode='map', interactive_only=true)` — get numbered refs for all buttons/inputs/selects
+- `query_page(mode='find_element', selector_type='ref', selector_value='N')` — get CSS pixel coordinates for a ref
+- `execute_js(code='...')` — run arbitrary JS in the webview (most flexible inspection tool)
+- `take_screenshot(inline=true)` — captures frontmost screen window, so focus the app first with `manage_window(action='focus')`
+
+**Interacting with the app:**
+- `click(selector_type='ref', selector_value='N')` — click an element by ref from map
+- `type_text(selector_type='ref', selector_value='N', text='...')` — type into an input (cannot send empty string; use `execute_js` to clear)
+- `mouse_action(action='scroll', direction='down', amount=200)` — scroll the page
+- `navigate(action='reload')` — reload; also supports `goto`, `back`, `forward`
+
+**Waiting and state:**
+- `wait_for(text='...', state='visible', timeout_ms=5000)` — wait for text to appear/disappear
+- `manage_storage(store='local_storage', action='keys')` — list/get/set localStorage keys
+- `manage_window(action='focus')` — focus, resize, position, zoom, devtools, bounds
+
+### Workflow
+1. `query_page(mode='map', interactive_only=true)` to discover elements and get refs
+2. `click`/`type_text` using refs to interact
+3. `execute_js` for anything the structured tools can't do
+4. `wait_for` after actions that trigger async updates
+5. `take_screenshot` to visually verify (focus app window first)
