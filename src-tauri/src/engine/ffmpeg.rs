@@ -217,24 +217,43 @@ async fn run_tool_command(
             AppError::FfmpegNotAvailable
         })?;
 
-    let mut stdout_pipe = child.stdout.take();
-    let mut stderr_pipe = child.stderr.take();
+    // Take pipes and spawn concurrent readers BEFORE waiting on the child.
+    // This prevents deadlocks when output exceeds the OS pipe buffer (~64KB).
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
+
+    let stdout_reader = tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = stdout_pipe {
+            let _ = pipe.read_to_end(&mut buf).await;
+        }
+        buf
+    });
+    let stderr_reader = tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = stderr_pipe {
+            let _ = pipe.read_to_end(&mut buf).await;
+        }
+        buf
+    });
 
     let status = if let Some(timeout_duration) = timeout {
         tokio::select! {
             _ = cancel.cancelled() => {
                 let _ = child.kill().await;
+                let _ = child.wait().await;
+                stdout_reader.abort();
+                stderr_reader.abort();
                 return Err(AppError::Cancelled);
             }
             _ = tokio::time::sleep(timeout_duration) => {
                 let _ = child.kill().await;
                 let _ = child.wait().await;
 
-                let mut stderr_buf = Vec::new();
-                if let Some(ref mut pipe) = stderr_pipe {
-                    use tokio::io::AsyncReadExt;
-                    let _ = pipe.read_to_end(&mut stderr_buf).await;
-                }
+                let stderr_buf = stderr_reader.await.unwrap_or_default();
+                stdout_reader.abort();
 
                 let stderr = String::from_utf8_lossy(&stderr_buf).to_string();
                 return Err(AppError::Other(format!(
@@ -253,6 +272,9 @@ async fn run_tool_command(
         tokio::select! {
             _ = cancel.cancelled() => {
                 let _ = child.kill().await;
+                let _ = child.wait().await;
+                stdout_reader.abort();
+                stderr_reader.abort();
                 return Err(AppError::Cancelled);
             }
             status = child.wait() => {
@@ -261,16 +283,9 @@ async fn run_tool_command(
         }
     };
 
-    let mut stdout_buf = Vec::new();
-    let mut stderr_buf = Vec::new();
-    if let Some(ref mut pipe) = stdout_pipe {
-        use tokio::io::AsyncReadExt;
-        let _ = pipe.read_to_end(&mut stdout_buf).await;
-    }
-    if let Some(ref mut pipe) = stderr_pipe {
-        use tokio::io::AsyncReadExt;
-        let _ = pipe.read_to_end(&mut stderr_buf).await;
-    }
+    // Collect pipe output — completes quickly since child already exited.
+    let stdout_buf = stdout_reader.await.unwrap_or_default();
+    let stderr_buf = stderr_reader.await.unwrap_or_default();
 
     let stdout = String::from_utf8_lossy(&stdout_buf).to_string();
     let stderr = String::from_utf8_lossy(&stderr_buf).to_string();
@@ -639,33 +654,71 @@ pub async fn capture_screenshot(
 }
 
 /// Profile approximate video bitrate by sampling the stream for 10 seconds.
+///
+/// This spawns ffmpeg directly instead of using `run_tool_command` because:
+/// - ffmpeg with `-t 10` on live streams normally exits non-zero (the stream is
+///   still sending when the time limit is hit), which `run_tool_command` treats as error.
+/// - We only need the "Statistics:" line from stderr, regardless of exit code.
 pub async fn profile_bitrate(
     app: &AppHandle,
     url: &str,
     user_agent: &str,
     cancel: &CancellationToken,
 ) -> Result<String, AppError> {
-    let (_, stderr) = run_tool_command(
-        app,
-        "ffmpeg",
-        &[
-            "-v",
-            "debug",
-            "-user_agent",
-            user_agent,
-            "-i",
-            url,
-            "-t",
-            "10",
-            "-f",
-            "null",
-            "-",
-        ],
-        cancel,
-        Some(FFMPEG_BITRATE_TIMEOUT),
-    )
-    .await?;
+    if cancel.is_cancelled() {
+        return Err(AppError::Cancelled);
+    }
 
+    let resolved_bin = resolve_binary(app, "ffmpeg");
+
+    let mut child = tokio::process::Command::new(&resolved_bin)
+        .args([
+            "-v", "verbose",
+            "-user_agent", user_agent,
+            "-i", url,
+            "-t", "10",
+            "-f", "null", "-",
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| {
+            log::warn!("Failed to spawn ffmpeg using '{}': {}", resolved_bin, err);
+            AppError::FfmpegNotAvailable
+        })?;
+
+    let stderr_pipe = child.stderr.take();
+    let stderr_reader = tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = stderr_pipe {
+            let _ = pipe.read_to_end(&mut buf).await;
+        }
+        buf
+    });
+
+    // Wait for exit with cancellation and timeout, accepting any exit code.
+    let timed_out = tokio::select! {
+        _ = cancel.cancelled() => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            stderr_reader.abort();
+            return Err(AppError::Cancelled);
+        }
+        _ = tokio::time::sleep(FFMPEG_BITRATE_TIMEOUT) => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            true
+        }
+        _status = child.wait() => {
+            false
+        }
+    };
+
+    let stderr_buf = stderr_reader.await.unwrap_or_default();
+    let stderr = String::from_utf8_lossy(&stderr_buf);
+
+    // Parse the Statistics line regardless of exit code.
     let mut total_bytes: u64 = 0;
 
     for line in stderr.lines() {
@@ -679,6 +732,14 @@ pub async fn profile_bitrate(
                 }
             }
         }
+    }
+
+    if timed_out && total_bytes == 0 {
+        return Err(AppError::Other(format!(
+            "ffmpeg bitrate profiling timed out after {:.0}s (binary: {})",
+            FFMPEG_BITRATE_TIMEOUT.as_secs_f64(),
+            resolved_bin,
+        )));
     }
 
     if total_bytes == 0 {

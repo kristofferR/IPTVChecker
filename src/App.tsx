@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
+import { setLiquidGlassEffect } from "tauri-plugin-liquid-glass-api";
 import {
   isPermissionGranted,
   onAction,
@@ -318,6 +319,9 @@ export default function App() {
     detectPlatform()
       .then((p) => {
         setPlatform(p);
+        if (p === "macos") {
+          setLiquidGlassEffect({}).catch(() => {});
+        }
       })
       .catch(() => {
         // Keep navigator-based fallback when plugin-os isn't available yet.
@@ -1309,6 +1313,7 @@ export default function App() {
         }
       />
 
+      <div className="flex flex-col flex-1 min-h-0 bg-content">
       {ffmpegWarning && (
         <div className="flex items-center gap-2 px-4 py-2.5 bg-yellow-500/10 border-b border-yellow-500/20 text-yellow-400 text-[13px]">
           <AlertTriangle className="w-4 h-4" />
@@ -1534,6 +1539,7 @@ export default function App() {
         throughputChannelsPerSecond={telemetry.throughputChannelsPerSecond}
         etaSeconds={telemetry.etaSeconds}
       />
+      </div>
 
       {openSourceDialogState && (
         <OpenSourceDialog

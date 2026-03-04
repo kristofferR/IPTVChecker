@@ -12,6 +12,7 @@
     "core:window:allow-set-progress-bar",
     "os:default",
     "notification:default",
-    "macos-haptics:default"
+    "macos-haptics:default",
+    "liquid-glass:default"
   ]
 }

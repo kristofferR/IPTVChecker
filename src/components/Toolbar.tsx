@@ -9,6 +9,16 @@ import {
   Square,
   Settings,
 } from "lucide-react";
+import {
+  SFPlayFill,
+  SFPauseFill,
+  SFStopFill,
+  SFFolder,
+  SFFolderFill,
+  SFLink,
+  SFGearshape,
+  SFClockArrow,
+} from "./SFSymbols";
 import type { PointerEvent } from "react";
 import type { ChannelResult } from "../lib/types";
 import type { ScanState } from "../hooks/useScan";
@@ -71,6 +81,7 @@ export function Toolbar({
   scanBlockedReason,
 }: ToolbarProps) {
   const appWindow = getCurrentWindow();
+  const isMac = useWindowDragRegion;
   const scanning = scanState === "scanning";
   const paused = scanState === "paused";
   const inScanSession = scanning || paused;
@@ -79,6 +90,16 @@ export function Toolbar({
   const scanDisabledReason = !hasPlaylist
     ? "Open a playlist first"
     : scanBlockedReason;
+
+  // Platform-appropriate icons
+  const IconOpen = isMac ? SFFolder : FolderOpen;
+  const IconFolder = isMac ? SFFolderFill : Folder;
+  const IconLink = isMac ? SFLink : Link2;
+  const IconPlay = isMac ? SFPlayFill : Play;
+  const IconPause = isMac ? SFPauseFill : Pause;
+  const IconStop = isMac ? SFStopFill : Square;
+  const IconSettings = isMac ? SFGearshape : Settings;
+  const IconHistory = isMac ? SFClockArrow : History;
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (!useWindowDragRegion) return;
@@ -104,7 +125,7 @@ export function Toolbar({
         disabled={inScanSession}
         className={toolbarBtn}
       >
-        <FolderOpen className="w-4 h-4" />
+        <IconOpen className="w-4 h-4" />
         Open
       </button>
 
@@ -113,7 +134,7 @@ export function Toolbar({
         disabled={inScanSession}
         className={toolbarBtn}
       >
-        <Folder className="w-4 h-4" />
+        <IconFolder className="w-4 h-4" />
         Open Folder
       </button>
 
@@ -122,7 +143,7 @@ export function Toolbar({
         disabled={inScanSession}
         className={toolbarBtn}
       >
-        <Link2 className="w-4 h-4" />
+        <IconLink className="w-4 h-4" />
         Open URL
       </button>
 
@@ -133,7 +154,7 @@ export function Toolbar({
               onClick={onPauseScan}
               className={toolbarBtn}
             >
-              <Pause className="w-4 h-4" />
+              <IconPause className="w-4 h-4" />
               Pause
             </button>
           ) : (
@@ -141,7 +162,7 @@ export function Toolbar({
               onClick={onResumeScan}
               className={`${toolbarBtn} toolbar-btn-primary`}
             >
-              <Play className="w-4 h-4" />
+              <IconPlay className="w-4 h-4" />
               Resume
             </button>
           )}
@@ -149,7 +170,7 @@ export function Toolbar({
             onClick={onStopScan}
             className={`${toolbarBtn} toolbar-btn-stop`}
           >
-            <Square className="w-3.5 h-3.5" />
+            <IconStop className="w-3.5 h-3.5" />
             Stop
           </button>
         </>
@@ -160,7 +181,7 @@ export function Toolbar({
           title={scanDisabledReason ?? undefined}
           className={`${toolbarBtn} toolbar-btn-primary`}
         >
-          <Play className="w-4 h-4" />
+          <IconPlay className="w-4 h-4" />
           {scanLabel}
         </button>
       )}
@@ -186,6 +207,7 @@ export function Toolbar({
         disabled={!hasResults || inScanSession}
         menuRequest={menuExportRequest}
         scanState={scanState}
+        isMac={isMac}
       />
 
       <button
@@ -193,7 +215,7 @@ export function Toolbar({
         disabled={!hasPlaylist}
         className={`${toolbarBtn} px-2.5`}
       >
-        <History className="w-4 h-4" />
+        <IconHistory className="w-4 h-4" />
         History
       </button>
 
@@ -201,7 +223,7 @@ export function Toolbar({
         onClick={onOpenSettings}
         className={`${toolbarBtn} px-2 min-w-9 justify-center`}
       >
-        <Settings className="w-4 h-4" />
+        <IconSettings className="w-4 h-4" />
       </button>
     </div>
   );

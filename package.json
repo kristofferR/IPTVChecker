@@ -24,6 +24,7 @@
     "lucide-react": "^0.576",
     "react": "^19",
     "react-dom": "^19",
+    "tauri-plugin-liquid-glass-api": "^0.1.6",
     "tauri-plugin-macos-haptics-api": "^1.0.0"
   },
   "devDependencies": {

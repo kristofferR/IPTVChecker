@@ -9,6 +9,7 @@
   --panel-bg-subtle: rgb(39 39 42 / 0.5);
   --panel-bg-muted: rgb(39 39 42 / 0.3);
   --surface-bg: rgb(24 24 27);
+  --content-bg: rgb(24 24 27);
   --input-bg: rgb(39 39 42);
   --border-color: rgb(63 63 70);
   --border-subtle: rgb(63 63 70 / 0.5);
@@ -30,6 +31,7 @@
   --panel-bg-subtle: rgb(244 244 245 / 0.72);
   --panel-bg-muted: rgb(244 244 245 / 0.5);
   --surface-bg: rgb(255 255 255);
+  --content-bg: rgb(255 255 255);
   --input-bg: rgb(255 255 255);
   --border-color: rgb(212 212 216);
   --border-subtle: rgb(212 212 216 / 0.75);
@@ -56,6 +58,7 @@
     --panel-bg-subtle: rgb(244 244 245 / 0.72);
     --panel-bg-muted: rgb(244 244 245 / 0.5);
     --surface-bg: rgb(255 255 255);
+    --content-bg: rgb(255 255 255);
     --input-bg: rgb(255 255 255);
     --border-color: rgb(212 212 216);
     --border-subtle: rgb(212 212 216 / 0.75);
@@ -76,6 +79,7 @@
   --text-tertiary: -apple-system-tertiary-label;
 
   --surface-bg: transparent;
+  --content-bg: rgb(246 246 246 / 0.88);
   --border-color: -apple-system-separator;
   --border-subtle: -apple-system-separator;
   --input-bg: transparent;
@@ -83,7 +87,7 @@
   --toolbar-pl: 78px;
 
   /* Light mode defaults (vibrancy is light gray, tint dark to contrast) */
-  --panel-bg: rgb(0 0 0 / 0.03);
+  --panel-bg: rgb(246 246 246 / 0.45);
   --panel-bg-subtle: rgb(0 0 0 / 0.02);
   --panel-bg-muted: transparent;
   --btn-bg: rgb(255 255 255 / 0.65);
@@ -96,7 +100,8 @@
 /* macOS dark mode: vibrancy is dark, tint light to contrast */
 @media (prefers-color-scheme: dark) {
   [data-platform="macos"] {
-    --panel-bg: rgb(255 255 255 / 0.06);
+    --content-bg: rgb(30 30 30 / 0.88);
+    --panel-bg: rgb(30 30 30 / 0.45);
     --panel-bg-subtle: rgb(255 255 255 / 0.04);
     --panel-bg-muted: rgb(255 255 255 / 0.02);
     --btn-bg: rgb(255 255 255 / 0.1);
@@ -111,6 +116,7 @@
   --color-panel-subtle: var(--panel-bg-subtle);
   --color-panel-muted: var(--panel-bg-muted);
   --color-surface: var(--surface-bg);
+  --color-content: var(--content-bg);
   --color-input: var(--input-bg);
   --color-border-app: var(--border-color);
   --color-border-subtle: var(--border-subtle);

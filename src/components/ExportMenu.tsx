@@ -8,6 +8,7 @@ import {
   CircleAlert,
   Info,
 } from "lucide-react";
+import { SFSquareArrowUp, SFChevronDown } from "./SFSymbols";
 import type { ChannelResult } from "../lib/types";
 import type { ScanState } from "../hooks/useScan";
 import {
@@ -63,6 +64,7 @@ interface ExportMenuProps {
     action: "csv" | "split" | "renamed" | "m3u" | "scanlog";
   } | null;
   scanState: ScanState;
+  isMac?: boolean;
 }
 
 export function ExportMenu({
@@ -74,7 +76,10 @@ export function ExportMenu({
   disabled,
   menuRequest,
   scanState,
+  isMac,
 }: ExportMenuProps) {
+  const IconExport = isMac ? SFSquareArrowUp : Download;
+  const IconChevron = isMac ? SFChevronDown : ChevronDown;
   const [open, setOpen] = useState(false);
   const [busyAction, setBusyAction] = useState<"csv" | "split" | "renamed" | "m3u" | "scanlog" | null>(null);
   const [feedback, setFeedback] = useState<{
@@ -345,10 +350,10 @@ export function ExportMenu({
         {exporting ? (
           <LoaderCircle className="w-4 h-4 animate-spin" />
         ) : (
-          <Download className="w-4 h-4" />
+          <IconExport className="w-4 h-4" />
         )}
         {exporting ? "Exporting..." : "Export"}
-        {!exporting && <ChevronDown className="w-[14px] h-[14px]" />}
+        {!exporting && <IconChevron className="w-[14px] h-[14px]" />}
       </button>
       {open && (
         <div className="macos-popover absolute right-0 top-full mt-1 w-64 bg-dropdown backdrop-blur-xl border border-border-app rounded-lg shadow-xl z-50 py-1">

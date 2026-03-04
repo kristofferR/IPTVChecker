@@ -140,17 +140,6 @@ pub fn run() {
 
     builder
         .setup(|app| {
-            #[cfg(target_os = "macos")]
-            {
-                let window = app.get_webview_window("main").expect("main window");
-                let _ = window_vibrancy::apply_vibrancy(
-                    &window,
-                    window_vibrancy::NSVisualEffectMaterial::UnderWindowBackground,
-                    None,
-                    None,
-                );
-            }
-
             // Load persisted settings
             if let Ok(store) = app.store("settings.json") {
                 if let Some(value) = store.get("settings") {
