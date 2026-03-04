@@ -157,7 +157,16 @@ body {
   -webkit-overflow-scrolling: touch;
   scroll-behavior: auto;
   overscroll-behavior: auto;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 15px) 0,
+    calc(100% - 15px) var(--toolbar-height, 0px),
+    100% var(--toolbar-height, 0px),
+    100% 100%,
+    0 100%
+  );
 }
+
 
 /* macOS: Tahoe glass pill groups */
 [data-platform="macos"] .toolbar-group {
