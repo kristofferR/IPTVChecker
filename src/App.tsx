@@ -1456,7 +1456,8 @@ export default function App() {
         visible={settings.show_prescan_filter}
       />
 
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-col flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 bg-content">
         <div className="flex flex-col flex-1 min-w-0">
           {playlist ? (
             <ChannelTable
@@ -1568,6 +1569,7 @@ export default function App() {
         throughputChannelsPerSecond={telemetry.throughputChannelsPerSecond}
         etaSeconds={telemetry.etaSeconds}
       />
+      </div>
       </div>
 
       {openSourceDialogState && (

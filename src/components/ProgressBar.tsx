@@ -50,7 +50,7 @@ export function ProgressBar({
   }
 
   return (
-    <div className="px-4 py-2 border-t border-border-app bg-panel-subtle">
+    <div className="px-4 py-2 border-t border-border-app bg-panel-subtle glass-material">
       <div className="flex items-center gap-3">
         <div className="flex-1 h-2.5 bg-btn rounded-full overflow-hidden">
           <div

@@ -446,5 +446,11 @@ body {
 
 [data-platform="macos"] .glass-material {
   -apple-visual-effect: -apple-system-glass-material;
-  background: transparent !important;
+  background: rgb(246 246 246 / 0.12) !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-platform="macos"] .glass-material {
+    background: rgb(30 30 30 / 0.12) !important;
+  }
 }
