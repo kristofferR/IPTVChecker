@@ -345,15 +345,20 @@ export function ExportMenu({
       <button
         onClick={() => setOpen(!open)}
         disabled={disabled || exporting}
-        className="flex items-center gap-2 px-3 py-1.5 min-h-9 text-[14px] rounded-md toolbar-btn disabled:opacity-40 disabled:pointer-events-none"
+        title="Export"
+        className={
+          isMac
+            ? "flex items-center justify-center px-3 py-[6px] toolbar-btn disabled:opacity-40 disabled:pointer-events-none"
+            : "flex items-center gap-2 px-3 py-1.5 min-h-9 text-[14px] rounded-md toolbar-btn disabled:opacity-40 disabled:pointer-events-none"
+        }
       >
         {exporting ? (
-          <LoaderCircle className="w-4 h-4 animate-spin" />
+          <LoaderCircle className={isMac ? "w-[22px] h-[22px] animate-spin" : "w-4 h-4 animate-spin"} />
         ) : (
-          <IconExport className="w-4 h-4" />
+          <IconExport className={isMac ? "w-[22px] h-[22px]" : "w-4 h-4"} />
         )}
-        {exporting ? "Exporting..." : "Export"}
-        {!exporting && <IconChevron className="w-[14px] h-[14px]" />}
+        {!isMac && (exporting ? "Exporting..." : "Export")}
+        {!isMac && !exporting && <IconChevron className="w-[14px] h-[14px]" />}
       </button>
       {open && (
         <div className="macos-popover absolute right-0 top-full mt-1 w-64 bg-dropdown backdrop-blur-xl border border-border-app rounded-lg shadow-xl z-50 py-1">

@@ -159,6 +159,54 @@ body {
   overscroll-behavior: auto;
 }
 
+/* macOS: Tahoe glass pill groups */
+[data-platform="macos"] .toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: linear-gradient(to bottom, rgb(0 0 0 / 0.015), rgb(0 0 0 / 0.01));
+  border-radius: 9999px;
+  padding: 4px;
+  box-shadow:
+    0 6px 20px rgb(0 0 0 / 0.1),
+    inset 1px 2px 1px -1px rgb(255 255 255 / 1),
+    inset -1px -1px 1px 0 rgb(255 255 255 / 1);
+  border: none;
+}
+
+[data-platform="macos"] .toolbar-group-prominent {
+  background: linear-gradient(to bottom, rgb(10 132 255 / 0.06), rgb(10 132 255 / 0.04));
+  box-shadow:
+    0 6px 20px rgb(10 132 255 / 0.08),
+    inset 1px 2px 1px -1px rgb(255 255 255 / 0.8),
+    inset -1px -1px 1px 0 rgb(255 255 255 / 0.8);
+}
+
+[data-platform="macos"] .toolbar-group .toolbar-btn {
+  border-radius: 9999px;
+  position: relative;
+}
+
+/* Button separators — vertical line between adjacent buttons */
+[data-platform="macos"] .toolbar-group .toolbar-btn:not(:first-child)::before {
+  content: '';
+  position: absolute;
+  left: -0.5px;
+  top: 16%;
+  bottom: 16%;
+  width: 1px;
+  background: rgb(0 0 0 / 0.08);
+  pointer-events: none;
+}
+
+/* Hide separator when this button or previous sibling is hovered/active */
+[data-platform="macos"] .toolbar-group .toolbar-btn:hover::before,
+[data-platform="macos"] .toolbar-group .toolbar-btn:active::before,
+[data-platform="macos"] .toolbar-group .toolbar-btn:hover + .toolbar-btn::before,
+[data-platform="macos"] .toolbar-group .toolbar-btn:active + .toolbar-btn::before {
+  opacity: 0;
+}
+
 /* macOS toolbar buttons (borderless, subtle hover like NSToolbarItem) */
 [data-platform="macos"] .toolbar-btn {
   background: transparent;
@@ -166,24 +214,23 @@ body {
 }
 
 [data-platform="macos"] .toolbar-btn:hover {
-  background: rgb(0 0 0 / 0.06);
+  background: rgb(0 0 0 / 0.08);
 }
 
 [data-platform="macos"] .toolbar-btn:active {
-  background: rgb(0 0 0 / 0.1);
+  background: rgb(0 0 0 / 0.2);
 }
 
-[data-platform="macos"] .toolbar-btn-primary {
-  background: rgb(10 132 255 / 0.18);
+[data-platform="macos"] .toolbar-group-prominent .toolbar-btn {
   color: rgb(0 84 186);
 }
 
-[data-platform="macos"] .toolbar-btn-primary:hover {
-  background: rgb(10 132 255 / 0.24);
+[data-platform="macos"] .toolbar-group-prominent .toolbar-btn:hover {
+  background: rgb(10 132 255 / 0.12);
 }
 
 [data-platform="macos"] .toolbar-btn-stop {
-  color: rgb(220 38 38);
+  color: rgb(220 38 38) !important;
 }
 
 /* macOS controls */
@@ -255,25 +302,45 @@ body {
 }
 
 @media (prefers-color-scheme: dark) {
+  [data-platform="macos"] .toolbar-group {
+    background: linear-gradient(to bottom, rgb(255 255 255 / 0.03), rgb(255 255 255 / 0.02));
+    box-shadow:
+      0 6px 20px rgb(0 0 0 / 0.15),
+      inset 1px 2px 1px -1px rgb(255 255 255 / 0.08),
+      inset -1px -1px 1px 0 rgb(255 255 255 / 0.08);
+  }
+
+  [data-platform="macos"] .toolbar-group-prominent {
+    background: linear-gradient(to bottom, rgb(10 132 255 / 0.10), rgb(10 132 255 / 0.07));
+    box-shadow:
+      0 6px 20px rgb(0 0 0 / 0.15),
+      inset 1px 2px 1px -1px rgb(255 255 255 / 0.06),
+      inset -1px -1px 1px 0 rgb(255 255 255 / 0.06);
+  }
+
+  /* Dark mode separators */
+  [data-platform="macos"] .toolbar-group .toolbar-btn:not(:first-child)::before {
+    background: rgb(255 255 255 / 0.1);
+  }
+
   [data-platform="macos"] .toolbar-btn:hover {
-    background: rgb(255 255 255 / 0.08);
+    background: rgb(255 255 255 / 0.1);
   }
 
   [data-platform="macos"] .toolbar-btn:active {
-    background: rgb(255 255 255 / 0.12);
+    background: rgb(255 255 255 / 0.25);
   }
 
-  [data-platform="macos"] .toolbar-btn-primary {
+  [data-platform="macos"] .toolbar-group-prominent .toolbar-btn {
     color: rgb(130 195 255);
-    background: rgb(10 132 255 / 0.25);
   }
 
-  [data-platform="macos"] .toolbar-btn-primary:hover {
-    background: rgb(10 132 255 / 0.32);
+  [data-platform="macos"] .toolbar-group-prominent .toolbar-btn:hover {
+    background: rgb(10 132 255 / 0.18);
   }
 
   [data-platform="macos"] .toolbar-btn-stop {
-    color: rgb(248 113 113);
+    color: rgb(248 113 113) !important;
   }
 
   [data-platform="macos"] .macos-btn {

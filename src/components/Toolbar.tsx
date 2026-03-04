@@ -55,6 +55,9 @@ interface ToolbarProps {
 const toolbarBtn =
   "flex items-center gap-2 px-3 py-1.5 min-h-9 text-[14px] rounded-md toolbar-btn disabled:opacity-40 disabled:pointer-events-none";
 
+const toolbarBtnMac =
+  "flex items-center justify-center px-3 py-[6px] toolbar-btn disabled:opacity-40 disabled:pointer-events-none";
+
 const dragIgnoreSelector =
   "button, input, textarea, select, a, [role='button'], [contenteditable='true'], [data-no-window-drag]";
 
@@ -113,78 +116,91 @@ export function Toolbar({
   };
 
   const dragRegionAttr = useWindowDragRegion ? true : undefined;
+  const btn = isMac ? toolbarBtnMac : toolbarBtn;
 
   return (
     <div
       onPointerDown={handlePointerDown}
       data-tauri-drag-region={dragRegionAttr}
-      className="flex items-center gap-1.5 px-3 border-b border-border-app bg-panel pt-[var(--toolbar-pt)] pb-2 pl-[var(--toolbar-pl)]"
+      className={`flex items-center px-3 border-b border-border-app bg-panel pt-[var(--toolbar-pt)] pb-2 pl-[var(--toolbar-pl)] ${isMac ? "gap-3" : "gap-1.5"}`}
     >
-      <button
-        onClick={onOpen}
-        disabled={inScanSession}
-        className={toolbarBtn}
-      >
-        <IconOpen className="w-4 h-4" />
-        Open
-      </button>
-
-      <button
-        onClick={onOpenFolder}
-        disabled={inScanSession}
-        className={toolbarBtn}
-      >
-        <IconFolder className="w-4 h-4" />
-        Open Folder
-      </button>
-
-      <button
-        onClick={onOpenUrl}
-        disabled={inScanSession}
-        className={toolbarBtn}
-      >
-        <IconLink className="w-4 h-4" />
-        Open URL
-      </button>
-
-      {inScanSession ? (
-        <>
-          {scanning ? (
-            <button
-              onClick={onPauseScan}
-              className={toolbarBtn}
-            >
-              <IconPause className="w-4 h-4" />
-              Pause
-            </button>
-          ) : (
-            <button
-              onClick={onResumeScan}
-              className={`${toolbarBtn} toolbar-btn-primary`}
-            >
-              <IconPlay className="w-4 h-4" />
-              Resume
-            </button>
-          )}
-          <button
-            onClick={onStopScan}
-            className={`${toolbarBtn} toolbar-btn-stop`}
-          >
-            <IconStop className="w-3.5 h-3.5" />
-            Stop
-          </button>
-        </>
-      ) : (
+      {/* Source group: Open, Open Folder, Open URL */}
+      <div className={isMac ? "toolbar-group" : "flex items-center gap-1.5"}>
         <button
-          onClick={onStartScan}
-          disabled={scanDisabledReason !== null}
-          title={scanDisabledReason ?? undefined}
-          className={`${toolbarBtn} toolbar-btn-primary`}
+          onClick={onOpen}
+          disabled={inScanSession}
+          className={btn}
+          title="Open File"
         >
-          <IconPlay className="w-4 h-4" />
-          {scanLabel}
+          <IconOpen className="w-[22px] h-[22px]" />
+          {!isMac && "Open"}
         </button>
-      )}
+
+        <button
+          onClick={onOpenFolder}
+          disabled={inScanSession}
+          className={btn}
+          title="Open Folder"
+        >
+          <IconFolder className="w-[22px] h-[22px]" />
+          {!isMac && "Open Folder"}
+        </button>
+
+        <button
+          onClick={onOpenUrl}
+          disabled={inScanSession}
+          className={btn}
+          title="Open URL"
+        >
+          <IconLink className="w-[22px] h-[22px]" />
+          {!isMac && "Open URL"}
+        </button>
+      </div>
+
+      {/* Scan group: Scan / Pause+Stop */}
+      <div className={isMac ? "toolbar-group toolbar-group-prominent" : "flex items-center gap-1.5"}>
+        {inScanSession ? (
+          <>
+            {scanning ? (
+              <button
+                onClick={onPauseScan}
+                className={btn}
+                title="Pause Scan"
+              >
+                <IconPause className="w-[22px] h-[22px]" />
+                {!isMac && "Pause"}
+              </button>
+            ) : (
+              <button
+                onClick={onResumeScan}
+                className={isMac ? btn : `${btn} toolbar-btn-primary`}
+                title="Resume Scan"
+              >
+                <IconPlay className="w-[22px] h-[22px]" />
+                {!isMac && "Resume"}
+              </button>
+            )}
+            <button
+              onClick={onStopScan}
+              className={`${btn} toolbar-btn-stop`}
+              title="Stop Scan"
+            >
+              <IconStop className="w-[19px] h-[19px]" />
+              {!isMac && "Stop"}
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={onStartScan}
+            disabled={scanDisabledReason !== null}
+            title={scanDisabledReason ?? (isMac ? "Scan" : undefined)}
+            className={isMac ? btn : `${btn} toolbar-btn-primary`}
+          >
+            <IconPlay className="w-[22px] h-[22px]" />
+            {!isMac && scanLabel}
+          </button>
+        )}
+      </div>
 
       {playlistName && (
         <span
@@ -198,33 +214,38 @@ export function Toolbar({
 
       <div data-tauri-drag-region={dragRegionAttr} className="flex-1" />
 
-      <ExportMenu
-        results={results}
-        filteredResults={filteredResults}
-        selectedResults={selectedResults}
-        playlistName={playlistName}
-        playlistPath={playlistPath}
-        disabled={!hasResults || inScanSession}
-        menuRequest={menuExportRequest}
-        scanState={scanState}
-        isMac={isMac}
-      />
+      {/* Actions group: Export, History, Settings */}
+      <div className={isMac ? "toolbar-group" : "flex items-center gap-1.5"}>
+        <ExportMenu
+          results={results}
+          filteredResults={filteredResults}
+          selectedResults={selectedResults}
+          playlistName={playlistName}
+          playlistPath={playlistPath}
+          disabled={!hasResults || inScanSession}
+          menuRequest={menuExportRequest}
+          scanState={scanState}
+          isMac={isMac}
+        />
 
-      <button
-        onClick={onOpenHistory}
-        disabled={!hasPlaylist}
-        className={`${toolbarBtn} px-2.5`}
-      >
-        <IconHistory className="w-4 h-4" />
-        History
-      </button>
+        <button
+          onClick={onOpenHistory}
+          disabled={!hasPlaylist}
+          className={isMac ? btn : `${btn} px-2.5`}
+          title="History"
+        >
+          <IconHistory className="w-[22px] h-[22px]" />
+          {!isMac && "History"}
+        </button>
 
-      <button
-        onClick={onOpenSettings}
-        className={`${toolbarBtn} px-2 min-w-9 justify-center`}
-      >
-        <IconSettings className="w-4 h-4" />
-      </button>
+        <button
+          onClick={onOpenSettings}
+          className={isMac ? btn : `${btn} px-2 min-w-9 justify-center`}
+          title="Settings"
+        >
+          <IconSettings className="w-[22px] h-[22px]" />
+        </button>
+      </div>
     </div>
   );
 }
