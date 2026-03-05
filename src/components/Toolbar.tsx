@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  BarChart3,
   History,
   Folder,
   FolderOpen,
@@ -43,8 +44,10 @@ interface ToolbarProps {
   onStopScan: () => void;
   onOpenHistory: () => void;
   onOpenSettings: () => void;
+  onToggleReport: () => void;
   scanState: ScanState;
   hasPlaylist: boolean;
+  showReport: boolean;
   exportScopeCounts: Record<ExportScope, number>;
   resolveExportScopeResults: (scope: ExportScope) => ChannelResult[];
   playlistName: string;
@@ -84,8 +87,10 @@ export const Toolbar = memo(function Toolbar({
   onStopScan,
   onOpenHistory,
   onOpenSettings,
+  onToggleReport,
   scanState,
   hasPlaylist,
+  showReport,
   exportScopeCounts,
   resolveExportScopeResults,
   playlistName,
@@ -129,6 +134,7 @@ export const Toolbar = memo(function Toolbar({
   const IconStop = isMac ? SFStopFill : Square;
   const IconSettings = isMac ? SFGearshape : Settings;
   const IconHistory = isMac ? SFClockArrow : History;
+  const IconReport = isMac ? BarChart3 : BarChart3;
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (!useWindowDragRegion) return;
@@ -311,6 +317,16 @@ export const Toolbar = memo(function Toolbar({
           scanState={scanState}
           isMac={isMac}
         />
+
+        <button
+          onClick={onToggleReport}
+          disabled={!hasPlaylist}
+          className={`${isMac ? btn : `${btn} px-2.5`} ${showReport ? "toolbar-btn-primary" : ""}`}
+          title={showReport ? "Hide Report" : "Show Report"}
+        >
+          <IconReport className="w-[22px] h-[22px]" />
+          {!isMac && "Report"}
+        </button>
 
         <button
           onClick={onOpenHistory}

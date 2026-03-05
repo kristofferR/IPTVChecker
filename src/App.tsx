@@ -48,6 +48,7 @@ import { useSettings } from "./hooks/useSettings";
 import { Toolbar } from "./components/Toolbar";
 import { FilterBar } from "./components/FilterBar";
 import { ChannelTable } from "./components/ChannelTable";
+import { PlaylistReportPanel } from "./components/PlaylistReportPanel";
 import { ThumbnailPanel } from "./components/ThumbnailPanel";
 import { StatsPanel } from "./components/StatsPanel";
 import { WarningsPanel } from "./components/WarningsPanel";
@@ -299,6 +300,10 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = localStorage.getItem("sidebar-width");
     return saved ? Math.max(100, Math.min(600, Number(saved))) : 288;
+  });
+  const [showReportPanel, setShowReportPanel] = useState(() => {
+    const saved = localStorage.getItem("report-panel-visible");
+    return saved == null ? true : saved === "1";
   });
   const sidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -1342,12 +1347,20 @@ export default function App() {
     localStorage.setItem("sidebar-width", String(sidebarWidth));
   }, [sidebarWidth]);
 
+  useEffect(() => {
+    localStorage.setItem("report-panel-visible", showReportPanel ? "1" : "0");
+  }, [showReportPanel]);
+
   const handleSelectChannel = useCallback((result: ChannelResult) => {
     setSelectedChannel(result);
   }, []);
 
   const handleOpenSettings = useCallback(() => {
     setShowSettings(true);
+  }, []);
+
+  const handleToggleReport = useCallback(() => {
+    setShowReportPanel((current) => !current);
   }, []);
 
   const launchChannelInPlayer = useCallback(async (result: ChannelResult) => {
@@ -1567,8 +1580,10 @@ export default function App() {
         onStopScan={cancel}
         onOpenHistory={openHistoryPanel}
         onOpenSettings={handleOpenSettings}
+        onToggleReport={handleToggleReport}
         scanState={scanState}
         hasPlaylist={playlist !== null}
+        showReport={playlist !== null && showReportPanel}
         exportScopeCounts={exportScopeCounts}
         resolveExportScopeResults={resolveExportScopeResults}
         playlistName={playlist?.file_name ?? ""}
@@ -1709,6 +1724,16 @@ export default function App() {
 
       <div className="flex flex-col flex-1 min-h-0">
       <div className="flex flex-1 min-h-0 bg-content">
+        {playlist && showReportPanel && (
+          <PlaylistReportPanel
+            playlist={playlist}
+            results={completedResults}
+            progress={progress}
+            summary={summary}
+            scanState={scanState}
+            onClose={() => setShowReportPanel(false)}
+          />
+        )}
         <div className="flex flex-col flex-1 min-w-0">
           {playlist ? (
             <Profiler id="ChannelTable" onRender={handleTableProfilerRender}>
