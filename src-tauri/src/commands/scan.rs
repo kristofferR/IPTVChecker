@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use tauri::{AppHandle, Emitter, Manager, Window};
 use tokio::sync::Semaphore;
@@ -9,7 +10,9 @@ use tokio_util::sync::CancellationToken;
 use crate::commands::history;
 use crate::engine::{checker, ffmpeg, parser, proxy, resume};
 use crate::error::AppError;
+use crate::models::backend_perf::BackendPerfSample;
 use crate::models::channel::{Channel, ChannelResult, ChannelStatus};
+use crate::models::playlist::PlaylistPreview;
 use crate::models::scan::{
     RetryBackoff, ScanConfig, ScanErrorPayload, ScanEvent, ScanProgress, ScanSummary,
 };
@@ -17,6 +20,9 @@ use crate::models::scan_log::{ChannelDebugLog, ScanDebugLog};
 use crate::state::AppState;
 
 static NEXT_SCAN_RUN_ID: AtomicU64 = AtomicU64::new(1);
+const PROGRESS_EMIT_INTERVAL_MS: u64 = 50;
+const CHECKPOINT_FLUSH_INTERVAL_MS: u64 = 250;
+const CHECKPOINT_FLUSH_MAX_BATCH: usize = 128;
 
 #[derive(Debug, Clone)]
 struct SharedUrlResult {
@@ -103,7 +109,9 @@ async fn compute_shared_url_result(
     skip_screenshots: bool,
     screenshots_dir: Option<&String>,
     screenshot_file_name: &str,
-) -> Result<SharedUrlResult, AppError> {
+    diagnostics_semaphore: &Arc<Semaphore>,
+) -> Result<(SharedUrlResult, WorkerTiming), AppError> {
+    let check_started_at = Instant::now();
     let (status_str, stream_url, latency_ms, retry_count, error_reason, mut channel_log) =
         match checker::check_channel_status_with_debug(
             client,
@@ -140,6 +148,7 @@ async fn compute_shared_url_result(
                 },
             ),
         };
+    let check_ms = check_started_at.elapsed().as_secs_f64() * 1000.0;
 
     let final_status_str = if status_str == "Geoblocked" && test_geoblock {
         if let Some(proxies) = proxy_list {
@@ -168,13 +177,21 @@ async fn compute_shared_url_result(
         channel_log.final_reason = error_reason.clone();
     }
 
+    let mut timing = WorkerTiming {
+        check_ms,
+        diagnostics_ms: 0.0,
+    };
+
     if status != ChannelStatus::Alive || cancel.is_cancelled() {
-        return Ok(SharedUrlResult::dead(
-            stream_url,
-            latency_ms,
-            (retry_count > 0).then_some(retry_count),
-            error_reason,
-            channel_log,
+        return Ok((
+            SharedUrlResult::dead(
+                stream_url,
+                latency_ms,
+                (retry_count > 0).then_some(retry_count),
+                error_reason,
+                channel_log,
+            ),
+            timing,
         ));
     }
 
@@ -198,37 +215,28 @@ async fn compute_shared_url_result(
         error_reason,
         channel_log,
     };
+    let diagnostics_started_at = Instant::now();
+    let _diagnostics_permit = diagnostics_semaphore.clone().acquire_owned().await.ok();
 
     if ffprobe_ok {
-        if let Ok(stream_tracks) = ffmpeg::get_stream_track_presence(app, &target_url, cancel).await
-        {
-            shared.audio_only = stream_tracks.has_audio && !stream_tracks.has_video;
-        }
-
-        if !shared.audio_only {
-            if let Ok(info) = ffmpeg::get_stream_info(app, &target_url, cancel).await {
-                shared.codec = Some(info.codec);
-                shared.resolution = Some(info.resolution.clone());
-                shared.width = info.width;
-                shared.height = info.height;
-                shared.fps = info.fps;
-                shared.low_framerate = info.fps.map(|fps| fps < 29).unwrap_or(false);
+        if let Ok(snapshot) = ffmpeg::collect_probe_snapshot(app, &target_url, cancel).await {
+            shared.audio_only =
+                snapshot.track_presence.has_audio && !snapshot.track_presence.has_video;
+            if let Some(info) = snapshot.video_info {
+                if !shared.audio_only {
+                    shared.codec = Some(info.codec);
+                    shared.resolution = Some(info.resolution.clone());
+                    shared.width = info.width;
+                    shared.height = info.height;
+                    shared.fps = info.fps;
+                    shared.low_framerate = info.fps.map(|fps| fps < 29).unwrap_or(false);
+                }
             }
-        }
-
-        if !cancel.is_cancelled() {
-            if let Ok(audio) = ffmpeg::get_audio_info(app, &target_url, cancel).await {
+            if let Some(audio) = snapshot.audio_info {
                 shared.audio_codec = Some(audio.codec);
                 shared.audio_bitrate = audio.bitrate_kbps.map(|b| format!("{}", b));
             }
-        }
-
-        if !cancel.is_cancelled() {
-            if let Ok(ffprobe_output) =
-                ffmpeg::collect_ffprobe_output(app, &target_url, cancel).await
-            {
-                shared.channel_log.ffprobe_output = Some(ffprobe_output);
-            }
+            shared.channel_log.ffprobe_output = Some(snapshot.ffprobe_output);
         }
 
         if !cancel.is_cancelled() && profile_bitrate_flag && ffmpeg_ok {
@@ -255,8 +263,9 @@ async fn compute_shared_url_result(
             }
         }
     }
+    timing.diagnostics_ms = diagnostics_started_at.elapsed().as_secs_f64() * 1000.0;
 
-    Ok(shared)
+    Ok((shared, timing))
 }
 
 fn try_mark_scan_started(scanning: &mut bool) -> Result<(), AppError> {
@@ -301,12 +310,18 @@ fn emit_scan_error_event(app: &AppHandle, run_id: &str, message: impl Into<Strin
 }
 
 async fn cancel_scan_token(state: &AppState, scan_scope: &str) {
-    let token = state
-        .with_window_scan_state(scan_scope, |scan_state| scan_state.cancel_token.clone())
+    let (token, pause_notify) = state
+        .with_window_scan_state(scan_scope, |scan_state| {
+            (
+                scan_state.cancel_token.clone(),
+                scan_state.pause_notify.clone(),
+            )
+        })
         .await;
     if let Some(cancel) = token {
         cancel.cancel();
     }
+    pause_notify.notify_waiters();
 }
 
 async fn wait_if_paused(state: &AppState, scan_scope: &str, cancel: &CancellationToken) -> bool {
@@ -315,27 +330,25 @@ async fn wait_if_paused(state: &AppState, scan_scope: &str, cancel: &Cancellatio
             return false;
         }
 
-        let paused = state
-            .with_window_scan_state(scan_scope, |scan_state| scan_state.paused)
+        let (paused, pause_notify) = state
+            .with_window_scan_state(scan_scope, |scan_state| {
+                (scan_state.paused, scan_state.pause_notify.clone())
+            })
             .await;
         if !paused {
             return true;
         }
 
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        tokio::select! {
+            _ = cancel.cancelled() => return false,
+            _ = pause_notify.notified() => {}
+        }
     }
 }
 
 async fn reset_scan_state(state: &AppState, scan_scope: &str) {
     cancel_scan_token(state, scan_scope).await;
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    state
-        .with_window_scan_state(scan_scope, |scan_state| {
-            mark_scan_finished(&mut scan_state.scanning);
-            scan_state.paused = false;
-            scan_state.current_run_id = None;
-        })
-        .await;
+    clear_pre_spawn_scan_state(state, scan_scope).await;
 }
 
 async fn clear_pre_spawn_scan_state(state: &AppState, scan_scope: &str) {
@@ -345,6 +358,7 @@ async fn clear_pre_spawn_scan_state(state: &AppState, scan_scope: &str) {
             scan_state.paused = false;
             scan_state.current_run_id = None;
             scan_state.cancel_token = None;
+            scan_state.pause_notify.notify_waiters();
         })
         .await;
 }
@@ -362,6 +376,7 @@ async fn clear_scan_state_for_run(state: &AppState, scan_scope: &str, finished_r
             mark_scan_finished(&mut scan_state.scanning);
             scan_state.paused = false;
             scan_state.cancel_token = None;
+            scan_state.pause_notify.notify_waiters();
         })
         .await;
 }
@@ -380,6 +395,19 @@ struct ScanCounters {
 struct CompletedScanData {
     summary: ScanSummary,
     results: Vec<ChannelResult>,
+    channel_logs: Vec<ChannelDebugLog>,
+}
+
+#[derive(Debug, Clone)]
+struct WorkerOutput {
+    result: ChannelResult,
+    channel_log: ChannelDebugLog,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct WorkerTiming {
+    check_ms: f64,
+    diagnostics_ms: f64,
 }
 
 impl ScanCounters {
@@ -448,32 +476,231 @@ fn now_epoch_ms() -> u64 {
         .as_millis() as u64
 }
 
-#[tauri::command]
-pub async fn start_scan(
-    app: AppHandle,
-    window: Window,
-    config: ScanConfig,
-) -> Result<String, AppError> {
-    let state = app.state::<Arc<AppState>>();
-    let scan_scope = window.label().to_string();
+async fn record_backend_perf(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    metric: &str,
+    value_ms: f64,
+    run_id: Option<&str>,
+) {
+    if !cfg!(debug_assertions) {
+        return;
+    }
 
-    config.validate()?;
-    let cancel_token = CancellationToken::new();
-    let run_id = next_scan_run_id();
-    let scan_started_at_epoch_ms = now_epoch_ms();
+    let sample = BackendPerfSample {
+        metric: metric.to_string(),
+        value_ms,
+        run_id: run_id.map(str::to_string),
+        recorded_at_epoch_ms: now_epoch_ms(),
+    };
+    state.push_backend_perf_sample(sample.clone()).await;
+    let _ = app.emit("scan://backend-perf", sample);
+}
 
-    // Prevent multiple simultaneous scans
+fn source_mtime_ms(path: &str) -> Option<u64> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let modified = metadata.modified().ok()?;
+    let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some(duration.as_millis().min(u128::from(u64::MAX)) as u64)
+}
+
+fn playlist_preview_cache_key(config: &ScanConfig) -> String {
+    format!(
+        "{}|g:{}|s:{}",
+        config.file_path,
+        config.group_filter.as_deref().unwrap_or("*"),
+        config.channel_search.as_deref().unwrap_or("*")
+    )
+}
+
+async fn parse_playlist_with_cache(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    config: &ScanConfig,
+    run_id: &str,
+) -> Result<PlaylistPreview, AppError> {
+    let source_mtime = source_mtime_ms(&config.file_path);
+    let cache_key = playlist_preview_cache_key(config);
+    if let Some(cached) = state
+        .get_cached_playlist_preview(&cache_key, source_mtime)
+        .await
+    {
+        return Ok(cached);
+    }
+
+    let parse_started_at = Instant::now();
+    let preview = parser::parse_playlist(
+        &config.file_path,
+        &config.group_filter,
+        &config.channel_search,
+    )?;
+    let parse_ms = parse_started_at.elapsed().as_secs_f64() * 1000.0;
+    record_backend_perf(
+        app,
+        state,
+        "scan.preflight.parse_ms",
+        parse_ms,
+        Some(run_id),
+    )
+    .await;
     state
-        .with_window_scan_state(&scan_scope, |scan_state| -> Result<(), AppError> {
-            try_mark_scan_started(&mut scan_state.scanning)?;
-            scan_state.paused = false;
-            scan_state.cancel_token = Some(cancel_token.clone());
-            scan_state.current_run_id = Some(run_id.clone());
-            scan_state.scan_log = None;
-            Ok(())
-        })
-        .await?;
+        .put_cached_playlist_preview(cache_key, preview.clone(), source_mtime)
+        .await;
+    Ok(preview)
+}
 
+async fn emit_channel_result_event(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    run_id: &str,
+    result: ChannelResult,
+) {
+    let emit_started_at = Instant::now();
+    let _ = app.emit(
+        "scan://channel-result",
+        ScanEvent {
+            run_id: run_id.to_string(),
+            payload: result,
+        },
+    );
+    let emit_ms = emit_started_at.elapsed().as_secs_f64() * 1000.0;
+    record_backend_perf(app, state, "scan.event_emit_ms", emit_ms, Some(run_id)).await;
+}
+
+async fn emit_progress_event(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    run_id: &str,
+    progress: ScanProgress,
+) {
+    let emit_started_at = Instant::now();
+    let _ = app.emit(
+        "scan://progress",
+        ScanEvent {
+            run_id: run_id.to_string(),
+            payload: progress,
+        },
+    );
+    let emit_ms = emit_started_at.elapsed().as_secs_f64() * 1000.0;
+    record_backend_perf(app, state, "scan.event_emit_ms", emit_ms, Some(run_id)).await;
+}
+
+async fn flush_checkpoint_entries(
+    log_file: &str,
+    checkpoint_file: &str,
+    pending: &mut Vec<resume::CheckpointWriteEntry>,
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    run_id: &str,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    let batch = std::mem::take(pending);
+    let log_path = log_file.to_string();
+    let checkpoint_path = checkpoint_file.to_string();
+    let flush_started_at = Instant::now();
+    let flush_result = tokio::task::spawn_blocking(move || {
+        resume::write_entries(&log_path, &checkpoint_path, &batch)
+    })
+    .await;
+    let flush_ms = flush_started_at.elapsed().as_secs_f64() * 1000.0;
+    record_backend_perf(
+        app,
+        state,
+        "scan.checkpoint_flush_ms",
+        flush_ms,
+        Some(run_id),
+    )
+    .await;
+
+    match flush_result {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            log::warn!("Failed to flush checkpoint batch for {}: {}", run_id, error);
+        }
+        Err(error) => {
+            log::warn!(
+                "Checkpoint writer task join failure for {}: {}",
+                run_id,
+                error
+            );
+        }
+    }
+}
+
+async fn run_checkpoint_writer(
+    mut rx: tokio::sync::mpsc::Receiver<resume::CheckpointWriteEntry>,
+    log_file: String,
+    checkpoint_file: String,
+    app: AppHandle,
+    state: Arc<AppState>,
+    run_id: String,
+) {
+    let mut pending =
+        Vec::<resume::CheckpointWriteEntry>::with_capacity(CHECKPOINT_FLUSH_MAX_BATCH);
+    let mut ticker = tokio::time::interval(std::time::Duration::from_millis(
+        CHECKPOINT_FLUSH_INTERVAL_MS,
+    ));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        tokio::select! {
+            maybe_entry = rx.recv() => {
+                match maybe_entry {
+                    Some(entry) => {
+                        pending.push(entry);
+                        if pending.len() >= CHECKPOINT_FLUSH_MAX_BATCH {
+                            flush_checkpoint_entries(
+                                &log_file,
+                                &checkpoint_file,
+                                &mut pending,
+                                &app,
+                                &state,
+                                &run_id,
+                            )
+                            .await;
+                        }
+                    }
+                    None => {
+                        break;
+                    }
+                }
+            }
+            _ = ticker.tick() => {
+                flush_checkpoint_entries(
+                    &log_file,
+                    &checkpoint_file,
+                    &mut pending,
+                    &app,
+                    &state,
+                    &run_id,
+                )
+                .await;
+            }
+        }
+    }
+
+    flush_checkpoint_entries(
+        &log_file,
+        &checkpoint_file,
+        &mut pending,
+        &app,
+        &state,
+        &run_id,
+    )
+    .await;
+}
+
+async fn execute_scan_run(
+    app: AppHandle,
+    state: Arc<AppState>,
+    scan_scope: String,
+    run_id: String,
+    scan_started_at_epoch_ms: u64,
+    config: ScanConfig,
+    cancel_token: CancellationToken,
+) -> Result<(), AppError> {
     log::info!(
         "Starting scan {} for window '{}': {} (concurrency: {}, retries: {}, retry_backoff: {:?})",
         run_id,
@@ -484,23 +711,11 @@ pub async fn start_scan(
         config.retry_backoff
     );
 
-    // Parse the playlist
-    let preview = match parser::parse_playlist(
-        &config.file_path,
-        &config.group_filter,
-        &config.channel_search,
-    ) {
-        Ok(preview) => preview,
-        Err(error) => {
-            clear_pre_spawn_scan_state(state.inner().as_ref(), &scan_scope).await;
-            return Err(error);
-        }
-    };
-
+    let preview = parse_playlist_with_cache(&app, &state, &config, &run_id).await?;
     let mut channels = preview.channels;
     filter_channels_by_selection(&mut channels, &config.selected_indices);
     let total = channels.len();
-    log::info!("Scan: {} channels to check", total);
+    log::info!("Scan {}: {} channels to check", run_id, total);
 
     if total == 0 {
         let summary = ScanSummary {
@@ -541,16 +756,16 @@ pub async fn start_scan(
                     source_identity: config.source_identity.clone(),
                     started_at_epoch_ms: scan_started_at_epoch_ms,
                     finished_at_epoch_ms: now_epoch_ms(),
-                    summary: summary.clone(),
+                    summary,
                     channels: Vec::new(),
                 });
             })
             .await;
-        clear_pre_spawn_scan_state(state.inner().as_ref(), &scan_scope).await;
-        return Ok(run_id);
+        return Ok(());
     }
 
     // Resume support
+    let resume_started_at = Instant::now();
     let playlist_path = std::path::Path::new(&config.file_path);
     let base_name = playlist_path
         .file_stem()
@@ -603,6 +818,15 @@ pub async fn start_scan(
             channels.len()
         );
     }
+    let resume_ms = resume_started_at.elapsed().as_secs_f64() * 1000.0;
+    record_backend_perf(
+        &app,
+        &state,
+        "scan.preflight.resume_load_ms",
+        resume_ms,
+        Some(&run_id),
+    )
+    .await;
 
     // Load proxies if configured
     let proxy_list = if config.test_geoblock {
@@ -613,7 +837,6 @@ pub async fn start_scan(
                     Some(proxy_list)
                 }
                 Err(error) => {
-                    clear_pre_spawn_scan_state(state.inner().as_ref(), &scan_scope).await;
                     return Err(AppError::Other(format!(
                         "Failed to load proxy file '{}': {}",
                         proxy_file, error
@@ -628,7 +851,17 @@ pub async fn start_scan(
     };
 
     // Check ffmpeg availability
+    let ffmpeg_check_started_at = Instant::now();
     let (ffmpeg_available, ffprobe_available) = ffmpeg::check_availability(&app).await;
+    let ffmpeg_check_ms = ffmpeg_check_started_at.elapsed().as_secs_f64() * 1000.0;
+    record_backend_perf(
+        &app,
+        &state,
+        "scan.preflight.ffmpeg_check_ms",
+        ffmpeg_check_ms,
+        Some(&run_id),
+    )
+    .await;
 
     // Screenshots directory — use app temp dir by default (in-app preview only),
     // or a user-specified folder if configured.
@@ -646,11 +879,10 @@ pub async fn start_scan(
                     .to_string()
             }
         };
-        if let Err(e) = std::fs::create_dir_all(&dir) {
-            clear_pre_spawn_scan_state(state.inner().as_ref(), &scan_scope).await;
+        if let Err(error) = std::fs::create_dir_all(&dir) {
             return Err(AppError::Other(format!(
                 "Failed to create screenshots directory: {}",
-                e
+                error
             )));
         }
         Some(dir)
@@ -658,174 +890,227 @@ pub async fn start_scan(
         None
     };
 
-    // Spawn the scan task
-    let app_handle = app.clone();
-    let state_clone = state.inner().clone();
-    let run_id_for_task = run_id.clone();
-    let resumed_results_for_events = resumed_results.clone();
-    let log_file_for_task = log_file.clone();
-    let checkpoint_file_for_task = checkpoint_file.clone();
-    let scan_started_at_epoch_ms_for_task = scan_started_at_epoch_ms;
-    let scan_scope_for_task = scan_scope.clone();
+    let client = Arc::new(
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap_or_default(),
+    );
+    let semaphore = Arc::new(Semaphore::new(config.concurrency as usize));
+    let diagnostics_limit = usize::max(1, usize::min(config.concurrency as usize, 4));
+    let diagnostics_semaphore = Arc::new(Semaphore::new(diagnostics_limit));
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<WorkerOutput>(256);
+    let (checkpoint_tx, checkpoint_rx) =
+        tokio::sync::mpsc::channel::<resume::CheckpointWriteEntry>(1024);
 
-    tokio::spawn(async move {
-        let client = Arc::new(
-            reqwest::Client::builder()
-                .connect_timeout(std::time::Duration::from_secs(5))
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .unwrap_or_default(),
-        );
-        let semaphore = Arc::new(Semaphore::new(config.concurrency as usize));
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<ChannelResult>(256);
+    let checkpoint_task = tokio::spawn(run_checkpoint_writer(
+        checkpoint_rx,
+        log_file.clone(),
+        checkpoint_file.clone(),
+        app.clone(),
+        state.clone(),
+        run_id.clone(),
+    ));
 
-        // Spawn a task to forward results as events
-        let app_for_events = app_handle.clone();
-        let run_id_for_events = run_id_for_task.clone();
-        let event_task = tokio::spawn(async move {
-            let mut counters = ScanCounters::default();
-            let mut completed_results = Vec::with_capacity(total);
-            tokio::task::yield_now().await;
+    let app_for_events = app.clone();
+    let state_for_events = state.clone();
+    let run_id_for_events = run_id.clone();
+    let event_task = tokio::spawn(async move {
+        let mut counters = ScanCounters::default();
+        let mut completed_results = Vec::with_capacity(total);
+        let mut channel_logs = Vec::<ChannelDebugLog>::with_capacity(total);
+        let mut first_result_emitted = false;
+        let mut last_progress_emit = Instant::now()
+            .checked_sub(std::time::Duration::from_millis(PROGRESS_EMIT_INTERVAL_MS))
+            .unwrap_or_else(Instant::now);
 
-            for result in resumed_results_for_events {
-                counters.apply(&result);
-                completed_results.push(result.clone());
+        for result in resumed_results {
+            counters.apply(&result);
+            completed_results.push(result.clone());
+            emit_channel_result_event(
+                &app_for_events,
+                &state_for_events,
+                &run_id_for_events,
+                result,
+            )
+            .await;
 
-                let _ = app_for_events.emit(
-                    "scan://channel-result",
-                    ScanEvent {
-                        run_id: run_id_for_events.clone(),
-                        payload: result,
-                    },
-                );
-                let _ = app_for_events.emit(
-                    "scan://progress",
-                    ScanEvent {
-                        run_id: run_id_for_events.clone(),
-                        payload: counters.as_progress(total),
-                    },
-                );
+            if last_progress_emit.elapsed().as_millis() as u64 >= PROGRESS_EMIT_INTERVAL_MS {
+                emit_progress_event(
+                    &app_for_events,
+                    &state_for_events,
+                    &run_id_for_events,
+                    counters.as_progress(total),
+                )
+                .await;
+                last_progress_emit = Instant::now();
+            }
+        }
+
+        while let Some(worker) = rx.recv().await {
+            if !first_result_emitted {
+                first_result_emitted = true;
+                let time_to_first_ms =
+                    now_epoch_ms().saturating_sub(scan_started_at_epoch_ms) as f64;
+                record_backend_perf(
+                    &app_for_events,
+                    &state_for_events,
+                    "scan.time_to_first_result_ms",
+                    time_to_first_ms,
+                    Some(&run_id_for_events),
+                )
+                .await;
             }
 
-            while let Some(result) = rx.recv().await {
-                counters.apply(&result);
-                completed_results.push(result.clone());
+            counters.apply(&worker.result);
+            completed_results.push(worker.result.clone());
+            channel_logs.push(worker.channel_log);
+            emit_channel_result_event(
+                &app_for_events,
+                &state_for_events,
+                &run_id_for_events,
+                worker.result,
+            )
+            .await;
 
-                let _ = app_for_events.emit(
-                    "scan://channel-result",
-                    ScanEvent {
-                        run_id: run_id_for_events.clone(),
-                        payload: result,
-                    },
-                );
-                let _ = app_for_events.emit(
-                    "scan://progress",
-                    ScanEvent {
-                        run_id: run_id_for_events.clone(),
-                        payload: counters.as_progress(total),
-                    },
-                );
+            if last_progress_emit.elapsed().as_millis() as u64 >= PROGRESS_EMIT_INTERVAL_MS {
+                emit_progress_event(
+                    &app_for_events,
+                    &state_for_events,
+                    &run_id_for_events,
+                    counters.as_progress(total),
+                )
+                .await;
+                last_progress_emit = Instant::now();
             }
+        }
 
-            CompletedScanData {
-                summary: counters.as_summary(total),
-                results: completed_results,
-            }
-        });
+        emit_progress_event(
+            &app_for_events,
+            &state_for_events,
+            &run_id_for_events,
+            counters.as_progress(total),
+        )
+        .await;
 
-        // Process channels
-        let proxy_list = Arc::new(proxy_list);
-        let shared_url_results: Arc<
-            tokio::sync::Mutex<
-                HashMap<String, Arc<tokio::sync::OnceCell<Result<SharedUrlResult, AppError>>>>,
+        CompletedScanData {
+            summary: counters.as_summary(total),
+            results: completed_results,
+            channel_logs,
+        }
+    });
+
+    let proxy_list = Arc::new(proxy_list);
+    let shared_url_results: Arc<
+        tokio::sync::Mutex<
+            HashMap<
+                String,
+                Arc<tokio::sync::OnceCell<Result<(SharedUrlResult, WorkerTiming), AppError>>>,
             >,
-        > = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
-        let channel_debug_logs: Arc<tokio::sync::Mutex<Vec<ChannelDebugLog>>> =
-            Arc::new(tokio::sync::Mutex::new(Vec::new()));
-        let mut handles = Vec::new();
+        >,
+    > = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let mut handles = Vec::new();
 
-        for channel in channels {
-            if cancel_token.is_cancelled() {
-                break;
+    for channel in channels {
+        if cancel_token.is_cancelled() {
+            break;
+        }
+
+        let pause_wait_started_at = Instant::now();
+        if !wait_if_paused(state.as_ref(), &scan_scope, &cancel_token).await {
+            break;
+        }
+        let pause_wait_ms = pause_wait_started_at.elapsed().as_secs_f64() * 1000.0;
+        if pause_wait_ms >= 1.0 {
+            record_backend_perf(
+                &app,
+                &state,
+                "scan.pause_wait_ms",
+                pause_wait_ms,
+                Some(&run_id),
+            )
+            .await;
+        }
+
+        let permit = semaphore.clone().acquire_owned().await;
+        let permit = match permit {
+            Ok(permit) => permit,
+            Err(_) => break,
+        };
+
+        let tx = tx.clone();
+        let checkpoint_tx = checkpoint_tx.clone();
+        let cancel = cancel_token.clone();
+        let client = Arc::clone(&client);
+        let user_agent = config.user_agent.clone();
+        let timeout = config.timeout;
+        let retries = config.retries;
+        let retry_backoff = config.retry_backoff;
+        let extended_timeout = config.extended_timeout;
+        let proxy_list = Arc::clone(&proxy_list);
+        let test_geoblock = config.test_geoblock;
+        let skip_screenshots = config.skip_screenshots;
+        let profile_bitrate_flag = config.profile_bitrate;
+        let screenshots_dir = screenshots_dir.clone();
+        let ffmpeg_ok = ffmpeg_available;
+        let ffprobe_ok = ffprobe_available;
+        let task_app = app.clone();
+        let state_for_perf = state.clone();
+        let run_id_for_perf = run_id.clone();
+        let shared_url_results = Arc::clone(&shared_url_results);
+        let diagnostics_semaphore = Arc::clone(&diagnostics_semaphore);
+
+        let handle = tokio::spawn(async move {
+            let _permit = permit;
+            if cancel.is_cancelled() {
+                return;
             }
-            if !wait_if_paused(state_clone.as_ref(), &scan_scope_for_task, &cancel_token).await {
-                break;
-            }
 
-            let permit = semaphore.clone().acquire_owned().await;
-            if permit.is_err() {
-                break;
-            }
-            let _permit = permit.unwrap();
+            let canonical_url = canonicalize_stream_url(&channel.url);
+            let result_cell = {
+                let mut cache = shared_url_results.lock().await;
+                cache
+                    .entry(canonical_url)
+                    .or_insert_with(|| Arc::new(tokio::sync::OnceCell::new()))
+                    .clone()
+            };
 
-            let tx = tx.clone();
-            let cancel = cancel_token.clone();
-            let client = Arc::clone(&client);
-            let user_agent = config.user_agent.clone();
-            let timeout = config.timeout;
-            let retries = config.retries;
-            let retry_backoff = config.retry_backoff;
-            let extended_timeout = config.extended_timeout;
-            let proxy_list = Arc::clone(&proxy_list);
-            let test_geoblock = config.test_geoblock;
-            let skip_screenshots = config.skip_screenshots;
-            let profile_bitrate_flag = config.profile_bitrate;
-            let screenshots_dir = screenshots_dir.clone();
-            let log_file = log_file_for_task.clone();
-            let checkpoint_file = checkpoint_file_for_task.clone();
-            let ffmpeg_ok = ffmpeg_available;
-            let ffprobe_ok = ffprobe_available;
-            let task_app = app_handle.clone();
-            let shared_url_results = Arc::clone(&shared_url_results);
-            let channel_debug_logs = Arc::clone(&channel_debug_logs);
+            let screenshot_file_name =
+                ffmpeg::build_screenshot_file_name(channel.index, &channel.name);
 
-            let handle = tokio::spawn(async move {
-                if cancel.is_cancelled() {
-                    return;
-                }
+            let shared_result = result_cell
+                .get_or_init(|| async {
+                    compute_shared_url_result(
+                        &task_app,
+                        &client,
+                        &channel.url,
+                        timeout,
+                        retries,
+                        retry_backoff,
+                        extended_timeout,
+                        &user_agent,
+                        &cancel,
+                        &proxy_list,
+                        test_geoblock,
+                        ffmpeg_ok,
+                        ffprobe_ok,
+                        profile_bitrate_flag,
+                        skip_screenshots,
+                        screenshots_dir.as_ref(),
+                        &screenshot_file_name,
+                        &diagnostics_semaphore,
+                    )
+                    .await
+                })
+                .await;
 
-                let canonical_url = canonicalize_stream_url(&channel.url);
-                let result_cell = {
-                    let mut cache = shared_url_results.lock().await;
-                    cache
-                        .entry(canonical_url)
-                        .or_insert_with(|| Arc::new(tokio::sync::OnceCell::new()))
-                        .clone()
-                };
-
-                let screenshot_file_name =
-                    ffmpeg::build_screenshot_file_name(channel.index, &channel.name);
-
-                let shared_result = result_cell
-                    .get_or_init(|| async {
-                        compute_shared_url_result(
-                            &task_app,
-                            &client,
-                            &channel.url,
-                            timeout,
-                            retries,
-                            retry_backoff,
-                            extended_timeout,
-                            &user_agent,
-                            &cancel,
-                            &proxy_list,
-                            test_geoblock,
-                            ffmpeg_ok,
-                            ffprobe_ok,
-                            profile_bitrate_flag,
-                            skip_screenshots,
-                            screenshots_dir.as_ref(),
-                            &screenshot_file_name,
-                        )
-                        .await
-                    })
-                    .await;
-
-                let mut shared = match shared_result {
-                    Ok(value) => value.clone(),
-                    Err(AppError::Cancelled) => return,
-                    Err(error) => {
-                        let reason = error.to_string();
+            let (mut shared, timing) = match shared_result {
+                Ok(value) => value.clone(),
+                Err(AppError::Cancelled) => return,
+                Err(error) => {
+                    let reason = error.to_string();
+                    (
                         SharedUrlResult::dead(
                             None,
                             None,
@@ -836,161 +1121,234 @@ pub async fn start_scan(
                                 final_reason: Some(reason),
                                 ..ChannelDebugLog::default()
                             },
-                        )
-                    }
-                };
-                shared.channel_log.channel_index = channel.index;
-                shared.channel_log.channel_name = channel.name.clone();
-                shared.channel_log.channel_url = channel.url.clone();
-
-                let mut result = ChannelResult {
-                    index: channel.index,
-                    playlist: channel.playlist.clone(),
-                    name: channel.name.clone(),
-                    group: channel.group.clone(),
-                    url: channel.url.clone(),
-                    status: shared.status.clone(),
-                    codec: shared.codec.clone(),
-                    resolution: shared.resolution.clone(),
-                    width: shared.width,
-                    height: shared.height,
-                    fps: shared.fps,
-                    latency_ms: shared.latency_ms,
-                    video_bitrate: shared.video_bitrate.clone(),
-                    audio_bitrate: shared.audio_bitrate.clone(),
-                    audio_codec: shared.audio_codec.clone(),
-                    audio_only: shared.audio_only,
-                    screenshot_path: shared.screenshot_path.clone(),
-                    label_mismatches: Vec::new(),
-                    low_framerate: shared.low_framerate,
-                    error_message: None,
-                    channel_id: parser::get_channel_id(&channel.url),
-                    extinf_line: channel.extinf_line.clone(),
-                    metadata_lines: channel.metadata_lines.clone(),
-                    stream_url: shared.stream_url.clone(),
-                    retry_count: shared.retry_count,
-                    error_reason: shared.error_reason.clone(),
-                };
-
-                if result.status == ChannelStatus::Alive {
-                    if let Some(ref resolution) = result.resolution {
-                        result.label_mismatches =
-                            ffmpeg::check_label_mismatch(&channel.name, resolution);
-                    }
+                        ),
+                        WorkerTiming::default(),
+                    )
                 }
+            };
 
-                // Write checkpoint log
-                let _ = resume::write_log_entry(
-                    &log_file,
-                    &format!("{} - {} {}", channel.index + 1, channel.name, channel.url),
-                );
-                let _ = resume::write_result_entry(&checkpoint_file, &result);
-                channel_debug_logs
-                    .lock()
-                    .await
-                    .push(shared.channel_log.clone());
-
-                let _ = tx.send(result).await;
-                drop(_permit);
-            });
-
-            handles.push(handle);
-        }
-
-        // Wait for all channel checks to complete
-        for handle in handles {
-            let _ = handle.await;
-        }
-
-        // Drop the sender to close the channel
-        drop(tx);
-
-        // Wait for event forwarding to finish
-        let completed_scan = match event_task.await {
-            Ok(data) => data,
-            Err(error) => {
-                emit_scan_error_event(
-                    &app_handle,
-                    &run_id_for_task,
-                    format!("Scan failed while dispatching progress events: {}", error),
-                );
-                cleanup_resume_files(&log_file_for_task, &checkpoint_file_for_task);
-                clear_scan_state_for_run(
-                    state_clone.as_ref(),
-                    &scan_scope_for_task,
-                    &run_id_for_task,
+            if timing.check_ms > 0.0 {
+                record_backend_perf(
+                    &task_app,
+                    &state_for_perf,
+                    "scan.worker.check_ms",
+                    timing.check_ms,
+                    Some(&run_id_for_perf),
                 )
                 .await;
-                return;
             }
-        };
-        let summary = completed_scan.summary.clone();
+            if timing.diagnostics_ms > 0.0 {
+                record_backend_perf(
+                    &task_app,
+                    &state_for_perf,
+                    "scan.worker.diagnostics_ms",
+                    timing.diagnostics_ms,
+                    Some(&run_id_for_perf),
+                )
+                .await;
+            }
 
-        if cancel_token.is_cancelled() {
-            let _ = app_handle.emit(
-                "scan://cancelled",
-                ScanEvent {
-                    run_id: run_id_for_task.clone(),
-                    payload: summary.clone(),
-                },
-            );
-            state_clone
-                .with_window_scan_state(&scan_scope_for_task, |scan_state| {
-                    scan_state.scan_log = None;
+            shared.channel_log.channel_index = channel.index;
+            shared.channel_log.channel_name = channel.name.clone();
+            shared.channel_log.channel_url = channel.url.clone();
+
+            let mut result = ChannelResult {
+                index: channel.index,
+                playlist: channel.playlist.clone(),
+                name: channel.name.clone(),
+                group: channel.group.clone(),
+                url: channel.url.clone(),
+                status: shared.status.clone(),
+                codec: shared.codec.clone(),
+                resolution: shared.resolution.clone(),
+                width: shared.width,
+                height: shared.height,
+                fps: shared.fps,
+                latency_ms: shared.latency_ms,
+                video_bitrate: shared.video_bitrate.clone(),
+                audio_bitrate: shared.audio_bitrate.clone(),
+                audio_codec: shared.audio_codec.clone(),
+                audio_only: shared.audio_only,
+                screenshot_path: shared.screenshot_path.clone(),
+                label_mismatches: Vec::new(),
+                low_framerate: shared.low_framerate,
+                error_message: None,
+                channel_id: parser::get_channel_id(&channel.url),
+                extinf_line: channel.extinf_line.clone(),
+                metadata_lines: channel.metadata_lines.clone(),
+                stream_url: shared.stream_url.clone(),
+                retry_count: shared.retry_count,
+                error_reason: shared.error_reason.clone(),
+            };
+
+            if result.status == ChannelStatus::Alive {
+                if let Some(ref resolution) = result.resolution {
+                    result.label_mismatches =
+                        ffmpeg::check_label_mismatch(&channel.name, resolution);
+                }
+            }
+
+            let _ = checkpoint_tx
+                .send(resume::CheckpointWriteEntry {
+                    log_entry: format!("{} - {} {}", channel.index + 1, channel.name, channel.url),
+                    result: result.clone(),
                 })
                 .await;
-            cleanup_resume_files(&log_file_for_task, &checkpoint_file_for_task);
-        } else {
-            let history_limit = {
-                let settings = state_clone.settings.lock().await;
-                settings.scan_history_limit as usize
-            };
-            if let Err(error) = history::append_scan_history(
-                &app_handle,
-                &run_id_for_task,
-                &config,
-                &summary,
-                completed_scan.results,
-                history_limit,
-            ) {
-                log::warn!(
-                    "Failed to write scan history for {}: {}",
-                    run_id_for_task,
-                    error
-                );
-            }
-            let _ = app_handle.emit(
-                "scan://complete",
-                ScanEvent {
-                    run_id: run_id_for_task.clone(),
-                    payload: summary.clone(),
-                },
-            );
-
-            let mut channel_logs = {
-                let logs = channel_debug_logs.lock().await;
-                logs.clone()
-            };
-            channel_logs.sort_by_key(|entry| entry.channel_index);
-            state_clone
-                .with_window_scan_state(&scan_scope_for_task, |scan_state| {
-                    scan_state.scan_log = Some(ScanDebugLog {
-                        run_id: run_id_for_task.clone(),
-                        playlist_path: config.file_path.clone(),
-                        source_identity: config.source_identity.clone(),
-                        started_at_epoch_ms: scan_started_at_epoch_ms_for_task,
-                        finished_at_epoch_ms: now_epoch_ms(),
-                        summary: summary.clone(),
-                        channels: channel_logs,
-                    });
+            let _ = tx
+                .send(WorkerOutput {
+                    result,
+                    channel_log: shared.channel_log.clone(),
                 })
                 .await;
-            cleanup_resume_files(&log_file_for_task, &checkpoint_file_for_task);
+        });
+        handles.push(handle);
+    }
+
+    drop(tx);
+    drop(checkpoint_tx);
+
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    let event_result = event_task.await;
+    if let Err(error) = checkpoint_task.await {
+        log::warn!("Checkpoint writer task failed for {}: {}", run_id, error);
+    }
+
+    let completed_scan = match event_result {
+        Ok(data) => data,
+        Err(error) => {
+            cleanup_resume_files(&log_file, &checkpoint_file);
+            return Err(AppError::Other(format!(
+                "Scan failed while dispatching progress events: {}",
+                error
+            )));
         }
+    };
 
-        clear_scan_state_for_run(state_clone.as_ref(), &scan_scope_for_task, &run_id_for_task)
+    let summary = completed_scan.summary.clone();
+    if cancel_token.is_cancelled() {
+        let _ = app.emit(
+            "scan://cancelled",
+            ScanEvent {
+                run_id: run_id.clone(),
+                payload: summary,
+            },
+        );
+        state
+            .with_window_scan_state(&scan_scope, |scan_state| {
+                scan_state.scan_log = None;
+            })
             .await;
+        cleanup_resume_files(&log_file, &checkpoint_file);
+        return Ok(());
+    }
+
+    let history_limit = {
+        let settings = state.settings.lock().await;
+        settings.scan_history_limit as usize
+    };
+    if let Err(error) = history::append_scan_history(
+        &app,
+        &run_id,
+        &config,
+        &summary,
+        completed_scan.results,
+        history_limit,
+    ) {
+        log::warn!("Failed to write scan history for {}: {}", run_id, error);
+    }
+
+    let _ = app.emit(
+        "scan://complete",
+        ScanEvent {
+            run_id: run_id.clone(),
+            payload: summary.clone(),
+        },
+    );
+
+    let mut channel_logs = completed_scan.channel_logs;
+    channel_logs.sort_by_key(|entry| entry.channel_index);
+    state
+        .with_window_scan_state(&scan_scope, |scan_state| {
+            scan_state.scan_log = Some(ScanDebugLog {
+                run_id: run_id.clone(),
+                playlist_path: config.file_path.clone(),
+                source_identity: config.source_identity.clone(),
+                started_at_epoch_ms: scan_started_at_epoch_ms,
+                finished_at_epoch_ms: now_epoch_ms(),
+                summary,
+                channels: channel_logs,
+            });
+        })
+        .await;
+    cleanup_resume_files(&log_file, &checkpoint_file);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn start_scan(
+    app: AppHandle,
+    window: Window,
+    config: ScanConfig,
+) -> Result<String, AppError> {
+    let start_command_started_at = Instant::now();
+    let state = app.state::<Arc<AppState>>();
+    let scan_scope = window.label().to_string();
+
+    config.validate()?;
+    let cancel_token = CancellationToken::new();
+    let run_id = next_scan_run_id();
+    let scan_started_at_epoch_ms = now_epoch_ms();
+
+    state
+        .with_window_scan_state(&scan_scope, |scan_state| -> Result<(), AppError> {
+            try_mark_scan_started(&mut scan_state.scanning)?;
+            scan_state.paused = false;
+            scan_state.cancel_token = Some(cancel_token.clone());
+            scan_state.current_run_id = Some(run_id.clone());
+            scan_state.scan_log = None;
+            scan_state.pause_notify.notify_waiters();
+            Ok(())
+        })
+        .await?;
+
+    let app_for_task = app.clone();
+    let state_for_task = state.inner().clone();
+    let scan_scope_for_task = scan_scope.clone();
+    let run_id_for_task = run_id.clone();
+    tokio::spawn(async move {
+        let outcome = execute_scan_run(
+            app_for_task.clone(),
+            state_for_task.clone(),
+            scan_scope_for_task.clone(),
+            run_id_for_task.clone(),
+            scan_started_at_epoch_ms,
+            config,
+            cancel_token,
+        )
+        .await;
+        if let Err(error) = outcome {
+            emit_scan_error_event(&app_for_task, &run_id_for_task, error.to_string());
+        }
+        clear_scan_state_for_run(
+            state_for_task.as_ref(),
+            &scan_scope_for_task,
+            &run_id_for_task,
+        )
+        .await;
     });
+
+    let command_ms = start_command_started_at.elapsed().as_secs_f64() * 1000.0;
+    record_backend_perf(
+        &app,
+        state.inner(),
+        "scan.start_scan_command_ms",
+        command_ms,
+        Some(&run_id),
+    )
+    .await;
 
     Ok(run_id)
 }
@@ -1005,10 +1363,10 @@ pub async fn cancel_scan(app: AppHandle, window: Window) -> Result<(), AppError>
 #[tauri::command]
 pub async fn pause_scan(app: AppHandle, window: Window) -> Result<(), AppError> {
     let state = app.state::<Arc<AppState>>();
-    let run_id = state
+    let (run_id, pause_notify) = state
         .with_window_scan_state(
             window.label(),
-            |scan_state| -> Result<Option<String>, AppError> {
+            |scan_state| -> Result<(Option<String>, Arc<tokio::sync::Notify>), AppError> {
                 if !scan_state.scanning {
                     return Err(AppError::Other("No scan is currently running".to_string()));
                 }
@@ -1017,13 +1375,14 @@ pub async fn pause_scan(app: AppHandle, window: Window) -> Result<(), AppError> 
                     .clone()
                     .ok_or_else(|| AppError::Other("No active scan run id found".to_string()))?;
                 if scan_state.paused {
-                    return Ok(None);
+                    return Ok((None, scan_state.pause_notify.clone()));
                 }
                 scan_state.paused = true;
-                Ok(Some(run_id))
+                Ok((Some(run_id), scan_state.pause_notify.clone()))
             },
         )
         .await?;
+    pause_notify.notify_waiters();
     if let Some(run_id) = run_id {
         let _ = app.emit(
             "scan://paused",
@@ -1040,10 +1399,10 @@ pub async fn pause_scan(app: AppHandle, window: Window) -> Result<(), AppError> 
 #[tauri::command]
 pub async fn resume_scan(app: AppHandle, window: Window) -> Result<(), AppError> {
     let state = app.state::<Arc<AppState>>();
-    let run_id = state
+    let (run_id, pause_notify) = state
         .with_window_scan_state(
             window.label(),
-            |scan_state| -> Result<Option<String>, AppError> {
+            |scan_state| -> Result<(Option<String>, Arc<tokio::sync::Notify>), AppError> {
                 if !scan_state.scanning {
                     return Err(AppError::Other("No scan is currently running".to_string()));
                 }
@@ -1052,13 +1411,14 @@ pub async fn resume_scan(app: AppHandle, window: Window) -> Result<(), AppError>
                     .clone()
                     .ok_or_else(|| AppError::Other("No active scan run id found".to_string()))?;
                 if !scan_state.paused {
-                    return Ok(None);
+                    return Ok((None, scan_state.pause_notify.clone()));
                 }
                 scan_state.paused = false;
-                Ok(Some(run_id))
+                Ok((Some(run_id), scan_state.pause_notify.clone()))
             },
         )
         .await?;
+    pause_notify.notify_waiters();
     if let Some(run_id) = run_id {
         let _ = app.emit(
             "scan://resumed",

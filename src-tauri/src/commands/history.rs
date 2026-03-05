@@ -159,7 +159,7 @@ fn load_history_store(path: &Path) -> Result<ScanHistoryStore, AppError> {
 }
 
 fn save_history_store(path: &Path, store: &ScanHistoryStore) -> Result<(), AppError> {
-    let bytes = serde_json::to_vec_pretty(store).map_err(|error| {
+    let bytes = serde_json::to_vec(store).map_err(|error| {
         AppError::Parse(format!("Failed to serialize scan history store: {}", error))
     })?;
 
@@ -518,6 +518,7 @@ mod tests {
             proxy_file: None,
             test_geoblock: false,
             screenshots_dir: None,
+            client_capabilities: None,
         }
     }
 

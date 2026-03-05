@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
+use crate::models::channel::ChannelResult;
 
 pub const MIN_TIMEOUT_SECS: f64 = 0.5;
 pub const MAX_TIMEOUT_SECS: f64 = 300.0;
@@ -43,6 +44,13 @@ pub struct ScanConfig {
     pub proxy_file: Option<String>,
     pub test_geoblock: bool,
     pub screenshots_dir: Option<String>,
+    pub client_capabilities: Option<ScanClientCapabilities>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ScanClientCapabilities {
+    #[serde(default)]
+    pub event_batch_v1: bool,
 }
 
 impl ScanConfig {
@@ -112,6 +120,12 @@ pub struct ScanEvent<T> {
     pub payload: T,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanResultBatchPayload {
+    pub items: Vec<ChannelResult>,
+    pub progress: ScanProgress,
+}
+
 /// Payload contract for `scan://error`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanErrorPayload {
@@ -140,6 +154,7 @@ mod tests {
             proxy_file: None,
             test_geoblock: false,
             screenshots_dir: None,
+            client_capabilities: None,
         }
     }
 

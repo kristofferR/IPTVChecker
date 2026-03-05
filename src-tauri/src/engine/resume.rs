@@ -45,6 +45,22 @@ fn sanitize_log_entry(entry: &str) -> String {
         .join(" ")
 }
 
+#[derive(Debug, Clone)]
+pub struct CheckpointWriteEntry {
+    pub log_entry: String,
+    pub result: ChannelResult,
+}
+
+fn sanitize_result_for_persistence(result: &ChannelResult) -> ChannelResult {
+    let mut sanitized = result.clone();
+    sanitized.url = sanitize_url_for_persistence(&sanitized.url);
+    sanitized.stream_url = sanitized
+        .stream_url
+        .as_deref()
+        .map(sanitize_url_for_persistence);
+    sanitized
+}
+
 /// Load processed channels from a checkpoint log file.
 /// Returns (set of channel URLs, last_index).
 pub fn load_processed_channels(log_file: &str) -> (HashSet<String>, usize) {
@@ -131,12 +147,7 @@ pub fn load_checkpoint_results(checkpoint_file: &str) -> Vec<ChannelResult> {
 pub fn write_result_entry(checkpoint_file: &str, result: &ChannelResult) -> Result<(), AppError> {
     use std::io::Write;
 
-    let mut sanitized = result.clone();
-    sanitized.url = sanitize_url_for_persistence(&sanitized.url);
-    sanitized.stream_url = sanitized
-        .stream_url
-        .as_deref()
-        .map(sanitize_url_for_persistence);
+    let sanitized = sanitize_result_for_persistence(result);
 
     let serialized = serde_json::to_string(&sanitized).map_err(|error| {
         AppError::Parse(format!("Failed to serialize checkpoint result: {}", error))
@@ -149,6 +160,41 @@ pub fn write_result_entry(checkpoint_file: &str, result: &ChannelResult) -> Resu
         .map_err(AppError::Io)?;
 
     writeln!(file, "{}", serialized).map_err(AppError::Io)?;
+    Ok(())
+}
+
+/// Append a batch of log+result entries, opening each file only once.
+pub fn write_entries(
+    log_file: &str,
+    checkpoint_file: &str,
+    entries: &[CheckpointWriteEntry],
+) -> Result<(), AppError> {
+    use std::io::Write;
+
+    if entries.is_empty() {
+        return Ok(());
+    }
+
+    let mut log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_file)
+        .map_err(AppError::Io)?;
+    let mut checkpoint = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(checkpoint_file)
+        .map_err(AppError::Io)?;
+
+    for entry in entries {
+        writeln!(log, "{}", sanitize_log_entry(&entry.log_entry)).map_err(AppError::Io)?;
+        let serialized = serde_json::to_string(&sanitize_result_for_persistence(&entry.result))
+            .map_err(|error| {
+                AppError::Parse(format!("Failed to serialize checkpoint result: {}", error))
+            })?;
+        writeln!(checkpoint, "{}", serialized).map_err(AppError::Io)?;
+    }
+
     Ok(())
 }
 
@@ -281,9 +327,8 @@ mod tests {
 
         let mut result = make_result(8, "Secret", ChannelStatus::Alive);
         result.url = "https://demo:secret@example.com/live.m3u8?token=abc123".to_string();
-        result.stream_url = Some(
-            "https://stream.example.com/hls.m3u8?auth=xyz987&session=abcd".to_string(),
-        );
+        result.stream_url =
+            Some("https://stream.example.com/hls.m3u8?auth=xyz987&session=abcd".to_string());
 
         write_result_entry(&checkpoint_file, &result).expect("result write should succeed");
 

@@ -1,7 +1,7 @@
 use crate::engine::parser;
 use crate::error::AppError;
 use crate::models::playlist::PlaylistPreview;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::time::Duration;
 use tauri::Manager;
@@ -17,6 +17,21 @@ pub struct XtreamOpenRequest {
 const PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const PLAYLIST_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
 const PLAYLIST_DOWNLOAD_MAX_BYTES: u64 = 10 * 1024 * 1024;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct RemotePlaylistCacheMetadata {
+    etag: Option<String>,
+    last_modified: Option<String>,
+}
+
+#[derive(Debug)]
+enum PlaylistDownloadResult {
+    NotModified,
+    Updated {
+        bytes: Vec<u8>,
+        metadata: RemotePlaylistCacheMetadata,
+    },
+}
 
 fn parse_http_url(value: &str, invalid_message: &str) -> Result<Url, AppError> {
     let trimmed = value.trim();
@@ -96,6 +111,27 @@ fn cleanup_stale_cache_temp_files(cache_path: &std::path::Path) {
     }
 }
 
+fn cache_metadata_path(cache_path: &std::path::Path) -> std::path::PathBuf {
+    cache_path.with_extension("m3u8.meta.json")
+}
+
+fn load_cache_metadata(cache_path: &std::path::Path) -> Option<RemotePlaylistCacheMetadata> {
+    let path = cache_metadata_path(cache_path);
+    let bytes = std::fs::read(path).ok()?;
+    serde_json::from_slice::<RemotePlaylistCacheMetadata>(&bytes).ok()
+}
+
+fn save_cache_metadata(
+    cache_path: &std::path::Path,
+    metadata: &RemotePlaylistCacheMetadata,
+) -> Result<(), AppError> {
+    let path = cache_metadata_path(cache_path);
+    let bytes = serde_json::to_vec(metadata).map_err(|error| {
+        AppError::Parse(format!("Failed to serialize cache metadata: {}", error))
+    })?;
+    std::fs::write(path, bytes).map_err(AppError::Io)
+}
+
 fn map_download_error(
     error: reqwest::Error,
     error_label: &str,
@@ -122,10 +158,11 @@ async fn download_playlist_bytes(
     connect_timeout: Duration,
     timeout: Duration,
     max_bytes: u64,
-) -> Result<Vec<u8>, AppError> {
+    cache_metadata: Option<&RemotePlaylistCacheMetadata>,
+) -> Result<PlaylistDownloadResult, AppError> {
     use futures::StreamExt;
 
-    let response = reqwest::Client::builder()
+    let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
         .connect_timeout(connect_timeout)
         .timeout(timeout)
@@ -135,20 +172,46 @@ async fn download_playlist_bytes(
                 "Failed to initialize HTTP client for {}: {}",
                 error_label, error
             ))
-        })?
+        })?;
+    let mut request = client
         .get(download_url.clone())
-        .header(reqwest::header::USER_AGENT, "IPTV-Checker-GUI/1.0")
+        .header(reqwest::header::USER_AGENT, "IPTV-Checker-GUI/1.0");
+    if let Some(metadata) = cache_metadata {
+        if let Some(ref etag) = metadata.etag {
+            request = request.header(reqwest::header::IF_NONE_MATCH, etag);
+        }
+        if let Some(ref last_modified) = metadata.last_modified {
+            request = request.header(reqwest::header::IF_MODIFIED_SINCE, last_modified);
+        }
+    }
+    let response = request
         .send()
         .await
         .map_err(|error| map_download_error(error, error_label, timeout, "request"))?;
 
     let status = response.status();
+    if status == reqwest::StatusCode::NOT_MODIFIED {
+        return Ok(PlaylistDownloadResult::NotModified);
+    }
     if !status.is_success() {
         return Err(AppError::Other(format!(
             "Failed to download {}: HTTP {}",
             error_label, status
         )));
     }
+
+    let metadata = RemotePlaylistCacheMetadata {
+        etag: response
+            .headers()
+            .get(reqwest::header::ETAG)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string),
+        last_modified: response
+            .headers()
+            .get(reqwest::header::LAST_MODIFIED)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string),
+    };
 
     let mut bytes = Vec::new();
     let mut total = 0u64;
@@ -167,7 +230,7 @@ async fn download_playlist_bytes(
         bytes.extend_from_slice(&chunk);
     }
 
-    Ok(bytes)
+    Ok(PlaylistDownloadResult::Updated { bytes, metadata })
 }
 
 async fn download_playlist_to_cache(
@@ -175,14 +238,43 @@ async fn download_playlist_to_cache(
     download_url: &Url,
     error_label: &str,
 ) -> Result<String, AppError> {
-    let bytes = download_playlist_bytes(
+    let metadata = load_cache_metadata(&cache_path);
+    let download = download_playlist_bytes(
         download_url,
         error_label,
         PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT,
         PLAYLIST_DOWNLOAD_TIMEOUT,
         PLAYLIST_DOWNLOAD_MAX_BYTES,
+        metadata.as_ref(),
     )
     .await?;
+
+    let (bytes, response_metadata) = match download {
+        PlaylistDownloadResult::NotModified => {
+            if cache_path.exists() {
+                return Ok(cache_path.to_string_lossy().to_string());
+            }
+            match download_playlist_bytes(
+                download_url,
+                error_label,
+                PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT,
+                PLAYLIST_DOWNLOAD_TIMEOUT,
+                PLAYLIST_DOWNLOAD_MAX_BYTES,
+                None,
+            )
+            .await?
+            {
+                PlaylistDownloadResult::NotModified => {
+                    return Err(AppError::Other(format!(
+                        "Server returned 304 for {}, but cache file is missing",
+                        error_label
+                    )));
+                }
+                PlaylistDownloadResult::Updated { bytes, metadata } => (bytes, metadata),
+            }
+        }
+        PlaylistDownloadResult::Updated { bytes, metadata } => (bytes, metadata),
+    };
 
     cleanup_stale_cache_temp_files(&cache_path);
     let tmp_suffix = std::time::SystemTime::now()
@@ -218,6 +310,13 @@ async fn download_playlist_to_cache(
     if let Err(error) = persist_result {
         let _ = std::fs::remove_file(&tmp_path);
         return Err(error);
+    }
+    if let Err(error) = save_cache_metadata(&cache_path, &response_metadata) {
+        log::warn!(
+            "Failed to persist remote playlist cache metadata for {}: {}",
+            cache_path.to_string_lossy(),
+            error
+        );
     }
 
     Ok(cache_path.to_string_lossy().to_string())
@@ -519,6 +618,7 @@ mod tests {
             Duration::from_secs(1),
             Duration::from_secs(1),
             32,
+            None,
         )
         .await
         .expect_err("oversized response should fail");
@@ -565,6 +665,7 @@ mod tests {
             Duration::from_millis(100),
             Duration::from_millis(100),
             1024,
+            None,
         )
         .await
         .expect_err("slow response should timeout");

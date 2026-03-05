@@ -84,6 +84,11 @@ export interface ScanConfig {
   proxy_file: string | null;
   test_geoblock: boolean;
   screenshots_dir: string | null;
+  client_capabilities?: ScanClientCapabilities | null;
+}
+
+export interface ScanClientCapabilities {
+  event_batch_v1: boolean;
 }
 
 export interface ScanProgress {
@@ -106,6 +111,11 @@ export interface ScanSummary {
 export interface ScanEvent<T> {
   run_id: string;
   payload: T;
+}
+
+export interface ScanResultBatchPayload {
+  items: ChannelResult[];
+  progress: ScanProgress;
 }
 
 // Shared payload contract for scan://error events.

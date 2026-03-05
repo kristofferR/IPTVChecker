@@ -13,6 +13,15 @@ fn map_csv_error(error: csv::Error) -> AppError {
     AppError::Other(format!("CSV export failed: {}", error))
 }
 
+async fn run_blocking_export<T: Send + 'static>(
+    task_name: &'static str,
+    work: impl FnOnce() -> Result<T, AppError> + Send + 'static,
+) -> Result<T, AppError> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|error| AppError::Other(format!("{} task failed: {}", task_name, error)))?
+}
+
 fn sanitize_csv_cell(value: &str) -> String {
     let sanitized = value.replace('\u{0000}', "");
     let starts_with_formula = sanitized
@@ -43,142 +52,148 @@ pub async fn export_csv(
     playlist_name: String,
     include_latency: bool,
 ) -> Result<(), AppError> {
-    let file = std::fs::File::create(&path).map_err(AppError::Io)?;
-    let mut writer = csv::WriterBuilder::new()
-        .has_headers(false)
-        .from_writer(file);
+    run_blocking_export("export_csv", move || {
+        let file = std::fs::File::create(&path).map_err(AppError::Io)?;
+        let mut writer = csv::WriterBuilder::new()
+            .has_headers(false)
+            .from_writer(file);
 
-    // Header matching Python CLI format
-    let mut headers = vec![
-        "Playlist".to_string(),
-        "Channel Number".to_string(),
-        "Total Channels in Playlist".to_string(),
-        "Channel Status".to_string(),
-        "Group Name".to_string(),
-        "Channel Name".to_string(),
-        "Channel ID".to_string(),
-        "Codec".to_string(),
-        "Bit Rate (kbps)".to_string(),
-        "Resolution".to_string(),
-        "Frame Rate".to_string(),
-        "Audio Only".to_string(),
-        "Audio".to_string(),
-        "Error Reason".to_string(),
-    ];
-    if include_latency {
-        headers.push("Latency".to_string());
-    }
-    writer.write_record(headers).map_err(map_csv_error)?;
-
-    let total = results.len();
-    for (i, r) in results.iter().enumerate() {
-        let playlist_cell = if r.playlist.trim().is_empty() {
-            playlist_name.as_str()
-        } else {
-            r.playlist.as_str()
-        };
-        let status_str = r.status.to_string();
-        let codec = r.codec.as_deref().unwrap_or("Unknown");
-        let bitrate = r
-            .video_bitrate
-            .as_deref()
-            .map(|b| b.replace("kbps", "").trim().to_string())
-            .unwrap_or_else(|| "Unknown".to_string());
-        let resolution = r.resolution.as_deref().unwrap_or("Unknown");
-        let fps = r.fps.map(|f| f.to_string()).unwrap_or_default();
-        let audio = format!(
-            "{} kbps {}",
-            r.audio_bitrate.as_deref().unwrap_or("Unknown"),
-            r.audio_codec.as_deref().unwrap_or("Unknown")
-        );
-        let audio_only = if r.audio_only { "Yes" } else { "No" };
-        let error_reason = r.error_reason.as_deref().unwrap_or_default();
-
-        let mut row = vec![
-            sanitize_csv_cell(playlist_cell),
-            (i + 1).to_string(),
-            total.to_string(),
-            sanitize_csv_cell(&status_str),
-            sanitize_csv_cell(&r.group),
-            sanitize_csv_cell(&r.name),
-            sanitize_csv_cell(&r.channel_id),
-            sanitize_csv_cell(codec),
-            sanitize_csv_cell(&bitrate),
-            sanitize_csv_cell(resolution),
-            sanitize_csv_cell(&fps),
-            audio_only.to_string(),
-            sanitize_csv_cell(&audio),
-            sanitize_csv_cell(error_reason),
+        // Header matching Python CLI format
+        let mut headers = vec![
+            "Playlist".to_string(),
+            "Channel Number".to_string(),
+            "Total Channels in Playlist".to_string(),
+            "Channel Status".to_string(),
+            "Group Name".to_string(),
+            "Channel Name".to_string(),
+            "Channel ID".to_string(),
+            "Codec".to_string(),
+            "Bit Rate (kbps)".to_string(),
+            "Resolution".to_string(),
+            "Frame Rate".to_string(),
+            "Audio Only".to_string(),
+            "Audio".to_string(),
+            "Error Reason".to_string(),
         ];
         if include_latency {
-            row.push(sanitize_csv_cell(&format_latency(r.latency_ms)));
+            headers.push("Latency".to_string());
+        }
+        writer.write_record(headers).map_err(map_csv_error)?;
+
+        let total = results.len();
+        for (i, r) in results.iter().enumerate() {
+            let playlist_cell = if r.playlist.trim().is_empty() {
+                playlist_name.as_str()
+            } else {
+                r.playlist.as_str()
+            };
+            let status_str = r.status.to_string();
+            let codec = r.codec.as_deref().unwrap_or("Unknown");
+            let bitrate = r
+                .video_bitrate
+                .as_deref()
+                .map(|b| b.replace("kbps", "").trim().to_string())
+                .unwrap_or_else(|| "Unknown".to_string());
+            let resolution = r.resolution.as_deref().unwrap_or("Unknown");
+            let fps = r.fps.map(|f| f.to_string()).unwrap_or_default();
+            let audio = format!(
+                "{} kbps {}",
+                r.audio_bitrate.as_deref().unwrap_or("Unknown"),
+                r.audio_codec.as_deref().unwrap_or("Unknown")
+            );
+            let audio_only = if r.audio_only { "Yes" } else { "No" };
+            let error_reason = r.error_reason.as_deref().unwrap_or_default();
+
+            let mut row = vec![
+                sanitize_csv_cell(playlist_cell),
+                (i + 1).to_string(),
+                total.to_string(),
+                sanitize_csv_cell(&status_str),
+                sanitize_csv_cell(&r.group),
+                sanitize_csv_cell(&r.name),
+                sanitize_csv_cell(&r.channel_id),
+                sanitize_csv_cell(codec),
+                sanitize_csv_cell(&bitrate),
+                sanitize_csv_cell(resolution),
+                sanitize_csv_cell(&fps),
+                audio_only.to_string(),
+                sanitize_csv_cell(&audio),
+                sanitize_csv_cell(error_reason),
+            ];
+            if include_latency {
+                row.push(sanitize_csv_cell(&format_latency(r.latency_ms)));
+            }
+
+            writer.write_record(row).map_err(map_csv_error)?;
         }
 
-        writer.write_record(row).map_err(map_csv_error)?;
-    }
-
-    writer.flush().map_err(AppError::Io)?;
-    Ok(())
+        writer.flush().map_err(AppError::Io)?;
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn export_split(results: Vec<ChannelResult>, base_path: String) -> Result<(), AppError> {
-    #[derive(Default)]
-    struct SplitBuckets {
-        working: Vec<String>,
-        dead: Vec<String>,
-        geoblocked: Vec<String>,
-    }
-
-    let mut playlists: BTreeMap<String, SplitBuckets> = BTreeMap::new();
-
-    for r in &results {
-        let playlist_key = playlist_file_key(&r.playlist);
-        let buckets = playlists.entry(playlist_key).or_default();
-        let entry = build_m3u_entry(r);
-        match r.status {
-            ChannelStatus::Alive => buckets.working.push(entry),
-            ChannelStatus::Dead => buckets.dead.push(entry),
-            ChannelStatus::Geoblocked
-            | ChannelStatus::GeoblockedConfirmed
-            | ChannelStatus::GeoblockedUnconfirmed => buckets.geoblocked.push(entry),
-            _ => {}
+    run_blocking_export("export_split", move || {
+        #[derive(Default)]
+        struct SplitBuckets {
+            working: Vec<String>,
+            dead: Vec<String>,
+            geoblocked: Vec<String>,
         }
-    }
 
-    let split_by_playlist = playlists.len() > 1;
+        let mut playlists: BTreeMap<String, SplitBuckets> = BTreeMap::new();
 
-    for (playlist, buckets) in playlists {
-        if !buckets.working.is_empty() {
-            let suffix = if split_by_playlist {
-                format!("{}_working", playlist)
-            } else {
-                "working".to_string()
-            };
-            let path = export_target_path(&base_path, &suffix);
-            write_m3u_file(&path, &buckets.working)?;
+        for r in &results {
+            let playlist_key = playlist_file_key(&r.playlist);
+            let buckets = playlists.entry(playlist_key).or_default();
+            let entry = build_m3u_entry(r);
+            match r.status {
+                ChannelStatus::Alive => buckets.working.push(entry),
+                ChannelStatus::Dead => buckets.dead.push(entry),
+                ChannelStatus::Geoblocked
+                | ChannelStatus::GeoblockedConfirmed
+                | ChannelStatus::GeoblockedUnconfirmed => buckets.geoblocked.push(entry),
+                _ => {}
+            }
         }
-        if !buckets.dead.is_empty() {
-            let suffix = if split_by_playlist {
-                format!("{}_dead", playlist)
-            } else {
-                "dead".to_string()
-            };
-            let path = export_target_path(&base_path, &suffix);
-            write_m3u_file(&path, &buckets.dead)?;
-        }
-        if !buckets.geoblocked.is_empty() {
-            let suffix = if split_by_playlist {
-                format!("{}_geoblocked", playlist)
-            } else {
-                "geoblocked".to_string()
-            };
-            let path = export_target_path(&base_path, &suffix);
-            write_m3u_file(&path, &buckets.geoblocked)?;
-        }
-    }
 
-    Ok(())
+        let split_by_playlist = playlists.len() > 1;
+
+        for (playlist, buckets) in playlists {
+            if !buckets.working.is_empty() {
+                let suffix = if split_by_playlist {
+                    format!("{}_working", playlist)
+                } else {
+                    "working".to_string()
+                };
+                let path = export_target_path(&base_path, &suffix);
+                write_m3u_file(&path, &buckets.working)?;
+            }
+            if !buckets.dead.is_empty() {
+                let suffix = if split_by_playlist {
+                    format!("{}_dead", playlist)
+                } else {
+                    "dead".to_string()
+                };
+                let path = export_target_path(&base_path, &suffix);
+                write_m3u_file(&path, &buckets.dead)?;
+            }
+            if !buckets.geoblocked.is_empty() {
+                let suffix = if split_by_playlist {
+                    format!("{}_geoblocked", playlist)
+                } else {
+                    "geoblocked".to_string()
+                };
+                let path = export_target_path(&base_path, &suffix);
+                write_m3u_file(&path, &buckets.geoblocked)?;
+            }
+        }
+
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -186,53 +201,59 @@ pub async fn export_renamed(
     results: Vec<ChannelResult>,
     base_path: String,
 ) -> Result<(), AppError> {
-    use std::io::Write;
+    run_blocking_export("export_renamed", move || {
+        use std::io::Write;
 
-    let path = export_target_path(&base_path, "renamed");
-    let mut file = std::fs::File::create(&path).map_err(AppError::Io)?;
-    writeln!(file, "#EXTM3U").map_err(AppError::Io)?;
+        let path = export_target_path(&base_path, "renamed");
+        let mut file = std::fs::File::create(&path).map_err(AppError::Io)?;
+        writeln!(file, "#EXTM3U").map_err(AppError::Io)?;
 
-    for r in &results {
-        if r.status == ChannelStatus::Alive {
-            // Build renamed EXTINF line
-            let video_info = format_video_info(r);
-            let audio_info = format_audio_info(r);
-            let renamed_name = format!("{} ({} | Audio: {})", r.name, video_info, audio_info);
+        for r in &results {
+            if r.status == ChannelStatus::Alive {
+                // Build renamed EXTINF line
+                let video_info = format_video_info(r);
+                let audio_info = format_audio_info(r);
+                let renamed_name = format!("{} ({} | Audio: {})", r.name, video_info, audio_info);
 
-            // Replace channel name in EXTINF line (respecting quoted attribute values)
-            let extinf = if let Some(pos) = find_unquoted_comma(&r.extinf_line) {
-                format!("{},{}", &r.extinf_line[..pos], renamed_name)
+                // Replace channel name in EXTINF line (respecting quoted attribute values)
+                let extinf = if let Some(pos) = find_unquoted_comma(&r.extinf_line) {
+                    format!("{},{}", &r.extinf_line[..pos], renamed_name)
+                } else {
+                    r.extinf_line.clone()
+                };
+
+                writeln!(file, "{}", extinf).map_err(AppError::Io)?;
+                for meta in &r.metadata_lines {
+                    writeln!(file, "{}", meta).map_err(AppError::Io)?;
+                }
+                if let Some(audio_only_metadata) = audio_only_export_metadata(r) {
+                    writeln!(file, "{}", audio_only_metadata).map_err(AppError::Io)?;
+                }
+                writeln!(file, "{}", r.url).map_err(AppError::Io)?;
             } else {
-                r.extinf_line.clone()
-            };
-
-            writeln!(file, "{}", extinf).map_err(AppError::Io)?;
-            for meta in &r.metadata_lines {
-                writeln!(file, "{}", meta).map_err(AppError::Io)?;
+                writeln!(file, "{}", r.extinf_line).map_err(AppError::Io)?;
+                for meta in &r.metadata_lines {
+                    writeln!(file, "{}", meta).map_err(AppError::Io)?;
+                }
+                if let Some(audio_only_metadata) = audio_only_export_metadata(r) {
+                    writeln!(file, "{}", audio_only_metadata).map_err(AppError::Io)?;
+                }
+                writeln!(file, "{}", r.url).map_err(AppError::Io)?;
             }
-            if let Some(audio_only_metadata) = audio_only_export_metadata(r) {
-                writeln!(file, "{}", audio_only_metadata).map_err(AppError::Io)?;
-            }
-            writeln!(file, "{}", r.url).map_err(AppError::Io)?;
-        } else {
-            writeln!(file, "{}", r.extinf_line).map_err(AppError::Io)?;
-            for meta in &r.metadata_lines {
-                writeln!(file, "{}", meta).map_err(AppError::Io)?;
-            }
-            if let Some(audio_only_metadata) = audio_only_export_metadata(r) {
-                writeln!(file, "{}", audio_only_metadata).map_err(AppError::Io)?;
-            }
-            writeln!(file, "{}", r.url).map_err(AppError::Io)?;
         }
-    }
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn export_m3u(results: Vec<ChannelResult>, path: String) -> Result<(), AppError> {
-    let entries = results.iter().map(build_m3u_entry).collect::<Vec<String>>();
-    write_m3u_file(Path::new(&path), &entries)
+    run_blocking_export("export_m3u", move || {
+        let entries = results.iter().map(build_m3u_entry).collect::<Vec<String>>();
+        write_m3u_file(Path::new(&path), &entries)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -249,11 +270,14 @@ pub async fn export_scan_log_json(
             AppError::Other("No completed scan log is available yet. Run a scan first.".to_string())
         })?;
 
-    let bytes = serde_json::to_vec_pretty(&scan_log).map_err(|error| {
-        AppError::Parse(format!("Failed to serialize scan log JSON: {}", error))
-    })?;
-    std::fs::write(path, bytes).map_err(AppError::Io)?;
-    Ok(())
+    run_blocking_export("export_scan_log_json", move || {
+        let bytes = serde_json::to_vec_pretty(&scan_log).map_err(|error| {
+            AppError::Parse(format!("Failed to serialize scan log JSON: {}", error))
+        })?;
+        std::fs::write(path, bytes).map_err(AppError::Io)?;
+        Ok(())
+    })
+    .await
 }
 
 fn build_m3u_entry(r: &ChannelResult) -> String {

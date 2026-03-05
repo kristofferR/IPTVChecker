@@ -371,6 +371,29 @@ pub struct StreamTrackPresence {
     pub has_audio: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct ProbeSnapshot {
+    pub track_presence: StreamTrackPresence,
+    pub video_info: Option<VideoInfo>,
+    pub audio_info: Option<AudioInfo>,
+    pub ffprobe_output: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct FfprobeCombinedStream {
+    codec_type: Option<String>,
+    codec_name: Option<String>,
+    width: Option<u32>,
+    height: Option<u32>,
+    r_frame_rate: Option<String>,
+    bit_rate: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FfprobeCombinedOutput {
+    streams: Vec<FfprobeCombinedStream>,
+}
+
 fn parse_stream_track_presence(stdout: &str) -> Result<StreamTrackPresence, serde_json::Error> {
     let parsed: FfprobeTrackOutput = serde_json::from_str(stdout)?;
     let mut presence = StreamTrackPresence::default();
@@ -384,6 +407,88 @@ fn parse_stream_track_presence(stdout: &str) -> Result<StreamTrackPresence, serd
     }
 
     Ok(presence)
+}
+
+fn truncate_ffprobe_output(stdout: &str) -> String {
+    let mut truncated: String = stdout.chars().take(MAX_FFPROBE_OUTPUT_CHARS).collect();
+    if stdout.chars().count() > MAX_FFPROBE_OUTPUT_CHARS {
+        truncated.push_str("\n...truncated...");
+    }
+    truncated
+}
+
+fn parse_probe_snapshot(stdout: &str) -> Result<ProbeSnapshot, serde_json::Error> {
+    let parsed: FfprobeCombinedOutput = serde_json::from_str(stdout)?;
+    let mut presence = StreamTrackPresence::default();
+    let mut best_video: Option<&FfprobeCombinedStream> = None;
+    let mut best_video_pixels: u64 = 0;
+    let mut audio_stream: Option<&FfprobeCombinedStream> = None;
+
+    for stream in &parsed.streams {
+        match stream
+            .codec_type
+            .as_deref()
+            .map(|value| value.to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("video") => {
+                presence.has_video = true;
+                let pixels = stream.width.unwrap_or(0) as u64 * stream.height.unwrap_or(0) as u64;
+                if best_video.is_none() || pixels >= best_video_pixels {
+                    best_video = Some(stream);
+                    best_video_pixels = pixels;
+                }
+            }
+            Some("audio") => {
+                presence.has_audio = true;
+                if audio_stream.is_none() {
+                    audio_stream = Some(stream);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let video_info = best_video.map(|stream| {
+        let codec = stream
+            .codec_name
+            .as_ref()
+            .map(|value| value.to_uppercase())
+            .unwrap_or_else(|| "Unknown".to_string());
+        let width = stream.width;
+        let height = stream.height;
+        let fps = stream
+            .r_frame_rate
+            .as_deref()
+            .and_then(parse_ffprobe_fps);
+        VideoInfo {
+            codec,
+            width,
+            height,
+            fps,
+            resolution: resolution_label(width, height),
+        }
+    });
+
+    let audio_info = audio_stream.map(|stream| AudioInfo {
+        codec: stream
+            .codec_name
+            .as_ref()
+            .map(|value| value.to_uppercase())
+            .unwrap_or_else(|| "Unknown".to_string()),
+        bitrate_kbps: stream
+            .bit_rate
+            .as_deref()
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(|bits| (bits / 1000) as u32),
+    });
+
+    Ok(ProbeSnapshot {
+        track_presence: presence,
+        video_info,
+        audio_info,
+        ffprobe_output: truncate_ffprobe_output(stdout),
+    })
 }
 
 fn parse_ffprobe_fps(raw: &str) -> Option<u32> {
@@ -590,11 +695,45 @@ pub async fn collect_ffprobe_output(
     )
     .await?;
 
-    let mut truncated: String = stdout.chars().take(MAX_FFPROBE_OUTPUT_CHARS).collect();
-    if stdout.chars().count() > MAX_FFPROBE_OUTPUT_CHARS {
-        truncated.push_str("\n...truncated...");
-    }
-    Ok(truncated)
+    Ok(truncate_ffprobe_output(&stdout))
+}
+
+/// Collect stream diagnostics from one ffprobe run (track presence, video, audio,
+/// and raw output for debug logs).
+pub async fn collect_probe_snapshot(
+    app: &AppHandle,
+    url: &str,
+    cancel: &CancellationToken,
+) -> Result<ProbeSnapshot, AppError> {
+    let (stdout, stderr) = run_tool_command(
+        app,
+        "ffprobe",
+        &[
+            "-v",
+            "error",
+            "-analyzeduration",
+            "15000000",
+            "-probesize",
+            "15000000",
+            "-show_entries",
+            "stream=codec_type,codec_name,width,height,r_frame_rate,bit_rate",
+            "-show_format",
+            "-of",
+            "json",
+            url,
+        ],
+        cancel,
+        Some(FFPROBE_TIMEOUT),
+    )
+    .await?;
+
+    parse_probe_snapshot(&stdout).map_err(|error| {
+        AppError::Other(format!(
+            "Failed to parse ffprobe probe snapshot: {} ({})",
+            error,
+            stderr_excerpt(&stderr)
+        ))
+    })
 }
 
 /// Capture a screenshot frame from a stream via ffmpeg.
@@ -802,7 +941,7 @@ mod tests {
 
     use super::{
         build_screenshot_file_name, check_label_mismatch, contains_word, parse_ffprobe_fps,
-        parse_stream_track_presence, resolution_label, sanitize_screenshot_stem,
+        parse_probe_snapshot, parse_stream_track_presence, resolution_label, sanitize_screenshot_stem,
         unique_screenshot_output_path, MAX_SCREENSHOT_STEM_LEN,
     };
 
@@ -886,6 +1025,44 @@ mod tests {
         let presence = parse_stream_track_presence(output).expect("track presence should parse");
         assert!(presence.has_video);
         assert!(presence.has_audio);
+    }
+
+    #[test]
+    fn parse_probe_snapshot_extracts_video_audio_and_raw_output() {
+        let output = r#"{
+            "streams":[
+                {"codec_type":"video","codec_name":"h264","width":1920,"height":1080,"r_frame_rate":"30000/1001"},
+                {"codec_type":"audio","codec_name":"aac","bit_rate":"128000"}
+            ]
+        }"#;
+        let snapshot = parse_probe_snapshot(output).expect("probe snapshot should parse");
+        assert!(snapshot.track_presence.has_video);
+        assert!(snapshot.track_presence.has_audio);
+        let video = snapshot.video_info.expect("video info should exist");
+        assert_eq!(video.codec, "H264");
+        assert_eq!(video.width, Some(1920));
+        assert_eq!(video.height, Some(1080));
+        assert_eq!(video.fps, Some(30));
+        assert_eq!(video.resolution, "1080p");
+        let audio = snapshot.audio_info.expect("audio info should exist");
+        assert_eq!(audio.codec, "AAC");
+        assert_eq!(audio.bitrate_kbps, Some(128));
+        assert!(snapshot.ffprobe_output.contains("\"streams\""));
+    }
+
+    #[test]
+    fn parse_probe_snapshot_prefers_highest_resolution_video() {
+        let output = r#"{
+            "streams":[
+                {"codec_type":"video","codec_name":"h264","width":1280,"height":720,"r_frame_rate":"25"},
+                {"codec_type":"video","codec_name":"hevc","width":3840,"height":2160,"r_frame_rate":"50"}
+            ]
+        }"#;
+        let snapshot = parse_probe_snapshot(output).expect("probe snapshot should parse");
+        let video = snapshot.video_info.expect("video info should exist");
+        assert_eq!(video.codec, "HEVC");
+        assert_eq!(video.resolution, "4K");
+        assert_eq!(video.fps, Some(50));
     }
 
     #[test]
