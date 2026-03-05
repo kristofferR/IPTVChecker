@@ -316,6 +316,20 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.dataset.platform = platform;
+    if (platform !== "macos") return;
+
+    let cancelled = false;
+    const applyLiquidGlass = (attempt = 0) => {
+      setLiquidGlassEffect({}).catch(() => {
+        if (cancelled || attempt >= 5) return;
+        window.setTimeout(() => applyLiquidGlass(attempt + 1), 120 * (attempt + 1));
+      });
+    };
+
+    applyLiquidGlass();
+    return () => {
+      cancelled = true;
+    };
   }, [platform]);
 
   // Detect platform via native plugin and refresh the initial fallback.
@@ -323,9 +337,6 @@ export default function App() {
     detectPlatform()
       .then((p) => {
         setPlatform(p);
-        if (p === "macos") {
-          setLiquidGlassEffect({}).catch(() => {});
-        }
       })
       .catch(() => {
         // Keep navigator-based fallback when plugin-os isn't available yet.
@@ -1311,7 +1322,7 @@ export default function App() {
         statusFilter={statusFilter}
         onStatusChange={setStatusFilter}
       />
-      {isMac && <div ref={headerPortalRef} style={liveSelectedChannel && !sidebarHidden ? { marginRight: "18rem" } : undefined} />}
+      {isMac && playlist && <div ref={headerPortalRef} style={liveSelectedChannel && !sidebarHidden ? { marginRight: "18rem" } : undefined} />}
       </div>
 
       <div className="flex flex-col flex-1 min-h-0">

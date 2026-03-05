@@ -5,10 +5,130 @@ pub mod models;
 pub mod state;
 
 use std::sync::Arc;
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use state::AppState;
 use tauri::{Emitter, Manager};
+use tauri_plugin_liquid_glass::{LiquidGlassConfig, LiquidGlassExt};
 use tauri_plugin_store::StoreExt;
+
+#[cfg(target_os = "macos")]
+static APP_IS_QUITTING: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "macos")]
+static WINDOW_CLOSED_BY_USER: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "macos")]
+fn schedule_macos_system_appearance_patch(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        for _attempt in 0..20 {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            let handle = app.clone();
+            let patched = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let patched_on_main = patched.clone();
+            let _ = app.run_on_main_thread(move || {
+                patched_on_main.store(false, Ordering::Relaxed);
+
+                // Keep this patch local to macOS where the private selector exists.
+                // We retry from the worker thread because the recreated window's
+                // WKWebView hierarchy may not be fully attached immediately.
+                #[allow(deprecated)]
+                use cocoa::base::{id, nil, NO};
+                use objc::runtime::{Class, BOOL, YES};
+                use objc::{msg_send, sel, sel_impl};
+
+                unsafe fn find_webview(view: id) -> Option<id> {
+                    if view == nil {
+                        return None;
+                    }
+                    if let Some(cls) = Class::get("WKWebView") {
+                        let is_wk: BOOL = msg_send![view, isKindOfClass: cls];
+                        if is_wk != NO {
+                            return Some(view);
+                        }
+                    }
+                    let subviews: id = msg_send![view, subviews];
+                    let count: usize = msg_send![subviews, count];
+                    for i in 0..count {
+                        let subview: id = msg_send![subviews, objectAtIndex: i];
+                        if let Some(wv) = find_webview(subview) {
+                            return Some(wv);
+                        }
+                    }
+                    None
+                }
+
+                if let Some(window) = handle.get_webview_window("main") {
+                    if let Ok(ns_window) = window.ns_window() {
+                        unsafe {
+                            let ns_window = ns_window as id;
+                            let content_view: id = msg_send![ns_window, contentView];
+                            if let Some(webview) = find_webview(content_view) {
+                                let config: id = msg_send![webview, configuration];
+                                let prefs: id = msg_send![config, preferences];
+                                let _: () = msg_send![prefs, _setUseSystemAppearance: YES];
+                                patched_on_main.store(true, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                }
+            });
+
+            if patched.load(Ordering::Relaxed) {
+                break;
+            }
+        }
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn create_fresh_main_window(app: &tauri::AppHandle) {
+    let Some(window_config) = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|cfg| cfg.label == "main")
+        .or_else(|| app.config().app.windows.first())
+    else {
+        log::error!("Cannot recreate main window: no window config found");
+        return;
+    };
+
+    match tauri::WebviewWindowBuilder::from_config(app, window_config).and_then(|builder| builder.build()) {
+        Ok(window) => {
+            let theme_preference = {
+                let state = app.state::<Arc<AppState>>();
+                let theme = state.settings.blocking_lock().theme;
+                theme
+            };
+            if let Err(error) = commands::settings::apply_theme_preference(app, theme_preference) {
+                log::warn!(
+                    "Failed to apply theme preference on recreated window: {}",
+                    error
+                );
+            }
+
+            if let Err(error) = app
+                .liquid_glass()
+                .set_effect(&window, LiquidGlassConfig::default())
+            {
+                log::warn!(
+                    "Failed to apply liquid glass on recreated window: {}",
+                    error
+                );
+            }
+
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+            schedule_macos_system_appearance_patch(app.clone());
+        }
+        Err(error) => {
+            log::error!("Failed to recreate main window on reopen: {}", error);
+        }
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -226,45 +346,10 @@ pub fn run() {
 
             // Enable _useSystemAppearance on WKWebView so CSS
             // `-apple-visual-effect: -apple-system-glass-material` works.
+            // Deferred to avoid ObjC exceptions when webview isn't fully ready.
             #[cfg(target_os = "macos")]
             {
-                use cocoa::base::{id, nil, NO};
-                use objc::runtime::{Class, BOOL, YES};
-                use objc::{msg_send, sel, sel_impl};
-
-                unsafe fn find_webview(view: id) -> Option<id> {
-                    if view == nil {
-                        return None;
-                    }
-                    if let Some(cls) = Class::get("WKWebView") {
-                        let is_wk: BOOL = msg_send![view, isKindOfClass: cls];
-                        if is_wk != NO {
-                            return Some(view);
-                        }
-                    }
-                    let subviews: id = msg_send![view, subviews];
-                    let count: usize = msg_send![subviews, count];
-                    for i in 0..count {
-                        let subview: id = msg_send![subviews, objectAtIndex: i];
-                        if let Some(wv) = find_webview(subview) {
-                            return Some(wv);
-                        }
-                    }
-                    None
-                }
-
-                if let Some(window) = app.get_webview_window("main") {
-                    let ns_window: id = window.ns_window().unwrap() as id;
-                    unsafe {
-                        let content_view: id = msg_send![ns_window, contentView];
-                        if let Some(webview) = find_webview(content_view) {
-                            let config: id = msg_send![webview, configuration];
-                            let prefs: id = msg_send![config, preferences];
-                            let _: () =
-                                msg_send![prefs, _setUseSystemAppearance: YES];
-                        }
-                    }
-                }
+                schedule_macos_system_appearance_patch(app.handle().clone());
             }
 
             #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -338,6 +423,63 @@ pub fn run() {
             commands::recent::add_recent_playlist,
             commands::recent::clear_recent_playlists,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .on_window_event(|window, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                if window.label() == "main" && !APP_IS_QUITTING.load(Ordering::Relaxed) {
+                    if let Some(main_window) = window.app_handle().get_webview_window("main") {
+                        if let Err(error) = window.app_handle().liquid_glass().set_effect(
+                            &main_window,
+                            LiquidGlassConfig {
+                                enabled: false,
+                                ..Default::default()
+                            },
+                        ) {
+                            log::debug!("Failed to remove liquid glass before close: {}", error);
+                        }
+                    }
+                    WINDOW_CLOSED_BY_USER.store(true, Ordering::Relaxed);
+                }
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            match event {
+                tauri::RunEvent::MenuEvent(menu_event) => {
+                    let event_id = menu_event.id().as_ref();
+                    if event_id.contains("quit") {
+                        APP_IS_QUITTING.store(true, Ordering::Relaxed);
+                    }
+                }
+                tauri::RunEvent::ExitRequested { api, .. } => {
+                    if APP_IS_QUITTING.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    if WINDOW_CLOSED_BY_USER.swap(false, Ordering::Relaxed) {
+                        api.prevent_exit();
+                    }
+                }
+                tauri::RunEvent::Reopen {
+                    has_visible_windows,
+                    ..
+                } => {
+                    APP_IS_QUITTING.store(false, Ordering::Relaxed);
+                    WINDOW_CLOSED_BY_USER.store(false, Ordering::Relaxed);
+                    if has_visible_windows {
+                        return;
+                    }
+
+                    if let Some(main_window) = app.get_webview_window("main") {
+                        let _ = main_window.unminimize();
+                        let _ = main_window.show();
+                        let _ = main_window.set_focus();
+                    } else {
+                        create_fresh_main_window(app);
+                    }
+                }
+                _ => {}
+            }
+        });
 }

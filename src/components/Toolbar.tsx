@@ -132,12 +132,17 @@ export function Toolbar({
 
   const dragRegionAttr = useWindowDragRegion ? true : undefined;
   const btn = isMac ? toolbarBtnMac : toolbarBtn;
+  const toolbarPadding = hasPlaylist
+    ? "pt-[var(--toolbar-pt)] pb-2"
+    : isMac
+      ? "pt-[calc(var(--toolbar-pt)-0.5rem)] pb-1"
+      : "pt-[var(--toolbar-pt)] pb-1";
 
   return (
     <div
       onPointerDown={handlePointerDown}
       data-tauri-drag-region={dragRegionAttr}
-      className={`flex items-center px-3 bg-panel pt-[var(--toolbar-pt)] pb-2 pl-[var(--toolbar-pl)] relative glass-material ${isMac ? "gap-3" : "gap-1.5"}`}
+      className={`flex items-center px-3 bg-panel ${toolbarPadding} pl-[var(--toolbar-pl)] relative glass-material ${isMac ? "gap-3" : "gap-1.5"}`}
     >
       {/* Source group: Open, Open Folder, Open URL */}
       <div className={isMac ? "toolbar-group" : "flex items-center gap-1.5"}>
