@@ -137,6 +137,7 @@ export interface AppSettings {
   screenshots_dir: string | null;
   scan_history_limit: number;
   scan_notifications: boolean;
+  low_fps_threshold: number;
   theme: ThemePreference;
   log_level: string;
   show_prescan_filter: boolean;

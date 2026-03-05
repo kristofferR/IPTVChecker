@@ -16,6 +16,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   screenshots_dir: null,
   scan_history_limit: 20,
   scan_notifications: true,
+  low_fps_threshold: 23.0,
   theme: "system",
   log_level: "error",
   show_prescan_filter: false,

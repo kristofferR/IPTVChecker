@@ -278,6 +278,28 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                   <option value="exponential">Exponential</option>
                 </select>
               </div>
+
+              <div>
+                <label className={labelClass}>Low FPS Threshold</label>
+                <input
+                  type="number"
+                  value={draft.low_fps_threshold}
+                  onChange={(event) => {
+                    const value = parseFloat(event.target.value);
+                    update(
+                      "low_fps_threshold",
+                      Number.isNaN(value) ? 23.0 : Math.max(0, Math.min(240, value)),
+                    );
+                  }}
+                  step="0.1"
+                  min="0"
+                  max="240"
+                  className={inputClass}
+                />
+                <p className="text-[11px] text-text-tertiary mt-1">
+                  Mark channels as low framerate when FPS is at or below this value.
+                </p>
+              </div>
             </div>
           </section>
 

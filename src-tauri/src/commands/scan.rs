@@ -106,6 +106,7 @@ async fn compute_shared_url_result(
     ffmpeg_ok: bool,
     ffprobe_ok: bool,
     profile_bitrate_flag: bool,
+    low_fps_threshold: f64,
     skip_screenshots: bool,
     screenshots_dir: Option<&String>,
     screenshot_file_name: &str,
@@ -229,7 +230,10 @@ async fn compute_shared_url_result(
                     shared.width = info.width;
                     shared.height = info.height;
                     shared.fps = info.fps;
-                    shared.low_framerate = info.fps.map(|fps| fps < 29).unwrap_or(false);
+                    shared.low_framerate = info
+                        .fps
+                        .map(|fps| (fps as f64) <= low_fps_threshold)
+                        .unwrap_or(false);
                 }
             }
             if let Some(audio) = snapshot.audio_info {
@@ -900,6 +904,10 @@ async fn execute_scan_run(
     let semaphore = Arc::new(Semaphore::new(config.concurrency as usize));
     let diagnostics_limit = usize::max(1, usize::min(config.concurrency as usize, 4));
     let diagnostics_semaphore = Arc::new(Semaphore::new(diagnostics_limit));
+    let low_fps_threshold_setting = {
+        let settings = state.settings.lock().await;
+        settings.low_fps_threshold
+    };
     let (tx, mut rx) = tokio::sync::mpsc::channel::<WorkerOutput>(256);
     let (checkpoint_tx, checkpoint_rx) =
         tokio::sync::mpsc::channel::<resume::CheckpointWriteEntry>(1024);
@@ -1052,6 +1060,7 @@ async fn execute_scan_run(
         let test_geoblock = config.test_geoblock;
         let skip_screenshots = config.skip_screenshots;
         let profile_bitrate_flag = config.profile_bitrate;
+        let low_fps_threshold = low_fps_threshold_setting;
         let screenshots_dir = screenshots_dir.clone();
         let ffmpeg_ok = ffmpeg_available;
         let ffprobe_ok = ffprobe_available;
@@ -1096,6 +1105,7 @@ async fn execute_scan_run(
                         ffmpeg_ok,
                         ffprobe_ok,
                         profile_bitrate_flag,
+                        low_fps_threshold,
                         skip_screenshots,
                         screenshots_dir.as_ref(),
                         &screenshot_file_name,

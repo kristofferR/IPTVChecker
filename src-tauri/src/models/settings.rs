@@ -32,6 +32,7 @@ pub struct AppSettings {
     pub screenshots_dir: Option<String>,
     pub scan_history_limit: u32,
     pub scan_notifications: bool,
+    pub low_fps_threshold: f64,
     pub theme: ThemePreference,
     pub log_level: String,
     pub show_prescan_filter: bool,
@@ -65,6 +66,7 @@ impl Default for AppSettings {
             screenshots_dir: None,
             scan_history_limit: 20,
             scan_notifications: true,
+            low_fps_threshold: 23.0,
             theme: ThemePreference::System,
             log_level: "error".to_string(),
             show_prescan_filter: false,
@@ -83,9 +85,16 @@ mod tests {
     }
 
     #[test]
+    fn default_low_fps_threshold_is_23() {
+        let settings = AppSettings::default();
+        assert_eq!(settings.low_fps_threshold, 23.0);
+    }
+
+    #[test]
     fn deserialize_missing_scan_notifications_defaults_to_true() {
         let settings: AppSettings = serde_json::from_value(serde_json::json!({}))
             .expect("settings should deserialize with defaults");
         assert!(settings.scan_notifications);
+        assert_eq!(settings.low_fps_threshold, 23.0);
     }
 }

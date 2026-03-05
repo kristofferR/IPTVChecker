@@ -12,6 +12,8 @@ use crate::state::AppState;
 const MAX_SCREENSHOT_BYTES: u64 = 10 * 1024 * 1024;
 const MIN_SCAN_HISTORY_LIMIT: u32 = 1;
 const MAX_SCAN_HISTORY_LIMIT: u32 = 200;
+const MIN_LOW_FPS_THRESHOLD: f64 = 0.0;
+const MAX_LOW_FPS_THRESHOLD: f64 = 240.0;
 
 pub fn apply_theme_preference(
     app: &tauri::AppHandle,
@@ -291,6 +293,15 @@ pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Re
         return Err(AppError::Other(format!(
             "Invalid scan history limit: must be between {} and {}",
             MIN_SCAN_HISTORY_LIMIT, MAX_SCAN_HISTORY_LIMIT
+        )));
+    }
+    if !settings.low_fps_threshold.is_finite()
+        || settings.low_fps_threshold < MIN_LOW_FPS_THRESHOLD
+        || settings.low_fps_threshold > MAX_LOW_FPS_THRESHOLD
+    {
+        return Err(AppError::Other(format!(
+            "Invalid low FPS threshold: must be between {} and {}",
+            MIN_LOW_FPS_THRESHOLD, MAX_LOW_FPS_THRESHOLD
         )));
     }
 
