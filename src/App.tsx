@@ -312,7 +312,12 @@ export default function App() {
     const saved = localStorage.getItem("report-panel-visible");
     return saved == null ? true : saved === "1";
   });
+  const [reportSidebarWidth, setReportSidebarWidth] = useState(() => {
+    const saved = localStorage.getItem("report-sidebar-width");
+    return saved ? Math.max(260, Math.min(700, Number(saved))) : 330;
+  });
   const sidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const reportSidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [menuInfo, setMenuInfo] = useState<string | null>(null);
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
@@ -1363,6 +1368,37 @@ export default function App() {
     document.addEventListener("mouseup", onMouseUp);
   }, [sidebarWidth]);
 
+  const handleReportSidebarDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    reportSidebarDragRef.current = {
+      startX: e.clientX,
+      startWidth: reportSidebarWidth,
+    };
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!reportSidebarDragRef.current) return;
+      const delta = reportSidebarDragRef.current.startX - ev.clientX;
+      const newWidth = Math.max(
+        260,
+        Math.min(700, reportSidebarDragRef.current.startWidth + delta),
+      );
+      setReportSidebarWidth(newWidth);
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      reportSidebarDragRef.current = null;
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, [reportSidebarWidth]);
+
   useEffect(() => {
     localStorage.setItem("sidebar-width", String(sidebarWidth));
   }, [sidebarWidth]);
@@ -1370,6 +1406,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("report-panel-visible", showReportPanel ? "1" : "0");
   }, [showReportPanel]);
+
+  useEffect(() => {
+    localStorage.setItem("report-sidebar-width", String(reportSidebarWidth));
+  }, [reportSidebarWidth]);
 
   const handleSelectChannel = useCallback((result: ChannelResult) => {
     setSelectedChannel(result);
@@ -1624,7 +1664,21 @@ export default function App() {
         filteredCount={filteredExportResults.length}
         totalCount={completedResults.length}
       />
-      {isMac && playlist && <div ref={headerPortalRef} style={liveSelectedChannel && !sidebarHidden ? { marginLeft: `${sidebarWidth}px` } : undefined} />}
+      {isMac && playlist && (
+        <div
+          ref={headerPortalRef}
+          style={{
+            marginLeft:
+              liveSelectedChannel && !sidebarHidden
+                ? `${sidebarWidth}px`
+                : undefined,
+            marginRight:
+              playlist && showReportPanel
+                ? `${reportSidebarWidth}px`
+                : undefined,
+          }}
+        />
+      )}
       </div>
 
       <div className="flex flex-col flex-1 min-h-0">
@@ -1877,6 +1931,8 @@ export default function App() {
             summary={summary}
             scanState={scanState}
             placement="right"
+            widthPx={reportSidebarWidth}
+            onResizeStart={handleReportSidebarDragStart}
             onClose={() => setShowReportPanel(false)}
           />
         )}

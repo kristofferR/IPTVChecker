@@ -23,6 +23,8 @@ interface PlaylistReportPanelProps {
   summary: ScanSummary | null;
   scanState: ScanState;
   placement?: "left" | "right";
+  widthPx?: number;
+  onResizeStart?: (event: React.MouseEvent<HTMLDivElement>) => void;
   onClose: () => void;
 }
 
@@ -161,6 +163,8 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
   summary,
   scanState,
   placement = "left",
+  widthPx = 330,
+  onResizeStart,
   onClose,
 }: PlaylistReportPanelProps) {
   const statusSnapshot = summary ?? progress;
@@ -246,7 +250,20 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
   const statusClass = aliveOrDrm > 0 ? "text-emerald-300" : "text-red-300";
 
   return (
-    <aside className={`h-full w-[330px] shrink-0 ${placement === "right" ? "border-l" : "border-r"} border-border-app bg-panel/70 backdrop-blur-sm overflow-auto`}>
+    <aside
+      className={`relative h-full shrink-0 ${placement === "right" ? "border-l" : "border-r"} border-border-app bg-panel/70 backdrop-blur-sm overflow-auto`}
+      style={{ width: `${widthPx}px` }}
+    >
+      {onResizeStart && (
+        <div
+          onMouseDown={onResizeStart}
+          className={`absolute top-0 bottom-0 w-1 cursor-col-resize z-10 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors ${
+            placement === "right"
+              ? "left-0 -translate-x-1/2"
+              : "right-0 translate-x-1/2"
+          }`}
+        />
+      )}
       <div className="sticky top-0 z-10 px-4 py-3 border-b border-border-app bg-panel/85 backdrop-blur-sm">
         <div className="flex items-start justify-between gap-2">
           <div>
