@@ -1484,7 +1484,7 @@ export default function App() {
       url: `${baseUrl}?window=settings`,
       title: "Settings",
       width: 620,
-      height: 560,
+      height: 680,
       minWidth: 520,
       minHeight: 400,
       resizable: true,
