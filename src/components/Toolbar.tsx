@@ -60,6 +60,8 @@ interface ToolbarProps {
   onGroupChange: (value: string) => void;
   statusFilter: string;
   onStatusChange: (value: string) => void;
+  filteredCount: number;
+  totalCount: number;
 }
 
 const toolbarBtn =
@@ -99,6 +101,8 @@ export const Toolbar = memo(function Toolbar({
   onGroupChange,
   statusFilter,
   onStatusChange,
+  filteredCount,
+  totalCount,
 }: ToolbarProps) {
   const isMac = useWindowDragRegion;
   const scanning = scanState === "scanning";
@@ -110,6 +114,11 @@ export const Toolbar = memo(function Toolbar({
     ? "Open a playlist first"
     : scanBlockedReason;
   const filtersDisabled = !hasPlaylist;
+  const filtersActive =
+    search.trim().length > 0 || groupFilter !== "all" || statusFilter !== "all";
+  const filterCountLabel = filtersActive
+    ? `${filteredCount} of ${totalCount} channels`
+    : `${totalCount} channels`;
 
   // Platform-appropriate icons
   const IconOpen = isMac ? SFFolder : FolderOpen;
@@ -283,6 +292,11 @@ export const Toolbar = memo(function Toolbar({
           <option value="duplicates">Duplicates</option>
           <option value="pending">Pending</option>
         </select>
+        {hasPlaylist && (
+          <span className="text-[11px] text-text-tertiary px-1 whitespace-nowrap">
+            {filterCountLabel}
+          </span>
+        )}
       </div>
 
       {/* Actions group: Export, History, Settings */}

@@ -1538,6 +1538,8 @@ export default function App() {
         onGroupChange={handleGroupFilterChange}
         statusFilter={statusFilter}
         onStatusChange={handleStatusFilterChange}
+        filteredCount={filteredExportResults.length}
+        totalCount={completedResults.length}
       />
       {isMac && playlist && <div ref={headerPortalRef} style={liveSelectedChannel && !sidebarHidden ? { marginRight: `${sidebarWidth}px` } : undefined} />}
       </div>
