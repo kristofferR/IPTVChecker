@@ -100,7 +100,6 @@ export function Toolbar({
   statusFilter,
   onStatusChange,
 }: ToolbarProps) {
-  const appWindow = getCurrentWindow();
   const isMac = useWindowDragRegion;
   const scanning = scanState === "scanning";
   const paused = scanState === "paused";
@@ -128,8 +127,8 @@ export function Toolbar({
     const target = event.target as HTMLElement | null;
     if (target?.closest(dragIgnoreSelector)) return;
 
-    event.preventDefault();
-    void appWindow.startDragging();
+    // Keep native drag-region behavior intact for secondary windows.
+    void getCurrentWindow().startDragging();
   };
 
   const dragRegionAttr = useWindowDragRegion ? true : undefined;

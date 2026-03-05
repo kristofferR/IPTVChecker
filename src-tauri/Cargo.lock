@@ -2245,11 +2245,9 @@ name = "iptv-checker"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "cocoa",
  "csv",
  "futures",
  "log",
- "objc",
  "rand 0.10.0",
  "regex",
  "reqwest",

@@ -184,7 +184,7 @@ fn sanitize_recent_playlists(entries: Vec<RecentPlaylistEntry>) -> Vec<RecentPla
 }
 
 #[cfg(target_os = "macos")]
-fn update_recent_menu(app: &tauri::AppHandle, entries: &[RecentPlaylistEntry]) {
+fn apply_recent_menu_update(app: &tauri::AppHandle, entries: &[RecentPlaylistEntry]) {
     use tauri::menu::{MenuItem, PredefinedMenuItem};
 
     let Some(menu) = app.menu() else {
@@ -252,6 +252,17 @@ fn update_recent_menu(app: &tauri::AppHandle, entries: &[RecentPlaylistEntry]) {
         if let Some(clear_item) = clear_item_kind.as_menuitem() {
             let _ = clear_item.set_enabled(inserted_any);
         }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn update_recent_menu(app: &tauri::AppHandle, entries: &[RecentPlaylistEntry]) {
+    let app_handle = app.clone();
+    let entries = entries.to_vec();
+    if let Err(error) = app.run_on_main_thread(move || {
+        apply_recent_menu_update(&app_handle, &entries);
+    }) {
+        log::warn!("Failed to schedule recent menu update on main thread: {error}");
     }
 }
 
