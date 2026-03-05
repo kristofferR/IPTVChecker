@@ -91,6 +91,21 @@ bun tauri dev
 bun tauri build
 ```
 
+## Backend Benchmark Harness
+
+Deterministic local scan/check throughput benchmark (mock local HTTP stream server):
+
+```bash
+# Runs Rust backend benchmark binary
+bun run perf:backend-scan -- --channels 2000 --concurrency 16 --timeout-secs 2.0 --payload-kb 600
+```
+
+Outputs JSON with:
+- `time_to_first_result_ms`
+- `throughput_channels_per_sec`
+- `total_elapsed_ms`
+- status buckets (`alive`, `drm`, `dead`, `geoblocked`, `errors`)
+
 ## Project Structure
 
 ```

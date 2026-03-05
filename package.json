@@ -11,6 +11,7 @@
     "typecheck": "tsgo --noEmit",
     "test:frontend": "bun test tests",
     "perf:ui-filter": "bun run scripts/benchmark-ui-filter.ts",
+    "perf:backend-scan": "cd src-tauri && cargo run --release --bin backend_bench --",
     "setup:ffmpeg": "bash scripts/download-ffmpeg.sh",
     "clean:fuzz-local": "bash scripts/clean-fuzz-local.sh"
   },
