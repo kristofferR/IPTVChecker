@@ -1288,6 +1288,7 @@ export default function App() {
   const checkForUpdatesRef = useRef(checkForUpdates);
   checkForUpdatesRef.current = checkForUpdates;
   const handleToggleReportRef = useRef<() => void>(() => {});
+  const handleToggleSidebarRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     let cancelled = false;
@@ -1316,7 +1317,7 @@ export default function App() {
         listen("menu://export-renamed", () => queueExport("renamed")),
         listen("menu://export-filtered-m3u", () => queueExport("m3u")),
         listen("menu://export-scan-log", () => queueExport("scanlog")),
-        listen("menu://toggle-sidebar", () => setSidebarHidden((h) => !h)),
+        listen("menu://toggle-sidebar", () => handleToggleSidebarRef.current()),
         listen("menu://toggle-report", () => handleToggleReportRef.current()),
         listen("menu://toggle-prescan-filter", () => {
           const current = settingsRef.current;
@@ -1560,6 +1561,14 @@ export default function App() {
   }, [pendingPlaybackChannel, launchChannelInPlayer]);
 
   const completedResults = flatResults;
+  handleToggleSidebarRef.current = () => {
+    setSidebarHidden((h) => {
+      if (h && !selectedChannel && completedResults.length > 0) {
+        setSelectedChannel(completedResults[0]);
+      }
+      return !h;
+    });
+  };
   const filteredExportResults = useMemo(
     () =>
       measureUiPerf(
