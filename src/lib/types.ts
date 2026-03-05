@@ -65,6 +65,11 @@ export interface XtreamOpenRequest {
   password: string;
 }
 
+export interface StalkerOpenRequest {
+  portal: string;
+  mac: string;
+}
+
 export interface XtreamRecentSource {
   server: string;
   username: string;

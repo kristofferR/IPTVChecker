@@ -10,6 +10,7 @@ import type {
   RecentPlaylistEntry,
   RecentPlaylistKind,
   ScreenshotCacheStats,
+  StalkerOpenRequest,
   XtreamOpenRequest,
 } from "./types";
 
@@ -43,6 +44,18 @@ export async function openPlaylistXtream(
   channelSearch?: string,
 ): Promise<PlaylistPreview> {
   return invoke("open_playlist_xtream", {
+    source,
+    groupFilter: groupFilter ?? null,
+    channelSearch: channelSearch ?? null,
+  });
+}
+
+export async function openPlaylistStalker(
+  source: StalkerOpenRequest,
+  groupFilter?: string,
+  channelSearch?: string,
+): Promise<PlaylistPreview> {
+  return invoke("open_playlist_stalker", {
     source,
     groupFilter: groupFilter ?? null,
     channelSearch: channelSearch ?? null,

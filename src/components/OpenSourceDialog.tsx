@@ -1,15 +1,21 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { KeyRound, Link2, X } from "lucide-react";
-import type { XtreamOpenRequest, XtreamRecentSource } from "../lib/types";
+import { Cpu, KeyRound, Link2, X } from "lucide-react";
+import type {
+  StalkerOpenRequest,
+  XtreamOpenRequest,
+  XtreamRecentSource,
+} from "../lib/types";
 
-type OpenSourceMode = "url" | "xtream";
+type OpenSourceMode = "url" | "xtream" | "stalker";
 
 interface OpenSourceDialogProps {
   initialMode: OpenSourceMode;
   initialUrl?: string;
   initialXtream?: XtreamRecentSource | null;
+  initialStalker?: StalkerOpenRequest | null;
   onOpenUrl: (url: string) => Promise<boolean>;
   onOpenXtream: (source: XtreamOpenRequest) => Promise<boolean>;
+  onOpenStalker: (source: StalkerOpenRequest) => Promise<boolean>;
   onClose: () => void;
 }
 
@@ -28,8 +34,10 @@ export function OpenSourceDialog({
   initialMode,
   initialUrl,
   initialXtream,
+  initialStalker,
   onOpenUrl,
   onOpenXtream,
+  onOpenStalker,
   onClose,
 }: OpenSourceDialogProps) {
   const [mode, setMode] = useState<OpenSourceMode>(initialMode);
@@ -37,11 +45,15 @@ export function OpenSourceDialog({
   const [xtreamServer, setXtreamServer] = useState(initialXtream?.server ?? "");
   const [xtreamUsername, setXtreamUsername] = useState(initialXtream?.username ?? "");
   const [xtreamPassword, setXtreamPassword] = useState("");
+  const [stalkerPortal, setStalkerPortal] = useState(initialStalker?.portal ?? "");
+  const [stalkerMac, setStalkerMac] = useState(initialStalker?.mac ?? "");
   const [localError, setLocalError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const initialXtreamServer = initialXtream?.server ?? "";
   const initialXtreamUsername = initialXtream?.username ?? "";
+  const initialStalkerPortal = initialStalker?.portal ?? "";
+  const initialStalkerMac = initialStalker?.mac ?? "";
 
   useEffect(() => {
     setMode(initialMode);
@@ -49,9 +61,18 @@ export function OpenSourceDialog({
     setXtreamServer(initialXtreamServer);
     setXtreamUsername(initialXtreamUsername);
     setXtreamPassword("");
+    setStalkerPortal(initialStalkerPortal);
+    setStalkerMac(initialStalkerMac);
     setLocalError(null);
     setSubmitting(false);
-  }, [initialMode, initialUrl, initialXtreamServer, initialXtreamUsername]);
+  }, [
+    initialMode,
+    initialUrl,
+    initialXtreamServer,
+    initialXtreamUsername,
+    initialStalkerPortal,
+    initialStalkerMac,
+  ]);
 
   const handleClose = useCallback(() => {
     setXtreamPassword("");
@@ -86,6 +107,29 @@ export function OpenSourceDialog({
         }
 
         const opened = await onOpenUrl(url.trim());
+        if (opened) {
+          handleClose();
+        }
+        return;
+      }
+
+      if (mode === "stalker") {
+        const portalError = validateHttpUrl(stalkerPortal, "Stalker portal");
+        if (portalError) {
+          setLocalError(portalError);
+          return;
+        }
+
+        const mac = stalkerMac.trim();
+        if (!mac) {
+          setLocalError("Stalker MAC address cannot be empty.");
+          return;
+        }
+
+        const opened = await onOpenStalker({
+          portal: stalkerPortal.trim(),
+          mac,
+        });
         if (opened) {
           handleClose();
         }
@@ -180,6 +224,14 @@ export function OpenSourceDialog({
               <KeyRound className="w-4 h-4" />
               Xtream
             </button>
+            <button
+              type="button"
+              onClick={() => switchMode("stalker")}
+              className={tabClass("stalker")}
+            >
+              <Cpu className="w-4 h-4" />
+              Stalker
+            </button>
           </div>
 
           {mode === "url" ? (
@@ -200,7 +252,7 @@ export function OpenSourceDialog({
                 className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[14px] text-text-primary placeholder:text-text-muted focus:border-blue-500 focus:outline-none"
               />
             </div>
-          ) : (
+          ) : mode === "xtream" ? (
             <div className="space-y-3">
               <div className="space-y-2">
                 <label
@@ -246,6 +298,42 @@ export function OpenSourceDialog({
                   type="password"
                   value={xtreamPassword}
                   onChange={(event) => setXtreamPassword(event.target.value)}
+                  className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[14px] text-text-primary placeholder:text-text-muted focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <label
+                  htmlFor="open-source-stalker-portal"
+                  className="text-[12px] font-medium text-text-secondary"
+                >
+                  Stalker Portal URL
+                </label>
+                <input
+                  id="open-source-stalker-portal"
+                  type="text"
+                  autoFocus
+                  value={stalkerPortal}
+                  onChange={(event) => setStalkerPortal(event.target.value)}
+                  placeholder="https://example.com:8080"
+                  className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[14px] text-text-primary placeholder:text-text-muted focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+              <div className="space-y-2">
+                <label
+                  htmlFor="open-source-stalker-mac"
+                  className="text-[12px] font-medium text-text-secondary"
+                >
+                  MAC Address
+                </label>
+                <input
+                  id="open-source-stalker-mac"
+                  type="text"
+                  value={stalkerMac}
+                  onChange={(event) => setStalkerMac(event.target.value)}
+                  placeholder="00:1A:79:12:34:56"
                   className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[14px] text-text-primary placeholder:text-text-muted focus:border-blue-500 focus:outline-none"
                 />
               </div>

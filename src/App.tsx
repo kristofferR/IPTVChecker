@@ -25,6 +25,7 @@ import type {
   RecentPlaylistEntry,
   ScanConfig,
   ScanHistoryItem,
+  StalkerOpenRequest,
   XtreamOpenRequest,
   XtreamRecentSource,
 } from "./lib/types";
@@ -35,6 +36,7 @@ import {
   getRecentPlaylists,
   getScanHistory,
   openPlaylist,
+  openPlaylistStalker,
   openPlaylistXtream,
   openPlaylistUrl,
   checkFfmpegAvailable,
@@ -204,12 +206,13 @@ function shouldSkipUpdateCheck(
   );
 }
 
-type OpenSourceMode = "url" | "xtream";
+type OpenSourceMode = "url" | "xtream" | "stalker";
 
 interface OpenSourceDialogState {
   mode: OpenSourceMode;
   initialUrl: string;
   initialXtream: XtreamRecentSource | null;
+  initialStalker: StalkerOpenRequest | null;
 }
 
 function serializeXtreamRecent(source: XtreamRecentSource): string {
@@ -719,6 +722,43 @@ export default function App() {
     [channelSearch, initFromPlaylist, refreshRecentPlaylists],
   );
 
+  const openPlaylistStalkerValue = useCallback(
+    async (source: StalkerOpenRequest): Promise<boolean> => {
+      setPlaylistOpenError(null);
+      try {
+        const searchTrimmed = channelSearch.trim() || undefined;
+        logger.debug(
+          `[App] Opening Stalker playlist: portal=${source.portal}, mac=${source.mac}, channelSearch="${searchTrimmed ?? ""}"`,
+        );
+        const preview = await openPlaylistStalker(source, undefined, searchTrimmed);
+        logger.debug(
+          `[App] Stalker playlist loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
+          preview.groups,
+        );
+        setPlaylist(preview);
+        initFromPlaylist(preview.channels);
+        setSearch("");
+        setGroupFilter("all");
+        setStatusFilter("all");
+        setPlaylistOpenError(null);
+        setSelectedChannel(null);
+        setSelectedChannelIndices([]);
+        setPendingPlaybackChannel(null);
+        setShowHistory(false);
+        return true;
+      } catch (err) {
+        logger.error("[App] Failed to open Stalker playlist", err);
+        setPlaylistOpenError(formatPlaylistOpenError(err));
+        setSelectedChannel(null);
+        setSelectedChannelIndices([]);
+        setPendingPlaybackChannel(null);
+        setShowHistory(false);
+        return false;
+      }
+    },
+    [channelSearch, initFromPlaylist],
+  );
+
   const openSourceDialog = useCallback((state: OpenSourceDialogState) => {
     setOpenSourceDialogState(state);
   }, []);
@@ -728,6 +768,7 @@ export default function App() {
       mode: "url",
       initialUrl: "",
       initialXtream: null,
+      initialStalker: null,
     });
   }, [openSourceDialog]);
 
@@ -794,6 +835,7 @@ export default function App() {
           mode: "xtream",
           initialUrl: "",
           initialXtream: source,
+          initialStalker: null,
         });
         return;
       }
@@ -1798,8 +1840,10 @@ export default function App() {
           initialMode={openSourceDialogState.mode}
           initialUrl={openSourceDialogState.initialUrl}
           initialXtream={openSourceDialogState.initialXtream}
+          initialStalker={openSourceDialogState.initialStalker}
           onOpenUrl={openPlaylistUrlValue}
           onOpenXtream={openPlaylistXtreamValue}
+          onOpenStalker={openPlaylistStalkerValue}
           onClose={() => setOpenSourceDialogState(null)}
         />
       )}
