@@ -157,6 +157,10 @@ body {
   -webkit-overflow-scrolling: touch;
   scroll-behavior: auto;
   overscroll-behavior: auto;
+}
+
+/* Only scroll regions that extend under the titlebar need the toolbar cutout. */
+[data-platform="macos"] .native-scroll-toolbar-cutout {
   clip-path: polygon(
     0 0,
     calc(100% - 15px) 0,
