@@ -954,6 +954,7 @@ fn build_stalker_preview(
 
         if include_group && include_search {
             let language = parser::detect_channel_language(&group, &raw_name, &extinf_line);
+            let (tvg_id, tvg_name, tvg_logo, tvg_chno) = parser::extract_tvg_metadata(&extinf_line);
             let content_type = ContentType::detect_from_url(&stream_url);
             channels.push(Channel {
                 index: source_index,
@@ -964,6 +965,10 @@ fn build_stalker_preview(
                 name: raw_name,
                 group,
                 language,
+                tvg_id,
+                tvg_name,
+                tvg_logo,
+                tvg_chno,
                 url: stream_url,
                 content_type,
                 extinf_line,

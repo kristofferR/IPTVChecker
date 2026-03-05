@@ -169,6 +169,35 @@ pub fn get_group_name(extinf_line: &str) -> String {
     "Unknown Group".to_string()
 }
 
+fn extinf_attribute_value(extinf_line: &str, key: &str) -> Option<String> {
+    if !extinf_line.starts_with("#EXTINF") {
+        return None;
+    }
+
+    parse_extinf_attributes(extinf_line)
+        .into_iter()
+        .find_map(|(candidate_key, candidate_value)| {
+            (candidate_key == key).then_some(candidate_value.trim().to_string())
+        })
+        .filter(|value| !value.is_empty())
+}
+
+pub fn extract_tvg_metadata(
+    extinf_line: &str,
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
+    (
+        extinf_attribute_value(extinf_line, "tvg-id"),
+        extinf_attribute_value(extinf_line, "tvg-name"),
+        extinf_attribute_value(extinf_line, "tvg-logo"),
+        extinf_attribute_value(extinf_line, "tvg-chno"),
+    )
+}
+
 fn normalize_language_candidate(raw: &str) -> Option<String> {
     let first = raw
         .split(['|', ',', ';', '/'])
@@ -391,6 +420,7 @@ fn parse_playlist_reader<R: BufRead>(
                 let name = get_channel_name(&extinf_line);
                 let group = get_group_name(&extinf_line);
                 let language = detect_channel_language(&group, &name, &extinf_line);
+                let (tvg_id, tvg_name, tvg_logo, tvg_chno) = extract_tvg_metadata(&extinf_line);
                 let content_type = ContentType::detect_from_url(&line);
                 channels.push(Channel {
                     index: source_index,
@@ -398,6 +428,10 @@ fn parse_playlist_reader<R: BufRead>(
                     name,
                     group,
                     language,
+                    tvg_id,
+                    tvg_name,
+                    tvg_logo,
+                    tvg_chno,
                     url: line,
                     content_type,
                     extinf_line,
@@ -662,6 +696,17 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_tvg_metadata_reads_extinf_attributes() {
+        let extinf =
+            "#EXTINF:-1 tvg-id=\"epg-1\" tvg-name=\"Channel Name\" tvg-logo=\"http://img/logo.png\" tvg-chno=\"101\",Channel Name";
+        let (tvg_id, tvg_name, tvg_logo, tvg_chno) = extract_tvg_metadata(extinf);
+        assert_eq!(tvg_id.as_deref(), Some("epg-1"));
+        assert_eq!(tvg_name.as_deref(), Some("Channel Name"));
+        assert_eq!(tvg_logo.as_deref(), Some("http://img/logo.png"));
+        assert_eq!(tvg_chno.as_deref(), Some("101"));
+    }
+
+    #[test]
     fn test_get_channel_id() {
         assert_eq!(get_channel_id("http://example.com/live/123.ts"), "123");
         assert_eq!(get_channel_id("http://example.com/live/stream"), "stream");
@@ -833,7 +878,7 @@ http://example.com/beta.m3u8
     #[test]
     fn test_parse_m3u_from_memory() {
         let payload =
-            b"#EXTM3U\n#EXTINF:-1 group-title=\"News\",Channel One\nhttp://example.com/live.m3u8\n";
+            b"#EXTM3U\n#EXTINF:-1 tvg-id=\"epg-1\" tvg-name=\"Channel One HD\" tvg-logo=\"http://example.com/logo.png\" tvg-chno=\"42\" group-title=\"News\",Channel One\nhttp://example.com/live.m3u8\n";
         let parsed = parse_m3u(payload, "memory-playlist.m3u8", &None, &None)
             .expect("in-memory parser should succeed");
 
@@ -846,6 +891,16 @@ http://example.com/beta.m3u8
         assert_eq!(parsed.channels[0].name, "Channel One");
         assert_eq!(parsed.channels[0].group, "News");
         assert_eq!(parsed.channels[0].language, None);
+        assert_eq!(parsed.channels[0].tvg_id.as_deref(), Some("epg-1"));
+        assert_eq!(
+            parsed.channels[0].tvg_name.as_deref(),
+            Some("Channel One HD")
+        );
+        assert_eq!(
+            parsed.channels[0].tvg_logo.as_deref(),
+            Some("http://example.com/logo.png")
+        );
+        assert_eq!(parsed.channels[0].tvg_chno.as_deref(), Some("42"));
         assert_eq!(parsed.channels[0].url, "http://example.com/live.m3u8");
     }
 

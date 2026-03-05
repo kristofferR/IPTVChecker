@@ -116,6 +116,14 @@ pub struct Channel {
     pub group: String,
     #[serde(default)]
     pub language: Option<String>,
+    #[serde(default)]
+    pub tvg_id: Option<String>,
+    #[serde(default)]
+    pub tvg_name: Option<String>,
+    #[serde(default)]
+    pub tvg_logo: Option<String>,
+    #[serde(default)]
+    pub tvg_chno: Option<String>,
     pub url: String,
     #[serde(default)]
     pub content_type: ContentType,
@@ -131,6 +139,14 @@ pub struct ChannelResult {
     pub group: String,
     #[serde(default)]
     pub language: Option<String>,
+    #[serde(default)]
+    pub tvg_id: Option<String>,
+    #[serde(default)]
+    pub tvg_name: Option<String>,
+    #[serde(default)]
+    pub tvg_logo: Option<String>,
+    #[serde(default)]
+    pub tvg_chno: Option<String>,
     pub url: String,
     #[serde(default)]
     pub content_type: ContentType,
@@ -173,6 +189,10 @@ mod tests {
             name: "Channel".to_string(),
             group: "Group".to_string(),
             language: None,
+            tvg_id: None,
+            tvg_name: None,
+            tvg_logo: None,
+            tvg_chno: None,
             url: "https://example.com/live.m3u8".to_string(),
             content_type: ContentType::Live,
             status: ChannelStatus::Dead,
@@ -235,6 +255,10 @@ mod tests {
             serde_json::from_value(value).expect("legacy alias should deserialize");
         assert_eq!(parsed.error_reason.as_deref(), Some("Timeout"));
         assert_eq!(parsed.language, None);
+        assert_eq!(parsed.tvg_id, None);
+        assert_eq!(parsed.tvg_name, None);
+        assert_eq!(parsed.tvg_logo, None);
+        assert_eq!(parsed.tvg_chno, None);
         assert_eq!(parsed.content_type, ContentType::Live);
     }
 

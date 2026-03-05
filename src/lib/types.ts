@@ -16,6 +16,10 @@ export interface Channel {
   name: string;
   group: string;
   language: string | null;
+  tvg_id: string | null;
+  tvg_name: string | null;
+  tvg_logo: string | null;
+  tvg_chno: string | null;
   url: string;
   content_type: ContentType;
   extinf_line: string;
@@ -28,6 +32,10 @@ export interface ChannelResult {
   name: string;
   group: string;
   language: string | null;
+  tvg_id: string | null;
+  tvg_name: string | null;
+  tvg_logo: string | null;
+  tvg_chno: string | null;
   url: string;
   content_type: ContentType;
   status: ChannelStatus;
