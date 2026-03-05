@@ -702,9 +702,9 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
               <section className={blockClass}>
                 <div className={rowClass}>
                   <div className="min-w-0">
-                    <p className="text-[13px] font-medium">Default app for .m3u8</p>
+                    <p className="text-[13px] font-medium">Default app for .m3u/.m3u8</p>
                     <p className="text-[11px] text-text-tertiary mt-0.5">
-                      Open .m3u8 playlist files in IPTV Checker by default.
+                      Open playlist files in IPTV Checker by default.
                     </p>
                   </div>
                   <button

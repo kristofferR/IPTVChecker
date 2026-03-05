@@ -2281,6 +2281,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "url",
+ "winreg",
 ]
 
 [[package]]

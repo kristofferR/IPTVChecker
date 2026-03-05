@@ -41,3 +41,6 @@ fs2 = "0.4.3"
 tauri-plugin-macos-haptics = "1.0.0"
 objc2 = "0.6.4"
 core-foundation = "0.10"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.55"

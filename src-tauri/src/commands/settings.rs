@@ -242,54 +242,105 @@ fn set_default_m3u8_handler(app: &tauri::AppHandle) -> Result<String, AppError> 
         ));
     }
 
-    let extension = CFString::new("m3u8");
     let handler_bundle = CFString::new(bundle_id);
-    let content_type = unsafe {
-        let uti_ref = UTTypeCreatePreferredIdentifierForTag(
-            kUTTagClassFilenameExtension,
-            extension.as_concrete_TypeRef(),
-            std::ptr::null(),
-        );
-        if uti_ref.is_null() {
-            return Err(AppError::Other(
-                "macOS could not resolve the .m3u8 content type".to_string(),
-            ));
-        }
-        CFString::wrap_under_create_rule(uti_ref)
-    };
+    for extension in ["m3u", "m3u8"] {
+        let extension_cf = CFString::new(extension);
+        let content_type = unsafe {
+            let uti_ref = UTTypeCreatePreferredIdentifierForTag(
+                kUTTagClassFilenameExtension,
+                extension_cf.as_concrete_TypeRef(),
+                std::ptr::null(),
+            );
+            if uti_ref.is_null() {
+                return Err(AppError::Other(format!(
+                    "macOS could not resolve the .{} content type",
+                    extension
+                )));
+            }
+            CFString::wrap_under_create_rule(uti_ref)
+        };
 
-    let status = unsafe {
-        LSSetDefaultRoleHandlerForContentType(
-            content_type.as_concrete_TypeRef(),
-            K_LS_ROLES_ALL,
-            handler_bundle.as_concrete_TypeRef(),
-        )
-    };
-    if status != 0 {
-        return Err(AppError::Other(format!(
-            "macOS LaunchServices failed to set default app for .m3u8 (error {})",
-            status
-        )));
+        let status = unsafe {
+            LSSetDefaultRoleHandlerForContentType(
+                content_type.as_concrete_TypeRef(),
+                K_LS_ROLES_ALL,
+                handler_bundle.as_concrete_TypeRef(),
+            )
+        };
+        if status != 0 {
+            return Err(AppError::Other(format!(
+                "macOS LaunchServices failed to set default app for .{} (error {})",
+                extension, status
+            )));
+        }
     }
 
-    Ok("IPTV Checker is now the default app for .m3u8 files.".to_string())
+    Ok("IPTV Checker is now the default app for .m3u and .m3u8 files.".to_string())
 }
 
 #[cfg(target_os = "linux")]
 fn set_default_m3u8_handler(app: &tauri::AppHandle) -> Result<String, AppError> {
+    use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    let identifier = app.config().identifier.as_str();
-    if identifier.trim().is_empty() {
-        return Err(AppError::Other(
-            "App identifier is missing; cannot set default handler".to_string(),
-        ));
+    const MIME_TYPES: [&str; 3] = [
+        "application/vnd.apple.mpegurl",
+        "application/x-mpegurl",
+        "audio/x-mpegurl",
+    ];
+
+    fn linux_data_home() -> PathBuf {
+        if let Ok(raw) = std::env::var("XDG_DATA_HOME") {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() {
+                return PathBuf::from(trimmed);
+            }
+        }
+        if let Ok(raw) = std::env::var("HOME") {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() {
+                return PathBuf::from(trimmed).join(".local").join("share");
+            }
+        }
+        std::env::temp_dir()
     }
 
-    let desktop_id = format!("{}.desktop", identifier);
-    for mime_type in ["application/vnd.apple.mpegurl", "audio/x-mpegurl"] {
+    fn linux_association_executable() -> Result<PathBuf, AppError> {
+        if let Ok(raw) = std::env::var("APPIMAGE") {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() {
+                let path = PathBuf::from(trimmed);
+                if path.exists() {
+                    return Ok(path);
+                }
+            }
+        }
+        std::env::current_exe().map_err(|error| {
+            AppError::Other(format!(
+                "Failed to resolve application executable path: {}",
+                error
+            ))
+        })
+    }
+
+    fn desktop_exec_value(executable_path: &Path) -> String {
+        let escaped = executable_path
+            .to_string_lossy()
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"");
+        format!("\"{}\" %f", escaped)
+    }
+
+    fn desktop_entry_content(executable_path: &Path) -> String {
+        format!(
+            "[Desktop Entry]\nType=Application\nVersion=1.0\nName=IPTV Checker\nComment=Validate IPTV playlists and inspect stream health.\nExec={}\nTerminal=false\nNoDisplay=false\nCategories=Utility;\nMimeType=application/vnd.apple.mpegurl;application/x-mpegurl;audio/x-mpegurl;\n",
+            desktop_exec_value(executable_path)
+        )
+    }
+
+    fn run_xdg_mime_default(desktop_id: &str, mime_type: &str) -> Result<(), AppError> {
         let output = Command::new("xdg-mime")
-            .args(["default", desktop_id.as_str(), mime_type])
+            .args(["default", desktop_id, mime_type])
             .output()
             .map_err(|error| {
                 AppError::Other(format!(
@@ -311,33 +362,186 @@ fn set_default_m3u8_handler(app: &tauri::AppHandle) -> Result<String, AppError> 
                 detail
             )));
         }
+        Ok(())
     }
 
-    Ok("IPTV Checker is now the default app for .m3u8 files.".to_string())
+    let identifier = app.config().identifier.as_str();
+    if identifier.trim().is_empty() {
+        return Err(AppError::Other(
+            "App identifier is missing; cannot set default handler".to_string(),
+        ));
+    }
+
+    let desktop_id = format!("{}.desktop", identifier);
+    let applications_dir = linux_data_home().join("applications");
+    fs::create_dir_all(&applications_dir).map_err(|error| {
+        AppError::Other(format!(
+            "Failed to create applications directory at {}: {}",
+            applications_dir.display(),
+            error
+        ))
+    })?;
+
+    let desktop_entry_path = applications_dir.join(&desktop_id);
+    let executable_path = linux_association_executable()?;
+    fs::write(
+        &desktop_entry_path,
+        desktop_entry_content(executable_path.as_path()),
+    )
+    .map_err(|error| {
+        AppError::Other(format!(
+            "Failed to write desktop entry at {}: {}",
+            desktop_entry_path.display(),
+            error
+        ))
+    })?;
+
+    for mime_type in MIME_TYPES {
+        run_xdg_mime_default(desktop_id.as_str(), mime_type)?;
+    }
+
+    match Command::new("update-desktop-database")
+        .arg(&applications_dir)
+        .output()
+    {
+        Ok(output) => {
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let detail = if stderr.is_empty() {
+                    "unknown error".to_string()
+                } else {
+                    stderr
+                };
+                log::warn!(
+                    "update-desktop-database failed for {} ({}): {}",
+                    applications_dir.display(),
+                    output.status,
+                    detail
+                );
+            }
+        }
+        Err(error) => {
+            log::warn!(
+                "Failed to execute update-desktop-database for {}: {}",
+                applications_dir.display(),
+                error
+            );
+        }
+    }
+
+    Ok("IPTV Checker is now the default app for .m3u and .m3u8 files.".to_string())
 }
 
 #[cfg(target_os = "windows")]
 fn set_default_m3u8_handler(_app: &tauri::AppHandle) -> Result<String, AppError> {
-    use std::process::Command;
+    use winreg::RegKey;
+    use winreg::enums::HKEY_CURRENT_USER;
 
-    Command::new("cmd")
-        .args(["/C", "start", "", "ms-settings:defaultapps"])
-        .spawn()
-        .map_err(|error| {
+    fn register_windows_extension(
+        classes_root: &RegKey,
+        extension: &str,
+        prog_id: &str,
+        mime_type: &str,
+    ) -> Result<(), AppError> {
+        let (ext_key, _) = classes_root.create_subkey(extension).map_err(|error| {
             AppError::Other(format!(
-                "Failed to open Windows Default Apps settings: {}",
-                error
+                "Failed to create registry key {}: {}",
+                extension, error
             ))
         })?;
 
-    Ok("Opened Windows Default Apps settings. Set IPTV Checker as default for .m3u8 there."
-        .to_string())
+        ext_key.set_value("", &prog_id).map_err(|error| {
+            AppError::Other(format!(
+                "Failed to set default handler for {}: {}",
+                extension, error
+            ))
+        })?;
+        ext_key.set_value("Content Type", &mime_type).map_err(|error| {
+            AppError::Other(format!(
+                "Failed to set MIME type for {}: {}",
+                extension, error
+            ))
+        })?;
+
+        Ok(())
+    }
+
+    let executable_path = std::env::current_exe().map_err(|error| {
+        AppError::Other(format!(
+            "Failed to resolve application executable path: {}",
+            error
+        ))
+    })?;
+    let executable_display = executable_path
+        .to_string_lossy()
+        .replace('"', "\\\"");
+    let open_command = format!("\"{}\" \"%1\"", executable_display);
+    let icon_value = format!("\"{}\",0", executable_display);
+    const PROG_ID: &str = "IPTVChecker.Playlist";
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let (classes_root, _) = hkcu
+        .create_subkey("Software\\Classes")
+        .map_err(|error| AppError::Other(format!("Failed to access HKCU\\Software\\Classes: {}", error)))?;
+
+    register_windows_extension(&classes_root, ".m3u", PROG_ID, "audio/x-mpegurl")?;
+    register_windows_extension(
+        &classes_root,
+        ".m3u8",
+        PROG_ID,
+        "application/vnd.apple.mpegurl",
+    )?;
+
+    let (prog_id_key, _) = classes_root.create_subkey(PROG_ID).map_err(|error| {
+        AppError::Other(format!(
+            "Failed to create registry key {}: {}",
+            PROG_ID, error
+        ))
+    })?;
+    prog_id_key
+        .set_value("", &"IPTV Checker Playlist")
+        .map_err(|error| {
+            AppError::Other(format!(
+                "Failed to set registry value for {}: {}",
+                PROG_ID, error
+            ))
+        })?;
+
+    let (icon_key, _) = prog_id_key.create_subkey("DefaultIcon").map_err(|error| {
+        AppError::Other(format!(
+            "Failed to create registry key {}\\DefaultIcon: {}",
+            PROG_ID, error
+        ))
+    })?;
+    icon_key.set_value("", &icon_value).map_err(|error| {
+        AppError::Other(format!(
+            "Failed to set icon for {}: {}",
+            PROG_ID, error
+        ))
+    })?;
+
+    let (command_key, _) = prog_id_key
+        .create_subkey("shell\\open\\command")
+        .map_err(|error| {
+            AppError::Other(format!(
+                "Failed to create registry key {}\\shell\\open\\command: {}",
+                PROG_ID, error
+            ))
+        })?;
+    command_key.set_value("", &open_command).map_err(|error| {
+        AppError::Other(format!(
+            "Failed to set open command for {}: {}",
+            PROG_ID, error
+        ))
+    })?;
+
+    Ok("IPTV Checker is now the default app for .m3u and .m3u8 files.".to_string())
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 fn set_default_m3u8_handler(_app: &tauri::AppHandle) -> Result<String, AppError> {
     Err(AppError::Other(
-        "Setting default apps for .m3u8 is not supported on this platform".to_string(),
+        "Setting default apps for .m3u/.m3u8 is not supported on this platform".to_string(),
     ))
 }
 
