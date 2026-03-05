@@ -1,7 +1,7 @@
 use crate::engine::parser;
 use crate::error::AppError;
 use crate::models::channel::{Channel, ContentType};
-use crate::models::playlist::PlaylistPreview;
+use crate::models::playlist::{PlaylistPreview, XtreamAccountInfo};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -600,6 +600,17 @@ fn build_xtream_player_api_url(server: &Url, username: &str, password: &str) -> 
     api_url
 }
 
+fn build_xtream_player_api_action_url(
+    server: &Url,
+    username: &str,
+    password: &str,
+    action: &str,
+) -> Url {
+    let mut api_url = build_xtream_player_api_url(server, username, password);
+    api_url.query_pairs_mut().append_pair("action", action);
+    api_url
+}
+
 fn build_xtream_source_key(server: &Url, username: &str) -> String {
     format!(
         "xtream:{}|{}|m3u_plus|ts",
@@ -625,11 +636,75 @@ fn parse_max_connections_value(value: &serde_json::Value) -> Option<u32> {
     }
 }
 
+fn parse_bool_like(value: &serde_json::Value) -> Option<bool> {
+    match value {
+        serde_json::Value::Bool(flag) => Some(*flag),
+        serde_json::Value::Number(number) => number.as_i64().map(|raw| raw != 0),
+        serde_json::Value::String(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            if let Ok(parsed) = trimmed.parse::<i64>() {
+                return Some(parsed != 0);
+            }
+            match trimmed.to_ascii_lowercase().as_str() {
+                "true" | "yes" | "active" => Some(true),
+                "false" | "no" | "inactive" => Some(false),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn parse_epoch_value(value: &serde_json::Value) -> Option<u64> {
+    match value {
+        serde_json::Value::Number(number) => number.as_u64().filter(|epoch| *epoch > 0),
+        serde_json::Value::String(raw) => raw.trim().parse::<u64>().ok().filter(|epoch| *epoch > 0),
+        _ => None,
+    }
+}
+
+fn parse_optional_string(value: Option<&serde_json::Value>) -> Option<String> {
+    value
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty())
+        .map(ToString::to_string)
+}
+
+fn extract_xtream_account_info(payload: &serde_json::Value) -> Option<XtreamAccountInfo> {
+    let user = payload.get("user_info").unwrap_or(payload);
+    let info = XtreamAccountInfo {
+        status: parse_optional_string(user.get("status")),
+        expires_at_epoch: user
+            .get("exp_date")
+            .and_then(parse_epoch_value)
+            .or_else(|| user.get("expiration").and_then(parse_epoch_value)),
+        created_at_epoch: user.get("created_at").and_then(parse_epoch_value),
+        is_trial: user.get("is_trial").and_then(parse_bool_like),
+        active_connections: user
+            .get("active_cons")
+            .and_then(parse_max_connections_value),
+        max_connections: user
+            .get("max_connections")
+            .and_then(parse_max_connections_value),
+    };
+
+    let has_any = info.status.is_some()
+        || info.expires_at_epoch.is_some()
+        || info.created_at_epoch.is_some()
+        || info.is_trial.is_some()
+        || info.active_connections.is_some()
+        || info.max_connections.is_some();
+    has_any.then_some(info)
+}
+
+#[cfg(test)]
 fn extract_xtream_max_connections(payload: &serde_json::Value) -> Option<u32> {
-    payload
-        .get("user_info")
-        .and_then(|user| user.get("max_connections"))
-        .and_then(parse_max_connections_value)
+    extract_xtream_account_info(payload)
+        .and_then(|account| account.max_connections)
         .or_else(|| {
             payload
                 .get("max_connections")
@@ -637,8 +712,14 @@ fn extract_xtream_max_connections(payload: &serde_json::Value) -> Option<u32> {
         })
 }
 
-async fn fetch_xtream_max_connections(server: &Url, username: &str, password: &str) -> Option<u32> {
+async fn fetch_xtream_account_info(
+    server: &Url,
+    username: &str,
+    password: &str,
+) -> Option<XtreamAccountInfo> {
     let api_url = build_xtream_player_api_url(server, username, password);
+    let account_info_url =
+        build_xtream_player_api_action_url(server, username, password, "get_account_info");
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
         .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
@@ -646,25 +727,31 @@ async fn fetch_xtream_max_connections(server: &Url, username: &str, password: &s
         .build()
         .ok()?;
 
-    let response = client
-        .get(api_url.clone())
-        .header(reqwest::header::USER_AGENT, "IPTV-Checker-GUI/1.0")
-        .send()
-        .await
-        .ok()?;
+    for endpoint in [account_info_url, api_url.clone()] {
+        let response = client
+            .get(endpoint.clone())
+            .header(reqwest::header::USER_AGENT, "IPTV-Checker-GUI/1.0")
+            .send()
+            .await
+            .ok()?;
 
-    if !response.status().is_success() {
-        log::debug!(
-            "Xtream player_api request returned HTTP {} for {}",
-            response.status(),
-            api_url
-        );
-        return None;
+        if !response.status().is_success() {
+            log::debug!(
+                "Xtream player_api request returned HTTP {} for {}",
+                response.status(),
+                endpoint
+            );
+            continue;
+        }
+
+        let payload_bytes = response.bytes().await.ok()?;
+        let payload = serde_json::from_slice::<serde_json::Value>(&payload_bytes).ok()?;
+        if let Some(info) = extract_xtream_account_info(&payload) {
+            return Some(info);
+        }
     }
 
-    let payload_bytes = response.bytes().await.ok()?;
-    let payload = serde_json::from_slice::<serde_json::Value>(&payload_bytes).ok()?;
-    extract_xtream_max_connections(&payload)
+    None
 }
 
 fn normalize_stalker_portal(portal: &str) -> Result<Url, AppError> {
@@ -1163,6 +1250,7 @@ fn build_stalker_preview(
         )),
         server_location: None,
         xtream_max_connections: None,
+        xtream_account_info: None,
         total_channels: channels.len(),
         live_count,
         movie_count,
@@ -1310,8 +1398,8 @@ pub async fn open_playlist_xtream(
     let source_key = build_xtream_source_key(&server, &username);
     let download_url = build_xtream_download_url(&server, &username, &password);
     let data_dir = app_data_dir(&app)?;
-    let (xtream_max_connections, cached_path_result) = tokio::join!(
-        fetch_xtream_max_connections(&server, &username, &password),
+    let (xtream_account_info, cached_path_result) = tokio::join!(
+        fetch_xtream_account_info(&server, &username, &password),
         download_playlist_to_cache_in_data_dir(
             &data_dir,
             &source_key,
@@ -1322,7 +1410,10 @@ pub async fn open_playlist_xtream(
     let cached_path = cached_path_result?;
     let mut preview = parser::parse_playlist(&cached_path, &group_filter, &channel_search)?;
     preview.source_identity = Some(source_key);
-    preview.xtream_max_connections = xtream_max_connections;
+    preview.xtream_max_connections = xtream_account_info
+        .as_ref()
+        .and_then(|account| account.max_connections);
+    preview.xtream_account_info = xtream_account_info;
     populate_server_location(&mut preview).await;
     Ok(preview)
 }
@@ -1331,11 +1422,11 @@ pub async fn open_playlist_xtream(
 mod tests {
     use super::{
         build_stalker_endpoint_candidates, build_stalker_preview, build_xtream_download_url,
-        build_xtream_player_api_url, build_xtream_source_key, cleanup_stale_cache_temp_files,
-        dominant_channel_host, download_playlist_bytes, extract_stalker_stream_url,
-        extract_xtream_max_connections, normalize_stalker_mac, normalize_stalker_portal,
-        normalize_url_identity, normalize_xtream_server, parse_ipapi_location,
-        source_cache_file_name,
+        build_xtream_player_api_action_url, build_xtream_player_api_url, build_xtream_source_key,
+        cleanup_stale_cache_temp_files, dominant_channel_host, download_playlist_bytes,
+        extract_stalker_stream_url, extract_xtream_account_info, extract_xtream_max_connections,
+        normalize_stalker_mac, normalize_stalker_portal, normalize_url_identity,
+        normalize_xtream_server, parse_ipapi_location, source_cache_file_name,
     };
     use crate::models::channel::{Channel, ContentType};
     use std::time::Duration;
@@ -1417,6 +1508,22 @@ mod tests {
     }
 
     #[test]
+    fn build_xtream_player_api_action_url_appends_action_query() {
+        let server =
+            normalize_xtream_server("https://demo.example.com:8080/").expect("valid server");
+        let url = build_xtream_player_api_action_url(
+            &server,
+            "demo_user",
+            "demo_pass",
+            "get_account_info",
+        );
+        assert_eq!(
+            url.as_str(),
+            "https://demo.example.com:8080/player_api.php?username=demo_user&password=demo_pass&action=get_account_info"
+        );
+    }
+
+    #[test]
     fn build_xtream_source_key_excludes_password() {
         let server =
             normalize_xtream_server("https://demo.example.com:8080/").expect("valid server");
@@ -1444,6 +1551,27 @@ mod tests {
             "max_connections": 2
         });
         assert_eq!(extract_xtream_max_connections(&payload), Some(2));
+    }
+
+    #[test]
+    fn extract_xtream_account_info_parses_subscription_fields() {
+        let payload = serde_json::json!({
+            "user_info": {
+                "status": "Active",
+                "exp_date": "1735689600",
+                "created_at": "1704067200",
+                "is_trial": "1",
+                "active_cons": "2",
+                "max_connections": "4"
+            }
+        });
+        let info = extract_xtream_account_info(&payload).expect("account info should parse");
+        assert_eq!(info.status.as_deref(), Some("Active"));
+        assert_eq!(info.expires_at_epoch, Some(1_735_689_600));
+        assert_eq!(info.created_at_epoch, Some(1_704_067_200));
+        assert_eq!(info.is_trial, Some(true));
+        assert_eq!(info.active_connections, Some(2));
+        assert_eq!(info.max_connections, Some(4));
     }
 
     #[test]

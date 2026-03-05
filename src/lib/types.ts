@@ -69,12 +69,22 @@ export interface PlaylistPreview {
   source_identity: string | null;
   server_location: string | null;
   xtream_max_connections: number | null;
+  xtream_account_info: XtreamAccountInfo | null;
   total_channels: number;
   live_count: number;
   movie_count: number;
   series_count: number;
   groups: string[];
   channels: Channel[];
+}
+
+export interface XtreamAccountInfo {
+  status: string | null;
+  expires_at_epoch: number | null;
+  created_at_epoch: number | null;
+  is_trial: boolean | null;
+  active_connections: number | null;
+  max_connections: number | null;
 }
 
 export interface XtreamOpenRequest {
