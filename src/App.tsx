@@ -668,6 +668,19 @@ export default function App() {
           `[App] Xtream playlist loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
           preview.groups,
         );
+        if (
+          typeof preview.xtream_max_connections === "number" &&
+          Number.isFinite(preview.xtream_max_connections) &&
+          preview.xtream_max_connections > 0
+        ) {
+          const effectiveConcurrency = Math.max(
+            1,
+            Math.min(20, Math.round(preview.xtream_max_connections)),
+          );
+          setMenuInfo(
+            `Xtream max connections detected: ${preview.xtream_max_connections}. Scan concurrency will use ${effectiveConcurrency}.`,
+          );
+        }
         setPlaylist(preview);
         initFromPlaylist(preview.channels);
         setSearch("");
@@ -1120,7 +1133,12 @@ export default function App() {
       selected_indices: selection.length > 0 ? selection : null,
       timeout: settings.timeout,
       extended_timeout: settings.extended_timeout,
-      concurrency: settings.concurrency,
+      concurrency:
+        typeof playlist.xtream_max_connections === "number" &&
+        Number.isFinite(playlist.xtream_max_connections) &&
+        playlist.xtream_max_connections > 0
+          ? Math.max(1, Math.min(20, Math.round(playlist.xtream_max_connections)))
+          : settings.concurrency,
       retries: settings.retries,
       retry_backoff: settings.retry_backoff,
       user_agent: settings.user_agent,

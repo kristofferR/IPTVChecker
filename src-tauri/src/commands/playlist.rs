@@ -17,6 +17,7 @@ pub struct XtreamOpenRequest {
 const PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const PLAYLIST_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
 const PLAYLIST_DOWNLOAD_MAX_BYTES: u64 = 10 * 1024 * 1024;
+const XTREAM_PLAYER_API_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct RemotePlaylistCacheMetadata {
@@ -398,12 +399,89 @@ fn build_xtream_download_url(server: &Url, username: &str, password: &str) -> Ur
     playlist_url
 }
 
+fn build_xtream_player_api_url(server: &Url, username: &str, password: &str) -> Url {
+    let mut api_url = server.clone();
+    let mut endpoint_path = api_url.path().trim_end_matches('/').to_string();
+    if endpoint_path.is_empty() || endpoint_path == "/" {
+        endpoint_path = "/player_api.php".to_string();
+    } else {
+        endpoint_path.push_str("/player_api.php");
+    }
+    api_url.set_path(&endpoint_path);
+    api_url.set_query(None);
+    api_url.set_fragment(None);
+    api_url
+        .query_pairs_mut()
+        .append_pair("username", username)
+        .append_pair("password", password);
+    api_url
+}
+
 fn build_xtream_source_key(server: &Url, username: &str) -> String {
     format!(
         "xtream:{}|{}|m3u_plus|ts",
         xtream_server_identity(server),
         username
     )
+}
+
+fn parse_max_connections_value(value: &serde_json::Value) -> Option<u32> {
+    match value {
+        serde_json::Value::Number(number) => number.as_u64().and_then(|value| {
+            if value == 0 {
+                None
+            } else {
+                u32::try_from(value).ok()
+            }
+        }),
+        serde_json::Value::String(raw) => {
+            let parsed = raw.trim().parse::<u32>().ok()?;
+            (parsed > 0).then_some(parsed)
+        }
+        _ => None,
+    }
+}
+
+fn extract_xtream_max_connections(payload: &serde_json::Value) -> Option<u32> {
+    payload
+        .get("user_info")
+        .and_then(|user| user.get("max_connections"))
+        .and_then(parse_max_connections_value)
+        .or_else(|| {
+            payload
+                .get("max_connections")
+                .and_then(parse_max_connections_value)
+        })
+}
+
+async fn fetch_xtream_max_connections(server: &Url, username: &str, password: &str) -> Option<u32> {
+    let api_url = build_xtream_player_api_url(server, username, password);
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
+        .timeout(XTREAM_PLAYER_API_TIMEOUT)
+        .build()
+        .ok()?;
+
+    let response = client
+        .get(api_url.clone())
+        .header(reqwest::header::USER_AGENT, "IPTV-Checker-GUI/1.0")
+        .send()
+        .await
+        .ok()?;
+
+    if !response.status().is_success() {
+        log::debug!(
+            "Xtream player_api request returned HTTP {} for {}",
+            response.status(),
+            api_url
+        );
+        return None;
+    }
+
+    let payload_bytes = response.bytes().await.ok()?;
+    let payload = serde_json::from_slice::<serde_json::Value>(&payload_bytes).ok()?;
+    extract_xtream_max_connections(&payload)
 }
 
 #[tauri::command]
@@ -469,23 +547,28 @@ pub async fn open_playlist_xtream(
     let source_key = build_xtream_source_key(&server, &username);
     let download_url = build_xtream_download_url(&server, &username, &password);
     let data_dir = app_data_dir(&app)?;
-    let cached_path = download_playlist_to_cache_in_data_dir(
-        &data_dir,
-        &source_key,
-        &download_url,
-        "Xtream playlist",
-    )
-    .await?;
+    let (xtream_max_connections, cached_path_result) = tokio::join!(
+        fetch_xtream_max_connections(&server, &username, &password),
+        download_playlist_to_cache_in_data_dir(
+            &data_dir,
+            &source_key,
+            &download_url,
+            "Xtream playlist",
+        )
+    );
+    let cached_path = cached_path_result?;
     let mut preview = parser::parse_playlist(&cached_path, &group_filter, &channel_search)?;
     preview.source_identity = Some(source_key);
+    preview.xtream_max_connections = xtream_max_connections;
     Ok(preview)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        build_xtream_download_url, build_xtream_source_key, cleanup_stale_cache_temp_files,
-        download_playlist_bytes, normalize_url_identity, normalize_xtream_server,
+        build_xtream_download_url, build_xtream_player_api_url, build_xtream_source_key,
+        cleanup_stale_cache_temp_files, download_playlist_bytes, extract_xtream_max_connections,
+        normalize_url_identity, normalize_xtream_server,
         source_cache_file_name,
     };
     use std::time::Duration;
@@ -519,6 +602,17 @@ mod tests {
     }
 
     #[test]
+    fn build_xtream_player_api_url_uses_expected_query() {
+        let server =
+            normalize_xtream_server("https://demo.example.com:8080/").expect("valid server");
+        let url = build_xtream_player_api_url(&server, "demo_user", "demo_pass");
+        assert_eq!(
+            url.as_str(),
+            "https://demo.example.com:8080/player_api.php?username=demo_user&password=demo_pass"
+        );
+    }
+
+    #[test]
     fn build_xtream_source_key_excludes_password() {
         let server =
             normalize_xtream_server("https://demo.example.com:8080/").expect("valid server");
@@ -528,6 +622,24 @@ mod tests {
             "xtream:https://demo.example.com:8080|demo_user|m3u_plus|ts"
         );
         assert!(!key.contains("demo_pass"));
+    }
+
+    #[test]
+    fn extract_xtream_max_connections_parses_user_info_string() {
+        let payload = serde_json::json!({
+            "user_info": {
+                "max_connections": "4"
+            }
+        });
+        assert_eq!(extract_xtream_max_connections(&payload), Some(4));
+    }
+
+    #[test]
+    fn extract_xtream_max_connections_parses_numeric_fallback() {
+        let payload = serde_json::json!({
+            "max_connections": 2
+        });
+        assert_eq!(extract_xtream_max_connections(&payload), Some(2));
     }
 
     #[test]

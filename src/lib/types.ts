@@ -51,6 +51,7 @@ export interface PlaylistPreview {
   file_path: string;
   file_name: string;
   source_identity: string | null;
+  xtream_max_connections: number | null;
   total_channels: number;
   groups: string[];
   channels: Channel[];

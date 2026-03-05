@@ -7,6 +7,8 @@ pub struct PlaylistPreview {
     pub file_path: String,
     pub file_name: String,
     pub source_identity: Option<String>,
+    #[serde(default)]
+    pub xtream_max_connections: Option<u32>,
     pub total_channels: usize,
     pub groups: Vec<String>,
     pub channels: Vec<Channel>,
