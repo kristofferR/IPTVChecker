@@ -333,6 +333,22 @@ export function ThumbnailPanel({
                 )}
               </div>
             )}
+            {result.status === "alive" && (result.resolution || result.fps || result.video_bitrate || result.audio_bitrate) && (
+              <div className="flex items-center justify-center gap-2 mt-2">
+                {result.resolution && result.resolution !== "Unknown" && (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">{result.width}x{result.height}</span>
+                )}
+                {result.fps && (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">{result.fps} fps</span>
+                )}
+                {result.video_bitrate && result.video_bitrate !== "Unknown" && result.video_bitrate !== "N/A" && (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">{result.video_bitrate}</span>
+                )}
+                {result.audio_bitrate && (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">{result.audio_bitrate} kbps audio</span>
+                )}
+              </div>
+            )}
           </div>
         </div>,
         document.body
