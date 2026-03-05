@@ -10,6 +10,11 @@ import type {
 import type { ScanState } from "../hooks/useScan";
 import { summarizeLanguageDistribution } from "../lib/languageDistribution";
 import { summarizeEpgCoverage } from "../lib/epgCoverage";
+import {
+  hasScanStarted,
+  shouldShowContentCounts,
+  shouldShowLanguageDistribution,
+} from "../lib/playlistReportVisibility";
 
 interface PlaylistReportPanelProps {
   playlist: PlaylistPreview;
@@ -178,6 +183,15 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
     [playlist.channels],
   );
 
+  const showHealthScore = hasScanStarted(scanState);
+  const showContentCounts = shouldShowContentCounts(
+    playlist.movie_count,
+    playlist.series_count,
+  );
+  const showLanguageDistribution = shouldShowLanguageDistribution(
+    playlist.channels.map((channel) => ({ language: channel.language })),
+  );
+
   const epgSummary = useMemo(
     () => summarizeEpgCoverage(playlist.channels.map((channel) => ({ tvg_id: channel.tvg_id }))),
     [playlist.channels],
@@ -268,100 +282,106 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
       </div>
 
       <div className="p-4 space-y-5">
-        <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
-          <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">Health Score</p>
-          <div className="flex items-center gap-3">
-            <div className="relative w-24 h-24 shrink-0">
-              <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
-                <circle cx="50" cy="50" r={ringRadius} stroke="rgba(148,163,184,0.22)" strokeWidth="9" fill="none" />
-                <circle
-                  cx="50"
-                  cy="50"
-                  r={ringRadius}
-                  stroke="#38bdf8"
-                  strokeWidth="9"
-                  strokeLinecap="round"
-                  strokeDasharray={`${ringCircumference} ${ringCircumference}`}
-                  strokeDashoffset={ringCircumference * (1 - ringPercent)}
-                  style={{ transition: "stroke-dashoffset 240ms ease" }}
-                  fill="none"
-                />
-              </svg>
-              <div className="absolute inset-0 flex items-center justify-center text-[18px] font-semibold text-text-primary">
-                {ringScore.toFixed(1)}
-              </div>
-            </div>
-            <div className="grid grid-cols-1 gap-1 text-[12px] flex-1">
-              <div className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1">
-                <span className="text-text-tertiary">Ping</span>
-                <span className="text-text-primary">{(displayScore?.ping ?? 0).toFixed(1)}</span>
-              </div>
-              <div className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1">
-                <span className="text-text-tertiary">Content</span>
-                <span className="text-text-primary">{(displayScore?.content ?? 0).toFixed(1)}</span>
-              </div>
-              <div className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1">
-                <span className="text-text-tertiary">Quality</span>
-                <span className="text-text-primary">{(displayScore?.quality ?? 0).toFixed(1)}</span>
-              </div>
-            </div>
-          </div>
-          <p className="mt-2 text-[11px] text-text-tertiary">
-            {scanState === "complete" ? "Final score" : "Live estimate during scan"}
-          </p>
-        </section>
-
-        <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
-          <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">Content Counts</p>
-          <div className="grid grid-cols-2 gap-2 text-[12px]">
-            <div className="rounded-md bg-input/60 px-2 py-1.5">
-              <p className="text-text-tertiary">Live</p>
-              <p className="text-text-primary font-medium">{playlist.live_count}</p>
-            </div>
-            <div className="rounded-md bg-input/60 px-2 py-1.5">
-              <p className="text-text-tertiary">Movies</p>
-              <p className="text-text-primary font-medium">{playlist.movie_count}</p>
-            </div>
-            <div className="rounded-md bg-input/60 px-2 py-1.5">
-              <p className="text-text-tertiary">Series</p>
-              <p className="text-text-primary font-medium">{playlist.series_count}</p>
-            </div>
-            <div className="rounded-md bg-input/60 px-2 py-1.5">
-              <p className="text-text-tertiary">Total</p>
-              <p className="text-text-primary font-medium">{playlist.total_channels}</p>
-            </div>
-          </div>
-        </section>
-
-        <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
-          <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">Language Distribution</p>
-          {languageSummary.entries.length === 0 ? (
-            <p className="text-[12px] text-text-tertiary">No language metadata detected.</p>
-          ) : (
-            <div className="space-y-1.5">
-              {languageSummary.entries.map((entry, index) => (
-                <div key={entry.language}>
-                  <div className="flex items-center justify-between text-[11px] mb-0.5">
-                    <span className="text-text-secondary">{entry.language}</span>
-                    <span className="text-text-tertiary">{entry.percentage.toFixed(1)}%</span>
-                  </div>
-                  <div className="h-1.5 rounded-full bg-input overflow-hidden">
-                    <div
-                      className="h-full"
-                      style={{
-                        width: `${entry.percentage}%`,
-                        backgroundColor: CHART_COLORS[index % CHART_COLORS.length],
-                      }}
-                    />
-                  </div>
+        {showHealthScore && (
+          <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
+            <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">Health Score</p>
+            <div className="flex items-center gap-3">
+              <div className="relative w-24 h-24 shrink-0">
+                <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+                  <circle cx="50" cy="50" r={ringRadius} stroke="rgba(148,163,184,0.22)" strokeWidth="9" fill="none" />
+                  <circle
+                    cx="50"
+                    cy="50"
+                    r={ringRadius}
+                    stroke="#38bdf8"
+                    strokeWidth="9"
+                    strokeLinecap="round"
+                    strokeDasharray={`${ringCircumference} ${ringCircumference}`}
+                    strokeDashoffset={ringCircumference * (1 - ringPercent)}
+                    style={{ transition: "stroke-dashoffset 240ms ease" }}
+                    fill="none"
+                  />
+                </svg>
+                <div className="absolute inset-0 flex items-center justify-center text-[18px] font-semibold text-text-primary">
+                  {ringScore.toFixed(1)}
                 </div>
-              ))}
-              {languageSummary.otherCount > 0 && (
-                <p className="text-[11px] text-text-tertiary">Other: {languageSummary.otherPercentage.toFixed(1)}%</p>
-              )}
+              </div>
+              <div className="grid grid-cols-1 gap-1 text-[12px] flex-1">
+                <div className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1">
+                  <span className="text-text-tertiary">Ping</span>
+                  <span className="text-text-primary">{(displayScore?.ping ?? 0).toFixed(1)}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1">
+                  <span className="text-text-tertiary">Content</span>
+                  <span className="text-text-primary">{(displayScore?.content ?? 0).toFixed(1)}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1">
+                  <span className="text-text-tertiary">Quality</span>
+                  <span className="text-text-primary">{(displayScore?.quality ?? 0).toFixed(1)}</span>
+                </div>
+              </div>
             </div>
-          )}
-        </section>
+            <p className="mt-2 text-[11px] text-text-tertiary">
+              {scanState === "complete" ? "Final score" : "Live estimate during scan"}
+            </p>
+          </section>
+        )}
+
+        {showContentCounts && (
+          <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
+            <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">Content Counts</p>
+            <div className="grid grid-cols-2 gap-2 text-[12px]">
+              <div className="rounded-md bg-input/60 px-2 py-1.5">
+                <p className="text-text-tertiary">Live</p>
+                <p className="text-text-primary font-medium">{playlist.live_count}</p>
+              </div>
+              <div className="rounded-md bg-input/60 px-2 py-1.5">
+                <p className="text-text-tertiary">Movies</p>
+                <p className="text-text-primary font-medium">{playlist.movie_count}</p>
+              </div>
+              <div className="rounded-md bg-input/60 px-2 py-1.5">
+                <p className="text-text-tertiary">Series</p>
+                <p className="text-text-primary font-medium">{playlist.series_count}</p>
+              </div>
+              <div className="rounded-md bg-input/60 px-2 py-1.5">
+                <p className="text-text-tertiary">Total</p>
+                <p className="text-text-primary font-medium">{playlist.total_channels}</p>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {showLanguageDistribution && (
+          <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
+            <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">Language Distribution</p>
+            {languageSummary.entries.length === 0 ? (
+              <p className="text-[12px] text-text-tertiary">No language metadata detected.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {languageSummary.entries.map((entry, index) => (
+                  <div key={entry.language}>
+                    <div className="flex items-center justify-between text-[11px] mb-0.5">
+                      <span className="text-text-secondary">{entry.language}</span>
+                      <span className="text-text-tertiary">{entry.percentage.toFixed(1)}%</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-input overflow-hidden">
+                      <div
+                        className="h-full"
+                        style={{
+                          width: `${entry.percentage}%`,
+                          backgroundColor: CHART_COLORS[index % CHART_COLORS.length],
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+                {languageSummary.otherCount > 0 && (
+                  <p className="text-[11px] text-text-tertiary">Other: {languageSummary.otherPercentage.toFixed(1)}%</p>
+                )}
+              </div>
+            )}
+          </section>
+        )}
 
         <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
           <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">Video Quality Distribution</p>
