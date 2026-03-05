@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Window};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
@@ -106,40 +106,40 @@ async fn compute_shared_url_result(
 ) -> Result<SharedUrlResult, AppError> {
     let (status_str, stream_url, latency_ms, retry_count, error_reason, mut channel_log) =
         match checker::check_channel_status_with_debug(
-        client,
-        channel_url,
-        timeout,
-        retries,
-        retry_backoff,
-        extended_timeout,
-        user_agent,
-        cancel,
-    )
-    .await
-    {
-        Ok(outcome) => (
-            outcome.status,
-            outcome.stream_url,
-            outcome.latency_ms,
-            outcome.retries_used,
-            outcome.last_error_reason,
-            outcome.debug_log,
-        ),
-        Err(AppError::Cancelled) => return Err(AppError::Cancelled),
-        Err(error) => (
-            "Dead".to_string(),
-            None,
-            None,
-            0,
-            Some(error.to_string()),
-            ChannelDebugLog {
-                channel_url: channel_url.to_string(),
-                final_verdict: "Dead".to_string(),
-                final_reason: Some(error.to_string()),
-                ..ChannelDebugLog::default()
-            },
-        ),
-    };
+            client,
+            channel_url,
+            timeout,
+            retries,
+            retry_backoff,
+            extended_timeout,
+            user_agent,
+            cancel,
+        )
+        .await
+        {
+            Ok(outcome) => (
+                outcome.status,
+                outcome.stream_url,
+                outcome.latency_ms,
+                outcome.retries_used,
+                outcome.last_error_reason,
+                outcome.debug_log,
+            ),
+            Err(AppError::Cancelled) => return Err(AppError::Cancelled),
+            Err(error) => (
+                "Dead".to_string(),
+                None,
+                None,
+                0,
+                Some(error.to_string()),
+                ChannelDebugLog {
+                    channel_url: channel_url.to_string(),
+                    final_verdict: "Dead".to_string(),
+                    final_reason: Some(error.to_string()),
+                    ..ChannelDebugLog::default()
+                },
+            ),
+        };
 
     let final_status_str = if status_str == "Geoblocked" && test_geoblock {
         if let Some(proxies) = proxy_list {
@@ -224,7 +224,8 @@ async fn compute_shared_url_result(
         }
 
         if !cancel.is_cancelled() {
-            if let Ok(ffprobe_output) = ffmpeg::collect_ffprobe_output(app, &target_url, cancel).await
+            if let Ok(ffprobe_output) =
+                ffmpeg::collect_ffprobe_output(app, &target_url, cancel).await
             {
                 shared.channel_log.ffprobe_output = Some(ffprobe_output);
             }
@@ -299,23 +300,24 @@ fn emit_scan_error_event(app: &AppHandle, run_id: &str, message: impl Into<Strin
     );
 }
 
-async fn cancel_scan_token(state: &AppState) {
-    let token = state.cancel_token.lock().await;
-    if let Some(ref cancel) = *token {
+async fn cancel_scan_token(state: &AppState, scan_scope: &str) {
+    let token = state
+        .with_window_scan_state(scan_scope, |scan_state| scan_state.cancel_token.clone())
+        .await;
+    if let Some(cancel) = token {
         cancel.cancel();
     }
 }
 
-async fn wait_if_paused(state: &AppState, cancel: &CancellationToken) -> bool {
+async fn wait_if_paused(state: &AppState, scan_scope: &str, cancel: &CancellationToken) -> bool {
     loop {
         if cancel.is_cancelled() {
             return false;
         }
 
-        let paused = {
-            let pause_lock = state.paused.lock().await;
-            *pause_lock
-        };
+        let paused = state
+            .with_window_scan_state(scan_scope, |scan_state| scan_state.paused)
+            .await;
         if !paused {
             return true;
         }
@@ -324,59 +326,44 @@ async fn wait_if_paused(state: &AppState, cancel: &CancellationToken) -> bool {
     }
 }
 
-async fn reset_scan_state(state: &AppState) {
-    cancel_scan_token(state).await;
+async fn reset_scan_state(state: &AppState, scan_scope: &str) {
+    cancel_scan_token(state, scan_scope).await;
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    let mut scanning = state.scanning.lock().await;
-    mark_scan_finished(&mut scanning);
-    drop(scanning);
-
-    let mut paused = state.paused.lock().await;
-    *paused = false;
-    drop(paused);
-
-    let mut run_id = state.current_run_id.lock().await;
-    *run_id = None;
+    state
+        .with_window_scan_state(scan_scope, |scan_state| {
+            mark_scan_finished(&mut scan_state.scanning);
+            scan_state.paused = false;
+            scan_state.current_run_id = None;
+        })
+        .await;
 }
 
-async fn clear_pre_spawn_scan_state(state: &AppState) {
-    let mut scanning = state.scanning.lock().await;
-    mark_scan_finished(&mut scanning);
-    drop(scanning);
-
-    let mut paused = state.paused.lock().await;
-    *paused = false;
-    drop(paused);
-
-    let mut run_id = state.current_run_id.lock().await;
-    *run_id = None;
-    drop(run_id);
-
-    let mut token_lock = state.cancel_token.lock().await;
-    *token_lock = None;
+async fn clear_pre_spawn_scan_state(state: &AppState, scan_scope: &str) {
+    state
+        .with_window_scan_state(scan_scope, |scan_state| {
+            mark_scan_finished(&mut scan_state.scanning);
+            scan_state.paused = false;
+            scan_state.current_run_id = None;
+            scan_state.cancel_token = None;
+        })
+        .await;
 }
 
 /// Clear scan state only if the current run_id still matches the finishing scan.
 /// This prevents a finishing scan from accidentally wiping state that belongs to
 /// a new scan that started during the cleanup window.
-async fn clear_scan_state_for_run(state: &AppState, finished_run_id: &str) {
-    let mut run_id = state.current_run_id.lock().await;
-    if run_id.as_deref() != Some(finished_run_id) {
-        return;
-    }
-    *run_id = None;
-    drop(run_id);
-
-    let mut scanning = state.scanning.lock().await;
-    mark_scan_finished(&mut scanning);
-    drop(scanning);
-
-    let mut paused = state.paused.lock().await;
-    *paused = false;
-    drop(paused);
-
-    let mut token_lock = state.cancel_token.lock().await;
-    *token_lock = None;
+async fn clear_scan_state_for_run(state: &AppState, scan_scope: &str, finished_run_id: &str) {
+    state
+        .with_window_scan_state(scan_scope, |scan_state| {
+            if scan_state.current_run_id.as_deref() != Some(finished_run_id) {
+                return;
+            }
+            scan_state.current_run_id = None;
+            mark_scan_finished(&mut scan_state.scanning);
+            scan_state.paused = false;
+            scan_state.cancel_token = None;
+        })
+        .await;
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -462,39 +449,35 @@ fn now_epoch_ms() -> u64 {
 }
 
 #[tauri::command]
-pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, AppError> {
+pub async fn start_scan(
+    app: AppHandle,
+    window: Window,
+    config: ScanConfig,
+) -> Result<String, AppError> {
     let state = app.state::<Arc<AppState>>();
+    let scan_scope = window.label().to_string();
 
-    // Prevent multiple simultaneous scans
-    {
-        let mut scanning = state.scanning.lock().await;
-        config.validate()?;
-        try_mark_scan_started(&mut scanning)?;
-    }
-    {
-        let mut paused = state.paused.lock().await;
-        *paused = false;
-    }
-
+    config.validate()?;
     let cancel_token = CancellationToken::new();
-    {
-        let mut token_lock = state.cancel_token.lock().await;
-        *token_lock = Some(cancel_token.clone());
-    }
     let run_id = next_scan_run_id();
     let scan_started_at_epoch_ms = now_epoch_ms();
-    {
-        let mut run_id_lock = state.current_run_id.lock().await;
-        *run_id_lock = Some(run_id.clone());
-    }
-    {
-        let mut scan_log = state.scan_log.lock().await;
-        *scan_log = None;
-    }
+
+    // Prevent multiple simultaneous scans
+    state
+        .with_window_scan_state(&scan_scope, |scan_state| -> Result<(), AppError> {
+            try_mark_scan_started(&mut scan_state.scanning)?;
+            scan_state.paused = false;
+            scan_state.cancel_token = Some(cancel_token.clone());
+            scan_state.current_run_id = Some(run_id.clone());
+            scan_state.scan_log = None;
+            Ok(())
+        })
+        .await?;
 
     log::info!(
-        "Starting scan {}: {} (concurrency: {}, retries: {}, retry_backoff: {:?})",
+        "Starting scan {} for window '{}': {} (concurrency: {}, retries: {}, retry_backoff: {:?})",
         run_id,
+        scan_scope,
         config.file_path,
         config.concurrency,
         config.retries,
@@ -509,7 +492,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
     ) {
         Ok(preview) => preview,
         Err(error) => {
-            clear_pre_spawn_scan_state(state.inner().as_ref()).await;
+            clear_pre_spawn_scan_state(state.inner().as_ref(), &scan_scope).await;
             return Err(error);
         }
     };
@@ -550,19 +533,20 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
         ) {
             log::warn!("Failed to write scan history for {}: {}", run_id, error);
         }
-        {
-            let mut scan_log = state.scan_log.lock().await;
-            *scan_log = Some(ScanDebugLog {
-                run_id: run_id.clone(),
-                playlist_path: config.file_path.clone(),
-                source_identity: config.source_identity.clone(),
-                started_at_epoch_ms: scan_started_at_epoch_ms,
-                finished_at_epoch_ms: now_epoch_ms(),
-                summary: summary.clone(),
-                channels: Vec::new(),
-            });
-        }
-        clear_pre_spawn_scan_state(state.inner().as_ref()).await;
+        state
+            .with_window_scan_state(&scan_scope, |scan_state| {
+                scan_state.scan_log = Some(ScanDebugLog {
+                    run_id: run_id.clone(),
+                    playlist_path: config.file_path.clone(),
+                    source_identity: config.source_identity.clone(),
+                    started_at_epoch_ms: scan_started_at_epoch_ms,
+                    finished_at_epoch_ms: now_epoch_ms(),
+                    summary: summary.clone(),
+                    channels: Vec::new(),
+                });
+            })
+            .await;
+        clear_pre_spawn_scan_state(state.inner().as_ref(), &scan_scope).await;
         return Ok(run_id);
     }
 
@@ -629,7 +613,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                     Some(proxy_list)
                 }
                 Err(error) => {
-                    clear_pre_spawn_scan_state(state.inner().as_ref()).await;
+                    clear_pre_spawn_scan_state(state.inner().as_ref(), &scan_scope).await;
                     return Err(AppError::Other(format!(
                         "Failed to load proxy file '{}': {}",
                         proxy_file, error
@@ -663,7 +647,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
             }
         };
         if let Err(e) = std::fs::create_dir_all(&dir) {
-            clear_pre_spawn_scan_state(state.inner().as_ref()).await;
+            clear_pre_spawn_scan_state(state.inner().as_ref(), &scan_scope).await;
             return Err(AppError::Other(format!(
                 "Failed to create screenshots directory: {}",
                 e
@@ -682,6 +666,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
     let log_file_for_task = log_file.clone();
     let checkpoint_file_for_task = checkpoint_file.clone();
     let scan_started_at_epoch_ms_for_task = scan_started_at_epoch_ms;
+    let scan_scope_for_task = scan_scope.clone();
 
     tokio::spawn(async move {
         let client = Arc::new(
@@ -763,7 +748,7 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
             if cancel_token.is_cancelled() {
                 break;
             }
-            if !wait_if_paused(state_clone.as_ref(), &cancel_token).await {
+            if !wait_if_paused(state_clone.as_ref(), &scan_scope_for_task, &cancel_token).await {
                 break;
             }
 
@@ -900,7 +885,10 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                     &format!("{} - {} {}", channel.index + 1, channel.name, channel.url),
                 );
                 let _ = resume::write_result_entry(&checkpoint_file, &result);
-                channel_debug_logs.lock().await.push(shared.channel_log.clone());
+                channel_debug_logs
+                    .lock()
+                    .await
+                    .push(shared.channel_log.clone());
 
                 let _ = tx.send(result).await;
                 drop(_permit);
@@ -927,7 +915,12 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                     format!("Scan failed while dispatching progress events: {}", error),
                 );
                 cleanup_resume_files(&log_file_for_task, &checkpoint_file_for_task);
-                clear_scan_state_for_run(state_clone.as_ref(), &run_id_for_task).await;
+                clear_scan_state_for_run(
+                    state_clone.as_ref(),
+                    &scan_scope_for_task,
+                    &run_id_for_task,
+                )
+                .await;
                 return;
             }
         };
@@ -941,10 +934,11 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                     payload: summary.clone(),
                 },
             );
-            {
-                let mut scan_log = state_clone.scan_log.lock().await;
-                *scan_log = None;
-            }
+            state_clone
+                .with_window_scan_state(&scan_scope_for_task, |scan_state| {
+                    scan_state.scan_log = None;
+                })
+                .await;
             cleanup_resume_files(&log_file_for_task, &checkpoint_file_for_task);
         } else {
             let history_limit = {
@@ -978,100 +972,102 @@ pub async fn start_scan(app: AppHandle, config: ScanConfig) -> Result<String, Ap
                 logs.clone()
             };
             channel_logs.sort_by_key(|entry| entry.channel_index);
-            {
-                let mut scan_log = state_clone.scan_log.lock().await;
-                *scan_log = Some(ScanDebugLog {
-                    run_id: run_id_for_task.clone(),
-                    playlist_path: config.file_path.clone(),
-                    source_identity: config.source_identity.clone(),
-                    started_at_epoch_ms: scan_started_at_epoch_ms_for_task,
-                    finished_at_epoch_ms: now_epoch_ms(),
-                    summary: summary.clone(),
-                    channels: channel_logs,
-                });
-            }
+            state_clone
+                .with_window_scan_state(&scan_scope_for_task, |scan_state| {
+                    scan_state.scan_log = Some(ScanDebugLog {
+                        run_id: run_id_for_task.clone(),
+                        playlist_path: config.file_path.clone(),
+                        source_identity: config.source_identity.clone(),
+                        started_at_epoch_ms: scan_started_at_epoch_ms_for_task,
+                        finished_at_epoch_ms: now_epoch_ms(),
+                        summary: summary.clone(),
+                        channels: channel_logs,
+                    });
+                })
+                .await;
             cleanup_resume_files(&log_file_for_task, &checkpoint_file_for_task);
         }
 
-        clear_scan_state_for_run(state_clone.as_ref(), &run_id_for_task).await;
+        clear_scan_state_for_run(state_clone.as_ref(), &scan_scope_for_task, &run_id_for_task)
+            .await;
     });
 
     Ok(run_id)
 }
 
 #[tauri::command]
-pub async fn cancel_scan(app: AppHandle) -> Result<(), AppError> {
+pub async fn cancel_scan(app: AppHandle, window: Window) -> Result<(), AppError> {
     let state = app.state::<Arc<AppState>>();
-    cancel_scan_token(state.inner().as_ref()).await;
+    cancel_scan_token(state.inner().as_ref(), window.label()).await;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn pause_scan(app: AppHandle) -> Result<(), AppError> {
+pub async fn pause_scan(app: AppHandle, window: Window) -> Result<(), AppError> {
     let state = app.state::<Arc<AppState>>();
-    {
-        let scanning = state.scanning.lock().await;
-        if !*scanning {
-            return Err(AppError::Other("No scan is currently running".to_string()));
-        }
+    let run_id = state
+        .with_window_scan_state(
+            window.label(),
+            |scan_state| -> Result<Option<String>, AppError> {
+                if !scan_state.scanning {
+                    return Err(AppError::Other("No scan is currently running".to_string()));
+                }
+                let run_id = scan_state
+                    .current_run_id
+                    .clone()
+                    .ok_or_else(|| AppError::Other("No active scan run id found".to_string()))?;
+                if scan_state.paused {
+                    return Ok(None);
+                }
+                scan_state.paused = true;
+                Ok(Some(run_id))
+            },
+        )
+        .await?;
+    if let Some(run_id) = run_id {
+        let _ = app.emit(
+            "scan://paused",
+            ScanEvent {
+                run_id,
+                payload: (),
+            },
+        );
     }
-
-    let run_id = {
-        let run_id_lock = state.current_run_id.lock().await;
-        run_id_lock
-            .clone()
-            .ok_or_else(|| AppError::Other("No active scan run id found".to_string()))?
-    };
-
-    let mut paused = state.paused.lock().await;
-    if *paused {
-        return Ok(());
-    }
-    *paused = true;
-    drop(paused);
-
-    let _ = app.emit(
-        "scan://paused",
-        ScanEvent {
-            run_id,
-            payload: (),
-        },
-    );
 
     Ok(())
 }
 
 #[tauri::command]
-pub async fn resume_scan(app: AppHandle) -> Result<(), AppError> {
+pub async fn resume_scan(app: AppHandle, window: Window) -> Result<(), AppError> {
     let state = app.state::<Arc<AppState>>();
-    {
-        let scanning = state.scanning.lock().await;
-        if !*scanning {
-            return Err(AppError::Other("No scan is currently running".to_string()));
-        }
+    let run_id = state
+        .with_window_scan_state(
+            window.label(),
+            |scan_state| -> Result<Option<String>, AppError> {
+                if !scan_state.scanning {
+                    return Err(AppError::Other("No scan is currently running".to_string()));
+                }
+                let run_id = scan_state
+                    .current_run_id
+                    .clone()
+                    .ok_or_else(|| AppError::Other("No active scan run id found".to_string()))?;
+                if !scan_state.paused {
+                    return Ok(None);
+                }
+                scan_state.paused = false;
+                Ok(Some(run_id))
+            },
+        )
+        .await?;
+    if let Some(run_id) = run_id {
+        let _ = app.emit(
+            "scan://resumed",
+            ScanEvent {
+                run_id,
+                payload: (),
+            },
+        );
     }
-
-    let run_id = {
-        let run_id_lock = state.current_run_id.lock().await;
-        run_id_lock
-            .clone()
-            .ok_or_else(|| AppError::Other("No active scan run id found".to_string()))?
-    };
-
-    let mut paused = state.paused.lock().await;
-    if !*paused {
-        return Ok(());
-    }
-    *paused = false;
-    drop(paused);
-
-    let _ = app.emit(
-        "scan://resumed",
-        ScanEvent {
-            run_id,
-            payload: (),
-        },
-    );
 
     Ok(())
 }
@@ -1079,11 +1075,12 @@ pub async fn resume_scan(app: AppHandle) -> Result<(), AppError> {
 /// Cancel any running scan and force-reset the scanning flag.
 /// Called when opening a new playlist or on app startup to ensure clean state.
 #[tauri::command]
-pub async fn reset_scan(app: AppHandle) -> Result<(), AppError> {
+pub async fn reset_scan(app: AppHandle, window: Window) -> Result<(), AppError> {
     let state = app.state::<Arc<AppState>>();
-    reset_scan_state(state.inner().as_ref()).await;
+    let scan_scope = window.label().to_string();
+    reset_scan_state(state.inner().as_ref(), &scan_scope).await;
 
-    log::info!("Scan state reset");
+    log::info!("Scan state reset for window '{}'", scan_scope);
     Ok(())
 }
 
@@ -1236,13 +1233,15 @@ mod tests {
     async fn cancel_scan_token_cancels_active_token() {
         let state = AppState::new();
         let token = CancellationToken::new();
+        let scan_scope = "main";
 
-        {
-            let mut lock = state.cancel_token.lock().await;
-            *lock = Some(token.clone());
-        }
+        state
+            .with_window_scan_state(scan_scope, |scan_state| {
+                scan_state.cancel_token = Some(token.clone());
+            })
+            .await;
 
-        cancel_scan_token(state.as_ref()).await;
+        cancel_scan_token(state.as_ref(), scan_scope).await;
         assert!(token.is_cancelled());
     }
 
@@ -1250,76 +1249,66 @@ mod tests {
     async fn reset_scan_state_cancels_token_and_clears_flag() {
         let state = AppState::new();
         let token = CancellationToken::new();
+        let scan_scope = "main";
+        let other_scope = "secondary";
 
-        {
-            let mut token_lock = state.cancel_token.lock().await;
-            *token_lock = Some(token.clone());
-        }
-        {
-            let mut scan_lock = state.scanning.lock().await;
-            *scan_lock = true;
-        }
-        {
-            let mut paused_lock = state.paused.lock().await;
-            *paused_lock = true;
-        }
-        {
-            let mut run_id_lock = state.current_run_id.lock().await;
-            *run_id_lock = Some("scan-run-test".to_string());
-        }
+        state
+            .with_window_scan_state(scan_scope, |scan_state| {
+                scan_state.cancel_token = Some(token.clone());
+                scan_state.scanning = true;
+                scan_state.paused = true;
+                scan_state.current_run_id = Some("scan-run-test".to_string());
+            })
+            .await;
+        state
+            .with_window_scan_state(other_scope, |scan_state| {
+                scan_state.scanning = true;
+                scan_state.current_run_id = Some("scan-run-other".to_string());
+            })
+            .await;
 
-        reset_scan_state(state.as_ref()).await;
+        reset_scan_state(state.as_ref(), scan_scope).await;
 
         assert!(token.is_cancelled());
-        let scanning = state.scanning.lock().await;
-        assert!(!*scanning);
-        drop(scanning);
-
-        let paused = state.paused.lock().await;
-        assert!(!*paused);
-        drop(paused);
-
-        let run_id = state.current_run_id.lock().await;
-        assert!(run_id.is_none());
+        state
+            .with_window_scan_state(scan_scope, |scan_state| {
+                assert!(!scan_state.scanning);
+                assert!(!scan_state.paused);
+                assert!(scan_state.current_run_id.is_none());
+            })
+            .await;
+        state
+            .with_window_scan_state(other_scope, |scan_state| {
+                assert!(scan_state.scanning);
+                assert_eq!(scan_state.current_run_id.as_deref(), Some("scan-run-other"));
+            })
+            .await;
     }
 
     #[tokio::test]
     async fn clear_pre_spawn_scan_state_clears_flag_and_token() {
         let state = AppState::new();
         let token = CancellationToken::new();
+        let scan_scope = "main";
 
-        {
-            let mut token_lock = state.cancel_token.lock().await;
-            *token_lock = Some(token);
-        }
-        {
-            let mut scan_lock = state.scanning.lock().await;
-            *scan_lock = true;
-        }
-        {
-            let mut paused_lock = state.paused.lock().await;
-            *paused_lock = true;
-        }
-        {
-            let mut run_id_lock = state.current_run_id.lock().await;
-            *run_id_lock = Some("scan-run-test".to_string());
-        }
+        state
+            .with_window_scan_state(scan_scope, |scan_state| {
+                scan_state.cancel_token = Some(token);
+                scan_state.scanning = true;
+                scan_state.paused = true;
+                scan_state.current_run_id = Some("scan-run-test".to_string());
+            })
+            .await;
 
-        clear_pre_spawn_scan_state(state.as_ref()).await;
+        clear_pre_spawn_scan_state(state.as_ref(), scan_scope).await;
 
-        let scanning = state.scanning.lock().await;
-        assert!(!*scanning);
-        drop(scanning);
-
-        let token_lock = state.cancel_token.lock().await;
-        assert!(token_lock.is_none());
-        drop(token_lock);
-
-        let paused = state.paused.lock().await;
-        assert!(!*paused);
-        drop(paused);
-
-        let run_id = state.current_run_id.lock().await;
-        assert!(run_id.is_none());
+        state
+            .with_window_scan_state(scan_scope, |scan_state| {
+                assert!(!scan_state.scanning);
+                assert!(scan_state.cancel_token.is_none());
+                assert!(!scan_state.paused);
+                assert!(scan_state.current_run_id.is_none());
+            })
+            .await;
     }
 }

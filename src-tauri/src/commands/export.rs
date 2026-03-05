@@ -231,27 +231,27 @@ pub async fn export_renamed(
 
 #[tauri::command]
 pub async fn export_m3u(results: Vec<ChannelResult>, path: String) -> Result<(), AppError> {
-    let entries = results
-        .iter()
-        .map(build_m3u_entry)
-        .collect::<Vec<String>>();
+    let entries = results.iter().map(build_m3u_entry).collect::<Vec<String>>();
     write_m3u_file(Path::new(&path), &entries)
 }
 
 #[tauri::command]
-pub async fn export_scan_log_json(app: tauri::AppHandle, path: String) -> Result<(), AppError> {
+pub async fn export_scan_log_json(
+    app: tauri::AppHandle,
+    window: tauri::Window,
+    path: String,
+) -> Result<(), AppError> {
     let state = app.state::<Arc<AppState>>();
-    let scan_log = {
-        let guard = state.scan_log.lock().await;
-        guard.clone().ok_or_else(|| {
-            AppError::Other(
-                "No completed scan log is available yet. Run a scan first.".to_string(),
-            )
-        })?
-    };
+    let scan_log = state
+        .with_window_scan_state(window.label(), |scan_state| scan_state.scan_log.clone())
+        .await
+        .ok_or_else(|| {
+            AppError::Other("No completed scan log is available yet. Run a scan first.".to_string())
+        })?;
 
-    let bytes = serde_json::to_vec_pretty(&scan_log)
-        .map_err(|error| AppError::Parse(format!("Failed to serialize scan log JSON: {}", error)))?;
+    let bytes = serde_json::to_vec_pretty(&scan_log).map_err(|error| {
+        AppError::Parse(format!("Failed to serialize scan log JSON: {}", error))
+    })?;
     std::fs::write(path, bytes).map_err(AppError::Io)?;
     Ok(())
 }
