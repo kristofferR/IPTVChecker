@@ -118,5 +118,9 @@ export function useSettings() {
     setSettings(newSettings);
   }, []);
 
-  return { settings, save, loading };
+  const applyExternal = useCallback((newSettings: AppSettings) => {
+    setSettings(newSettings);
+  }, []);
+
+  return { settings, save, applyExternal, loading };
 }

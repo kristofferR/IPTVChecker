@@ -6,7 +6,6 @@ import {
   Network,
   SlidersHorizontal,
   Wrench,
-  X,
 } from "lucide-react";
 import {
   clearScreenshotCache,
@@ -18,11 +17,6 @@ import {
   setDefaultScanPreset,
   setDefaultM3u8FileAssociation,
 } from "../lib/tauri";
-import {
-  HapticFeedbackPattern,
-  PerformanceTime,
-  triggerHaptic,
-} from "../lib/haptics";
 import type {
   AppSettings,
   ScanPresetCollection,
@@ -36,7 +30,6 @@ type SettingsTab = "general" | "scanning" | "media" | "network" | "advanced";
 interface SettingsPanelProps {
   settings: AppSettings;
   onSave: (settings: AppSettings) => Promise<void> | void;
-  onClose: () => void;
 }
 
 interface PersistOptions {
@@ -172,7 +165,7 @@ function SegmentedControl<T extends string>({
   );
 }
 
-export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps) {
+export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [draft, setDraft] = useState<AppSettings>(settings);
   const [presetCollection, setPresetCollection] = useState<ScanPresetCollection>({
@@ -303,46 +296,6 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
     },
     [schedulePersist],
   );
-
-  useEffect(() => {
-    const panel = panelRef.current;
-    if (!panel) return;
-
-    const previouslyFocused = document.activeElement as HTMLElement;
-    panel.focus();
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        flushPendingSave();
-        onClose();
-        return;
-      }
-
-      if (event.key !== "Tab") return;
-      const focusableElements = panel.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      );
-      const first = focusableElements[0];
-      const last = focusableElements[focusableElements.length - 1];
-
-      if (!first || !last) return;
-
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    panel.addEventListener("keydown", handleKeyDown);
-    return () => {
-      panel.removeEventListener("keydown", handleKeyDown);
-      previouslyFocused?.focus();
-    };
-  }, [flushPendingSave, onClose]);
 
   useEffect(() => {
     return () => {
@@ -544,12 +497,6 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
     }
   };
 
-  const closePanel = () => {
-    flushPendingSave();
-    void triggerHaptic(HapticFeedbackPattern.LevelChange, PerformanceTime.Now);
-    onClose();
-  };
-
   const tabs: Array<{
     id: SettingsTab;
     label: string;
@@ -563,44 +510,33 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Settings">
-      <div className="absolute inset-0 bg-black/45" onClick={closePanel} />
-
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className="relative z-10 w-[68rem] max-w-[96vw] h-[44rem] max-h-[94vh] rounded-2xl border border-border-app bg-overlay shadow-2xl flex flex-col overflow-hidden focus:outline-none"
-      >
-        <div className="relative flex items-center justify-center px-4 pt-4 pb-3 border-b border-border-app bg-panel-subtle" data-tauri-drag-region>
-          <div className="flex items-center gap-1">
-            {tabs.map(({ id, label, Icon }) => {
-              const active = activeTab === id;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setActiveTab(id)}
-                  className={`flex flex-col items-center gap-1.5 w-[72px] py-2 rounded-lg text-[11px] font-medium whitespace-nowrap transition-colors ${
-                    active
-                      ? "bg-black/[0.08] dark:bg-white/[0.12] text-text-primary"
-                      : "text-text-tertiary hover:text-text-secondary hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
-                  }`}
-                >
-                  <Icon className="h-[22px] w-[22px]" strokeWidth={active ? 1.7 : 1.4} />
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-          <button
-            onClick={closePanel}
-            aria-label="Close settings"
-            className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 hover:bg-btn-hover rounded-md transition-colors text-text-tertiary hover:text-text-primary"
-            type="button"
-          >
-            <X className="w-4 h-4" />
-          </button>
+    <div
+      ref={panelRef}
+      tabIndex={-1}
+      className="flex flex-col h-full bg-overlay focus:outline-none"
+    >
+      <div className="relative flex items-center justify-center px-4 pt-4 pb-3 border-b border-border-app bg-panel-subtle" data-tauri-drag-region>
+        <div className="flex items-center gap-1">
+          {tabs.map(({ id, label, Icon }) => {
+            const active = activeTab === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setActiveTab(id)}
+                className={`flex flex-col items-center gap-1.5 w-[72px] py-2 rounded-lg text-[11px] font-medium whitespace-nowrap transition-colors ${
+                  active
+                    ? "bg-black/[0.08] dark:bg-white/[0.12] text-text-primary"
+                    : "text-text-tertiary hover:text-text-secondary hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                }`}
+              >
+                <Icon className="h-[22px] w-[22px]" strokeWidth={active ? 1.7 : 1.4} />
+                {label}
+              </button>
+            );
+          })}
         </div>
+      </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           {saveError && (
@@ -1335,7 +1271,6 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
             </>
           )}
         </div>
-      </div>
     </div>
   );
 }

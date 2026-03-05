@@ -12,6 +12,7 @@ import {
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { setLiquidGlassEffect } from "tauri-plugin-liquid-glass-api";
 import {
   isPermissionGranted,
@@ -28,6 +29,7 @@ import type {
   StalkerOpenRequest,
   XtreamOpenRequest,
   XtreamRecentSource,
+  AppSettings,
 } from "./lib/types";
 import {
   addRecentPlaylist,
@@ -52,7 +54,6 @@ import { PlaylistReportPanel } from "./components/PlaylistReportPanel";
 import { ThumbnailPanel } from "./components/ThumbnailPanel";
 import { StatsPanel } from "./components/StatsPanel";
 import { ProgressBar } from "./components/ProgressBar";
-import { SettingsPanel } from "./components/SettingsPanel";
 import { KeyboardShortcutsDialog } from "./components/KeyboardShortcutsDialog";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { OpenSourceDialog } from "./components/OpenSourceDialog";
@@ -293,7 +294,6 @@ export default function App() {
     [],
   );
   const [lightboxOpen, setLightboxOpen] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [ffmpegWarning, setFfmpegWarning] = useState(false);
   const [errorDismissed, setErrorDismissed] = useState(false);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
@@ -334,7 +334,7 @@ export default function App() {
     action: "csv" | "split" | "renamed" | "m3u" | "scanlog";
   } | null>(null);
 
-  const { settings, save: saveSettings } = useSettings();
+  const { settings, save: saveSettings, applyExternal: applyExternalSettings } = useSettings();
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const saveSettingsRef = useRef(saveSettings);
@@ -397,6 +397,17 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
   }, [settings.theme]);
+
+  // Sync settings changes from the settings window
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    listen<AppSettings>("settings-changed", (event) => {
+      applyExternalSettings(event.payload);
+    }).then((unlisten) => {
+      off = unlisten;
+    });
+    return () => off?.();
+  }, [applyExternalSettings]);
 
   useEffect(() => {
     startLongTaskObserver();
@@ -1089,11 +1100,6 @@ export default function App() {
   }, [handleDroppedPaths]);
 
   // Keyboard shortcuts
-  const showSettingsRef = useRef(showSettings);
-  useEffect(() => {
-    showSettingsRef.current = showSettings;
-  }, [showSettings]);
-
   const showKeyboardShortcutsRef = useRef(showKeyboardShortcuts);
   useEffect(() => {
     showKeyboardShortcutsRef.current = showKeyboardShortcuts;
@@ -1124,6 +1130,8 @@ export default function App() {
     handleOpenShortcutRef.current = handleOpen;
   }, [handleOpen]);
 
+  const handleOpenSettingsRef = useRef<() => void>(() => {});
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const hasPrimaryModifier = isPrimaryModifierPressed(e, isMac) && !e.altKey;
@@ -1139,7 +1147,7 @@ export default function App() {
       }
       if (hasPrimaryModifier && !e.shiftKey && (e.key === "," || e.code === "Comma")) {
         e.preventDefault();
-        setShowSettings((s) => !s);
+        handleOpenSettingsRef.current();
       }
       if (hasPrimaryModifier && (e.key === "/" || e.code === "Slash")) {
         e.preventDefault();
@@ -1172,7 +1180,6 @@ export default function App() {
           setShowHistory(false);
           return;
         }
-        if (showSettingsRef.current) setShowSettings(false);
       }
     };
     window.addEventListener("keydown", handler);
@@ -1324,7 +1331,7 @@ export default function App() {
         listen("menu://pause-scan", () => void pauseRef.current()),
         listen("menu://resume-scan", () => void resumeRef.current()),
         listen("menu://stop-scan", () => void cancelRef.current()),
-        listen("menu://open-settings", () => setShowSettings(true)),
+        listen("menu://open-settings", () => handleOpenSettingsRef.current()),
         listen("menu://check-updates", () => void checkForUpdatesRef.current(true)),
         listen("menu://keyboard-shortcuts", () => setShowKeyboardShortcuts(true)),
       ]);
@@ -1465,9 +1472,32 @@ export default function App() {
     setSelectedChannel(result);
   }, []);
 
-  const handleOpenSettings = useCallback(() => {
-    setShowSettings(true);
+  const handleOpenSettings = useCallback(async () => {
+    const existing = await WebviewWindow.getByLabel("settings");
+    if (existing) {
+      await existing.setFocus();
+      return;
+    }
+    const devUrl = "http://localhost:1420";
+    const baseUrl = import.meta.env.DEV ? devUrl : window.location.origin;
+    new WebviewWindow("settings", {
+      url: `${baseUrl}?window=settings`,
+      title: "Settings",
+      width: 620,
+      height: 560,
+      minWidth: 520,
+      minHeight: 400,
+      resizable: true,
+      minimizable: false,
+      maximizable: false,
+      center: true,
+      hiddenTitle: true,
+      titleBarStyle: "overlay",
+    });
   }, []);
+  useEffect(() => {
+    handleOpenSettingsRef.current = handleOpenSettings;
+  }, [handleOpenSettings]);
 
   const markManualReportVisibility = useCallback((nextVisible: boolean) => {
     reportWasAutoShownRef.current = false;
@@ -2066,14 +2096,6 @@ export default function App() {
           onOpenXtream={openPlaylistXtreamValue}
           onOpenStalker={openPlaylistStalkerValue}
           onClose={() => setOpenSourceDialogState(null)}
-        />
-      )}
-
-      {showSettings && (
-        <SettingsPanel
-          settings={settings}
-          onSave={saveSettings}
-          onClose={() => setShowSettings(false)}
         />
       )}
 

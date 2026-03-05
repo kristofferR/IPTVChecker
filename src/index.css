@@ -111,6 +111,20 @@
   }
 }
 
+/* Settings window: opaque backgrounds (no vibrancy) */
+[data-window="settings"][data-platform="macos"] {
+  --surface-bg: rgb(246 246 246);
+  --overlay-bg: rgb(246 246 246);
+  --panel-bg-subtle: rgb(240 240 240);
+}
+@media (prefers-color-scheme: dark) {
+  [data-window="settings"][data-platform="macos"] {
+    --surface-bg: rgb(30 30 32);
+    --overlay-bg: rgb(30 30 32);
+    --panel-bg-subtle: rgb(38 38 40);
+  }
+}
+
 @theme {
   --color-panel: var(--panel-bg);
   --color-panel-subtle: var(--panel-bg-subtle);
@@ -129,7 +143,8 @@
   --color-text-tertiary: var(--text-tertiary);
 }
 
-html, body {
+html, body, #root {
+  height: 100%;
   background: var(--surface-bg);
 }
 
