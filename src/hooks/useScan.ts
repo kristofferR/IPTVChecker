@@ -503,6 +503,8 @@ export function useScan() {
       logger.debug(`[useScan] start: totalChannels=${totalChannels}`, config);
       const selectedSet =
         selectedIndices.length > 0 ? new Set(selectedIndices) : null;
+      const initialTotal =
+        selectedIndices.length > 0 ? selectedIndices.length : totalChannels;
 
       // Reset existing results back to pending status for channels being scanned.
       const previous = resultsRef.current;
@@ -551,7 +553,14 @@ export function useScan() {
       setResults(updated);
       setFlatResults(rebuilt.flatResults);
       setUiMetrics(rebuilt.metrics);
-      setProgress(null);
+      setProgress({
+        completed: 0,
+        total: Math.max(0, initialTotal),
+        alive: 0,
+        dead: 0,
+        geoblocked: 0,
+        drm: 0,
+      });
       setSummary(null);
       setError(null);
       setScanState("scanning");
@@ -588,6 +597,7 @@ export function useScan() {
         logger.error("[useScan] startScan IPC error:", err);
         pendingScanError.current = null;
         setError(String(err));
+        setProgress(null);
         setScanState("idle");
         setTelemetry(EMPTY_TELEMETRY);
         activeRunId.current = null;
