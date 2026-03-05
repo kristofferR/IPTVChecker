@@ -12,6 +12,7 @@ const MAX_SCREENSHOT_STEM_LEN: usize = 120;
 const FALLBACK_SCREENSHOT_STEM: &str = "channel";
 const MAX_STDERR_EXCERPT_CHARS: usize = 600;
 const MAX_FFPROBE_OUTPUT_CHARS: usize = 16_000;
+const PNG_SIGNATURE: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
 const FFPROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const FFMPEG_BITRATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
@@ -191,6 +192,41 @@ fn unique_screenshot_output_path(output_dir: &Path, stem: &str, ext: &str) -> Pa
         .map(|d| d.as_millis())
         .unwrap_or(0);
     output_dir.join(format!("{base}-{ts}.{ext}"))
+}
+
+fn screenshot_header_is_valid(format: ScreenshotFormat, header: &[u8]) -> bool {
+    match format {
+        ScreenshotFormat::Png => header.starts_with(&PNG_SIGNATURE),
+        ScreenshotFormat::Webp => {
+            header.len() >= 12 && &header[0..4] == b"RIFF" && &header[8..12] == b"WEBP"
+        }
+    }
+}
+
+fn validate_captured_screenshot(path: &Path, format: ScreenshotFormat) -> Result<(), String> {
+    use std::io::Read;
+
+    let metadata = std::fs::metadata(path)
+        .map_err(|error| format!("failed to read output metadata: {}", error))?;
+    if metadata.len() < 12 {
+        return Err("output image is empty".to_string());
+    }
+
+    let mut file =
+        std::fs::File::open(path).map_err(|error| format!("failed to open output image: {}", error))?;
+    let mut header = [0u8; 16];
+    let bytes_read = file
+        .read(&mut header)
+        .map_err(|error| format!("failed to read output image: {}", error))?;
+    if bytes_read < 12 {
+        return Err("output image header is incomplete".to_string());
+    }
+
+    if !screenshot_header_is_valid(format, &header[..bytes_read]) {
+        return Err("output image header is invalid".to_string());
+    }
+
+    Ok(())
 }
 
 /// Run an ffmpeg/ffprobe command via resolved binary path with cancellation
@@ -795,6 +831,18 @@ pub async fn capture_screenshot(
     .await?;
 
     if output_path.exists() {
+        if let Err(error) = validate_captured_screenshot(&output_path, format) {
+            let _ = std::fs::remove_file(&output_path);
+            log::warn!(
+                "Screenshot capture produced invalid output for {} - {}",
+                file_name,
+                error
+            );
+            return Err(AppError::Other(format!(
+                "Failed to capture screenshot for {} - {}",
+                file_name, error
+            )));
+        }
         log::debug!("Screenshot captured: {}", output_str);
         Ok(output_str)
     } else {
@@ -961,7 +1009,8 @@ mod tests {
     use super::{
         build_screenshot_file_name, check_label_mismatch, contains_word, parse_ffprobe_fps,
         parse_probe_snapshot, parse_stream_track_presence, resolution_label, sanitize_screenshot_stem,
-        unique_screenshot_output_path, MAX_SCREENSHOT_STEM_LEN,
+        screenshot_header_is_valid, unique_screenshot_output_path, validate_captured_screenshot,
+        ScreenshotFormat, MAX_SCREENSHOT_STEM_LEN,
     };
 
     #[test]
@@ -1026,6 +1075,40 @@ mod tests {
             output.file_name().and_then(|n| n.to_str()),
             Some("1-Channel-2.webp")
         );
+
+        std::fs::remove_dir_all(&test_dir).expect("temp dir should be removable");
+    }
+
+    #[test]
+    fn screenshot_header_validation_matches_format() {
+        let png_header = [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13];
+        let webp_header = [
+            b'R', b'I', b'F', b'F', 0, 0, 0, 0, b'W', b'E', b'B', b'P',
+        ];
+        assert!(screenshot_header_is_valid(ScreenshotFormat::Png, &png_header));
+        assert!(screenshot_header_is_valid(ScreenshotFormat::Webp, &webp_header));
+        assert!(!screenshot_header_is_valid(
+            ScreenshotFormat::Webp,
+            &png_header
+        ));
+    }
+
+    #[test]
+    fn validate_captured_screenshot_rejects_invalid_header() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be monotonic")
+            .as_nanos();
+        let test_dir = std::env::temp_dir().join(format!("iptv-checker-screenshot-validate-{unique}"));
+        std::fs::create_dir_all(&test_dir).expect("temp dir should be creatable");
+
+        let invalid_path = test_dir.join("invalid.webp");
+        std::fs::write(&invalid_path, b"not-a-real-image")
+            .expect("fixture file should be writable");
+
+        let error = validate_captured_screenshot(&invalid_path, ScreenshotFormat::Webp)
+            .expect_err("invalid header should be rejected");
+        assert!(error.contains("invalid"));
 
         std::fs::remove_dir_all(&test_dir).expect("temp dir should be removable");
     }
