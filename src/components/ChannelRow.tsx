@@ -5,6 +5,7 @@ import { Radio, Tv } from "lucide-react";
 import { StatusBadge } from "./StatusBadge";
 import { extractTvgLogoUrl } from "../lib/extinf";
 import { channelLogoPixels, channelRowHeightPixels } from "../lib/channelLogoSize";
+import { detectChannelProtocol } from "../lib/streamProtocol";
 
 function formatLatency(latencyMs: number): string {
   if (latencyMs < 1000) {
@@ -65,6 +66,7 @@ function ChannelRowImpl({
     result.error_reason?.trim() ||
     result.last_error_reason?.trim() ||
     null;
+  const streamProtocol = useMemo(() => detectChannelProtocol(result), [result]);
 
   useEffect(() => {
     setLogoLoadFailed(false);
@@ -131,8 +133,15 @@ function ChannelRowImpl({
       }
       case "url":
         return (
-          <span className="truncate px-2 text-text-secondary" title={result.url}>
-            {result.url}
+          <span className="flex min-w-0 items-center gap-2 px-2">
+            {streamProtocol && (
+              <span className="rounded bg-panel-subtle px-1.5 py-0.5 text-[10px] uppercase tracking-[0.06em] text-text-tertiary ring-1 ring-border-subtle">
+                {streamProtocol}
+              </span>
+            )}
+            <span className="truncate text-text-secondary" title={result.url}>
+              {result.url}
+            </span>
           </span>
         );
       case "group":

@@ -706,6 +706,17 @@ pub async fn collect_probe_snapshot(
     url: &str,
     cancel: &CancellationToken,
 ) -> Result<ProbeSnapshot, AppError> {
+    collect_probe_snapshot_with_timeout(app, url, cancel, Some(FFPROBE_TIMEOUT)).await
+}
+
+/// Collect stream diagnostics from one ffprobe run (track presence, video, audio,
+/// and raw output for debug logs) with an explicit timeout.
+pub async fn collect_probe_snapshot_with_timeout(
+    app: &AppHandle,
+    url: &str,
+    cancel: &CancellationToken,
+    timeout: Option<std::time::Duration>,
+) -> Result<ProbeSnapshot, AppError> {
     let (stdout, stderr) = run_tool_command(
         app,
         "ffprobe",
@@ -724,7 +735,7 @@ pub async fn collect_probe_snapshot(
             url,
         ],
         cancel,
-        Some(FFPROBE_TIMEOUT),
+        timeout,
     )
     .await?;
 

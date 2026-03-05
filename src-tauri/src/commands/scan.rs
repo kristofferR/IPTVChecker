@@ -117,8 +117,20 @@ async fn compute_shared_url_result(
     diagnostics_semaphore: &Arc<Semaphore>,
 ) -> Result<(SharedUrlResult, WorkerTiming), AppError> {
     let check_started_at = Instant::now();
-    let (status_str, stream_url, latency_ms, retry_count, error_reason, mut channel_log) =
-        match checker::check_channel_status_with_debug(
+    let check_outcome = if checker::uses_ffprobe_liveness(channel_url) {
+        checker::check_channel_status_with_ffprobe_debug(
+            app,
+            channel_url,
+            timeout,
+            retries,
+            retry_backoff,
+            extended_timeout,
+            ffprobe_ok,
+            cancel,
+        )
+        .await
+    } else {
+        checker::check_channel_status_with_debug(
             client,
             channel_url,
             timeout,
@@ -129,7 +141,10 @@ async fn compute_shared_url_result(
             cancel,
         )
         .await
-        {
+    };
+
+    let (status_str, stream_url, latency_ms, retry_count, error_reason, mut channel_log) =
+        match check_outcome {
             Ok(outcome) => (
                 outcome.status,
                 outcome.stream_url,

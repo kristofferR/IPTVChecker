@@ -19,6 +19,7 @@ import { ArrowDown, ArrowUp } from "lucide-react";
 import { measureUiPerf } from "../lib/perf";
 import { isPrimaryModifierPressed } from "../lib/shortcuts";
 import { channelRowHeightPixels } from "../lib/channelLogoSize";
+import { detectChannelProtocol } from "../lib/streamProtocol";
 
 interface ChannelTableProps {
   resultsByIndex: (ChannelResult | null)[];
@@ -57,6 +58,7 @@ function buildChannelMetadataSummary(channel: ChannelResult): string {
     : "Unknown";
   const audioCodec = channel.audio_codec ?? "Unknown";
   const streamUrl = channel.stream_url ?? "N/A";
+  const protocol = detectChannelProtocol(channel) ?? "Unknown";
   const errorReason =
     channel.error_reason?.trim() ||
     channel.last_error_reason?.trim() ||
@@ -67,6 +69,7 @@ function buildChannelMetadataSummary(channel: ChannelResult): string {
     `Group: ${channel.group}`,
     `Playlist: ${channel.playlist}`,
     `Status: ${formatStatusLabel(channel.status)}`,
+    `Protocol: ${protocol.toUpperCase()}`,
     `Error Reason: ${errorReason}`,
     `URL: ${channel.url}`,
     `Stream URL: ${streamUrl}`,

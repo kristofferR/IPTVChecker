@@ -21,6 +21,7 @@ const GEOBLOCK_STATUSES: &[u16] = &[403, 451, 426];
 const SECONDARY_GEOBLOCK_STATUSES: &[u16] = &[401, 423, 451];
 /// HTTP status codes that are typically transient and should be retried.
 const RETRYABLE_HTTP_STATUSES: &[u16] = &[408, 425, 429, 500, 502, 503, 504];
+const FFPROBE_LIVENESS_SCHEMES: &[&str] = &["rtsp", "rtsps", "rtmp", "rtmps"];
 
 fn elapsed_millis(started_at: Instant) -> u64 {
     started_at
@@ -34,6 +35,45 @@ fn now_epoch_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+fn is_valid_url_scheme(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !first.is_ascii_alphabetic() {
+        return false;
+    }
+    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '+' || ch == '-' || ch == '.')
+}
+
+pub fn detect_stream_scheme(url: &str) -> Option<String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Ok(parsed) = Url::parse(trimmed) {
+        let scheme = parsed.scheme().trim().to_ascii_lowercase();
+        if !scheme.is_empty() {
+            return Some(scheme);
+        }
+    }
+
+    let scheme = trimmed.split_once("://").map(|(scheme, _)| scheme.trim())?;
+    if !is_valid_url_scheme(scheme) {
+        return None;
+    }
+
+    Some(scheme.to_ascii_lowercase())
+}
+
+pub fn uses_ffprobe_liveness(url: &str) -> bool {
+    detect_stream_scheme(url)
+        .as_deref()
+        .map(|scheme| FFPROBE_LIVENESS_SCHEMES.contains(&scheme))
+        .unwrap_or(false)
 }
 
 /// Internal result from a single verification attempt.
@@ -559,6 +599,287 @@ async fn verify(
     }
 }
 
+fn summarize_ffprobe_error(error: &AppError) -> String {
+    match error {
+        AppError::Cancelled => "Cancelled".to_string(),
+        _ => {
+            let rendered = error.to_string();
+            if rendered.trim().is_empty() {
+                "ffprobe check failed".to_string()
+            } else {
+                rendered
+            }
+        }
+    }
+}
+
+/// Check RTSP/RTMP channel liveness using ffprobe.
+pub async fn check_channel_status_with_ffprobe_debug(
+    app: &tauri::AppHandle,
+    url: &str,
+    timeout: f64,
+    retries: u32,
+    retry_backoff: RetryBackoff,
+    extended_timeout: Option<f64>,
+    ffprobe_available: bool,
+    cancel_token: &tokio_util::sync::CancellationToken,
+) -> Result<ChannelCheckOutcome, AppError> {
+    if !timeout.is_finite() || timeout <= 0.0 {
+        return Err(AppError::Other(
+            "Invalid timeout: must be greater than 0 seconds".to_string(),
+        ));
+    }
+    if let Some(ext) = extended_timeout {
+        if !ext.is_finite() || ext <= 0.0 {
+            return Err(AppError::Other(
+                "Invalid extended timeout: must be greater than 0 seconds".to_string(),
+            ));
+        }
+    }
+
+    if !uses_ffprobe_liveness(url) {
+        return Err(AppError::Other(format!(
+            "Unsupported non-HTTP stream scheme for ffprobe liveness check: {}",
+            detect_stream_scheme(url).unwrap_or_else(|| "unknown".to_string())
+        )));
+    }
+
+    if !ffprobe_available {
+        let reason =
+            "ffprobe is required for RTSP/RTMP liveness checks, but it is not available".to_string();
+        let timestamp = now_epoch_ms();
+        return Ok(ChannelCheckOutcome {
+            status: "Dead".to_string(),
+            stream_url: None,
+            latency_ms: None,
+            retries_used: 0,
+            last_error_reason: Some(reason.clone()),
+            debug_log: ChannelDebugLog {
+                channel_index: 0,
+                channel_name: String::new(),
+                channel_url: url.to_string(),
+                check_started_at_epoch_ms: timestamp,
+                check_ended_at_epoch_ms: timestamp,
+                retry_attempts: 0,
+                successful_attempt: None,
+                http_status_codes: Vec::new(),
+                redirect_chain: Vec::new(),
+                bytes_transferred: 0,
+                ttfb_ms: None,
+                final_verdict: "Dead".to_string(),
+                final_reason: Some(reason.clone()),
+                ffprobe_output: None,
+                attempts: vec![ChannelAttemptDebugLog {
+                    attempt: 1,
+                    timeout_secs: timeout,
+                    started_at_epoch_ms: timestamp,
+                    ended_at_epoch_ms: timestamp,
+                    verdict: "Dead".to_string(),
+                    reason: Some(reason),
+                    http_status_codes: Vec::new(),
+                    redirect_chain: Vec::new(),
+                    bytes_transferred: 0,
+                    ttfb_ms: None,
+                }],
+            },
+        });
+    }
+
+    let retries = retries.clamp(MIN_RETRIES, MAX_RETRIES);
+    let attempts = total_attempts(retries);
+
+    struct AttemptOutcome {
+        status: String,
+        stream_url: Option<String>,
+        latency_ms: Option<u64>,
+        retries_used: u32,
+        last_error_reason: Option<String>,
+        successful_attempt: Option<u32>,
+        attempts: Vec<ChannelAttemptDebugLog>,
+        ffprobe_output: Option<String>,
+    }
+
+    let attempt_check = |current_timeout: f64, attempt_offset: u32| {
+        let app = app.clone();
+        let url = url.to_string();
+        let cancel = cancel_token.clone();
+        async move {
+            let mut retries_used = 0u32;
+            let mut last_error_reason: Option<String> = None;
+            let mut attempt_logs = Vec::<ChannelAttemptDebugLog>::new();
+            let mut ffprobe_output: Option<String> = None;
+
+            for attempt in 0..attempts {
+                if cancel.is_cancelled() {
+                    return Err(AppError::Cancelled);
+                }
+
+                let attempt_number = attempt_offset.saturating_add(attempt).saturating_add(1);
+                let attempt_started_at_epoch_ms = now_epoch_ms();
+                let started_at = Instant::now();
+                let timeout_duration = Duration::from_secs_f64(current_timeout.max(0.5));
+
+                let probe_result = crate::engine::ffmpeg::collect_probe_snapshot_with_timeout(
+                    &app,
+                    &url,
+                    &cancel,
+                    Some(timeout_duration),
+                )
+                .await;
+                let latency_ms = Some(elapsed_millis(started_at));
+                let attempt_ended_at_epoch_ms = now_epoch_ms();
+
+                match probe_result {
+                    Ok(snapshot) => {
+                        let has_tracks =
+                            snapshot.track_presence.has_audio || snapshot.track_presence.has_video;
+                        ffprobe_output = Some(snapshot.ffprobe_output);
+
+                        if has_tracks {
+                            attempt_logs.push(ChannelAttemptDebugLog {
+                                attempt: attempt_number,
+                                timeout_secs: current_timeout,
+                                started_at_epoch_ms: attempt_started_at_epoch_ms,
+                                ended_at_epoch_ms: attempt_ended_at_epoch_ms,
+                                verdict: "Alive".to_string(),
+                                reason: None,
+                                http_status_codes: Vec::new(),
+                                redirect_chain: Vec::new(),
+                                bytes_transferred: 0,
+                                ttfb_ms: latency_ms,
+                            });
+                            return Ok(AttemptOutcome {
+                                status: "Alive".to_string(),
+                                stream_url: Some(url.clone()),
+                                latency_ms,
+                                retries_used,
+                                last_error_reason,
+                                successful_attempt: Some(attempt_number),
+                                attempts: attempt_logs,
+                                ffprobe_output,
+                            });
+                        }
+
+                        let reason =
+                            Some("No decodable audio/video tracks reported by ffprobe".to_string());
+                        let verdict = if attempt < retries { "Retry" } else { "Dead" };
+                        attempt_logs.push(ChannelAttemptDebugLog {
+                            attempt: attempt_number,
+                            timeout_secs: current_timeout,
+                            started_at_epoch_ms: attempt_started_at_epoch_ms,
+                            ended_at_epoch_ms: attempt_ended_at_epoch_ms,
+                            verdict: verdict.to_string(),
+                            reason: reason.clone(),
+                            http_status_codes: Vec::new(),
+                            redirect_chain: Vec::new(),
+                            bytes_transferred: 0,
+                            ttfb_ms: latency_ms,
+                        });
+
+                        last_error_reason = reason;
+                    }
+                    Err(AppError::Cancelled) => return Err(AppError::Cancelled),
+                    Err(error) => {
+                        let reason = Some(summarize_ffprobe_error(&error));
+                        let verdict = if attempt < retries { "Retry" } else { "Dead" };
+                        attempt_logs.push(ChannelAttemptDebugLog {
+                            attempt: attempt_number,
+                            timeout_secs: current_timeout,
+                            started_at_epoch_ms: attempt_started_at_epoch_ms,
+                            ended_at_epoch_ms: attempt_ended_at_epoch_ms,
+                            verdict: verdict.to_string(),
+                            reason: reason.clone(),
+                            http_status_codes: Vec::new(),
+                            redirect_chain: Vec::new(),
+                            bytes_transferred: 0,
+                            ttfb_ms: latency_ms,
+                        });
+                        last_error_reason = reason;
+                    }
+                }
+
+                if attempt < retries {
+                    retries_used = retries_used.saturating_add(1);
+                    let delay = retry_delay_seconds(retry_backoff, attempt);
+                    if delay > 0 {
+                        tokio::time::sleep(Duration::from_secs(delay)).await;
+                    }
+                }
+            }
+
+            Ok(AttemptOutcome {
+                status: "Dead".to_string(),
+                stream_url: None,
+                latency_ms: None,
+                retries_used,
+                last_error_reason,
+                successful_attempt: None,
+                attempts: attempt_logs,
+                ffprobe_output,
+            })
+        }
+    };
+
+    let first = attempt_check(timeout, 0).await?;
+    let mut final_outcome = first;
+
+    if final_outcome.status == "Dead" {
+        if let Some(ext_timeout) = extended_timeout {
+            let second = attempt_check(ext_timeout, final_outcome.attempts.len() as u32).await?;
+            let mut combined_attempts = final_outcome.attempts;
+            combined_attempts.extend(second.attempts);
+
+            final_outcome = AttemptOutcome {
+                status: second.status,
+                stream_url: second.stream_url,
+                latency_ms: second.latency_ms,
+                retries_used: final_outcome.retries_used.saturating_add(second.retries_used),
+                last_error_reason: second.last_error_reason.or(final_outcome.last_error_reason),
+                successful_attempt: second.successful_attempt,
+                attempts: combined_attempts,
+                ffprobe_output: second.ffprobe_output.or(final_outcome.ffprobe_output),
+            };
+        }
+    }
+
+    let check_started_at_epoch_ms = final_outcome
+        .attempts
+        .first()
+        .map(|attempt| attempt.started_at_epoch_ms)
+        .unwrap_or_else(now_epoch_ms);
+    let check_ended_at_epoch_ms = final_outcome
+        .attempts
+        .last()
+        .map(|attempt| attempt.ended_at_epoch_ms)
+        .unwrap_or_else(now_epoch_ms);
+    let ttfb_ms = final_outcome.attempts.iter().find_map(|attempt| attempt.ttfb_ms);
+
+    Ok(ChannelCheckOutcome {
+        status: final_outcome.status.clone(),
+        stream_url: final_outcome.stream_url,
+        latency_ms: final_outcome.latency_ms,
+        retries_used: final_outcome.retries_used,
+        last_error_reason: final_outcome.last_error_reason.clone(),
+        debug_log: ChannelDebugLog {
+            channel_index: 0,
+            channel_name: String::new(),
+            channel_url: url.to_string(),
+            check_started_at_epoch_ms,
+            check_ended_at_epoch_ms,
+            retry_attempts: final_outcome.retries_used,
+            successful_attempt: final_outcome.successful_attempt,
+            http_status_codes: Vec::new(),
+            redirect_chain: Vec::new(),
+            bytes_transferred: 0,
+            ttfb_ms,
+            final_verdict: final_outcome.status,
+            final_reason: final_outcome.last_error_reason,
+            ffprobe_output: final_outcome.ffprobe_output,
+            attempts: final_outcome.attempts,
+        },
+    })
+}
+
 /// Check the status of a single channel URL.
 ///
 /// Returns status + diagnostics used for structured scan log export.
@@ -986,5 +1307,31 @@ mod tests {
         assert_eq!(parts[0], "BANDWIDTH=5000");
         assert_eq!(parts[1], r#"CODECS="avc1,mp4a""#);
         assert_eq!(parts[2], "RESOLUTION=1920x1080");
+    }
+
+    #[test]
+    fn test_detect_stream_scheme_normalizes_casing() {
+        assert_eq!(
+            detect_stream_scheme("RTSP://example.com/live/1"),
+            Some("rtsp".to_string())
+        );
+        assert_eq!(
+            detect_stream_scheme(" rtmp://example.com/live "),
+            Some("rtmp".to_string())
+        );
+    }
+
+    #[test]
+    fn test_detect_stream_scheme_handles_invalid_values() {
+        assert_eq!(detect_stream_scheme(""), None);
+        assert_eq!(detect_stream_scheme("not-a-url"), None);
+    }
+
+    #[test]
+    fn test_uses_ffprobe_liveness_for_rtsp_and_rtmp() {
+        assert!(uses_ffprobe_liveness("rtsp://example.com/live/1"));
+        assert!(uses_ffprobe_liveness("rtmps://example.com/live/1"));
+        assert!(!uses_ffprobe_liveness("https://example.com/live.m3u8"));
+        assert!(!uses_ffprobe_liveness("udp://239.0.0.1:1234"));
     }
 }
