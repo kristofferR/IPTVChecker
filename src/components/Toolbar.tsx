@@ -16,8 +16,8 @@ import {
   SFPlayFill,
   SFPauseFill,
   SFStopFill,
+  SFDocumentViewfinder,
   SFFolder,
-  SFFolderFill,
   SFLink,
   SFGearshape,
   SFClockArrow,
@@ -121,8 +121,8 @@ export const Toolbar = memo(function Toolbar({
     hasPlaylist ? `${label} (${statusOptionCounts[value] ?? 0})` : label;
 
   // Platform-appropriate icons
-  const IconOpen = isMac ? SFFolder : FolderOpen;
-  const IconFolder = isMac ? SFFolderFill : Folder;
+  const IconOpen = isMac ? SFDocumentViewfinder : FolderOpen;
+  const IconFolder = isMac ? SFFolder : Folder;
   const IconLink = isMac ? SFLink : Link2;
   const IconPlay = isMac ? SFPlayFill : Play;
   const IconPause = isMac ? SFPauseFill : Pause;
