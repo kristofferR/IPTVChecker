@@ -260,67 +260,82 @@ async fn compute_shared_url_result(
     let ffprobe_timeout_duration =
         std::time::Duration::from_secs_f64(ffprobe_timeout_secs.clamp(1.0, 300.0));
 
-    if ffprobe_ok {
-        if let Ok(snapshot) = ffmpeg::collect_probe_snapshot_with_timeout(
+    // Run ffprobe and screenshot capture in parallel — they are independent.
+    // Bitrate profiling runs alongside screenshot after ffprobe starts.
+    let want_screenshot = !skip_screenshots && ffmpeg_ok && screenshots_dir.is_some();
+
+    let ffprobe_fut = async {
+        if !ffprobe_ok {
+            return None;
+        }
+        ffmpeg::collect_probe_snapshot_with_timeout(
             app,
             &target_url,
             cancel,
             Some(ffprobe_timeout_duration),
         )
         .await
-        {
-            shared.audio_only =
-                snapshot.track_presence.has_audio && !snapshot.track_presence.has_video;
-            if let Some(info) = snapshot.video_info {
-                if !shared.audio_only {
-                    shared.codec = Some(info.codec);
-                    shared.resolution = Some(info.resolution.clone());
-                    shared.width = info.width;
-                    shared.height = info.height;
-                    shared.fps = info.fps;
-                    shared.low_framerate = info
-                        .fps
-                        .map(|fps| (fps as f64) <= low_fps_threshold)
-                        .unwrap_or(false);
-                }
-            }
-            if let Some(audio) = snapshot.audio_info {
-                shared.audio_codec = Some(audio.codec);
-                shared.audio_bitrate = audio.bitrate_kbps.map(|b| format!("{}", b));
-            }
-            shared.channel_log.ffprobe_output = Some(snapshot.ffprobe_output);
-        }
+        .ok()
+    };
 
-        if !cancel.is_cancelled() && profile_bitrate_flag && ffmpeg_ok {
-            if let Ok(bitrate) = ffmpeg::profile_bitrate(
-                app,
-                &target_url,
-                user_agent,
-                ffmpeg_bitrate_timeout_secs,
-                cancel,
-            )
-            .await
-            {
-                shared.video_bitrate = Some(bitrate);
+    let screenshot_fut = async {
+        if !want_screenshot || cancel.is_cancelled() {
+            return None;
+        }
+        let dir = screenshots_dir.unwrap();
+        ffmpeg::capture_screenshot(
+            app,
+            &target_url,
+            dir,
+            screenshot_file_name,
+            user_agent,
+            screenshot_format,
+            cancel,
+        )
+        .await
+        .ok()
+    };
+
+    let (probe_result, screenshot_result) = tokio::join!(ffprobe_fut, screenshot_fut);
+
+    if let Some(snapshot) = probe_result {
+        shared.audio_only =
+            snapshot.track_presence.has_audio && !snapshot.track_presence.has_video;
+        if let Some(info) = snapshot.video_info {
+            if !shared.audio_only {
+                shared.codec = Some(info.codec);
+                shared.resolution = Some(info.resolution.clone());
+                shared.width = info.width;
+                shared.height = info.height;
+                shared.fps = info.fps;
+                shared.low_framerate = info
+                    .fps
+                    .map(|fps| (fps as f64) <= low_fps_threshold)
+                    .unwrap_or(false);
             }
         }
+        if let Some(audio) = snapshot.audio_info {
+            shared.audio_codec = Some(audio.codec);
+            shared.audio_bitrate = audio.bitrate_kbps.map(|b| format!("{}", b));
+        }
+        shared.channel_log.ffprobe_output = Some(snapshot.ffprobe_output);
     }
 
-    if !cancel.is_cancelled() && !skip_screenshots && ffmpeg_ok {
-        if let Some(dir) = screenshots_dir {
-            if let Ok(path) = ffmpeg::capture_screenshot(
-                app,
-                &target_url,
-                dir,
-                screenshot_file_name,
-                user_agent,
-                screenshot_format,
-                cancel,
-            )
-            .await
-            {
-                shared.screenshot_path = Some(path);
-            }
+    if let Some(path) = screenshot_result {
+        shared.screenshot_path = Some(path);
+    }
+
+    if ffprobe_ok && !cancel.is_cancelled() && profile_bitrate_flag && ffmpeg_ok {
+        if let Ok(bitrate) = ffmpeg::profile_bitrate(
+            app,
+            &target_url,
+            user_agent,
+            ffmpeg_bitrate_timeout_secs,
+            cancel,
+        )
+        .await
+        {
+            shared.video_bitrate = Some(bitrate);
         }
     }
     timing.diagnostics_ms = diagnostics_started_at.elapsed().as_secs_f64() * 1000.0;
