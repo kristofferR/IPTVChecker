@@ -2044,6 +2044,8 @@ export default function App() {
         lowFpsCount={uiMetrics.lowFpsCount}
         mislabeledCount={uiMetrics.mislabeledCount}
         duplicateCount={duplicateIndices.size}
+        statusFilter={statusFilter}
+        onStatusChange={handleStatusFilterChange}
       />
       <ProgressBar
         progress={progress}
