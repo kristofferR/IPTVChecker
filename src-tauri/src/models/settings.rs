@@ -16,6 +16,28 @@ impl Default for ThemePreference {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ScreenshotFormat {
+    Webp,
+    Png,
+}
+
+impl Default for ScreenshotFormat {
+    fn default() -> Self {
+        Self::Webp
+    }
+}
+
+impl ScreenshotFormat {
+    pub fn extension(&self) -> &'static str {
+        match self {
+            Self::Webp => "webp",
+            Self::Png => "png",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
@@ -36,6 +58,7 @@ pub struct AppSettings {
     pub theme: ThemePreference,
     pub log_level: String,
     pub show_prescan_filter: bool,
+    pub screenshot_format: ScreenshotFormat,
 }
 
 impl AppSettings {
@@ -70,6 +93,7 @@ impl Default for AppSettings {
             theme: ThemePreference::System,
             log_level: "error".to_string(),
             show_prescan_filter: false,
+            screenshot_format: ScreenshotFormat::default(),
         }
     }
 }

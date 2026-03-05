@@ -60,7 +60,7 @@ fn canonicalize_root_if_exists(path: &Path) -> Option<std::path::PathBuf> {
 fn is_supported_screenshot_extension(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| ext.eq_ignore_ascii_case("png"))
+        .map(|ext| ext.eq_ignore_ascii_case("png") || ext.eq_ignore_ascii_case("webp"))
         .unwrap_or(false)
 }
 
@@ -83,7 +83,7 @@ fn validate_screenshot_path(
 
     if !is_supported_screenshot_extension(&canonical_path) {
         return Err(AppError::Other(
-            "Access denied: only .png screenshot files are allowed".to_string(),
+            "Access denied: only .png and .webp screenshot files are allowed".to_string(),
         ));
     }
 
@@ -349,8 +349,20 @@ pub async fn read_screenshot(app: tauri::AppHandle, path: String) -> Result<Stri
 
     let bytes = std::fs::read(&validated_path)
         .map_err(|e| AppError::Other(format!("Failed to read screenshot: {}", e)))?;
+
+    let mime = match validated_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("webp") => "image/webp",
+        _ => "image/png",
+    };
+
     Ok(format!(
-        "data:image/png;base64,{}",
+        "data:{};base64,{}",
+        mime,
         base64::engine::general_purpose::STANDARD.encode(&bytes)
     ))
 }
@@ -479,6 +491,25 @@ mod tests {
             .expect("in-scope png should be accepted");
 
         assert!(validated.ends_with("frame.png"));
+        std::fs::remove_dir_all(&root).expect("fixture root should be removable");
+    }
+
+    #[test]
+    fn validate_screenshot_path_allows_webp_within_allowed_root() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be monotonic")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("iptv-screenshot-webp-{unique}"));
+        std::fs::create_dir_all(&root).expect("root should be created");
+        let screenshot = root.join("frame.webp");
+        std::fs::write(&screenshot, vec![0u8; 64]).expect("fixture screenshot should be writable");
+
+        let allowed = vec![root.canonicalize().expect("root should canonicalize")];
+        let validated = validate_screenshot_path(&screenshot, &allowed)
+            .expect("in-scope webp should be accepted");
+
+        assert!(validated.ends_with("frame.webp"));
         std::fs::remove_dir_all(&root).expect("fixture root should be removable");
     }
 }

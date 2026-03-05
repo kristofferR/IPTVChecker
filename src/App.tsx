@@ -1413,6 +1413,10 @@ export default function App() {
   // Load screenshot via custom Tauri command (bypasses fs/asset scope issues)
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
   const screenshotPathRef = useRef<string | null>(null);
+  const screenshotCacheRef = useRef(new Map<string, string>());
+  useEffect(() => {
+    screenshotCacheRef.current.clear();
+  }, [playlist]);
   useEffect(() => {
     const path = liveSelectedChannel?.screenshot_path?.trim() || null;
     if (path === screenshotPathRef.current) return;
@@ -1423,10 +1427,19 @@ export default function App() {
       return;
     }
 
+    const cached = screenshotCacheRef.current.get(path);
+    if (cached) {
+      setScreenshotUrl(cached);
+      return;
+    }
+
     let stale = false;
     readScreenshot(path)
       .then((dataUrl) => {
-        if (!stale) setScreenshotUrl(dataUrl);
+        if (!stale) {
+          screenshotCacheRef.current.set(path, dataUrl);
+          setScreenshotUrl(dataUrl);
+        }
       })
       .catch(() => {
         if (!stale) setScreenshotUrl(null);

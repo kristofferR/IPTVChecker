@@ -20,6 +20,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   theme: "system",
   log_level: "error",
   show_prescan_filter: false,
+  screenshot_format: "webp",
 };
 
 export function useSettings() {

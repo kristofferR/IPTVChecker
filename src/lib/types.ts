@@ -123,6 +123,8 @@ export interface ScanErrorPayload {
   message: string;
 }
 
+export type ScreenshotFormat = "webp" | "png";
+
 export interface AppSettings {
   timeout: number;
   extended_timeout: number | null;
@@ -141,6 +143,7 @@ export interface AppSettings {
   theme: ThemePreference;
   log_level: string;
   show_prescan_filter: boolean;
+  screenshot_format: ScreenshotFormat;
 }
 
 export interface ScanHistoryDiff {

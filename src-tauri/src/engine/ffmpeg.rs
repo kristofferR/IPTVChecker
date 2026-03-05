@@ -6,6 +6,7 @@ use tauri::{AppHandle, Manager};
 use tokio_util::sync::CancellationToken;
 
 use crate::error::AppError;
+use crate::models::settings::ScreenshotFormat;
 
 const MAX_SCREENSHOT_STEM_LEN: usize = 120;
 const FALLBACK_SCREENSHOT_STEM: &str = "channel";
@@ -157,7 +158,7 @@ pub fn build_screenshot_file_name(channel_index: usize, channel_name: &str) -> S
     }
 }
 
-fn unique_screenshot_output_path(output_dir: &Path, stem: &str) -> PathBuf {
+fn unique_screenshot_output_path(output_dir: &Path, stem: &str, ext: &str) -> PathBuf {
     let base_stem = sanitize_screenshot_stem(stem);
     let mut base = truncate_stem(&base_stem, MAX_SCREENSHOT_STEM_LEN);
     base = trim_windows_unsafe_edges(&base);
@@ -165,7 +166,7 @@ fn unique_screenshot_output_path(output_dir: &Path, stem: &str) -> PathBuf {
         base = FALLBACK_SCREENSHOT_STEM.to_string();
     }
 
-    let initial = output_dir.join(format!("{base}.png"));
+    let initial = output_dir.join(format!("{base}.{ext}"));
     if !initial.exists() {
         return initial;
     }
@@ -179,7 +180,7 @@ fn unique_screenshot_output_path(output_dir: &Path, stem: &str) -> PathBuf {
             truncated_base = FALLBACK_SCREENSHOT_STEM.to_string();
         }
 
-        let candidate = output_dir.join(format!("{truncated_base}{suffix}.png"));
+        let candidate = output_dir.join(format!("{truncated_base}{suffix}.{ext}"));
         if !candidate.exists() {
             return candidate;
         }
@@ -189,7 +190,7 @@ fn unique_screenshot_output_path(output_dir: &Path, stem: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    output_dir.join(format!("{base}-{ts}.png"))
+    output_dir.join(format!("{base}-{ts}.{ext}"))
 }
 
 /// Run an ffmpeg/ffprobe command via resolved binary path with cancellation
@@ -745,31 +746,38 @@ pub async fn capture_screenshot(
     output_dir: &str,
     file_name: &str,
     user_agent: &str,
+    format: ScreenshotFormat,
     cancel: &CancellationToken,
 ) -> Result<String, AppError> {
     if cancel.is_cancelled() {
         return Err(AppError::Cancelled);
     }
 
-    let output_path = unique_screenshot_output_path(Path::new(output_dir), file_name);
+    let output_path =
+        unique_screenshot_output_path(Path::new(output_dir), file_name, format.extension());
     let output_str = output_path.to_string_lossy().to_string();
     let timeout_duration = std::time::Duration::from_secs(15);
 
     // Capture the first available frame — no seeking (-ss) since live IPTV
     // streams don't support it reliably and it causes hangs.
+    let mut args = vec![
+        "-y",
+        "-user_agent",
+        user_agent,
+        "-i",
+        url,
+        "-frames:v",
+        "1",
+    ];
+    if format == ScreenshotFormat::Webp {
+        args.extend_from_slice(&["-quality", "90"]);
+    }
+    args.push(&output_str);
+
     let (_stdout, stderr) = run_tool_command(
         app,
         "ffmpeg",
-        &[
-            "-y",
-            "-user_agent",
-            user_agent,
-            "-i",
-            url,
-            "-frames:v",
-            "1",
-            &output_str,
-        ],
+        &args,
         cancel,
         Some(timeout_duration),
     )
@@ -999,13 +1007,13 @@ mod tests {
         let test_dir = std::env::temp_dir().join(format!("iptv-checker-sanitize-{unique}"));
         std::fs::create_dir_all(&test_dir).expect("temp dir should be creatable");
 
-        let existing = test_dir.join("1-Channel.png");
+        let existing = test_dir.join("1-Channel.webp");
         std::fs::write(&existing, b"old").expect("fixture file should be writable");
 
-        let output = unique_screenshot_output_path(&test_dir, "1-Channel");
+        let output = unique_screenshot_output_path(&test_dir, "1-Channel", "webp");
         assert_eq!(
             output.file_name().and_then(|n| n.to_str()),
-            Some("1-Channel-2.png")
+            Some("1-Channel-2.webp")
         );
 
         std::fs::remove_dir_all(&test_dir).expect("temp dir should be removable");

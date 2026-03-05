@@ -110,6 +110,7 @@ async fn compute_shared_url_result(
     skip_screenshots: bool,
     screenshots_dir: Option<&String>,
     screenshot_file_name: &str,
+    screenshot_format: crate::models::settings::ScreenshotFormat,
     diagnostics_semaphore: &Arc<Semaphore>,
 ) -> Result<(SharedUrlResult, WorkerTiming), AppError> {
     let check_started_at = Instant::now();
@@ -259,6 +260,7 @@ async fn compute_shared_url_result(
                 dir,
                 screenshot_file_name,
                 user_agent,
+                screenshot_format,
                 cancel,
             )
             .await
@@ -904,9 +906,9 @@ async fn execute_scan_run(
     let semaphore = Arc::new(Semaphore::new(config.concurrency as usize));
     let diagnostics_limit = usize::max(1, usize::min(config.concurrency as usize, 4));
     let diagnostics_semaphore = Arc::new(Semaphore::new(diagnostics_limit));
-    let low_fps_threshold_setting = {
+    let (low_fps_threshold_setting, screenshot_format_setting) = {
         let settings = state.settings.lock().await;
-        settings.low_fps_threshold
+        (settings.low_fps_threshold, settings.screenshot_format)
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel::<WorkerOutput>(256);
     let (checkpoint_tx, checkpoint_rx) =
@@ -1061,6 +1063,7 @@ async fn execute_scan_run(
         let skip_screenshots = config.skip_screenshots;
         let profile_bitrate_flag = config.profile_bitrate;
         let low_fps_threshold = low_fps_threshold_setting;
+        let screenshot_format = screenshot_format_setting;
         let screenshots_dir = screenshots_dir.clone();
         let ffmpeg_ok = ffmpeg_available;
         let ffprobe_ok = ffprobe_available;
@@ -1109,6 +1112,7 @@ async fn execute_scan_run(
                         skip_screenshots,
                         screenshots_dir.as_ref(),
                         &screenshot_file_name,
+                        screenshot_format,
                         &diagnostics_semaphore,
                     )
                     .await

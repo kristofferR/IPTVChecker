@@ -331,6 +331,21 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                 </span>
               </label>
 
+              <div className="flex flex-col gap-1">
+                <label className={labelClass}>Screenshot format</label>
+                <select
+                  value={draft.screenshot_format}
+                  onChange={(event) =>
+                    update("screenshot_format", event.target.value as "webp" | "png")
+                  }
+                  className={inputClass}
+                  disabled={draft.skip_screenshots}
+                >
+                  <option value="webp">WebP (smaller, faster)</option>
+                  <option value="png">PNG (lossless)</option>
+                </select>
+              </div>
+
               <label className={toggleRowClass}>
                 <input
                   type="checkbox"
