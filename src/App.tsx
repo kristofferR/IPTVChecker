@@ -1129,6 +1129,9 @@ export default function App() {
       proxy_file: settings.proxy_file,
       test_geoblock: settings.test_geoblock,
       screenshots_dir: settings.screenshots_dir,
+      client_capabilities: {
+        event_batch_v1: true,
+      },
     };
 
     await start(config, playlist.total_channels, selection);

@@ -6,6 +6,7 @@ import type {
   ScanErrorPayload,
   ScanEvent,
   ScanProgress,
+  ScanResultBatchPayload,
   ScanSummary,
 } from "../lib/types";
 import { cancelScan, pauseScan, resetScan, resumeScan, startScan } from "../lib/tauri";
@@ -206,21 +207,91 @@ export function useScan() {
     rafId.current = null;
   }, []);
 
-  const queueResult = useCallback(
-    (result: ChannelResult) => {
-      eventCount.current += 1;
+  const queueResults = useCallback(
+    (incoming: ChannelResult[]) => {
+      if (incoming.length === 0) return;
+      eventCount.current += incoming.length;
       if (eventCount.current <= 5 || eventCount.current % 50 === 0) {
+        const last = incoming[incoming.length - 1];
         logger.debug(
-          `[useScan] event #${eventCount.current}: index=${result.index} name="${result.name}" status=${result.status}`,
+          `[useScan] events total=${eventCount.current}: +${incoming.length}, latest index=${last.index} status=${last.status}`,
         );
       }
-      pendingResults.current.push(result);
+      pendingResults.current.push(...incoming);
       if (rafId.current === null) {
         rafId.current = requestAnimationFrame(flushResults);
       }
     },
     [flushResults],
   );
+
+  const queueResult = useCallback(
+    (result: ChannelResult) => {
+      queueResults([result]);
+    },
+    [queueResults],
+  );
+
+  const recordCompletions = useCallback((count: number) => {
+    if (count <= 0) return;
+    const clock = runClock.current;
+    if (!clock) return;
+    const pauseMs =
+      clock.pausedAtMs != null ? performance.now() - clock.pausedAtMs : 0;
+    const activeMs =
+      performance.now() -
+      clock.startedAtMs -
+      clock.accumulatedPausedMs -
+      pauseMs;
+    for (let i = 0; i < count; i += 1) {
+      completionActiveMs.current.push(activeMs);
+    }
+  }, []);
+
+  const handleProgressUpdate = useCallback((nextProgress: ScanProgress) => {
+    setProgress(nextProgress);
+
+    // Throttle telemetry updates to avoid flicker (issue #79)
+    const now = performance.now();
+    if (
+      now - lastTelemetryUpdateMs.current < TELEMETRY_THROTTLE_MS &&
+      lastTelemetryUpdateMs.current > 0
+    ) {
+      return;
+    }
+
+    // Sliding-window throughput: use last N completion timestamps
+    const samples = completionActiveMs.current;
+    if (samples.length < MIN_SAMPLES_FOR_TELEMETRY) {
+      setTelemetry(EMPTY_TELEMETRY);
+      return;
+    }
+
+    const windowStart = Math.max(0, samples.length - SLIDING_WINDOW_SIZE);
+    const firstMs = samples[windowStart];
+    const lastMs = samples[samples.length - 1];
+    const windowDurationSec = (lastMs - firstMs) / 1000;
+    const windowCount = samples.length - 1 - windowStart;
+
+    if (windowDurationSec <= 0 || windowCount <= 0) {
+      setTelemetry(EMPTY_TELEMETRY);
+      return;
+    }
+
+    const throughput = windowCount / windowDurationSec;
+    if (!Number.isFinite(throughput) || throughput <= 0) {
+      setTelemetry(EMPTY_TELEMETRY);
+      return;
+    }
+
+    const remaining = Math.max(0, nextProgress.total - nextProgress.completed);
+    const etaSeconds = remaining > 0 ? remaining / throughput : 0;
+    setTelemetry({
+      throughputChannelsPerSecond: throughput,
+      etaSeconds: Number.isFinite(etaSeconds) ? etaSeconds : null,
+    });
+    lastTelemetryUpdateMs.current = now;
+  }, []);
 
   const applyScanError = useCallback((message: string) => {
     setError(message);
@@ -237,6 +308,28 @@ export function useScan() {
       logger.debug("[useScan] Setting up event listeners");
 
       unlisteners.push(
+        await listen<ScanEvent<ScanResultBatchPayload>>(
+          "scan://channel-results-batch",
+          (event) => {
+            if (
+              cancelling.current ||
+              !isRunScopedEventForActiveRun(
+                activeRunId.current,
+                event.payload.run_id,
+              )
+            ) {
+              return;
+            }
+
+            const payload = event.payload.payload;
+            queueResults(payload.items);
+            recordCompletions(payload.items.length);
+            handleProgressUpdate(payload.progress);
+          },
+        ),
+      );
+
+      unlisteners.push(
         await listen<ScanEvent<ChannelResult>>("scan://channel-result", (event) => {
           if (
             cancelling.current ||
@@ -248,21 +341,7 @@ export function useScan() {
             return;
           }
           queueResult(event.payload.payload);
-
-          // Record completion time (in active-elapsed-ms) for sliding-window throughput
-          const clock = runClock.current;
-          if (clock) {
-            const pauseMs =
-              clock.pausedAtMs != null
-                ? performance.now() - clock.pausedAtMs
-                : 0;
-            const activeMs =
-              performance.now() -
-              clock.startedAtMs -
-              clock.accumulatedPausedMs -
-              pauseMs;
-            completionActiveMs.current.push(activeMs);
-          }
+          recordCompletions(1);
         }),
       );
 
@@ -277,52 +356,7 @@ export function useScan() {
           ) {
             return;
           }
-          const nextProgress = event.payload.payload;
-          setProgress(nextProgress);
-
-          // Throttle telemetry updates to avoid flicker (issue #79)
-          const now = performance.now();
-          if (
-            now - lastTelemetryUpdateMs.current < TELEMETRY_THROTTLE_MS &&
-            lastTelemetryUpdateMs.current > 0
-          ) {
-            return;
-          }
-
-          // Sliding-window throughput: use last N completion timestamps
-          const samples = completionActiveMs.current;
-          if (samples.length < MIN_SAMPLES_FOR_TELEMETRY) {
-            setTelemetry(EMPTY_TELEMETRY);
-            return;
-          }
-
-          const windowStart = Math.max(0, samples.length - SLIDING_WINDOW_SIZE);
-          const firstMs = samples[windowStart];
-          const lastMs = samples[samples.length - 1];
-          const windowDurationSec = (lastMs - firstMs) / 1000;
-          const windowCount = samples.length - 1 - windowStart;
-
-          if (windowDurationSec <= 0 || windowCount <= 0) {
-            setTelemetry(EMPTY_TELEMETRY);
-            return;
-          }
-
-          const throughput = windowCount / windowDurationSec;
-          if (!Number.isFinite(throughput) || throughput <= 0) {
-            setTelemetry(EMPTY_TELEMETRY);
-            return;
-          }
-
-          const remaining = Math.max(
-            0,
-            nextProgress.total - nextProgress.completed,
-          );
-          const etaSeconds = remaining > 0 ? remaining / throughput : 0;
-          setTelemetry({
-            throughputChannelsPerSecond: throughput,
-            etaSeconds: Number.isFinite(etaSeconds) ? etaSeconds : null,
-          });
-          lastTelemetryUpdateMs.current = now;
+          handleProgressUpdate(event.payload.payload);
         }),
       );
 
@@ -451,7 +485,13 @@ export function useScan() {
         cancelAnimationFrame(rafId.current);
       }
     };
-  }, [queueResult, applyScanError]);
+  }, [
+    queueResult,
+    queueResults,
+    applyScanError,
+    recordCompletions,
+    handleProgressUpdate,
+  ]);
 
   const start = useCallback(
     async (

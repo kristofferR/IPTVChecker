@@ -16,6 +16,7 @@ use crate::models::channel::{Channel, ChannelResult, ChannelStatus};
 use crate::models::playlist::PlaylistPreview;
 use crate::models::scan::{
     RetryBackoff, ScanConfig, ScanErrorPayload, ScanEvent, ScanProgress, ScanSummary,
+    ScanResultBatchPayload,
 };
 use crate::models::scan_log::{ChannelDebugLog, ScanDebugLog};
 use crate::state::AppState;
@@ -24,6 +25,7 @@ static NEXT_SCAN_RUN_ID: AtomicU64 = AtomicU64::new(1);
 const PROGRESS_EMIT_INTERVAL_MS: u64 = 50;
 const CHECKPOINT_FLUSH_INTERVAL_MS: u64 = 250;
 const CHECKPOINT_FLUSH_MAX_BATCH: usize = 128;
+const RESULT_BATCH_MAX_ITEMS: usize = 64;
 
 #[derive(Debug, Clone)]
 struct SharedUrlResult {
@@ -592,6 +594,28 @@ async fn emit_progress_event(
     record_backend_perf(app, state, "scan.event_emit_ms", emit_ms, Some(run_id)).await;
 }
 
+async fn emit_result_batch_event(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    run_id: &str,
+    items: Vec<ChannelResult>,
+    progress: ScanProgress,
+) {
+    if items.is_empty() {
+        return;
+    }
+    let emit_started_at = Instant::now();
+    let _ = app.emit(
+        "scan://channel-results-batch",
+        ScanEvent {
+            run_id: run_id.to_string(),
+            payload: ScanResultBatchPayload { items, progress },
+        },
+    );
+    let emit_ms = emit_started_at.elapsed().as_secs_f64() * 1000.0;
+    record_backend_perf(app, state, "scan.event_emit_ms", emit_ms, Some(run_id)).await;
+}
+
 async fn flush_checkpoint_entries(
     log_file: &str,
     checkpoint_file: &str,
@@ -965,10 +989,16 @@ async fn execute_scan_run(
     let app_for_events = app.clone();
     let state_for_events = state.clone();
     let run_id_for_events = run_id.clone();
+    let batch_events_enabled = config
+        .client_capabilities
+        .as_ref()
+        .map(|caps| caps.event_batch_v1)
+        .unwrap_or(false);
     let event_task = tokio::spawn(async move {
         let mut counters = ScanCounters::default();
         let mut completed_results = Vec::with_capacity(total);
         let mut channel_logs = Vec::<ChannelDebugLog>::with_capacity(total);
+        let mut pending_batch_results = Vec::<ChannelResult>::with_capacity(RESULT_BATCH_MAX_ITEMS);
         let mut first_result_emitted = false;
         let mut last_progress_emit = Instant::now()
             .checked_sub(std::time::Duration::from_millis(PROGRESS_EMIT_INTERVAL_MS))
@@ -977,15 +1007,39 @@ async fn execute_scan_run(
         for result in resumed_results {
             counters.apply(&result);
             completed_results.push(result.clone());
-            emit_channel_result_event(
-                &app_for_events,
-                &state_for_events,
-                &run_id_for_events,
-                result,
-            )
-            .await;
+            if batch_events_enabled {
+                pending_batch_results.push(result);
+                if pending_batch_results.len() >= RESULT_BATCH_MAX_ITEMS {
+                    emit_result_batch_event(
+                        &app_for_events,
+                        &state_for_events,
+                        &run_id_for_events,
+                        std::mem::take(&mut pending_batch_results),
+                        counters.as_progress(total),
+                    )
+                    .await;
+                }
+            } else {
+                emit_channel_result_event(
+                    &app_for_events,
+                    &state_for_events,
+                    &run_id_for_events,
+                    result,
+                )
+                .await;
+            }
 
             if last_progress_emit.elapsed().as_millis() as u64 >= PROGRESS_EMIT_INTERVAL_MS {
+                if batch_events_enabled && !pending_batch_results.is_empty() {
+                    emit_result_batch_event(
+                        &app_for_events,
+                        &state_for_events,
+                        &run_id_for_events,
+                        std::mem::take(&mut pending_batch_results),
+                        counters.as_progress(total),
+                    )
+                    .await;
+                }
                 emit_progress_event(
                     &app_for_events,
                     &state_for_events,
@@ -1015,15 +1069,39 @@ async fn execute_scan_run(
             counters.apply(&worker.result);
             completed_results.push(worker.result.clone());
             channel_logs.push(worker.channel_log);
-            emit_channel_result_event(
-                &app_for_events,
-                &state_for_events,
-                &run_id_for_events,
-                worker.result,
-            )
-            .await;
+            if batch_events_enabled {
+                pending_batch_results.push(worker.result);
+                if pending_batch_results.len() >= RESULT_BATCH_MAX_ITEMS {
+                    emit_result_batch_event(
+                        &app_for_events,
+                        &state_for_events,
+                        &run_id_for_events,
+                        std::mem::take(&mut pending_batch_results),
+                        counters.as_progress(total),
+                    )
+                    .await;
+                }
+            } else {
+                emit_channel_result_event(
+                    &app_for_events,
+                    &state_for_events,
+                    &run_id_for_events,
+                    worker.result,
+                )
+                .await;
+            }
 
             if last_progress_emit.elapsed().as_millis() as u64 >= PROGRESS_EMIT_INTERVAL_MS {
+                if batch_events_enabled && !pending_batch_results.is_empty() {
+                    emit_result_batch_event(
+                        &app_for_events,
+                        &state_for_events,
+                        &run_id_for_events,
+                        std::mem::take(&mut pending_batch_results),
+                        counters.as_progress(total),
+                    )
+                    .await;
+                }
                 emit_progress_event(
                     &app_for_events,
                     &state_for_events,
@@ -1035,6 +1113,16 @@ async fn execute_scan_run(
             }
         }
 
+        if batch_events_enabled && !pending_batch_results.is_empty() {
+            emit_result_batch_event(
+                &app_for_events,
+                &state_for_events,
+                &run_id_for_events,
+                std::mem::take(&mut pending_batch_results),
+                counters.as_progress(total),
+            )
+            .await;
+        }
         emit_progress_event(
             &app_for_events,
             &state_for_events,
