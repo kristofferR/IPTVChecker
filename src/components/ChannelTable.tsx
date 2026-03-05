@@ -17,6 +17,7 @@ import {
 import { ChannelRow } from "./ChannelRow";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { measureUiPerf } from "../lib/perf";
+import { isPrimaryModifierPressed } from "../lib/shortcuts";
 
 interface ChannelTableProps {
   resultsByIndex: (ChannelResult | null)[];
@@ -25,6 +26,7 @@ interface ChannelTableProps {
   search: string;
   groupFilter: string;
   statusFilter: string;
+  isMac: boolean;
   scanState?: "idle" | "scanning" | "paused" | "complete" | "cancelled";
   onSelectChannel: (result: ChannelResult) => void;
   onOpenChannel?: (result: ChannelResult) => void;
@@ -169,6 +171,7 @@ export function ChannelTable({
   search,
   groupFilter,
   statusFilter,
+  isMac,
   onSelectChannel,
   onOpenChannel,
   onSelectionChange,
@@ -524,7 +527,11 @@ export function ChannelTable({
     const handler = (event: KeyboardEvent) => {
       if (isInputLikeTarget(event.target)) return;
 
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a") {
+      if (
+        isPrimaryModifierPressed(event, isMac) &&
+        !event.altKey &&
+        event.key.toLowerCase() === "a"
+      ) {
         event.preventDefault();
         selectAllVisibleRef.current();
         return;
@@ -540,7 +547,7 @@ export function ChannelTable({
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [isMac]);
 
   const handleSort = useCallback(
     (field: SortField) => {
@@ -674,7 +681,7 @@ export function ChannelTable({
         return;
       }
 
-      if (event.metaKey || event.ctrlKey) {
+      if (isPrimaryModifierPressed(event, isMac)) {
         updateSelection((prev) => {
           const next = new Set(prev);
           if (next.has(result.index)) {
@@ -701,6 +708,7 @@ export function ChannelTable({
       selectSingle(result, rowIndex);
     },
     [
+      isMac,
       selectRange,
       updateSelection,
       onSelectChannel,

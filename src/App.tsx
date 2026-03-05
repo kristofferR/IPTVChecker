@@ -61,6 +61,7 @@ import { filterResults } from "./lib/filters";
 import { logger } from "./lib/logger";
 import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/haptics";
 import type { ExportScope } from "./lib/exportScope";
+import { isPrimaryModifierPressed } from "./lib/shortcuts";
 import { measureUiPerf, recordUiPerf, startLongTaskObserver } from "./lib/perf";
 
 function errorToString(err: unknown): string {
@@ -1033,20 +1034,22 @@ export default function App() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "o") {
+      const hasPrimaryModifier = isPrimaryModifierPressed(e, isMac) && !e.altKey;
+
+      if (hasPrimaryModifier && !e.shiftKey && e.key.toLowerCase() === "o") {
         e.preventDefault();
         handleOpenShortcutRef.current();
       }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+      if (hasPrimaryModifier && !e.shiftKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === ",") {
+      if (hasPrimaryModifier && !e.shiftKey && (e.key === "," || e.code === "Comma")) {
         e.preventDefault();
         setShowSettings((s) => !s);
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === "/") {
+      if (hasPrimaryModifier && (e.key === "/" || e.code === "Slash")) {
         e.preventDefault();
         setShowKeyboardShortcuts(true);
       }
@@ -1082,7 +1085,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [isMac]);
 
   useEffect(() => {
     const handler = (event: MouseEvent) => {
@@ -1629,6 +1632,7 @@ export default function App() {
                 groupFilter={groupFilter}
                 statusFilter={statusFilter}
                 scanState={scanState}
+                isMac={isMac}
                 onSelectChannel={handleSelectChannel}
                 onOpenChannel={handleOpenChannel}
                 onSelectionChange={setSelectedChannelIndices}
