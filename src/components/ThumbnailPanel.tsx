@@ -28,6 +28,7 @@ export function ThumbnailPanel({
 }: ThumbnailPanelProps) {
   const [lightboxRendered, setLightboxRendered] = useState(false);
   const [lightboxVisible, setLightboxVisible] = useState(false);
+  const [resolvedUrlCopied, setResolvedUrlCopied] = useState(false);
 
   const closeLightbox = useCallback(() => {
     onLightboxChange(false);
@@ -68,6 +69,8 @@ export function ThumbnailPanel({
     result.error_reason?.trim() ||
     result.last_error_reason?.trim() ||
     null;
+  const resolvedUrl = result.stream_url?.trim() || null;
+  const showResolvedUrl = !!resolvedUrl && resolvedUrl !== result.url;
   const scanActive = scanState === "scanning" || scanState === "paused";
   const waitingForScanResult =
     scanActive && (result.status === "pending" || result.status === "checking");
@@ -92,6 +95,26 @@ export function ThumbnailPanel({
     !screenshotsEnabled &&
     result.status === "alive" &&
     !screenshotUrl;
+
+  const handleCopyResolvedUrl = useCallback(async () => {
+    if (!resolvedUrl) return;
+    try {
+      await navigator.clipboard.writeText(resolvedUrl);
+      setResolvedUrlCopied(true);
+    } catch {
+      setResolvedUrlCopied(false);
+    }
+  }, [resolvedUrl]);
+
+  useEffect(() => {
+    if (!resolvedUrlCopied) return;
+    const timer = window.setTimeout(() => setResolvedUrlCopied(false), 1200);
+    return () => window.clearTimeout(timer);
+  }, [resolvedUrlCopied]);
+
+  useEffect(() => {
+    setResolvedUrlCopied(false);
+  }, [result.index, result.stream_url, result.url]);
 
   return (
     <div className="native-scroll flex flex-col gap-3 p-4 overflow-y-auto">
@@ -222,6 +245,22 @@ export function ThumbnailPanel({
               Last error: {lastErrorReason}
             </p>
           )}
+        </div>
+      )}
+
+      {showResolvedUrl && (
+        <div className="p-2 rounded bg-panel-subtle border border-border-subtle">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[12px] font-medium text-text-primary">Resolved URL</p>
+            <button
+              type="button"
+              onClick={handleCopyResolvedUrl}
+              className="macos-btn px-2 py-1 text-[11px] bg-btn hover:bg-btn-hover rounded-md"
+            >
+              {resolvedUrlCopied ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <p className="text-[11px] text-text-secondary mt-1 break-all">{resolvedUrl}</p>
         </div>
       )}
 

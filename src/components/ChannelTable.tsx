@@ -57,14 +57,16 @@ function buildChannelMetadataSummary(channel: ChannelResult): string {
     ? `${channel.audio_bitrate} kbps`
     : "Unknown";
   const audioCodec = channel.audio_codec ?? "Unknown";
-  const streamUrl = channel.stream_url ?? "N/A";
+  const resolvedStreamUrl = channel.stream_url?.trim() || null;
+  const hasResolvedStreamUrl =
+    !!resolvedStreamUrl && resolvedStreamUrl !== channel.url;
   const protocol = detectChannelProtocol(channel) ?? "Unknown";
   const errorReason =
     channel.error_reason?.trim() ||
     channel.last_error_reason?.trim() ||
     "N/A";
 
-  return [
+  const lines = [
     `Name: ${channel.name}`,
     `Group: ${channel.group}`,
     `Playlist: ${channel.playlist}`,
@@ -72,12 +74,17 @@ function buildChannelMetadataSummary(channel: ChannelResult): string {
     `Protocol: ${protocol.toUpperCase()}`,
     `Error Reason: ${errorReason}`,
     `URL: ${channel.url}`,
-    `Stream URL: ${streamUrl}`,
     `Codec: ${channel.codec ?? "Unknown"}`,
     `Resolution: ${channel.resolution ?? "Unknown"}`,
     `Video Bitrate: ${videoBitrate}`,
     `Audio: ${audioBitrate} ${audioCodec}`,
-  ].join("\n");
+  ];
+
+  if (hasResolvedStreamUrl) {
+    lines.splice(7, 0, `Resolved URL: ${resolvedStreamUrl}`);
+  }
+
+  return lines.join("\n");
 }
 
 function parseStoredOrder(raw: string | null): ColumnKey[] {
