@@ -104,6 +104,7 @@ export function useScan() {
   const [duplicateIndices, setDuplicateIndices] = useState<Set<number>>(
     () => new Set(),
   );
+  const [screenshotsPaused, setScreenshotsPaused] = useState(false);
 
   // Batch incoming results with requestAnimationFrame
   const pendingResults = useRef<ChannelResult[]>([]);
@@ -428,6 +429,15 @@ export function useScan() {
         }),
       );
 
+      unlisteners.push(
+        await listen<ScanEvent<null>>("scan://screenshots-paused", (event) => {
+          if (isRunScopedEventForActiveRun(activeRunId.current, event.payload.run_id)) {
+            logger.debug("[useScan] scan://screenshots-paused received");
+            setScreenshotsPaused(true);
+          }
+        }),
+      );
+
       logger.debug("[useScan] All event listeners registered");
     };
 
@@ -505,6 +515,7 @@ export function useScan() {
       setError(null);
       setScanState("scanning");
       setTelemetry(EMPTY_TELEMETRY);
+      setScreenshotsPaused(false);
       pendingResults.current = [];
       eventCount.current = 0;
       activeRunId.current = null;
@@ -656,6 +667,7 @@ export function useScan() {
     scanState,
     error,
     telemetry,
+    screenshotsPaused,
     start,
     cancel,
     pause,

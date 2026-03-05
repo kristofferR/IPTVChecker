@@ -430,6 +430,36 @@ pub fn run() {
 
             commands::recent::refresh_recent_menu(&app.handle());
 
+            // Background cleanup: evict old screenshot dirs per retention policy
+            {
+                let handle = app.handle().clone();
+                let state = app.state::<Arc<AppState>>().inner().clone();
+                tokio::spawn(async move {
+                    let (retention_count, _) = {
+                        let s = state.settings.lock().await;
+                        (s.screenshot_retention_count, s.low_space_threshold_gb)
+                    };
+                    let cache_root = handle
+                        .path()
+                        .temp_dir()
+                        .unwrap_or_else(|_| std::env::temp_dir())
+                        .join("iptv-checker-screenshots");
+                    if cache_root.exists() {
+                        let freed = commands::settings::evict_old_screenshot_dirs(
+                            &cache_root,
+                            &std::collections::HashSet::new(),
+                            retention_count,
+                        );
+                        if freed > 0 {
+                            log::info!(
+                                "Startup eviction freed {} bytes of screenshot cache",
+                                freed
+                            );
+                        }
+                    }
+                });
+            }
+
             // Enable _useSystemAppearance on WKWebView so CSS
             // `-apple-visual-effect: -apple-system-glass-material` works.
             // Deferred to avoid ObjC exceptions when webview isn't fully ready.

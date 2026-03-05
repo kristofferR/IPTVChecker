@@ -144,6 +144,8 @@ export interface AppSettings {
   log_level: string;
   show_prescan_filter: boolean;
   screenshot_format: ScreenshotFormat;
+  screenshot_retention_count: number;
+  low_space_threshold_gb: number;
 }
 
 export interface ScanHistoryDiff {
@@ -164,10 +166,18 @@ export interface ScanHistoryItem {
   diff: ScanHistoryDiff | null;
 }
 
+export type DiskSpaceTier = "plenty" | "moderate" | "low" | "critical";
+
+export interface DiskSpaceInfo {
+  available_bytes: number;
+  tier: DiskSpaceTier;
+}
+
 export interface ScreenshotCacheStats {
   file_count: number;
   total_bytes: number;
   cache_dir: string;
+  disk_space: DiskSpaceInfo | null;
 }
 
 export type RecentPlaylistKind = "file" | "url" | "xtream";

@@ -59,6 +59,8 @@ pub struct AppSettings {
     pub log_level: String,
     pub show_prescan_filter: bool,
     pub screenshot_format: ScreenshotFormat,
+    pub screenshot_retention_count: u32,
+    pub low_space_threshold_gb: f64,
 }
 
 impl AppSettings {
@@ -94,6 +96,8 @@ impl Default for AppSettings {
             log_level: "error".to_string(),
             show_prescan_filter: false,
             screenshot_format: ScreenshotFormat::default(),
+            screenshot_retention_count: 1,
+            low_space_threshold_gb: 5.0,
         }
     }
 }

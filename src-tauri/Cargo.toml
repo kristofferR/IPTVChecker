@@ -35,6 +35,7 @@ base64 = "0.22.1"
 sha2 = "0.10"
 tauri-plugin-notification = "2"
 tauri-plugin-mcp = { git = "https://github.com/P3GLEG/tauri-plugin-mcp" }
+fs2 = "0.4.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri-plugin-macos-haptics = "1.0.0"

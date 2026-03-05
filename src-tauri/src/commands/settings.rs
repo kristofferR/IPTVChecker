@@ -5,6 +5,7 @@ use std::{fs, path::Path};
 use tauri::Manager;
 use tauri_plugin_store::StoreExt;
 
+use crate::engine::disk;
 use crate::error::AppError;
 use crate::models::settings::{AppSettings, ThemePreference};
 use crate::state::AppState;
@@ -14,6 +15,10 @@ const MIN_SCAN_HISTORY_LIMIT: u32 = 1;
 const MAX_SCAN_HISTORY_LIMIT: u32 = 200;
 const MIN_LOW_FPS_THRESHOLD: f64 = 0.0;
 const MAX_LOW_FPS_THRESHOLD: f64 = 240.0;
+const MIN_RETENTION_COUNT: u32 = 0;
+const MAX_RETENTION_COUNT: u32 = 100;
+const MIN_LOW_SPACE_THRESHOLD_GB: f64 = 1.0;
+const MAX_LOW_SPACE_THRESHOLD_GB: f64 = 50.0;
 
 pub fn apply_theme_preference(
     app: &tauri::AppHandle,
@@ -41,6 +46,7 @@ pub struct ScreenshotCacheStats {
     pub file_count: usize,
     pub total_bytes: u64,
     pub cache_dir: String,
+    pub disk_space: Option<disk::DiskSpaceInfo>,
 }
 
 fn screenshot_cache_root(app: &tauri::AppHandle) -> std::path::PathBuf {
@@ -304,6 +310,21 @@ pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Re
             MIN_LOW_FPS_THRESHOLD, MAX_LOW_FPS_THRESHOLD
         )));
     }
+    if settings.screenshot_retention_count > MAX_RETENTION_COUNT {
+        return Err(AppError::Other(format!(
+            "Invalid screenshot retention count: must be between {} and {}",
+            MIN_RETENTION_COUNT, MAX_RETENTION_COUNT
+        )));
+    }
+    if !settings.low_space_threshold_gb.is_finite()
+        || settings.low_space_threshold_gb < MIN_LOW_SPACE_THRESHOLD_GB
+        || settings.low_space_threshold_gb > MAX_LOW_SPACE_THRESHOLD_GB
+    {
+        return Err(AppError::Other(format!(
+            "Invalid low space threshold: must be between {} and {} GB",
+            MIN_LOW_SPACE_THRESHOLD_GB, MAX_LOW_SPACE_THRESHOLD_GB
+        )));
+    }
 
     let state = app.state::<Arc<AppState>>();
     let mut current = state.settings.lock().await;
@@ -373,11 +394,15 @@ pub async fn get_screenshot_cache_stats(
 ) -> Result<ScreenshotCacheStats, AppError> {
     let cache_root = screenshot_cache_root(&app);
     let (total_bytes, file_count) = collect_dir_stats(&cache_root).map_err(AppError::Io)?;
+    let state = app.state::<Arc<AppState>>();
+    let threshold_gb = state.settings.lock().await.low_space_threshold_gb;
+    let disk_space = Some(disk::get_disk_space_info(&cache_root, threshold_gb));
 
     Ok(ScreenshotCacheStats {
         file_count,
         total_bytes,
         cache_dir: cache_root.to_string_lossy().to_string(),
+        disk_space,
     })
 }
 
@@ -394,7 +419,171 @@ pub async fn clear_screenshot_cache(
         file_count: 0,
         total_bytes: 0,
         cache_dir: cache_root.to_string_lossy().to_string(),
+        disk_space: None,
     })
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct ScanMeta {
+    #[serde(default)]
+    scan_started_at_epoch_ms: u64,
+    #[serde(default)]
+    source_identity: String,
+}
+
+fn read_scan_meta(dir: &Path) -> Option<ScanMeta> {
+    let meta_path = dir.join(".scan-meta.json");
+    let data = fs::read_to_string(meta_path).ok()?;
+    serde_json::from_str(&data).ok()
+}
+
+/// Evict old screenshot scan directories based on retention policy.
+/// Returns total bytes freed.
+pub fn evict_old_screenshot_dirs(
+    cache_root: &Path,
+    keep_dirs: &HashSet<String>,
+    retention_count: u32,
+) -> u64 {
+    if !cache_root.exists() {
+        return 0;
+    }
+
+    let entries = match fs::read_dir(cache_root) {
+        Ok(entries) => entries,
+        Err(_) => return 0,
+    };
+
+    // Collect all scan dirs with metadata
+    let mut dirs_with_meta: Vec<(std::path::PathBuf, ScanMeta)> = Vec::new();
+    let mut dirs_without_meta: Vec<std::path::PathBuf> = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let dir_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if keep_dirs.contains(&dir_name) {
+            continue;
+        }
+
+        match read_scan_meta(&path) {
+            Some(meta) => dirs_with_meta.push((path, meta)),
+            None => dirs_without_meta.push(path),
+        }
+    }
+
+    let mut bytes_freed = 0u64;
+
+    // Always delete dirs without metadata (legacy)
+    for dir in &dirs_without_meta {
+        if let Ok((bytes, _)) = collect_dir_stats(dir) {
+            if fs::remove_dir_all(dir).is_ok() {
+                bytes_freed += bytes;
+                log::info!("Evicted legacy screenshot dir: {}", dir.display());
+            }
+        }
+    }
+
+    // Group by source_identity and keep only the most recent `retention_count` per source
+    let mut by_source: std::collections::HashMap<String, Vec<(std::path::PathBuf, u64)>> =
+        std::collections::HashMap::new();
+    for (path, meta) in dirs_with_meta {
+        by_source
+            .entry(meta.source_identity.clone())
+            .or_default()
+            .push((path, meta.scan_started_at_epoch_ms));
+    }
+
+    for (_source, mut dirs) in by_source {
+        // Sort newest first
+        dirs.sort_by(|a, b| b.1.cmp(&a.1));
+        // Keep `retention_count`, evict the rest
+        for (path, _ts) in dirs.into_iter().skip(retention_count as usize) {
+            if let Ok((bytes, _)) = collect_dir_stats(&path) {
+                if fs::remove_dir_all(&path).is_ok() {
+                    bytes_freed += bytes;
+                    log::info!("Evicted screenshot dir (retention): {}", path.display());
+                }
+            }
+        }
+    }
+
+    bytes_freed
+}
+
+/// Evict oldest screenshot dirs one at a time until disk space is above threshold.
+/// Returns total bytes freed.
+pub fn evict_for_disk_space(
+    cache_root: &Path,
+    current_scan_dir: &str,
+    low_threshold_gb: f64,
+) -> u64 {
+    if !cache_root.exists() {
+        return 0;
+    }
+
+    let mut bytes_freed = 0u64;
+    let current_dir_name = Path::new(current_scan_dir)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    loop {
+        let tier = disk::classify_space(cache_root, low_threshold_gb);
+        if !matches!(tier, disk::DiskSpaceTier::Critical | disk::DiskSpaceTier::Low) {
+            break;
+        }
+
+        // Find the oldest evictable dir
+        let entries = match fs::read_dir(cache_root) {
+            Ok(e) => e,
+            Err(_) => break,
+        };
+
+        let mut oldest: Option<(std::path::PathBuf, u64)> = None;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let dir_name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if dir_name == current_dir_name {
+                continue;
+            }
+
+            let ts = read_scan_meta(&path)
+                .map(|m| m.scan_started_at_epoch_ms)
+                .unwrap_or(0);
+            if oldest.as_ref().map_or(true, |o| ts < o.1) {
+                oldest = Some((path, ts));
+            }
+        }
+
+        match oldest {
+            Some((path, _)) => {
+                if let Ok((bytes, _)) = collect_dir_stats(&path) {
+                    if fs::remove_dir_all(&path).is_ok() {
+                        bytes_freed += bytes;
+                        log::info!("Evicted screenshot dir (disk space): {}", path.display());
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            None => break,
+        }
+    }
+
+    bytes_freed
 }
 
 #[cfg(test)]

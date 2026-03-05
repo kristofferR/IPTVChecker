@@ -496,11 +496,32 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
               <div className="rounded-xl border border-border-subtle p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-[12px] font-medium">Temp Screenshot Cache</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-[12px] font-medium">Temp Screenshot Cache</p>
+                      {cacheStats?.disk_space && (
+                        <span
+                          className={`inline-block w-2 h-2 rounded-full ${
+                            cacheStats.disk_space.tier === "critical"
+                              ? "bg-red-500"
+                              : cacheStats.disk_space.tier === "low"
+                                ? "bg-amber-500"
+                                : cacheStats.disk_space.tier === "moderate"
+                                  ? "bg-yellow-400"
+                                  : "bg-emerald-500"
+                          }`}
+                          title={`Disk space: ${formatBytes(cacheStats.disk_space.available_bytes)} available (${cacheStats.disk_space.tier})`}
+                        />
+                      )}
+                    </div>
                     <p className="text-[11px] text-text-tertiary mt-0.5">
                       {cacheStats
                         ? `${formatBytes(cacheStats.total_bytes)} (${cacheStats.file_count} files)`
                         : "Unavailable"}
+                      {cacheStats?.disk_space && (
+                        <span className="ml-1.5 text-text-tertiary/70">
+                          · {formatBytes(cacheStats.disk_space.available_bytes)} free
+                        </span>
+                      )}
                     </p>
                   </div>
                   <button
@@ -520,6 +541,51 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                     {cacheStats.cache_dir}
                   </p>
                 )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className={labelClass}>Screenshot Retention</label>
+                  <input
+                    type="number"
+                    value={draft.screenshot_retention_count}
+                    onChange={(event) => {
+                      const value = parseInt(event.target.value, 10);
+                      update(
+                        "screenshot_retention_count",
+                        Number.isNaN(value) ? 1 : Math.max(0, Math.min(100, value)),
+                      );
+                    }}
+                    min="0"
+                    max="100"
+                    className={inputClass}
+                  />
+                  <p className="text-[11px] text-text-tertiary mt-1">
+                    Keep last N scan screenshot dirs per playlist source. 0 = no retention.
+                  </p>
+                </div>
+
+                <div>
+                  <label className={labelClass}>Low Space Threshold (GB)</label>
+                  <input
+                    type="number"
+                    value={draft.low_space_threshold_gb}
+                    onChange={(event) => {
+                      const value = parseFloat(event.target.value);
+                      update(
+                        "low_space_threshold_gb",
+                        Number.isNaN(value) ? 5.0 : Math.max(1, Math.min(50, value)),
+                      );
+                    }}
+                    step="0.5"
+                    min="1"
+                    max="50"
+                    className={inputClass}
+                  />
+                  <p className="text-[11px] text-text-tertiary mt-1">
+                    Pause screenshots during scans when free disk space drops below this.
+                  </p>
+                </div>
               </div>
             </div>
           </section>

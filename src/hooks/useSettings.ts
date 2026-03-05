@@ -21,6 +21,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   log_level: "error",
   show_prescan_filter: false,
   screenshot_format: "webp",
+  screenshot_retention_count: 1,
+  low_space_threshold_gb: 5.0,
 };
 
 export function useSettings() {

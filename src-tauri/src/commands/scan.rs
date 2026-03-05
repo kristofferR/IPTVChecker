@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -8,7 +8,8 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 use crate::commands::history;
-use crate::engine::{checker, ffmpeg, parser, proxy, resume};
+use crate::commands::settings;
+use crate::engine::{checker, disk, ffmpeg, parser, proxy, resume};
 use crate::error::AppError;
 use crate::models::backend_perf::BackendPerfSample;
 use crate::models::channel::{Channel, ChannelResult, ChannelStatus};
@@ -871,6 +872,11 @@ async fn execute_scan_run(
 
     // Screenshots directory — use app temp dir by default (in-app preview only),
     // or a user-specified folder if configured.
+    let (screenshot_retention_count, low_space_threshold_gb) = {
+        let s = state.settings.lock().await;
+        (s.screenshot_retention_count, s.low_space_threshold_gb)
+    };
+    let using_custom_screenshots_dir = config.screenshots_dir.is_some();
     let screenshots_dir = if !config.skip_screenshots && ffmpeg_available {
         let dir = match config.screenshots_dir.clone() {
             Some(d) => d,
@@ -891,6 +897,39 @@ async fn execute_scan_run(
                 error
             )));
         }
+
+        // Write scan metadata for eviction logic
+        if !using_custom_screenshots_dir {
+            let meta = serde_json::json!({
+                "scan_started_at_epoch_ms": scan_started_at_epoch_ms,
+                "source_identity": config.source_identity.clone().unwrap_or_default(),
+                "playlist_file": config.file_path.clone(),
+            });
+            let meta_path = std::path::Path::new(&dir).join(".scan-meta.json");
+            if let Err(error) = std::fs::write(&meta_path, meta.to_string()) {
+                log::warn!("Failed to write scan metadata: {}", error);
+            }
+
+            // Pre-scan eviction: remove old dirs per retention policy
+            let cache_root = std::path::Path::new(&dir)
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new(&dir));
+            let current_dir_name = std::path::Path::new(&dir)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let mut keep = HashSet::new();
+            keep.insert(current_dir_name);
+            let freed =
+                settings::evict_old_screenshot_dirs(cache_root, &keep, screenshot_retention_count);
+            if freed > 0 {
+                log::info!(
+                    "Pre-scan eviction freed {} bytes of screenshot cache",
+                    freed
+                );
+            }
+        }
+
         Some(dir)
     } else {
         None
@@ -1020,6 +1059,13 @@ async fn execute_scan_run(
             >,
         >,
     > = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+
+    // Disk space tracking for screenshot pause
+    let screenshots_paused = Arc::new(AtomicBool::new(false));
+    let screenshots_paused_emitted = Arc::new(AtomicBool::new(false));
+    let disk_check_counter = Arc::new(AtomicUsize::new(0));
+    let eviction_in_progress = Arc::new(AtomicBool::new(false));
+
     let mut handles = Vec::new();
 
     for channel in channels {
@@ -1072,6 +1118,12 @@ async fn execute_scan_run(
         let run_id_for_perf = run_id.clone();
         let shared_url_results = Arc::clone(&shared_url_results);
         let diagnostics_semaphore = Arc::clone(&diagnostics_semaphore);
+        let screenshots_paused = Arc::clone(&screenshots_paused);
+        let screenshots_paused_emitted = Arc::clone(&screenshots_paused_emitted);
+        let disk_check_counter = Arc::clone(&disk_check_counter);
+        let eviction_in_progress = Arc::clone(&eviction_in_progress);
+        let using_custom_dir = using_custom_screenshots_dir;
+        let low_space_threshold_gb = low_space_threshold_gb;
 
         let handle = tokio::spawn(async move {
             let _permit = permit;
@@ -1091,6 +1143,75 @@ async fn execute_scan_run(
             let screenshot_file_name =
                 ffmpeg::build_screenshot_file_name(channel.index, &channel.name);
 
+            // Check disk space periodically (every ~20 channels)
+            let effective_skip_screenshots = if skip_screenshots || screenshots_paused.load(Ordering::Relaxed) {
+                skip_screenshots || screenshots_paused.load(Ordering::Relaxed)
+            } else if !using_custom_dir {
+                let count = disk_check_counter.fetch_add(1, Ordering::Relaxed);
+                if count % 20 == 0 {
+                    if let Some(ref dir) = screenshots_dir {
+                        let dir_path = std::path::Path::new(dir.as_str());
+                        let tier = disk::classify_space(dir_path, low_space_threshold_gb);
+                        match tier {
+                            disk::DiskSpaceTier::Critical => {
+                                screenshots_paused.store(true, Ordering::Relaxed);
+                                if !screenshots_paused_emitted.swap(true, Ordering::Relaxed) {
+                                    let _ = task_app.emit(
+                                        "scan://screenshots-paused",
+                                        ScanEvent {
+                                            run_id: run_id_for_perf.clone(),
+                                            payload: (),
+                                        },
+                                    );
+                                }
+                                true
+                            }
+                            disk::DiskSpaceTier::Low => {
+                                // Try eviction if not already running
+                                if !eviction_in_progress.swap(true, Ordering::Relaxed) {
+                                    let cache_root = dir_path.parent().unwrap_or(dir_path);
+                                    let freed = settings::evict_for_disk_space(
+                                        cache_root,
+                                        dir.as_str(),
+                                        low_space_threshold_gb,
+                                    );
+                                    if freed > 0 {
+                                        log::info!("Disk space eviction freed {} bytes", freed);
+                                    }
+                                    eviction_in_progress.store(false, Ordering::Relaxed);
+                                    // Re-check after eviction
+                                    let tier_after = disk::classify_space(dir_path, low_space_threshold_gb);
+                                    if matches!(tier_after, disk::DiskSpaceTier::Critical) {
+                                        screenshots_paused.store(true, Ordering::Relaxed);
+                                        if !screenshots_paused_emitted.swap(true, Ordering::Relaxed) {
+                                            let _ = task_app.emit(
+                                                "scan://screenshots-paused",
+                                                ScanEvent {
+                                                    run_id: run_id_for_perf.clone(),
+                                                    payload: (),
+                                                },
+                                            );
+                                        }
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                }
+                            }
+                            _ => false,
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
             let shared_result = result_cell
                 .get_or_init(|| async {
                     compute_shared_url_result(
@@ -1109,7 +1230,7 @@ async fn execute_scan_run(
                         ffprobe_ok,
                         profile_bitrate_flag,
                         low_fps_threshold,
-                        skip_screenshots,
+                        effective_skip_screenshots,
                         screenshots_dir.as_ref(),
                         &screenshot_file_name,
                         screenshot_format,

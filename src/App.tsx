@@ -325,6 +325,7 @@ export default function App() {
     scanState,
     error,
     telemetry,
+    screenshotsPaused,
     start,
     cancel,
     pause,
@@ -1505,6 +1506,12 @@ export default function App() {
         <div className="flex items-center gap-2 px-4 py-2.5 bg-yellow-500/10 border-b border-yellow-500/20 text-yellow-400 text-[13px]">
           <AlertTriangle className="w-4 h-4" />
           ffmpeg/ffprobe not found. Screenshots and media info will be disabled.
+        </div>
+      )}
+
+      {screenshotsPaused && (scanState === "scanning" || scanState === "paused") && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-[13px]">
+          <span className="flex-1">Screenshot capture paused — low disk space</span>
         </div>
       )}
 
