@@ -557,7 +557,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
   }> = [
     { id: "general", label: "General", Icon: SlidersHorizontal },
     { id: "scanning", label: "Scanning", Icon: Gauge },
-    { id: "media", label: "Media", Icon: Layers },
+    { id: "media", label: "Screenshots", Icon: Layers },
     { id: "network", label: "Network", Icon: Network },
     { id: "advanced", label: "Advanced", Icon: Wrench },
   ];
@@ -641,6 +641,33 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
 
                 <div className={rowClass}>
                   <div>
+                    <p className="text-[13px] font-medium">Channel logo size</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Controls logo size in the channel name column.
+                    </p>
+                  </div>
+                  <select
+                    value={draft.channel_logo_size}
+                    onChange={(event) =>
+                      updateSetting(
+                        "channel_logo_size",
+                        event.target.value as AppSettings["channel_logo_size"],
+                        { immediate: true },
+                      )
+                    }
+                    className={`${inputClass} w-44`}
+                  >
+                    <option value="small">Small (16px)</option>
+                    <option value="medium">Medium (24px)</option>
+                    <option value="large">Large (36px)</option>
+                    <option value="huge">Huge (48px)</option>
+                  </select>
+                </div>
+              </section>
+
+              <section className={blockClass}>
+                <div className={rowClass}>
+                  <div>
                     <p className="text-[13px] font-medium">Show pre-scan filter bar</p>
                     <p className="text-[11px] text-text-tertiary mt-0.5">
                       Display the regex filter bar before scanning.
@@ -686,32 +713,6 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                     ariaLabel="Auto-reveal report panel"
                   />
                 </div>
-
-                <div className={rowClass}>
-                  <div>
-                    <p className="text-[13px] font-medium">Channel logo size</p>
-                    <p className="text-[11px] text-text-tertiary mt-0.5">
-                      Controls logo size in the channel name column.
-                    </p>
-                  </div>
-                  <select
-                    value={draft.channel_logo_size}
-                    onChange={(event) =>
-                      updateSetting(
-                        "channel_logo_size",
-                        event.target.value as AppSettings["channel_logo_size"],
-                        { immediate: true },
-                      )
-                    }
-                    className={`${inputClass} w-44`}
-                  >
-                    <option value="small">Small (16px)</option>
-                    <option value="medium">Medium (24px)</option>
-                    <option value="large">Large (36px)</option>
-                    <option value="huge">Huge (48px)</option>
-                  </select>
-                </div>
-
               </section>
 
               <section className={blockClass}>
