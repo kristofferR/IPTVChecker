@@ -844,25 +844,42 @@ export function ChannelTable({
     setContextMenuState(null);
   }, [selectedIndices, onScanSelected]);
 
+  const getSelectedChannels = useCallback((): ChannelResult[] => {
+    if (selectedIndices.size <= 1 && contextMenuState) {
+      return [contextMenuState.channel];
+    }
+    const indexSet = selectedIndices;
+    return completedResults
+      .filter((r) => indexSet.has(r.index))
+      .sort((a, b) => a.index - b.index);
+  }, [selectedIndices, contextMenuState, completedResults]);
+
   const handleCopyChannelName = useCallback(async () => {
     if (!contextMenuState) return;
-    await copyText("name", contextMenuState.channel.name);
-  }, [contextMenuState, copyText]);
+    const channels = getSelectedChannels();
+    await copyText("name", channels.map((c) => c.name).join("\n"));
+  }, [contextMenuState, copyText, getSelectedChannels]);
 
   const handleCopyChannelUrl = useCallback(async () => {
     if (!contextMenuState) return;
-    await copyText("url", contextMenuState.channel.url);
-  }, [contextMenuState, copyText]);
+    const channels = getSelectedChannels();
+    await copyText("url", channels.map((c) => c.url).join("\n"));
+  }, [contextMenuState, copyText, getSelectedChannels]);
 
   const handleCopyM3uEntry = useCallback(async () => {
     if (!contextMenuState) return;
-    await copyText("m3u", buildM3uEntryText(contextMenuState.channel));
-  }, [contextMenuState, copyText]);
+    const channels = getSelectedChannels();
+    await copyText("m3u", channels.map(buildM3uEntryText).join("\n"));
+  }, [contextMenuState, copyText, getSelectedChannels]);
 
   const handleCopyAllMetadata = useCallback(async () => {
     if (!contextMenuState) return;
-    await copyText("metadata", buildChannelMetadataSummary(contextMenuState.channel));
-  }, [contextMenuState, copyText]);
+    const channels = getSelectedChannels();
+    await copyText(
+      "metadata",
+      channels.map(buildChannelMetadataSummary).join("\n\n"),
+    );
+  }, [contextMenuState, copyText, getSelectedChannels]);
 
   const handleOpenInPlayer = useCallback(() => {
     if (!contextMenuState) return;
@@ -1184,28 +1201,28 @@ export function ChannelTable({
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
-            {copiedAction === "name" ? "Copied!" : "Copy Channel Name"}
+            {copiedAction === "name" ? "Copied!" : selectedIndices.size > 1 ? `Copy ${selectedIndices.size} Names` : "Copy Channel Name"}
           </button>
           <button
             onClick={handleCopyChannelUrl}
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
-            {copiedAction === "url" ? "Copied!" : "Copy URL"}
+            {copiedAction === "url" ? "Copied!" : selectedIndices.size > 1 ? `Copy ${selectedIndices.size} URLs` : "Copy URL"}
           </button>
           <button
             onClick={handleCopyM3uEntry}
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
-            {copiedAction === "m3u" ? "Copied!" : "Copy M3U Entry"}
+            {copiedAction === "m3u" ? "Copied!" : selectedIndices.size > 1 ? `Copy ${selectedIndices.size} M3U Entries` : "Copy M3U Entry"}
           </button>
           <button
             onClick={handleCopyAllMetadata}
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
-            {copiedAction === "metadata" ? "Copied!" : "Copy All Metadata"}
+            {copiedAction === "metadata" ? "Copied!" : selectedIndices.size > 1 ? `Copy ${selectedIndices.size} Metadata` : "Copy All Metadata"}
           </button>
         </div>
       )}
