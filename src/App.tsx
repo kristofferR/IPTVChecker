@@ -110,6 +110,7 @@ const UPDATE_CHECK_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const OS_PROGRESS_UPDATE_INTERVAL_MS = 2000;
 const UPDATE_LAST_CHECK_KEY = "updates:last-check-epoch-ms";
 const UPDATE_CACHE_KEY = "updates:last-available-release";
+const START_SCREEN_RECENT_LIMIT = 5;
 const GITHUB_LATEST_RELEASE_API =
   "https://api.github.com/repos/kristofferR/IPTVChecker-GUI/releases/latest";
 const GITHUB_RELEASES_PAGE =
@@ -782,6 +783,15 @@ export default function App() {
     });
   }, [openSourceDialog]);
 
+  const handleOpenXtream = useCallback(() => {
+    openSourceDialog({
+      mode: "xtream",
+      initialUrl: "",
+      initialXtream: null,
+      initialStalker: null,
+    });
+  }, [openSourceDialog]);
+
   const refreshHistory = useCallback(async () => {
     if (!playlist) {
       setHistoryEntries([]);
@@ -858,6 +868,10 @@ export default function App() {
   useEffect(() => {
     recentPlaylistsRef.current = recentPlaylists;
   }, [recentPlaylists]);
+  const startScreenRecentPlaylists = useMemo(
+    () => recentPlaylists.slice(0, START_SCREEN_RECENT_LIMIT),
+    [recentPlaylists],
+  );
   const previousScanStateRef = useRef(scanState);
   const osProgressTimerRef = useRef<number | null>(null);
   const lastOsProgressUpdateMsRef = useRef(0);
@@ -1767,24 +1781,40 @@ export default function App() {
                   </kbd>{" "}
                   to load an M3U playlist
                 </p>
-                <button
-                  onClick={handleOpen}
-                  className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-600/25 transition-colors"
-                  type="button"
-                >
-                  <FolderOpen className="w-4 h-4" />
-                  Open File
-                </button>
-                <button
-                  onClick={handleOpenFolder}
-                  className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors ml-2"
-                  type="button"
-                >
-                  <FolderOpen className="w-4 h-4" />
-                  Open Folder
-                </button>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    onClick={handleOpen}
+                    className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-600/25 transition-colors"
+                    type="button"
+                  >
+                    <FolderOpen className="w-4 h-4" />
+                    Open File
+                  </button>
+                  <button
+                    onClick={handleOpenFolder}
+                    className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
+                    type="button"
+                  >
+                    <FolderOpen className="w-4 h-4" />
+                    Open Folder
+                  </button>
+                  <button
+                    onClick={handleOpenUrl}
+                    className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
+                    type="button"
+                  >
+                    Add URL
+                  </button>
+                  <button
+                    onClick={handleOpenXtream}
+                    className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
+                    type="button"
+                  >
+                    Add Xtream
+                  </button>
+                </div>
 
-                {recentPlaylists.length > 0 && (
+                {startScreenRecentPlaylists.length > 0 && (
                   <div className="mt-6 text-left mx-auto max-w-xl">
                     <div className="flex items-center justify-between mb-2">
                       <p className="text-[12px] uppercase tracking-[0.08em] text-text-tertiary">
@@ -1801,7 +1831,7 @@ export default function App() {
                       </button>
                     </div>
                     <div className="space-y-1">
-                      {recentPlaylists.map((entry) => (
+                      {startScreenRecentPlaylists.map((entry) => (
                         <button
                           key={`${entry.kind}:${entry.value}`}
                           onClick={() => handleOpenRecent(entry)}
