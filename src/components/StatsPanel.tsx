@@ -7,6 +7,9 @@ interface StatsPanelProps {
   summary: ScanSummary | null;
   totalChannels: number;
   scanState: ScanState;
+  lowFpsCount: number;
+  mislabeledCount: number;
+  duplicateCount: number;
 }
 
 export const StatsPanel = memo(function StatsPanel({
@@ -14,8 +17,18 @@ export const StatsPanel = memo(function StatsPanel({
   summary,
   totalChannels,
   scanState,
+  lowFpsCount,
+  mislabeledCount,
+  duplicateCount,
 }: StatsPanelProps) {
   const stats = summary ?? progress;
+  const effectiveLowFpsCount = summary?.low_framerate ?? lowFpsCount;
+  const effectiveMislabeledCount = summary?.mislabeled ?? mislabeledCount;
+  const showRightStatus =
+    scanState === "paused" ||
+    effectiveLowFpsCount > 0 ||
+    effectiveMislabeledCount > 0 ||
+    duplicateCount > 0;
 
   return (
     <div className="flex items-center gap-4 px-4 py-2 text-[13px] border-t border-border-app bg-panel-subtle glass-material">
@@ -47,22 +60,31 @@ export const StatsPanel = memo(function StatsPanel({
               Score {summary.playlist_score.overall.toFixed(1)}/10
             </span>
           )}
-          {summary.low_framerate > 0 && (
-            <span className="text-orange-400">
-              ⚠ {summary.low_framerate} low fps
-            </span>
-          )}
-          {summary.mislabeled > 0 && (
-            <span className="text-orange-400">
-              ⚠ {summary.mislabeled} mislabeled
-            </span>
-          )}
         </>
       )}
-      {scanState === "paused" && (
-        <span className="text-yellow-400 font-medium uppercase tracking-[0.04em]">
-          Paused
-        </span>
+      {showRightStatus && (
+        <div className="ml-auto flex items-center gap-4">
+          {scanState === "paused" && (
+            <span className="text-yellow-400 font-medium uppercase tracking-[0.04em]">
+              Paused
+            </span>
+          )}
+          {effectiveLowFpsCount > 0 && (
+            <span className="text-orange-400">
+              ⚠ {effectiveLowFpsCount} low fps
+            </span>
+          )}
+          {effectiveMislabeledCount > 0 && (
+            <span className="text-orange-400">
+              ✕ {effectiveMislabeledCount} mislabeled
+            </span>
+          )}
+          {duplicateCount > 0 && (
+            <span className="text-orange-400">
+              ⚠ {duplicateCount} duplicates
+            </span>
+          )}
+        </div>
       )}
     </div>
   );

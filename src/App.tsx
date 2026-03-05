@@ -51,7 +51,6 @@ import { ChannelTable } from "./components/ChannelTable";
 import { PlaylistReportPanel } from "./components/PlaylistReportPanel";
 import { ThumbnailPanel } from "./components/ThumbnailPanel";
 import { StatsPanel } from "./components/StatsPanel";
-import { WarningsPanel } from "./components/WarningsPanel";
 import { ProgressBar } from "./components/ProgressBar";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { KeyboardShortcutsDialog } from "./components/KeyboardShortcutsDialog";
@@ -2012,16 +2011,14 @@ export default function App() {
         )}
       </div>
 
-      <WarningsPanel
-        lowFpsCount={uiMetrics.lowFpsCount}
-        mislabeledCount={uiMetrics.mislabeledCount}
-        duplicateCount={duplicateIndices.size}
-      />
       <StatsPanel
         progress={progress}
         summary={summary}
         scanState={scanState}
         totalChannels={playlist?.total_channels ?? 0}
+        lowFpsCount={uiMetrics.lowFpsCount}
+        mislabeledCount={uiMetrics.mislabeledCount}
+        duplicateCount={duplicateIndices.size}
       />
       <ProgressBar
         progress={progress}
