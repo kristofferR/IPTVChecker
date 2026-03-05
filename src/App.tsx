@@ -66,6 +66,7 @@ import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/hap
 import type { ExportScope } from "./lib/exportScope";
 import { isPrimaryModifierPressed } from "./lib/shortcuts";
 import { measureUiPerf, recordUiPerf, startLongTaskObserver } from "./lib/perf";
+import { shouldAutoRevealReportPanel } from "./lib/playlistReportVisibility";
 
 function errorToString(err: unknown): string {
   if (typeof err === "string") {
@@ -308,10 +309,7 @@ export default function App() {
     const saved = localStorage.getItem("sidebar-width");
     return saved ? Math.max(100, Math.min(600, Number(saved))) : 288;
   });
-  const [showReportPanel, setShowReportPanel] = useState(() => {
-    const saved = localStorage.getItem("report-panel-visible");
-    return saved == null ? true : saved === "1";
-  });
+  const [showReportPanel, setShowReportPanel] = useState(false);
   const [reportSidebarWidth, setReportSidebarWidth] = useState(() => {
     const saved = localStorage.getItem("report-sidebar-width");
     return saved ? Math.max(260, Math.min(700, Number(saved))) : 330;
@@ -363,6 +361,10 @@ export default function App() {
     () => validateRegexPattern(channelSearch),
     [channelSearch],
   );
+  const reportAutoRevealBlockedRef = useRef(false);
+  const reportAutoRevealDoneRef = useRef(false);
+  const reportWasAutoShownRef = useRef(false);
+  const reportAutoRevealPreviousScanStateRef = useRef(scanState);
 
   useEffect(() => {
     document.documentElement.dataset.platform = platform;
@@ -1404,12 +1406,61 @@ export default function App() {
   }, [sidebarWidth]);
 
   useEffect(() => {
-    localStorage.setItem("report-panel-visible", showReportPanel ? "1" : "0");
-  }, [showReportPanel]);
-
-  useEffect(() => {
     localStorage.setItem("report-sidebar-width", String(reportSidebarWidth));
   }, [reportSidebarWidth]);
+
+  useEffect(() => {
+    reportAutoRevealBlockedRef.current = false;
+    reportAutoRevealDoneRef.current = false;
+    reportWasAutoShownRef.current = false;
+    setShowReportPanel(false);
+  }, [playlist]);
+
+  useEffect(() => {
+    const previous = reportAutoRevealPreviousScanStateRef.current;
+    const scanJustStarted =
+      scanState === "scanning" &&
+      previous !== "scanning" &&
+      previous !== "paused";
+
+    if (scanJustStarted) {
+      reportAutoRevealBlockedRef.current = false;
+      reportAutoRevealDoneRef.current = false;
+      if (reportWasAutoShownRef.current && showReportPanel) {
+        setShowReportPanel(false);
+      }
+      reportWasAutoShownRef.current = false;
+    }
+
+    reportAutoRevealPreviousScanStateRef.current = scanState;
+  }, [scanState, showReportPanel]);
+
+  useEffect(() => {
+    if (!playlist || showReportPanel) {
+      return;
+    }
+    if (!settings.report_auto_reveal) {
+      return;
+    }
+    if (reportAutoRevealBlockedRef.current || reportAutoRevealDoneRef.current) {
+      return;
+    }
+
+    const isScanActive =
+      scanState === "scanning" ||
+      scanState === "paused" ||
+      scanState === "complete";
+    if (!isScanActive) {
+      return;
+    }
+    if (!shouldAutoRevealReportPanel(progress, playlist.total_channels)) {
+      return;
+    }
+
+    reportAutoRevealDoneRef.current = true;
+    reportWasAutoShownRef.current = true;
+    setShowReportPanel(true);
+  }, [playlist, progress, scanState, settings.report_auto_reveal, showReportPanel]);
 
   const handleSelectChannel = useCallback((result: ChannelResult) => {
     setSelectedChannel(result);
@@ -1419,9 +1470,32 @@ export default function App() {
     setShowSettings(true);
   }, []);
 
+  const markManualReportVisibility = useCallback((nextVisible: boolean) => {
+    reportWasAutoShownRef.current = false;
+    const isActiveScan = scanState === "scanning" || scanState === "paused";
+    if (!isActiveScan) {
+      return;
+    }
+    if (nextVisible) {
+      reportAutoRevealBlockedRef.current = false;
+      reportAutoRevealDoneRef.current = true;
+      return;
+    }
+    reportAutoRevealBlockedRef.current = true;
+  }, [scanState]);
+
   const handleToggleReport = useCallback(() => {
-    setShowReportPanel((current) => !current);
-  }, []);
+    setShowReportPanel((current) => {
+      const next = !current;
+      markManualReportVisibility(next);
+      return next;
+    });
+  }, [markManualReportVisibility]);
+
+  const handleCloseReport = useCallback(() => {
+    markManualReportVisibility(false);
+    setShowReportPanel(false);
+  }, [markManualReportVisibility]);
 
   const launchChannelInPlayer = useCallback(async (result: ChannelResult) => {
     try {
@@ -1933,7 +2007,7 @@ export default function App() {
             placement="right"
             widthPx={reportSidebarWidth}
             onResizeStart={handleReportSidebarDragStart}
-            onClose={() => setShowReportPanel(false)}
+            onClose={handleCloseReport}
           />
         )}
       </div>

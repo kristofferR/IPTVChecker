@@ -196,6 +196,7 @@ export interface AppSettings {
   theme: ThemePreference;
   log_level: string;
   show_prescan_filter: boolean;
+  report_auto_reveal: boolean;
   channel_logo_size: ChannelLogoSize;
   screenshot_format: ScreenshotFormat;
   screenshot_retention_count: number;

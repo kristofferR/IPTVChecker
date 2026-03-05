@@ -1,6 +1,7 @@
 import {
   hasScanStarted,
   languageCoverage,
+  shouldAutoRevealReportPanel,
   shouldShowContentCounts,
   shouldShowLanguageDistribution,
 } from "../src/lib/playlistReportVisibility";
@@ -36,5 +37,49 @@ describe("playlist report visibility rules", () => {
     expect(shouldShowLanguageDistribution(sparse)).toBe(false);
     expect(languageCoverage(rich)).toBe(0.75);
     expect(shouldShowLanguageDistribution(rich)).toBe(true);
+  });
+
+  test("report auto-reveal only triggers near completion on broad scans", () => {
+    expect(shouldAutoRevealReportPanel(null, 100)).toBe(false);
+
+    expect(
+      shouldAutoRevealReportPanel(
+        {
+          completed: 90,
+          total: 100,
+        },
+        100,
+      ),
+    ).toBe(true);
+
+    expect(
+      shouldAutoRevealReportPanel(
+        {
+          completed: 89,
+          total: 100,
+        },
+        100,
+      ),
+    ).toBe(false);
+
+    expect(
+      shouldAutoRevealReportPanel(
+        {
+          completed: 45,
+          total: 50,
+        },
+        100,
+      ),
+    ).toBe(false);
+
+    expect(
+      shouldAutoRevealReportPanel(
+        {
+          completed: 77,
+          total: 85,
+        },
+        100,
+      ),
+    ).toBe(true);
   });
 });

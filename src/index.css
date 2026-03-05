@@ -463,3 +463,33 @@ body {
     background: transparent !important;
   }
 }
+
+@keyframes report-panel-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes report-panel-slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.report-panel-enter-right {
+  animation: report-panel-slide-in-right 360ms ease-out;
+}
+
+.report-panel-enter-left {
+  animation: report-panel-slide-in-left 360ms ease-out;
+}

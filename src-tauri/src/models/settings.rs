@@ -79,6 +79,7 @@ pub struct AppSettings {
     pub theme: ThemePreference,
     pub log_level: String,
     pub show_prescan_filter: bool,
+    pub report_auto_reveal: bool,
     pub channel_logo_size: ChannelLogoSize,
     pub screenshot_format: ScreenshotFormat,
     pub screenshot_retention_count: u32,
@@ -202,6 +203,7 @@ impl Default for AppSettings {
             theme: ThemePreference::System,
             log_level: "error".to_string(),
             show_prescan_filter: false,
+            report_auto_reveal: true,
             channel_logo_size: ChannelLogoSize::default(),
             screenshot_format: ScreenshotFormat::default(),
             screenshot_retention_count: 1,
@@ -225,7 +227,10 @@ mod tests {
     fn default_low_fps_threshold_is_23() {
         let settings = AppSettings::default();
         assert_eq!(settings.low_fps_threshold, 23.0);
-        assert_eq!(settings.ffprobe_timeout_secs, super::DEFAULT_FFPROBE_TIMEOUT_SECS);
+        assert_eq!(
+            settings.ffprobe_timeout_secs,
+            super::DEFAULT_FFPROBE_TIMEOUT_SECS
+        );
         assert_eq!(
             settings.ffmpeg_bitrate_timeout_secs,
             super::DEFAULT_FFMPEG_BITRATE_TIMEOUT_SECS
@@ -237,6 +242,7 @@ mod tests {
         let settings: AppSettings = serde_json::from_value(serde_json::json!({}))
             .expect("settings should deserialize with defaults");
         assert!(settings.scan_notifications);
+        assert!(settings.report_auto_reveal);
         assert_eq!(settings.low_fps_threshold, 23.0);
         assert_eq!(settings.channel_logo_size, super::ChannelLogoSize::Small);
     }

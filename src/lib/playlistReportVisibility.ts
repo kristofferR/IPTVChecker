@@ -5,6 +5,14 @@ export type ReportScanState =
   | "complete"
   | "cancelled";
 
+export interface ReportScanProgressSnapshot {
+  completed: number;
+  total: number;
+}
+
+export const REPORT_AUTO_REVEAL_COMPLETION_THRESHOLD = 0.9;
+export const REPORT_AUTO_REVEAL_COVERAGE_THRESHOLD = 0.85;
+
 export function hasScanStarted(scanState: ReportScanState): boolean {
   return scanState !== "idle";
 }
@@ -36,4 +44,29 @@ export function shouldShowLanguageDistribution(
   minimumCoverage = 0.5,
 ): boolean {
   return languageCoverage(channels) > minimumCoverage;
+}
+
+export function shouldAutoRevealReportPanel(
+  progress: ReportScanProgressSnapshot | null,
+  playlistTotalChannels: number,
+  completionThreshold = REPORT_AUTO_REVEAL_COMPLETION_THRESHOLD,
+  coverageThreshold = REPORT_AUTO_REVEAL_COVERAGE_THRESHOLD,
+): boolean {
+  if (!progress) {
+    return false;
+  }
+
+  const scanTotal = Math.max(0, progress.total);
+  const fullPlaylistTotal = Math.max(0, playlistTotalChannels);
+  if (scanTotal === 0 || fullPlaylistTotal === 0) {
+    return false;
+  }
+
+  const scanCoverage = scanTotal / fullPlaylistTotal;
+  if (scanCoverage < coverageThreshold) {
+    return false;
+  }
+
+  const completionRatio = progress.completed / scanTotal;
+  return completionRatio >= completionThreshold;
 }

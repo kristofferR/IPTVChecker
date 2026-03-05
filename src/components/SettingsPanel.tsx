@@ -676,6 +676,22 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
 
                 <div className={rowClass}>
                   <div>
+                    <p className="text-[13px] font-medium">Auto-reveal report panel</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Slide in the playlist report near scan completion.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={draft.report_auto_reveal}
+                    onChange={(checked) =>
+                      updateSetting("report_auto_reveal", checked, { immediate: true })
+                    }
+                    ariaLabel="Auto-reveal report panel"
+                  />
+                </div>
+
+                <div className={rowClass}>
+                  <div>
                     <p className="text-[13px] font-medium">Channel logo size</p>
                     <p className="text-[11px] text-text-tertiary mt-0.5">
                       Controls logo size in the channel name column.

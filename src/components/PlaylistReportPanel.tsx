@@ -251,7 +251,9 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
 
   return (
     <aside
-      className={`relative h-full shrink-0 ${placement === "right" ? "border-l" : "border-r"} border-border-app bg-panel/70 backdrop-blur-sm overflow-auto`}
+      className={`relative h-full shrink-0 ${
+        placement === "right" ? "border-l report-panel-enter-right" : "border-r report-panel-enter-left"
+      } border-border-app bg-panel/70 backdrop-blur-sm overflow-auto`}
       style={{ width: `${widthPx}px` }}
     >
       {onResizeStart && (
