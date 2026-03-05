@@ -144,6 +144,16 @@ pub struct ScanSummary {
     pub drm: usize,
     pub low_framerate: usize,
     pub mislabeled: usize,
+    #[serde(default)]
+    pub playlist_score: Option<PlaylistScore>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PlaylistScore {
+    pub overall: f64,
+    pub ping: f64,
+    pub content: f64,
+    pub quality: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

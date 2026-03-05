@@ -15,8 +15,8 @@ use crate::models::backend_perf::BackendPerfSample;
 use crate::models::channel::{Channel, ChannelResult, ChannelStatus};
 use crate::models::playlist::PlaylistPreview;
 use crate::models::scan::{
-    RetryBackoff, ScanConfig, ScanErrorPayload, ScanEvent, ScanProgress, ScanResultBatchPayload,
-    ScanSummary,
+    PlaylistScore, RetryBackoff, ScanConfig, ScanErrorPayload, ScanEvent, ScanProgress,
+    ScanResultBatchPayload, ScanSummary,
 };
 use crate::models::scan_log::{ChannelDebugLog, ScanDebugLog};
 use crate::state::AppState;
@@ -512,8 +512,172 @@ impl ScanCounters {
             drm: self.drm,
             low_framerate: self.low_framerate,
             mislabeled: self.mislabeled,
+            playlist_score: None,
         }
     }
+}
+
+fn clamp_01(value: f64) -> f64 {
+    value.clamp(0.0, 1.0)
+}
+
+fn clamp_score_10(value: f64) -> f64 {
+    value.clamp(0.0, 10.0)
+}
+
+fn round_to_tenth(value: f64) -> f64 {
+    (value * 10.0).round() / 10.0
+}
+
+fn median_u64(values: &[u64]) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_unstable();
+    let mid = sorted.len() / 2;
+    if sorted.len() % 2 == 1 {
+        Some(sorted[mid] as f64)
+    } else {
+        Some((sorted[mid - 1] as f64 + sorted[mid] as f64) / 2.0)
+    }
+}
+
+fn is_hd_or_uhd(result: &ChannelResult) -> bool {
+    if let (Some(width), Some(height)) = (result.width, result.height) {
+        if width >= 1280 && height >= 720 {
+            return true;
+        }
+    }
+    if let Some(resolution) = result.resolution.as_ref() {
+        let normalized = resolution.to_ascii_lowercase();
+        return normalized.contains("720")
+            || normalized.contains("1080")
+            || normalized.contains("1440")
+            || normalized.contains("2160")
+            || normalized.contains("4k")
+            || normalized.contains("uhd");
+    }
+    false
+}
+
+fn codec_tier_score(codec: Option<&str>) -> f64 {
+    let Some(codec) = codec else {
+        return 0.4;
+    };
+    let normalized = codec.to_ascii_lowercase();
+    if normalized.contains("hevc") || normalized.contains("h265") || normalized.contains("h.265") {
+        return 1.0;
+    }
+    if normalized.contains("av1") {
+        return 1.0;
+    }
+    if normalized.contains("h264") || normalized.contains("h.264") || normalized.contains("avc") {
+        return 0.8;
+    }
+    if normalized.contains("mpeg") || normalized.contains("vp9") {
+        return 0.6;
+    }
+    0.5
+}
+
+fn compute_playlist_score(
+    results: &[ChannelResult],
+    total_channels: usize,
+) -> Option<PlaylistScore> {
+    if total_channels == 0 {
+        return None;
+    }
+
+    let alive_results = results
+        .iter()
+        .filter(|result| result.status == ChannelStatus::Alive)
+        .collect::<Vec<_>>();
+    let alive_count = alive_results.len();
+
+    let ping_score = {
+        let latencies = alive_results
+            .iter()
+            .filter_map(|result| result.latency_ms)
+            .collect::<Vec<_>>();
+        let p50 = median_u64(&latencies);
+        let raw = if let Some(p50) = p50 {
+            // 100ms ~= excellent (10), 1200ms ~= poor (0)
+            (1200.0 - p50) / 1100.0 * 10.0
+        } else {
+            0.0
+        };
+        clamp_score_10(raw)
+    };
+
+    let content_score = {
+        let alive_ratio = alive_count as f64 / total_channels as f64;
+        let unique_groups = results
+            .iter()
+            .map(|result| result.group.trim().to_ascii_lowercase())
+            .filter(|group| !group.is_empty())
+            .collect::<HashSet<_>>()
+            .len();
+        let diversity_ratio = clamp_01(unique_groups as f64 / 20.0);
+        let epg_covered = results
+            .iter()
+            .filter(|result| {
+                result
+                    .tvg_id
+                    .as_deref()
+                    .map(str::trim)
+                    .map(|value| !value.is_empty())
+                    .unwrap_or(false)
+            })
+            .count();
+        let epg_ratio = epg_covered as f64 / total_channels as f64;
+
+        clamp_score_10((alive_ratio * 0.6 + diversity_ratio * 0.2 + epg_ratio * 0.2) * 10.0)
+    };
+
+    let quality_score = {
+        if alive_results.is_empty() {
+            0.0
+        } else {
+            let hd_ratio = alive_results
+                .iter()
+                .filter(|result| is_hd_or_uhd(result))
+                .count() as f64
+                / alive_results.len() as f64;
+
+            let codec_avg = alive_results
+                .iter()
+                .map(|result| codec_tier_score(result.codec.as_deref()))
+                .sum::<f64>()
+                / alive_results.len() as f64;
+
+            let fps_known = alive_results
+                .iter()
+                .filter(|result| result.fps.is_some())
+                .count();
+            let fps_ratio = if fps_known == 0 {
+                0.0
+            } else {
+                alive_results
+                    .iter()
+                    .filter(|result| result.fps.unwrap_or_default() >= 25)
+                    .count() as f64
+                    / fps_known as f64
+            };
+
+            clamp_score_10((hd_ratio * 0.5 + codec_avg * 0.3 + fps_ratio * 0.2) * 10.0)
+        }
+    };
+
+    let overall_score =
+        clamp_score_10(ping_score * 0.25 + content_score * 0.40 + quality_score * 0.35);
+
+    Some(PlaylistScore {
+        overall: round_to_tenth(overall_score),
+        ping: round_to_tenth(ping_score),
+        content: round_to_tenth(content_score),
+        quality: round_to_tenth(quality_score),
+    })
 }
 
 fn filter_channels_by_selection(
@@ -812,6 +976,7 @@ async fn execute_scan_run(
             drm: 0,
             low_framerate: 0,
             mislabeled: 0,
+            playlist_score: None,
         };
 
         let _ = app.emit(
@@ -1522,7 +1687,8 @@ async fn execute_scan_run(
         }
     };
 
-    let summary = completed_scan.summary.clone();
+    let mut summary = completed_scan.summary.clone();
+    summary.playlist_score = compute_playlist_score(&completed_scan.results, summary.total);
     if cancel_token.is_cancelled() {
         let _ = app.emit(
             "scan://cancelled",
@@ -1899,6 +2065,45 @@ mod tests {
         assert_eq!(summary.drm, 1);
         assert_eq!(summary.low_framerate, 1);
         assert_eq!(summary.mislabeled, 1);
+        assert!(summary.playlist_score.is_none());
+    }
+
+    #[test]
+    fn compute_playlist_score_builds_weighted_subscores() {
+        let mut first = make_result(0, ChannelStatus::Alive, false, false);
+        first.group = "Sports".to_string();
+        first.latency_ms = Some(150);
+        first.tvg_id = Some("epg-a".to_string());
+        first.width = Some(1920);
+        first.height = Some(1080);
+        first.codec = Some("h264".to_string());
+        first.fps = Some(30);
+
+        let mut second = make_result(1, ChannelStatus::Alive, false, false);
+        second.group = "Movies".to_string();
+        second.latency_ms = Some(300);
+        second.tvg_id = Some("epg-b".to_string());
+        second.width = Some(3840);
+        second.height = Some(2160);
+        second.codec = Some("hevc".to_string());
+        second.fps = Some(50);
+
+        let mut third = make_result(2, ChannelStatus::Dead, false, false);
+        third.group = "Kids".to_string();
+
+        let score = compute_playlist_score(&[first, second, third], 3)
+            .expect("score should be present for non-empty scans");
+
+        assert!(score.ping > 0.0);
+        assert!(score.content > 0.0);
+        assert!(score.quality > 0.0);
+        assert!(score.overall > 0.0);
+        assert!(score.overall <= 10.0);
+    }
+
+    #[test]
+    fn compute_playlist_score_returns_none_for_empty_scans() {
+        assert!(compute_playlist_score(&[], 0).is_none());
     }
 
     #[tokio::test]

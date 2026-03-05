@@ -40,6 +40,11 @@ export const StatsPanel = memo(function StatsPanel({
       )}
       {summary && (
         <>
+          {summary.playlist_score && (
+            <span className="text-blue-400">
+              Score {summary.playlist_score.overall.toFixed(1)}/10
+            </span>
+          )}
           {summary.low_framerate > 0 && (
             <span className="text-orange-400">
               ⚠ {summary.low_framerate} low fps

@@ -147,6 +147,14 @@ export interface ScanSummary {
   drm: number;
   low_framerate: number;
   mislabeled: number;
+  playlist_score: PlaylistScore | null;
+}
+
+export interface PlaylistScore {
+  overall: number;
+  ping: number;
+  content: number;
+  quality: number;
 }
 
 export interface ScanEvent<T> {

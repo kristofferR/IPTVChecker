@@ -705,6 +705,7 @@ mod tests {
                 drm: 0,
                 low_framerate: 0,
                 mislabeled: 0,
+                playlist_score: None,
             },
             channels: Vec::new(),
         };

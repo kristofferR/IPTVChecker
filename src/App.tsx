@@ -168,8 +168,13 @@ function formatScanNotificationBody(stats: {
   drm: number;
   dead: number;
   geoblocked: number;
+  playlist_score?: { overall: number } | null;
 }): string {
-  return `Alive ${stats.alive} | DRM ${stats.drm} | Dead ${stats.dead} | Geoblocked ${stats.geoblocked}`;
+  const base = `Alive ${stats.alive} | DRM ${stats.drm} | Dead ${stats.dead} | Geoblocked ${stats.geoblocked}`;
+  if (!stats.playlist_score) {
+    return base;
+  }
+  return `${base} | Score ${stats.playlist_score.overall.toFixed(1)}/10`;
 }
 
 async function canSendNotifications(): Promise<boolean> {

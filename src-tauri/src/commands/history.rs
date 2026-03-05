@@ -494,6 +494,7 @@ mod tests {
                     .count(),
                 low_framerate: 0,
                 mislabeled: 0,
+                playlist_score: None,
             },
             group_filter: None,
             channel_search: None,
@@ -602,6 +603,7 @@ mod tests {
                 .count(),
             low_framerate: 0,
             mislabeled: 0,
+            playlist_score: None,
         }
     }
 
@@ -669,6 +671,7 @@ mod tests {
                     drm: 0,
                     low_framerate: 0,
                     mislabeled: 0,
+                    playlist_score: None,
                 },
                 group_filter: None,
                 channel_search: None,
