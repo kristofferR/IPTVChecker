@@ -787,7 +787,7 @@ pub async fn collect_probe_snapshot_with_timeout(
 /// Capture a screenshot frame from a stream via ffmpeg.
 /// Uses the unified command runner for consistent sidecar/PATH resolution
 /// and bounded diagnostics on failures/timeouts.
-pub async fn capture_screenshot(
+async fn capture_screenshot_with_format(
     app: &AppHandle,
     url: &str,
     output_dir: &str,
@@ -796,10 +796,6 @@ pub async fn capture_screenshot(
     format: ScreenshotFormat,
     cancel: &CancellationToken,
 ) -> Result<String, AppError> {
-    if cancel.is_cancelled() {
-        return Err(AppError::Cancelled);
-    }
-
     let output_path =
         unique_screenshot_output_path(Path::new(output_dir), file_name, format.extension());
     let output_str = output_path.to_string_lossy().to_string();
@@ -856,6 +852,48 @@ pub async fn capture_screenshot(
             "Failed to capture screenshot for {} - output file missing",
             file_name,
         )))
+    }
+}
+
+/// Capture a screenshot frame from a stream via ffmpeg.
+/// Automatically retries as PNG when WebP capture fails.
+pub async fn capture_screenshot(
+    app: &AppHandle,
+    url: &str,
+    output_dir: &str,
+    file_name: &str,
+    user_agent: &str,
+    format: ScreenshotFormat,
+    cancel: &CancellationToken,
+) -> Result<String, AppError> {
+    if cancel.is_cancelled() {
+        return Err(AppError::Cancelled);
+    }
+
+    match capture_screenshot_with_format(
+        app, url, output_dir, file_name, user_agent, format, cancel,
+    )
+    .await
+    {
+        Ok(path) => Ok(path),
+        Err(error) if format == ScreenshotFormat::Webp => {
+            log::warn!(
+                "WebP screenshot capture failed for {} ({}), retrying as PNG",
+                file_name,
+                error
+            );
+            capture_screenshot_with_format(
+                app,
+                url,
+                output_dir,
+                file_name,
+                user_agent,
+                ScreenshotFormat::Png,
+                cancel,
+            )
+            .await
+        }
+        Err(error) => Err(error),
     }
 }
 
