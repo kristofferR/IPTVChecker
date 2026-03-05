@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import type { ChannelLogoSize, ChannelResult } from "../lib/types";
 import type { ColumnDefinition } from "../lib/tableColumns";
-import { Radio, Tv } from "lucide-react";
+import { Play, Radio, Tv } from "lucide-react";
 import { StatusBadge } from "./StatusBadge";
 import { extractTvgLogoUrl } from "../lib/extinf";
 import { channelLogoPixels, channelRowHeightPixels } from "../lib/channelLogoSize";
@@ -37,6 +37,7 @@ interface ChannelRowProps {
   tableWidth: number;
   onRowDoubleClick?: (event: React.MouseEvent<HTMLDivElement>) => void;
   onRowContextMenu?: (event: React.MouseEvent<HTMLDivElement>) => void;
+  onPlayChannel?: (result: ChannelResult) => void;
 }
 
 function ChannelRowImpl({
@@ -52,6 +53,7 @@ function ChannelRowImpl({
   tableWidth,
   onRowDoubleClick,
   onRowContextMenu,
+  onPlayChannel,
 }: ChannelRowProps) {
   const isAlive = result.status === "alive";
   const logoUrl = useMemo(() => extractTvgLogoUrl(result.extinf_line), [result.extinf_line]);
@@ -214,7 +216,7 @@ function ChannelRowImpl({
   return (
     <div
       data-row-index={rowIndex}
-      className={`channel-row select-none grid items-center px-4 text-sm border-b hover:bg-panel-subtle ${
+      className={`channel-row group relative select-none grid items-center px-4 text-sm border-b hover:bg-panel-subtle ${
         selected ? "selected bg-panel-subtle border-transparent" : "border-border-subtle"
       } ${duplicate && !selected ? "bg-amber-500/8" : ""} ${
         duplicate ? "ring-1 ring-amber-500/20" : ""
@@ -246,6 +248,21 @@ function ChannelRowImpl({
           </div>
         );
       })}
+      {onPlayChannel && (
+        <div className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto z-10">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPlayChannel(result);
+            }}
+            className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-600 hover:bg-blue-500 text-white shadow-md transition-colors"
+            title="Open in player"
+          >
+            <Play className="w-3.5 h-3.5 ml-0.5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -266,7 +283,8 @@ function equalChannelRowProps(
     previous.tableWidth === next.tableWidth &&
     previous.onRowClick === next.onRowClick &&
     previous.onRowDoubleClick === next.onRowDoubleClick &&
-    previous.onRowContextMenu === next.onRowContextMenu
+    previous.onRowContextMenu === next.onRowContextMenu &&
+    previous.onPlayChannel === next.onPlayChannel
   );
 }
 

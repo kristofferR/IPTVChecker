@@ -1148,6 +1148,7 @@ export function ChannelTable({
                       onRowClick={handleRowClick}
                       onRowDoubleClick={handleRowDoubleClick}
                       onRowContextMenu={handleRowContextMenu}
+                      onPlayChannel={onOpenChannel}
                       selected={selectedIndices.has(result.index)}
                       duplicate={duplicateIndices.has(result.index)}
                       focused={focusedRow === virtualRow.index}
