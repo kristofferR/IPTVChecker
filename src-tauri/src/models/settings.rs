@@ -49,7 +49,7 @@ pub enum ChannelLogoSize {
 
 impl Default for ChannelLogoSize {
     fn default() -> Self {
-        Self::Medium
+        Self::Small
     }
 }
 
@@ -141,6 +141,6 @@ mod tests {
             .expect("settings should deserialize with defaults");
         assert!(settings.scan_notifications);
         assert_eq!(settings.low_fps_threshold, 23.0);
-        assert_eq!(settings.channel_logo_size, super::ChannelLogoSize::Medium);
+        assert_eq!(settings.channel_logo_size, super::ChannelLogoSize::Small);
     }
 }

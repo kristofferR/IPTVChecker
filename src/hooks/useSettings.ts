@@ -20,7 +20,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   theme: "system",
   log_level: "error",
   show_prescan_filter: false,
-  channel_logo_size: "medium",
+  channel_logo_size: "small",
   screenshot_format: "webp",
   screenshot_retention_count: 1,
   low_space_threshold_gb: 5.0,
