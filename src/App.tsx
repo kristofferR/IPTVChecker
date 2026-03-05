@@ -1287,6 +1287,7 @@ export default function App() {
   openHistoryPanelRef.current = openHistoryPanel;
   const checkForUpdatesRef = useRef(checkForUpdates);
   checkForUpdatesRef.current = checkForUpdates;
+  const handleToggleReportRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     let cancelled = false;
@@ -1316,6 +1317,7 @@ export default function App() {
         listen("menu://export-filtered-m3u", () => queueExport("m3u")),
         listen("menu://export-scan-log", () => queueExport("scanlog")),
         listen("menu://toggle-sidebar", () => setSidebarHidden((h) => !h)),
+        listen("menu://toggle-report", () => handleToggleReportRef.current()),
         listen("menu://toggle-prescan-filter", () => {
           const current = settingsRef.current;
           void saveSettingsRef.current({ ...current, show_prescan_filter: !current.show_prescan_filter });
@@ -1520,6 +1522,7 @@ export default function App() {
       return next;
     });
   }, [markManualReportVisibility]);
+  handleToggleReportRef.current = handleToggleReport;
 
   const handleCloseReport = useCallback(() => {
     markManualReportVisibility(false);

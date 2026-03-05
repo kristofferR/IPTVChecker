@@ -301,6 +301,10 @@ pub fn run() {
             MenuItemBuilder::with_id("menu.view.toggle_sidebar", "Toggle Sidebar")
                 .accelerator("Cmd+Shift+L")
                 .build(app)?;
+        let toggle_report_item =
+            MenuItemBuilder::with_id("menu.view.toggle_report", "Toggle Report")
+                .accelerator("Cmd+Shift+R")
+                .build(app)?;
         let toggle_prescan_item =
             MenuItemBuilder::with_id("menu.view.toggle_prescan_filter", "Show Pre-scan Filter")
                 .accelerator("Cmd+Shift+F")
@@ -312,6 +316,7 @@ pub fn run() {
 
         let view_menu = SubmenuBuilder::new(app, "View")
             .item(&toggle_sidebar_item)
+            .item(&toggle_report_item)
             .item(&toggle_prescan_item)
             .item(&clear_filters_item)
             .text("menu.view.history", "Scan History")
@@ -406,6 +411,10 @@ pub fn run() {
             MenuItemBuilder::with_id("menu.view.toggle_sidebar", "Toggle Sidebar")
                 .accelerator("Ctrl+Shift+L")
                 .build(app)?;
+        let toggle_report_item =
+            MenuItemBuilder::with_id("menu.view.toggle_report", "Toggle Report")
+                .accelerator("Ctrl+Shift+R")
+                .build(app)?;
         let toggle_prescan_item =
             MenuItemBuilder::with_id("menu.view.toggle_prescan_filter", "Show Pre-scan Filter")
                 .accelerator("Ctrl+Shift+F")
@@ -417,6 +426,7 @@ pub fn run() {
 
         let view_menu = SubmenuBuilder::new(app, "View")
             .item(&toggle_sidebar_item)
+            .item(&toggle_report_item)
             .item(&toggle_prescan_item)
             .item(&clear_filters_item)
             .text("menu.view.history", "Scan History")
@@ -488,6 +498,7 @@ pub fn run() {
             "menu.file.export_filtered_m3u" => Some("menu://export-filtered-m3u"),
             "menu.file.export_scan_log" => Some("menu://export-scan-log"),
             "menu.view.toggle_sidebar" => Some("menu://toggle-sidebar"),
+            "menu.view.toggle_report" => Some("menu://toggle-report"),
             "menu.view.toggle_prescan_filter" => Some("menu://toggle-prescan-filter"),
             "menu.view.clear_filters" => Some("menu://clear-filters"),
             "menu.view.history" => Some("menu://open-history"),
