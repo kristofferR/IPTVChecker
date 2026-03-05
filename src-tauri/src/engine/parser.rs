@@ -8,6 +8,7 @@ use crate::models::channel::Channel;
 use crate::models::playlist::PlaylistPreview;
 
 const PLAYLIST_GROUP_PREFIX: &str = "Playlist: ";
+const MAX_PLAYLIST_DISCOVERY_DEPTH: usize = 64;
 
 pub fn find_unquoted_comma(input: &str) -> Option<usize> {
     let bytes = input.as_bytes();
@@ -36,7 +37,8 @@ pub fn find_unquoted_comma(input: &str) -> Option<usize> {
     None
 }
 
-fn parse_extinf_attributes(extinf_line: &str) -> Vec<(String, String)> {
+/// Parse key-value attributes from an #EXTINF line header.
+pub fn parse_extinf_attributes(extinf_line: &str) -> Vec<(String, String)> {
     let header_end = find_unquoted_comma(extinf_line).unwrap_or(extinf_line.len());
     let header = &extinf_line[..header_end];
     let payload = header
@@ -199,37 +201,24 @@ fn is_line_needed(line: &str, group_filter: &Option<String>, pattern: &Option<Re
     true
 }
 
-/// Parse an M3U/M3U8 file and return a PlaylistPreview.
-pub fn parse_playlist(
-    file_path: &str,
-    group_filter: &Option<String>,
+fn compile_channel_search_pattern(
     channel_search: &Option<String>,
+) -> Result<Option<Regex>, AppError> {
+    if let Some(search) = channel_search.as_ref() {
+        return Ok(Some(Regex::new(&format!("(?i){}", search)).map_err(
+            |e| AppError::Parse(format!("Invalid regex '{}': {}", search, e)),
+        )?));
+    }
+    Ok(None)
+}
+
+fn parse_playlist_reader<R: BufRead>(
+    reader: R,
+    file_path: &str,
+    playlist_name: String,
+    group_filter: &Option<String>,
+    pattern: &Option<Regex>,
 ) -> Result<PlaylistPreview, AppError> {
-    let path = Path::new(file_path);
-    if !path.exists() {
-        return Err(AppError::FileNotFound(file_path.to_string()));
-    }
-    if path.is_dir() {
-        return parse_playlist_directory(file_path, group_filter, channel_search);
-    }
-
-    log::info!("Parsing playlist: {}", file_path);
-    let file = std::fs::File::open(path).map_err(AppError::Io)?;
-    let reader = std::io::BufReader::new(file);
-    let playlist_name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| file_path.to_string());
-
-    let pattern = if let Some(ref search) = channel_search {
-        Some(
-            Regex::new(&format!("(?i){}", search))
-                .map_err(|e| AppError::Parse(format!("Invalid regex '{}': {}", search, e)))?,
-        )
-    } else {
-        None
-    };
-
     let mut channels = Vec::new();
     let mut groups = BTreeSet::new();
     let mut source_index = 0usize;
@@ -254,7 +243,7 @@ pub fn parse_playlist(
             // Always collect groups for the filter dropdown, even for skipped channels.
             groups.insert(get_group_name(&line));
 
-            if is_line_needed(&line, group_filter, &pattern) {
+            if is_line_needed(&line, group_filter, pattern) {
                 pending_extinf = Some(line);
             }
             continue;
@@ -303,6 +292,50 @@ pub fn parse_playlist(
     })
 }
 
+/// Parse an M3U/M3U8 file and return a PlaylistPreview.
+pub fn parse_playlist(
+    file_path: &str,
+    group_filter: &Option<String>,
+    channel_search: &Option<String>,
+) -> Result<PlaylistPreview, AppError> {
+    let path = Path::new(file_path);
+    if !path.exists() {
+        return Err(AppError::FileNotFound(file_path.to_string()));
+    }
+    if path.is_dir() {
+        return parse_playlist_directory(file_path, group_filter, channel_search);
+    }
+
+    log::info!("Parsing playlist: {}", file_path);
+    let file = std::fs::File::open(path).map_err(AppError::Io)?;
+    let reader = std::io::BufReader::new(file);
+    let playlist_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| file_path.to_string());
+    let pattern = compile_channel_search_pattern(channel_search)?;
+
+    parse_playlist_reader(reader, file_path, playlist_name, group_filter, &pattern)
+}
+
+/// Parse M3U/M3U8 data from memory (used by fuzz targets and in-memory tests).
+pub fn parse_m3u(
+    input: &[u8],
+    playlist_name: &str,
+    group_filter: &Option<String>,
+    channel_search: &Option<String>,
+) -> Result<PlaylistPreview, AppError> {
+    let pattern = compile_channel_search_pattern(channel_search)?;
+    let reader = std::io::BufReader::new(std::io::Cursor::new(input));
+    parse_playlist_reader(
+        reader,
+        "<memory>",
+        playlist_name.to_string(),
+        group_filter,
+        &pattern,
+    )
+}
+
 fn parse_playlist_directory(
     dir_path: &str,
     group_filter: &Option<String>,
@@ -315,14 +348,7 @@ fn parse_playlist_directory(
         ));
     }
 
-    let pattern = if let Some(ref search) = channel_search {
-        Some(
-            Regex::new(&format!("(?i){}", search))
-                .map_err(|e| AppError::Parse(format!("Invalid regex '{}': {}", search, e)))?,
-        )
-    } else {
-        None
-    };
+    let pattern = compile_channel_search_pattern(channel_search)?;
 
     let mut channels = Vec::new();
     let mut groups = BTreeSet::new();
@@ -385,12 +411,23 @@ pub fn find_playlists_in_dir(dir_path: &str) -> Result<Vec<String>, AppError> {
     }
 
     let mut playlists = Vec::new();
-    collect_playlists_recursive(path, &mut playlists)?;
+    collect_playlists_recursive(path, &mut playlists, 0)?;
 
     Ok(playlists)
 }
 
-fn collect_playlists_recursive(path: &Path, playlists: &mut Vec<String>) -> Result<(), AppError> {
+fn collect_playlists_recursive(
+    path: &Path,
+    playlists: &mut Vec<String>,
+    depth: usize,
+) -> Result<(), AppError> {
+    if depth > MAX_PLAYLIST_DISCOVERY_DEPTH {
+        return Err(AppError::Parse(format!(
+            "Directory nesting exceeds maximum depth of {}",
+            MAX_PLAYLIST_DISCOVERY_DEPTH
+        )));
+    }
+
     let mut entries: Vec<_> = std::fs::read_dir(path)
         .map_err(AppError::Io)?
         .filter_map(|e| e.ok())
@@ -401,7 +438,7 @@ fn collect_playlists_recursive(path: &Path, playlists: &mut Vec<String>) -> Resu
         let entry_path = entry.path();
         let file_type = entry.file_type().map_err(AppError::Io)?;
         if file_type.is_dir() {
-            collect_playlists_recursive(&entry_path, playlists)?;
+            collect_playlists_recursive(&entry_path, playlists, depth + 1)?;
             continue;
         }
 
@@ -624,6 +661,50 @@ http://example.com/beta.m3u8
         assert_eq!(playlist_filtered.total_channels, 1);
         assert_eq!(playlist_filtered.channels[0].name, "Beta");
         assert_eq!(playlist_filtered.channels[0].index, 1);
+
+        std::fs::remove_dir_all(root).expect("fixture directory should be removable");
+    }
+
+    #[test]
+    fn test_parse_m3u_from_memory() {
+        let payload =
+            b"#EXTM3U\n#EXTINF:-1 group-title=\"News\",Channel One\nhttp://example.com/live.m3u8\n";
+        let parsed = parse_m3u(payload, "memory-playlist.m3u8", &None, &None)
+            .expect("in-memory parser should succeed");
+
+        assert_eq!(parsed.file_path, "<memory>");
+        assert_eq!(parsed.file_name, "memory-playlist.m3u8");
+        assert_eq!(parsed.total_channels, 1);
+        assert_eq!(parsed.channels[0].name, "Channel One");
+        assert_eq!(parsed.channels[0].group, "News");
+        assert_eq!(parsed.channels[0].url, "http://example.com/live.m3u8");
+    }
+
+    #[test]
+    fn test_find_playlists_in_dir_enforces_depth_limit() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be monotonic")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("iptv-parser-depth-{unique}"));
+        std::fs::create_dir_all(&root).expect("root fixture dir should be created");
+
+        let mut nested = root.clone();
+        for level in 0..=MAX_PLAYLIST_DISCOVERY_DEPTH + 1 {
+            nested = nested.join(format!("d{}", level));
+            std::fs::create_dir_all(&nested).expect("nested fixture dir should be created");
+        }
+        std::fs::write(
+            nested.join("too-deep.m3u8"),
+            "#EXTM3U\n#EXTINF:-1,Deep\nhttp://example.com/deep.m3u8\n",
+        )
+        .expect("deep fixture file should be writable");
+
+        let error = find_playlists_in_dir(&root.to_string_lossy())
+            .expect_err("depth guard should reject deeply nested directories");
+        assert!(error
+            .to_string()
+            .contains("Directory nesting exceeds maximum depth"));
 
         std::fs::remove_dir_all(root).expect("fixture directory should be removable");
     }

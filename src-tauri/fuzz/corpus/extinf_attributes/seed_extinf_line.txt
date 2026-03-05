@@ -1,0 +1,1 @@
+#EXTINF:-1 tvg-id="abc" tvg-name="News, Intl" group-title="World" tvg-logo="https://example.com/logo.png",Example News

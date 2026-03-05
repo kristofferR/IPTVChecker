@@ -1,0 +1,3 @@
+#EXTM3U
+#EXTINF:-1 tvg-name="News" group-title="World",Example News
+http://example.com/live/news.m3u8

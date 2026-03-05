@@ -1,0 +1,33 @@
+[package]
+name = "iptv-checker-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+iptv-checker = { path = ".." }
+
+[[bin]]
+name = "parse_m3u"
+path = "fuzz_targets/parse_m3u.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "extinf_attributes"
+path = "fuzz_targets/extinf_attributes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "playlist_discovery_depth"
+path = "fuzz_targets/playlist_discovery_depth.rs"
+test = false
+doc = false
+bench = false

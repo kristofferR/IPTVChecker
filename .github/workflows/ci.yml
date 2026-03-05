@@ -78,3 +78,43 @@ jobs:
       - name: Run Rust tests
         working-directory: src-tauri
         run: cargo test
+
+  parser-fuzz:
+    name: Parser Fuzz Smoke
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Setup Rust (nightly for cargo-fuzz)
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Fuzz parse_m3u (20s)
+        working-directory: src-tauri
+        run: cargo +nightly fuzz run parse_m3u --sanitizer none -- -max_total_time=20
+
+      - name: Fuzz extinf_attributes (20s)
+        working-directory: src-tauri
+        run: cargo +nightly fuzz run extinf_attributes --sanitizer none -- -max_total_time=20
+
+      - name: Fuzz playlist_discovery_depth (20s)
+        working-directory: src-tauri
+        run: cargo +nightly fuzz run playlist_discovery_depth --sanitizer none -- -max_total_time=20
