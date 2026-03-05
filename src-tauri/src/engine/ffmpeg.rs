@@ -35,10 +35,18 @@ fn resolve_binary(app: &AppHandle, name: &str) -> String {
     } else {
         ""
     };
-    let sidecar_name = format!("{name}-{TARGET_TRIPLE}{ext}");
 
     if let Ok(dir) = app.path().resource_dir() {
+        // Production builds: binary has platform triple suffix
+        let sidecar_name = format!("{name}-{TARGET_TRIPLE}{ext}");
         let path = dir.join(&sidecar_name);
+        if path.exists() {
+            return path.to_string_lossy().to_string();
+        }
+
+        // Dev builds: Tauri copies external binaries without the triple suffix
+        let dev_name = format!("{name}{ext}");
+        let path = dir.join(&dev_name);
         if path.exists() {
             return path.to_string_lossy().to_string();
         }
@@ -806,7 +814,7 @@ async fn capture_screenshot_with_format(
     // streams don't support it reliably and it causes hangs.
     let mut args = vec!["-y", "-user_agent", user_agent, "-i", url, "-frames:v", "1"];
     if format == ScreenshotFormat::Webp {
-        args.extend_from_slice(&["-quality", "90"]);
+        args.extend_from_slice(&["-c:v", "libwebp", "-quality", "90", "-pix_fmt", "yuv420p"]);
     }
     args.push(&output_str);
 
