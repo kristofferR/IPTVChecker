@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Cross-platform IPTV Stream Checker"
 authors = []
 edition = "2021"
+default-run = "iptv-checker"
 
 [lib]
 name = "iptv_checker_lib"

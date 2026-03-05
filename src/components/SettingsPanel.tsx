@@ -577,9 +577,6 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
               Preferences
             </p>
             <h2 className="text-[18px] font-semibold text-text-primary">Settings</h2>
-            <p className="text-[12px] text-text-secondary mt-1">
-              Changes are applied automatically.
-            </p>
           </div>
           <button
             onClick={closePanel}
