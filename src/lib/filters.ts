@@ -212,6 +212,9 @@ export function filterResults(
       if (statusFilter === "audio_only") {
         return r.audio_only;
       }
+      if (statusFilter === "mislabeled") {
+        return r.label_mismatches.length > 0;
+      }
       if (statusFilter === "geoblocked") {
         if (
           r.status !== "geoblocked" &&

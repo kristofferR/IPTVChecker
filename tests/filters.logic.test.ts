@@ -10,6 +10,7 @@ function makeResult(
     group: string;
     status: ChannelStatus;
     audioOnly?: boolean;
+    labelMismatches?: string[];
   },
 ): ChannelResult {
   return {
@@ -30,7 +31,7 @@ function makeResult(
     audio_codec: null,
     audio_only: options.audioOnly ?? false,
     screenshot_path: null,
-    label_mismatches: [],
+    label_mismatches: options.labelMismatches ?? [],
     low_framerate: false,
     error_message: null,
     channel_id: `id-${index}`,
@@ -96,5 +97,21 @@ describe("filterResults", () => {
     expect(filterResults(results, "", "all", "audio_only").map((r) => r.index)).toEqual(
       [2],
     );
+  });
+
+  it("supports mislabeled status filter", () => {
+    const resultsWithMislabeled = [
+      ...results,
+      makeResult(3, {
+        name: "HD News",
+        playlist: "Primary",
+        group: "News",
+        status: "alive",
+        labelMismatches: ["Resolution mismatch: labeled HD but actual SD"],
+      }),
+    ];
+    expect(
+      filterResults(resultsWithMislabeled, "", "all", "mislabeled").map((r) => r.index),
+    ).toEqual([3]);
   });
 });
