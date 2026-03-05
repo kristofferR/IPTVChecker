@@ -74,8 +74,14 @@ export function ThumbnailPanel({
     screenshotsEnabled &&
     !showLoadingPlaceholder &&
     !screenshotUrl &&
+    !!result.screenshot_path &&
+    screenshotLoadError;
+  const showNoThumbnailCaptured =
+    screenshotsEnabled &&
+    !showLoadingPlaceholder &&
+    !screenshotUrl &&
     result.status === "alive" &&
-    (screenshotLoadError || !result.screenshot_path);
+    !result.screenshot_path;
   const showScreenshotsDisabled =
     !screenshotsEnabled &&
     result.status === "alive" &&
@@ -120,6 +126,12 @@ export function ThumbnailPanel({
           <p className="text-[11px] text-red-200/80">
             {lastErrorReason ? `Capture failed: ${lastErrorReason}` : "Capture timed out or decode failed."}
           </p>
+        </div>
+      ) : showNoThumbnailCaptured ? (
+        <div className="flex h-[180px] flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
+          <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
+          <p className="text-[12px] font-medium text-text-secondary">No thumbnail captured</p>
+          <p className="text-[11px] text-text-tertiary">This channel scanned successfully, but no frame was saved.</p>
         </div>
       ) : showScreenshotsDisabled ? (
         <div className="flex h-[180px] flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
