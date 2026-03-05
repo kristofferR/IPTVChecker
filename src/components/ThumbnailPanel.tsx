@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { CircleHelp, X } from "lucide-react";
 import type { ChannelResult } from "../lib/types";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
 import { StatusBadge } from "./StatusBadge";
@@ -186,9 +186,18 @@ export function ThumbnailPanel({ result, screenshotUrl, lightboxOpen, onLightbox
                 alt={result.name}
                 className="block max-h-[84vh] max-w-[88vw] rounded-xl border border-white/15 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]"
               />
+            ) : result.screenshot_path ? (
+              <div className="w-[400px] h-[300px] rounded-xl border border-white/15 bg-black/60 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]" />
             ) : (
-              <div className="flex items-center justify-center w-[400px] h-[300px] rounded-xl border border-white/15 bg-black/60 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]">
-                <X className="w-24 h-24 text-red-500/80" strokeWidth={2.5} />
+              <div className="flex flex-col items-center justify-center gap-2 w-[400px] h-[300px] rounded-xl border border-white/15 bg-black/60 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]">
+                {result.status === "pending" || result.status === "checking" ? (
+                  <>
+                    <CircleHelp className="w-24 h-24 text-white/40" strokeWidth={1.5} />
+                    <span className="text-white/50 text-[14px] font-medium">Unscanned</span>
+                  </>
+                ) : (
+                  <X className="w-24 h-24 text-red-500/80" strokeWidth={2.5} />
+                )}
               </div>
             )}
           </div>

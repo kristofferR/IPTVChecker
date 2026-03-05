@@ -1053,9 +1053,7 @@ export default function App() {
         const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
         if (tag === "input" || tag === "textarea" || tag === "select" || (e.target as HTMLElement)?.isContentEditable) return;
         e.preventDefault();
-        if (screenshotUrlRef.current) {
-          setLightboxOpen((prev) => !prev);
-        }
+        setLightboxOpen((prev) => !prev);
       }
       if (e.key === "Escape") {
         if (lightboxOpenRef.current) {
@@ -1414,10 +1412,6 @@ export default function App() {
 
   // Load screenshot via custom Tauri command (bypasses fs/asset scope issues)
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
-  const screenshotUrlRef = useRef<string | null>(null);
-  useEffect(() => {
-    screenshotUrlRef.current = screenshotUrl;
-  }, [screenshotUrl]);
   const screenshotPathRef = useRef<string | null>(null);
   useEffect(() => {
     const path = liveSelectedChannel?.screenshot_path?.trim() || null;
