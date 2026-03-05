@@ -1437,6 +1437,8 @@ export default function App() {
 
   // Load screenshot via custom Tauri command (bypasses fs/asset scope issues)
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
+  const [screenshotLoading, setScreenshotLoading] = useState(false);
+  const [screenshotLoadError, setScreenshotLoadError] = useState(false);
   const screenshotPathRef = useRef<string | null>(null);
   const screenshotCacheRef = useRef(new Map<string, string>());
   useEffect(() => {
@@ -1449,25 +1451,37 @@ export default function App() {
 
     if (!path) {
       setScreenshotUrl(null);
+      setScreenshotLoading(false);
+      setScreenshotLoadError(false);
       return;
     }
 
     const cached = screenshotCacheRef.current.get(path);
     if (cached) {
       setScreenshotUrl(cached);
+      setScreenshotLoading(false);
+      setScreenshotLoadError(false);
       return;
     }
 
     let stale = false;
+    setScreenshotLoading(true);
+    setScreenshotLoadError(false);
     readScreenshot(path)
       .then((dataUrl) => {
         if (!stale) {
           screenshotCacheRef.current.set(path, dataUrl);
           setScreenshotUrl(dataUrl);
+          setScreenshotLoading(false);
+          setScreenshotLoadError(false);
         }
       })
       .catch(() => {
-        if (!stale) setScreenshotUrl(null);
+        if (!stale) {
+          setScreenshotUrl(null);
+          setScreenshotLoading(false);
+          setScreenshotLoadError(true);
+        }
       });
     return () => {
       stale = true;
@@ -1742,6 +1756,9 @@ export default function App() {
             <ThumbnailPanel
               result={liveSelectedChannel}
               screenshotUrl={screenshotUrl}
+              screenshotLoading={screenshotLoading}
+              screenshotLoadError={screenshotLoadError}
+              screenshotsEnabled={!settings.skip_screenshots}
               lightboxOpen={lightboxOpen}
               onLightboxChange={setLightboxOpen}
             />

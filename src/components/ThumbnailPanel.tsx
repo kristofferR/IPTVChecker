@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { CircleHelp, X } from "lucide-react";
+import { CircleHelp, ImageOff, LoaderCircle, X } from "lucide-react";
 import type { ChannelResult } from "../lib/types";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
 import { StatusBadge } from "./StatusBadge";
@@ -8,11 +8,22 @@ import { StatusBadge } from "./StatusBadge";
 interface ThumbnailPanelProps {
   result: ChannelResult | null;
   screenshotUrl: string | null;
+  screenshotLoading: boolean;
+  screenshotLoadError: boolean;
+  screenshotsEnabled: boolean;
   lightboxOpen: boolean;
   onLightboxChange: (open: boolean) => void;
 }
 
-export function ThumbnailPanel({ result, screenshotUrl, lightboxOpen, onLightboxChange }: ThumbnailPanelProps) {
+export function ThumbnailPanel({
+  result,
+  screenshotUrl,
+  screenshotLoading,
+  screenshotLoadError,
+  screenshotsEnabled,
+  lightboxOpen,
+  onLightboxChange,
+}: ThumbnailPanelProps) {
   const [lightboxRendered, setLightboxRendered] = useState(false);
   const [lightboxVisible, setLightboxVisible] = useState(false);
 
@@ -55,6 +66,20 @@ export function ThumbnailPanel({ result, screenshotUrl, lightboxOpen, onLightbox
     result.error_reason?.trim() ||
     result.last_error_reason?.trim() ||
     null;
+  const waitingForScanResult = result.status === "pending" || result.status === "checking";
+  const loadingStoredScreenshot =
+    screenshotLoading || (!!result.screenshot_path && !screenshotUrl && !screenshotLoadError);
+  const showLoadingPlaceholder = screenshotsEnabled && (waitingForScanResult || loadingStoredScreenshot);
+  const showScreenshotError =
+    screenshotsEnabled &&
+    !showLoadingPlaceholder &&
+    !screenshotUrl &&
+    result.status === "alive" &&
+    (screenshotLoadError || !result.screenshot_path);
+  const showScreenshotsDisabled =
+    !screenshotsEnabled &&
+    result.status === "alive" &&
+    !screenshotUrl;
 
   return (
     <div className="native-scroll flex flex-col gap-3 p-4 overflow-y-auto">
@@ -63,7 +88,7 @@ export function ThumbnailPanel({ result, screenshotUrl, lightboxOpen, onLightbox
         <h3 className="text-[14px] font-semibold truncate">{result.name}</h3>
       </div>
 
-      {screenshotUrl && (
+      {screenshotUrl ? (
         <button
           type="button"
           onClick={openLightbox}
@@ -78,7 +103,31 @@ export function ThumbnailPanel({ result, screenshotUrl, lightboxOpen, onLightbox
             Click to enlarge
           </div>
         </button>
-      )}
+      ) : showLoadingPlaceholder ? (
+        <div className="relative h-[180px] overflow-hidden rounded-lg border border-border-app bg-panel-subtle">
+          <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-panel to-panel-subtle" />
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-secondary">
+            <LoaderCircle className="h-5 w-5 animate-spin" />
+            <span className="text-[11px] font-medium">
+              {waitingForScanResult ? "Waiting for scan result..." : "Loading thumbnail..."}
+            </span>
+          </div>
+        </div>
+      ) : showScreenshotError ? (
+        <div className="flex h-[180px] flex-col items-center justify-center gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 text-center">
+          <ImageOff className="h-9 w-9 text-red-300/90" strokeWidth={1.75} />
+          <p className="text-[12px] font-medium text-red-200">Thumbnail unavailable</p>
+          <p className="text-[11px] text-red-200/80">
+            {lastErrorReason ? `Capture failed: ${lastErrorReason}` : "Capture timed out or decode failed."}
+          </p>
+        </div>
+      ) : showScreenshotsDisabled ? (
+        <div className="flex h-[180px] flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
+          <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
+          <p className="text-[12px] font-medium text-text-secondary">Screenshots disabled</p>
+          <p className="text-[11px] text-text-tertiary">Enable screenshots in Settings to capture thumbnails.</p>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-2 text-[11px]">
         <div>
