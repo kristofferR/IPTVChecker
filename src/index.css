@@ -107,7 +107,7 @@
     --btn-bg: rgb(255 255 255 / 0.1);
     --btn-bg-hover: rgb(255 255 255 / 0.15);
     --dropdown-bg: rgb(30 30 32 / 0.9);
-    --overlay-bg: rgb(30 30 32 / 0.9);
+    --overlay-bg: rgb(30 30 32);
   }
 }
 

@@ -571,25 +571,8 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
         tabIndex={-1}
         className="relative z-10 w-[68rem] max-w-[96vw] h-[44rem] max-h-[94vh] rounded-2xl border border-border-app bg-overlay shadow-2xl flex flex-col overflow-hidden focus:outline-none"
       >
-        <div className="flex items-start justify-between px-6 pt-5 pb-3 border-b border-border-app">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-1">
-              Preferences
-            </p>
-            <h2 className="text-[18px] font-semibold text-text-primary">Settings</h2>
-          </div>
-          <button
-            onClick={closePanel}
-            aria-label="Close settings"
-            className="p-1.5 hover:bg-btn-hover rounded-md transition-colors"
-            type="button"
-          >
-            <X className="w-[18px] h-[18px]" />
-          </button>
-        </div>
-
-        <div className="px-4 py-2 border-b border-border-app bg-panel-subtle">
-          <div className="flex items-center gap-1 overflow-x-auto">
+        <div className="relative flex items-center justify-center px-4 pt-4 pb-3 border-b border-border-app bg-panel-subtle" data-tauri-drag-region>
+          <div className="flex items-center gap-1">
             {tabs.map(({ id, label, Icon }) => {
               const active = activeTab === id;
               return (
@@ -597,18 +580,26 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                   key={id}
                   type="button"
                   onClick={() => setActiveTab(id)}
-                  className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] font-medium whitespace-nowrap transition-colors ${
+                  className={`flex flex-col items-center gap-1.5 w-[72px] py-2 rounded-lg text-[11px] font-medium whitespace-nowrap transition-colors ${
                     active
-                      ? "bg-blue-600 text-white"
-                      : "text-text-secondary hover:bg-btn-hover"
+                      ? "bg-black/[0.08] dark:bg-white/[0.12] text-text-primary"
+                      : "text-text-tertiary hover:text-text-secondary hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
                   }`}
                 >
-                  <Icon className="h-3.5 w-3.5" />
+                  <Icon className="h-[22px] w-[22px]" strokeWidth={active ? 1.7 : 1.4} />
                   {label}
                 </button>
               );
             })}
           </div>
+          <button
+            onClick={closePanel}
+            aria-label="Close settings"
+            className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 hover:bg-btn-hover rounded-md transition-colors text-text-tertiary hover:text-text-primary"
+            type="button"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
@@ -1250,7 +1241,8 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
           )}
 
           {activeTab === "advanced" && (
-            <section className={`${blockClass} p-4`}>
+            <>
+              <section className={`${blockClass} p-4`}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
@@ -1340,6 +1332,7 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                 </div>
               </div>
             </section>
+            </>
           )}
         </div>
       </div>
