@@ -616,6 +616,11 @@ export function useScan() {
       cancelAnimationFrame(rafId.current);
       rafId.current = null;
     }
+    // Reflect stopped state in the UI immediately (issue #148).
+    // The backend scan://cancelled event will still arrive later to
+    // deliver the summary and clean up activeRunId.
+    setScanState("cancelled");
+    setTelemetry(EMPTY_TELEMETRY);
     try {
       await cancelScan();
     } catch {
