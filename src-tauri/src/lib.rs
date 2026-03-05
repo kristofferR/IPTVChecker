@@ -100,16 +100,58 @@ fn create_new_window(app: &tauri::AppHandle) {
 
 fn emit_menu_event_to_focused_window(app: &tauri::AppHandle, event_name: &str) {
     if let Some(window) = app.get_focused_window() {
-        let _ = window.emit(event_name, ());
+        let window_label = window.label().to_string();
+        match window.emit(event_name, ()) {
+            Ok(_) => {
+                log::trace!(
+                    "menu event '{}' dispatched to focused window '{}'",
+                    event_name,
+                    window_label
+                );
+            }
+            Err(error) => {
+                log::warn!(
+                    "Failed to dispatch menu event '{}' to focused window '{}': {}",
+                    event_name,
+                    window_label,
+                    error
+                );
+            }
+        }
         return;
     }
+
+    log::debug!(
+        "No focused window for menu event '{}'; trying main window fallback",
+        event_name
+    );
 
     if let Some(main_window) = app.get_webview_window("main") {
-        let _ = main_window.emit(event_name, ());
+        match main_window.emit(event_name, ()) {
+            Ok(_) => {
+                log::trace!(
+                    "menu event '{}' dispatched to fallback main window",
+                    event_name
+                );
+            }
+            Err(error) => {
+                log::warn!(
+                    "Failed to dispatch menu event '{}' to fallback main window: {}",
+                    event_name,
+                    error
+                );
+            }
+        }
         return;
     }
 
-    let _ = app.emit(event_name, ());
+    log::warn!(
+        "No focused/main window available for menu event '{}'; falling back to broadcast",
+        event_name
+    );
+    if let Err(error) = app.emit(event_name, ()) {
+        log::warn!("Broadcast menu event '{}' failed: {}", event_name, error);
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
