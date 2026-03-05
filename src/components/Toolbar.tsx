@@ -157,41 +157,8 @@ export const Toolbar = memo(function Toolbar({
       data-tauri-drag-region={dragRegionAttr}
       className={`flex items-center px-3 ${toolbarSurface} ${toolbarPadding} pl-[var(--toolbar-pl)] relative ${isMac ? "gap-3" : "gap-1.5"}`}
     >
-      {/* Source group: Open, Open Folder, Open URL */}
-      <div className={isMac ? "toolbar-group" : "flex items-center gap-1.5"}>
-        <button
-          onClick={onOpen}
-          disabled={inScanSession}
-          className={btn}
-          title="Open File"
-        >
-          <IconOpen className="w-[22px] h-[22px]" />
-          {!isMac && "Open"}
-        </button>
-
-        <button
-          onClick={onOpenFolder}
-          disabled={inScanSession}
-          className={btn}
-          title="Open Folder"
-        >
-          <IconFolder className="w-[22px] h-[22px]" />
-          {!isMac && "Open Folder"}
-        </button>
-
-        <button
-          onClick={onOpenUrl}
-          disabled={inScanSession}
-          className={btn}
-          title="Open URL"
-        >
-          <IconLink className="w-[22px] h-[22px]" />
-          {!isMac && "Open URL"}
-        </button>
-      </div>
-
-      {/* Scan group: Scan / Pause+Stop */}
-      <div className={isMac ? "toolbar-group toolbar-group-prominent" : "flex items-center gap-1.5"}>
+      {/* Scan group: Scan / Pause+Stop — under traffic lights on macOS */}
+      <div className={isMac ? "toolbar-group toolbar-group-prominent -ml-[calc(var(--toolbar-pl)-0.75rem)] mr-2" : "flex items-center gap-1.5"}>
         {inScanSession ? (
           <>
             {scanning ? (
@@ -233,6 +200,39 @@ export const Toolbar = memo(function Toolbar({
             {!isMac && scanLabel}
           </button>
         )}
+      </div>
+
+      {/* Source group: Open, Open Folder, Open URL */}
+      <div className={isMac ? "toolbar-group" : "flex items-center gap-1.5"}>
+        <button
+          onClick={onOpen}
+          disabled={inScanSession}
+          className={btn}
+          title="Open File"
+        >
+          <IconOpen className="w-[22px] h-[22px]" />
+          {!isMac && "Open"}
+        </button>
+
+        <button
+          onClick={onOpenFolder}
+          disabled={inScanSession}
+          className={btn}
+          title="Open Folder"
+        >
+          <IconFolder className="w-[22px] h-[22px]" />
+          {!isMac && "Open Folder"}
+        </button>
+
+        <button
+          onClick={onOpenUrl}
+          disabled={inScanSession}
+          className={btn}
+          title="Open URL"
+        >
+          <IconLink className="w-[22px] h-[22px]" />
+          {!isMac && "Open URL"}
+        </button>
       </div>
 
       {playlistName && (
