@@ -8,6 +8,7 @@ function makeResult(index: number, url: string): ChannelResult {
     playlist: "fixture.m3u",
     name: `Channel ${index}`,
     group: "Group",
+    language: null,
     url,
     content_type: "live",
     status: "pending",

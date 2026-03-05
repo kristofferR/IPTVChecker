@@ -15,6 +15,7 @@ export interface Channel {
   playlist: string;
   name: string;
   group: string;
+  language: string | null;
   url: string;
   content_type: ContentType;
   extinf_line: string;
@@ -26,6 +27,7 @@ export interface ChannelResult {
   playlist: string;
   name: string;
   group: string;
+  language: string | null;
   url: string;
   content_type: ContentType;
   status: ChannelStatus;

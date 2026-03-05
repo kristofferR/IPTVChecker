@@ -11,6 +11,7 @@ function makeResult(index: number, name = `Channel ${index}`): ChannelResult {
     playlist: "fixture.m3u8",
     name,
     group: "Group",
+    language: null,
     url: `https://example.com/${index}.m3u8`,
     content_type: "live",
     status: "alive",

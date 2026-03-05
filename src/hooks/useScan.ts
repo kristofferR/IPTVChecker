@@ -645,6 +645,7 @@ export function useScan() {
           playlist: ch.playlist,
           name: ch.name,
           group: ch.group,
+          language: ch.language,
           url: ch.url,
           content_type: ch.content_type,
           status: "pending" as const,

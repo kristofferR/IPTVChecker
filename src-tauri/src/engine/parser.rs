@@ -169,6 +169,120 @@ pub fn get_group_name(extinf_line: &str) -> String {
     "Unknown Group".to_string()
 }
 
+fn normalize_language_candidate(raw: &str) -> Option<String> {
+    let first = raw
+        .split(['|', ',', ';', '/'])
+        .next()
+        .map(str::trim)
+        .unwrap_or("");
+    if first.is_empty() {
+        return None;
+    }
+
+    let bracket_trimmed = first
+        .trim_matches(|c: char| {
+            c == '[' || c == ']' || c == '(' || c == ')' || c == '{' || c == '}'
+        })
+        .trim();
+    if bracket_trimmed.is_empty() {
+        return None;
+    }
+
+    let primary = bracket_trimmed
+        .split(['-', '_'])
+        .next()
+        .map(str::trim)
+        .unwrap_or(bracket_trimmed);
+    if primary.len() >= 2 && primary.len() <= 3 && primary.chars().all(|c| c.is_ascii_alphabetic())
+    {
+        return Some(primary.to_ascii_uppercase());
+    }
+
+    match primary.to_ascii_lowercase().as_str() {
+        "english" => Some("EN".to_string()),
+        "french" => Some("FR".to_string()),
+        "arabic" => Some("AR".to_string()),
+        "german" => Some("DE".to_string()),
+        "spanish" => Some("ES".to_string()),
+        "italian" => Some("IT".to_string()),
+        "portuguese" => Some("PT".to_string()),
+        "russian" => Some("RU".to_string()),
+        "turkish" => Some("TR".to_string()),
+        "dutch" => Some("NL".to_string()),
+        "polish" => Some("PL".to_string()),
+        _ => None,
+    }
+}
+
+fn extract_prefixed_language(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some(rest) = trimmed.strip_prefix('[') {
+        if let Some((token, _)) = rest.split_once(']') {
+            return normalize_language_candidate(token);
+        }
+    }
+    if let Some(rest) = trimmed.strip_prefix('(') {
+        if let Some((token, _)) = rest.split_once(')') {
+            return normalize_language_candidate(token);
+        }
+    }
+
+    let mut token = String::new();
+    let mut end = 0usize;
+    for (index, ch) in trimmed.char_indices() {
+        if !ch.is_ascii_alphabetic() {
+            break;
+        }
+        if token.len() >= 3 {
+            break;
+        }
+        token.push(ch);
+        end = index + ch.len_utf8();
+    }
+
+    if token.len() < 2 || token.len() > 3 {
+        return None;
+    }
+
+    let rest = trimmed[end..].trim_start();
+    let starts_with_separator = rest
+        .chars()
+        .next()
+        .map(|ch| {
+            matches!(
+                ch,
+                ':' | '|' | '-' | '/' | '▎' | '•' | '·' | '_' | '—' | '–'
+            )
+        })
+        .unwrap_or(false);
+    if !starts_with_separator {
+        return None;
+    }
+
+    normalize_language_candidate(&token)
+}
+
+pub fn detect_channel_language(group: &str, name: &str, extinf_line: &str) -> Option<String> {
+    if extinf_line.starts_with("#EXTINF") {
+        for (key, value) in parse_extinf_attributes(extinf_line) {
+            if matches!(
+                key.as_str(),
+                "tvg-language" | "tvg-lang" | "language" | "lang" | "tvg-country"
+            ) {
+                if let Some(language) = normalize_language_candidate(&value) {
+                    return Some(language);
+                }
+            }
+        }
+    }
+
+    extract_prefixed_language(group).or_else(|| extract_prefixed_language(name))
+}
+
 /// Extract channel ID from the stream URL (last path segment, minus .ts extension).
 pub fn get_channel_id(url: &str) -> String {
     if url.is_empty() {
@@ -276,12 +390,14 @@ fn parse_playlist_reader<R: BufRead>(
             if let Some(extinf_line) = pending_extinf.take() {
                 let name = get_channel_name(&extinf_line);
                 let group = get_group_name(&extinf_line);
+                let language = detect_channel_language(&group, &name, &extinf_line);
                 let content_type = ContentType::detect_from_url(&line);
                 channels.push(Channel {
                     index: source_index,
                     playlist: playlist_name.clone(),
                     name,
                     group,
+                    language,
                     url: line,
                     content_type,
                     extinf_line,
@@ -526,6 +642,26 @@ mod tests {
     }
 
     #[test]
+    fn test_detect_channel_language_prefers_attributes_then_prefixes() {
+        assert_eq!(
+            detect_channel_language(
+                "FR: Sports",
+                "FR | News Channel",
+                "#EXTINF:-1 tvg-language=\"en\",Sample"
+            ),
+            Some("EN".to_string())
+        );
+        assert_eq!(
+            detect_channel_language("AR ▎ Movies", "Sample Channel", "#EXTINF:-1,Sample"),
+            Some("AR".to_string())
+        );
+        assert_eq!(
+            detect_channel_language("Unknown", "EN | Sample Channel", "#EXTINF:-1,Sample"),
+            Some("EN".to_string())
+        );
+    }
+
+    #[test]
     fn test_get_channel_id() {
         assert_eq!(get_channel_id("http://example.com/live/123.ts"), "123");
         assert_eq!(get_channel_id("http://example.com/live/stream"), "stream");
@@ -709,7 +845,20 @@ http://example.com/beta.m3u8
         assert_eq!(parsed.series_count, 0);
         assert_eq!(parsed.channels[0].name, "Channel One");
         assert_eq!(parsed.channels[0].group, "News");
+        assert_eq!(parsed.channels[0].language, None);
         assert_eq!(parsed.channels[0].url, "http://example.com/live.m3u8");
+    }
+
+    #[test]
+    fn test_parse_m3u_detects_language_from_group_and_name_prefixes() {
+        let payload = b"#EXTM3U\n#EXTINF:-1 group-title=\"FR: Sports\",France Sports\nhttp://example.com/fr.m3u8\n#EXTINF:-1 group-title=\"Other\",EN | World News\nhttp://example.com/en.m3u8\n";
+
+        let parsed = parse_m3u(payload, "languages.m3u8", &None, &None)
+            .expect("in-memory parser should succeed");
+
+        assert_eq!(parsed.total_channels, 2);
+        assert_eq!(parsed.channels[0].language.as_deref(), Some("FR"));
+        assert_eq!(parsed.channels[1].language.as_deref(), Some("EN"));
     }
 
     #[test]

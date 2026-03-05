@@ -12,6 +12,7 @@ function makeResult(
     playlist: "fixture.m3u8",
     name: `Channel ${index}`,
     group: "Group",
+    language: null,
     url: `https://example.com/${index}.m3u8`,
     content_type: "live",
     status: "alive",

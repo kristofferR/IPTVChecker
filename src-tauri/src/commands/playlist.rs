@@ -953,6 +953,7 @@ fn build_stalker_preview(
         );
 
         if include_group && include_search {
+            let language = parser::detect_channel_language(&group, &raw_name, &extinf_line);
             let content_type = ContentType::detect_from_url(&stream_url);
             channels.push(Channel {
                 index: source_index,
@@ -962,6 +963,7 @@ fn build_stalker_preview(
                     .unwrap_or_else(|| "Stalker Portal".to_string()),
                 name: raw_name,
                 group,
+                language,
                 url: stream_url,
                 content_type,
                 extinf_line,

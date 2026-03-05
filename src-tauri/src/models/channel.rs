@@ -114,6 +114,8 @@ pub struct Channel {
     pub playlist: String,
     pub name: String,
     pub group: String,
+    #[serde(default)]
+    pub language: Option<String>,
     pub url: String,
     #[serde(default)]
     pub content_type: ContentType,
@@ -127,6 +129,8 @@ pub struct ChannelResult {
     pub playlist: String,
     pub name: String,
     pub group: String,
+    #[serde(default)]
+    pub language: Option<String>,
     pub url: String,
     #[serde(default)]
     pub content_type: ContentType,
@@ -168,6 +172,7 @@ mod tests {
             playlist: "fixture.m3u8".to_string(),
             name: "Channel".to_string(),
             group: "Group".to_string(),
+            language: None,
             url: "https://example.com/live.m3u8".to_string(),
             content_type: ContentType::Live,
             status: ChannelStatus::Dead,
@@ -229,6 +234,7 @@ mod tests {
         let parsed: ChannelResult =
             serde_json::from_value(value).expect("legacy alias should deserialize");
         assert_eq!(parsed.error_reason.as_deref(), Some("Timeout"));
+        assert_eq!(parsed.language, None);
         assert_eq!(parsed.content_type, ContentType::Live);
     }
 

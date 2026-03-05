@@ -209,6 +209,7 @@ mod tests {
             playlist: "fixture.m3u8".to_string(),
             name: name.to_string(),
             group: "Group".to_string(),
+            language: None,
             url: format!("https://example.com/stream/{}", index),
             content_type: crate::models::channel::ContentType::Live,
             status,

@@ -18,6 +18,7 @@ function makeResult(
     playlist: options.playlist,
     name: options.name,
     group: options.group,
+    language: null,
     url: `https://example.com/${index}.m3u8`,
     content_type: "live",
     status: options.status,
