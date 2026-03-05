@@ -235,9 +235,20 @@ export const Toolbar = memo(function Toolbar({
         </button>
       </div>
 
-      {playlistName && (
+      {/* macOS: playlist name centered in title bar area */}
+      {playlistName && isMac && (
         <span
-          data-tauri-drag-region={dragRegionAttr}
+          data-tauri-drag-region
+          className="absolute top-[6px] left-1/2 -translate-x-1/2 text-[13px] text-text-tertiary truncate max-w-[40%] pointer-events-none"
+          title={playlistName}
+        >
+          {playlistName}
+        </span>
+      )}
+
+      {/* Non-macOS: playlist name inline */}
+      {playlistName && !isMac && (
+        <span
           className="text-[13px] text-text-tertiary truncate max-w-64 ml-1"
           title={playlistName}
         >
