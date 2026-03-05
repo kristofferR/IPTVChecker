@@ -30,6 +30,7 @@ const RESULT_BATCH_MAX_ITEMS: usize = 64;
 #[derive(Debug, Clone)]
 struct SharedUrlResult {
     status: ChannelStatus,
+    drm_system: Option<String>,
     latency_ms: Option<u64>,
     codec: Option<String>,
     resolution: Option<String>,
@@ -58,6 +59,7 @@ impl SharedUrlResult {
     ) -> Self {
         Self {
             status: ChannelStatus::Dead,
+            drm_system: None,
             latency_ms,
             codec: None,
             resolution: None,
@@ -145,7 +147,7 @@ async fn compute_shared_url_result(
         .await
     };
 
-    let (status_str, stream_url, latency_ms, retry_count, error_reason, mut channel_log) =
+    let (status_str, stream_url, latency_ms, retry_count, error_reason, drm_system, mut channel_log) =
         match check_outcome {
             Ok(outcome) => (
                 outcome.status,
@@ -153,6 +155,7 @@ async fn compute_shared_url_result(
                 outcome.latency_ms,
                 outcome.retries_used,
                 outcome.last_error_reason,
+                outcome.drm_system,
                 outcome.debug_log,
             ),
             Err(AppError::Cancelled) => return Err(AppError::Cancelled),
@@ -162,6 +165,7 @@ async fn compute_shared_url_result(
                 None,
                 0,
                 Some(error.to_string()),
+                None,
                 ChannelDebugLog {
                     channel_url: channel_url.to_string(),
                     final_verdict: "Dead".to_string(),
@@ -188,6 +192,7 @@ async fn compute_shared_url_result(
 
     let status = match final_status_str.as_str() {
         "Alive" => ChannelStatus::Alive,
+        "DRM" => ChannelStatus::Drm,
         "Dead" => ChannelStatus::Dead,
         "Geoblocked" => ChannelStatus::Geoblocked,
         "Geoblocked (Confirmed)" => ChannelStatus::GeoblockedConfirmed,
@@ -204,7 +209,7 @@ async fn compute_shared_url_result(
         diagnostics_ms: 0.0,
     };
 
-    if status != ChannelStatus::Alive || cancel.is_cancelled() {
+    if !matches!(status, ChannelStatus::Alive | ChannelStatus::Drm) || cancel.is_cancelled() {
         return Ok((
             SharedUrlResult::dead(
                 stream_url,
@@ -219,7 +224,8 @@ async fn compute_shared_url_result(
 
     let target_url = stream_url.as_deref().unwrap_or(channel_url).to_string();
     let mut shared = SharedUrlResult {
-        status,
+        status: status.clone(),
+        drm_system,
         latency_ms,
         codec: None,
         resolution: None,
@@ -237,6 +243,11 @@ async fn compute_shared_url_result(
         error_reason,
         channel_log,
     };
+
+    // DRM-protected streams are reported distinctly without expensive diagnostics.
+    if status == ChannelStatus::Drm {
+        return Ok((shared, timing));
+    }
     let diagnostics_started_at = Instant::now();
     let _diagnostics_permit = diagnostics_semaphore.clone().acquire_owned().await.ok();
     let ffprobe_timeout_duration =
@@ -429,6 +440,7 @@ struct ScanCounters {
     alive: usize,
     dead: usize,
     geoblocked: usize,
+    drm: usize,
     low_framerate: usize,
     mislabeled: usize,
 }
@@ -457,6 +469,7 @@ impl ScanCounters {
         match result.status {
             ChannelStatus::Alive => self.alive += 1,
             ChannelStatus::Dead => self.dead += 1,
+            ChannelStatus::Drm => self.drm += 1,
             ChannelStatus::Geoblocked
             | ChannelStatus::GeoblockedConfirmed
             | ChannelStatus::GeoblockedUnconfirmed => self.geoblocked += 1,
@@ -479,6 +492,7 @@ impl ScanCounters {
             alive: self.alive,
             dead: self.dead,
             geoblocked: self.geoblocked,
+            drm: self.drm,
         }
     }
 
@@ -488,6 +502,7 @@ impl ScanCounters {
             alive: self.alive,
             dead: self.dead,
             geoblocked: self.geoblocked,
+            drm: self.drm,
             low_framerate: self.low_framerate,
             mislabeled: self.mislabeled,
         }
@@ -787,6 +802,7 @@ async fn execute_scan_run(
             alive: 0,
             dead: 0,
             geoblocked: 0,
+            drm: 0,
             low_framerate: 0,
             mislabeled: 0,
         };
@@ -1439,6 +1455,7 @@ async fn execute_scan_run(
                 stream_url: shared.stream_url.clone(),
                 retry_count: shared.retry_count,
                 error_reason: shared.error_reason.clone(),
+                drm_system: shared.drm_system.clone(),
             };
 
             if result.status == ChannelStatus::Alive {
@@ -1746,6 +1763,7 @@ mod tests {
             stream_url: None,
             retry_count: None,
             error_reason: None,
+            drm_system: None,
         }
     }
 
@@ -1825,7 +1843,7 @@ mod tests {
     #[test]
     fn scan_counters_follow_event_order() {
         let mut counters = ScanCounters::default();
-        let total = 3usize;
+        let total = 4usize;
 
         let alive = make_result(0, ChannelStatus::Alive, true, true);
         counters.apply(&alive);
@@ -1834,17 +1852,21 @@ mod tests {
         assert_eq!(progress.alive, 1);
         assert_eq!(progress.dead, 0);
         assert_eq!(progress.geoblocked, 0);
+        assert_eq!(progress.drm, 0);
 
         let geoblocked = make_result(1, ChannelStatus::Geoblocked, false, false);
         counters.apply(&geoblocked);
-        let dead = make_result(2, ChannelStatus::Dead, false, false);
+        let drm = make_result(2, ChannelStatus::Drm, false, false);
+        counters.apply(&drm);
+        let dead = make_result(3, ChannelStatus::Dead, false, false);
         counters.apply(&dead);
 
         let summary = counters.as_summary(total);
-        assert_eq!(summary.total, 3);
+        assert_eq!(summary.total, 4);
         assert_eq!(summary.alive, 1);
         assert_eq!(summary.dead, 1);
         assert_eq!(summary.geoblocked, 1);
+        assert_eq!(summary.drm, 1);
         assert_eq!(summary.low_framerate, 1);
         assert_eq!(summary.mislabeled, 1);
     }

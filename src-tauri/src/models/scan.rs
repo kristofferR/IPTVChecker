@@ -128,6 +128,8 @@ pub struct ScanProgress {
     pub alive: usize,
     pub dead: usize,
     pub geoblocked: usize,
+    #[serde(default)]
+    pub drm: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,6 +138,8 @@ pub struct ScanSummary {
     pub alive: usize,
     pub dead: usize,
     pub geoblocked: usize,
+    #[serde(default)]
+    pub drm: usize,
     pub low_framerate: usize,
     pub mislabeled: usize,
 }

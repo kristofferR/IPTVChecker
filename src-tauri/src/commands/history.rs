@@ -225,7 +225,7 @@ fn channel_identity_key(result: &ChannelResult) -> String {
 }
 
 fn is_alive(status: &ChannelStatus) -> bool {
-    matches!(status, ChannelStatus::Alive)
+    matches!(status, ChannelStatus::Alive | ChannelStatus::Drm)
 }
 
 fn compute_history_diff(
@@ -457,6 +457,7 @@ mod tests {
             stream_url: None,
             retry_count: None,
             error_reason: None,
+            drm_system: None,
         }
     }
 
@@ -481,6 +482,10 @@ mod tests {
                     .filter(|result| result.status == ChannelStatus::Dead)
                     .count(),
                 geoblocked: 0,
+                drm: results
+                    .iter()
+                    .filter(|result| result.status == ChannelStatus::Drm)
+                    .count(),
                 low_framerate: 0,
                 mislabeled: 0,
             },
@@ -552,6 +557,7 @@ mod tests {
             stream_url: None,
             retry_count: None,
             error_reason: None,
+            drm_system: None,
         }
     }
 
@@ -576,6 +582,10 @@ mod tests {
                             | ChannelStatus::GeoblockedUnconfirmed
                     )
                 })
+                .count(),
+            drm: results
+                .iter()
+                .filter(|result| result.status == ChannelStatus::Drm)
                 .count(),
             low_framerate: 0,
             mislabeled: 0,
@@ -643,6 +653,7 @@ mod tests {
                     alive: 1,
                     dead: 0,
                     geoblocked: 0,
+                    drm: 0,
                     low_framerate: 0,
                     mislabeled: 0,
                 },

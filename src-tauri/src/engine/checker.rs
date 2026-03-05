@@ -82,6 +82,7 @@ enum VerifyResult {
     Alive {
         stream_url: Option<String>,
         latency_ms: Option<u64>,
+        drm_system: Option<String>,
     },
     Dead {
         latency_ms: Option<u64>,
@@ -111,6 +112,7 @@ pub struct ChannelCheckOutcome {
     pub latency_ms: Option<u64>,
     pub retries_used: u32,
     pub last_error_reason: Option<String>,
+    pub drm_system: Option<String>,
     pub debug_log: ChannelDebugLog,
 }
 
@@ -219,6 +221,69 @@ fn is_direct_stream(content_type: &str, url: &str) -> bool {
         || path.ends_with(".m4s")
         || path.ends_with(".mp4")
         || path.ends_with(".aac")
+}
+
+fn is_dash_manifest_content_type(content_type: &str, url: &str) -> bool {
+    let ct = content_type.to_lowercase();
+    let path = Url::parse(url)
+        .map(|u| u.path().to_lowercase())
+        .unwrap_or_default();
+    ct.contains("application/dash+xml")
+        || ct.contains("application/xml+dash")
+        || path.ends_with(".mpd")
+}
+
+fn detect_hls_drm_system(playlist_body: &str) -> Option<String> {
+    let lower = playlist_body.to_ascii_lowercase();
+    let has_hls_key_markers =
+        lower.contains("#ext-x-key") || lower.contains("#ext-x-session-key");
+    if !has_hls_key_markers {
+        return None;
+    }
+
+    if lower.contains("com.widevine.alpha") || lower.contains("edef8ba9-79d6-4ace-a3c8-27dcd51d21ed")
+    {
+        return Some("Widevine".to_string());
+    }
+    if lower.contains("com.apple.streamingkeydelivery") || lower.contains("skd://") {
+        return Some("FairPlay".to_string());
+    }
+    if lower.contains("playready")
+        || lower.contains("9a04f079-9840-4286-ab92-e65be0885f95")
+    {
+        return Some("PlayReady".to_string());
+    }
+    if lower.contains("sample-aes") {
+        return Some("HLS SAMPLE-AES".to_string());
+    }
+
+    Some("HLS Encrypted".to_string())
+}
+
+fn detect_dash_drm_system(manifest_body: &str) -> Option<String> {
+    let lower = manifest_body.to_ascii_lowercase();
+    if !lower.contains("<contentprotection") {
+        return None;
+    }
+
+    if lower.contains("edef8ba9-79d6-4ace-a3c8-27dcd51d21ed")
+        || lower.contains("com.widevine.alpha")
+    {
+        return Some("Widevine".to_string());
+    }
+    if lower.contains("9a04f079-9840-4286-ab92-e65be0885f95")
+        || lower.contains("playready")
+    {
+        return Some("PlayReady".to_string());
+    }
+    if lower.contains("94ce86fb-07ff-4f43-adb8-93d2fa968ca2")
+        || lower.contains("com.apple.fps")
+        || lower.contains("fairplay")
+    {
+        return Some("FairPlay".to_string());
+    }
+
+    Some("DASH Encrypted".to_string())
 }
 
 /// Split an HLS attribute list on commas, skipping commas inside quoted values.
@@ -364,6 +429,7 @@ async fn read_stream(
                     return VerifyResult::Alive {
                         stream_url: None,
                         latency_ms: observed_latency_ms,
+                        drm_system: None,
                     };
                 }
             }
@@ -391,6 +457,7 @@ async fn read_stream(
         VerifyResult::Alive {
             stream_url: None,
             latency_ms: observed_latency_ms.or(Some(elapsed_millis(request_started_at))),
+            drm_system: None,
         }
     } else {
         VerifyResult::Dead {
@@ -535,35 +602,55 @@ async fn verify(
 
     let final_url = resp.url().to_string();
 
-    if is_playlist_content_type(&content_type, &final_url) {
-        let playlist_text = match resp.text().await {
+    let is_hls_manifest = is_playlist_content_type(&content_type, &final_url);
+    let is_dash_manifest = is_dash_manifest_content_type(&content_type, &final_url);
+
+    if is_hls_manifest || is_dash_manifest {
+        let manifest_text = match resp.text().await {
             Ok(t) if !t.is_empty() => t,
             _ => {
                 return VerifyResult::Retry {
-                    reason: Some("Empty playlist body".to_string()),
+                    reason: Some("Empty manifest body".to_string()),
                 };
             }
         };
-        let next_url = match extract_next_url(&final_url, &playlist_text) {
-            Some(u) => u,
-            None => {
-                return VerifyResult::Retry {
-                    reason: Some("No playable URI found in playlist".to_string()),
+
+        if is_hls_manifest {
+            if let Some(drm_system) = detect_hls_drm_system(&manifest_text) {
+                return VerifyResult::Alive {
+                    stream_url: Some(final_url),
+                    latency_ms: effective_root_latency,
+                    drm_system: Some(drm_system),
                 };
             }
+
+            let next_url = match extract_next_url(&final_url, &manifest_text) {
+                Some(u) => u,
+                None => {
+                    return VerifyResult::Retry {
+                        reason: Some("No playable URI found in playlist".to_string()),
+                    };
+                }
+            };
+            return Box::pin(verify(
+                client,
+                &next_url,
+                timeout_secs,
+                playlist_depth + 1,
+                redirect_depth,
+                visited,
+                headers,
+                effective_root_latency,
+                metrics,
+            ))
+            .await;
+        }
+
+        return VerifyResult::Alive {
+            stream_url: Some(final_url),
+            latency_ms: effective_root_latency,
+            drm_system: detect_dash_drm_system(&manifest_text),
         };
-        return Box::pin(verify(
-            client,
-            &next_url,
-            timeout_secs,
-            playlist_depth + 1,
-            redirect_depth,
-            visited,
-            headers,
-            effective_root_latency,
-            metrics,
-        ))
-        .await;
     }
 
     let min_bytes = if is_direct_stream(&content_type, &final_url) {
@@ -591,9 +678,14 @@ async fn verify(
 
     let result = read_stream(resp, min_bytes, root_latency_ms, request_started_at, metrics).await;
     match result {
-        VerifyResult::Alive { latency_ms, .. } => VerifyResult::Alive {
+        VerifyResult::Alive {
+            latency_ms,
+            drm_system,
+            ..
+        } => VerifyResult::Alive {
             stream_url: Some(final_url),
             latency_ms,
+            drm_system,
         },
         _ => result,
     }
@@ -654,6 +746,7 @@ pub async fn check_channel_status_with_ffprobe_debug(
             latency_ms: None,
             retries_used: 0,
             last_error_reason: Some(reason.clone()),
+            drm_system: None,
             debug_log: ChannelDebugLog {
                 channel_index: 0,
                 channel_name: String::new(),
@@ -694,6 +787,7 @@ pub async fn check_channel_status_with_ffprobe_debug(
         latency_ms: Option<u64>,
         retries_used: u32,
         last_error_reason: Option<String>,
+        drm_system: Option<String>,
         successful_attempt: Option<u32>,
         attempts: Vec<ChannelAttemptDebugLog>,
         ffprobe_output: Option<String>,
@@ -754,6 +848,7 @@ pub async fn check_channel_status_with_ffprobe_debug(
                                 latency_ms,
                                 retries_used,
                                 last_error_reason,
+                                drm_system: None,
                                 successful_attempt: Some(attempt_number),
                                 attempts: attempt_logs,
                                 ffprobe_output,
@@ -813,6 +908,7 @@ pub async fn check_channel_status_with_ffprobe_debug(
                 latency_ms: None,
                 retries_used,
                 last_error_reason,
+                drm_system: None,
                 successful_attempt: None,
                 attempts: attempt_logs,
                 ffprobe_output,
@@ -835,6 +931,7 @@ pub async fn check_channel_status_with_ffprobe_debug(
                 latency_ms: second.latency_ms,
                 retries_used: final_outcome.retries_used.saturating_add(second.retries_used),
                 last_error_reason: second.last_error_reason.or(final_outcome.last_error_reason),
+                drm_system: second.drm_system.or(final_outcome.drm_system),
                 successful_attempt: second.successful_attempt,
                 attempts: combined_attempts,
                 ffprobe_output: second.ffprobe_output.or(final_outcome.ffprobe_output),
@@ -860,6 +957,7 @@ pub async fn check_channel_status_with_ffprobe_debug(
         latency_ms: final_outcome.latency_ms,
         retries_used: final_outcome.retries_used,
         last_error_reason: final_outcome.last_error_reason.clone(),
+        drm_system: final_outcome.drm_system.clone(),
         debug_log: ChannelDebugLog {
             channel_index: 0,
             channel_name: String::new(),
@@ -924,6 +1022,7 @@ pub async fn check_channel_status_with_debug(
         latency_ms: Option<u64>,
         retries_used: u32,
         last_error_reason: Option<String>,
+        drm_system: Option<String>,
         successful_attempt: Option<u32>,
         attempts: Vec<ChannelAttemptDebugLog>,
     }
@@ -972,6 +1071,13 @@ pub async fn check_channel_status_with_debug(
                 let attempt_ended_at_epoch_ms = now_epoch_ms();
 
                 let (verdict, reason_for_log) = match &result {
+                    VerifyResult::Alive {
+                        drm_system: Some(system),
+                        ..
+                    } => (
+                        "DRM".to_string(),
+                        Some(format!("Detected DRM system: {}", system)),
+                    ),
                     VerifyResult::Alive { .. } => ("Alive".to_string(), None),
                     VerifyResult::Dead { reason, .. } => ("Dead".to_string(), reason.clone()),
                     VerifyResult::Geoblocked { reason, .. } => {
@@ -996,14 +1102,22 @@ pub async fn check_channel_status_with_debug(
                     VerifyResult::Alive {
                         stream_url,
                         latency_ms,
+                        drm_system,
                     } => {
-                        log::info!("Channel alive: {}", url);
+                        let status = if drm_system.is_some() {
+                            log::info!("Channel DRM-protected: {}", url);
+                            "DRM".to_string()
+                        } else {
+                            log::info!("Channel alive: {}", url);
+                            "Alive".to_string()
+                        };
                         return Ok(AttemptOutcome {
-                            status: "Alive".to_string(),
+                            status,
                             stream_url,
                             latency_ms,
                             retries_used,
                             last_error_reason,
+                            drm_system,
                             successful_attempt: Some(attempt_number),
                             attempts: attempt_logs,
                         });
@@ -1016,6 +1130,7 @@ pub async fn check_channel_status_with_debug(
                             latency_ms,
                             retries_used,
                             last_error_reason: reason.or(last_error_reason),
+                            drm_system: None,
                             successful_attempt: None,
                             attempts: attempt_logs,
                         });
@@ -1028,6 +1143,7 @@ pub async fn check_channel_status_with_debug(
                             latency_ms,
                             retries_used,
                             last_error_reason: reason.or(last_error_reason),
+                            drm_system: None,
                             successful_attempt: None,
                             attempts: attempt_logs,
                         });
@@ -1053,6 +1169,7 @@ pub async fn check_channel_status_with_debug(
                 latency_ms: None,
                 retries_used,
                 last_error_reason,
+                drm_system: None,
                 successful_attempt: None,
                 attempts: attempt_logs,
             })
@@ -1075,6 +1192,7 @@ pub async fn check_channel_status_with_debug(
                 latency_ms: second.latency_ms,
                 retries_used: final_outcome.retries_used.saturating_add(second.retries_used),
                 last_error_reason: second.last_error_reason.or(final_outcome.last_error_reason),
+                drm_system: second.drm_system.or(final_outcome.drm_system),
                 successful_attempt: second.successful_attempt,
                 attempts: combined_attempts,
             };
@@ -1115,6 +1233,7 @@ pub async fn check_channel_status_with_debug(
         latency_ms: final_outcome.latency_ms,
         retries_used: final_outcome.retries_used,
         last_error_reason: final_outcome.last_error_reason.clone(),
+        drm_system: final_outcome.drm_system.clone(),
         debug_log: ChannelDebugLog {
             channel_index: 0,
             channel_name: String::new(),
@@ -1309,6 +1428,68 @@ mod tests {
             "video/mp4",
             "http://example.com/video.mp4"
         ));
+    }
+
+    #[test]
+    fn test_detect_hls_drm_systems() {
+        let widevine = r#"#EXTM3U
+#EXT-X-KEY:METHOD=SAMPLE-AES,KEYFORMAT="com.widevine.alpha",URI="data:text/plain;base64,AAA="
+"#;
+        assert_eq!(
+            detect_hls_drm_system(widevine),
+            Some("Widevine".to_string())
+        );
+
+        let fairplay = r#"#EXTM3U
+#EXT-X-SESSION-KEY:METHOD=SAMPLE-AES,KEYFORMAT="com.apple.streamingkeydelivery",URI="skd://example.com/asset"
+"#;
+        assert_eq!(
+            detect_hls_drm_system(fairplay),
+            Some("FairPlay".to_string())
+        );
+
+        let clear = r#"#EXTM3U
+#EXT-X-TARGETDURATION:4
+#EXTINF:4,
+segment.ts
+"#;
+        assert_eq!(detect_hls_drm_system(clear), None);
+    }
+
+    #[test]
+    fn test_detect_dash_drm_systems() {
+        let widevine = r#"<MPD>
+  <Period>
+    <AdaptationSet>
+      <ContentProtection schemeIdUri="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#;
+        assert_eq!(
+            detect_dash_drm_system(widevine),
+            Some("Widevine".to_string())
+        );
+
+        let fairplay = r#"<MPD>
+  <Period>
+    <AdaptationSet>
+      <ContentProtection schemeIdUri="com.apple.fps.1_0"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#;
+        assert_eq!(
+            detect_dash_drm_system(fairplay),
+            Some("FairPlay".to_string())
+        );
+
+        let clear = r#"<MPD>
+  <Period>
+    <AdaptationSet>
+      <Representation id="1" bandwidth="1000000"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#;
+        assert_eq!(detect_dash_drm_system(clear), None);
     }
 
     #[test]
@@ -1546,6 +1727,118 @@ mod tests {
 
         assert_eq!(outcome.status, "Dead");
         assert_eq!(outcome.last_error_reason.as_deref(), Some("Timeout"));
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn integration_checker_marks_hls_drm_as_drm_status() {
+        let handler = Arc::new(move |_path: &str| TestHttpResponse {
+            status_code: 200,
+            reason: "OK",
+            headers: vec![(
+                "Content-Type".to_string(),
+                "application/vnd.apple.mpegurl".to_string(),
+            )],
+            body: br#"#EXTM3U
+#EXT-X-KEY:METHOD=SAMPLE-AES,KEYFORMAT="com.apple.streamingkeydelivery",URI="skd://example.com/asset"
+#EXTINF:4,
+segment.ts
+"#
+            .to_vec(),
+            delay_ms: 0,
+        });
+        let (base_url, server_handle) = spawn_http_server(handler).await;
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let outcome = check_channel_status_with_debug(
+            &test_client(),
+            &format!("{base_url}/fairplay.m3u8"),
+            1.0,
+            0,
+            RetryBackoff::None,
+            None,
+            "IPTVCheckerTests/1.0",
+            &cancel,
+        )
+        .await
+        .expect("checker request should succeed");
+
+        assert_eq!(outcome.status, "DRM");
+        assert_eq!(outcome.drm_system.as_deref(), Some("FairPlay"));
+        assert_eq!(outcome.stream_url, Some(format!("{base_url}/fairplay.m3u8")));
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn integration_checker_marks_dash_drm_as_drm_status() {
+        let handler = Arc::new(move |_path: &str| TestHttpResponse {
+            status_code: 200,
+            reason: "OK",
+            headers: vec![("Content-Type".to_string(), "application/dash+xml".to_string())],
+            body: br#"<MPD>
+  <Period>
+    <AdaptationSet>
+      <ContentProtection schemeIdUri="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#
+                .to_vec(),
+            delay_ms: 0,
+        });
+        let (base_url, server_handle) = spawn_http_server(handler).await;
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let outcome = check_channel_status_with_debug(
+            &test_client(),
+            &format!("{base_url}/manifest.mpd"),
+            1.0,
+            0,
+            RetryBackoff::None,
+            None,
+            "IPTVCheckerTests/1.0",
+            &cancel,
+        )
+        .await
+        .expect("checker request should succeed");
+
+        assert_eq!(outcome.status, "DRM");
+        assert_eq!(outcome.drm_system.as_deref(), Some("Widevine"));
+        assert_eq!(outcome.stream_url, Some(format!("{base_url}/manifest.mpd")));
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn integration_checker_accepts_dash_without_drm() {
+        let handler = Arc::new(move |_path: &str| TestHttpResponse {
+            status_code: 200,
+            reason: "OK",
+            headers: vec![("Content-Type".to_string(), "application/dash+xml".to_string())],
+            body: br#"<MPD>
+  <Period>
+    <AdaptationSet>
+      <Representation id="1" bandwidth="1000000"/>
+    </AdaptationSet>
+  </Period>
+</MPD>"#
+                .to_vec(),
+            delay_ms: 0,
+        });
+        let (base_url, server_handle) = spawn_http_server(handler).await;
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let outcome = check_channel_status_with_debug(
+            &test_client(),
+            &format!("{base_url}/clear.mpd"),
+            1.0,
+            0,
+            RetryBackoff::None,
+            None,
+            "IPTVCheckerTests/1.0",
+            &cancel,
+        )
+        .await
+        .expect("checker request should succeed");
+
+        assert_eq!(outcome.status, "Alive");
+        assert_eq!(outcome.drm_system, None);
+        assert_eq!(outcome.stream_url, Some(format!("{base_url}/clear.mpd")));
         server_handle.abort();
     }
 }

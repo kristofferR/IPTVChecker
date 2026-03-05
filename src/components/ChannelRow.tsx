@@ -66,6 +66,9 @@ function ChannelRowImpl({
     result.error_reason?.trim() ||
     result.last_error_reason?.trim() ||
     null;
+  const drmStatusTitle = result.drm_system
+    ? `DRM: ${result.drm_system}`
+    : "DRM-protected stream";
   const streamProtocol = useMemo(() => detectChannelProtocol(result), [result]);
 
   useEffect(() => {
@@ -84,7 +87,13 @@ function ChannelRowImpl({
         return (
           <StatusBadge
             status={result.status}
-            title={result.status === "dead" ? (errorReason ?? undefined) : undefined}
+            title={
+              result.status === "dead"
+                ? (errorReason ?? undefined)
+                : result.status === "drm"
+                  ? drmStatusTitle
+                  : undefined
+            }
           />
         );
       case "error":

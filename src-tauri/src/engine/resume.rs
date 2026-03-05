@@ -231,6 +231,7 @@ mod tests {
             stream_url: None,
             retry_count: None,
             error_reason: None,
+            drm_system: None,
         }
     }
 

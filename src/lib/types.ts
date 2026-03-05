@@ -2,6 +2,7 @@ export type ChannelStatus =
   | "pending"
   | "checking"
   | "alive"
+  | "drm"
   | "dead"
   | "geoblocked"
   | "geoblocked_confirmed"
@@ -45,6 +46,7 @@ export interface ChannelResult {
   retry_count?: number | null;
   error_reason?: string | null;
   last_error_reason?: string | null;
+  drm_system?: string | null;
 }
 
 export interface PlaylistPreview {
@@ -100,6 +102,7 @@ export interface ScanProgress {
   alive: number;
   dead: number;
   geoblocked: number;
+  drm: number;
 }
 
 export interface ScanSummary {
@@ -107,6 +110,7 @@ export interface ScanSummary {
   alive: number;
   dead: number;
   geoblocked: number;
+  drm: number;
   low_framerate: number;
   mislabeled: number;
 }

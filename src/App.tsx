@@ -163,10 +163,11 @@ function readCachedUpdateNotice(): UpdateNotice | null {
 
 function formatScanNotificationBody(stats: {
   alive: number;
+  drm: number;
   dead: number;
   geoblocked: number;
 }): string {
-  return `Alive ${stats.alive} | Dead ${stats.dead} | Geoblocked ${stats.geoblocked}`;
+  return `Alive ${stats.alive} | DRM ${stats.drm} | Dead ${stats.dead} | Geoblocked ${stats.geoblocked}`;
 }
 
 async function canSendNotifications(): Promise<boolean> {
@@ -916,7 +917,7 @@ export default function App() {
 
       if (isMac) {
         const badgeLabel = progress
-          ? `${progress.alive}/${progress.dead}`
+          ? `${progress.alive + progress.drm}/${progress.dead}`
           : "...";
         void appWindow.setBadgeLabel(badgeLabel).catch(() => {});
       }

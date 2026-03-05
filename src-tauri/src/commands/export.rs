@@ -141,6 +141,7 @@ pub async fn export_split(results: Vec<ChannelResult>, base_path: String) -> Res
             working: Vec<String>,
             dead: Vec<String>,
             geoblocked: Vec<String>,
+            drm: Vec<String>,
         }
 
         let mut playlists: BTreeMap<String, SplitBuckets> = BTreeMap::new();
@@ -152,6 +153,7 @@ pub async fn export_split(results: Vec<ChannelResult>, base_path: String) -> Res
             match r.status {
                 ChannelStatus::Alive => buckets.working.push(entry),
                 ChannelStatus::Dead => buckets.dead.push(entry),
+                ChannelStatus::Drm => buckets.drm.push(entry),
                 ChannelStatus::Geoblocked
                 | ChannelStatus::GeoblockedConfirmed
                 | ChannelStatus::GeoblockedUnconfirmed => buckets.geoblocked.push(entry),
@@ -188,6 +190,15 @@ pub async fn export_split(results: Vec<ChannelResult>, base_path: String) -> Res
                 };
                 let path = export_target_path(&base_path, &suffix);
                 write_m3u_file(&path, &buckets.geoblocked)?;
+            }
+            if !buckets.drm.is_empty() {
+                let suffix = if split_by_playlist {
+                    format!("{}_drm", playlist)
+                } else {
+                    "drm".to_string()
+                };
+                let path = export_target_path(&base_path, &suffix);
+                write_m3u_file(&path, &buckets.drm)?;
             }
         }
 
@@ -430,6 +441,7 @@ mod tests {
             stream_url: None,
             retry_count: None,
             error_reason: None,
+            drm_system: None,
         }
     }
 

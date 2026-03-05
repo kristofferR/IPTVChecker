@@ -21,12 +21,13 @@ export type SearchTextCache = WeakMap<ChannelResult, string>;
 
 const STATUS_ORDER: Record<ChannelStatus, number> = {
   alive: 0,
-  geoblocked: 1,
-  geoblocked_confirmed: 1,
-  geoblocked_unconfirmed: 1,
-  dead: 2,
-  checking: 3,
-  pending: 4,
+  drm: 1,
+  geoblocked: 2,
+  geoblocked_confirmed: 2,
+  geoblocked_unconfirmed: 2,
+  dead: 3,
+  checking: 4,
+  pending: 5,
 };
 
 function parseBitrateKbps(value: string | null): number | null {

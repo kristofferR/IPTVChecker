@@ -275,6 +275,7 @@ export const Toolbar = memo(function Toolbar({
         >
           <option value="all">All Status</option>
           <option value="alive">Alive</option>
+          <option value="drm">DRM</option>
           <option value="dead">Dead</option>
           <option value="geoblocked">Geoblocked</option>
           <option value="mislabeled">Mislabeled</option>

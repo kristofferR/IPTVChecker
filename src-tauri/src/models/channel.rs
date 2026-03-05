@@ -6,6 +6,7 @@ pub enum ChannelStatus {
     Pending,
     Checking,
     Alive,
+    Drm,
     Dead,
     Geoblocked,
     GeoblockedConfirmed,
@@ -18,6 +19,7 @@ impl std::fmt::Display for ChannelStatus {
             ChannelStatus::Pending => write!(f, "Pending"),
             ChannelStatus::Checking => write!(f, "Checking"),
             ChannelStatus::Alive => write!(f, "Alive"),
+            ChannelStatus::Drm => write!(f, "DRM"),
             ChannelStatus::Dead => write!(f, "Dead"),
             ChannelStatus::Geoblocked => write!(f, "Geoblocked"),
             ChannelStatus::GeoblockedConfirmed => write!(f, "Geoblocked (Confirmed)"),
@@ -68,6 +70,8 @@ pub struct ChannelResult {
     pub retry_count: Option<u32>,
     #[serde(default, alias = "last_error_reason")]
     pub error_reason: Option<String>,
+    #[serde(default)]
+    pub drm_system: Option<String>,
 }
 
 #[cfg(test)]
@@ -102,6 +106,7 @@ mod tests {
             stream_url: None,
             retry_count: None,
             error_reason: None,
+            drm_system: None,
         }
     }
 

@@ -4,6 +4,8 @@ export function statusLabel(status: ChannelStatus): string {
   switch (status) {
     case "alive":
       return "Alive";
+    case "drm":
+      return "DRM";
     case "dead":
       return "Dead";
     case "geoblocked":
@@ -23,6 +25,8 @@ export function statusColor(status: ChannelStatus): string {
   switch (status) {
     case "alive":
       return "text-green-400";
+    case "drm":
+      return "text-cyan-400";
     case "dead":
       return "text-red-400";
     case "geoblocked":
@@ -40,6 +44,8 @@ export function statusBgColor(status: ChannelStatus): string {
   switch (status) {
     case "alive":
       return "bg-green-500/10 text-green-400 border-green-500/20";
+    case "drm":
+      return "bg-cyan-500/10 text-cyan-400 border-cyan-500/20";
     case "dead":
       return "bg-red-500/10 text-red-400 border-red-500/20";
     case "geoblocked":
@@ -57,6 +63,8 @@ export function statusIcon(status: ChannelStatus): string {
   switch (status) {
     case "alive":
       return "✓";
+    case "drm":
+      return "⚿";
     case "dead":
       return "✕";
     case "geoblocked":
@@ -96,6 +104,8 @@ export function statusDotColor(status: ChannelStatus): string {
   switch (status) {
     case "alive":
       return "bg-green-500";
+    case "drm":
+      return "bg-cyan-500";
     case "dead":
       return "bg-red-500";
     case "geoblocked":

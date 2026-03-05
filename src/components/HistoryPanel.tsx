@@ -131,6 +131,7 @@ export function HistoryPanel({
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
                   <span className="text-text-secondary">{entry.summary.total} total</span>
                   <span className="text-green-400">{entry.summary.alive} alive</span>
+                  <span className="text-cyan-400">{entry.summary.drm} drm</span>
                   <span className="text-red-400">{entry.summary.dead} dead</span>
                   <span className="text-yellow-400">{entry.summary.geoblocked} geoblocked</span>
                 </div>

@@ -85,6 +85,7 @@ export function ThumbnailPanel({
     !screenshotUrl &&
     !!result.screenshot_path &&
     screenshotLoadError;
+  const showDrmPlaceholder = result.status === "drm" && !screenshotUrl;
   const showNoThumbnailCaptured =
     screenshotsEnabled &&
     !showLoadingPlaceholder &&
@@ -156,6 +157,14 @@ export function ThumbnailPanel({
             {lastErrorReason ? `Capture failed: ${lastErrorReason}` : "Capture timed out or decode failed."}
           </p>
         </div>
+      ) : showDrmPlaceholder ? (
+        <div className="flex h-[180px] flex-col items-center justify-center gap-2 rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 text-center">
+          <CircleHelp className="h-8 w-8 text-cyan-300/90" strokeWidth={1.75} />
+          <p className="text-[12px] font-medium text-cyan-200">DRM-protected stream</p>
+          <p className="text-[11px] text-cyan-200/80">
+            {result.drm_system ? `Detected system: ${result.drm_system}` : "Detected encrypted playback requirements."}
+          </p>
+        </div>
       ) : showNoThumbnailCaptured ? (
         <div className="flex h-[180px] flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
           <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
@@ -212,6 +221,15 @@ export function ThumbnailPanel({
           </>
         )}
       </div>
+
+      {result.status === "drm" && (
+        <div className="p-2 rounded bg-cyan-500/10 border border-cyan-500/20">
+          <p className="text-[12px] font-medium text-cyan-300">DRM Detection</p>
+          <p className="text-[11px] text-cyan-200/90 mt-1">
+            System: {result.drm_system ?? "Encrypted stream"}
+          </p>
+        </div>
+      )}
 
       {result.label_mismatches.length > 0 && (
         <div className="p-2 rounded bg-orange-500/10 border border-orange-500/20">
