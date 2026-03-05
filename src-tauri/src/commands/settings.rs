@@ -7,7 +7,9 @@ use tauri_plugin_store::StoreExt;
 
 use crate::engine::disk;
 use crate::error::AppError;
-use crate::models::settings::{AppSettings, ThemePreference};
+use crate::models::settings::{
+    AppSettings, ScanPresetCollection, ScanPresetConfig, ScanSettingsPreset, ThemePreference,
+};
 use crate::state::AppState;
 
 const MAX_SCREENSHOT_BYTES: u64 = 10 * 1024 * 1024;
@@ -23,6 +25,8 @@ const MIN_FFPROBE_TIMEOUT_SECS: f64 = 1.0;
 const MAX_FFPROBE_TIMEOUT_SECS: f64 = 300.0;
 const MIN_FFMPEG_BITRATE_TIMEOUT_SECS: f64 = 5.0;
 const MAX_FFMPEG_BITRATE_TIMEOUT_SECS: f64 = 300.0;
+const SCAN_PRESETS_STORE_KEY: &str = "scan_presets";
+const MAX_PRESET_NAME_LENGTH: usize = 64;
 
 pub fn apply_theme_preference(
     app: &tauri::AppHandle,
@@ -156,6 +160,55 @@ fn collect_dir_stats(path: &Path) -> Result<(u64, usize), std::io::Error> {
     }
 
     Ok((total_bytes, file_count))
+}
+
+fn normalize_preset_name(name: &str) -> Result<String, AppError> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::Other(
+            "Preset name cannot be empty".to_string(),
+        ));
+    }
+    if trimmed.chars().count() > MAX_PRESET_NAME_LENGTH {
+        return Err(AppError::Other(format!(
+            "Preset name must be {} characters or fewer",
+            MAX_PRESET_NAME_LENGTH
+        )));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn load_scan_presets(app: &tauri::AppHandle) -> ScanPresetCollection {
+    let Ok(store) = app.store("settings.json") else {
+        return ScanPresetCollection::default();
+    };
+    let Some(value) = store.get(SCAN_PRESETS_STORE_KEY) else {
+        return ScanPresetCollection::default();
+    };
+    serde_json::from_value::<ScanPresetCollection>(value).unwrap_or_default()
+}
+
+fn save_scan_presets(app: &tauri::AppHandle, presets: &ScanPresetCollection) {
+    let Ok(store) = app.store("settings.json") else {
+        return;
+    };
+    if let Ok(value) = serde_json::to_value(presets) {
+        store.set(SCAN_PRESETS_STORE_KEY, value);
+    }
+}
+
+fn sort_scan_presets(presets: &mut Vec<ScanSettingsPreset>) {
+    presets.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+    });
+}
+
+fn preset_index_by_name(presets: &[ScanSettingsPreset], name: &str) -> Option<usize> {
+    presets
+        .iter()
+        .position(|preset| preset.name.eq_ignore_ascii_case(name))
 }
 
 #[cfg(target_os = "macos")]
@@ -293,6 +346,129 @@ pub async fn get_settings(app: tauri::AppHandle) -> Result<AppSettings, AppError
     let state = app.state::<Arc<AppState>>();
     let settings = state.settings.lock().await;
     Ok(settings.clone())
+}
+
+#[tauri::command]
+pub async fn get_scan_presets(app: tauri::AppHandle) -> Result<ScanPresetCollection, AppError> {
+    Ok(load_scan_presets(&app))
+}
+
+#[tauri::command]
+pub async fn save_scan_preset(
+    app: tauri::AppHandle,
+    name: String,
+    config: ScanPresetConfig,
+    set_as_default: bool,
+) -> Result<ScanPresetCollection, AppError> {
+    let normalized_name = normalize_preset_name(&name)?;
+    let mut collection = load_scan_presets(&app);
+
+    if let Some(index) = preset_index_by_name(&collection.presets, &normalized_name) {
+        collection.presets[index] = ScanSettingsPreset {
+            name: normalized_name.clone(),
+            config,
+        };
+    } else {
+        collection.presets.push(ScanSettingsPreset {
+            name: normalized_name.clone(),
+            config,
+        });
+    }
+
+    if set_as_default {
+        collection.default_preset = Some(normalized_name.clone());
+    }
+
+    sort_scan_presets(&mut collection.presets);
+    save_scan_presets(&app, &collection);
+    Ok(collection)
+}
+
+#[tauri::command]
+pub async fn rename_scan_preset(
+    app: tauri::AppHandle,
+    current_name: String,
+    new_name: String,
+) -> Result<ScanPresetCollection, AppError> {
+    let current_name = normalize_preset_name(&current_name)?;
+    let new_name = normalize_preset_name(&new_name)?;
+    let mut collection = load_scan_presets(&app);
+
+    let Some(current_index) = preset_index_by_name(&collection.presets, &current_name) else {
+        return Err(AppError::Other("Preset not found".to_string()));
+    };
+
+    if let Some(existing_index) = preset_index_by_name(&collection.presets, &new_name) {
+        if existing_index != current_index {
+            return Err(AppError::Other(
+                "A preset with that name already exists".to_string(),
+            ));
+        }
+    }
+
+    let previous_name = collection.presets[current_index].name.clone();
+    collection.presets[current_index].name = new_name.clone();
+    if collection
+        .default_preset
+        .as_deref()
+        .map(|value| value.eq_ignore_ascii_case(&previous_name))
+        .unwrap_or(false)
+    {
+        collection.default_preset = Some(new_name);
+    }
+
+    sort_scan_presets(&mut collection.presets);
+    save_scan_presets(&app, &collection);
+    Ok(collection)
+}
+
+#[tauri::command]
+pub async fn delete_scan_preset(
+    app: tauri::AppHandle,
+    name: String,
+) -> Result<ScanPresetCollection, AppError> {
+    let normalized_name = normalize_preset_name(&name)?;
+    let mut collection = load_scan_presets(&app);
+
+    let Some(index) = preset_index_by_name(&collection.presets, &normalized_name) else {
+        return Err(AppError::Other("Preset not found".to_string()));
+    };
+    let removed = collection.presets.remove(index);
+
+    if collection
+        .default_preset
+        .as_deref()
+        .map(|value| value.eq_ignore_ascii_case(&removed.name))
+        .unwrap_or(false)
+    {
+        collection.default_preset = None;
+    }
+
+    sort_scan_presets(&mut collection.presets);
+    save_scan_presets(&app, &collection);
+    Ok(collection)
+}
+
+#[tauri::command]
+pub async fn set_default_scan_preset(
+    app: tauri::AppHandle,
+    name: Option<String>,
+) -> Result<ScanPresetCollection, AppError> {
+    let mut collection = load_scan_presets(&app);
+    let normalized_name = match name {
+        Some(value) => Some(normalize_preset_name(&value)?),
+        None => None,
+    };
+
+    if let Some(ref requested) = normalized_name {
+        if preset_index_by_name(&collection.presets, requested).is_none() {
+            return Err(AppError::Other("Preset not found".to_string()));
+        }
+    }
+
+    collection.default_preset = normalized_name;
+    save_scan_presets(&app, &collection);
+    Ok(collection)
 }
 
 #[tauri::command]
@@ -610,7 +786,11 @@ pub fn evict_for_disk_space(
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_dir_stats, validate_screenshot_path};
+    use super::{
+        collect_dir_stats, normalize_preset_name, preset_index_by_name, sort_scan_presets,
+        validate_screenshot_path,
+    };
+    use crate::models::settings::{ScanPresetConfig, ScanSettingsPreset};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -722,5 +902,33 @@ mod tests {
 
         assert!(validated.ends_with("frame.webp"));
         std::fs::remove_dir_all(&root).expect("fixture root should be removable");
+    }
+
+    #[test]
+    fn preset_name_validation_rejects_blank_values() {
+        assert!(normalize_preset_name("   ").is_err());
+        assert_eq!(
+            normalize_preset_name("  Fast Scan  ").expect("name should normalize"),
+            "Fast Scan"
+        );
+    }
+
+    #[test]
+    fn preset_sort_and_lookup_are_case_insensitive() {
+        let mut presets = vec![
+            ScanSettingsPreset {
+                name: "zeta".to_string(),
+                config: ScanPresetConfig::default(),
+            },
+            ScanSettingsPreset {
+                name: "Alpha".to_string(),
+                config: ScanPresetConfig::default(),
+            },
+        ];
+        sort_scan_presets(&mut presets);
+        assert_eq!(presets[0].name, "Alpha");
+        assert_eq!(presets[1].name, "zeta");
+        assert_eq!(preset_index_by_name(&presets, "alpha"), Some(0));
+        assert_eq!(preset_index_by_name(&presets, "ZETA"), Some(1));
     }
 }

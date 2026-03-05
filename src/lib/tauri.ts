@@ -3,6 +3,8 @@ import type {
   AppSettings,
   ChannelResult,
   PlaylistPreview,
+  ScanPresetCollection,
+  ScanPresetConfig,
   ScanConfig,
   ScanHistoryItem,
   RecentPlaylistEntry,
@@ -112,6 +114,38 @@ export async function getSettings(): Promise<AppSettings> {
 
 export async function updateSettings(settings: AppSettings): Promise<void> {
   return invoke("update_settings", { settings });
+}
+
+export async function getScanPresets(): Promise<ScanPresetCollection> {
+  return invoke("get_scan_presets");
+}
+
+export async function saveScanPreset(
+  name: string,
+  config: ScanPresetConfig,
+  setAsDefault = false,
+): Promise<ScanPresetCollection> {
+  return invoke("save_scan_preset", { name, config, set_as_default: setAsDefault });
+}
+
+export async function renameScanPreset(
+  currentName: string,
+  newName: string,
+): Promise<ScanPresetCollection> {
+  return invoke("rename_scan_preset", {
+    current_name: currentName,
+    new_name: newName,
+  });
+}
+
+export async function deleteScanPreset(name: string): Promise<ScanPresetCollection> {
+  return invoke("delete_scan_preset", { name });
+}
+
+export async function setDefaultScanPreset(
+  name: string | null,
+): Promise<ScanPresetCollection> {
+  return invoke("set_default_scan_preset", { name });
 }
 
 export async function checkFfmpegAvailable(): Promise<[boolean, boolean]> {

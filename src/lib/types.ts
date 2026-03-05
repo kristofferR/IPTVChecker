@@ -159,6 +159,34 @@ export interface AppSettings {
   low_space_threshold_gb: number;
 }
 
+export interface ScanPresetConfig {
+  timeout: number;
+  extended_timeout: number | null;
+  concurrency: number;
+  retries: number;
+  retry_backoff: RetryBackoff;
+  user_agent: string;
+  skip_screenshots: boolean;
+  profile_bitrate: boolean;
+  ffprobe_timeout_secs: number;
+  ffmpeg_bitrate_timeout_secs: number;
+  proxy_file: string | null;
+  test_geoblock: boolean;
+  screenshots_dir: string | null;
+  low_fps_threshold: number;
+  screenshot_format: ScreenshotFormat;
+}
+
+export interface ScanSettingsPreset {
+  name: string;
+  config: ScanPresetConfig;
+}
+
+export interface ScanPresetCollection {
+  presets: ScanSettingsPreset[];
+  default_preset: string | null;
+}
+
 export interface ScanHistoryDiff {
   channels_gained: number;
   channels_lost: number;

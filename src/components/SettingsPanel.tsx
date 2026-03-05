@@ -10,7 +10,12 @@ import {
 } from "lucide-react";
 import {
   clearScreenshotCache,
+  deleteScanPreset,
+  getScanPresets,
   getScreenshotCacheStats,
+  renameScanPreset,
+  saveScanPreset,
+  setDefaultScanPreset,
   setDefaultM3u8FileAssociation,
 } from "../lib/tauri";
 import {
@@ -18,7 +23,13 @@ import {
   PerformanceTime,
   triggerHaptic,
 } from "../lib/haptics";
-import type { AppSettings, ScreenshotCacheStats } from "../lib/types";
+import type {
+  AppSettings,
+  ScanPresetCollection,
+  ScanPresetConfig,
+  ScanSettingsPreset,
+  ScreenshotCacheStats,
+} from "../lib/types";
 
 type SettingsTab = "general" | "scanning" | "media" | "network" | "advanced";
 
@@ -38,6 +49,51 @@ const inputClass =
 const blockClass = "rounded-2xl border border-border-app/70 bg-panel-subtle";
 const rowClass =
   "flex items-center justify-between gap-3 px-4 py-3 border-b border-border-subtle last:border-b-0";
+const PRESET_NAME_MAX_LENGTH = 64;
+
+function buildScanPresetConfig(settings: AppSettings): ScanPresetConfig {
+  return {
+    timeout: settings.timeout,
+    extended_timeout: settings.extended_timeout,
+    concurrency: settings.concurrency,
+    retries: settings.retries,
+    retry_backoff: settings.retry_backoff,
+    user_agent: settings.user_agent,
+    skip_screenshots: settings.skip_screenshots,
+    profile_bitrate: settings.profile_bitrate,
+    ffprobe_timeout_secs: settings.ffprobe_timeout_secs,
+    ffmpeg_bitrate_timeout_secs: settings.ffmpeg_bitrate_timeout_secs,
+    proxy_file: settings.proxy_file,
+    test_geoblock: settings.test_geoblock,
+    screenshots_dir: settings.screenshots_dir,
+    low_fps_threshold: settings.low_fps_threshold,
+    screenshot_format: settings.screenshot_format,
+  };
+}
+
+function applyScanPresetConfig(
+  base: AppSettings,
+  config: ScanPresetConfig,
+): AppSettings {
+  return {
+    ...base,
+    timeout: config.timeout,
+    extended_timeout: config.extended_timeout,
+    concurrency: config.concurrency,
+    retries: config.retries,
+    retry_backoff: config.retry_backoff,
+    user_agent: config.user_agent,
+    skip_screenshots: config.skip_screenshots,
+    profile_bitrate: config.profile_bitrate,
+    ffprobe_timeout_secs: config.ffprobe_timeout_secs,
+    ffmpeg_bitrate_timeout_secs: config.ffmpeg_bitrate_timeout_secs,
+    proxy_file: config.proxy_file,
+    test_geoblock: config.test_geoblock,
+    screenshots_dir: config.screenshots_dir,
+    low_fps_threshold: config.low_fps_threshold,
+    screenshot_format: config.screenshot_format,
+  };
+}
 
 function formatBytes(totalBytes: number): string {
   if (totalBytes < 1024) return `${totalBytes} B`;
@@ -117,6 +173,16 @@ function SegmentedControl<T extends string>({
 export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [draft, setDraft] = useState<AppSettings>(settings);
+  const [presetCollection, setPresetCollection] = useState<ScanPresetCollection>({
+    presets: [],
+    default_preset: null,
+  });
+  const [selectedPresetName, setSelectedPresetName] = useState("");
+  const [presetNameDraft, setPresetNameDraft] = useState("");
+  const [presetSetAsDefault, setPresetSetAsDefault] = useState(false);
+  const [presetBusy, setPresetBusy] = useState(false);
+  const [presetError, setPresetError] = useState<string | null>(null);
+  const [presetNotice, setPresetNotice] = useState<string | null>(null);
   const [cacheStats, setCacheStats] = useState<ScreenshotCacheStats | null>(null);
   const [cacheBusy, setCacheBusy] = useState(false);
   const [associationBusy, setAssociationBusy] = useState(false);
@@ -132,6 +198,38 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
   useEffect(() => {
     setDraft(settings);
   }, [settings]);
+
+  const refreshPresets = useCallback(async () => {
+    try {
+      const next = await getScanPresets();
+      setPresetCollection(next);
+      setPresetError(null);
+    } catch (error) {
+      setPresetError(error instanceof Error ? error.message : String(error));
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshPresets();
+  }, [refreshPresets]);
+
+  useEffect(() => {
+    if (presetCollection.presets.length === 0) {
+      setSelectedPresetName("");
+      return;
+    }
+    const selectedExists = presetCollection.presets.some(
+      (preset) => preset.name === selectedPresetName,
+    );
+    if (selectedExists) return;
+    setSelectedPresetName(
+      presetCollection.default_preset ?? presetCollection.presets[0]?.name ?? "",
+    );
+  }, [presetCollection, selectedPresetName]);
+
+  const selectedPreset: ScanSettingsPreset | null =
+    presetCollection.presets.find((preset) => preset.name === selectedPresetName) ??
+    null;
 
   const persist = useCallback(
     (next: AppSettings) => {
@@ -187,6 +285,17 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
       setDraft((prev) => {
         const next = { ...prev, [key]: value };
         schedulePersist(next, options);
+        return next;
+      });
+    },
+    [schedulePersist],
+  );
+
+  const applyPresetToDraft = useCallback(
+    (config: ScanPresetConfig) => {
+      setDraft((prev) => {
+        const next = applyScanPresetConfig(prev, config);
+        schedulePersist(next, { immediate: true });
         return next;
       });
     },
@@ -296,6 +405,140 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
       setAssociationError(err instanceof Error ? err.message : String(err));
     } finally {
       setAssociationBusy(false);
+    }
+  };
+
+  const handleSavePreset = async () => {
+    const name = presetNameDraft.trim() || selectedPresetName.trim();
+    if (!name) {
+      setPresetError("Enter a preset name first.");
+      return;
+    }
+    if (name.length > PRESET_NAME_MAX_LENGTH) {
+      setPresetError(`Preset name must be ${PRESET_NAME_MAX_LENGTH} characters or fewer.`);
+      return;
+    }
+
+    setPresetBusy(true);
+    setPresetError(null);
+    setPresetNotice(null);
+    try {
+      const next = await saveScanPreset(
+        name,
+        buildScanPresetConfig(draft),
+        presetSetAsDefault,
+      );
+      setPresetCollection(next);
+      setSelectedPresetName(name);
+      setPresetNameDraft(name);
+      setPresetNotice(`Saved preset "${name}".`);
+    } catch (error) {
+      setPresetError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPresetBusy(false);
+    }
+  };
+
+  const handleLoadPreset = () => {
+    if (!selectedPreset) {
+      setPresetError("Select a preset to load.");
+      return;
+    }
+    setPresetError(null);
+    setPresetNotice(`Loaded preset "${selectedPreset.name}".`);
+    applyPresetToDraft(selectedPreset.config);
+  };
+
+  const handleRenamePreset = async () => {
+    if (!selectedPreset) {
+      setPresetError("Select a preset to rename.");
+      return;
+    }
+    const nextName = window
+      .prompt("Rename preset", selectedPreset.name)
+      ?.trim();
+    if (!nextName || nextName === selectedPreset.name) {
+      return;
+    }
+    if (nextName.length > PRESET_NAME_MAX_LENGTH) {
+      setPresetError(`Preset name must be ${PRESET_NAME_MAX_LENGTH} characters or fewer.`);
+      return;
+    }
+
+    setPresetBusy(true);
+    setPresetError(null);
+    setPresetNotice(null);
+    try {
+      const next = await renameScanPreset(selectedPreset.name, nextName);
+      setPresetCollection(next);
+      setSelectedPresetName(nextName);
+      setPresetNameDraft(nextName);
+      setPresetNotice(`Renamed preset to "${nextName}".`);
+    } catch (error) {
+      setPresetError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPresetBusy(false);
+    }
+  };
+
+  const handleDeletePreset = async () => {
+    if (!selectedPreset) {
+      setPresetError("Select a preset to delete.");
+      return;
+    }
+    if (!window.confirm(`Delete preset "${selectedPreset.name}"?`)) {
+      return;
+    }
+
+    setPresetBusy(true);
+    setPresetError(null);
+    setPresetNotice(null);
+    try {
+      const next = await deleteScanPreset(selectedPreset.name);
+      setPresetCollection(next);
+      setPresetNameDraft("");
+      setSelectedPresetName(
+        next.default_preset ?? next.presets[0]?.name ?? "",
+      );
+      setPresetNotice(`Deleted preset "${selectedPreset.name}".`);
+    } catch (error) {
+      setPresetError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPresetBusy(false);
+    }
+  };
+
+  const handleSetDefaultPreset = async () => {
+    if (!selectedPreset) {
+      setPresetError("Select a preset to mark as default.");
+      return;
+    }
+    setPresetBusy(true);
+    setPresetError(null);
+    setPresetNotice(null);
+    try {
+      const next = await setDefaultScanPreset(selectedPreset.name);
+      setPresetCollection(next);
+      setPresetNotice(`Default preset set to "${selectedPreset.name}".`);
+    } catch (error) {
+      setPresetError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPresetBusy(false);
+    }
+  };
+
+  const handleClearDefaultPreset = async () => {
+    setPresetBusy(true);
+    setPresetError(null);
+    setPresetNotice(null);
+    try {
+      const next = await setDefaultScanPreset(null);
+      setPresetCollection(next);
+      setPresetNotice("Cleared default preset.");
+    } catch (error) {
+      setPresetError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPresetBusy(false);
     }
   };
 
@@ -488,144 +731,268 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
           )}
 
           {activeTab === "scanning" && (
-            <section className={`${blockClass} p-4`}>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Timeout (seconds)
-                  </label>
-                  <input
-                    type="number"
-                    value={draft.timeout}
+            <>
+              <section className={`${blockClass} p-4 space-y-3`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[13px] font-medium text-text-primary">Scan Presets</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Save, load, rename, and delete reusable scan configurations.
+                    </p>
+                  </div>
+                  {presetCollection.default_preset && (
+                    <span className="rounded-md border border-border-app px-2 py-1 text-[11px] text-text-secondary">
+                      Default: {presetCollection.default_preset}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
+                  <select
+                    value={selectedPresetName}
                     onChange={(event) => {
-                      const value = parseFloat(event.target.value);
-                      updateSetting(
-                        "timeout",
-                        Number.isNaN(value) ? 10 : Math.max(0.5, value),
-                      );
+                      setSelectedPresetName(event.target.value);
+                      setPresetNameDraft(event.target.value);
                     }}
-                    step="0.5"
-                    min="0.5"
                     className={inputClass}
-                  />
+                    disabled={presetBusy || presetCollection.presets.length === 0}
+                  >
+                    <option value="">
+                      {presetCollection.presets.length === 0
+                        ? "No presets saved"
+                        : "Select preset"}
+                    </option>
+                    {presetCollection.presets.map((preset) => (
+                      <option key={preset.name} value={preset.name}>
+                        {preset.name}
+                        {presetCollection.default_preset === preset.name
+                          ? " (Default)"
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleLoadPreset}
+                    disabled={presetBusy || !selectedPreset}
+                    className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    Load
+                  </button>
                 </div>
 
-                <div>
-                  <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Extended Timeout (seconds)
-                  </label>
-                  <input
-                    type="number"
-                    value={draft.extended_timeout ?? ""}
-                    onChange={(event) => {
-                      if (!event.target.value) {
-                        updateSetting("extended_timeout", null);
-                        return;
-                      }
-                      const value = parseFloat(event.target.value);
-                      updateSetting(
-                        "extended_timeout",
-                        Number.isNaN(value) ? null : Math.max(1, value),
-                      );
-                    }}
-                    placeholder="Disabled"
-                    step="1"
-                    min="1"
-                    className={inputClass}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Concurrency
-                  </label>
-                  <input
-                    type="number"
-                    value={draft.concurrency}
-                    onChange={(event) => {
-                      const value = parseInt(event.target.value, 10);
-                      updateSetting(
-                        "concurrency",
-                        Number.isNaN(value) ? 1 : Math.max(1, Math.min(20, value)),
-                      );
-                    }}
-                    min="1"
-                    max="20"
-                    className={inputClass}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Max Retries
-                  </label>
-                  <input
-                    type="number"
-                    value={draft.retries}
-                    onChange={(event) => {
-                      const value = parseInt(event.target.value, 10);
-                      updateSetting(
-                        "retries",
-                        Number.isNaN(value) ? 3 : Math.max(0, Math.min(10, value)),
-                      );
-                    }}
-                    min="0"
-                    max="10"
-                    className={inputClass}
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Retry Backoff
-                  </label>
-                  <SegmentedControl
-                    value={draft.retry_backoff}
-                    options={[
-                      { value: "none", label: "None" },
-                      { value: "linear", label: "Linear" },
-                      { value: "exponential", label: "Exponential" },
-                    ]}
-                    onChange={(value) =>
-                      updateSetting("retry_backoff", value, { immediate: true })
-                    }
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Low FPS Threshold
-                  </label>
-                  <input
-                    type="number"
-                    value={draft.low_fps_threshold}
-                    onChange={(event) => {
-                      const value = parseFloat(event.target.value);
-                      updateSetting(
-                        "low_fps_threshold",
-                        Number.isNaN(value) ? 23.0 : Math.max(0, Math.min(240, value)),
-                      );
-                    }}
-                    step="0.1"
-                    min="0"
-                    max="240"
-                    className={inputClass}
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    User Agent
-                  </label>
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
                   <input
                     type="text"
-                    value={draft.user_agent}
-                    onChange={(event) => updateSetting("user_agent", event.target.value)}
+                    value={presetNameDraft}
+                    onChange={(event) =>
+                      setPresetNameDraft(event.target.value.slice(0, PRESET_NAME_MAX_LENGTH))
+                    }
+                    placeholder="Preset name"
                     className={inputClass}
+                    disabled={presetBusy}
                   />
+                  <button
+                    type="button"
+                    onClick={handleSavePreset}
+                    disabled={presetBusy}
+                    className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    Save
+                  </button>
                 </div>
-              </div>
-            </section>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="inline-flex items-center gap-2 text-[12px] text-text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={presetSetAsDefault}
+                      onChange={(event) => setPresetSetAsDefault(event.target.checked)}
+                      disabled={presetBusy}
+                    />
+                    Set as default when saving
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleSetDefaultPreset}
+                    disabled={presetBusy || !selectedPreset}
+                    className="macos-btn px-3 py-1.5 min-h-9 text-[12px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    Mark Default
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleClearDefaultPreset}
+                    disabled={presetBusy || !presetCollection.default_preset}
+                    className="macos-btn px-3 py-1.5 min-h-9 text-[12px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    Clear Default
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRenamePreset}
+                    disabled={presetBusy || !selectedPreset}
+                    className="macos-btn px-3 py-1.5 min-h-9 text-[12px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    Rename
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeletePreset}
+                    disabled={presetBusy || !selectedPreset}
+                    className="macos-btn px-3 py-1.5 min-h-9 text-[12px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    Delete
+                  </button>
+                </div>
+
+                {presetNotice && (
+                  <p className="text-[11px] text-emerald-400">{presetNotice}</p>
+                )}
+                {presetError && (
+                  <p className="text-[11px] text-red-400">{presetError}</p>
+                )}
+              </section>
+
+              <section className={`${blockClass} p-4`}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
+                      Timeout (seconds)
+                    </label>
+                    <input
+                      type="number"
+                      value={draft.timeout}
+                      onChange={(event) => {
+                        const value = parseFloat(event.target.value);
+                        updateSetting(
+                          "timeout",
+                          Number.isNaN(value) ? 10 : Math.max(0.5, value),
+                        );
+                      }}
+                      step="0.5"
+                      min="0.5"
+                      className={inputClass}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
+                      Extended Timeout (seconds)
+                    </label>
+                    <input
+                      type="number"
+                      value={draft.extended_timeout ?? ""}
+                      onChange={(event) => {
+                        if (!event.target.value) {
+                          updateSetting("extended_timeout", null);
+                          return;
+                        }
+                        const value = parseFloat(event.target.value);
+                        updateSetting(
+                          "extended_timeout",
+                          Number.isNaN(value) ? null : Math.max(1, value),
+                        );
+                      }}
+                      placeholder="Disabled"
+                      step="1"
+                      min="1"
+                      className={inputClass}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
+                      Concurrency
+                    </label>
+                    <input
+                      type="number"
+                      value={draft.concurrency}
+                      onChange={(event) => {
+                        const value = parseInt(event.target.value, 10);
+                        updateSetting(
+                          "concurrency",
+                          Number.isNaN(value) ? 1 : Math.max(1, Math.min(20, value)),
+                        );
+                      }}
+                      min="1"
+                      max="20"
+                      className={inputClass}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
+                      Max Retries
+                    </label>
+                    <input
+                      type="number"
+                      value={draft.retries}
+                      onChange={(event) => {
+                        const value = parseInt(event.target.value, 10);
+                        updateSetting(
+                          "retries",
+                          Number.isNaN(value) ? 3 : Math.max(0, Math.min(10, value)),
+                        );
+                      }}
+                      min="0"
+                      max="10"
+                      className={inputClass}
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
+                      Retry Backoff
+                    </label>
+                    <SegmentedControl
+                      value={draft.retry_backoff}
+                      options={[
+                        { value: "none", label: "None" },
+                        { value: "linear", label: "Linear" },
+                        { value: "exponential", label: "Exponential" },
+                      ]}
+                      onChange={(value) =>
+                        updateSetting("retry_backoff", value, { immediate: true })
+                      }
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
+                      Low FPS Threshold
+                    </label>
+                    <input
+                      type="number"
+                      value={draft.low_fps_threshold}
+                      onChange={(event) => {
+                        const value = parseFloat(event.target.value);
+                        updateSetting(
+                          "low_fps_threshold",
+                          Number.isNaN(value) ? 23.0 : Math.max(0, Math.min(240, value)),
+                        );
+                      }}
+                      step="0.1"
+                      min="0"
+                      max="240"
+                      className={inputClass}
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
+                      User Agent
+                    </label>
+                    <input
+                      type="text"
+                      value={draft.user_agent}
+                      onChange={(event) => updateSetting("user_agent", event.target.value)}
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
+              </section>
+            </>
           )}
 
           {activeTab === "media" && (

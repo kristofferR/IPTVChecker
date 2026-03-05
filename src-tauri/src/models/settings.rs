@@ -84,6 +84,85 @@ pub struct AppSettings {
     pub low_space_threshold_gb: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ScanPresetConfig {
+    pub timeout: f64,
+    pub extended_timeout: Option<f64>,
+    pub concurrency: u32,
+    pub retries: u32,
+    pub retry_backoff: RetryBackoff,
+    pub user_agent: String,
+    pub skip_screenshots: bool,
+    pub profile_bitrate: bool,
+    pub ffprobe_timeout_secs: f64,
+    pub ffmpeg_bitrate_timeout_secs: f64,
+    pub proxy_file: Option<String>,
+    pub test_geoblock: bool,
+    pub screenshots_dir: Option<String>,
+    pub low_fps_threshold: f64,
+    pub screenshot_format: ScreenshotFormat,
+}
+
+impl Default for ScanPresetConfig {
+    fn default() -> Self {
+        Self::from_settings(&AppSettings::default())
+    }
+}
+
+impl ScanPresetConfig {
+    pub fn from_settings(settings: &AppSettings) -> Self {
+        Self {
+            timeout: settings.timeout,
+            extended_timeout: settings.extended_timeout,
+            concurrency: settings.concurrency,
+            retries: settings.retries,
+            retry_backoff: settings.retry_backoff,
+            user_agent: settings.user_agent.clone(),
+            skip_screenshots: settings.skip_screenshots,
+            profile_bitrate: settings.profile_bitrate,
+            ffprobe_timeout_secs: settings.ffprobe_timeout_secs,
+            ffmpeg_bitrate_timeout_secs: settings.ffmpeg_bitrate_timeout_secs,
+            proxy_file: settings.proxy_file.clone(),
+            test_geoblock: settings.test_geoblock,
+            screenshots_dir: settings.screenshots_dir.clone(),
+            low_fps_threshold: settings.low_fps_threshold,
+            screenshot_format: settings.screenshot_format,
+        }
+    }
+
+    pub fn apply_to_settings(&self, settings: &mut AppSettings) {
+        settings.timeout = self.timeout;
+        settings.extended_timeout = self.extended_timeout;
+        settings.concurrency = self.concurrency;
+        settings.retries = self.retries;
+        settings.retry_backoff = self.retry_backoff;
+        settings.user_agent = self.user_agent.clone();
+        settings.skip_screenshots = self.skip_screenshots;
+        settings.profile_bitrate = self.profile_bitrate;
+        settings.ffprobe_timeout_secs = self.ffprobe_timeout_secs;
+        settings.ffmpeg_bitrate_timeout_secs = self.ffmpeg_bitrate_timeout_secs;
+        settings.proxy_file = self.proxy_file.clone();
+        settings.test_geoblock = self.test_geoblock;
+        settings.screenshots_dir = self.screenshots_dir.clone();
+        settings.low_fps_threshold = self.low_fps_threshold;
+        settings.screenshot_format = self.screenshot_format;
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ScanSettingsPreset {
+    pub name: String,
+    pub config: ScanPresetConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct ScanPresetCollection {
+    pub presets: Vec<ScanSettingsPreset>,
+    pub default_preset: Option<String>,
+}
+
 impl AppSettings {
     pub fn level_filter(&self) -> log::LevelFilter {
         match self.log_level.to_lowercase().as_str() {
@@ -128,7 +207,7 @@ impl Default for AppSettings {
 
 #[cfg(test)]
 mod tests {
-    use super::AppSettings;
+    use super::{AppSettings, ScanPresetConfig, ScreenshotFormat};
 
     #[test]
     fn default_enables_scan_notifications() {
@@ -154,5 +233,27 @@ mod tests {
         assert!(settings.scan_notifications);
         assert_eq!(settings.low_fps_threshold, 23.0);
         assert_eq!(settings.channel_logo_size, super::ChannelLogoSize::Small);
+    }
+
+    #[test]
+    fn preset_config_round_trip_updates_scan_fields_only() {
+        let mut base = AppSettings::default();
+        base.timeout = 22.5;
+        base.retries = 7;
+        base.user_agent = "PresetAgent/1.0".to_string();
+        base.screenshot_format = ScreenshotFormat::Png;
+        let preset = ScanPresetConfig::from_settings(&base);
+
+        let mut destination = AppSettings::default();
+        destination.theme = super::ThemePreference::Dark;
+        destination.scan_history_limit = 99;
+        preset.apply_to_settings(&mut destination);
+
+        assert_eq!(destination.timeout, 22.5);
+        assert_eq!(destination.retries, 7);
+        assert_eq!(destination.user_agent, "PresetAgent/1.0");
+        assert_eq!(destination.screenshot_format, ScreenshotFormat::Png);
+        assert_eq!(destination.theme, super::ThemePreference::Dark);
+        assert_eq!(destination.scan_history_limit, 99);
     }
 }

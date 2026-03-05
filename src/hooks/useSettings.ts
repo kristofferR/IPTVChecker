@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AppSettings } from "../lib/types";
-import { getSettings, updateSettings } from "../lib/tauri";
+import type { AppSettings, ScanPresetConfig } from "../lib/types";
+import { getScanPresets, getSettings, updateSettings } from "../lib/tauri";
 
 const DEFAULT_SETTINGS: AppSettings = {
   timeout: 10.0,
@@ -32,13 +32,81 @@ export function useSettings() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
 
+  const applyPresetConfig = (
+    base: AppSettings,
+    config: ScanPresetConfig,
+  ): AppSettings => ({
+    ...base,
+    timeout: config.timeout,
+    extended_timeout: config.extended_timeout,
+    concurrency: config.concurrency,
+    retries: config.retries,
+    retry_backoff: config.retry_backoff,
+    user_agent: config.user_agent,
+    skip_screenshots: config.skip_screenshots,
+    profile_bitrate: config.profile_bitrate,
+    ffprobe_timeout_secs: config.ffprobe_timeout_secs,
+    ffmpeg_bitrate_timeout_secs: config.ffmpeg_bitrate_timeout_secs,
+    proxy_file: config.proxy_file,
+    test_geoblock: config.test_geoblock,
+    screenshots_dir: config.screenshots_dir,
+    low_fps_threshold: config.low_fps_threshold,
+    screenshot_format: config.screenshot_format,
+  });
+
+  const sameScanConfig = (value: AppSettings, config: ScanPresetConfig): boolean =>
+    value.timeout === config.timeout &&
+    value.extended_timeout === config.extended_timeout &&
+    value.concurrency === config.concurrency &&
+    value.retries === config.retries &&
+    value.retry_backoff === config.retry_backoff &&
+    value.user_agent === config.user_agent &&
+    value.skip_screenshots === config.skip_screenshots &&
+    value.profile_bitrate === config.profile_bitrate &&
+    value.ffprobe_timeout_secs === config.ffprobe_timeout_secs &&
+    value.ffmpeg_bitrate_timeout_secs === config.ffmpeg_bitrate_timeout_secs &&
+    value.proxy_file === config.proxy_file &&
+    value.test_geoblock === config.test_geoblock &&
+    value.screenshots_dir === config.screenshots_dir &&
+    value.low_fps_threshold === config.low_fps_threshold &&
+    value.screenshot_format === config.screenshot_format;
+
   useEffect(() => {
-    getSettings()
-      .then(setSettings)
-      .catch(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        let resolved = await getSettings();
+        try {
+          const presetState = await getScanPresets();
+          if (presetState.default_preset) {
+            const preset = presetState.presets.find(
+              (entry) => entry.name === presetState.default_preset,
+            );
+            if (preset && !sameScanConfig(resolved, preset.config)) {
+              resolved = applyPresetConfig(resolved, preset.config);
+              await updateSettings(resolved);
+            }
+          }
+        } catch {
+          // Keep base settings when presets fail to load.
+        }
+        if (!cancelled) {
+          setSettings(resolved);
+        }
+      } catch {
         // Use defaults on error
-      })
-      .finally(() => setLoading(false));
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const save = useCallback(async (newSettings: AppSettings) => {
