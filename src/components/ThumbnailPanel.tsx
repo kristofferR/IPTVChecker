@@ -11,6 +11,7 @@ interface ThumbnailPanelProps {
   screenshotLoading: boolean;
   screenshotLoadError: boolean;
   screenshotsEnabled: boolean;
+  scanState: "idle" | "scanning" | "paused" | "complete" | "cancelled";
   lightboxOpen: boolean;
   onLightboxChange: (open: boolean) => void;
 }
@@ -21,6 +22,7 @@ export function ThumbnailPanel({
   screenshotLoading,
   screenshotLoadError,
   screenshotsEnabled,
+  scanState,
   lightboxOpen,
   onLightboxChange,
 }: ThumbnailPanelProps) {
@@ -66,7 +68,11 @@ export function ThumbnailPanel({
     result.error_reason?.trim() ||
     result.last_error_reason?.trim() ||
     null;
-  const waitingForScanResult = result.status === "pending" || result.status === "checking";
+  const scanActive = scanState === "scanning" || scanState === "paused";
+  const waitingForScanResult =
+    scanActive && (result.status === "pending" || result.status === "checking");
+  const showUnscannedPlaceholder =
+    !scanActive && (result.status === "pending" || result.status === "checking");
   const loadingStoredScreenshot =
     screenshotLoading || (!!result.screenshot_path && !screenshotUrl && !screenshotLoadError);
   const showLoadingPlaceholder = screenshotsEnabled && (waitingForScanResult || loadingStoredScreenshot);
@@ -132,6 +138,12 @@ export function ThumbnailPanel({
           <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
           <p className="text-[12px] font-medium text-text-secondary">No thumbnail captured</p>
           <p className="text-[11px] text-text-tertiary">This channel scanned successfully, but no frame was saved.</p>
+        </div>
+      ) : showUnscannedPlaceholder ? (
+        <div className="flex h-[180px] flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
+          <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
+          <p className="text-[12px] font-medium text-text-secondary">Unscanned</p>
+          <p className="text-[11px] text-text-tertiary">Start a scan to capture this thumbnail.</p>
         </div>
       ) : showScreenshotsDisabled ? (
         <div className="flex h-[180px] flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">

@@ -1759,6 +1759,7 @@ export default function App() {
               screenshotLoading={screenshotLoading}
               screenshotLoadError={screenshotLoadError}
               screenshotsEnabled={!settings.skip_screenshots}
+              scanState={scanState}
               lightboxOpen={lightboxOpen}
               onLightboxChange={setLightboxOpen}
             />
