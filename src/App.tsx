@@ -1555,6 +1555,32 @@ export default function App() {
     ],
   );
 
+  const statusOptionCounts = useMemo(() => {
+    const baseFiltered = filterResults(
+      completedResults,
+      deferredSearch,
+      groupFilter,
+      "all",
+      duplicateIndices,
+    );
+    return {
+      all: baseFiltered.length,
+      alive: filterResults(baseFiltered, "", "all", "alive", duplicateIndices).length,
+      drm: filterResults(baseFiltered, "", "all", "drm", duplicateIndices).length,
+      dead: filterResults(baseFiltered, "", "all", "dead", duplicateIndices).length,
+      geoblocked: filterResults(baseFiltered, "", "all", "geoblocked", duplicateIndices).length,
+      mislabeled: filterResults(baseFiltered, "", "all", "mislabeled", duplicateIndices).length,
+      audio_only: filterResults(baseFiltered, "", "all", "audio_only", duplicateIndices).length,
+      duplicates: filterResults(baseFiltered, "", "all", "duplicates", duplicateIndices).length,
+      pending: filterResults(baseFiltered, "", "all", "pending", duplicateIndices).length,
+    };
+  }, [
+    completedResults,
+    deferredSearch,
+    groupFilter,
+    duplicateIndices,
+  ]);
+
   const exportContextRef = useRef({
     all: completedResults,
     filtered: filteredExportResults,
@@ -1734,8 +1760,7 @@ export default function App() {
         onGroupChange={handleGroupFilterChange}
         statusFilter={statusFilter}
         onStatusChange={handleStatusFilterChange}
-        filteredCount={filteredExportResults.length}
-        totalCount={completedResults.length}
+        statusOptionCounts={statusOptionCounts}
       />
       {isMac && playlist && (
         <div

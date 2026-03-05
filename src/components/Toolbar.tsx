@@ -63,8 +63,7 @@ interface ToolbarProps {
   onGroupChange: (value: string) => void;
   statusFilter: string;
   onStatusChange: (value: string) => void;
-  filteredCount: number;
-  totalCount: number;
+  statusOptionCounts: Record<string, number>;
 }
 
 const toolbarBtn =
@@ -106,8 +105,7 @@ export const Toolbar = memo(function Toolbar({
   onGroupChange,
   statusFilter,
   onStatusChange,
-  filteredCount,
-  totalCount,
+  statusOptionCounts,
 }: ToolbarProps) {
   const isMac = useWindowDragRegion;
   const scanning = scanState === "scanning";
@@ -119,11 +117,8 @@ export const Toolbar = memo(function Toolbar({
     ? "Open a playlist first"
     : scanBlockedReason;
   const filtersDisabled = !hasPlaylist;
-  const filtersActive =
-    search.trim().length > 0 || groupFilter !== "all" || statusFilter !== "all";
-  const filterCountLabel = filtersActive
-    ? `${filteredCount} of ${totalCount} channels`
-    : `${totalCount} channels`;
+  const statusLabel = (value: string, label: string) =>
+    hasPlaylist ? `${label} (${statusOptionCounts[value] ?? 0})` : label;
 
   // Platform-appropriate icons
   const IconOpen = isMac ? SFFolder : FolderOpen;
@@ -252,23 +247,11 @@ export const Toolbar = memo(function Toolbar({
 
       <div data-tauri-drag-region={dragRegionAttr} className="flex-1" />
 
-      {/* Filters: Search, Group, Status */}
+      {/* Filters: Group, Status, Search */}
       <div
-        className={`flex items-center gap-1.5 ${filtersDisabled ? "opacity-50" : ""}`}
+        className={`flex items-center gap-[clamp(0.35rem,0.8vw,0.85rem)] ${filtersDisabled ? "opacity-50" : ""}`}
         data-no-window-drag
       >
-        <div className="relative">
-          <Search className="search-icon absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary" />
-          <input
-            ref={searchInputRef}
-            type="search"
-            placeholder="Search..."
-            value={search}
-            disabled={filtersDisabled}
-            onChange={(e) => onSearchChange(e.target.value)}
-            className="native-field h-7 w-40 pl-7 pr-2 text-[12px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:cursor-not-allowed"
-          />
-        </div>
         <select
           value={groupFilter}
           disabled={filtersDisabled}
@@ -288,21 +271,28 @@ export const Toolbar = memo(function Toolbar({
           onChange={(e) => onStatusChange(e.target.value)}
           className="native-field h-7 text-[12px] px-2 bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
         >
-          <option value="all">All Status</option>
-          <option value="alive">Alive</option>
-          <option value="drm">DRM</option>
-          <option value="dead">Dead</option>
-          <option value="geoblocked">Geoblocked</option>
-          <option value="mislabeled">Mislabeled</option>
-          <option value="audio_only">Audio Only</option>
-          <option value="duplicates">Duplicates</option>
-          <option value="pending">Pending</option>
+          <option value="all">{statusLabel("all", "All Status")}</option>
+          <option value="alive">{statusLabel("alive", "Alive")}</option>
+          <option value="drm">{statusLabel("drm", "DRM")}</option>
+          <option value="dead">{statusLabel("dead", "Dead")}</option>
+          <option value="geoblocked">{statusLabel("geoblocked", "Geoblocked")}</option>
+          <option value="mislabeled">{statusLabel("mislabeled", "Mislabeled")}</option>
+          <option value="audio_only">{statusLabel("audio_only", "Audio Only")}</option>
+          <option value="duplicates">{statusLabel("duplicates", "Duplicates")}</option>
+          <option value="pending">{statusLabel("pending", "Pending")}</option>
         </select>
-        {hasPlaylist && (
-          <span className="text-[11px] text-text-tertiary px-1 whitespace-nowrap">
-            {filterCountLabel}
-          </span>
-        )}
+        <div className="relative ml-[clamp(0.15rem,0.5vw,0.6rem)]">
+          <Search className="search-icon absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary" />
+          <input
+            ref={searchInputRef}
+            type="search"
+            placeholder="Search..."
+            value={search}
+            disabled={filtersDisabled}
+            onChange={(e) => onSearchChange(e.target.value)}
+            className="native-field h-7 w-[clamp(9rem,16vw,12.5rem)] pl-7 pr-2 text-[12px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:cursor-not-allowed"
+          />
+        </div>
       </div>
 
       {/* Actions group: Export, History, Settings */}
