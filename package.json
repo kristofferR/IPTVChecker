@@ -11,7 +11,8 @@
     "typecheck": "tsgo --noEmit",
     "test:frontend": "bun test tests",
     "perf:ui-filter": "bun run scripts/benchmark-ui-filter.ts",
-    "setup:ffmpeg": "bash scripts/download-ffmpeg.sh"
+    "setup:ffmpeg": "bash scripts/download-ffmpeg.sh",
+    "clean:fuzz-local": "bash scripts/clean-fuzz-local.sh"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3",
