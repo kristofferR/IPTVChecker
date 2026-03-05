@@ -27,9 +27,11 @@ export const StatsPanel = memo(function StatsPanel({
           <span className="text-green-400">
             {stats.alive} ✓
           </span>
-          <span className="text-cyan-400">
-            {stats.drm} ⚿
-          </span>
+          {stats.drm > 0 && (
+            <span className="text-cyan-400">
+              {stats.drm} ⚿
+            </span>
+          )}
           <span className="text-red-400">
             {stats.dead} ✕
           </span>

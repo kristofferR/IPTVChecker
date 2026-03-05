@@ -172,7 +172,13 @@ function formatScanNotificationBody(stats: {
   geoblocked: number;
   playlist_score?: { overall: number } | null;
 }): string {
-  const base = `Alive ${stats.alive} | DRM ${stats.drm} | Dead ${stats.dead} | Geoblocked ${stats.geoblocked}`;
+  const parts = [
+    `Alive ${stats.alive}`,
+    ...(stats.drm > 0 ? [`DRM ${stats.drm}`] : []),
+    `Dead ${stats.dead}`,
+    `Geoblocked ${stats.geoblocked}`,
+  ];
+  const base = parts.join(" | ");
   if (!stats.playlist_score) {
     return base;
   }
