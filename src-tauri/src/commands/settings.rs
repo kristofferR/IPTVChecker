@@ -19,6 +19,10 @@ const MIN_RETENTION_COUNT: u32 = 0;
 const MAX_RETENTION_COUNT: u32 = 100;
 const MIN_LOW_SPACE_THRESHOLD_GB: f64 = 1.0;
 const MAX_LOW_SPACE_THRESHOLD_GB: f64 = 50.0;
+const MIN_FFPROBE_TIMEOUT_SECS: f64 = 1.0;
+const MAX_FFPROBE_TIMEOUT_SECS: f64 = 300.0;
+const MIN_FFMPEG_BITRATE_TIMEOUT_SECS: f64 = 5.0;
+const MAX_FFMPEG_BITRATE_TIMEOUT_SECS: f64 = 300.0;
 
 pub fn apply_theme_preference(
     app: &tauri::AppHandle,
@@ -308,6 +312,24 @@ pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Re
         return Err(AppError::Other(format!(
             "Invalid low FPS threshold: must be between {} and {}",
             MIN_LOW_FPS_THRESHOLD, MAX_LOW_FPS_THRESHOLD
+        )));
+    }
+    if !settings.ffprobe_timeout_secs.is_finite()
+        || settings.ffprobe_timeout_secs < MIN_FFPROBE_TIMEOUT_SECS
+        || settings.ffprobe_timeout_secs > MAX_FFPROBE_TIMEOUT_SECS
+    {
+        return Err(AppError::Other(format!(
+            "Invalid ffprobe timeout: must be between {} and {} seconds",
+            MIN_FFPROBE_TIMEOUT_SECS, MAX_FFPROBE_TIMEOUT_SECS
+        )));
+    }
+    if !settings.ffmpeg_bitrate_timeout_secs.is_finite()
+        || settings.ffmpeg_bitrate_timeout_secs < MIN_FFMPEG_BITRATE_TIMEOUT_SECS
+        || settings.ffmpeg_bitrate_timeout_secs > MAX_FFMPEG_BITRATE_TIMEOUT_SECS
+    {
+        return Err(AppError::Other(format!(
+            "Invalid ffmpeg bitrate timeout: must be between {} and {} seconds",
+            MIN_FFMPEG_BITRATE_TIMEOUT_SECS, MAX_FFMPEG_BITRATE_TIMEOUT_SECS
         )));
     }
     if settings.screenshot_retention_count > MAX_RETENTION_COUNT {

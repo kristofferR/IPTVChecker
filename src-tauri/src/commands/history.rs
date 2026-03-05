@@ -515,6 +515,8 @@ mod tests {
             user_agent: "IPTVCheckerTests/1.0".to_string(),
             skip_screenshots: true,
             profile_bitrate: false,
+            ffprobe_timeout_secs: 30.0,
+            ffmpeg_bitrate_timeout_secs: 60.0,
             proxy_file: None,
             test_geoblock: false,
             screenshots_dir: None,

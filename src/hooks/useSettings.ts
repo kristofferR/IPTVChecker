@@ -11,6 +11,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   user_agent: "VLC/3.0.14 LibVLC/3.0.14",
   skip_screenshots: false,
   profile_bitrate: false,
+  ffprobe_timeout_secs: 30,
+  ffmpeg_bitrate_timeout_secs: 60,
   proxy_file: null,
   test_geoblock: false,
   screenshots_dir: null,

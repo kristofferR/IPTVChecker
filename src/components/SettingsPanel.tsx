@@ -890,6 +890,48 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                     <option value="trace">Trace</option>
                   </select>
                 </div>
+
+                <div>
+                  <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
+                    ffprobe timeout (seconds)
+                  </label>
+                  <input
+                    type="number"
+                    value={draft.ffprobe_timeout_secs}
+                    onChange={(event) => {
+                      const value = parseFloat(event.target.value);
+                      updateSetting(
+                        "ffprobe_timeout_secs",
+                        Number.isNaN(value) ? 30 : Math.max(1, Math.min(300, value)),
+                      );
+                    }}
+                    step="1"
+                    min="1"
+                    max="300"
+                    className={inputClass}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
+                    ffmpeg bitrate timeout (seconds)
+                  </label>
+                  <input
+                    type="number"
+                    value={draft.ffmpeg_bitrate_timeout_secs}
+                    onChange={(event) => {
+                      const value = parseFloat(event.target.value);
+                      updateSetting(
+                        "ffmpeg_bitrate_timeout_secs",
+                        Number.isNaN(value) ? 60 : Math.max(5, Math.min(300, value)),
+                      );
+                    }}
+                    step="1"
+                    min="5"
+                    max="300"
+                    className={inputClass}
+                  />
+                </div>
               </div>
             </section>
           )}

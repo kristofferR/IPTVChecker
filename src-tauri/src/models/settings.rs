@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 
 use super::scan::RetryBackoff;
 
+pub const DEFAULT_FFPROBE_TIMEOUT_SECS: f64 = 30.0;
+pub const DEFAULT_FFMPEG_BITRATE_TIMEOUT_SECS: f64 = 60.0;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ThemePreference {
@@ -64,6 +67,8 @@ pub struct AppSettings {
     pub user_agent: String,
     pub skip_screenshots: bool,
     pub profile_bitrate: bool,
+    pub ffprobe_timeout_secs: f64,
+    pub ffmpeg_bitrate_timeout_secs: f64,
     pub proxy_file: Option<String>,
     pub test_geoblock: bool,
     pub screenshots_dir: Option<String>,
@@ -102,6 +107,8 @@ impl Default for AppSettings {
             user_agent: "VLC/3.0.14 LibVLC/3.0.14".to_string(),
             skip_screenshots: false,
             profile_bitrate: false,
+            ffprobe_timeout_secs: DEFAULT_FFPROBE_TIMEOUT_SECS,
+            ffmpeg_bitrate_timeout_secs: DEFAULT_FFMPEG_BITRATE_TIMEOUT_SECS,
             proxy_file: None,
             test_geoblock: false,
             screenshots_dir: None,
@@ -133,6 +140,11 @@ mod tests {
     fn default_low_fps_threshold_is_23() {
         let settings = AppSettings::default();
         assert_eq!(settings.low_fps_threshold, 23.0);
+        assert_eq!(settings.ffprobe_timeout_secs, super::DEFAULT_FFPROBE_TIMEOUT_SECS);
+        assert_eq!(
+            settings.ffmpeg_bitrate_timeout_secs,
+            super::DEFAULT_FFMPEG_BITRATE_TIMEOUT_SECS
+        );
     }
 
     #[test]

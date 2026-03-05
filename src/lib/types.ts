@@ -82,6 +82,8 @@ export interface ScanConfig {
   user_agent: string;
   skip_screenshots: boolean;
   profile_bitrate: boolean;
+  ffprobe_timeout_secs: number;
+  ffmpeg_bitrate_timeout_secs: number;
   proxy_file: string | null;
   test_geoblock: boolean;
   screenshots_dir: string | null;
@@ -136,6 +138,8 @@ export interface AppSettings {
   user_agent: string;
   skip_screenshots: boolean;
   profile_bitrate: boolean;
+  ffprobe_timeout_secs: number;
+  ffmpeg_bitrate_timeout_secs: number;
   proxy_file: string | null;
   test_geoblock: boolean;
   screenshots_dir: string | null;

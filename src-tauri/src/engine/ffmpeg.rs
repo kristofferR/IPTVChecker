@@ -907,11 +907,18 @@ pub async fn profile_bitrate(
     app: &AppHandle,
     url: &str,
     user_agent: &str,
+    timeout_secs: f64,
     cancel: &CancellationToken,
 ) -> Result<String, AppError> {
     if cancel.is_cancelled() {
         return Err(AppError::Cancelled);
     }
+
+    let timeout_duration = if timeout_secs.is_finite() {
+        std::time::Duration::from_secs_f64(timeout_secs.clamp(1.0, 600.0))
+    } else {
+        FFMPEG_BITRATE_TIMEOUT
+    };
 
     let resolved_bin = resolve_binary(app, "ffmpeg");
 
@@ -949,7 +956,7 @@ pub async fn profile_bitrate(
             stderr_reader.abort();
             return Err(AppError::Cancelled);
         }
-        _ = tokio::time::sleep(FFMPEG_BITRATE_TIMEOUT) => {
+        _ = tokio::time::sleep(timeout_duration) => {
             let _ = child.kill().await;
             let _ = child.wait().await;
             true
@@ -981,7 +988,7 @@ pub async fn profile_bitrate(
     if timed_out && total_bytes == 0 {
         return Err(AppError::Other(format!(
             "ffmpeg bitrate profiling timed out after {:.0}s (binary: {})",
-            FFMPEG_BITRATE_TIMEOUT.as_secs_f64(),
+            timeout_duration.as_secs_f64(),
             resolved_bin,
         )));
     }

@@ -1144,6 +1144,8 @@ export default function App() {
       user_agent: settings.user_agent,
       skip_screenshots: settings.skip_screenshots,
       profile_bitrate: settings.profile_bitrate,
+      ffprobe_timeout_secs: settings.ffprobe_timeout_secs,
+      ffmpeg_bitrate_timeout_secs: settings.ffmpeg_bitrate_timeout_secs,
       proxy_file: settings.proxy_file,
       test_geoblock: settings.test_geoblock,
       screenshots_dir: settings.screenshots_dir,

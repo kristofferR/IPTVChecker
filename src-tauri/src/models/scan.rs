@@ -7,6 +7,10 @@ pub const MIN_TIMEOUT_SECS: f64 = 0.5;
 pub const MAX_TIMEOUT_SECS: f64 = 300.0;
 pub const MIN_EXTENDED_TIMEOUT_SECS: f64 = 1.0;
 pub const MAX_EXTENDED_TIMEOUT_SECS: f64 = 600.0;
+pub const MIN_FFPROBE_TIMEOUT_SECS: f64 = 1.0;
+pub const MAX_FFPROBE_TIMEOUT_SECS: f64 = 300.0;
+pub const MIN_FFMPEG_BITRATE_TIMEOUT_SECS: f64 = 5.0;
+pub const MAX_FFMPEG_BITRATE_TIMEOUT_SECS: f64 = 300.0;
 pub const MIN_CONCURRENCY: u32 = 1;
 pub const MAX_CONCURRENCY: u32 = 20;
 pub const MIN_RETRIES: u32 = 0;
@@ -41,6 +45,8 @@ pub struct ScanConfig {
     pub user_agent: String,
     pub skip_screenshots: bool,
     pub profile_bitrate: bool,
+    pub ffprobe_timeout_secs: f64,
+    pub ffmpeg_bitrate_timeout_secs: f64,
     pub proxy_file: Option<String>,
     pub test_geoblock: bool,
     pub screenshots_dir: Option<String>,
@@ -88,6 +94,26 @@ impl ScanConfig {
             return Err(AppError::Other(format!(
                 "Invalid retries: must be between {} and {}",
                 MIN_RETRIES, MAX_RETRIES
+            )));
+        }
+
+        if !self.ffprobe_timeout_secs.is_finite()
+            || self.ffprobe_timeout_secs < MIN_FFPROBE_TIMEOUT_SECS
+            || self.ffprobe_timeout_secs > MAX_FFPROBE_TIMEOUT_SECS
+        {
+            return Err(AppError::Other(format!(
+                "Invalid ffprobe timeout: must be between {} and {} seconds",
+                MIN_FFPROBE_TIMEOUT_SECS, MAX_FFPROBE_TIMEOUT_SECS
+            )));
+        }
+
+        if !self.ffmpeg_bitrate_timeout_secs.is_finite()
+            || self.ffmpeg_bitrate_timeout_secs < MIN_FFMPEG_BITRATE_TIMEOUT_SECS
+            || self.ffmpeg_bitrate_timeout_secs > MAX_FFMPEG_BITRATE_TIMEOUT_SECS
+        {
+            return Err(AppError::Other(format!(
+                "Invalid ffmpeg bitrate timeout: must be between {} and {} seconds",
+                MIN_FFMPEG_BITRATE_TIMEOUT_SECS, MAX_FFMPEG_BITRATE_TIMEOUT_SECS
             )));
         }
 
@@ -151,6 +177,8 @@ mod tests {
             user_agent: "VLC/3.0.14 LibVLC/3.0.14".to_string(),
             skip_screenshots: false,
             profile_bitrate: false,
+            ffprobe_timeout_secs: 30.0,
+            ffmpeg_bitrate_timeout_secs: 60.0,
             proxy_file: None,
             test_geoblock: false,
             screenshots_dir: None,
@@ -207,6 +235,32 @@ mod tests {
         assert!(config.validate().is_ok());
 
         config.retries = MAX_RETRIES + 1;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_invalid_ffprobe_timeout() {
+        let mut config = valid_config();
+        config.ffprobe_timeout_secs = 0.0;
+        assert!(config.validate().is_err());
+
+        config.ffprobe_timeout_secs = f64::INFINITY;
+        assert!(config.validate().is_err());
+
+        config.ffprobe_timeout_secs = MAX_FFPROBE_TIMEOUT_SECS + 1.0;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_invalid_ffmpeg_bitrate_timeout() {
+        let mut config = valid_config();
+        config.ffmpeg_bitrate_timeout_secs = 0.0;
+        assert!(config.validate().is_err());
+
+        config.ffmpeg_bitrate_timeout_secs = f64::NAN;
+        assert!(config.validate().is_err());
+
+        config.ffmpeg_bitrate_timeout_secs = MAX_FFMPEG_BITRATE_TIMEOUT_SECS + 1.0;
         assert!(config.validate().is_err());
     }
 }

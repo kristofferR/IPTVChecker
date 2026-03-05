@@ -109,6 +109,8 @@ async fn compute_shared_url_result(
     ffmpeg_ok: bool,
     ffprobe_ok: bool,
     profile_bitrate_flag: bool,
+    ffprobe_timeout_secs: f64,
+    ffmpeg_bitrate_timeout_secs: f64,
     low_fps_threshold: f64,
     skip_screenshots: bool,
     screenshots_dir: Option<&String>,
@@ -121,10 +123,10 @@ async fn compute_shared_url_result(
         checker::check_channel_status_with_ffprobe_debug(
             app,
             channel_url,
-            timeout,
+            ffprobe_timeout_secs,
             retries,
             retry_backoff,
-            extended_timeout,
+            None,
             ffprobe_ok,
             cancel,
         )
@@ -237,9 +239,18 @@ async fn compute_shared_url_result(
     };
     let diagnostics_started_at = Instant::now();
     let _diagnostics_permit = diagnostics_semaphore.clone().acquire_owned().await.ok();
+    let ffprobe_timeout_duration =
+        std::time::Duration::from_secs_f64(ffprobe_timeout_secs.clamp(1.0, 300.0));
 
     if ffprobe_ok {
-        if let Ok(snapshot) = ffmpeg::collect_probe_snapshot(app, &target_url, cancel).await {
+        if let Ok(snapshot) = ffmpeg::collect_probe_snapshot_with_timeout(
+            app,
+            &target_url,
+            cancel,
+            Some(ffprobe_timeout_duration),
+        )
+        .await
+        {
             shared.audio_only =
                 snapshot.track_presence.has_audio && !snapshot.track_presence.has_video;
             if let Some(info) = snapshot.video_info {
@@ -263,7 +274,14 @@ async fn compute_shared_url_result(
         }
 
         if !cancel.is_cancelled() && profile_bitrate_flag && ffmpeg_ok {
-            if let Ok(bitrate) = ffmpeg::profile_bitrate(app, &target_url, user_agent, cancel).await
+            if let Ok(bitrate) = ffmpeg::profile_bitrate(
+                app,
+                &target_url,
+                user_agent,
+                ffmpeg_bitrate_timeout_secs,
+                cancel,
+            )
+            .await
             {
                 shared.video_bitrate = Some(bitrate);
             }
@@ -1211,6 +1229,8 @@ async fn execute_scan_run(
         let test_geoblock = config.test_geoblock;
         let skip_screenshots = config.skip_screenshots;
         let profile_bitrate_flag = config.profile_bitrate;
+        let ffprobe_timeout_secs = config.ffprobe_timeout_secs;
+        let ffmpeg_bitrate_timeout_secs = config.ffmpeg_bitrate_timeout_secs;
         let low_fps_threshold = low_fps_threshold_setting;
         let screenshot_format = screenshot_format_setting;
         let screenshots_dir = screenshots_dir.clone();
@@ -1332,6 +1352,8 @@ async fn execute_scan_run(
                         ffmpeg_ok,
                         ffprobe_ok,
                         profile_bitrate_flag,
+                        ffprobe_timeout_secs,
+                        ffmpeg_bitrate_timeout_secs,
                         low_fps_threshold,
                         effective_skip_screenshots,
                         screenshots_dir.as_ref(),
