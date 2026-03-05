@@ -1633,6 +1633,7 @@ export default function App() {
                 statusFilter={statusFilter}
                 scanState={scanState}
                 isMac={isMac}
+                channelLogoSize={settings.channel_logo_size}
                 onSelectChannel={handleSelectChannel}
                 onOpenChannel={handleOpenChannel}
                 onSelectionChange={setSelectedChannelIndices}

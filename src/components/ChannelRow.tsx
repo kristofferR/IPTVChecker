@@ -1,8 +1,9 @@
-import { memo } from "react";
-import type { ChannelResult } from "../lib/types";
+import { memo, useEffect, useMemo, useState } from "react";
+import type { ChannelLogoSize, ChannelResult } from "../lib/types";
 import type { ColumnDefinition } from "../lib/tableColumns";
 import { Radio, Tv } from "lucide-react";
 import { StatusBadge } from "./StatusBadge";
+import { extractTvgLogoUrl } from "../lib/extinf";
 
 function formatLatency(latencyMs: number): string {
   if (latencyMs < 1000) {
@@ -24,6 +25,7 @@ function latencyTone(latencyMs: number): string {
 interface ChannelRowProps {
   rowIndex: number;
   result: ChannelResult;
+  channelLogoSize: ChannelLogoSize;
   onRowClick: (event: React.MouseEvent<HTMLDivElement>) => void;
   selected: boolean;
   duplicate?: boolean;
@@ -38,6 +40,7 @@ interface ChannelRowProps {
 function ChannelRowImpl({
   rowIndex,
   result,
+  channelLogoSize,
   onRowClick,
   selected,
   duplicate,
@@ -49,10 +52,26 @@ function ChannelRowImpl({
   onRowContextMenu,
 }: ChannelRowProps) {
   const isAlive = result.status === "alive";
+  const logoUrl = useMemo(() => extractTvgLogoUrl(result.extinf_line), [result.extinf_line]);
+  const [logoLoadFailed, setLogoLoadFailed] = useState(false);
+  const logoSizeClass = useMemo(() => {
+    if (channelLogoSize === "large") return "h-6 w-6";
+    if (channelLogoSize === "medium") return "h-5 w-5";
+    return "h-4 w-4";
+  }, [channelLogoSize]);
+  const kindIconSizeClass = useMemo(() => {
+    if (channelLogoSize === "large") return "h-5 w-5";
+    if (channelLogoSize === "medium") return "h-4 w-4";
+    return "h-3.5 w-3.5";
+  }, [channelLogoSize]);
   const errorReason =
     result.error_reason?.trim() ||
     result.last_error_reason?.trim() ||
     null;
+
+  useEffect(() => {
+    setLogoLoadFailed(false);
+  }, [logoUrl]);
 
   const renderCell = (column: ColumnDefinition) => {
     switch (column.key) {
@@ -86,15 +105,28 @@ function ChannelRowImpl({
         const kindLabel = result.audio_only ? "Audio-only stream" : "Video stream";
         return (
           <span className="inline-flex min-w-0 items-center gap-1.5 px-2 font-medium">
-            <span
-              className={`shrink-0 ${
-                result.audio_only ? "text-cyan-400" : "text-text-tertiary"
-              }`}
-              aria-label={kindLabel}
-              title={kindLabel}
-            >
-              <ChannelKindIcon className="h-3.5 w-3.5" aria-hidden="true" />
-            </span>
+            {logoUrl && !logoLoadFailed ? (
+              <img
+                src={logoUrl}
+                alt={`${result.name} logo`}
+                className={`${logoSizeClass} shrink-0 rounded-sm object-contain ring-1 ring-border-subtle bg-panel-subtle`}
+                loading="lazy"
+                referrerPolicy="no-referrer"
+                onError={() => {
+                  setLogoLoadFailed(true);
+                }}
+              />
+            ) : (
+              <span
+                className={`shrink-0 ${
+                  result.audio_only ? "text-cyan-400" : "text-text-tertiary"
+                }`}
+                aria-label={kindLabel}
+                title={kindLabel}
+              >
+                <ChannelKindIcon className={kindIconSizeClass} aria-hidden="true" />
+              </span>
+            )}
             <span className="truncate">{result.name}</span>
           </span>
         );
@@ -203,6 +235,7 @@ function equalChannelRowProps(
   return (
     previous.rowIndex === next.rowIndex &&
     previous.result === next.result &&
+    previous.channelLogoSize === next.channelLogoSize &&
     previous.selected === next.selected &&
     previous.duplicate === next.duplicate &&
     previous.focused === next.focused &&

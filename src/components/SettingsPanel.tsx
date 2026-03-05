@@ -413,6 +413,27 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                   </span>
                 </span>
               </label>
+
+              <div>
+                <label className={labelClass}>Channel Logo Size</label>
+                <select
+                  value={draft.channel_logo_size}
+                  onChange={(event) =>
+                    update(
+                      "channel_logo_size",
+                      event.target.value as AppSettings["channel_logo_size"],
+                    )
+                  }
+                  className={inputClass}
+                >
+                  <option value="small">Small (16px)</option>
+                  <option value="medium">Medium (20px)</option>
+                  <option value="large">Large (24px)</option>
+                </select>
+                <p className="text-[11px] text-text-tertiary mt-1">
+                  Controls logo size in the channel name column.
+                </p>
+              </div>
             </div>
           </section>
 

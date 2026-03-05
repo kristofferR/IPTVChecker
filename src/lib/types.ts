@@ -124,6 +124,7 @@ export interface ScanErrorPayload {
 }
 
 export type ScreenshotFormat = "webp" | "png";
+export type ChannelLogoSize = "small" | "medium" | "large";
 
 export interface AppSettings {
   timeout: number;
@@ -143,6 +144,7 @@ export interface AppSettings {
   theme: ThemePreference;
   log_level: string;
   show_prescan_filter: boolean;
+  channel_logo_size: ChannelLogoSize;
   screenshot_format: ScreenshotFormat;
   screenshot_retention_count: number;
   low_space_threshold_gb: number;

@@ -1,7 +1,7 @@
 import { useRef, useState, useMemo, useCallback, useEffect, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { ChannelResult } from "../lib/types";
+import type { ChannelLogoSize, ChannelResult } from "../lib/types";
 import type { SearchTextCache, SortDirection, SortField } from "../lib/filters";
 import { filterResults, sortResults } from "../lib/filters";
 import {
@@ -27,6 +27,7 @@ interface ChannelTableProps {
   groupFilter: string;
   statusFilter: string;
   isMac: boolean;
+  channelLogoSize: ChannelLogoSize;
   scanState?: "idle" | "scanning" | "paused" | "complete" | "cancelled";
   onSelectChannel: (result: ChannelResult) => void;
   onOpenChannel?: (result: ChannelResult) => void;
@@ -172,6 +173,7 @@ export function ChannelTable({
   groupFilter,
   statusFilter,
   isMac,
+  channelLogoSize,
   onSelectChannel,
   onOpenChannel,
   onSelectionChange,
@@ -1079,6 +1081,7 @@ export function ChannelTable({
                     <ChannelRow
                       rowIndex={virtualRow.index}
                       result={result}
+                      channelLogoSize={channelLogoSize}
                       onRowClick={handleRowClick}
                       onRowDoubleClick={handleRowDoubleClick}
                       onRowContextMenu={handleRowContextMenu}

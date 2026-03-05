@@ -38,6 +38,20 @@ impl ScreenshotFormat {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelLogoSize {
+    Small,
+    Medium,
+    Large,
+}
+
+impl Default for ChannelLogoSize {
+    fn default() -> Self {
+        Self::Medium
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
@@ -58,6 +72,7 @@ pub struct AppSettings {
     pub theme: ThemePreference,
     pub log_level: String,
     pub show_prescan_filter: bool,
+    pub channel_logo_size: ChannelLogoSize,
     pub screenshot_format: ScreenshotFormat,
     pub screenshot_retention_count: u32,
     pub low_space_threshold_gb: f64,
@@ -95,6 +110,7 @@ impl Default for AppSettings {
             theme: ThemePreference::System,
             log_level: "error".to_string(),
             show_prescan_filter: false,
+            channel_logo_size: ChannelLogoSize::default(),
             screenshot_format: ScreenshotFormat::default(),
             screenshot_retention_count: 1,
             low_space_threshold_gb: 5.0,
@@ -124,5 +140,6 @@ mod tests {
             .expect("settings should deserialize with defaults");
         assert!(settings.scan_notifications);
         assert_eq!(settings.low_fps_threshold, 23.0);
+        assert_eq!(settings.channel_logo_size, super::ChannelLogoSize::Medium);
     }
 }
