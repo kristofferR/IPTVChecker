@@ -1,6 +1,7 @@
 use crate::engine::parser::find_unquoted_comma;
 use crate::error::AppError;
 use crate::models::channel::{ChannelResult, ChannelStatus};
+use crate::models::scan_log::ScanDebugLog;
 use crate::state::AppState;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -8,9 +9,39 @@ use std::sync::Arc;
 use tauri::Manager;
 
 const AUDIO_ONLY_EXPORT_TAG: &str = "#EXTVLCOPT:iptv-checker-audio-only=1";
+const EXPORT_FORMAT_VERSION: u32 = 1;
 
 fn map_csv_error(error: csv::Error) -> AppError {
     AppError::Other(format!("CSV export failed: {}", error))
+}
+
+fn csv_version_marker_row() -> String {
+    format!("# IPTVChecker export v{}", EXPORT_FORMAT_VERSION)
+}
+
+fn now_epoch_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+#[derive(serde::Serialize)]
+struct ScanLogJsonExport {
+    version: u32,
+    exported_at_epoch_ms: u64,
+    #[serde(flatten)]
+    scan_log: ScanDebugLog,
+}
+
+fn serialize_scan_log_json_with_version(scan_log: ScanDebugLog) -> Result<Vec<u8>, AppError> {
+    let payload = ScanLogJsonExport {
+        version: EXPORT_FORMAT_VERSION,
+        exported_at_epoch_ms: now_epoch_ms(),
+        scan_log,
+    };
+    serde_json::to_vec_pretty(&payload)
+        .map_err(|error| AppError::Parse(format!("Failed to serialize scan log JSON: {}", error)))
 }
 
 async fn run_blocking_export<T: Send + 'static>(
@@ -53,7 +84,10 @@ pub async fn export_csv(
     include_latency: bool,
 ) -> Result<(), AppError> {
     run_blocking_export("export_csv", move || {
-        let file = std::fs::File::create(&path).map_err(AppError::Io)?;
+        use std::io::Write;
+
+        let mut file = std::fs::File::create(&path).map_err(AppError::Io)?;
+        writeln!(file, "{}", csv_version_marker_row()).map_err(AppError::Io)?;
         let mut writer = csv::WriterBuilder::new()
             .has_headers(false)
             .from_writer(file);
@@ -282,9 +316,7 @@ pub async fn export_scan_log_json(
         })?;
 
     run_blocking_export("export_scan_log_json", move || {
-        let bytes = serde_json::to_vec_pretty(&scan_log).map_err(|error| {
-            AppError::Parse(format!("Failed to serialize scan log JSON: {}", error))
-        })?;
+        let bytes = serialize_scan_log_json_with_version(scan_log)?;
         std::fs::write(path, bytes).map_err(AppError::Io)?;
         Ok(())
     })
@@ -410,6 +442,7 @@ fn format_audio_info(r: &ChannelResult) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::scan::ScanSummary;
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -443,6 +476,33 @@ mod tests {
             error_reason: None,
             drm_system: None,
         }
+    }
+
+    fn read_exported_csv(path: &Path) -> (String, csv::StringRecord, Vec<csv::StringRecord>) {
+        let content = std::fs::read(path).expect("csv file should be readable");
+        let marker_end = content
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .unwrap_or(content.len());
+        let marker = String::from_utf8_lossy(&content[..marker_end])
+            .trim_end_matches('\r')
+            .to_string();
+        let csv_body = if marker_end < content.len() {
+            &content[marker_end + 1..]
+        } else {
+            &content[..0]
+        };
+
+        let mut reader = csv::ReaderBuilder::new()
+            .has_headers(true)
+            .from_reader(csv_body);
+        let headers = reader.headers().expect("headers should parse").clone();
+        let rows: Vec<csv::StringRecord> = reader
+            .records()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("csv rows should parse");
+
+        (marker, headers, rows)
     }
 
     #[test]
@@ -491,15 +551,10 @@ mod tests {
             .await
             .expect("csv export should succeed");
 
-        let mut reader = csv::ReaderBuilder::new()
-            .has_headers(true)
-            .from_path(&path)
-            .expect("csv file should be readable");
-        let rows: Vec<csv::StringRecord> = reader
-            .records()
-            .collect::<Result<Vec<_>, _>>()
-            .expect("csv rows should parse");
+        let (marker, headers, rows) = read_exported_csv(&path);
 
+        assert_eq!(marker, csv_version_marker_row());
+        assert_eq!(headers.get(0), Some("Playlist"));
         assert_eq!(rows.len(), 1);
         let row = &rows[0];
         assert_eq!(row.get(0), Some("Playlist"));
@@ -527,17 +582,11 @@ mod tests {
             .await
             .expect("csv export should succeed");
 
-        let mut reader = csv::ReaderBuilder::new()
-            .has_headers(true)
-            .from_path(&path)
-            .expect("csv file should be readable");
-        let headers = reader.headers().expect("headers should parse").clone();
+        let (marker, headers, rows) = read_exported_csv(&path);
+
+        assert_eq!(marker, csv_version_marker_row());
         assert_eq!(headers.get(14), Some("Latency"));
 
-        let rows: Vec<csv::StringRecord> = reader
-            .records()
-            .collect::<Result<Vec<_>, _>>()
-            .expect("csv rows should parse");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].get(14), Some("1.2 s"));
 
@@ -561,17 +610,11 @@ mod tests {
             .await
             .expect("csv export should succeed");
 
-        let mut reader = csv::ReaderBuilder::new()
-            .has_headers(true)
-            .from_path(&path)
-            .expect("csv file should be readable");
-        let headers = reader.headers().expect("headers should parse").clone();
+        let (marker, headers, rows) = read_exported_csv(&path);
+
+        assert_eq!(marker, csv_version_marker_row());
         assert_eq!(headers.get(13), Some("Error Reason"));
 
-        let rows: Vec<csv::StringRecord> = reader
-            .records()
-            .collect::<Result<Vec<_>, _>>()
-            .expect("csv rows should parse");
         assert_eq!(rows[0].get(13), Some("Timeout"));
 
         std::fs::remove_file(path).expect("temporary csv should be removable");
@@ -593,17 +636,11 @@ mod tests {
             .await
             .expect("csv export should succeed");
 
-        let mut reader = csv::ReaderBuilder::new()
-            .has_headers(true)
-            .from_path(&path)
-            .expect("csv file should be readable");
-        let headers = reader.headers().expect("headers should parse").clone();
+        let (marker, headers, rows) = read_exported_csv(&path);
+
+        assert_eq!(marker, csv_version_marker_row());
         assert_eq!(headers.get(11), Some("Audio Only"));
 
-        let rows: Vec<csv::StringRecord> = reader
-            .records()
-            .collect::<Result<Vec<_>, _>>()
-            .expect("csv rows should parse");
         assert_eq!(rows[0].get(11), Some("Yes"));
 
         std::fs::remove_file(path).expect("temporary csv should be removable");
@@ -644,5 +681,44 @@ mod tests {
         assert_eq!(exported, expected);
 
         std::fs::remove_file(path).expect("temporary m3u should be removable");
+    }
+
+    #[test]
+    fn scan_log_json_export_includes_version_marker() {
+        let scan_log = ScanDebugLog {
+            run_id: "run-1".to_string(),
+            playlist_path: "/tmp/sample.m3u8".to_string(),
+            source_identity: Some("url:https://example.com/sample.m3u8".to_string()),
+            started_at_epoch_ms: 1000,
+            finished_at_epoch_ms: 2000,
+            summary: ScanSummary {
+                total: 1,
+                alive: 1,
+                dead: 0,
+                geoblocked: 0,
+                drm: 0,
+                low_framerate: 0,
+                mislabeled: 0,
+            },
+            channels: Vec::new(),
+        };
+
+        let bytes = serialize_scan_log_json_with_version(scan_log)
+            .expect("scan log export serialization should succeed");
+        let value: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("scan log export should be valid JSON");
+
+        assert_eq!(
+            value.get("version").and_then(|field| field.as_u64()),
+            Some(EXPORT_FORMAT_VERSION as u64)
+        );
+        assert!(value
+            .get("exported_at_epoch_ms")
+            .and_then(|field| field.as_u64())
+            .is_some());
+        assert_eq!(
+            value.get("run_id").and_then(|field| field.as_str()),
+            Some("run-1")
+        );
     }
 }
