@@ -1169,7 +1169,81 @@ pub async fn check_channel_status(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    #[derive(Clone)]
+    struct TestHttpResponse {
+        status_code: u16,
+        reason: &'static str,
+        headers: Vec<(String, String)>,
+        body: Vec<u8>,
+        delay_ms: u64,
+    }
+
+    impl TestHttpResponse {
+        fn bytes(&self) -> Vec<u8> {
+            let mut response = format!("HTTP/1.1 {} {}\r\n", self.status_code, self.reason);
+            for (name, value) in &self.headers {
+                response.push_str(name);
+                response.push_str(": ");
+                response.push_str(value);
+                response.push_str("\r\n");
+            }
+            response.push_str(&format!("Content-Length: {}\r\n", self.body.len()));
+            response.push_str("Connection: close\r\n\r\n");
+            let mut out = response.into_bytes();
+            out.extend_from_slice(&self.body);
+            out
+        }
+    }
+
+    async fn spawn_http_server(
+        handler: Arc<dyn Fn(&str) -> TestHttpResponse + Send + Sync + 'static>,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener should bind");
+        let addr = listener.local_addr().expect("listener should have local addr");
+
+        let handle = tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let handler = Arc::clone(&handler);
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 8192];
+                    let read = socket.read(&mut buf).await.unwrap_or(0);
+                    if read == 0 {
+                        return;
+                    }
+
+                    let request = String::from_utf8_lossy(&buf[..read]);
+                    let path = request
+                        .lines()
+                        .next()
+                        .and_then(|line| line.split_whitespace().nth(1))
+                        .unwrap_or("/");
+                    let response = handler(path);
+                    if response.delay_ms > 0 {
+                        tokio::time::sleep(Duration::from_millis(response.delay_ms)).await;
+                    }
+                    let _ = socket.write_all(&response.bytes()).await;
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+
+        (format!("http://{}", addr), handle)
+    }
+
+    fn test_client() -> reqwest::Client {
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("test client should build")
+    }
 
     #[test]
     fn test_extract_next_url_simple() {
@@ -1333,5 +1407,145 @@ mod tests {
         assert!(uses_ffprobe_liveness("rtmps://example.com/live/1"));
         assert!(!uses_ffprobe_liveness("https://example.com/live.m3u8"));
         assert!(!uses_ffprobe_liveness("udp://239.0.0.1:1234"));
+    }
+
+    #[tokio::test]
+    async fn integration_checker_follows_redirect_and_marks_alive() {
+        let stream_body = vec![b'x'; (MIN_DATA_THRESHOLD + 4096) as usize];
+        let handler = Arc::new(move |path: &str| match path {
+            "/redirect" => TestHttpResponse {
+                status_code: 302,
+                reason: "Found",
+                headers: vec![("Location".to_string(), "/stream".to_string())],
+                body: Vec::new(),
+                delay_ms: 0,
+            },
+            "/stream" => TestHttpResponse {
+                status_code: 200,
+                reason: "OK",
+                headers: vec![("Content-Type".to_string(), "video/mp2t".to_string())],
+                body: stream_body.clone(),
+                delay_ms: 0,
+            },
+            _ => TestHttpResponse {
+                status_code: 404,
+                reason: "Not Found",
+                headers: vec![("Content-Type".to_string(), "text/plain".to_string())],
+                body: b"missing".to_vec(),
+                delay_ms: 0,
+            },
+        });
+
+        let (base_url, server_handle) = spawn_http_server(handler).await;
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let outcome = check_channel_status_with_debug(
+            &test_client(),
+            &format!("{base_url}/redirect"),
+            2.0,
+            0,
+            RetryBackoff::None,
+            None,
+            "IPTVCheckerTests/1.0",
+            &cancel,
+        )
+        .await
+        .expect("checker request should succeed");
+
+        assert_eq!(outcome.status, "Alive");
+        assert_eq!(outcome.stream_url, Some(format!("{base_url}/stream")));
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn integration_checker_classifies_403_as_geoblocked() {
+        let handler = Arc::new(move |_path: &str| TestHttpResponse {
+            status_code: 403,
+            reason: "Forbidden",
+            headers: vec![("Content-Type".to_string(), "text/plain".to_string())],
+            body: b"blocked".to_vec(),
+            delay_ms: 0,
+        });
+        let (base_url, server_handle) = spawn_http_server(handler).await;
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let outcome = check_channel_status_with_debug(
+            &test_client(),
+            &format!("{base_url}/blocked"),
+            1.0,
+            0,
+            RetryBackoff::None,
+            None,
+            "IPTVCheckerTests/1.0",
+            &cancel,
+        )
+        .await
+        .expect("checker request should succeed");
+
+        assert_eq!(outcome.status, "Geoblocked");
+        assert_eq!(outcome.last_error_reason.as_deref(), Some("HTTP 403"));
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn integration_checker_marks_text_payload_dead() {
+        let handler = Arc::new(move |_path: &str| TestHttpResponse {
+            status_code: 200,
+            reason: "OK",
+            headers: vec![("Content-Type".to_string(), "text/plain".to_string())],
+            body: b"not a stream".to_vec(),
+            delay_ms: 0,
+        });
+        let (base_url, server_handle) = spawn_http_server(handler).await;
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let outcome = check_channel_status_with_debug(
+            &test_client(),
+            &format!("{base_url}/text"),
+            1.0,
+            0,
+            RetryBackoff::None,
+            None,
+            "IPTVCheckerTests/1.0",
+            &cancel,
+        )
+        .await
+        .expect("checker request should succeed");
+
+        assert_eq!(outcome.status, "Dead");
+        assert!(
+            outcome
+                .last_error_reason
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Unexpected text content type")
+        );
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn integration_checker_times_out_slow_endpoint() {
+        let handler = Arc::new(move |_path: &str| TestHttpResponse {
+            status_code: 200,
+            reason: "OK",
+            headers: vec![("Content-Type".to_string(), "video/mp2t".to_string())],
+            body: vec![b'x'; 4096],
+            delay_ms: 250,
+        });
+        let (base_url, server_handle) = spawn_http_server(handler).await;
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let outcome = check_channel_status_with_debug(
+            &test_client(),
+            &format!("{base_url}/slow"),
+            0.05,
+            0,
+            RetryBackoff::None,
+            None,
+            "IPTVCheckerTests/1.0",
+            &cancel,
+        )
+        .await
+        .expect("checker request should succeed");
+
+        assert_eq!(outcome.status, "Dead");
+        assert_eq!(outcome.last_error_reason.as_deref(), Some("Timeout"));
+        server_handle.abort();
     }
 }
