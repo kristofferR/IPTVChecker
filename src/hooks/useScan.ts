@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type {
+  Channel,
   ChannelResult,
   ScanConfig,
   ScanErrorPayload,
@@ -629,7 +630,7 @@ export function useScan() {
   }, []);
 
   const initFromPlaylist = useCallback(
-    async (channels: { index: number; playlist: string; name: string; group: string; url: string; extinf_line: string; metadata_lines: string[] }[]) => {
+    async (channels: Channel[]) => {
       // Cancel any running scan and reset backend state
       await resetScan().catch(() => {});
 
@@ -645,6 +646,7 @@ export function useScan() {
           name: ch.name,
           group: ch.group,
           url: ch.url,
+          content_type: ch.content_type,
           status: "pending" as const,
           codec: null,
           resolution: null,

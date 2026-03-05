@@ -4,7 +4,7 @@ use std::io::BufRead;
 use std::path::Path;
 
 use crate::error::AppError;
-use crate::models::channel::Channel;
+use crate::models::channel::{Channel, ContentType};
 use crate::models::playlist::PlaylistPreview;
 
 const PLAYLIST_GROUP_PREFIX: &str = "Playlist: ";
@@ -212,6 +212,22 @@ fn compile_channel_search_pattern(
     Ok(None)
 }
 
+fn content_type_totals(channels: &[Channel]) -> (usize, usize, usize) {
+    let mut live = 0usize;
+    let mut movie = 0usize;
+    let mut series = 0usize;
+
+    for channel in channels {
+        match channel.content_type {
+            ContentType::Live => live += 1,
+            ContentType::Movie => movie += 1,
+            ContentType::Series => series += 1,
+        }
+    }
+
+    (live, movie, series)
+}
+
 fn parse_playlist_reader<R: BufRead>(
     reader: R,
     file_path: &str,
@@ -260,12 +276,14 @@ fn parse_playlist_reader<R: BufRead>(
             if let Some(extinf_line) = pending_extinf.take() {
                 let name = get_channel_name(&extinf_line);
                 let group = get_group_name(&extinf_line);
+                let content_type = ContentType::detect_from_url(&line);
                 channels.push(Channel {
                     index: source_index,
                     playlist: playlist_name.clone(),
                     name,
                     group,
                     url: line,
+                    content_type,
                     extinf_line,
                     metadata_lines: std::mem::take(&mut pending_metadata),
                 });
@@ -281,12 +299,16 @@ fn parse_playlist_reader<R: BufRead>(
         channels.len(),
         groups.len()
     );
+    let (live_count, movie_count, series_count) = content_type_totals(&channels);
     Ok(PlaylistPreview {
         file_path: file_path.to_string(),
         file_name: playlist_name,
         source_identity: None,
         xtream_max_connections: None,
         total_channels: channels.len(),
+        live_count,
+        movie_count,
+        series_count,
         groups: groups.into_iter().collect(),
         channels,
     })
@@ -389,12 +411,16 @@ fn parse_playlist_directory(
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_else(|| dir_path.to_string());
 
+    let (live_count, movie_count, series_count) = content_type_totals(&channels);
     Ok(PlaylistPreview {
         file_path: dir_path.to_string(),
         file_name: dir_name,
         source_identity: None,
         xtream_max_connections: None,
         total_channels: channels.len(),
+        live_count,
+        movie_count,
+        series_count,
         groups: groups.into_iter().collect(),
         channels,
     })
@@ -533,6 +559,9 @@ http://example.com/three.m3u8
             .expect("streaming parser should parse fixture");
 
         assert_eq!(preview.total_channels, 2);
+        assert_eq!(preview.live_count, 2);
+        assert_eq!(preview.movie_count, 0);
+        assert_eq!(preview.series_count, 0);
         assert_eq!(preview.channels[0].name, "Channel One");
         assert_eq!(
             preview.channels[0].metadata_lines,
@@ -675,9 +704,28 @@ http://example.com/beta.m3u8
         assert_eq!(parsed.file_path, "<memory>");
         assert_eq!(parsed.file_name, "memory-playlist.m3u8");
         assert_eq!(parsed.total_channels, 1);
+        assert_eq!(parsed.live_count, 1);
+        assert_eq!(parsed.movie_count, 0);
+        assert_eq!(parsed.series_count, 0);
         assert_eq!(parsed.channels[0].name, "Channel One");
         assert_eq!(parsed.channels[0].group, "News");
         assert_eq!(parsed.channels[0].url, "http://example.com/live.m3u8");
+    }
+
+    #[test]
+    fn test_parse_m3u_detects_live_movie_and_series_content_types() {
+        let payload = b"#EXTM3U\n#EXTINF:-1 group-title=\"Live\",Live One\nhttp://server/user/pass/100\n#EXTINF:-1 group-title=\"Movies\",Movie One\nhttp://server/movie/user/pass/200.mp4\n#EXTINF:-1 group-title=\"Series\",Series One\nhttp://server/series/user/pass/300.mkv\n";
+
+        let parsed =
+            parse_m3u(payload, "content-types.m3u8", &None, &None).expect("parse should succeed");
+
+        assert_eq!(parsed.total_channels, 3);
+        assert_eq!(parsed.live_count, 1);
+        assert_eq!(parsed.movie_count, 1);
+        assert_eq!(parsed.series_count, 1);
+        assert_eq!(parsed.channels[0].content_type, ContentType::Live);
+        assert_eq!(parsed.channels[1].content_type, ContentType::Movie);
+        assert_eq!(parsed.channels[2].content_type, ContentType::Series);
     }
 
     #[test]

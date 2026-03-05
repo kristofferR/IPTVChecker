@@ -210,6 +210,7 @@ mod tests {
             name: name.to_string(),
             group: "Group".to_string(),
             url: format!("https://example.com/stream/{}", index),
+            content_type: crate::models::channel::ContentType::Live,
             status,
             codec: None,
             resolution: None,

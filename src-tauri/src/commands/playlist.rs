@@ -1,6 +1,6 @@
 use crate::engine::parser;
 use crate::error::AppError;
-use crate::models::channel::Channel;
+use crate::models::channel::{Channel, ContentType};
 use crate::models::playlist::PlaylistPreview;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -636,9 +636,8 @@ fn extract_stalker_stream_url(command: &str) -> Option<String> {
     }
 
     for token in trimmed.split_whitespace() {
-        let candidate = token.trim_matches(|value| {
-            value == '"' || value == '\'' || value == ';' || value == ','
-        });
+        let candidate = token
+            .trim_matches(|value| value == '"' || value == '\'' || value == ';' || value == ',');
         if candidate.contains("://") {
             return Some(candidate.to_string());
         }
@@ -869,11 +868,27 @@ async fn fetch_stalker_channels(
 
 fn compile_search_pattern(channel_search: &Option<String>) -> Result<Option<Regex>, AppError> {
     if let Some(search) = channel_search.as_ref() {
-        return Ok(Some(Regex::new(&format!("(?i){}", search)).map_err(|error| {
-            AppError::Parse(format!("Invalid regex '{}': {}", search, error))
-        })?));
+        return Ok(Some(Regex::new(&format!("(?i){}", search)).map_err(
+            |error| AppError::Parse(format!("Invalid regex '{}': {}", search, error)),
+        )?));
     }
     Ok(None)
+}
+
+fn content_type_totals(channels: &[Channel]) -> (usize, usize, usize) {
+    let mut live = 0usize;
+    let mut movie = 0usize;
+    let mut series = 0usize;
+
+    for channel in channels {
+        match channel.content_type {
+            ContentType::Live => live += 1,
+            ContentType::Movie => movie += 1,
+            ContentType::Series => series += 1,
+        }
+    }
+
+    (live, movie, series)
 }
 
 fn build_stalker_preview(
@@ -911,8 +926,7 @@ fn build_stalker_preview(
             ],
         )
         .or_else(|| {
-            let genre_id =
-                value_field_string(&item, &["tv_genre_id", "genre_id", "category_id"])?;
+            let genre_id = value_field_string(&item, &["tv_genre_id", "genre_id", "category_id"])?;
             genres_by_id.get(&genre_id).cloned()
         })
         .unwrap_or_else(|| "Unknown Group".to_string());
@@ -939,6 +953,7 @@ fn build_stalker_preview(
         );
 
         if include_group && include_search {
+            let content_type = ContentType::detect_from_url(&stream_url);
             channels.push(Channel {
                 index: source_index,
                 playlist: portal
@@ -948,6 +963,7 @@ fn build_stalker_preview(
                 name: raw_name,
                 group,
                 url: stream_url,
+                content_type,
                 extinf_line,
                 metadata_lines: Vec::new(),
             });
@@ -956,6 +972,7 @@ fn build_stalker_preview(
         source_index += 1;
     }
 
+    let (live_count, movie_count, series_count) = content_type_totals(&channels);
     Ok(PlaylistPreview {
         file_path: portal.to_string(),
         file_name: portal
@@ -969,6 +986,9 @@ fn build_stalker_preview(
         )),
         xtream_max_connections: None,
         total_channels: channels.len(),
+        live_count,
+        movie_count,
+        series_count,
         groups: groups.into_iter().collect(),
         channels,
     })
@@ -1153,8 +1173,7 @@ mod tests {
 
     #[test]
     fn normalize_stalker_mac_rejects_invalid_length() {
-        let error = normalize_stalker_mac("00:11:22:33:44")
-            .expect_err("invalid MAC should fail");
+        let error = normalize_stalker_mac("00:11:22:33:44").expect_err("invalid MAC should fail");
         assert!(error.to_string().contains("Invalid MAC address"));
     }
 
@@ -1163,7 +1182,10 @@ mod tests {
         let portal = normalize_stalker_portal("https://demo.example.com:8080/c")
             .expect("portal URL should normalize");
         let endpoints = build_stalker_endpoint_candidates(&portal);
-        let as_strings = endpoints.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let as_strings = endpoints
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
         assert_eq!(
             as_strings,
             vec![

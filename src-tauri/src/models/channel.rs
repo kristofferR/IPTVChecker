@@ -1,5 +1,85 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentType {
+    #[default]
+    Live,
+    Movie,
+    Series,
+}
+
+impl std::fmt::Display for ContentType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ContentType::Live => write!(f, "Live"),
+            ContentType::Movie => write!(f, "Movie"),
+            ContentType::Series => write!(f, "Series"),
+        }
+    }
+}
+
+impl ContentType {
+    fn classify_from_path(path: &str) -> Option<Self> {
+        let lower = path.to_ascii_lowercase();
+        if lower.contains("/series/") {
+            return Some(Self::Series);
+        }
+        if lower.contains("/movie/") || lower.contains("/vod/") {
+            return Some(Self::Movie);
+        }
+
+        let cleaned = lower
+            .split_once('?')
+            .map(|(before, _)| before)
+            .unwrap_or(&lower);
+        let cleaned = cleaned
+            .split_once('#')
+            .map(|(before, _)| before)
+            .unwrap_or(cleaned);
+        let file_name = cleaned.rsplit('/').next().unwrap_or(cleaned);
+        let extension = file_name.rsplit_once('.').map(|(_, ext)| ext)?;
+        if extension.is_empty() {
+            return None;
+        }
+
+        match extension {
+            "m3u8" | "ts" | "m2ts" | "mpegts" => Some(Self::Live),
+            "mp4" | "mkv" | "avi" | "mov" | "m4v" | "wmv" | "flv" | "webm" | "mpg" | "mpeg" => {
+                Some(Self::Movie)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn detect_from_url(url: &str) -> Self {
+        let trimmed = url.trim();
+        if trimmed.is_empty() {
+            return Self::Live;
+        }
+
+        if let Ok(parsed) = url::Url::parse(trimmed) {
+            if let Some(classified) = Self::classify_from_path(parsed.path()) {
+                return classified;
+            }
+            if let Some(query) = parsed.query().map(str::to_ascii_lowercase) {
+                if query.contains("type=series") || query.contains("action=get_series") {
+                    return Self::Series;
+                }
+                if query.contains("type=movie")
+                    || query.contains("type=vod")
+                    || query.contains("action=get_vod")
+                {
+                    return Self::Movie;
+                }
+            }
+            return Self::Live;
+        }
+
+        Self::classify_from_path(trimmed).unwrap_or(Self::Live)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ChannelStatus {
@@ -35,6 +115,8 @@ pub struct Channel {
     pub name: String,
     pub group: String,
     pub url: String,
+    #[serde(default)]
+    pub content_type: ContentType,
     pub extinf_line: String,
     pub metadata_lines: Vec<String>,
 }
@@ -46,6 +128,8 @@ pub struct ChannelResult {
     pub name: String,
     pub group: String,
     pub url: String,
+    #[serde(default)]
+    pub content_type: ContentType,
     pub status: ChannelStatus,
     pub codec: Option<String>,
     pub resolution: Option<String>,
@@ -85,6 +169,7 @@ mod tests {
             name: "Channel".to_string(),
             group: "Group".to_string(),
             url: "https://example.com/live.m3u8".to_string(),
+            content_type: ContentType::Live,
             status: ChannelStatus::Dead,
             codec: None,
             resolution: None,
@@ -144,6 +229,7 @@ mod tests {
         let parsed: ChannelResult =
             serde_json::from_value(value).expect("legacy alias should deserialize");
         assert_eq!(parsed.error_reason.as_deref(), Some("Timeout"));
+        assert_eq!(parsed.content_type, ContentType::Live);
     }
 
     #[test]
@@ -152,7 +238,39 @@ mod tests {
         result.error_reason = Some("DNS failure".to_string());
 
         let encoded = serde_json::to_value(result).expect("channel result should serialize");
-        assert_eq!(encoded.get("error_reason").and_then(|v| v.as_str()), Some("DNS failure"));
+        assert_eq!(
+            encoded.get("error_reason").and_then(|v| v.as_str()),
+            Some("DNS failure")
+        );
         assert!(encoded.get("last_error_reason").is_none());
+    }
+
+    #[test]
+    fn detect_content_type_handles_xtream_patterns() {
+        assert_eq!(
+            ContentType::detect_from_url("http://server/movie/user/pass/12345.mkv"),
+            ContentType::Movie
+        );
+        assert_eq!(
+            ContentType::detect_from_url("http://server/series/user/pass/12345.mp4"),
+            ContentType::Series
+        );
+        assert_eq!(
+            ContentType::detect_from_url("http://server/user/pass/12345"),
+            ContentType::Live
+        );
+    }
+
+    #[test]
+    fn detect_content_type_handles_extension_and_fallback() {
+        assert_eq!(
+            ContentType::detect_from_url("https://example.com/channel.m3u8"),
+            ContentType::Live
+        );
+        assert_eq!(
+            ContentType::detect_from_url("https://example.com/video.mp4"),
+            ContentType::Movie
+        );
+        assert_eq!(ContentType::detect_from_url("not-a-url"), ContentType::Live);
     }
 }

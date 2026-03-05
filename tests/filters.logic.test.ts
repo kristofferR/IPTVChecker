@@ -19,6 +19,7 @@ function makeResult(
     name: options.name,
     group: options.group,
     url: `https://example.com/${index}.m3u8`,
+    content_type: "live",
     status: options.status,
     codec: null,
     resolution: null,

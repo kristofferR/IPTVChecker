@@ -15,8 +15,8 @@ use crate::models::backend_perf::BackendPerfSample;
 use crate::models::channel::{Channel, ChannelResult, ChannelStatus};
 use crate::models::playlist::PlaylistPreview;
 use crate::models::scan::{
-    RetryBackoff, ScanConfig, ScanErrorPayload, ScanEvent, ScanProgress, ScanSummary,
-    ScanResultBatchPayload,
+    RetryBackoff, ScanConfig, ScanErrorPayload, ScanEvent, ScanProgress, ScanResultBatchPayload,
+    ScanSummary,
 };
 use crate::models::scan_log::{ChannelDebugLog, ScanDebugLog};
 use crate::state::AppState;
@@ -147,33 +147,40 @@ async fn compute_shared_url_result(
         .await
     };
 
-    let (status_str, stream_url, latency_ms, retry_count, error_reason, drm_system, mut channel_log) =
-        match check_outcome {
-            Ok(outcome) => (
-                outcome.status,
-                outcome.stream_url,
-                outcome.latency_ms,
-                outcome.retries_used,
-                outcome.last_error_reason,
-                outcome.drm_system,
-                outcome.debug_log,
-            ),
-            Err(AppError::Cancelled) => return Err(AppError::Cancelled),
-            Err(error) => (
-                "Dead".to_string(),
-                None,
-                None,
-                0,
-                Some(error.to_string()),
-                None,
-                ChannelDebugLog {
-                    channel_url: channel_url.to_string(),
-                    final_verdict: "Dead".to_string(),
-                    final_reason: Some(error.to_string()),
-                    ..ChannelDebugLog::default()
-                },
-            ),
-        };
+    let (
+        status_str,
+        stream_url,
+        latency_ms,
+        retry_count,
+        error_reason,
+        drm_system,
+        mut channel_log,
+    ) = match check_outcome {
+        Ok(outcome) => (
+            outcome.status,
+            outcome.stream_url,
+            outcome.latency_ms,
+            outcome.retries_used,
+            outcome.last_error_reason,
+            outcome.drm_system,
+            outcome.debug_log,
+        ),
+        Err(AppError::Cancelled) => return Err(AppError::Cancelled),
+        Err(error) => (
+            "Dead".to_string(),
+            None,
+            None,
+            0,
+            Some(error.to_string()),
+            None,
+            ChannelDebugLog {
+                channel_url: channel_url.to_string(),
+                final_verdict: "Dead".to_string(),
+                final_reason: Some(error.to_string()),
+                ..ChannelDebugLog::default()
+            },
+        ),
+    };
     let check_ms = check_started_at.elapsed().as_secs_f64() * 1000.0;
 
     let final_status_str = if status_str == "Geoblocked" && test_geoblock {
@@ -1284,7 +1291,9 @@ async fn execute_scan_run(
                 ffmpeg::build_screenshot_file_name(channel.index, &channel.name);
 
             // Check disk space periodically (every ~20 channels)
-            let effective_skip_screenshots = if skip_screenshots || screenshots_paused.load(Ordering::Relaxed) {
+            let effective_skip_screenshots = if skip_screenshots
+                || screenshots_paused.load(Ordering::Relaxed)
+            {
                 skip_screenshots || screenshots_paused.load(Ordering::Relaxed)
             } else if !using_custom_dir {
                 let count = disk_check_counter.fetch_add(1, Ordering::Relaxed);
@@ -1320,10 +1329,12 @@ async fn execute_scan_run(
                                     }
                                     eviction_in_progress.store(false, Ordering::Relaxed);
                                     // Re-check after eviction
-                                    let tier_after = disk::classify_space(dir_path, low_space_threshold_gb);
+                                    let tier_after =
+                                        disk::classify_space(dir_path, low_space_threshold_gb);
                                     if matches!(tier_after, disk::DiskSpaceTier::Critical) {
                                         screenshots_paused.store(true, Ordering::Relaxed);
-                                        if !screenshots_paused_emitted.swap(true, Ordering::Relaxed) {
+                                        if !screenshots_paused_emitted.swap(true, Ordering::Relaxed)
+                                        {
                                             let _ = task_app.emit(
                                                 "scan://screenshots-paused",
                                                 ScanEvent {
@@ -1435,6 +1446,7 @@ async fn execute_scan_run(
                 name: channel.name.clone(),
                 group: channel.group.clone(),
                 url: channel.url.clone(),
+                content_type: channel.content_type,
                 status: shared.status.clone(),
                 codec: shared.codec.clone(),
                 resolution: shared.resolution.clone(),
@@ -1739,6 +1751,7 @@ mod tests {
             name: format!("Channel {}", index),
             group: "Test".to_string(),
             url: format!("http://example.com/{}.m3u8", index),
+            content_type: crate::models::channel::ContentType::Live,
             status,
             codec: None,
             resolution: None,
@@ -1775,6 +1788,7 @@ mod tests {
             name: format!("Channel {}", index),
             group: "Test".to_string(),
             url: format!("http://example.com/{}.m3u8", index),
+            content_type: crate::models::channel::ContentType::Live,
             extinf_line: "#EXTINF:-1,Test".to_string(),
             metadata_lines: Vec::new(),
         }

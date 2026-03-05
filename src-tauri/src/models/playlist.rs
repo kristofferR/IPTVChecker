@@ -10,6 +10,12 @@ pub struct PlaylistPreview {
     #[serde(default)]
     pub xtream_max_connections: Option<u32>,
     pub total_channels: usize,
+    #[serde(default)]
+    pub live_count: usize,
+    #[serde(default)]
+    pub movie_count: usize,
+    #[serde(default)]
+    pub series_count: usize,
     pub groups: Vec<String>,
     pub channels: Vec<Channel>,
 }

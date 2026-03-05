@@ -9,6 +9,7 @@ function makeResult(index: number, url: string): ChannelResult {
     name: `Channel ${index}`,
     group: "Group",
     url,
+    content_type: "live",
     status: "pending",
     codec: null,
     resolution: null,

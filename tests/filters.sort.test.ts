@@ -13,6 +13,7 @@ function makeResult(
     name: `Channel ${index}`,
     group: "Group",
     url: `https://example.com/${index}.m3u8`,
+    content_type: "live",
     status: "alive",
     codec: null,
     resolution: null,

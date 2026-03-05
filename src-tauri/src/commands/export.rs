@@ -453,6 +453,7 @@ mod tests {
             name: name.to_string(),
             group: group.to_string(),
             url: "http://example.com/live.m3u8".to_string(),
+            content_type: crate::models::channel::ContentType::Live,
             status: ChannelStatus::Alive,
             codec: Some("H264".to_string()),
             resolution: Some("1080p".to_string()),

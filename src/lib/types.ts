@@ -8,12 +8,15 @@ export type ChannelStatus =
   | "geoblocked_confirmed"
   | "geoblocked_unconfirmed";
 
+export type ContentType = "live" | "movie" | "series";
+
 export interface Channel {
   index: number;
   playlist: string;
   name: string;
   group: string;
   url: string;
+  content_type: ContentType;
   extinf_line: string;
   metadata_lines: string[];
 }
@@ -24,6 +27,7 @@ export interface ChannelResult {
   name: string;
   group: string;
   url: string;
+  content_type: ContentType;
   status: ChannelStatus;
   codec: string | null;
   resolution: string | null;
@@ -55,6 +59,9 @@ export interface PlaylistPreview {
   source_identity: string | null;
   xtream_max_connections: number | null;
   total_channels: number;
+  live_count: number;
+  movie_count: number;
+  series_count: number;
   groups: string[];
   channels: Channel[];
 }
