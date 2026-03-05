@@ -274,6 +274,7 @@ export default function App() {
   const [selectedChannelIndices, setSelectedChannelIndices] = useState<number[]>(
     [],
   );
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [ffmpegWarning, setFfmpegWarning] = useState(false);
   const [errorDismissed, setErrorDismissed] = useState(false);
@@ -1019,6 +1020,11 @@ export default function App() {
     showHistoryRef.current = showHistory;
   }, [showHistory]);
 
+  const lightboxOpenRef = useRef(lightboxOpen);
+  useEffect(() => {
+    lightboxOpenRef.current = lightboxOpen;
+  }, [lightboxOpen]);
+
   const handleOpenShortcutRef = useRef(handleOpen);
   useEffect(() => {
     handleOpenShortcutRef.current = handleOpen;
@@ -1043,7 +1049,19 @@ export default function App() {
         e.preventDefault();
         setShowKeyboardShortcuts(true);
       }
+      if (e.key === " " && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+        if (tag === "input" || tag === "textarea" || tag === "select" || (e.target as HTMLElement)?.isContentEditable) return;
+        e.preventDefault();
+        if (screenshotUrlRef.current) {
+          setLightboxOpen((prev) => !prev);
+        }
+      }
       if (e.key === "Escape") {
+        if (lightboxOpenRef.current) {
+          setLightboxOpen(false);
+          return;
+        }
         if (pendingPlaybackRef.current) {
           setPendingPlaybackChannel(null);
           return;
@@ -1396,6 +1414,10 @@ export default function App() {
 
   // Load screenshot via custom Tauri command (bypasses fs/asset scope issues)
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
+  const screenshotUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    screenshotUrlRef.current = screenshotUrl;
+  }, [screenshotUrl]);
   const screenshotPathRef = useRef<string | null>(null);
   useEffect(() => {
     const path = liveSelectedChannel?.screenshot_path?.trim() || null;
@@ -1680,6 +1702,8 @@ export default function App() {
             <ThumbnailPanel
               result={liveSelectedChannel}
               screenshotUrl={screenshotUrl}
+              lightboxOpen={lightboxOpen}
+              onLightboxChange={setLightboxOpen}
             />
           </div>
         )}

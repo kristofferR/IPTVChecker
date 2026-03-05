@@ -8,21 +8,32 @@ import { StatusBadge } from "./StatusBadge";
 interface ThumbnailPanelProps {
   result: ChannelResult | null;
   screenshotUrl: string | null;
+  lightboxOpen: boolean;
+  onLightboxChange: (open: boolean) => void;
 }
 
-export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
+export function ThumbnailPanel({ result, screenshotUrl, lightboxOpen, onLightboxChange }: ThumbnailPanelProps) {
   const [lightboxRendered, setLightboxRendered] = useState(false);
   const [lightboxVisible, setLightboxVisible] = useState(false);
 
   const closeLightbox = useCallback(() => {
-    setLightboxVisible(false);
-  }, []);
+    onLightboxChange(false);
+  }, [onLightboxChange]);
 
   const openLightbox = useCallback(() => {
     if (!screenshotUrl) return;
-    setLightboxRendered(true);
-    requestAnimationFrame(() => setLightboxVisible(true));
-  }, [screenshotUrl]);
+    onLightboxChange(true);
+  }, [screenshotUrl, onLightboxChange]);
+
+  // Sync with external lightbox state (e.g. space key toggle)
+  useEffect(() => {
+    if (lightboxOpen) {
+      setLightboxRendered(true);
+      requestAnimationFrame(() => setLightboxVisible(true));
+    } else {
+      setLightboxVisible(false);
+    }
+  }, [lightboxOpen]);
 
   useEffect(() => {
     if (!lightboxRendered) return;
@@ -30,25 +41,6 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
     const timer = setTimeout(() => setLightboxRendered(false), 180);
     return () => clearTimeout(timer);
   }, [lightboxRendered, lightboxVisible]);
-
-  useEffect(() => {
-    setLightboxVisible(false);
-    setLightboxRendered(false);
-  }, [result?.index, screenshotUrl]);
-
-  useEffect(() => {
-    if (!lightboxRendered) return;
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeLightbox();
-      }
-    };
-
-    window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
-  }, [lightboxRendered, closeLightbox]);
 
   if (!result) {
     return (
@@ -160,7 +152,7 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
         </div>
       )}
 
-      {lightboxRendered && screenshotUrl && createPortal(
+      {lightboxRendered && createPortal(
         <div
           className={`fixed inset-0 z-[80] flex items-center justify-center px-6 py-10 transition-all duration-200 ${
             lightboxVisible ? "bg-black/70 opacity-100" : "bg-black/0 opacity-0"
@@ -180,16 +172,25 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
             <X className="w-5 h-5" />
           </button>
           <div
-            className={`max-h-full max-w-full transition-all duration-200 ${
+            className={`max-h-full max-w-full flex flex-col items-center gap-3 transition-all duration-200 ${
               lightboxVisible ? "opacity-100 scale-100" : "opacity-0 scale-95"
             }`}
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <img
-              src={screenshotUrl}
-              alt={result.name}
-              className="block max-h-[88vh] max-w-[88vw] rounded-xl border border-white/15 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]"
-            />
+            <h2 className="text-white text-[15px] font-semibold truncate max-w-[88vw] text-center drop-shadow-lg">
+              {result.name}
+            </h2>
+            {screenshotUrl ? (
+              <img
+                src={screenshotUrl}
+                alt={result.name}
+                className="block max-h-[84vh] max-w-[88vw] rounded-xl border border-white/15 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]"
+              />
+            ) : (
+              <div className="flex items-center justify-center w-[400px] h-[300px] rounded-xl border border-white/15 bg-black/60 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]">
+                <X className="w-24 h-24 text-red-500/80" strokeWidth={2.5} />
+              </div>
+            )}
           </div>
         </div>,
         document.body
