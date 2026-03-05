@@ -252,7 +252,32 @@ fn detect_hls_drm_system(playlist_body: &str) -> Option<String> {
         return Some("HLS SAMPLE-AES".to_string());
     }
 
-    Some("HLS Encrypted".to_string())
+    // AES-128 and NONE are standard HLS delivery encryption, not DRM.
+    // Only flag as encrypted if there's a key method beyond these.
+    let has_real_encryption = lower.lines().any(|line| {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("#ext-x-key") && !trimmed.starts_with("#ext-x-session-key") {
+            return false;
+        }
+        // Extract METHOD value from the tag attributes
+        if let Some(method_start) = trimmed.find("method=") {
+            let after_method = &trimmed[method_start + 7..];
+            let method_value = after_method
+                .split(|c: char| c == ',' || c == '"')
+                .find(|s| !s.is_empty())
+                .unwrap_or("");
+            // AES-128 and NONE are not DRM
+            method_value != "none" && method_value != "aes-128"
+        } else {
+            false
+        }
+    });
+
+    if has_real_encryption {
+        Some("HLS Encrypted".to_string())
+    } else {
+        None
+    }
 }
 
 fn detect_dash_drm_system(manifest_body: &str) -> Option<String> {
@@ -1465,6 +1490,49 @@ mod tests {
 segment.ts
 "#;
         assert_eq!(detect_hls_drm_system(clear), None);
+
+        // AES-128 is standard HLS encryption, not DRM
+        let aes128 = r#"#EXTM3U
+#EXT-X-KEY:METHOD=AES-128,URI="https://example.com/key"
+#EXT-X-TARGETDURATION:4
+#EXTINF:4,
+segment.ts
+"#;
+        assert_eq!(detect_hls_drm_system(aes128), None);
+
+        // METHOD=NONE should not be flagged
+        let none_method = r#"#EXTM3U
+#EXT-X-KEY:METHOD=NONE
+#EXT-X-TARGETDURATION:4
+#EXTINF:4,
+segment.ts
+"#;
+        assert_eq!(detect_hls_drm_system(none_method), None);
+
+        // Real-world uplynk playlist with multiple AES-128 keys — not DRM
+        let uplynk = r#"#EXTM3U
+#EXT-X-VERSION:6
+#EXT-X-MEDIA-SEQUENCE:0
+#EXT-X-TARGETDURATION:8
+#EXT-X-KEY:METHOD=AES-128,URI="https://content.uplynk.com/check2?b=abc",IV=0x00000001
+#EXTINF:4.096,
+https://cf.cdn.uplynk.com/slice1.ts
+#EXT-X-KEY:METHOD=AES-128,URI="https://content.uplynk.com/check2?b=abc",IV=0x00000002
+#EXTINF:4.096,
+https://cf.cdn.uplynk.com/slice2.ts
+"#;
+        assert_eq!(detect_hls_drm_system(uplynk), None);
+
+        // Mixed NONE and AES-128 — still not DRM
+        let mixed_clear = r#"#EXTM3U
+#EXT-X-KEY:METHOD=NONE
+#EXTINF:4,
+intro.ts
+#EXT-X-KEY:METHOD=AES-128,URI="https://example.com/key"
+#EXTINF:4,
+encrypted.ts
+"#;
+        assert_eq!(detect_hls_drm_system(mixed_clear), None);
     }
 
     #[test]
