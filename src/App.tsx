@@ -1586,16 +1586,19 @@ export default function App() {
 
   const completedResults = flatResults;
   handleToggleSidebarRef.current = () => {
-    setSidebarHidden((h) => {
-      if (h && !selectedChannel) {
+    const sidebarVisible = !sidebarHidden && !!selectedChannel;
+    if (sidebarVisible) {
+      setSidebarHidden(true);
+    } else {
+      if (!selectedChannel) {
         if (completedResults.length > 0) {
           setSelectedChannel(completedResults[0]);
         } else if (playlist && playlist.channels.length > 0) {
           setSelectedChannel(channelToStubResult(playlist.channels[0]));
         }
       }
-      return !h;
-    });
+      setSidebarHidden(false);
+    }
   };
   const filteredExportResults = useMemo(
     () =>

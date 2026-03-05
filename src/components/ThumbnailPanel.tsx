@@ -121,7 +121,7 @@ export function ThumbnailPanel({
   }, [result.index, result.stream_url, result.url]);
 
   return (
-    <div className="native-scroll flex flex-col gap-3 p-4 overflow-y-auto">
+    <div className="native-scroll flex flex-col gap-3 p-4 overflow-y-auto select-none">
       <div className="flex items-center gap-2">
         <StatusBadge status={result.status} />
         <h3 className="text-[14px] font-semibold truncate">{result.name}</h3>
