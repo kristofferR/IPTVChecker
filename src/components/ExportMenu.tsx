@@ -103,6 +103,7 @@ export function ExportMenu({
     return () => clearTimeout(timer);
   }, [feedback]);
 
+  const isPartial = scanState === "scanning" || scanState === "paused";
   const normalizedPlaylistPath = playlistPath.replace(/\\/g, "/");
   const sourceDir = normalizedPlaylistPath.includes("/")
     ? normalizedPlaylistPath.slice(0, normalizedPlaylistPath.lastIndexOf("/"))
@@ -113,6 +114,7 @@ export function ExportMenu({
   const sourceStem = sourceFileName.includes(".")
     ? sourceFileName.slice(0, sourceFileName.lastIndexOf("."))
     : sourceFileName;
+  const partialSuffix = isPartial ? "_partial" : "";
 
   const resolveScopedResults = useCallback((): ChannelResult[] | null => {
     const scoped = resolveScopeResults(scope);
@@ -147,7 +149,7 @@ export function ExportMenu({
 
     setOpen(false);
     const path = await save({
-      defaultPath: `${playlistName}_${exportScopeFileSuffix(scope)}.csv`,
+      defaultPath: `${playlistName}_${exportScopeFileSuffix(scope)}${partialSuffix}.csv`,
       filters: [{ name: "CSV", extensions: ["csv"] }],
     });
     if (!path) {
@@ -231,7 +233,7 @@ export function ExportMenu({
     setOpen(false);
 
     const path = await save({
-      defaultPath: `${sourceStem}_${exportScopeFileSuffix(scope)}.m3u8`,
+      defaultPath: `${sourceStem}_${exportScopeFileSuffix(scope)}${partialSuffix}.m3u8`,
       filters: [{ name: "M3U Playlist", extensions: ["m3u8", "m3u"] }],
     });
     if (!path) {
@@ -258,17 +260,17 @@ export function ExportMenu({
   }, [scope, sourceStem, resolveScopedResults]);
 
   const handleExportScanLog = useCallback(async () => {
-    if (scanState !== "complete") {
+    if (scanState === "idle") {
       setFeedback({
         kind: "info",
-        message: "Scan log export is available after a completed scan.",
+        message: "Run a scan first to generate a scan log.",
       });
       return;
     }
 
     setOpen(false);
     const path = await save({
-      defaultPath: `${sourceStem}_scan-log.json`,
+      defaultPath: `${sourceStem}_scan-log${partialSuffix}.json`,
       filters: [{ name: "JSON", extensions: ["json"] }],
     });
     if (!path) {
@@ -345,6 +347,13 @@ export function ExportMenu({
       </button>
       {open && (
         <div className="macos-popover absolute right-0 top-full mt-1 w-64 bg-dropdown backdrop-blur-xl border border-border-app rounded-lg shadow-xl z-50 py-1">
+          {isPartial && (
+            <div className="px-3 pt-2 pb-1.5 border-b border-border-subtle">
+              <p className="text-[11px] text-yellow-400">
+                Scan in progress — exported files will contain partial results
+              </p>
+            </div>
+          )}
           <div className="px-3 pt-2 pb-1.5 border-b border-border-subtle">
             <p className="text-[11px] uppercase tracking-[0.04em] text-text-tertiary mb-1.5">
               Export Scope
@@ -406,9 +415,9 @@ export function ExportMenu({
           </button>
           <button
             onClick={handleExportScanLog}
-            disabled={exporting || scanState !== "complete"}
+            disabled={exporting || scanState === "idle"}
             className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
-            title={scanState === "complete" ? undefined : "Complete a scan to enable"}
+            title={scanState === "idle" ? "Run a scan first" : undefined}
           >
             Export Scan Log (JSON)
           </button>
