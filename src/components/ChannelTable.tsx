@@ -23,6 +23,7 @@ interface ChannelTableProps {
   search: string;
   groupFilter: string;
   statusFilter: string;
+  scanState?: "idle" | "scanning" | "paused" | "complete" | "cancelled";
   onSelectChannel: (result: ChannelResult) => void;
   onOpenChannel?: (result: ChannelResult) => void;
   onSelectionChange?: (selectedIndices: number[]) => void;
@@ -169,6 +170,7 @@ export function ChannelTable({
   onOpenChannel,
   onSelectionChange,
   onScanSelected,
+  scanState,
   headerPortalRef,
 }: ChannelTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
@@ -1006,6 +1008,22 @@ export function ChannelTable({
           }}
         >
           <button
+            onClick={handleScanSelected}
+            disabled={selectedIndices.size === 0 || scanState === "scanning" || scanState === "paused"}
+            className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
+            type="button"
+          >
+            {selectedIndices.size > 0 &&
+            Array.from(selectedIndices).every((idx) => {
+              const r = results[idx];
+              return r != null && r.status !== "pending" && r.status !== "checking";
+            })
+              ? "Rescan"
+              : "Scan"}{" "}
+            Selected ({selectedIndices.size})
+          </button>
+          <div className="h-px my-1 bg-border-subtle" />
+          <button
             onClick={handleOpenInPlayer}
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
@@ -1039,15 +1057,6 @@ export function ChannelTable({
             type="button"
           >
             {copiedAction === "metadata" ? "Copied!" : "Copy All Metadata"}
-          </button>
-          <div className="h-px my-1 bg-border-subtle" />
-          <button
-            onClick={handleScanSelected}
-            disabled={selectedIndices.size === 0}
-            className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
-            type="button"
-          >
-            Scan selected ({selectedIndices.size})
           </button>
         </div>
       )}

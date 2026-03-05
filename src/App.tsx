@@ -273,6 +273,11 @@ export default function App() {
   const [pendingPlaybackChannel, setPendingPlaybackChannel] =
     useState<ChannelResult | null>(null);
   const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = localStorage.getItem("sidebar-width");
+    return saved ? Math.max(100, Math.min(600, Number(saved))) : 288;
+  });
+  const sidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const [menuInfo, setMenuInfo] = useState<string | null>(null);
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -1181,6 +1186,35 @@ export default function App() {
     };
   }, []);
 
+  const handleSidebarDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    sidebarDragRef.current = { startX: e.clientX, startWidth: sidebarWidth };
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!sidebarDragRef.current) return;
+      const delta = sidebarDragRef.current.startX - ev.clientX;
+      const newWidth = Math.max(100, Math.min(600, sidebarDragRef.current.startWidth + delta));
+      setSidebarWidth(newWidth);
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      sidebarDragRef.current = null;
+    };
+
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    localStorage.setItem("sidebar-width", String(sidebarWidth));
+  }, [sidebarWidth]);
+
   const handleSelectChannel = useCallback((result: ChannelResult) => {
     setSelectedChannel(result);
   }, []);
@@ -1322,7 +1356,7 @@ export default function App() {
         statusFilter={statusFilter}
         onStatusChange={setStatusFilter}
       />
-      {isMac && playlist && <div ref={headerPortalRef} style={liveSelectedChannel && !sidebarHidden ? { marginRight: "18rem" } : undefined} />}
+      {isMac && playlist && <div ref={headerPortalRef} style={liveSelectedChannel && !sidebarHidden ? { marginRight: `${sidebarWidth}px` } : undefined} />}
       </div>
 
       <div className="flex flex-col flex-1 min-h-0">
@@ -1444,6 +1478,7 @@ export default function App() {
               search={search}
               groupFilter={groupFilter}
               statusFilter={statusFilter}
+              scanState={scanState}
               onSelectChannel={handleSelectChannel}
               onOpenChannel={handleOpenChannel}
               onSelectionChange={setSelectedChannelIndices}
@@ -1522,7 +1557,11 @@ export default function App() {
         </div>
 
         {liveSelectedChannel && !sidebarHidden && (
-          <div className="w-72 border-l border-border-app bg-panel-muted">
+          <div className="relative border-l border-border-app bg-panel-muted shrink-0" style={{ width: `${sidebarWidth}px` }}>
+            <div
+              onMouseDown={handleSidebarDragStart}
+              className="absolute left-0 top-0 bottom-0 w-1 -translate-x-1/2 cursor-col-resize z-10 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors"
+            />
             <ThumbnailPanel
               result={liveSelectedChannel}
               screenshotUrl={screenshotUrl}

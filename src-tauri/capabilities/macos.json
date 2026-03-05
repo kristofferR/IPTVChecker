@@ -1,0 +1,9 @@
+{
+  "identifier": "macos-only",
+  "description": "macOS-specific permissions for haptic feedback.",
+  "windows": ["main"],
+  "platforms": ["macOS"],
+  "permissions": [
+    "macos-haptics:default"
+  ]
+}

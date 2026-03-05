@@ -50,6 +50,14 @@ lib/        — Types, Tauri invoke wrappers, formatting helpers, sort/filter lo
 - `cd src-tauri && cargo test` — run Rust tests
 - `bun run typecheck` — TypeScript type checking via tsgo
 
+## Disk Usage
+
+The Rust/Tauri build cache (`src-tauri/target/`) can grow to 20-30 GB. Clean it periodically:
+```
+rm -rf src-tauri/target
+```
+This is safe — it just rebuilds on next `bun tauri dev` or `bun tauri build`. Clean it at the start of sessions when disk space is low, or after finishing major work.
+
 ## Coding Conventions
 - Rust: snake_case, 4-space indentation, thiserror for errors, serde for serialization
 - TypeScript: strict mode, no unused locals/params, types in `lib/types.ts` mirror Rust models

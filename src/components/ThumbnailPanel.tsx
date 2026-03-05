@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import type { ChannelResult } from "../lib/types";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
@@ -159,7 +160,7 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
         </div>
       )}
 
-      {lightboxRendered && screenshotUrl && (
+      {lightboxRendered && screenshotUrl && createPortal(
         <div
           className={`fixed inset-0 z-[80] flex items-center justify-center px-6 py-10 transition-all duration-200 ${
             lightboxVisible ? "bg-black/70 opacity-100" : "bg-black/0 opacity-0"
@@ -190,7 +191,8 @@ export function ThumbnailPanel({ result, screenshotUrl }: ThumbnailPanelProps) {
               className="block max-h-[88vh] max-w-[88vw] rounded-xl border border-white/15 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]"
             />
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
