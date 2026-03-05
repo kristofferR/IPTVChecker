@@ -231,176 +231,273 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_macos_haptics::init());
 
     #[cfg(target_os = "macos")]
-    let builder = builder
-        .menu(|app| {
-            use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+    let builder = builder.menu(|app| {
+        use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 
-            let settings_item = MenuItemBuilder::with_id("menu.app.settings", "Settings...")
-                .accelerator("Cmd+,")
+        let settings_item = MenuItemBuilder::with_id("menu.app.settings", "Settings...")
+            .accelerator("Cmd+,")
+            .build(app)?;
+
+        let app_menu = SubmenuBuilder::new(app, "IPTV Checker")
+            .about(Some(AboutMetadata::default()))
+            .separator()
+            .item(&settings_item)
+            .separator()
+            .services()
+            .separator()
+            .hide()
+            .hide_others()
+            .show_all()
+            .separator()
+            .quit()
+            .build()?;
+
+        let new_window_item = MenuItemBuilder::with_id("menu.file.new_window", "New Window")
+            .accelerator("Cmd+N")
+            .build(app)?;
+        let open_item = MenuItemBuilder::with_id("menu.file.open", "Open Playlist...")
+            .accelerator("Cmd+O")
+            .build(app)?;
+        let open_folder_item = MenuItemBuilder::with_id("menu.file.open_folder", "Open Folder...")
+            .accelerator("Cmd+Shift+O")
+            .build(app)?;
+        let open_url_item = MenuItemBuilder::with_id("menu.file.open_url", "Open URL...")
+            .accelerator("Cmd+Shift+U")
+            .build(app)?;
+        let export_csv_item = MenuItemBuilder::with_id("menu.file.export_csv", "Export CSV")
+            .accelerator("Cmd+Shift+E")
+            .build(app)?;
+
+        let file_menu = SubmenuBuilder::with_id(app, "menu.file", "File")
+            .item(&new_window_item)
+            .separator()
+            .item(&open_item)
+            .item(&open_folder_item)
+            .item(&open_url_item)
+            .item(
+                &SubmenuBuilder::with_id(app, "menu.file.open_recent", "Open Recent")
+                    .text("menu.file.recent.0", "No recent playlists")
+                    .separator()
+                    .text("menu.file.recent.clear", "Clear Recent")
+                    .build()?,
+            )
+            .separator()
+            .item(&export_csv_item)
+            .text("menu.file.export_split", "Export Split Playlists")
+            .text("menu.file.export_renamed", "Export Renamed Playlist")
+            .text("menu.file.export_filtered_m3u", "Export Filtered M3U/M3U8")
+            .text("menu.file.export_scan_log", "Export Scan Log (JSON)")
+            .separator()
+            .close_window()
+            .build()?;
+
+        let toggle_sidebar_item =
+            MenuItemBuilder::with_id("menu.view.toggle_sidebar", "Toggle Sidebar")
+                .accelerator("Cmd+Shift+L")
                 .build(app)?;
-
-            let app_menu = SubmenuBuilder::new(app, "IPTV Checker")
-                .about(Some(AboutMetadata::default()))
-                .separator()
-                .item(&settings_item)
-                .separator()
-                .services()
-                .separator()
-                .hide()
-                .hide_others()
-                .show_all()
-                .separator()
-                .quit()
-                .build()?;
-
-            // File menu items with accelerators
-            let new_window_item = MenuItemBuilder::with_id("menu.file.new_window", "New Window")
-                .accelerator("Cmd+N")
+        let toggle_prescan_item =
+            MenuItemBuilder::with_id("menu.view.toggle_prescan_filter", "Show Pre-scan Filter")
+                .accelerator("Cmd+Shift+F")
                 .build(app)?;
-            let open_item = MenuItemBuilder::with_id("menu.file.open", "Open Playlist...")
-                .accelerator("Cmd+O")
+        let clear_filters_item = MenuItemBuilder::with_id("menu.view.clear_filters", "Clear Filters")
+            .accelerator("Cmd+Shift+X")
+            .build(app)?;
+
+        let view_menu = SubmenuBuilder::new(app, "View")
+            .item(&toggle_sidebar_item)
+            .item(&toggle_prescan_item)
+            .item(&clear_filters_item)
+            .text("menu.view.history", "Scan History")
+            .build()?;
+
+        let start_scan_item = MenuItemBuilder::with_id("menu.scan.start", "Start Scan")
+            .accelerator("Cmd+R")
+            .build(app)?;
+        let pause_scan_item = MenuItemBuilder::with_id("menu.scan.pause", "Pause Scan")
+            .accelerator("Cmd+P")
+            .build(app)?;
+        let stop_scan_item = MenuItemBuilder::with_id("menu.scan.stop", "Stop Scan")
+            .accelerator("Cmd+.")
+            .build(app)?;
+
+        let scan_menu = SubmenuBuilder::new(app, "Scan")
+            .item(&start_scan_item)
+            .item(&pause_scan_item)
+            .text("menu.scan.resume", "Resume Scan")
+            .item(&stop_scan_item)
+            .separator()
+            .text("menu.scan.settings", "Scan Settings")
+            .build()?;
+
+        let shortcuts_item = MenuItemBuilder::with_id("menu.help.shortcuts", "Keyboard Shortcuts")
+            .accelerator("Cmd+/")
+            .build(app)?;
+
+        let help_menu = SubmenuBuilder::new(app, "Help")
+            .item(&shortcuts_item)
+            .separator()
+            .text("menu.help.check_updates", "Check for Updates")
+            .build()?;
+
+        MenuBuilder::new(app)
+            .item(&app_menu)
+            .item(&file_menu)
+            .item(&scan_menu)
+            .item(&view_menu)
+            .item(&help_menu)
+            .build()
+    });
+
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    let builder = builder.menu(|app| {
+        use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+
+        let new_window_item = MenuItemBuilder::with_id("menu.file.new_window", "New Window")
+            .accelerator("Ctrl+N")
+            .build(app)?;
+        let open_item = MenuItemBuilder::with_id("menu.file.open", "Open Playlist...")
+            .accelerator("Ctrl+O")
+            .build(app)?;
+        let open_folder_item = MenuItemBuilder::with_id("menu.file.open_folder", "Open Folder...")
+            .accelerator("Ctrl+Shift+O")
+            .build(app)?;
+        let open_url_item = MenuItemBuilder::with_id("menu.file.open_url", "Open URL...")
+            .accelerator("Ctrl+Shift+U")
+            .build(app)?;
+        let export_csv_item = MenuItemBuilder::with_id("menu.file.export_csv", "Export CSV")
+            .accelerator("Ctrl+Shift+E")
+            .build(app)?;
+        let settings_item = MenuItemBuilder::with_id("menu.app.settings", "Settings...")
+            .accelerator("Ctrl+,")
+            .build(app)?;
+
+        let file_menu = SubmenuBuilder::with_id(app, "menu.file", "File")
+            .item(&new_window_item)
+            .separator()
+            .item(&open_item)
+            .item(&open_folder_item)
+            .item(&open_url_item)
+            .item(
+                &SubmenuBuilder::with_id(app, "menu.file.open_recent", "Open Recent")
+                    .text("menu.file.recent.0", "No recent playlists")
+                    .separator()
+                    .text("menu.file.recent.clear", "Clear Recent")
+                    .build()?,
+            )
+            .separator()
+            .item(&export_csv_item)
+            .text("menu.file.export_split", "Export Split Playlists")
+            .text("menu.file.export_renamed", "Export Renamed Playlist")
+            .text("menu.file.export_filtered_m3u", "Export Filtered M3U/M3U8")
+            .text("menu.file.export_scan_log", "Export Scan Log (JSON)")
+            .separator()
+            .item(&settings_item)
+            .quit()
+            .build()?;
+
+        let toggle_sidebar_item =
+            MenuItemBuilder::with_id("menu.view.toggle_sidebar", "Toggle Sidebar")
+                .accelerator("Ctrl+Shift+L")
                 .build(app)?;
-            let open_folder_item =
-                MenuItemBuilder::with_id("menu.file.open_folder", "Open Folder...")
-                    .accelerator("Cmd+Shift+O")
-                    .build(app)?;
-            let open_url_item = MenuItemBuilder::with_id("menu.file.open_url", "Open URL...")
-                .accelerator("Cmd+Shift+U")
+        let toggle_prescan_item =
+            MenuItemBuilder::with_id("menu.view.toggle_prescan_filter", "Show Pre-scan Filter")
+                .accelerator("Ctrl+Shift+F")
                 .build(app)?;
-            let export_csv_item = MenuItemBuilder::with_id("menu.file.export_csv", "Export CSV")
-                .accelerator("Cmd+Shift+E")
-                .build(app)?;
+        let clear_filters_item = MenuItemBuilder::with_id("menu.view.clear_filters", "Clear Filters")
+            .accelerator("Ctrl+Shift+X")
+            .build(app)?;
 
-            let file_menu = SubmenuBuilder::with_id(app, "menu.file", "File")
-                .item(&new_window_item)
-                .separator()
-                .item(&open_item)
-                .item(&open_folder_item)
-                .item(&open_url_item)
-                .item(
-                    &SubmenuBuilder::with_id(app, "menu.file.open_recent", "Open Recent")
-                        .text("menu.file.recent.0", "No recent playlists")
-                        .separator()
-                        .text("menu.file.recent.clear", "Clear Recent")
-                        .build()?,
-                )
-                .separator()
-                .item(&export_csv_item)
-                .text("menu.file.export_split", "Export Split Playlists")
-                .text("menu.file.export_renamed", "Export Renamed Playlist")
-                .text("menu.file.export_filtered_m3u", "Export Filtered M3U/M3U8")
-                .text("menu.file.export_scan_log", "Export Scan Log (JSON)")
-                .separator()
-                .close_window()
-                .build()?;
+        let view_menu = SubmenuBuilder::new(app, "View")
+            .item(&toggle_sidebar_item)
+            .item(&toggle_prescan_item)
+            .item(&clear_filters_item)
+            .text("menu.view.history", "Scan History")
+            .build()?;
 
-            // View menu items with accelerators
-            let toggle_sidebar_item =
-                MenuItemBuilder::with_id("menu.view.toggle_sidebar", "Toggle Sidebar")
-                    .accelerator("Cmd+Shift+L")
-                    .build(app)?;
-            let toggle_prescan_item =
-                MenuItemBuilder::with_id("menu.view.toggle_prescan_filter", "Show Pre-scan Filter")
-                    .accelerator("Cmd+Shift+F")
-                    .build(app)?;
-            let clear_filters_item =
-                MenuItemBuilder::with_id("menu.view.clear_filters", "Clear Filters")
-                    .accelerator("Cmd+Shift+X")
-                    .build(app)?;
+        let start_scan_item = MenuItemBuilder::with_id("menu.scan.start", "Start Scan")
+            .accelerator("Ctrl+R")
+            .build(app)?;
+        let pause_scan_item = MenuItemBuilder::with_id("menu.scan.pause", "Pause Scan")
+            .accelerator("Ctrl+P")
+            .build(app)?;
+        let stop_scan_item = MenuItemBuilder::with_id("menu.scan.stop", "Stop Scan")
+            .accelerator("Ctrl+.")
+            .build(app)?;
 
-            let view_menu = SubmenuBuilder::new(app, "View")
-                .item(&toggle_sidebar_item)
-                .item(&toggle_prescan_item)
-                .item(&clear_filters_item)
-                .text("menu.view.history", "Scan History")
-                .build()?;
+        let scan_menu = SubmenuBuilder::new(app, "Scan")
+            .item(&start_scan_item)
+            .item(&pause_scan_item)
+            .text("menu.scan.resume", "Resume Scan")
+            .item(&stop_scan_item)
+            .separator()
+            .text("menu.scan.settings", "Scan Settings")
+            .build()?;
 
-            // Scan menu items with accelerators
-            let start_scan_item = MenuItemBuilder::with_id("menu.scan.start", "Start Scan")
-                .accelerator("Cmd+R")
-                .build(app)?;
-            let pause_scan_item = MenuItemBuilder::with_id("menu.scan.pause", "Pause Scan")
-                .accelerator("Cmd+P")
-                .build(app)?;
-            let stop_scan_item = MenuItemBuilder::with_id("menu.scan.stop", "Stop Scan")
-                .accelerator("Cmd+.")
-                .build(app)?;
+        let shortcuts_item = MenuItemBuilder::with_id("menu.help.shortcuts", "Keyboard Shortcuts")
+            .accelerator("Ctrl+/")
+            .build(app)?;
 
-            let scan_menu = SubmenuBuilder::new(app, "Scan")
-                .item(&start_scan_item)
-                .item(&pause_scan_item)
-                .text("menu.scan.resume", "Resume Scan")
-                .item(&stop_scan_item)
-                .separator()
-                .text("menu.scan.settings", "Scan Settings")
-                .build()?;
+        let help_menu = SubmenuBuilder::new(app, "Help")
+            .item(&shortcuts_item)
+            .separator()
+            .text("menu.help.check_updates", "Check for Updates")
+            .build()?;
 
-            let shortcuts_item =
-                MenuItemBuilder::with_id("menu.help.shortcuts", "Keyboard Shortcuts")
-                    .accelerator("Cmd+/")
-                    .build(app)?;
+        MenuBuilder::new(app)
+            .item(&file_menu)
+            .item(&scan_menu)
+            .item(&view_menu)
+            .item(&help_menu)
+            .build()
+    });
 
-            let help_menu = SubmenuBuilder::new(app, "Help")
-                .item(&shortcuts_item)
-                .separator()
-                .text("menu.help.check_updates", "Check for Updates")
-                .build()?;
+    let builder = builder.on_menu_event(|app, event| {
+        log::debug!("menu event: id={}", event.id().as_ref());
+        if event.id().as_ref() == "menu.file.new_window" {
+            create_new_window(app);
+            return;
+        }
 
-            MenuBuilder::new(app)
-                .item(&app_menu)
-                .item(&file_menu)
-                .item(&scan_menu)
-                .item(&view_menu)
-                .item(&help_menu)
-                .build()
-        })
-        .on_menu_event(|app, event| {
-            log::debug!("menu event: id={}", event.id().as_ref());
-            if event.id().as_ref() == "menu.file.new_window" {
-                create_new_window(app);
-                return;
-            }
+        let frontend_event = match event.id().as_ref() {
+            "menu.app.settings" => Some("menu://open-settings"),
+            "menu.file.open" => Some("menu://open-playlist"),
+            "menu.file.open_folder" => Some("menu://open-folder"),
+            "menu.file.open_url" => Some("menu://open-url"),
+            "menu.file.recent.0" => Some("menu://open-recent-0"),
+            "menu.file.recent.1" => Some("menu://open-recent-1"),
+            "menu.file.recent.2" => Some("menu://open-recent-2"),
+            "menu.file.recent.3" => Some("menu://open-recent-3"),
+            "menu.file.recent.4" => Some("menu://open-recent-4"),
+            "menu.file.recent.5" => Some("menu://open-recent-5"),
+            "menu.file.recent.6" => Some("menu://open-recent-6"),
+            "menu.file.recent.7" => Some("menu://open-recent-7"),
+            "menu.file.recent.8" => Some("menu://open-recent-8"),
+            "menu.file.recent.9" => Some("menu://open-recent-9"),
+            "menu.file.recent.clear" => Some("menu://clear-recent"),
+            "menu.file.export_csv" => Some("menu://export-csv"),
+            "menu.file.export_split" => Some("menu://export-split"),
+            "menu.file.export_renamed" => Some("menu://export-renamed"),
+            "menu.file.export_filtered_m3u" => Some("menu://export-filtered-m3u"),
+            "menu.file.export_scan_log" => Some("menu://export-scan-log"),
+            "menu.view.toggle_sidebar" => Some("menu://toggle-sidebar"),
+            "menu.view.toggle_prescan_filter" => Some("menu://toggle-prescan-filter"),
+            "menu.view.clear_filters" => Some("menu://clear-filters"),
+            "menu.view.history" => Some("menu://open-history"),
+            "menu.scan.start" => Some("menu://start-scan"),
+            "menu.scan.pause" => Some("menu://pause-scan"),
+            "menu.scan.resume" => Some("menu://resume-scan"),
+            "menu.scan.stop" => Some("menu://stop-scan"),
+            "menu.scan.settings" => Some("menu://open-settings"),
+            "menu.help.shortcuts" => Some("menu://keyboard-shortcuts"),
+            "menu.help.check_updates" => Some("menu://check-updates"),
+            _ => None,
+        };
 
-            let frontend_event = match event.id().as_ref() {
-                "menu.app.settings" => Some("menu://open-settings"),
-                "menu.file.open" => Some("menu://open-playlist"),
-                "menu.file.open_folder" => Some("menu://open-folder"),
-                "menu.file.open_url" => Some("menu://open-url"),
-                "menu.file.recent.0" => Some("menu://open-recent-0"),
-                "menu.file.recent.1" => Some("menu://open-recent-1"),
-                "menu.file.recent.2" => Some("menu://open-recent-2"),
-                "menu.file.recent.3" => Some("menu://open-recent-3"),
-                "menu.file.recent.4" => Some("menu://open-recent-4"),
-                "menu.file.recent.5" => Some("menu://open-recent-5"),
-                "menu.file.recent.6" => Some("menu://open-recent-6"),
-                "menu.file.recent.7" => Some("menu://open-recent-7"),
-                "menu.file.recent.8" => Some("menu://open-recent-8"),
-                "menu.file.recent.9" => Some("menu://open-recent-9"),
-                "menu.file.recent.clear" => Some("menu://clear-recent"),
-                "menu.file.export_csv" => Some("menu://export-csv"),
-                "menu.file.export_split" => Some("menu://export-split"),
-                "menu.file.export_renamed" => Some("menu://export-renamed"),
-                "menu.file.export_filtered_m3u" => Some("menu://export-filtered-m3u"),
-                "menu.file.export_scan_log" => Some("menu://export-scan-log"),
-                "menu.view.toggle_sidebar" => Some("menu://toggle-sidebar"),
-                "menu.view.toggle_prescan_filter" => Some("menu://toggle-prescan-filter"),
-                "menu.view.clear_filters" => Some("menu://clear-filters"),
-                "menu.view.history" => Some("menu://open-history"),
-                "menu.scan.start" => Some("menu://start-scan"),
-                "menu.scan.pause" => Some("menu://pause-scan"),
-                "menu.scan.resume" => Some("menu://resume-scan"),
-                "menu.scan.stop" => Some("menu://stop-scan"),
-                "menu.scan.settings" => Some("menu://open-settings"),
-                "menu.help.shortcuts" => Some("menu://keyboard-shortcuts"),
-                "menu.help.check_updates" => Some("menu://check-updates"),
-                _ => None,
-            };
-
-            if let Some(name) = frontend_event {
-                log::debug!("menu event → frontend: {name}");
-                emit_menu_event_to_focused_window(app, name);
-            }
-        });
+        if let Some(name) = frontend_event {
+            log::debug!("menu event → frontend: {name}");
+            emit_menu_event_to_focused_window(app, name);
+        }
+    });
 
     builder
         .setup(|app| {
@@ -434,7 +531,7 @@ pub fn run() {
             {
                 let handle = app.handle().clone();
                 let state = app.state::<Arc<AppState>>().inner().clone();
-                tokio::spawn(async move {
+                tauri::async_runtime::spawn(async move {
                     let (retention_count, _) = {
                         let s = state.settings.lock().await;
                         (s.screenshot_retention_count, s.low_space_threshold_gb)
