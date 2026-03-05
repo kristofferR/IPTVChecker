@@ -1344,7 +1344,7 @@ export default function App() {
 
     const onMouseMove = (ev: MouseEvent) => {
       if (!sidebarDragRef.current) return;
-      const delta = sidebarDragRef.current.startX - ev.clientX;
+      const delta = ev.clientX - sidebarDragRef.current.startX;
       const newWidth = Math.max(100, Math.min(600, sidebarDragRef.current.startWidth + delta));
       setSidebarWidth(newWidth);
     };
@@ -1624,7 +1624,7 @@ export default function App() {
         filteredCount={filteredExportResults.length}
         totalCount={completedResults.length}
       />
-      {isMac && playlist && <div ref={headerPortalRef} style={liveSelectedChannel && !sidebarHidden ? { marginRight: `${sidebarWidth}px` } : undefined} />}
+      {isMac && playlist && <div ref={headerPortalRef} style={liveSelectedChannel && !sidebarHidden ? { marginLeft: `${sidebarWidth}px` } : undefined} />}
       </div>
 
       <div className="flex flex-col flex-1 min-h-0">
@@ -1744,15 +1744,23 @@ export default function App() {
 
       <div className="flex flex-col flex-1 min-h-0">
       <div className="flex flex-1 min-h-0 bg-content">
-        {playlist && showReportPanel && (
-          <PlaylistReportPanel
-            playlist={playlist}
-            results={completedResults}
-            progress={progress}
-            summary={summary}
-            scanState={scanState}
-            onClose={() => setShowReportPanel(false)}
-          />
+        {liveSelectedChannel && !sidebarHidden && (
+          <div className="relative border-r border-border-app bg-panel-muted shrink-0" style={{ width: `${sidebarWidth}px` }}>
+            <div
+              onMouseDown={handleSidebarDragStart}
+              className="absolute right-0 top-0 bottom-0 w-1 translate-x-1/2 cursor-col-resize z-10 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors"
+            />
+            <ThumbnailPanel
+              result={liveSelectedChannel}
+              screenshotUrl={screenshotUrl}
+              screenshotLoading={screenshotLoading}
+              screenshotLoadError={screenshotLoadError}
+              screenshotsEnabled={!settings.skip_screenshots}
+              scanState={scanState}
+              lightboxOpen={lightboxOpen}
+              onLightboxChange={setLightboxOpen}
+            />
+          </div>
         )}
         <div className="flex flex-col flex-1 min-w-0">
           {playlist ? (
@@ -1861,23 +1869,16 @@ export default function App() {
           )}
         </div>
 
-        {liveSelectedChannel && !sidebarHidden && (
-          <div className="relative border-l border-border-app bg-panel-muted shrink-0" style={{ width: `${sidebarWidth}px` }}>
-            <div
-              onMouseDown={handleSidebarDragStart}
-              className="absolute left-0 top-0 bottom-0 w-1 -translate-x-1/2 cursor-col-resize z-10 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors"
-            />
-            <ThumbnailPanel
-              result={liveSelectedChannel}
-              screenshotUrl={screenshotUrl}
-              screenshotLoading={screenshotLoading}
-              screenshotLoadError={screenshotLoadError}
-              screenshotsEnabled={!settings.skip_screenshots}
-              scanState={scanState}
-              lightboxOpen={lightboxOpen}
-              onLightboxChange={setLightboxOpen}
-            />
-          </div>
+        {playlist && showReportPanel && (
+          <PlaylistReportPanel
+            playlist={playlist}
+            results={completedResults}
+            progress={progress}
+            summary={summary}
+            scanState={scanState}
+            placement="right"
+            onClose={() => setShowReportPanel(false)}
+          />
         )}
       </div>
 

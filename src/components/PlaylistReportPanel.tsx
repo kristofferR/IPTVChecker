@@ -17,6 +17,7 @@ interface PlaylistReportPanelProps {
   progress: ScanProgress | null;
   summary: ScanSummary | null;
   scanState: ScanState;
+  placement?: "left" | "right";
   onClose: () => void;
 }
 
@@ -154,6 +155,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
   progress,
   summary,
   scanState,
+  placement = "left",
   onClose,
 }: PlaylistReportPanelProps) {
   const statusSnapshot = summary ?? progress;
@@ -230,7 +232,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
   const statusClass = aliveOrDrm > 0 ? "text-emerald-300" : "text-red-300";
 
   return (
-    <aside className="h-full w-[330px] shrink-0 border-r border-border-app bg-panel/70 backdrop-blur-sm overflow-auto">
+    <aside className={`h-full w-[330px] shrink-0 ${placement === "right" ? "border-l" : "border-r"} border-border-app bg-panel/70 backdrop-blur-sm overflow-auto`}>
       <div className="sticky top-0 z-10 px-4 py-3 border-b border-border-app bg-panel/85 backdrop-blur-sm">
         <div className="flex items-start justify-between gap-2">
           <div>
