@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use state::AppState;
 use tauri::{Emitter, Manager};
+use tauri::webview::PageLoadEvent;
 use tauri_plugin_liquid_glass::{LiquidGlassConfig, LiquidGlassExt};
 use tauri_plugin_store::StoreExt;
 
@@ -128,9 +129,6 @@ fn create_window_from_main_config(app: &tauri::AppHandle, label: String) {
                 );
             }
 
-            let _ = window.unminimize();
-            let _ = window.show();
-            let _ = window.set_focus();
             schedule_macos_system_appearance_patch(app.clone(), window.label().to_string());
         }
         Err(error) => {
@@ -512,6 +510,17 @@ pub fn run() {
             commands::recent::add_recent_playlist,
             commands::recent::clear_recent_playlists,
         ])
+        .on_page_load(|webview, payload| {
+            if payload.event() != PageLoadEvent::Finished {
+                return;
+            }
+            let window = webview.window();
+            if matches!(window.is_visible(), Ok(false)) {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        })
         .on_window_event(|window, event| {
             #[cfg(target_os = "macos")]
             if let tauri::WindowEvent::CloseRequested { .. } = event {
