@@ -1,6 +1,16 @@
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import type { ScanProgress, ScanSummary } from "../lib/types";
 import type { ScanState } from "../hooks/useScan";
+import {
+  SFCheckmarkCircleFill,
+  SFXmarkCircleFill,
+  SFLockFill,
+  SFShieldFill,
+  SFListNumber,
+  SFExclamationTriangleFill,
+  SFTagFill,
+  SFDocOnDocFill,
+} from "./SFSymbols";
 
 interface StatsPanelProps {
   progress: ScanProgress | null;
@@ -11,6 +21,37 @@ interface StatsPanelProps {
   mislabeledCount: number;
   duplicateCount: number;
 }
+
+function Pill({
+  icon,
+  label,
+  color,
+}: {
+  icon: ReactNode;
+  label: string;
+  color: string;
+}) {
+  const colorMap: Record<string, string> = {
+    neutral: "text-text-secondary bg-btn/60",
+    green: "text-green-400 bg-green-400/10",
+    red: "text-red-400 bg-red-400/10",
+    yellow: "text-yellow-400 bg-yellow-400/10",
+    cyan: "text-cyan-400 bg-cyan-400/10",
+    blue: "text-blue-400 bg-blue-400/10",
+    orange: "text-orange-400 bg-orange-400/10",
+  };
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[12px] tabular-nums ${colorMap[color] ?? colorMap.neutral}`}
+    >
+      {icon}
+      {label}
+    </span>
+  );
+}
+
+const iconSize = "w-3 h-3";
 
 export const StatsPanel = memo(function StatsPanel({
   progress,
@@ -31,58 +72,72 @@ export const StatsPanel = memo(function StatsPanel({
     duplicateCount > 0;
 
   return (
-    <div className="flex items-center gap-4 px-4 py-2 text-[13px] border-t border-border-app bg-panel-subtle glass-material">
-      <span className="text-text-secondary">
-        {totalChannels} total
-      </span>
+    <div className="flex items-center gap-2 px-4 py-1.5 border-t border-border-app bg-panel-subtle glass-material">
+      <Pill
+        icon={<SFListNumber className={iconSize} />}
+        label={`${totalChannels} total`}
+        color="neutral"
+      />
       {stats && (
         <>
-          <span className="text-green-400">
-            {stats.alive} ✓
-          </span>
+          <Pill
+            icon={<SFCheckmarkCircleFill className={iconSize} />}
+            label={String(stats.alive)}
+            color="green"
+          />
           {stats.drm > 0 && (
-            <span className="text-cyan-400">
-              {stats.drm} ⚿
-            </span>
+            <Pill
+              icon={<SFShieldFill className={iconSize} />}
+              label={String(stats.drm)}
+              color="cyan"
+            />
           )}
-          <span className="text-red-400">
-            {stats.dead} ✕
-          </span>
-          <span className="text-yellow-400">
-            {stats.geoblocked} 🔒
-          </span>
+          <Pill
+            icon={<SFXmarkCircleFill className={iconSize} />}
+            label={String(stats.dead)}
+            color="red"
+          />
+          <Pill
+            icon={<SFLockFill className={iconSize} />}
+            label={String(stats.geoblocked)}
+            color="yellow"
+          />
         </>
       )}
-      {summary && (
-        <>
-          {summary.playlist_score && (
-            <span className="text-blue-400">
-              Score {summary.playlist_score.overall.toFixed(1)}/10
-            </span>
-          )}
-        </>
+      {summary?.playlist_score && (
+        <Pill
+          icon={null}
+          label={`Score ${summary.playlist_score.overall.toFixed(1)}/10`}
+          color="blue"
+        />
       )}
       {showRightStatus && (
-        <div className="ml-auto flex items-center gap-4">
+        <div className="ml-auto flex items-center gap-2">
           {scanState === "paused" && (
-            <span className="text-yellow-400 font-medium uppercase tracking-[0.04em]">
+            <span className="text-[12px] text-yellow-400 font-medium uppercase tracking-[0.04em]">
               Paused
             </span>
           )}
           {effectiveLowFpsCount > 0 && (
-            <span className="text-orange-400">
-              ⚠ {effectiveLowFpsCount} low fps
-            </span>
+            <Pill
+              icon={<SFExclamationTriangleFill className={iconSize} />}
+              label={`${effectiveLowFpsCount} low fps`}
+              color="orange"
+            />
           )}
           {effectiveMislabeledCount > 0 && (
-            <span className="text-orange-400">
-              ✕ {effectiveMislabeledCount} mislabeled
-            </span>
+            <Pill
+              icon={<SFTagFill className={iconSize} />}
+              label={`${effectiveMislabeledCount} mislabeled`}
+              color="orange"
+            />
           )}
           {duplicateCount > 0 && (
-            <span className="text-orange-400">
-              ⚠ {duplicateCount} duplicates
-            </span>
+            <Pill
+              icon={<SFDocOnDocFill className={iconSize} />}
+              label={`${duplicateCount} duplicates`}
+              color="orange"
+            />
           )}
         </div>
       )}

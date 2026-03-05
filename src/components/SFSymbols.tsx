@@ -98,6 +98,84 @@ export function SFSquareArrowUp(props: IconProps) {
   );
 }
 
+// SF Symbol: checkmark.circle.fill
+export function SFCheckmarkCircleFill(props: IconProps) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
+      <path d="M12 2a10 10 0 110 20 10 10 0 010-20zm4.03 7.03a.75.75 0 00-1.06-1.06l-4.47 4.47-1.97-1.97a.75.75 0 00-1.06 1.06l2.5 2.5a.75.75 0 001.06 0l5-5z" />
+    </svg>
+  );
+}
+
+// SF Symbol: xmark.circle.fill
+export function SFXmarkCircleFill(props: IconProps) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
+      <path d="M12 2a10 10 0 110 20 10 10 0 010-20zm3.03 6.97a.75.75 0 00-1.06 0L12 10.94 9.97 8.97a.75.75 0 10-1.06 1.06L10.94 12l-2.03 1.97a.75.75 0 101.06 1.06L12 13.06l2.03 2.03a.75.75 0 101.06-1.06L13.06 12l2.03-2.03a.75.75 0 000-1z" />
+    </svg>
+  );
+}
+
+// SF Symbol: lock.fill
+export function SFLockFill(props: IconProps) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
+      <path d="M12 2a5 5 0 00-5 5v3H6a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2v-8a2 2 0 00-2-2h-1V7a5 5 0 00-5-5zm-3 8V7a3 3 0 116 0v3H9z" />
+    </svg>
+  );
+}
+
+// SF Symbol: shield.fill (DRM)
+export function SFShieldFill(props: IconProps) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
+      <path d="M12 2l-8 4v5c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z" />
+    </svg>
+  );
+}
+
+// SF Symbol: list.number
+export function SFListNumber(props: IconProps) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
+      <rect x="9" y="5" width="12" height="2" rx="1" />
+      <rect x="9" y="11" width="12" height="2" rx="1" />
+      <rect x="9" y="17" width="12" height="2" rx="1" />
+      <circle cx="4.5" cy="6" r="1.5" />
+      <circle cx="4.5" cy="12" r="1.5" />
+      <circle cx="4.5" cy="18" r="1.5" />
+    </svg>
+  );
+}
+
+// SF Symbol: exclamationmark.triangle.fill
+export function SFExclamationTriangleFill(props: IconProps) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
+      <path d="M12 2.5L1.5 20.5h21L12 2.5zm0 6.5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0112 9zm0 8a1 1 0 110 2 1 1 0 010-2z" />
+    </svg>
+  );
+}
+
+// SF Symbol: doc.on.doc.fill (duplicates)
+export function SFDocOnDocFill(props: IconProps) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
+      <path d="M16 1H8a2 2 0 00-2 2v14a2 2 0 002 2h8a2 2 0 002-2V3a2 2 0 00-2-2z" />
+      <path opacity="0.5" d="M18 5v14a2 2 0 01-2 2H8a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2z" />
+    </svg>
+  );
+}
+
+// SF Symbol: tag.fill (mislabeled)
+export function SFTagFill(props: IconProps) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
+      <path d="M2 4.5A2.5 2.5 0 014.5 2h5.59a2.5 2.5 0 011.77.73l8.41 8.41a2.5 2.5 0 010 3.54l-5.59 5.59a2.5 2.5 0 01-3.54 0l-8.41-8.41A2.5 2.5 0 012 10.09V4.5zM7 8.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" />
+    </svg>
+  );
+}
+
 // SF Symbol: chevron.down
 export function SFChevronDown(props: IconProps) {
   return (
