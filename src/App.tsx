@@ -278,6 +278,7 @@ export default function App() {
     return saved ? Math.max(100, Math.min(600, Number(saved))) : 288;
   });
   const sidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [menuInfo, setMenuInfo] = useState<string | null>(null);
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -1000,6 +1001,11 @@ export default function App() {
         e.preventDefault();
         handleOpen();
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
       if ((e.metaKey || e.ctrlKey) && e.key === ",") {
         e.preventDefault();
         setShowSettings((s) => !s);
@@ -1349,6 +1355,7 @@ export default function App() {
           channelSearchError ? `Invalid pre-scan regex: ${channelSearchError}` : null
         }
         search={search}
+        searchInputRef={searchInputRef}
         onSearchChange={setSearch}
         groups={playlist?.groups ?? []}
         groupFilter={groupFilter}

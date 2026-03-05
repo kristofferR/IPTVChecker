@@ -6,7 +6,7 @@ pub mod state;
 
 use std::sync::Arc;
 #[cfg(target_os = "macos")]
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use state::AppState;
 use tauri::{Emitter, Manager};
@@ -17,15 +17,18 @@ use tauri_plugin_store::StoreExt;
 static APP_IS_QUITTING: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static WINDOW_CLOSED_BY_USER: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "macos")]
+static NEXT_WINDOW_ID: AtomicUsize = AtomicUsize::new(1);
 
 #[cfg(target_os = "macos")]
-fn schedule_macos_system_appearance_patch(app: tauri::AppHandle) {
+fn schedule_macos_system_appearance_patch(app: tauri::AppHandle, window_label: String) {
     std::thread::spawn(move || {
         for _attempt in 0..20 {
             std::thread::sleep(std::time::Duration::from_millis(120));
             let handle = app.clone();
             let patched = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             let patched_on_main = patched.clone();
+            let target_label = window_label.clone();
             let _ = app.run_on_main_thread(move || {
                 patched_on_main.store(false, Ordering::Relaxed);
 
@@ -58,7 +61,7 @@ fn schedule_macos_system_appearance_patch(app: tauri::AppHandle) {
                     None
                 }
 
-                if let Some(window) = handle.get_webview_window("main") {
+                if let Some(window) = handle.get_webview_window(&target_label) {
                     if let Ok(ns_window) = window.ns_window() {
                         unsafe {
                             let ns_window = ns_window as id;
@@ -82,20 +85,23 @@ fn schedule_macos_system_appearance_patch(app: tauri::AppHandle) {
 }
 
 #[cfg(target_os = "macos")]
-fn create_fresh_main_window(app: &tauri::AppHandle) {
-    let Some(window_config) = app
+fn create_window_from_main_config(app: &tauri::AppHandle, label: String) {
+    let Some(mut window_config) = app
         .config()
         .app
         .windows
         .iter()
         .find(|cfg| cfg.label == "main")
-        .or_else(|| app.config().app.windows.first())
+        .cloned()
+        .or_else(|| app.config().app.windows.first().cloned())
     else {
         log::error!("Cannot recreate main window: no window config found");
         return;
     };
 
-    match tauri::WebviewWindowBuilder::from_config(app, window_config).and_then(|builder| builder.build()) {
+    window_config.label = label;
+
+    match tauri::WebviewWindowBuilder::from_config(app, &window_config).and_then(|builder| builder.build()) {
         Ok(window) => {
             let theme_preference = {
                 let state = app.state::<Arc<AppState>>();
@@ -122,12 +128,23 @@ fn create_fresh_main_window(app: &tauri::AppHandle) {
             let _ = window.unminimize();
             let _ = window.show();
             let _ = window.set_focus();
-            schedule_macos_system_appearance_patch(app.clone());
+            schedule_macos_system_appearance_patch(app.clone(), window.label().to_string());
         }
         Err(error) => {
             log::error!("Failed to recreate main window on reopen: {}", error);
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn create_fresh_main_window(app: &tauri::AppHandle) {
+    create_window_from_main_config(app, "main".to_string());
+}
+
+#[cfg(target_os = "macos")]
+fn create_new_window(app: &tauri::AppHandle) {
+    let id = NEXT_WINDOW_ID.fetch_add(1, Ordering::Relaxed);
+    create_window_from_main_config(app, format!("main-{}", id));
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -180,6 +197,9 @@ pub fn run() {
                 .build()?;
 
             // File menu items with accelerators
+            let new_window_item = MenuItemBuilder::with_id("menu.file.new_window", "New Window")
+                .accelerator("Cmd+N")
+                .build(app)?;
             let open_item = MenuItemBuilder::with_id("menu.file.open", "Open Playlist...")
                 .accelerator("Cmd+O")
                 .build(app)?;
@@ -195,6 +215,8 @@ pub fn run() {
                 .build(app)?;
 
             let file_menu = SubmenuBuilder::with_id(app, "menu.file", "File")
+                .item(&new_window_item)
+                .separator()
                 .item(&open_item)
                 .item(&open_folder_item)
                 .item(&open_url_item)
@@ -211,6 +233,8 @@ pub fn run() {
                 .text("menu.file.export_renamed", "Export Renamed Playlist")
                 .text("menu.file.export_filtered_m3u", "Export Filtered M3U/M3U8")
                 .text("menu.file.export_scan_log", "Export Scan Log (JSON)")
+                .separator()
+                .close_window()
                 .build()?;
 
             // View menu items with accelerators
@@ -275,6 +299,11 @@ pub fn run() {
         })
         .on_menu_event(|app, event| {
             log::debug!("menu event: id={}", event.id().as_ref());
+            if event.id().as_ref() == "menu.file.new_window" {
+                create_new_window(app);
+                return;
+            }
+
             let frontend_event = match event.id().as_ref() {
                 "menu.app.settings" => Some("menu://open-settings"),
                 "menu.file.open" => Some("menu://open-playlist"),
@@ -349,7 +378,7 @@ pub fn run() {
             // Deferred to avoid ObjC exceptions when webview isn't fully ready.
             #[cfg(target_os = "macos")]
             {
-                schedule_macos_system_appearance_patch(app.handle().clone());
+                schedule_macos_system_appearance_patch(app.handle().clone(), "main".to_string());
             }
 
             #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -426,10 +455,10 @@ pub fn run() {
         .on_window_event(|window, event| {
             #[cfg(target_os = "macos")]
             if let tauri::WindowEvent::CloseRequested { .. } = event {
-                if window.label() == "main" && !APP_IS_QUITTING.load(Ordering::Relaxed) {
-                    if let Some(main_window) = window.app_handle().get_webview_window("main") {
+                if !APP_IS_QUITTING.load(Ordering::Relaxed) {
+                    if let Some(target_window) = window.app_handle().get_webview_window(window.label()) {
                         if let Err(error) = window.app_handle().liquid_glass().set_effect(
-                            &main_window,
+                            &target_window,
                             LiquidGlassConfig {
                                 enabled: false,
                                 ..Default::default()
@@ -438,6 +467,9 @@ pub fn run() {
                             log::debug!("Failed to remove liquid glass before close: {}", error);
                         }
                     }
+                }
+
+                if window.label() == "main" && !APP_IS_QUITTING.load(Ordering::Relaxed) {
                     WINDOW_CLOSED_BY_USER.store(true, Ordering::Relaxed);
                 }
             }
@@ -475,6 +507,10 @@ pub fn run() {
                         let _ = main_window.unminimize();
                         let _ = main_window.show();
                         let _ = main_window.set_focus();
+                        schedule_macos_system_appearance_patch(
+                            app.clone(),
+                            "main".to_string(),
+                        );
                     } else {
                         create_fresh_main_window(app);
                     }

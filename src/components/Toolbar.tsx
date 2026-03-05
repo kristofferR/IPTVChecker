@@ -20,7 +20,7 @@ import {
   SFGearshape,
   SFClockArrow,
 } from "./SFSymbols";
-import type { PointerEvent } from "react";
+import type { PointerEvent, RefObject } from "react";
 import type { ChannelResult } from "../lib/types";
 import type { ScanState } from "../hooks/useScan";
 import { ExportMenu } from "./ExportMenu";
@@ -52,6 +52,7 @@ interface ToolbarProps {
   menuExportRequest: MenuExportRequest | null;
   scanBlockedReason: string | null;
   search: string;
+  searchInputRef?: RefObject<HTMLInputElement | null>;
   onSearchChange: (value: string) => void;
   groups: string[];
   groupFilter: string;
@@ -91,6 +92,7 @@ export function Toolbar({
   menuExportRequest,
   scanBlockedReason,
   search,
+  searchInputRef,
   onSearchChange,
   groups,
   groupFilter,
@@ -239,6 +241,7 @@ export function Toolbar({
         <div className="relative">
           <Search className="search-icon absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary" />
           <input
+            ref={searchInputRef}
             type="search"
             placeholder="Search..."
             value={search}
