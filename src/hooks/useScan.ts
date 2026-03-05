@@ -10,6 +10,7 @@ import type {
 } from "../lib/types";
 import { cancelScan, pauseScan, resetScan, resumeScan, startScan } from "../lib/tauri";
 import { logger } from "../lib/logger";
+import { findDuplicateChannelIndices } from "../lib/duplicates";
 import {
   pendingScanErrorMessageForRun,
   runScopedScanErrorMessage,
@@ -25,9 +26,21 @@ interface ScanTelemetry {
   etaSeconds: number | null;
 }
 
+interface ScanUiMetrics {
+  presentCount: number;
+  lowFpsCount: number;
+  mislabeledCount: number;
+}
+
 const EMPTY_TELEMETRY: ScanTelemetry = {
   throughputChannelsPerSecond: null,
   etaSeconds: null,
+};
+
+const EMPTY_UI_METRICS: ScanUiMetrics = {
+  presentCount: 0,
+  lowFpsCount: 0,
+  mislabeledCount: 0,
 };
 
 /** Number of recent completions used for rolling throughput average. */
@@ -44,16 +57,58 @@ interface RunClockState {
   accumulatedPausedMs: number;
 }
 
+function buildFlatResultsAndMetrics(
+  source: (ChannelResult | null)[],
+): {
+  flatResults: ChannelResult[];
+  indexToFlatPos: Map<number, number>;
+  metrics: ScanUiMetrics;
+} {
+  const flatResults: ChannelResult[] = [];
+  const indexToFlatPos = new Map<number, number>();
+  let lowFpsCount = 0;
+  let mislabeledCount = 0;
+
+  for (const result of source) {
+    if (!result) continue;
+    indexToFlatPos.set(result.index, flatResults.length);
+    flatResults.push(result);
+    if (result.low_framerate) {
+      lowFpsCount += 1;
+    }
+    if (result.label_mismatches.length > 0) {
+      mislabeledCount += 1;
+    }
+  }
+
+  return {
+    flatResults,
+    indexToFlatPos,
+    metrics: {
+      presentCount: flatResults.length,
+      lowFpsCount,
+      mislabeledCount,
+    },
+  };
+}
+
 export function useScan() {
   const [results, setResults] = useState<(ChannelResult | null)[]>([]);
+  const [flatResults, setFlatResults] = useState<ChannelResult[]>([]);
   const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [summary, setSummary] = useState<ScanSummary | null>(null);
   const [scanState, setScanState] = useState<ScanState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [telemetry, setTelemetry] = useState<ScanTelemetry>(EMPTY_TELEMETRY);
+  const [uiMetrics, setUiMetrics] = useState<ScanUiMetrics>(EMPTY_UI_METRICS);
+  const [duplicateIndices, setDuplicateIndices] = useState<Set<number>>(
+    () => new Set(),
+  );
 
   // Batch incoming results with requestAnimationFrame
   const pendingResults = useRef<ChannelResult[]>([]);
+  const resultsRef = useRef<(ChannelResult | null)[]>([]);
+  const indexToFlatPosRef = useRef<Map<number, number>>(new Map());
   const rafId = useRef<number | null>(null);
   const eventCount = useRef(0);
   const activeRunId = useRef<string | null>(null);
@@ -65,6 +120,9 @@ export function useScan() {
   const lastTelemetryUpdateMs = useRef(0);
   /** Set immediately on cancel click; suppresses incoming results during drain. */
   const cancelling = useRef(false);
+  const presentCountRef = useRef(0);
+  const lowFpsCountRef = useRef(0);
+  const mislabeledCountRef = useRef(0);
 
   // Reset backend scan state on mount (handles app restart with stale flag)
   useEffect(() => {
@@ -75,13 +133,73 @@ export function useScan() {
     if (pendingResults.current.length > 0) {
       const batch = pendingResults.current;
       pendingResults.current = [];
-      setResults((prev) => {
-        const updated = applyResultBatch(prev, batch);
-        const nonNull = updated.filter((r) => r != null).length;
+      const previous = resultsRef.current;
+      const updated = applyResultBatch(previous, batch);
+      resultsRef.current = updated;
+      setResults(updated);
+
+      let presentCount = presentCountRef.current;
+      let lowFpsCount = lowFpsCountRef.current;
+      let mislabeledCount = mislabeledCountRef.current;
+      let metricsChanged = false;
+      setFlatResults((prevFlat) => {
+        let nextFlat = prevFlat;
+        let flatChanged = false;
+
+        for (const result of batch) {
+          const previousResult = previous[result.index];
+          if (!previousResult) {
+            presentCount += 1;
+            metricsChanged = true;
+          }
+
+          const previousLowFps = previousResult?.low_framerate ?? false;
+          if (previousLowFps !== result.low_framerate) {
+            lowFpsCount += result.low_framerate ? 1 : -1;
+            metricsChanged = true;
+          }
+
+          const previousMislabeled =
+            (previousResult?.label_mismatches.length ?? 0) > 0;
+          const nextMislabeled = result.label_mismatches.length > 0;
+          if (previousMislabeled !== nextMislabeled) {
+            mislabeledCount += nextMislabeled ? 1 : -1;
+            metricsChanged = true;
+          }
+
+          const flatPos = indexToFlatPosRef.current.get(result.index);
+          if (flatPos == null) {
+            if (nextFlat === prevFlat) {
+              nextFlat = [...prevFlat];
+            }
+            indexToFlatPosRef.current.set(result.index, nextFlat.length);
+            nextFlat.push(result);
+            flatChanged = true;
+          } else if (nextFlat[flatPos] !== result) {
+            if (nextFlat === prevFlat) {
+              nextFlat = [...prevFlat];
+            }
+            nextFlat[flatPos] = result;
+            flatChanged = true;
+          }
+        }
+
+        if (metricsChanged) {
+          presentCountRef.current = presentCount;
+          lowFpsCountRef.current = lowFpsCount;
+          mislabeledCountRef.current = mislabeledCount;
+          setUiMetrics({
+            presentCount,
+            lowFpsCount,
+            mislabeledCount,
+          });
+        }
+
         logger.debug(
-          `[useScan] flush: batch=${batch.length}, total array=${updated.length}, non-null=${nonNull}`,
+          `[useScan] flush: batch=${batch.length}, total array=${updated.length}, non-null=${presentCount}`,
         );
-        return updated;
+
+        return flatChanged ? nextFlat : prevFlat;
       });
     }
     rafId.current = null;
@@ -336,47 +454,52 @@ export function useScan() {
         selectedIndices.length > 0 ? new Set(selectedIndices) : null;
 
       // Reset existing results back to pending status for channels being scanned.
-      setResults((prev) => {
-        const targetLength = prev.length > 0 ? prev.length : totalChannels;
+      const previous = resultsRef.current;
+      const targetLength = previous.length > 0 ? previous.length : totalChannels;
+      const updated = new Array<ChannelResult | null>(targetLength).fill(null);
 
-        if (targetLength > 0 && prev.some((r) => r != null)) {
-          const updated = new Array(targetLength).fill(null);
+      if (targetLength > 0 && previous.some((r) => r != null)) {
+        for (let i = 0; i < targetLength; i += 1) {
+          const existing = previous[i] ?? null;
+          if (!existing) continue;
 
-          for (let i = 0; i < targetLength; i += 1) {
-            const existing = prev[i] ?? null;
-            if (!existing) continue;
-
-            updated[i] =
-              selectedSet && !selectedSet.has(existing.index)
-                ? existing
-                : {
-                    ...existing,
-                    status: "pending" as const,
-                    codec: null,
-                    resolution: null,
-                    width: null,
-                    height: null,
-                    fps: null,
-                    latency_ms: null,
-                    video_bitrate: null,
-                    audio_bitrate: null,
-                    audio_codec: null,
-                    audio_only: false,
-                    screenshot_path: null,
-                    label_mismatches: [],
-                    low_framerate: false,
-                    error_message: null,
-                    stream_url: null,
-                    retry_count: null,
-                    error_reason: null,
-                  };
-          }
-
-          return updated;
+          updated[i] =
+            selectedSet && !selectedSet.has(existing.index)
+              ? existing
+              : {
+                  ...existing,
+                  status: "pending" as const,
+                  codec: null,
+                  resolution: null,
+                  width: null,
+                  height: null,
+                  fps: null,
+                  latency_ms: null,
+                  video_bitrate: null,
+                  audio_bitrate: null,
+                  audio_codec: null,
+                  audio_only: false,
+                  screenshot_path: null,
+                  label_mismatches: [],
+                  low_framerate: false,
+                  error_message: null,
+                  stream_url: null,
+                  retry_count: null,
+                  error_reason: null,
+                };
         }
+      }
 
-        return new Array(targetLength).fill(null);
-      });
+      const rebuilt = buildFlatResultsAndMetrics(updated);
+      resultsRef.current = updated;
+      indexToFlatPosRef.current = rebuilt.indexToFlatPos;
+      presentCountRef.current = rebuilt.metrics.presentCount;
+      lowFpsCountRef.current = rebuilt.metrics.lowFpsCount;
+      mislabeledCountRef.current = rebuilt.metrics.mislabeledCount;
+
+      setResults(updated);
+      setFlatResults(rebuilt.flatResults);
+      setUiMetrics(rebuilt.metrics);
       setProgress(null);
       setSummary(null);
       setError(null);
@@ -494,8 +617,19 @@ export function useScan() {
           error_reason: null,
         };
       }
+      const rebuilt = buildFlatResultsAndMetrics(pending);
+      const duplicates = findDuplicateChannelIndices(pending);
+
       logger.debug(`[useScan] initFromPlaylist: ${pending.length} channels`);
+      resultsRef.current = pending;
+      indexToFlatPosRef.current = rebuilt.indexToFlatPos;
+      presentCountRef.current = rebuilt.metrics.presentCount;
+      lowFpsCountRef.current = rebuilt.metrics.lowFpsCount;
+      mislabeledCountRef.current = rebuilt.metrics.mislabeledCount;
       setResults(pending);
+      setFlatResults(rebuilt.flatResults);
+      setUiMetrics(rebuilt.metrics);
+      setDuplicateIndices(duplicates);
       setProgress(null);
       setSummary(null);
       setError(null);
@@ -514,6 +648,9 @@ export function useScan() {
 
   return {
     results,
+    flatResults,
+    uiMetrics,
+    duplicateIndices,
     progress,
     summary,
     scanState,

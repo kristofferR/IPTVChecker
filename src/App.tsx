@@ -57,7 +57,6 @@ import { OpenSourceDialog } from "./components/OpenSourceDialog";
 import { AlertTriangle, ExternalLink, FolderOpen, Info, X } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { detectPlatform, type Platform } from "./lib/platform";
-import { findDuplicateChannelIndices } from "./lib/duplicates";
 import { filterResults } from "./lib/filters";
 import { logger } from "./lib/logger";
 import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/haptics";
@@ -317,6 +316,9 @@ export default function App() {
   saveSettingsRef.current = saveSettings;
   const {
     results,
+    flatResults,
+    uiMetrics,
+    duplicateIndices,
     progress,
     summary,
     scanState,
@@ -1286,24 +1288,7 @@ export default function App() {
     void launchChannelInPlayer(channel);
   }, [pendingPlaybackChannel, launchChannelInPlayer]);
 
-  const completedResults = useMemo(
-    () =>
-      measureUiPerf(
-        "app.completed-results",
-        () => results.filter((r): r is ChannelResult => r != null),
-        { rows: results.length },
-      ),
-    [results],
-  );
-  const duplicateIndices = useMemo(
-    () =>
-      measureUiPerf(
-        "app.duplicate-detection",
-        () => findDuplicateChannelIndices(results),
-        { rows: results.length },
-      ),
-    [results],
-  );
+  const completedResults = flatResults;
   const filteredExportResults = useMemo(
     () =>
       measureUiPerf(
@@ -1371,20 +1356,6 @@ export default function App() {
     }),
     [completedResults.length, filteredExportResults.length, selectedChannelIndices.length],
   );
-
-  const warningCounts = useMemo(() => {
-    let lowFpsCount = 0;
-    let mislabeledCount = 0;
-    for (const result of completedResults) {
-      if (result.low_framerate) {
-        lowFpsCount += 1;
-      }
-      if (result.label_mismatches.length > 0) {
-        mislabeledCount += 1;
-      }
-    }
-    return { lowFpsCount, mislabeledCount };
-  }, [completedResults]);
 
   const handleSearchChange = useCallback((value: string) => {
     setSearch(value);
@@ -1715,8 +1686,8 @@ export default function App() {
       </div>
 
       <WarningsPanel
-        lowFpsCount={warningCounts.lowFpsCount}
-        mislabeledCount={warningCounts.mislabeledCount}
+        lowFpsCount={uiMetrics.lowFpsCount}
+        mislabeledCount={uiMetrics.mislabeledCount}
         duplicateCount={duplicateIndices.size}
       />
       <StatsPanel
