@@ -10,6 +10,7 @@
     "tauri": "tauri",
     "typecheck": "tsgo --noEmit",
     "test:frontend": "bun test tests",
+    "perf:ui-filter": "bun run scripts/benchmark-ui-filter.ts",
     "setup:ffmpeg": "bash scripts/download-ffmpeg.sh"
   },
   "dependencies": {

@@ -1,8 +1,6 @@
+import { memo } from "react";
 import type { ChannelResult } from "../lib/types";
-import type {
-  ColumnDefinition,
-  ColumnKey,
-} from "../lib/tableColumns";
+import type { ColumnDefinition } from "../lib/tableColumns";
 import { Radio, Tv } from "lucide-react";
 import { StatusBadge } from "./StatusBadge";
 
@@ -24,43 +22,37 @@ function latencyTone(latencyMs: number): string {
 }
 
 interface ChannelRowProps {
+  rowIndex: number;
   result: ChannelResult;
-  onClick: (
-    event: React.MouseEvent<HTMLDivElement>,
-    result: ChannelResult,
-  ) => void;
+  onRowClick: (event: React.MouseEvent<HTMLDivElement>) => void;
   selected: boolean;
   duplicate?: boolean;
   focused?: boolean;
   columns: ColumnDefinition[];
-  columnWidths: Record<ColumnKey, number>;
-  onDoubleClick?: (result: ChannelResult) => void;
-  onContextMenu?: (event: React.MouseEvent<HTMLDivElement>) => void;
+  gridTemplateColumns: string;
+  tableWidth: number;
+  onRowDoubleClick?: (event: React.MouseEvent<HTMLDivElement>) => void;
+  onRowContextMenu?: (event: React.MouseEvent<HTMLDivElement>) => void;
 }
 
-export function ChannelRow({
+function ChannelRowImpl({
+  rowIndex,
   result,
-  onClick,
+  onRowClick,
   selected,
   duplicate,
   focused,
   columns,
-  columnWidths,
-  onDoubleClick,
-  onContextMenu,
+  gridTemplateColumns,
+  tableWidth,
+  onRowDoubleClick,
+  onRowContextMenu,
 }: ChannelRowProps) {
   const isAlive = result.status === "alive";
   const errorReason =
     result.error_reason?.trim() ||
     result.last_error_reason?.trim() ||
     null;
-  const gridTemplateColumns = columns
-    .map((column) => `${columnWidths[column.key]}px`)
-    .join(" ");
-  const tableWidth = columns.reduce(
-    (sum, column) => sum + columnWidths[column.key],
-    0,
-  );
 
   const renderCell = (column: ColumnDefinition) => {
     switch (column.key) {
@@ -168,6 +160,7 @@ export function ChannelRow({
 
   return (
     <div
+      data-row-index={rowIndex}
       className={`channel-row select-none grid items-center h-[34px] px-4 text-sm border-b border-border-subtle cursor-pointer hover:bg-panel-subtle ${
         selected ? "selected bg-panel-subtle" : ""
       } ${duplicate && !selected ? "bg-amber-500/8" : ""} ${
@@ -178,9 +171,9 @@ export function ChannelRow({
         width: `${tableWidth}px`,
         minWidth: `${tableWidth}px`,
       }}
-      onClick={(event) => onClick(event, result)}
-      onDoubleClick={() => onDoubleClick?.(result)}
-      onContextMenu={onContextMenu}
+      onClick={onRowClick}
+      onDoubleClick={onRowDoubleClick}
+      onContextMenu={onRowContextMenu}
     >
       {columns.map((column) => {
         const alignClass =
@@ -202,3 +195,24 @@ export function ChannelRow({
     </div>
   );
 }
+
+function equalChannelRowProps(
+  previous: Readonly<ChannelRowProps>,
+  next: Readonly<ChannelRowProps>,
+): boolean {
+  return (
+    previous.rowIndex === next.rowIndex &&
+    previous.result === next.result &&
+    previous.selected === next.selected &&
+    previous.duplicate === next.duplicate &&
+    previous.focused === next.focused &&
+    previous.columns === next.columns &&
+    previous.gridTemplateColumns === next.gridTemplateColumns &&
+    previous.tableWidth === next.tableWidth &&
+    previous.onRowClick === next.onRowClick &&
+    previous.onRowDoubleClick === next.onRowDoubleClick &&
+    previous.onRowContextMenu === next.onRowContextMenu
+  );
+}
+
+export const ChannelRow = memo(ChannelRowImpl, equalChannelRowProps);

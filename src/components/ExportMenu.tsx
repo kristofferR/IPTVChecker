@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import {
   Download,
@@ -21,7 +21,6 @@ import {
 import {
   exportScopeFileSuffix,
   exportScopeLabel,
-  resolveExportScopeResults,
   type ExportScope,
 } from "../lib/exportScope";
 import {
@@ -53,9 +52,8 @@ function readVisibleColumns(): ColumnKey[] {
 }
 
 interface ExportMenuProps {
-  results: ChannelResult[];
-  filteredResults: ChannelResult[];
-  selectedResults: ChannelResult[];
+  scopeCounts: Record<ExportScope, number>;
+  resolveScopeResults: (scope: ExportScope) => ChannelResult[];
   playlistName: string;
   playlistPath: string;
   disabled: boolean;
@@ -68,9 +66,8 @@ interface ExportMenuProps {
 }
 
 export function ExportMenu({
-  results,
-  filteredResults,
-  selectedResults,
+  scopeCounts,
+  resolveScopeResults,
   playlistName,
   playlistPath,
   disabled,
@@ -117,22 +114,8 @@ export function ExportMenu({
     ? sourceFileName.slice(0, sourceFileName.lastIndexOf("."))
     : sourceFileName;
 
-  const scopeCounts = useMemo(
-    () => ({
-      all: results.length,
-      filtered: filteredResults.length,
-      selected: selectedResults.length,
-    }),
-    [results, filteredResults, selectedResults],
-  );
-
   const resolveScopedResults = useCallback((): ChannelResult[] | null => {
-    const scoped = resolveExportScopeResults(
-      scope,
-      results,
-      filteredResults,
-      selectedResults,
-    );
+    const scoped = resolveScopeResults(scope);
     if (scoped.length > 0) {
       return scoped;
     }
@@ -156,7 +139,7 @@ export function ExportMenu({
       message: "No channels available to export.",
     });
     return null;
-  }, [scope, results, filteredResults, selectedResults]);
+  }, [scope, resolveScopeResults]);
 
   const handleExportCsv = useCallback(async () => {
     const scoped = resolveScopedResults();

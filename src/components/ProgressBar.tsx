@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { ScanProgress } from "../lib/types";
 import type { ScanState } from "../hooks/useScan";
 
@@ -13,17 +14,19 @@ function formatEta(seconds: number | null): string {
   return `${secs}s`;
 }
 
-export function ProgressBar({
-  progress,
-  scanState,
-  throughputChannelsPerSecond,
-  etaSeconds,
-}: {
+interface ProgressBarProps {
   progress: ScanProgress | null;
   scanState: ScanState;
   throughputChannelsPerSecond: number | null;
   etaSeconds: number | null;
-}) {
+}
+
+export const ProgressBar = memo(function ProgressBar({
+  progress,
+  scanState,
+  throughputChannelsPerSecond,
+  etaSeconds,
+}: ProgressBarProps) {
   if (!progress) return null;
 
   const percent =
@@ -74,4 +77,4 @@ export function ProgressBar({
       )}
     </div>
   );
-}
+});

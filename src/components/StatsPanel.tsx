@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { ScanProgress, ScanSummary } from "../lib/types";
 import type { ScanState } from "../hooks/useScan";
 
@@ -8,7 +9,7 @@ interface StatsPanelProps {
   scanState: ScanState;
 }
 
-export function StatsPanel({
+export const StatsPanel = memo(function StatsPanel({
   progress,
   summary,
   totalChannels,
@@ -55,4 +56,4 @@ export function StatsPanel({
       )}
     </div>
   );
-}
+});

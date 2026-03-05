@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   History,
@@ -24,6 +25,7 @@ import type { PointerEvent, RefObject } from "react";
 import type { ChannelResult } from "../lib/types";
 import type { ScanState } from "../hooks/useScan";
 import { ExportMenu } from "./ExportMenu";
+import type { ExportScope } from "../lib/exportScope";
 
 export interface MenuExportRequest {
   id: number;
@@ -43,9 +45,8 @@ interface ToolbarProps {
   onOpenSettings: () => void;
   scanState: ScanState;
   hasPlaylist: boolean;
-  results: ChannelResult[];
-  filteredResults: ChannelResult[];
-  selectedResults: ChannelResult[];
+  exportScopeCounts: Record<ExportScope, number>;
+  resolveExportScopeResults: (scope: ExportScope) => ChannelResult[];
   playlistName: string;
   playlistPath: string;
   selectedCount: number;
@@ -70,7 +71,7 @@ const toolbarBtnMac =
 const dragIgnoreSelector =
   "button, input, textarea, select, a, [role='button'], [contenteditable='true'], [data-no-window-drag]";
 
-export function Toolbar({
+export const Toolbar = memo(function Toolbar({
   useWindowDragRegion,
   onOpen,
   onOpenFolder,
@@ -83,9 +84,8 @@ export function Toolbar({
   onOpenSettings,
   scanState,
   hasPlaylist,
-  results,
-  filteredResults,
-  selectedResults,
+  exportScopeCounts,
+  resolveExportScopeResults,
   playlistName,
   playlistPath,
   selectedCount,
@@ -104,7 +104,7 @@ export function Toolbar({
   const scanning = scanState === "scanning";
   const paused = scanState === "paused";
   const inScanSession = scanning || paused;
-  const hasResults = results.length > 0;
+  const hasResults = exportScopeCounts.all > 0;
   const scanLabel = selectedCount > 0 ? `Scan Selected (${selectedCount})` : "Scan";
   const scanDisabledReason = !hasPlaylist
     ? "Open a playlist first"
@@ -279,9 +279,8 @@ export function Toolbar({
       {/* Actions group: Export, History, Settings */}
       <div className={isMac ? "toolbar-group" : "flex items-center gap-1.5"}>
         <ExportMenu
-          results={results}
-          filteredResults={filteredResults}
-          selectedResults={selectedResults}
+          scopeCounts={exportScopeCounts}
+          resolveScopeResults={resolveExportScopeResults}
           playlistName={playlistName}
           playlistPath={playlistPath}
           disabled={!hasResults || inScanSession}
@@ -310,4 +309,4 @@ export function Toolbar({
       </div>
     </div>
   );
-}
+});

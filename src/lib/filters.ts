@@ -17,6 +17,8 @@ export type SortField =
 
 export type SortDirection = "asc" | "desc";
 
+export type SearchTextCache = WeakMap<ChannelResult, string>;
+
 const STATUS_ORDER: Record<ChannelStatus, number> = {
   alive: 0,
   geoblocked: 1,
@@ -85,13 +87,22 @@ export function sortResults(
   field: SortField,
   direction: SortDirection,
 ): ChannelResult[] {
+  if (results.length <= 1) {
+    return results;
+  }
+
+  if (field === "index") {
+    if (direction === "asc") {
+      return results;
+    }
+    return [...results].reverse();
+  }
+
   const sorted = [...results];
   const dir = direction === "asc" ? 1 : -1;
 
   sorted.sort((a, b) => {
     switch (field) {
-      case "index":
-        return (a.index - b.index) * dir;
       case "playlist":
         return a.playlist.localeCompare(b.playlist) * dir;
       case "name":
@@ -169,22 +180,32 @@ export function filterResults(
   groupFilter: string,
   statusFilter: string,
   duplicateIndices?: Set<number>,
+  searchTextCache?: SearchTextCache,
 ): ChannelResult[] {
+  const normalizedSearch = search.trim().toLowerCase();
+  const hasSearch = normalizedSearch.length > 0;
+  const hasGroupFilter = groupFilter !== "" && groupFilter !== "all";
+  const hasStatusFilter = statusFilter !== "" && statusFilter !== "all";
+
+  if (!hasSearch && !hasGroupFilter && !hasStatusFilter) {
+    return results;
+  }
+
   return results.filter((r) => {
-    if (search) {
-      const q = search.toLowerCase();
-      if (
-        !r.name.toLowerCase().includes(q) &&
-        !r.playlist.toLowerCase().includes(q) &&
-        !r.group.toLowerCase().includes(q)
-      ) {
+    if (hasSearch) {
+      let haystack = searchTextCache?.get(r);
+      if (!haystack) {
+        haystack = `${r.name}\n${r.playlist}\n${r.group}`.toLowerCase();
+        searchTextCache?.set(r, haystack);
+      }
+      if (!haystack.includes(normalizedSearch)) {
         return false;
       }
     }
-    if (groupFilter && groupFilter !== "all") {
+    if (hasGroupFilter) {
       if (r.group !== groupFilter) return false;
     }
-    if (statusFilter && statusFilter !== "all") {
+    if (hasStatusFilter) {
       if (statusFilter === "duplicates") {
         return duplicateIndices?.has(r.index) ?? false;
       }

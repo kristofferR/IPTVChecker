@@ -1,4 +1,14 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import {
+  Profiler,
+  startTransition,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ProfilerOnRenderCallback,
+} from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
@@ -51,6 +61,8 @@ import { findDuplicateChannelIndices } from "./lib/duplicates";
 import { filterResults } from "./lib/filters";
 import { logger } from "./lib/logger";
 import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/haptics";
+import type { ExportScope } from "./lib/exportScope";
+import { measureUiPerf, recordUiPerf, startLongTaskObserver } from "./lib/perf";
 
 function errorToString(err: unknown): string {
   if (typeof err === "string") {
@@ -253,6 +265,7 @@ export default function App() {
 
   const [playlist, setPlaylist] = useState<PlaylistPreview | null>(null);
   const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search);
   const [channelSearch, setChannelSearch] = useState("");
   const [groupFilter, setGroupFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -352,6 +365,10 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
   }, [settings.theme]);
+
+  useEffect(() => {
+    startLongTaskObserver();
+  }, []);
 
   // Check ffmpeg on mount
   useEffect(() => {
@@ -995,11 +1012,21 @@ export default function App() {
     pendingPlaybackRef.current = pendingPlaybackChannel;
   }, [pendingPlaybackChannel]);
 
+  const showHistoryRef = useRef(showHistory);
+  useEffect(() => {
+    showHistoryRef.current = showHistory;
+  }, [showHistory]);
+
+  const handleOpenShortcutRef = useRef(handleOpen);
+  useEffect(() => {
+    handleOpenShortcutRef.current = handleOpen;
+  }, [handleOpen]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "o") {
         e.preventDefault();
-        handleOpen();
+        handleOpenShortcutRef.current();
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
         e.preventDefault();
@@ -1027,7 +1054,7 @@ export default function App() {
           setShowKeyboardShortcuts(false);
           return;
         }
-        if (showHistory) {
+        if (showHistoryRef.current) {
           setShowHistory(false);
           return;
         }
@@ -1036,7 +1063,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleOpen, showHistory]);
+  }, []);
 
   useEffect(() => {
     const handler = (event: MouseEvent) => {
@@ -1225,6 +1252,10 @@ export default function App() {
     setSelectedChannel(result);
   }, []);
 
+  const handleOpenSettings = useCallback(() => {
+    setShowSettings(true);
+  }, []);
+
   const launchChannelInPlayer = useCallback(async (result: ChannelResult) => {
     try {
       await openChannelInPlayer({
@@ -1256,31 +1287,135 @@ export default function App() {
   }, [pendingPlaybackChannel, launchChannelInPlayer]);
 
   const completedResults = useMemo(
-    () => results.filter((r): r is ChannelResult => r != null),
+    () =>
+      measureUiPerf(
+        "app.completed-results",
+        () => results.filter((r): r is ChannelResult => r != null),
+        { rows: results.length },
+      ),
     [results],
   );
   const duplicateIndices = useMemo(
-    () => findDuplicateChannelIndices(results),
+    () =>
+      measureUiPerf(
+        "app.duplicate-detection",
+        () => findDuplicateChannelIndices(results),
+        { rows: results.length },
+      ),
     [results],
   );
   const filteredExportResults = useMemo(
     () =>
-      filterResults(
-        completedResults,
-        search,
-        groupFilter,
-        statusFilter,
-        duplicateIndices,
+      measureUiPerf(
+        "app.export-filter",
+        () =>
+          filterResults(
+            completedResults,
+            deferredSearch,
+            groupFilter,
+            statusFilter,
+            duplicateIndices,
+          ),
+        {
+          rows: completedResults.length,
+          search: deferredSearch.length,
+          group: groupFilter,
+          status: statusFilter,
+        },
       ),
-    [completedResults, search, groupFilter, statusFilter, duplicateIndices],
+    [
+      completedResults,
+      deferredSearch,
+      groupFilter,
+      statusFilter,
+      duplicateIndices,
+    ],
   );
-  const selectedExportResults = useMemo(() => {
-    if (selectedChannelIndices.length === 0) {
-      return [];
+
+  const exportContextRef = useRef({
+    all: completedResults,
+    filtered: filteredExportResults,
+    selectedIndices: selectedChannelIndices,
+  });
+  useEffect(() => {
+    exportContextRef.current = {
+      all: completedResults,
+      filtered: filteredExportResults,
+      selectedIndices: selectedChannelIndices,
+    };
+  }, [completedResults, filteredExportResults, selectedChannelIndices]);
+
+  const resolveExportScopeResults = useCallback(
+    (scope: ExportScope): ChannelResult[] => {
+      const context = exportContextRef.current;
+      if (scope === "all") {
+        return context.all;
+      }
+      if (scope === "filtered") {
+        return context.filtered;
+      }
+      if (context.selectedIndices.length === 0) {
+        return [];
+      }
+      const selectedSet = new Set(context.selectedIndices);
+      return context.all.filter((result) => selectedSet.has(result.index));
+    },
+    [],
+  );
+
+  const exportScopeCounts = useMemo(
+    () => ({
+      all: completedResults.length,
+      filtered: filteredExportResults.length,
+      selected: selectedChannelIndices.length,
+    }),
+    [completedResults.length, filteredExportResults.length, selectedChannelIndices.length],
+  );
+
+  const warningCounts = useMemo(() => {
+    let lowFpsCount = 0;
+    let mislabeledCount = 0;
+    for (const result of completedResults) {
+      if (result.low_framerate) {
+        lowFpsCount += 1;
+      }
+      if (result.label_mismatches.length > 0) {
+        mislabeledCount += 1;
+      }
     }
-    const selected = new Set(selectedChannelIndices);
-    return completedResults.filter((result) => selected.has(result.index));
-  }, [completedResults, selectedChannelIndices]);
+    return { lowFpsCount, mislabeledCount };
+  }, [completedResults]);
+
+  const handleSearchChange = useCallback((value: string) => {
+    setSearch(value);
+  }, []);
+
+  const handleGroupFilterChange = useCallback((value: string) => {
+    startTransition(() => {
+      setGroupFilter(value);
+    });
+  }, []);
+
+  const handleStatusFilterChange = useCallback((value: string) => {
+    startTransition(() => {
+      setStatusFilter(value);
+    });
+  }, []);
+
+  const handleTableProfilerRender = useCallback<ProfilerOnRenderCallback>(
+    (id, phase, actualDuration, baseDuration) => {
+      recordUiPerf({
+        metric: "react.commit",
+        valueMs: actualDuration,
+        meta: {
+          id,
+          phase,
+          baseDuration,
+        },
+      });
+    },
+    [],
+  );
 
   // Keep sidebar in sync with live scan results
   const liveSelectedChannel =
@@ -1341,12 +1476,11 @@ export default function App() {
         onResumeScan={resume}
         onStopScan={cancel}
         onOpenHistory={openHistoryPanel}
-        onOpenSettings={() => setShowSettings(true)}
+        onOpenSettings={handleOpenSettings}
         scanState={scanState}
         hasPlaylist={playlist !== null}
-        results={completedResults}
-        filteredResults={filteredExportResults}
-        selectedResults={selectedExportResults}
+        exportScopeCounts={exportScopeCounts}
+        resolveExportScopeResults={resolveExportScopeResults}
         playlistName={playlist?.file_name ?? ""}
         playlistPath={playlist?.file_path ?? ""}
         selectedCount={selectedChannelIndices.length}
@@ -1356,12 +1490,12 @@ export default function App() {
         }
         search={search}
         searchInputRef={searchInputRef}
-        onSearchChange={setSearch}
+        onSearchChange={handleSearchChange}
         groups={playlist?.groups ?? []}
         groupFilter={groupFilter}
-        onGroupChange={setGroupFilter}
+        onGroupChange={handleGroupFilterChange}
         statusFilter={statusFilter}
-        onStatusChange={setStatusFilter}
+        onStatusChange={handleStatusFilterChange}
       />
       {isMac && playlist && <div ref={headerPortalRef} style={liveSelectedChannel && !sidebarHidden ? { marginRight: `${sidebarWidth}px` } : undefined} />}
       </div>
@@ -1479,19 +1613,22 @@ export default function App() {
       <div className="flex flex-1 min-h-0 bg-content">
         <div className="flex flex-col flex-1 min-w-0">
           {playlist ? (
-            <ChannelTable
-              results={results}
-              duplicateIndices={duplicateIndices}
-              search={search}
-              groupFilter={groupFilter}
-              statusFilter={statusFilter}
-              scanState={scanState}
-              onSelectChannel={handleSelectChannel}
-              onOpenChannel={handleOpenChannel}
-              onSelectionChange={setSelectedChannelIndices}
-              onScanSelected={handleScanSelected}
-              headerPortalRef={isMac ? headerPortalRef : undefined}
-            />
+            <Profiler id="ChannelTable" onRender={handleTableProfilerRender}>
+              <ChannelTable
+                resultsByIndex={results}
+                completedResults={completedResults}
+                duplicateIndices={duplicateIndices}
+                search={deferredSearch}
+                groupFilter={groupFilter}
+                statusFilter={statusFilter}
+                scanState={scanState}
+                onSelectChannel={handleSelectChannel}
+                onOpenChannel={handleOpenChannel}
+                onSelectionChange={setSelectedChannelIndices}
+                onScanSelected={handleScanSelected}
+                headerPortalRef={isMac ? headerPortalRef : undefined}
+              />
+            </Profiler>
           ) : (
             <div className="flex-1 flex items-center justify-center text-text-tertiary">
               <div className="text-center px-4">
@@ -1578,7 +1715,8 @@ export default function App() {
       </div>
 
       <WarningsPanel
-        results={results}
+        lowFpsCount={warningCounts.lowFpsCount}
+        mislabeledCount={warningCounts.mislabeledCount}
         duplicateCount={duplicateIndices.size}
       />
       <StatsPanel

@@ -2,7 +2,7 @@ import { useRef, useState, useMemo, useCallback, useEffect, type RefObject } fro
 import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ChannelResult } from "../lib/types";
-import type { SortDirection, SortField } from "../lib/filters";
+import type { SearchTextCache, SortDirection, SortField } from "../lib/filters";
 import { filterResults, sortResults } from "../lib/filters";
 import {
   COLUMN_ORDER_STORAGE_KEY,
@@ -16,9 +16,11 @@ import {
 } from "../lib/tableColumns";
 import { ChannelRow } from "./ChannelRow";
 import { ArrowDown, ArrowUp } from "lucide-react";
+import { measureUiPerf } from "../lib/perf";
 
 interface ChannelTableProps {
-  results: (ChannelResult | null)[];
+  resultsByIndex: (ChannelResult | null)[];
+  completedResults: ChannelResult[];
   duplicateIndices: Set<number>;
   search: string;
   groupFilter: string;
@@ -161,7 +163,8 @@ function keepMenuInViewport(
 }
 
 export function ChannelTable({
-  results,
+  resultsByIndex,
+  completedResults,
   duplicateIndices,
   search,
   groupFilter,
@@ -211,6 +214,10 @@ export function ChannelTable({
   const [columnWidths, setColumnWidths] = useState<Record<ColumnKey, number>>(
     () => parseStoredWidths(localStorage.getItem(COLUMN_WIDTH_STORAGE_KEY)),
   );
+  const searchTextCacheRef = useRef<SearchTextCache>(new WeakMap());
+  const filteredResultsRef = useRef<ChannelResult[]>([]);
+  const selectedIndicesRef = useRef(selectedIndices);
+  const contextMenuOpenRef = useRef(contextMenuState !== null);
 
   useEffect(() => {
     if (columnOrderMatchesDefaults(columnOrder)) {
@@ -251,17 +258,39 @@ export function ChannelTable({
     [columns, columnWidths],
   );
 
-  const filteredResults = useMemo(() => {
-    const nonNull = results.filter((r): r is ChannelResult => r != null);
-    const filtered = filterResults(
-      nonNull,
+  const filteredResults = useMemo(
+    () =>
+      measureUiPerf(
+        "table.filter-sort",
+        () => {
+          const filtered = filterResults(
+            completedResults,
+            search,
+            groupFilter,
+            statusFilter,
+            duplicateIndices,
+            searchTextCacheRef.current,
+          );
+          return sortResults(filtered, sortField, sortDir);
+        },
+        {
+          rows: completedResults.length,
+          search: search.length,
+          group: groupFilter,
+          status: statusFilter,
+          sort: `${sortField}:${sortDir}`,
+        },
+      ),
+    [
+      completedResults,
       search,
       groupFilter,
       statusFilter,
       duplicateIndices,
-    );
-    return sortResults(filtered, sortField, sortDir);
-  }, [results, search, groupFilter, statusFilter, duplicateIndices, sortField, sortDir]);
+      sortField,
+      sortDir,
+    ],
+  );
 
   const virtualizer = useVirtualizer({
     count: filteredResults.length,
@@ -269,6 +298,10 @@ export function ChannelTable({
     estimateSize: () => 34,
     overscan: 20,
   });
+
+  filteredResultsRef.current = filteredResults;
+  selectedIndicesRef.current = selectedIndices;
+  contextMenuOpenRef.current = contextMenuState !== null;
 
   const emitSelection = useCallback(
     (next: Set<number>) => {
@@ -477,27 +510,37 @@ export function ChannelTable({
     setContextMenuState(null);
   }, [emitSelection]);
 
+  const selectAllVisibleRef = useRef(selectAllVisible);
+  useEffect(() => {
+    selectAllVisibleRef.current = selectAllVisible;
+  }, [selectAllVisible]);
+
+  const clearSelectionRef = useRef(clearSelection);
+  useEffect(() => {
+    clearSelectionRef.current = clearSelection;
+  }, [clearSelection]);
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (isInputLikeTarget(event.target)) return;
 
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a") {
         event.preventDefault();
-        selectAllVisible();
+        selectAllVisibleRef.current();
         return;
       }
 
       if (event.key === "Escape") {
-        if (selectedIndices.size > 0 || contextMenuState) {
+        if (selectedIndicesRef.current.size > 0 || contextMenuOpenRef.current) {
           event.preventDefault();
-          clearSelection();
+          clearSelectionRef.current();
         }
       }
     };
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [selectAllVisible, selectedIndices.size, contextMenuState, clearSelection]);
+  }, []);
 
   const handleSort = useCallback(
     (field: SortField) => {
@@ -578,21 +621,26 @@ export function ChannelTable({
     ],
   );
 
+  const moveFocusByRef = useRef(moveFocusBy);
+  useEffect(() => {
+    moveFocusByRef.current = moveFocusBy;
+  }, [moveFocusBy]);
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isInputLikeTarget(event.target)) return;
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        moveFocusBy(1);
+        moveFocusByRef.current(1);
       } else if (event.key === "ArrowUp") {
         event.preventDefault();
-        moveFocusBy(-1);
+        moveFocusByRef.current(-1);
       }
     };
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [moveFocusBy]);
+  }, []);
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -612,7 +660,7 @@ export function ChannelTable({
     [filteredResults, focusedRow, onSelectChannel, moveFocusBy],
   );
 
-  const handleRowClick = useCallback(
+  const handleRowClickAt = useCallback(
     (
       event: React.MouseEvent<HTMLDivElement>,
       result: ChannelResult,
@@ -643,7 +691,8 @@ export function ChannelTable({
       }
 
       // Clicking the same single-selected row toggles back to no selection.
-      if (selectedIndices.size === 1 && selectedIndices.has(result.index)) {
+      const currentSelection = selectedIndicesRef.current;
+      if (currentSelection.size === 1 && currentSelection.has(result.index)) {
         clearSelection();
         setFocusedRow(rowIndex);
         return;
@@ -655,13 +704,12 @@ export function ChannelTable({
       selectRange,
       updateSelection,
       onSelectChannel,
-      selectedIndices,
       clearSelection,
       selectSingle,
     ],
   );
 
-  const handleRowContextMenu = useCallback(
+  const handleRowContextMenuAt = useCallback(
     (
       event: React.MouseEvent<HTMLDivElement>,
       result: ChannelResult,
@@ -670,7 +718,7 @@ export function ChannelTable({
       event.preventDefault();
       setColumnMenuState(null);
 
-      if (!selectedIndices.has(result.index)) {
+      if (!selectedIndicesRef.current.has(result.index)) {
         selectSingle(result, rowIndex);
       }
 
@@ -681,7 +729,52 @@ export function ChannelTable({
         channel: result,
       });
     },
-    [selectedIndices, selectSingle],
+    [selectSingle],
+  );
+
+  const getRowFromEvent = useCallback(
+    (
+      event: React.MouseEvent<HTMLDivElement>,
+    ): { rowIndex: number; result: ChannelResult } | null => {
+      const rowIndexRaw = event.currentTarget.dataset.rowIndex;
+      const rowIndex = rowIndexRaw ? Number.parseInt(rowIndexRaw, 10) : Number.NaN;
+      if (!Number.isFinite(rowIndex)) {
+        return null;
+      }
+      const result = filteredResultsRef.current[rowIndex];
+      if (!result) {
+        return null;
+      }
+      return { rowIndex, result };
+    },
+    [],
+  );
+
+  const handleRowClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const row = getRowFromEvent(event);
+      if (!row) return;
+      handleRowClickAt(event, row.result, row.rowIndex);
+    },
+    [getRowFromEvent, handleRowClickAt],
+  );
+
+  const handleRowContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const row = getRowFromEvent(event);
+      if (!row) return;
+      handleRowContextMenuAt(event, row.result, row.rowIndex);
+    },
+    [getRowFromEvent, handleRowContextMenuAt],
+  );
+
+  const handleRowDoubleClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const row = getRowFromEvent(event);
+      if (!row) return;
+      onOpenChannel?.(row.result);
+    },
+    [getRowFromEvent, onOpenChannel],
   );
 
   const handleScanSelected = useCallback(() => {
@@ -849,6 +942,7 @@ export function ChannelTable({
   }, []);
 
   const portalTarget = headerPortalRef?.current;
+  const virtualItems = virtualizer.getVirtualItems();
 
   const headerElement = (
     <div
@@ -960,7 +1054,7 @@ export function ChannelTable({
                 position: "relative",
               }}
             >
-              {virtualizer.getVirtualItems().map((virtualRow) => {
+              {virtualItems.map((virtualRow) => {
                 const result = filteredResults[virtualRow.index];
                 return (
                   <div
@@ -975,19 +1069,17 @@ export function ChannelTable({
                     }}
                   >
                     <ChannelRow
+                      rowIndex={virtualRow.index}
                       result={result}
-                      onClick={(event, clickedResult) =>
-                        handleRowClick(event, clickedResult, virtualRow.index)
-                      }
-                      onDoubleClick={onOpenChannel}
-                      onContextMenu={(event) =>
-                        handleRowContextMenu(event, result, virtualRow.index)
-                      }
+                      onRowClick={handleRowClick}
+                      onRowDoubleClick={handleRowDoubleClick}
+                      onRowContextMenu={handleRowContextMenu}
                       selected={selectedIndices.has(result.index)}
                       duplicate={duplicateIndices.has(result.index)}
                       focused={focusedRow === virtualRow.index}
                       columns={columns}
-                      columnWidths={columnWidths}
+                      gridTemplateColumns={gridTemplateColumns}
+                      tableWidth={tableWidth}
                     />
                   </div>
                 );
@@ -1015,7 +1107,7 @@ export function ChannelTable({
           >
             {selectedIndices.size > 0 &&
             Array.from(selectedIndices).every((idx) => {
-              const r = results[idx];
+              const r = resultsByIndex[idx];
               return r != null && r.status !== "pending" && r.status !== "checking";
             })
               ? "Rescan"
