@@ -502,6 +502,7 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::update_settings,
             commands::settings::check_ffmpeg_available,
+            commands::settings::set_default_m3u8_file_association,
             commands::settings::read_screenshot,
             commands::settings::get_screenshot_cache_stats,
             commands::settings::clear_screenshot_cache,

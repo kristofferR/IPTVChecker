@@ -118,6 +118,10 @@ export async function checkFfmpegAvailable(): Promise<[boolean, boolean]> {
   return invoke("check_ffmpeg_available");
 }
 
+export async function setDefaultM3u8FileAssociation(): Promise<string> {
+  return invoke("set_default_m3u8_file_association");
+}
+
 export async function readScreenshot(path: string): Promise<string> {
   return invoke("read_screenshot", { path });
 }

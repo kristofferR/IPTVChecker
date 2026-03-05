@@ -146,6 +146,136 @@ fn collect_dir_stats(path: &Path) -> Result<(u64, usize), std::io::Error> {
     Ok((total_bytes, file_count))
 }
 
+#[cfg(target_os = "macos")]
+fn set_default_m3u8_handler(app: &tauri::AppHandle) -> Result<String, AppError> {
+    use core_foundation::base::TCFType;
+    use core_foundation::string::{CFString, CFStringRef};
+
+    type OSStatus = i32;
+    type LSRolesMask = u32;
+    const K_LS_ROLES_ALL: LSRolesMask = 0xFFFF_FFFF;
+
+    #[link(name = "CoreServices", kind = "framework")]
+    extern "C" {
+        static kUTTagClassFilenameExtension: CFStringRef;
+        fn UTTypeCreatePreferredIdentifierForTag(
+            in_tag_class: CFStringRef,
+            in_tag: CFStringRef,
+            in_conforming_to_uti: CFStringRef,
+        ) -> CFStringRef;
+        fn LSSetDefaultRoleHandlerForContentType(
+            in_content_type: CFStringRef,
+            in_roles: LSRolesMask,
+            in_handler_bundle_id: CFStringRef,
+        ) -> OSStatus;
+    }
+
+    let bundle_id = app.config().identifier.as_str();
+    if bundle_id.trim().is_empty() {
+        return Err(AppError::Other(
+            "App bundle identifier is missing; cannot set default handler".to_string(),
+        ));
+    }
+
+    let extension = CFString::new("m3u8");
+    let handler_bundle = CFString::new(bundle_id);
+    let content_type = unsafe {
+        let uti_ref = UTTypeCreatePreferredIdentifierForTag(
+            kUTTagClassFilenameExtension,
+            extension.as_concrete_TypeRef(),
+            std::ptr::null(),
+        );
+        if uti_ref.is_null() {
+            return Err(AppError::Other(
+                "macOS could not resolve the .m3u8 content type".to_string(),
+            ));
+        }
+        CFString::wrap_under_create_rule(uti_ref)
+    };
+
+    let status = unsafe {
+        LSSetDefaultRoleHandlerForContentType(
+            content_type.as_concrete_TypeRef(),
+            K_LS_ROLES_ALL,
+            handler_bundle.as_concrete_TypeRef(),
+        )
+    };
+    if status != 0 {
+        return Err(AppError::Other(format!(
+            "macOS LaunchServices failed to set default app for .m3u8 (error {})",
+            status
+        )));
+    }
+
+    Ok("IPTV Checker is now the default app for .m3u8 files.".to_string())
+}
+
+#[cfg(target_os = "linux")]
+fn set_default_m3u8_handler(app: &tauri::AppHandle) -> Result<String, AppError> {
+    use std::process::Command;
+
+    let identifier = app.config().identifier.as_str();
+    if identifier.trim().is_empty() {
+        return Err(AppError::Other(
+            "App identifier is missing; cannot set default handler".to_string(),
+        ));
+    }
+
+    let desktop_id = format!("{}.desktop", identifier);
+    for mime_type in ["application/vnd.apple.mpegurl", "audio/x-mpegurl"] {
+        let output = Command::new("xdg-mime")
+            .args(["default", desktop_id.as_str(), mime_type])
+            .output()
+            .map_err(|error| {
+                AppError::Other(format!(
+                    "Failed to execute xdg-mime for {}: {}",
+                    mime_type, error
+                ))
+            })?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let detail = if stderr.is_empty() {
+                "unknown error".to_string()
+            } else {
+                stderr
+            };
+            return Err(AppError::Other(format!(
+                "xdg-mime failed for {} ({}): {}",
+                mime_type,
+                output.status,
+                detail
+            )));
+        }
+    }
+
+    Ok("IPTV Checker is now the default app for .m3u8 files.".to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn set_default_m3u8_handler(_app: &tauri::AppHandle) -> Result<String, AppError> {
+    use std::process::Command;
+
+    Command::new("cmd")
+        .args(["/C", "start", "", "ms-settings:defaultapps"])
+        .spawn()
+        .map_err(|error| {
+            AppError::Other(format!(
+                "Failed to open Windows Default Apps settings: {}",
+                error
+            ))
+        })?;
+
+    Ok("Opened Windows Default Apps settings. Set IPTV Checker as default for .m3u8 there."
+        .to_string())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn set_default_m3u8_handler(_app: &tauri::AppHandle) -> Result<String, AppError> {
+    Err(AppError::Other(
+        "Setting default apps for .m3u8 is not supported on this platform".to_string(),
+    ))
+}
+
 #[tauri::command]
 pub async fn get_settings(app: tauri::AppHandle) -> Result<AppSettings, AppError> {
     let state = app.state::<Arc<AppState>>();
@@ -187,6 +317,13 @@ pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Re
 pub async fn check_ffmpeg_available(app: tauri::AppHandle) -> Result<(bool, bool), AppError> {
     let (ffmpeg, ffprobe) = crate::engine::ffmpeg::check_availability(&app).await;
     Ok((ffmpeg, ffprobe))
+}
+
+#[tauri::command]
+pub async fn set_default_m3u8_file_association(
+    app: tauri::AppHandle,
+) -> Result<String, AppError> {
+    set_default_m3u8_handler(&app)
 }
 
 /// Read a screenshot file and return it as a base64-encoded data URL.

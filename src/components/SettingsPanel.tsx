@@ -1,7 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { X } from "lucide-react";
-import { clearScreenshotCache, getScreenshotCacheStats } from "../lib/tauri";
+import {
+  clearScreenshotCache,
+  getScreenshotCacheStats,
+  setDefaultM3u8FileAssociation,
+} from "../lib/tauri";
 import {
   HapticFeedbackPattern,
   PerformanceTime,
@@ -39,6 +43,9 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
   const [draft, setDraft] = useState<AppSettings>(settings);
   const [cacheStats, setCacheStats] = useState<ScreenshotCacheStats | null>(null);
   const [cacheBusy, setCacheBusy] = useState(false);
+  const [associationBusy, setAssociationBusy] = useState(false);
+  const [associationNotice, setAssociationNotice] = useState<string | null>(null);
+  const [associationError, setAssociationError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -128,6 +135,20 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
       setCacheStats(stats);
     } finally {
       setCacheBusy(false);
+    }
+  };
+
+  const handleSetDefaultM3u8Association = async () => {
+    setAssociationBusy(true);
+    setAssociationNotice(null);
+    setAssociationError(null);
+    try {
+      const message = await setDefaultM3u8FileAssociation();
+      setAssociationNotice(message);
+    } catch (err) {
+      setAssociationError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAssociationBusy(false);
     }
   };
 
@@ -408,6 +429,31 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                     </button>
                   )}
                 </div>
+              </div>
+
+              <div className="rounded-xl border border-border-subtle p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[12px] font-medium">Default app for .m3u8</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Open .m3u8 playlist files in IPTV Checker by default.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleSetDefaultM3u8Association}
+                    disabled={associationBusy}
+                    className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
+                    type="button"
+                  >
+                    {associationBusy ? "Applying..." : "Set as Default"}
+                  </button>
+                </div>
+                {associationNotice && (
+                  <p className="mt-2 text-[11px] text-emerald-400">{associationNotice}</p>
+                )}
+                {associationError && (
+                  <p className="mt-2 text-[11px] text-red-400">{associationError}</p>
+                )}
               </div>
 
               <div className="rounded-xl border border-border-subtle p-3">
