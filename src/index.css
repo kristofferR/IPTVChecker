@@ -327,6 +327,7 @@ body {
 
 [data-platform="macos"] .channel-row.selected {
   background: rgb(10 132 255 / 0.16);
+  box-shadow: 0 -1px 0 rgb(10 132 255 / 0.16);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -424,6 +425,7 @@ body {
 
   [data-platform="macos"] .channel-row.selected {
     background: rgb(10 132 255 / 0.22);
+    box-shadow: 0 -1px 0 rgb(10 132 255 / 0.22);
   }
 }
 
