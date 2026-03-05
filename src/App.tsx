@@ -21,6 +21,7 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import type {
+  Channel,
   ChannelResult,
   PlaylistPreview,
   RecentPlaylistEntry,
@@ -196,6 +197,29 @@ async function canSendNotifications(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function channelToStubResult(ch: Channel): ChannelResult {
+  return {
+    ...ch,
+    status: "pending",
+    codec: null,
+    resolution: null,
+    width: null,
+    height: null,
+    fps: null,
+    latency_ms: null,
+    video_bitrate: null,
+    audio_bitrate: null,
+    audio_codec: null,
+    audio_only: false,
+    screenshot_path: null,
+    label_mismatches: [],
+    low_framerate: false,
+    error_message: null,
+    channel_id: `${ch.index}`,
+    stream_url: null,
+  };
 }
 
 function inferPlatformFromNavigator(): Platform {
@@ -1563,8 +1587,12 @@ export default function App() {
   const completedResults = flatResults;
   handleToggleSidebarRef.current = () => {
     setSidebarHidden((h) => {
-      if (h && !selectedChannel && completedResults.length > 0) {
-        setSelectedChannel(completedResults[0]);
+      if (h && !selectedChannel) {
+        if (completedResults.length > 0) {
+          setSelectedChannel(completedResults[0]);
+        } else if (playlist && playlist.channels.length > 0) {
+          setSelectedChannel(channelToStubResult(playlist.channels[0]));
+        }
       }
       return !h;
     });
