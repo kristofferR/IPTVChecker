@@ -65,6 +65,11 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Download ffmpeg binaries
+        run: |
+          TARGET="$(rustc -vV | sed -n 's/^host: //p')"
+          bash scripts/download-ffmpeg.sh "$TARGET"
+
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
