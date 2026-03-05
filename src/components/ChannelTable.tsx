@@ -44,6 +44,9 @@ function buildM3uEntryText(channel: ChannelResult): string {
   return [channel.extinf_line, ...channel.metadata_lines, channel.url].join("\n");
 }
 
+const DEFAULT_VISIBLE_SINGLE_PLAYLIST_COLUMN_ORDER: ColumnKey[] =
+  DEFAULT_VISIBLE_COLUMN_ORDER.filter((key) => key !== "playlist");
+
 function formatStatusLabel(status: ChannelResult["status"]): string {
   return status
     .split("_")
@@ -87,11 +90,11 @@ function buildChannelMetadataSummary(channel: ChannelResult): string {
   return lines.join("\n");
 }
 
-function parseStoredOrder(raw: string | null): ColumnKey[] {
-  if (!raw) return DEFAULT_VISIBLE_COLUMN_ORDER;
+function parseStoredOrder(raw: string | null, fallbackOrder: ColumnKey[]): ColumnKey[] {
+  if (!raw) return fallbackOrder;
   try {
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return DEFAULT_VISIBLE_COLUMN_ORDER;
+    if (!Array.isArray(parsed)) return fallbackOrder;
 
     const known = new Set(DEFAULT_COLUMN_ORDER);
     const deduped: ColumnKey[] = [];
@@ -103,15 +106,15 @@ function parseStoredOrder(raw: string | null): ColumnKey[] {
     }
 
     if (deduped.length === 0) {
-      return DEFAULT_VISIBLE_COLUMN_ORDER;
+      return fallbackOrder;
     }
 
-    for (const key of DEFAULT_VISIBLE_COLUMN_ORDER) {
+    for (const key of fallbackOrder) {
       if (!deduped.includes(key)) deduped.push(key);
     }
     return deduped;
   } catch {
-    return DEFAULT_VISIBLE_COLUMN_ORDER;
+    return fallbackOrder;
   }
 }
 
@@ -137,9 +140,12 @@ function parseStoredWidths(raw: string | null): Record<ColumnKey, number> {
   return widths;
 }
 
-function columnOrderMatchesDefaults(columnOrder: ColumnKey[]): boolean {
-  if (columnOrder.length !== DEFAULT_VISIBLE_COLUMN_ORDER.length) return false;
-  return DEFAULT_VISIBLE_COLUMN_ORDER.every(
+function columnOrderMatchesDefaults(
+  columnOrder: ColumnKey[],
+  defaults: ColumnKey[],
+): boolean {
+  if (columnOrder.length !== defaults.length) return false;
+  return defaults.every(
     (key, index) => columnOrder[index] === key,
   );
 }
@@ -225,7 +231,10 @@ export function ChannelTable({
     width: number;
   } | null>(null);
   const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(() =>
-    parseStoredOrder(localStorage.getItem(COLUMN_ORDER_STORAGE_KEY)),
+    parseStoredOrder(
+      localStorage.getItem(COLUMN_ORDER_STORAGE_KEY),
+      DEFAULT_VISIBLE_SINGLE_PLAYLIST_COLUMN_ORDER,
+    ),
   );
   const [columnWidths, setColumnWidths] = useState<Record<ColumnKey, number>>(
     () => parseStoredWidths(localStorage.getItem(COLUMN_WIDTH_STORAGE_KEY)),
@@ -234,14 +243,36 @@ export function ChannelTable({
   const filteredResultsRef = useRef<ChannelResult[]>([]);
   const selectedIndicesRef = useRef(selectedIndices);
   const contextMenuOpenRef = useRef(contextMenuState !== null);
+  const uniquePlaylistCount = useMemo(
+    () =>
+      new Set(
+        completedResults
+          .map((result) => result.playlist.trim())
+          .filter((value) => value.length > 0),
+      ).size,
+    [completedResults],
+  );
+  const defaultVisibleColumnOrder = useMemo(
+    () =>
+      uniquePlaylistCount > 1
+        ? DEFAULT_VISIBLE_COLUMN_ORDER
+        : DEFAULT_VISIBLE_SINGLE_PLAYLIST_COLUMN_ORDER,
+    [uniquePlaylistCount],
+  );
 
   useEffect(() => {
-    if (columnOrderMatchesDefaults(columnOrder)) {
+    if (columnOrderMatchesDefaults(columnOrder, defaultVisibleColumnOrder)) {
       localStorage.removeItem(COLUMN_ORDER_STORAGE_KEY);
       return;
     }
     localStorage.setItem(COLUMN_ORDER_STORAGE_KEY, JSON.stringify(columnOrder));
-  }, [columnOrder]);
+  }, [columnOrder, defaultVisibleColumnOrder]);
+
+  useEffect(() => {
+    if (localStorage.getItem(COLUMN_ORDER_STORAGE_KEY) !== null) return;
+    if (columnOrderMatchesDefaults(columnOrder, defaultVisibleColumnOrder)) return;
+    setColumnOrder([...defaultVisibleColumnOrder]);
+  }, [columnOrder, defaultVisibleColumnOrder]);
 
   useEffect(() => {
     if (columnWidthsMatchDefaults(columnWidths)) {
@@ -253,9 +284,9 @@ export function ChannelTable({
 
   const hasColumnCustomizations = useMemo(
     () =>
-      !columnOrderMatchesDefaults(columnOrder) ||
+      !columnOrderMatchesDefaults(columnOrder, defaultVisibleColumnOrder) ||
       !columnWidthsMatchDefaults(columnWidths),
-    [columnOrder, columnWidths],
+    [columnOrder, defaultVisibleColumnOrder, columnWidths],
   );
 
   const columns = useMemo(
@@ -604,10 +635,10 @@ export function ChannelTable({
 
     localStorage.removeItem(COLUMN_ORDER_STORAGE_KEY);
     localStorage.removeItem(COLUMN_WIDTH_STORAGE_KEY);
-    setColumnOrder([...DEFAULT_VISIBLE_COLUMN_ORDER]);
+    setColumnOrder([...defaultVisibleColumnOrder]);
     setColumnWidths({ ...DEFAULT_COLUMN_WIDTHS });
     setColumnMenuState(null);
-  }, [hasColumnCustomizations]);
+  }, [defaultVisibleColumnOrder, hasColumnCustomizations]);
 
   const moveFocusBy = useCallback(
     (delta: number) => {
