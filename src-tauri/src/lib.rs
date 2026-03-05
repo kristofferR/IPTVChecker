@@ -19,20 +19,73 @@ static APP_IS_QUITTING: AtomicBool = AtomicBool::new(false);
 static WINDOW_CLOSED_BY_USER: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static NEXT_WINDOW_ID: AtomicUsize = AtomicUsize::new(1);
-#[cfg(target_os = "macos")]
-static SYSTEM_APPEARANCE_PATCH_DISABLED_LOGGED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "macos")]
-fn schedule_macos_system_appearance_patch(_app: tauri::AppHandle, window_label: String) {
-    if !SYSTEM_APPEARANCE_PATCH_DISABLED_LOGGED.swap(true, Ordering::Relaxed) {
-        log::warn!(
-            "Disabled unstable macOS private system-appearance patch to avoid Objective-C abort crashes"
-        );
+fn schedule_macos_system_appearance_patch(app: tauri::AppHandle, window_label: String) {
+    if !app.liquid_glass().is_supported() {
+        return;
     }
-    log::debug!(
-        "Skipped macOS private system-appearance patch for window '{}'",
-        window_label
-    );
+
+    std::thread::spawn(move || {
+        for _attempt in 0..20 {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            let handle = app.clone();
+            let patched = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let patched_on_main = patched.clone();
+            let target_label = window_label.clone();
+            let _ = app.run_on_main_thread(move || {
+                patched_on_main.store(false, Ordering::Relaxed);
+
+                // Keep this patch local to macOS where the private selector exists.
+                // We retry from the worker thread because the recreated window's
+                // WKWebView hierarchy may not be fully attached immediately.
+                #[allow(deprecated)]
+                use cocoa::base::{id, nil, NO};
+                use objc::runtime::{Class, BOOL, YES};
+                use objc::{msg_send, sel, sel_impl};
+
+                unsafe fn find_webview(view: id) -> Option<id> {
+                    if view == nil {
+                        return None;
+                    }
+                    if let Some(cls) = Class::get("WKWebView") {
+                        let is_wk: BOOL = msg_send![view, isKindOfClass: cls];
+                        if is_wk != NO {
+                            return Some(view);
+                        }
+                    }
+                    let subviews: id = msg_send![view, subviews];
+                    let count: usize = msg_send![subviews, count];
+                    for i in 0..count {
+                        let subview: id = msg_send![subviews, objectAtIndex: i];
+                        if let Some(wv) = find_webview(subview) {
+                            return Some(wv);
+                        }
+                    }
+                    None
+                }
+
+                if let Some(window) = handle.get_webview_window(&target_label) {
+                    if let Ok(ns_window) = window.ns_window() {
+                        unsafe {
+                            let ns_window = ns_window as id;
+                            let content_view: id = msg_send![ns_window, contentView];
+                            if let Some(webview) = find_webview(content_view) {
+                                let config: id = msg_send![webview, configuration];
+                                let prefs: id = msg_send![config, preferences];
+                                let _: () = msg_send![prefs, _setUseSystemAppearance: YES];
+                                patched_on_main.store(true, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                }
+            });
+
+            if patched.load(Ordering::Relaxed) {
+                break;
+            }
+        }
+    });
 }
 
 #[cfg(target_os = "macos")]

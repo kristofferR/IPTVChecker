@@ -38,3 +38,5 @@ tauri-plugin-mcp = { git = "https://github.com/P3GLEG/tauri-plugin-mcp" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri-plugin-macos-haptics = "1.0.0"
+cocoa = "0.26"
+objc = "0.2"
