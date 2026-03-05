@@ -167,6 +167,43 @@ body {
   background: var(--btn-bg-hover);
 }
 
+/* Non-macOS: primary and stop button variants */
+:root:not([data-platform="macos"]) .toolbar-btn-primary {
+  background: rgb(37 99 235);
+  color: white;
+}
+
+:root:not([data-platform="macos"]) .toolbar-btn-primary:hover {
+  background: rgb(29 78 216);
+}
+
+:root:not([data-platform="macos"]) .toolbar-btn-stop {
+  color: rgb(239 68 68);
+}
+
+:root:not([data-platform="macos"]) .toolbar-btn-stop:hover {
+  background: rgb(239 68 68 / 0.12);
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"]:not([data-platform="macos"]) .toolbar-btn-primary,
+  :root[data-theme="light"]:not([data-platform="macos"]) .toolbar-btn-primary {
+    background: rgb(37 99 235);
+    color: white;
+  }
+
+  :root[data-theme="system"]:not([data-platform="macos"]) .toolbar-btn-primary:hover,
+  :root[data-theme="light"]:not([data-platform="macos"]) .toolbar-btn-primary:hover {
+    background: rgb(29 78 216);
+  }
+}
+
+/* Windows: overlay titlebar needs drag region + padding for window controls */
+[data-platform="windows"] {
+  --toolbar-pt: 2rem;
+  --toolbar-pr: 138px;
+}
+
 /* Native-feeling scroll containers on macOS */
 [data-platform="macos"] .native-scroll {
   -webkit-overflow-scrolling: touch;

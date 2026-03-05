@@ -35,6 +35,7 @@ export interface MenuExportRequest {
 
 interface ToolbarProps {
   useWindowDragRegion: boolean;
+  platform: "macos" | "windows" | "linux";
   onOpen: () => void;
   onOpenFolder: () => void;
   onOpenUrl: () => void;
@@ -77,6 +78,7 @@ const dragIgnoreSelector =
 
 export const Toolbar = memo(function Toolbar({
   useWindowDragRegion,
+  platform,
   onOpen,
   onOpenFolder,
   onOpenUrl,
@@ -107,7 +109,7 @@ export const Toolbar = memo(function Toolbar({
   onStatusChange,
   statusOptionCounts,
 }: ToolbarProps) {
-  const isMac = useWindowDragRegion;
+  const isMac = platform === "macos";
   const scanning = scanState === "scanning";
   const paused = scanState === "paused";
   const inScanSession = scanning || paused;
@@ -155,7 +157,7 @@ export const Toolbar = memo(function Toolbar({
     <div
       onPointerDown={handlePointerDown}
       data-tauri-drag-region={dragRegionAttr}
-      className={`flex items-center px-3 ${toolbarSurface} ${toolbarPadding} pl-[var(--toolbar-pl)] relative ${isMac ? "gap-3" : "gap-1.5"}`}
+      className={`flex items-center px-3 ${toolbarSurface} ${toolbarPadding} pl-[var(--toolbar-pl)] pr-[var(--toolbar-pr,0.75rem)] relative ${isMac ? "gap-3" : "gap-1.5"}`}
     >
       {/* Scan group: Scan / Pause+Stop — under traffic lights on macOS */}
       <div className={isMac ? "toolbar-group toolbar-group-prominent -ml-[calc(var(--toolbar-pl)-0.75rem)] mr-2" : "flex items-center gap-1.5"}>

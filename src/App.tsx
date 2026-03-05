@@ -1802,7 +1802,8 @@ export default function App() {
     <div className="flex flex-col h-screen bg-surface">
       <div ref={toolbarMeasureRef} className={`relative z-20 ${isMac ? "glass-material bg-panel" : ""}`}>
       <Toolbar
-        useWindowDragRegion={isMac}
+        useWindowDragRegion={platform !== "linux"}
+        platform={platform}
         onOpen={handleOpen}
         onOpenFolder={handleOpenFolder}
         onOpenUrl={handleOpenUrl}
