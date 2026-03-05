@@ -143,6 +143,11 @@ function ChannelRowImpl({
       case "url":
         return (
           <span className="flex min-w-0 items-center gap-2 px-2">
+            {duplicate && (
+              <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-amber-300 ring-1 ring-amber-500/30">
+                duplicate
+              </span>
+            )}
             {streamProtocol && (
               <span className="rounded bg-panel-subtle px-1.5 py-0.5 text-[10px] uppercase tracking-[0.06em] text-text-tertiary ring-1 ring-border-subtle">
                 {streamProtocol}
