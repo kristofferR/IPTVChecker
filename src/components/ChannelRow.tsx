@@ -4,6 +4,7 @@ import type { ColumnDefinition } from "../lib/tableColumns";
 import { Radio, Tv } from "lucide-react";
 import { StatusBadge } from "./StatusBadge";
 import { extractTvgLogoUrl } from "../lib/extinf";
+import { channelLogoPixels, channelRowHeightPixels } from "../lib/channelLogoSize";
 
 function formatLatency(latencyMs: number): string {
   if (latencyMs < 1000) {
@@ -54,16 +55,12 @@ function ChannelRowImpl({
   const isAlive = result.status === "alive";
   const logoUrl = useMemo(() => extractTvgLogoUrl(result.extinf_line), [result.extinf_line]);
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
-  const logoSizeClass = useMemo(() => {
-    if (channelLogoSize === "large") return "h-6 w-6";
-    if (channelLogoSize === "medium") return "h-5 w-5";
-    return "h-4 w-4";
-  }, [channelLogoSize]);
-  const kindIconSizeClass = useMemo(() => {
-    if (channelLogoSize === "large") return "h-5 w-5";
-    if (channelLogoSize === "medium") return "h-4 w-4";
-    return "h-3.5 w-3.5";
-  }, [channelLogoSize]);
+  const logoSizePx = useMemo(() => channelLogoPixels(channelLogoSize), [channelLogoSize]);
+  const rowHeightPx = useMemo(() => channelRowHeightPixels(channelLogoSize), [channelLogoSize]);
+  const kindIconSizePx = useMemo(
+    () => Math.max(14, Math.round(logoSizePx * 0.78)),
+    [logoSizePx],
+  );
   const errorReason =
     result.error_reason?.trim() ||
     result.last_error_reason?.trim() ||
@@ -109,7 +106,8 @@ function ChannelRowImpl({
               <img
                 src={logoUrl}
                 alt={`${result.name} logo`}
-                className={`${logoSizeClass} shrink-0 rounded-sm object-contain ring-1 ring-border-subtle bg-panel-subtle`}
+                className="shrink-0 rounded-sm object-contain ring-1 ring-border-subtle bg-panel-subtle"
+                style={{ width: `${logoSizePx}px`, height: `${logoSizePx}px` }}
                 loading="lazy"
                 referrerPolicy="no-referrer"
                 onError={() => {
@@ -124,7 +122,7 @@ function ChannelRowImpl({
                 aria-label={kindLabel}
                 title={kindLabel}
               >
-                <ChannelKindIcon className={kindIconSizeClass} aria-hidden="true" />
+                <ChannelKindIcon size={kindIconSizePx} aria-hidden="true" />
               </span>
             )}
             <span className="truncate">{result.name}</span>
@@ -193,7 +191,7 @@ function ChannelRowImpl({
   return (
     <div
       data-row-index={rowIndex}
-      className={`channel-row select-none grid items-center h-[34px] px-4 text-sm border-b border-border-subtle hover:bg-panel-subtle ${
+      className={`channel-row select-none grid items-center px-4 text-sm border-b border-border-subtle hover:bg-panel-subtle ${
         selected ? "selected bg-panel-subtle" : ""
       } ${duplicate && !selected ? "bg-amber-500/8" : ""} ${
         duplicate ? "ring-1 ring-amber-500/20" : ""
@@ -202,6 +200,7 @@ function ChannelRowImpl({
         gridTemplateColumns,
         width: `${tableWidth}px`,
         minWidth: `${tableWidth}px`,
+        height: `${rowHeightPx}px`,
       }}
       onClick={onRowClick}
       onDoubleClick={onRowDoubleClick}

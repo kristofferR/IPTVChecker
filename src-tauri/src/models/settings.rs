@@ -44,6 +44,7 @@ pub enum ChannelLogoSize {
     Small,
     Medium,
     Large,
+    Huge,
 }
 
 impl Default for ChannelLogoSize {

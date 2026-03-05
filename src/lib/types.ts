@@ -124,7 +124,7 @@ export interface ScanErrorPayload {
 }
 
 export type ScreenshotFormat = "webp" | "png";
-export type ChannelLogoSize = "small" | "medium" | "large";
+export type ChannelLogoSize = "small" | "medium" | "large" | "huge";
 
 export interface AppSettings {
   timeout: number;

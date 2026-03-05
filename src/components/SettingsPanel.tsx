@@ -427,8 +427,9 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                   className={inputClass}
                 >
                   <option value="small">Small (16px)</option>
-                  <option value="medium">Medium (20px)</option>
-                  <option value="large">Large (24px)</option>
+                  <option value="medium">Medium (24px)</option>
+                  <option value="large">Large (36px)</option>
+                  <option value="huge">Huge (48px)</option>
                 </select>
                 <p className="text-[11px] text-text-tertiary mt-1">
                   Controls logo size in the channel name column.

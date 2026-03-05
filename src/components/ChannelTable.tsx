@@ -18,6 +18,7 @@ import { ChannelRow } from "./ChannelRow";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { measureUiPerf } from "../lib/perf";
 import { isPrimaryModifierPressed } from "../lib/shortcuts";
+import { channelRowHeightPixels } from "../lib/channelLogoSize";
 
 interface ChannelTableProps {
   resultsByIndex: (ChannelResult | null)[];
@@ -300,9 +301,13 @@ export function ChannelTable({
   const virtualizer = useVirtualizer({
     count: filteredResults.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 34,
+    estimateSize: () => channelRowHeightPixels(channelLogoSize),
     overscan: 20,
   });
+
+  useEffect(() => {
+    virtualizer.measure();
+  }, [channelLogoSize, virtualizer]);
 
   filteredResultsRef.current = filteredResults;
   selectedIndicesRef.current = selectedIndices;
