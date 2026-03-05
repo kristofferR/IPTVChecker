@@ -39,26 +39,23 @@ fn schedule_macos_system_appearance_patch(app: tauri::AppHandle, window_label: S
                 // Keep this patch local to macOS where the private selector exists.
                 // We retry from the worker thread because the recreated window's
                 // WKWebView hierarchy may not be fully attached immediately.
-                #[allow(deprecated)]
-                use cocoa::base::{id, nil, NO};
-                use objc::runtime::{Class, BOOL, YES};
-                use objc::{msg_send, sel, sel_impl};
+                use objc2::msg_send;
+                use objc2::runtime::{AnyClass, AnyObject};
+                type ObjcId = *mut AnyObject;
 
-                unsafe fn find_webview(view: id) -> Option<id> {
-                    if view == nil {
+                unsafe fn find_webview(view: ObjcId, wkwebview_class: &AnyClass) -> Option<ObjcId> {
+                    if view.is_null() {
                         return None;
                     }
-                    if let Some(cls) = Class::get("WKWebView") {
-                        let is_wk: BOOL = msg_send![view, isKindOfClass: cls];
-                        if is_wk != NO {
-                            return Some(view);
-                        }
+                    let is_wk: bool = msg_send![view, isKindOfClass: wkwebview_class];
+                    if is_wk {
+                        return Some(view);
                     }
-                    let subviews: id = msg_send![view, subviews];
+                    let subviews: ObjcId = msg_send![view, subviews];
                     let count: usize = msg_send![subviews, count];
                     for i in 0..count {
-                        let subview: id = msg_send![subviews, objectAtIndex: i];
-                        if let Some(wv) = find_webview(subview) {
+                        let subview: ObjcId = msg_send![subviews, objectAtIndex: i];
+                        if let Some(wv) = find_webview(subview, wkwebview_class) {
                             return Some(wv);
                         }
                     }
@@ -68,13 +65,15 @@ fn schedule_macos_system_appearance_patch(app: tauri::AppHandle, window_label: S
                 if let Some(window) = handle.get_webview_window(&target_label) {
                     if let Ok(ns_window) = window.ns_window() {
                         unsafe {
-                            let ns_window = ns_window as id;
-                            let content_view: id = msg_send![ns_window, contentView];
-                            if let Some(webview) = find_webview(content_view) {
-                                let config: id = msg_send![webview, configuration];
-                                let prefs: id = msg_send![config, preferences];
-                                let _: () = msg_send![prefs, _setUseSystemAppearance: YES];
-                                patched_on_main.store(true, Ordering::Relaxed);
+                            let ns_window = ns_window as ObjcId;
+                            let content_view: ObjcId = msg_send![ns_window, contentView];
+                            if let Some(wkwebview_class) = AnyClass::get(c"WKWebView") {
+                                if let Some(webview) = find_webview(content_view, wkwebview_class) {
+                                    let config: ObjcId = msg_send![webview, configuration];
+                                    let prefs: ObjcId = msg_send![config, preferences];
+                                    let _: () = msg_send![prefs, _setUseSystemAppearance: true];
+                                    patched_on_main.store(true, Ordering::Relaxed);
+                                }
                             }
                         }
                     }
