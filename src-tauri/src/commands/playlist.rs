@@ -6,6 +6,8 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
+use std::net::IpAddr;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tauri::Manager;
 use url::Url;
@@ -31,6 +33,9 @@ const STALKER_API_TIMEOUT: Duration = Duration::from_secs(12);
 const STALKER_USER_AGENT: &str =
     "Mozilla/5.0 (QtEmbedded; U; Linux; C) MAG200 stbapp ver: 2 rev: 250 Safari/533.3";
 const STALKER_X_USER_AGENT: &str = "Model: MAG250; Link: WiFi";
+const SERVER_LOCATION_LOOKUP_TIMEOUT: Duration = Duration::from_secs(4);
+
+static SERVER_LOCATION_CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct RemotePlaylistCacheMetadata {
@@ -45,6 +50,171 @@ enum PlaylistDownloadResult {
         bytes: Vec<u8>,
         metadata: RemotePlaylistCacheMetadata,
     },
+}
+
+fn server_location_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
+    SERVER_LOCATION_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn dominant_channel_host(channels: &[Channel]) -> Option<String> {
+    let mut counts = HashMap::<String, usize>::new();
+    for channel in channels {
+        let Ok(parsed) = Url::parse(channel.url.trim()) else {
+            continue;
+        };
+        let Some(host) = parsed.host_str() else {
+            continue;
+        };
+        let normalized = host.trim().to_ascii_lowercase();
+        if normalized.is_empty() {
+            continue;
+        }
+        *counts.entry(normalized).or_insert(0) += 1;
+    }
+
+    counts
+        .into_iter()
+        .max_by(|(host_a, count_a), (host_b, count_b)| {
+            count_a.cmp(count_b).then_with(|| host_b.cmp(host_a))
+        })
+        .map(|(host, _)| host)
+}
+
+fn is_routable_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            !(v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_multicast()
+                || v4.is_unspecified())
+        }
+        IpAddr::V6(v6) => {
+            !(v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local())
+        }
+    }
+}
+
+async fn resolve_host_ip(host: &str) -> Option<IpAddr> {
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return is_routable_ip(&ip).then_some(ip);
+    }
+
+    let mut fallback: Option<IpAddr> = None;
+    let addresses = tokio::net::lookup_host((host, 0)).await.ok()?;
+    for socket_address in addresses {
+        let ip = socket_address.ip();
+        if is_routable_ip(&ip) {
+            return Some(ip);
+        }
+        if fallback.is_none() {
+            fallback = Some(ip);
+        }
+    }
+    fallback.filter(is_routable_ip)
+}
+
+fn parse_ipapi_location(payload: &serde_json::Value) -> Option<String> {
+    if payload
+        .get("error")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return None;
+    }
+
+    let city = payload
+        .get("city")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    let region = payload
+        .get("region")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+    let country_code = payload
+        .get("country_code")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_uppercase());
+    let country_name = payload
+        .get("country_name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+
+    if let (Some(city), Some(code)) = (city.as_ref(), country_code.as_ref()) {
+        return Some(format!("{}, {}", city, code));
+    }
+    if let (Some(region), Some(code)) = (region.as_ref(), country_code.as_ref()) {
+        return Some(format!("{}, {}", region, code));
+    }
+    if let Some(name) = country_name {
+        return Some(name);
+    }
+    country_code
+}
+
+async fn lookup_ip_location(ip: IpAddr) -> Option<String> {
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
+        .timeout(SERVER_LOCATION_LOOKUP_TIMEOUT)
+        .build()
+        .ok()?;
+
+    let url = format!("https://ipapi.co/{}/json/", ip);
+    let response = client
+        .get(url)
+        .header(reqwest::header::USER_AGENT, "IPTV-Checker-GUI/1.0")
+        .send()
+        .await
+        .ok()?;
+
+    if !response.status().is_success() {
+        return None;
+    }
+
+    let payload_bytes = response.bytes().await.ok()?;
+    let payload = serde_json::from_slice::<serde_json::Value>(&payload_bytes).ok()?;
+    parse_ipapi_location(&payload)
+}
+
+async fn resolve_playlist_server_location(channels: &[Channel]) -> Option<String> {
+    let host = dominant_channel_host(channels)?;
+    if host.eq_ignore_ascii_case("localhost") {
+        return None;
+    }
+
+    if let Ok(cache) = server_location_cache().lock() {
+        if let Some(cached) = cache.get(&host) {
+            return cached.clone();
+        }
+    }
+
+    let location = match resolve_host_ip(&host).await {
+        Some(ip) => lookup_ip_location(ip).await,
+        None => None,
+    };
+
+    if let Ok(mut cache) = server_location_cache().lock() {
+        cache.insert(host, location.clone());
+    }
+
+    location
+}
+
+async fn populate_server_location(preview: &mut PlaylistPreview) {
+    preview.server_location = resolve_playlist_server_location(&preview.channels).await;
 }
 
 fn parse_http_url(value: &str, invalid_message: &str) -> Result<Url, AppError> {
@@ -991,6 +1161,7 @@ fn build_stalker_preview(
             normalize_url_identity(portal).trim_end_matches('/'),
             mac.to_ascii_lowercase()
         )),
+        server_location: None,
         xtream_max_connections: None,
         total_channels: channels.len(),
         live_count,
@@ -1043,7 +1214,7 @@ pub async fn open_playlist_stalker(
             }
         };
 
-        let preview = build_stalker_preview(
+        let mut preview = build_stalker_preview(
             &portal,
             &mac,
             channels_payload,
@@ -1057,6 +1228,7 @@ pub async fn open_playlist_stalker(
             continue;
         }
 
+        populate_server_location(&mut preview).await;
         return Ok(preview);
     }
 
@@ -1078,7 +1250,9 @@ pub async fn open_playlist(
     group_filter: Option<String>,
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
-    parser::parse_playlist(&path, &group_filter, &channel_search)
+    let mut preview = parser::parse_playlist(&path, &group_filter, &channel_search)?;
+    populate_server_location(&mut preview).await;
+    Ok(preview)
 }
 
 #[tauri::command]
@@ -1107,6 +1281,7 @@ pub(crate) async fn open_playlist_url_from_data_dir(
             .await?;
     let mut preview = parser::parse_playlist(&cached_path, &group_filter, &channel_search)?;
     preview.source_identity = Some(format!("url:{}", normalized_identity));
+    populate_server_location(&mut preview).await;
     Ok(preview)
 }
 
@@ -1148,6 +1323,7 @@ pub async fn open_playlist_xtream(
     let mut preview = parser::parse_playlist(&cached_path, &group_filter, &channel_search)?;
     preview.source_identity = Some(source_key);
     preview.xtream_max_connections = xtream_max_connections;
+    populate_server_location(&mut preview).await;
     Ok(preview)
 }
 
@@ -1156,10 +1332,12 @@ mod tests {
     use super::{
         build_stalker_endpoint_candidates, build_stalker_preview, build_xtream_download_url,
         build_xtream_player_api_url, build_xtream_source_key, cleanup_stale_cache_temp_files,
-        download_playlist_bytes, extract_stalker_stream_url, extract_xtream_max_connections,
-        normalize_stalker_mac, normalize_stalker_portal, normalize_url_identity,
-        normalize_xtream_server, source_cache_file_name,
+        dominant_channel_host, download_playlist_bytes, extract_stalker_stream_url,
+        extract_xtream_max_connections, normalize_stalker_mac, normalize_stalker_portal,
+        normalize_url_identity, normalize_xtream_server, parse_ipapi_location,
+        source_cache_file_name,
     };
+    use crate::models::channel::{Channel, ContentType};
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -1266,6 +1444,50 @@ mod tests {
             "max_connections": 2
         });
         assert_eq!(extract_xtream_max_connections(&payload), Some(2));
+    }
+
+    #[test]
+    fn dominant_channel_host_uses_most_common_url_host() {
+        let channel = |index: usize, url: &str| Channel {
+            index,
+            playlist: "fixture.m3u8".to_string(),
+            name: format!("Channel {}", index),
+            group: "Group".to_string(),
+            language: None,
+            tvg_id: None,
+            tvg_name: None,
+            tvg_logo: None,
+            tvg_chno: None,
+            url: url.to_string(),
+            content_type: ContentType::Live,
+            extinf_line: "#EXTINF:-1,Channel".to_string(),
+            metadata_lines: Vec::new(),
+        };
+
+        let channels = vec![
+            channel(0, "https://one.example.com/live/1.m3u8"),
+            channel(1, "https://one.example.com/live/2.m3u8"),
+            channel(2, "https://two.example.com/live/3.m3u8"),
+        ];
+
+        assert_eq!(
+            dominant_channel_host(&channels),
+            Some("one.example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_ipapi_location_formats_city_and_country_code() {
+        let payload = serde_json::json!({
+            "city": "Amsterdam",
+            "region": "North Holland",
+            "country_code": "nl",
+            "country_name": "Netherlands"
+        });
+        assert_eq!(
+            parse_ipapi_location(&payload),
+            Some("Amsterdam, NL".to_string())
+        );
     }
 
     #[test]
