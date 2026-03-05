@@ -96,6 +96,9 @@ export function ThumbnailPanel({
     !screenshotsEnabled &&
     result.status === "alive" &&
     !screenshotUrl;
+  const mediaFrameClass = "relative w-full aspect-video overflow-hidden rounded-lg border border-border-app";
+  const lightboxPlaceholderClass =
+    "w-[400px] max-w-[88vw] aspect-video rounded-xl border border-white/15 bg-black/60 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]";
 
   const handleCopyResolvedUrl = useCallback(async () => {
     if (!resolvedUrl) return;
@@ -128,20 +131,20 @@ export function ThumbnailPanel({
         <button
           type="button"
           onClick={openLightbox}
-          className="relative rounded-lg overflow-hidden border border-border-app bg-black cursor-zoom-in group"
+          className={`${mediaFrameClass} bg-black cursor-zoom-in group`}
         >
           <img
             src={screenshotUrl}
             alt={result.name}
-            className="w-full h-auto transition-transform duration-200 group-hover:scale-[1.015]"
+            className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.015]"
           />
           <div className="absolute inset-x-0 bottom-0 px-2 py-1 text-[11px] text-white/90 bg-black/45 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
             Click to enlarge
           </div>
         </button>
       ) : showLoadingPlaceholder ? (
-        <div className="relative h-[180px] overflow-hidden rounded-lg border border-border-app bg-panel-subtle">
-          <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-panel to-panel-subtle" />
+        <div className={`${mediaFrameClass} bg-panel-subtle isolate`}>
+          <div className="absolute inset-0 rounded-[inherit] animate-pulse bg-gradient-to-br from-panel to-panel-subtle" />
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-secondary">
             <LoaderCircle className="h-5 w-5 animate-spin" />
             <span className="text-[11px] font-medium">
@@ -150,7 +153,7 @@ export function ThumbnailPanel({
           </div>
         </div>
       ) : showScreenshotError ? (
-        <div className="flex h-[180px] flex-col items-center justify-center gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 text-center">
+        <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 text-center">
           <ImageOff className="h-9 w-9 text-red-300/90" strokeWidth={1.75} />
           <p className="text-[12px] font-medium text-red-200">Thumbnail unavailable</p>
           <p className="text-[11px] text-red-200/80">
@@ -158,7 +161,7 @@ export function ThumbnailPanel({
           </p>
         </div>
       ) : showDrmPlaceholder ? (
-        <div className="flex h-[180px] flex-col items-center justify-center gap-2 rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 text-center">
+        <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 text-center">
           <CircleHelp className="h-8 w-8 text-cyan-300/90" strokeWidth={1.75} />
           <p className="text-[12px] font-medium text-cyan-200">DRM-protected stream</p>
           <p className="text-[11px] text-cyan-200/80">
@@ -166,19 +169,19 @@ export function ThumbnailPanel({
           </p>
         </div>
       ) : showNoThumbnailCaptured ? (
-        <div className="flex h-[180px] flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
+        <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
           <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
           <p className="text-[12px] font-medium text-text-secondary">No thumbnail captured</p>
           <p className="text-[11px] text-text-tertiary">This channel scanned successfully, but no frame was saved.</p>
         </div>
       ) : showUnscannedPlaceholder ? (
-        <div className="flex h-[180px] flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
+        <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
           <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
           <p className="text-[12px] font-medium text-text-secondary">Unscanned</p>
           <p className="text-[11px] text-text-tertiary">Start a scan to capture this thumbnail.</p>
         </div>
       ) : showScreenshotsDisabled ? (
-        <div className="flex h-[180px] flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
+        <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
           <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
           <p className="text-[12px] font-medium text-text-secondary">Screenshots disabled</p>
           <p className="text-[11px] text-text-tertiary">Enable screenshots in Settings to capture thumbnails.</p>
@@ -317,9 +320,9 @@ export function ThumbnailPanel({
                 className="block max-h-[84vh] max-w-[88vw] rounded-xl border border-white/15 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]"
               />
             ) : result.screenshot_path ? (
-              <div className="w-[400px] h-[300px] rounded-xl border border-white/15 bg-black/60 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]" />
+              <div className={lightboxPlaceholderClass} />
             ) : (
-              <div className="flex flex-col items-center justify-center gap-2 w-[400px] h-[300px] rounded-xl border border-white/15 bg-black/60 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]">
+              <div className={`flex flex-col items-center justify-center gap-2 ${lightboxPlaceholderClass}`}>
                 {result.status === "pending" || result.status === "checking" ? (
                   <>
                     <CircleHelp className="w-24 h-24 text-white/40" strokeWidth={1.5} />

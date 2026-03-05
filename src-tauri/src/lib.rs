@@ -4,13 +4,13 @@ pub mod error;
 pub mod models;
 pub mod state;
 
-use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use state::AppState;
-use tauri::{Emitter, Manager};
 use tauri::webview::PageLoadEvent;
+use tauri::{Emitter, Manager};
 use tauri_plugin_liquid_glass::{LiquidGlassConfig, LiquidGlassExt};
 use tauri_plugin_store::StoreExt;
 
@@ -105,7 +105,9 @@ fn create_window_from_main_config(app: &tauri::AppHandle, label: String) {
 
     window_config.label = label;
 
-    match tauri::WebviewWindowBuilder::from_config(app, &window_config).and_then(|builder| builder.build()) {
+    match tauri::WebviewWindowBuilder::from_config(app, &window_config)
+        .and_then(|builder| builder.build())
+    {
         Ok(window) => {
             let theme_preference = {
                 let state = app.state::<Arc<AppState>>();
@@ -212,8 +214,12 @@ pub fn run() {
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Trace)
-                .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout))
-                .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview))
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Stdout,
+                ))
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Webview,
+                ))
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
@@ -299,9 +305,10 @@ pub fn run() {
             MenuItemBuilder::with_id("menu.view.toggle_prescan_filter", "Show Pre-scan Filter")
                 .accelerator("Cmd+Shift+F")
                 .build(app)?;
-        let clear_filters_item = MenuItemBuilder::with_id("menu.view.clear_filters", "Clear Filters")
-            .accelerator("Cmd+Shift+X")
-            .build(app)?;
+        let clear_filters_item =
+            MenuItemBuilder::with_id("menu.view.clear_filters", "Clear Filters")
+                .accelerator("Cmd+Shift+X")
+                .build(app)?;
 
         let view_menu = SubmenuBuilder::new(app, "View")
             .item(&toggle_sidebar_item)
@@ -403,9 +410,10 @@ pub fn run() {
             MenuItemBuilder::with_id("menu.view.toggle_prescan_filter", "Show Pre-scan Filter")
                 .accelerator("Ctrl+Shift+F")
                 .build(app)?;
-        let clear_filters_item = MenuItemBuilder::with_id("menu.view.clear_filters", "Clear Filters")
-            .accelerator("Ctrl+Shift+X")
-            .build(app)?;
+        let clear_filters_item =
+            MenuItemBuilder::with_id("menu.view.clear_filters", "Clear Filters")
+                .accelerator("Ctrl+Shift+X")
+                .build(app)?;
 
         let view_menu = SubmenuBuilder::new(app, "View")
             .item(&toggle_sidebar_item)
@@ -570,8 +578,8 @@ pub fn run() {
                 use tauri::menu::{MenuBuilder, MenuItemBuilder};
                 use tauri::tray::TrayIconBuilder;
 
-                let open_item = MenuItemBuilder::with_id("tray.open", "Open IPTV Checker")
-                    .build(app)?;
+                let open_item =
+                    MenuItemBuilder::with_id("tray.open", "Open IPTV Checker").build(app)?;
                 let quit_item = MenuItemBuilder::with_id("tray.quit", "Quit").build(app)?;
 
                 let tray_menu = MenuBuilder::new(app)
@@ -658,7 +666,9 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 if !APP_IS_QUITTING.load(Ordering::Relaxed) {
-                    if let Some(target_window) = window.app_handle().get_webview_window(window.label()) {
+                    if let Some(target_window) =
+                        window.app_handle().get_webview_window(window.label())
+                    {
                         if let Err(error) = window.app_handle().liquid_glass().set_effect(
                             &target_window,
                             LiquidGlassConfig {
@@ -706,10 +716,7 @@ pub fn run() {
                         let _ = main_window.unminimize();
                         let _ = main_window.show();
                         let _ = main_window.set_focus();
-                        schedule_macos_system_appearance_patch(
-                            app.clone(),
-                            "main".to_string(),
-                        );
+                        schedule_macos_system_appearance_patch(app.clone(), "main".to_string());
                     } else {
                         create_fresh_main_window(app);
                     }

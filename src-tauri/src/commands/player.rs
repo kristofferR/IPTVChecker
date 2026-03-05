@@ -11,7 +11,8 @@ static NEXT_TEMP_PLAYLIST_ID: AtomicU64 = AtomicU64::new(0);
 const TEMP_PLAYLIST_PREFIX: &str = "iptv-checker-single-channel-";
 const TEMP_PLAYLIST_EXTENSION: &str = "m3u8";
 const TEMP_PLAYLIST_DELETE_DELAY: std::time::Duration = std::time::Duration::from_secs(120);
-const STALE_TEMP_PLAYLIST_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+const STALE_TEMP_PLAYLIST_MAX_AGE: std::time::Duration =
+    std::time::Duration::from_secs(6 * 60 * 60);
 
 #[derive(Debug, Deserialize)]
 pub struct PlayerChannel {
@@ -156,11 +157,7 @@ pub async fn open_channel_in_player(channel: PlayerChannel) -> Result<(), AppErr
     content.push('\n');
 
     let temp_dir = std::env::temp_dir();
-    cleanup_stale_temp_playlists_in_dir(
-        &temp_dir,
-        STALE_TEMP_PLAYLIST_MAX_AGE,
-        SystemTime::now(),
-    );
+    cleanup_stale_temp_playlists_in_dir(&temp_dir, STALE_TEMP_PLAYLIST_MAX_AGE, SystemTime::now());
 
     let temp_path = write_unique_temp_playlist(&content)?;
     match open_with_system_default(&temp_path) {
@@ -178,8 +175,8 @@ pub async fn open_channel_in_player(channel: PlayerChannel) -> Result<(), AppErr
 #[cfg(test)]
 mod tests {
     use super::{
-        build_unique_temp_playlist_path, cleanup_stale_temp_playlists_in_dir, is_temp_playlist_file,
-        spawn_temp_playlist_cleanup, write_unique_temp_playlist_in_dir,
+        build_unique_temp_playlist_path, cleanup_stale_temp_playlists_in_dir,
+        is_temp_playlist_file, spawn_temp_playlist_cleanup, write_unique_temp_playlist_in_dir,
     };
     use std::time::{Duration, SystemTime};
 
@@ -255,11 +252,7 @@ mod tests {
             .set_times(std::fs::FileTimes::new().set_modified(stale_modified))
             .expect("stale mtime should be set");
 
-        cleanup_stale_temp_playlists_in_dir(
-            &root,
-            Duration::from_secs(60 * 60),
-            SystemTime::now(),
-        );
+        cleanup_stale_temp_playlists_in_dir(&root, Duration::from_secs(60 * 60), SystemTime::now());
 
         assert!(!stale.exists());
         assert!(fresh.exists());

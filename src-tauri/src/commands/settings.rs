@@ -165,9 +165,7 @@ fn collect_dir_stats(path: &Path) -> Result<(u64, usize), std::io::Error> {
 fn normalize_preset_name(name: &str) -> Result<String, AppError> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        return Err(AppError::Other(
-            "Preset name cannot be empty".to_string(),
-        ));
+        return Err(AppError::Other("Preset name cannot be empty".to_string()));
     }
     if trimmed.chars().count() > MAX_PRESET_NAME_LENGTH {
         return Err(AppError::Other(format!(
@@ -357,9 +355,7 @@ fn set_default_m3u8_handler(app: &tauri::AppHandle) -> Result<String, AppError> 
             };
             return Err(AppError::Other(format!(
                 "xdg-mime failed for {} ({}): {}",
-                mime_type,
-                output.status,
-                detail
+                mime_type, output.status, detail
             )));
         }
         Ok(())
@@ -434,8 +430,8 @@ fn set_default_m3u8_handler(app: &tauri::AppHandle) -> Result<String, AppError> 
 
 #[cfg(target_os = "windows")]
 fn set_default_m3u8_handler(_app: &tauri::AppHandle) -> Result<String, AppError> {
-    use winreg::RegKey;
     use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
 
     fn register_windows_extension(
         classes_root: &RegKey,
@@ -456,12 +452,14 @@ fn set_default_m3u8_handler(_app: &tauri::AppHandle) -> Result<String, AppError>
                 extension, error
             ))
         })?;
-        ext_key.set_value("Content Type", &mime_type).map_err(|error| {
-            AppError::Other(format!(
-                "Failed to set MIME type for {}: {}",
-                extension, error
-            ))
-        })?;
+        ext_key
+            .set_value("Content Type", &mime_type)
+            .map_err(|error| {
+                AppError::Other(format!(
+                    "Failed to set MIME type for {}: {}",
+                    extension, error
+                ))
+            })?;
 
         Ok(())
     }
@@ -472,17 +470,18 @@ fn set_default_m3u8_handler(_app: &tauri::AppHandle) -> Result<String, AppError>
             error
         ))
     })?;
-    let executable_display = executable_path
-        .to_string_lossy()
-        .replace('"', "\\\"");
+    let executable_display = executable_path.to_string_lossy().replace('"', "\\\"");
     let open_command = format!("\"{}\" \"%1\"", executable_display);
     let icon_value = format!("\"{}\",0", executable_display);
     const PROG_ID: &str = "IPTVChecker.Playlist";
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let (classes_root, _) = hkcu
-        .create_subkey("Software\\Classes")
-        .map_err(|error| AppError::Other(format!("Failed to access HKCU\\Software\\Classes: {}", error)))?;
+    let (classes_root, _) = hkcu.create_subkey("Software\\Classes").map_err(|error| {
+        AppError::Other(format!(
+            "Failed to access HKCU\\Software\\Classes: {}",
+            error
+        ))
+    })?;
 
     register_windows_extension(&classes_root, ".m3u", PROG_ID, "audio/x-mpegurl")?;
     register_windows_extension(
@@ -514,10 +513,7 @@ fn set_default_m3u8_handler(_app: &tauri::AppHandle) -> Result<String, AppError>
         ))
     })?;
     icon_key.set_value("", &icon_value).map_err(|error| {
-        AppError::Other(format!(
-            "Failed to set icon for {}: {}",
-            PROG_ID, error
-        ))
+        AppError::Other(format!("Failed to set icon for {}: {}", PROG_ID, error))
     })?;
 
     let (command_key, _) = prog_id_key
@@ -754,9 +750,7 @@ pub async fn check_ffmpeg_available(app: tauri::AppHandle) -> Result<(bool, bool
 }
 
 #[tauri::command]
-pub async fn set_default_m3u8_file_association(
-    app: tauri::AppHandle,
-) -> Result<String, AppError> {
+pub async fn set_default_m3u8_file_association(app: tauri::AppHandle) -> Result<String, AppError> {
     set_default_m3u8_handler(&app)
 }
 
@@ -936,7 +930,10 @@ pub fn evict_for_disk_space(
 
     loop {
         let tier = disk::classify_space(cache_root, low_threshold_gb);
-        if !matches!(tier, disk::DiskSpaceTier::Critical | disk::DiskSpaceTier::Low) {
+        if !matches!(
+            tier,
+            disk::DiskSpaceTier::Critical | disk::DiskSpaceTier::Low
+        ) {
             break;
         }
 

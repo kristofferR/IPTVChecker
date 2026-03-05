@@ -24,10 +24,7 @@ const RETRYABLE_HTTP_STATUSES: &[u16] = &[408, 425, 429, 500, 502, 503, 504];
 const FFPROBE_LIVENESS_SCHEMES: &[&str] = &["rtsp", "rtsps", "rtmp", "rtmps"];
 
 fn elapsed_millis(started_at: Instant) -> u64 {
-    started_at
-        .elapsed()
-        .as_millis()
-        .min(u128::from(u64::MAX)) as u64
+    started_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
 }
 
 fn now_epoch_ms() -> u64 {
@@ -235,22 +232,20 @@ fn is_dash_manifest_content_type(content_type: &str, url: &str) -> bool {
 
 fn detect_hls_drm_system(playlist_body: &str) -> Option<String> {
     let lower = playlist_body.to_ascii_lowercase();
-    let has_hls_key_markers =
-        lower.contains("#ext-x-key") || lower.contains("#ext-x-session-key");
+    let has_hls_key_markers = lower.contains("#ext-x-key") || lower.contains("#ext-x-session-key");
     if !has_hls_key_markers {
         return None;
     }
 
-    if lower.contains("com.widevine.alpha") || lower.contains("edef8ba9-79d6-4ace-a3c8-27dcd51d21ed")
+    if lower.contains("com.widevine.alpha")
+        || lower.contains("edef8ba9-79d6-4ace-a3c8-27dcd51d21ed")
     {
         return Some("Widevine".to_string());
     }
     if lower.contains("com.apple.streamingkeydelivery") || lower.contains("skd://") {
         return Some("FairPlay".to_string());
     }
-    if lower.contains("playready")
-        || lower.contains("9a04f079-9840-4286-ab92-e65be0885f95")
-    {
+    if lower.contains("playready") || lower.contains("9a04f079-9840-4286-ab92-e65be0885f95") {
         return Some("PlayReady".to_string());
     }
     if lower.contains("sample-aes") {
@@ -271,9 +266,7 @@ fn detect_dash_drm_system(manifest_body: &str) -> Option<String> {
     {
         return Some("Widevine".to_string());
     }
-    if lower.contains("9a04f079-9840-4286-ab92-e65be0885f95")
-        || lower.contains("playready")
-    {
+    if lower.contains("9a04f079-9840-4286-ab92-e65be0885f95") || lower.contains("playready") {
         return Some("PlayReady".to_string());
     }
     if lower.contains("94ce86fb-07ff-4f43-adb8-93d2fa968ca2")
@@ -421,7 +414,8 @@ async fn read_stream(
                     observed_latency_ms = Some(elapsed_millis(request_started_at));
                 }
                 bytes_read += chunk.len() as u64;
-                metrics.bytes_transferred = metrics.bytes_transferred.saturating_add(chunk.len() as u64);
+                metrics.bytes_transferred =
+                    metrics.bytes_transferred.saturating_add(chunk.len() as u64);
                 if metrics.ttfb_ms.is_none() {
                     metrics.ttfb_ms = observed_latency_ms;
                 }
@@ -662,10 +656,7 @@ async fn verify(
     } else if content_type.to_lowercase().starts_with("text/") {
         return VerifyResult::Dead {
             latency_ms: effective_root_latency,
-            reason: Some(format!(
-                "Unexpected text content type: {}",
-                content_type
-            )),
+            reason: Some(format!("Unexpected text content type: {}", content_type)),
         };
     } else {
         // Unrecognized content-type — attempt stream read
@@ -676,7 +667,14 @@ async fn verify(
         }
     };
 
-    let result = read_stream(resp, min_bytes, root_latency_ms, request_started_at, metrics).await;
+    let result = read_stream(
+        resp,
+        min_bytes,
+        root_latency_ms,
+        request_started_at,
+        metrics,
+    )
+    .await;
     match result {
         VerifyResult::Alive {
             latency_ms,
@@ -737,8 +735,8 @@ pub async fn check_channel_status_with_ffprobe_debug(
     }
 
     if !ffprobe_available {
-        let reason =
-            "ffprobe is required for RTSP/RTMP liveness checks, but it is not available".to_string();
+        let reason = "ffprobe is required for RTSP/RTMP liveness checks, but it is not available"
+            .to_string();
         let timestamp = now_epoch_ms();
         return Ok(ChannelCheckOutcome {
             status: "Dead".to_string(),
@@ -929,7 +927,9 @@ pub async fn check_channel_status_with_ffprobe_debug(
                 status: second.status,
                 stream_url: second.stream_url,
                 latency_ms: second.latency_ms,
-                retries_used: final_outcome.retries_used.saturating_add(second.retries_used),
+                retries_used: final_outcome
+                    .retries_used
+                    .saturating_add(second.retries_used),
                 last_error_reason: second.last_error_reason.or(final_outcome.last_error_reason),
                 drm_system: second.drm_system.or(final_outcome.drm_system),
                 successful_attempt: second.successful_attempt,
@@ -949,7 +949,10 @@ pub async fn check_channel_status_with_ffprobe_debug(
         .last()
         .map(|attempt| attempt.ended_at_epoch_ms)
         .unwrap_or_else(now_epoch_ms);
-    let ttfb_ms = final_outcome.attempts.iter().find_map(|attempt| attempt.ttfb_ms);
+    let ttfb_ms = final_outcome
+        .attempts
+        .iter()
+        .find_map(|attempt| attempt.ttfb_ms);
 
     Ok(ChannelCheckOutcome {
         status: final_outcome.status.clone(),
@@ -1190,7 +1193,9 @@ pub async fn check_channel_status_with_debug(
                 status: second.status,
                 stream_url: second.stream_url,
                 latency_ms: second.latency_ms,
-                retries_used: final_outcome.retries_used.saturating_add(second.retries_used),
+                retries_used: final_outcome
+                    .retries_used
+                    .saturating_add(second.retries_used),
                 last_error_reason: second.last_error_reason.or(final_outcome.last_error_reason),
                 drm_system: second.drm_system.or(final_outcome.drm_system),
                 successful_attempt: second.successful_attempt,
@@ -1206,7 +1211,11 @@ pub async fn check_channel_status_with_debug(
     for attempt in &final_outcome.attempts {
         http_status_codes.extend_from_slice(&attempt.http_status_codes);
         for url in &attempt.redirect_chain {
-            if redirect_chain.last().map(|value| value != url).unwrap_or(true) {
+            if redirect_chain
+                .last()
+                .map(|value| value != url)
+                .unwrap_or(true)
+            {
                 redirect_chain.push(url.clone());
             }
         }
@@ -1326,7 +1335,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("test listener should bind");
-        let addr = listener.local_addr().expect("listener should have local addr");
+        let addr = listener
+            .local_addr()
+            .expect("listener should have local addr");
 
         let handle = tokio::spawn(async move {
             while let Ok((mut socket, _)) = listener.accept().await {
@@ -1555,9 +1566,8 @@ segment.ts
 
     #[test]
     fn test_split_hls_attributes_respects_quotes() {
-        let parts = split_hls_attributes(
-            r#"BANDWIDTH=5000,CODECS="avc1,mp4a",RESOLUTION=1920x1080"#,
-        );
+        let parts =
+            split_hls_attributes(r#"BANDWIDTH=5000,CODECS="avc1,mp4a",RESOLUTION=1920x1080"#);
         assert_eq!(parts.len(), 3);
         assert_eq!(parts[0], "BANDWIDTH=5000");
         assert_eq!(parts[1], r#"CODECS="avc1,mp4a""#);
@@ -1691,13 +1701,11 @@ segment.ts
         .expect("checker request should succeed");
 
         assert_eq!(outcome.status, "Dead");
-        assert!(
-            outcome
-                .last_error_reason
-                .as_deref()
-                .unwrap_or_default()
-                .contains("Unexpected text content type")
-        );
+        assert!(outcome
+            .last_error_reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Unexpected text content type"));
         server_handle.abort();
     }
 
@@ -1732,7 +1740,8 @@ segment.ts
 
     #[tokio::test]
     async fn integration_checker_marks_hls_drm_as_drm_status() {
-        let handler = Arc::new(move |_path: &str| TestHttpResponse {
+        let handler = Arc::new(move |_path: &str| {
+            TestHttpResponse {
             status_code: 200,
             reason: "OK",
             headers: vec![(
@@ -1746,6 +1755,7 @@ segment.ts
 "#
             .to_vec(),
             delay_ms: 0,
+        }
         });
         let (base_url, server_handle) = spawn_http_server(handler).await;
         let cancel = tokio_util::sync::CancellationToken::new();
@@ -1764,7 +1774,10 @@ segment.ts
 
         assert_eq!(outcome.status, "DRM");
         assert_eq!(outcome.drm_system.as_deref(), Some("FairPlay"));
-        assert_eq!(outcome.stream_url, Some(format!("{base_url}/fairplay.m3u8")));
+        assert_eq!(
+            outcome.stream_url,
+            Some(format!("{base_url}/fairplay.m3u8"))
+        );
         server_handle.abort();
     }
 
@@ -1773,7 +1786,10 @@ segment.ts
         let handler = Arc::new(move |_path: &str| TestHttpResponse {
             status_code: 200,
             reason: "OK",
-            headers: vec![("Content-Type".to_string(), "application/dash+xml".to_string())],
+            headers: vec![(
+                "Content-Type".to_string(),
+                "application/dash+xml".to_string(),
+            )],
             body: br#"<MPD>
   <Period>
     <AdaptationSet>
@@ -1810,7 +1826,10 @@ segment.ts
         let handler = Arc::new(move |_path: &str| TestHttpResponse {
             status_code: 200,
             reason: "OK",
-            headers: vec![("Content-Type".to_string(), "application/dash+xml".to_string())],
+            headers: vec![(
+                "Content-Type".to_string(),
+                "application/dash+xml".to_string(),
+            )],
             body: br#"<MPD>
   <Period>
     <AdaptationSet>

@@ -212,8 +212,8 @@ fn validate_captured_screenshot(path: &Path, format: ScreenshotFormat) -> Result
         return Err("output image is empty".to_string());
     }
 
-    let mut file =
-        std::fs::File::open(path).map_err(|error| format!("failed to open output image: {}", error))?;
+    let mut file = std::fs::File::open(path)
+        .map_err(|error| format!("failed to open output image: {}", error))?;
     let mut header = [0u8; 16];
     let bytes_read = file
         .read(&mut header)
@@ -436,7 +436,11 @@ fn parse_stream_track_presence(stdout: &str) -> Result<StreamTrackPresence, serd
     let mut presence = StreamTrackPresence::default();
 
     for stream in parsed.streams {
-        match stream.codec_type.as_deref().map(|value| value.to_ascii_lowercase()) {
+        match stream
+            .codec_type
+            .as_deref()
+            .map(|value| value.to_ascii_lowercase())
+        {
             Some(ref codec_type) if codec_type == "video" => presence.has_video = true,
             Some(ref codec_type) if codec_type == "audio" => presence.has_audio = true,
             _ => {}
@@ -494,10 +498,7 @@ fn parse_probe_snapshot(stdout: &str) -> Result<ProbeSnapshot, serde_json::Error
             .unwrap_or_else(|| "Unknown".to_string());
         let width = stream.width;
         let height = stream.height;
-        let fps = stream
-            .r_frame_rate
-            .as_deref()
-            .and_then(parse_ffprobe_fps);
+        let fps = stream.r_frame_rate.as_deref().and_then(parse_ffprobe_fps);
         VideoInfo {
             codec,
             width,
@@ -803,28 +804,14 @@ async fn capture_screenshot_with_format(
 
     // Capture the first available frame — no seeking (-ss) since live IPTV
     // streams don't support it reliably and it causes hangs.
-    let mut args = vec![
-        "-y",
-        "-user_agent",
-        user_agent,
-        "-i",
-        url,
-        "-frames:v",
-        "1",
-    ];
+    let mut args = vec!["-y", "-user_agent", user_agent, "-i", url, "-frames:v", "1"];
     if format == ScreenshotFormat::Webp {
         args.extend_from_slice(&["-quality", "90"]);
     }
     args.push(&output_str);
 
-    let (_stdout, stderr) = run_tool_command(
-        app,
-        "ffmpeg",
-        &args,
-        cancel,
-        Some(timeout_duration),
-    )
-    .await?;
+    let (_stdout, stderr) =
+        run_tool_command(app, "ffmpeg", &args, cancel, Some(timeout_duration)).await?;
 
     if output_path.exists() {
         if let Err(error) = validate_captured_screenshot(&output_path, format) {
@@ -924,11 +911,17 @@ pub async fn profile_bitrate(
 
     let mut child = tokio::process::Command::new(&resolved_bin)
         .args([
-            "-v", "verbose",
-            "-user_agent", user_agent,
-            "-i", url,
-            "-t", "10",
-            "-f", "null", "-",
+            "-v",
+            "verbose",
+            "-user_agent",
+            user_agent,
+            "-i",
+            url,
+            "-t",
+            "10",
+            "-f",
+            "null",
+            "-",
         ])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
@@ -1014,8 +1007,7 @@ fn contains_word(haystack: &str, word: &str) -> bool {
             continue;
         }
         let before_ok = start == 0 || !h[start - 1].is_ascii_alphanumeric();
-        let after_ok =
-            start + w.len() == h.len() || !h[start + w.len()].is_ascii_alphanumeric();
+        let after_ok = start + w.len() == h.len() || !h[start + w.len()].is_ascii_alphanumeric();
         if before_ok && after_ok {
             return true;
         }
@@ -1053,9 +1045,9 @@ mod tests {
 
     use super::{
         build_screenshot_file_name, check_label_mismatch, contains_word, parse_ffprobe_fps,
-        parse_probe_snapshot, parse_stream_track_presence, resolution_label, sanitize_screenshot_stem,
-        screenshot_header_is_valid, unique_screenshot_output_path, validate_captured_screenshot,
-        ScreenshotFormat, MAX_SCREENSHOT_STEM_LEN,
+        parse_probe_snapshot, parse_stream_track_presence, resolution_label,
+        sanitize_screenshot_stem, screenshot_header_is_valid, unique_screenshot_output_path,
+        validate_captured_screenshot, ScreenshotFormat, MAX_SCREENSHOT_STEM_LEN,
     };
 
     #[test]
@@ -1127,11 +1119,15 @@ mod tests {
     #[test]
     fn screenshot_header_validation_matches_format() {
         let png_header = [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13];
-        let webp_header = [
-            b'R', b'I', b'F', b'F', 0, 0, 0, 0, b'W', b'E', b'B', b'P',
-        ];
-        assert!(screenshot_header_is_valid(ScreenshotFormat::Png, &png_header));
-        assert!(screenshot_header_is_valid(ScreenshotFormat::Webp, &webp_header));
+        let webp_header = [b'R', b'I', b'F', b'F', 0, 0, 0, 0, b'W', b'E', b'B', b'P'];
+        assert!(screenshot_header_is_valid(
+            ScreenshotFormat::Png,
+            &png_header
+        ));
+        assert!(screenshot_header_is_valid(
+            ScreenshotFormat::Webp,
+            &webp_header
+        ));
         assert!(!screenshot_header_is_valid(
             ScreenshotFormat::Webp,
             &png_header
@@ -1144,7 +1140,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("time should be monotonic")
             .as_nanos();
-        let test_dir = std::env::temp_dir().join(format!("iptv-checker-screenshot-validate-{unique}"));
+        let test_dir =
+            std::env::temp_dir().join(format!("iptv-checker-screenshot-validate-{unique}"));
         std::fs::create_dir_all(&test_dir).expect("temp dir should be creatable");
 
         let invalid_path = test_dir.join("invalid.webp");

@@ -57,7 +57,10 @@ mod tests {
     fn classify_space_returns_plenty_for_large_available() {
         let tier = classify_space(Path::new("/"), 5.0);
         // On any dev machine, root should have more than 20 GB
-        assert!(matches!(tier, DiskSpaceTier::Plenty | DiskSpaceTier::Moderate));
+        assert!(matches!(
+            tier,
+            DiskSpaceTier::Plenty | DiskSpaceTier::Moderate
+        ));
     }
 
     #[test]
