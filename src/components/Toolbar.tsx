@@ -109,6 +109,7 @@ export const Toolbar = memo(function Toolbar({
   const scanDisabledReason = !hasPlaylist
     ? "Open a playlist first"
     : scanBlockedReason;
+  const filtersDisabled = !hasPlaylist;
 
   // Platform-appropriate icons
   const IconOpen = isMac ? SFFolder : FolderOpen;
@@ -237,7 +238,10 @@ export const Toolbar = memo(function Toolbar({
       <div data-tauri-drag-region={dragRegionAttr} className="flex-1" />
 
       {/* Filters: Search, Group, Status */}
-      <div className="flex items-center gap-1.5" data-no-window-drag>
+      <div
+        className={`flex items-center gap-1.5 ${filtersDisabled ? "opacity-50" : ""}`}
+        data-no-window-drag
+      >
         <div className="relative">
           <Search className="search-icon absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary" />
           <input
@@ -245,14 +249,16 @@ export const Toolbar = memo(function Toolbar({
             type="search"
             placeholder="Search..."
             value={search}
+            disabled={filtersDisabled}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="native-field h-7 w-40 pl-7 pr-2 text-[12px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+            className="native-field h-7 w-40 pl-7 pr-2 text-[12px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:cursor-not-allowed"
           />
         </div>
         <select
           value={groupFilter}
+          disabled={filtersDisabled}
           onChange={(e) => onGroupChange(e.target.value)}
-          className="native-field h-7 text-[12px] px-2 bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="native-field h-7 text-[12px] px-2 bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
         >
           <option value="all">All Groups</option>
           {groups.map((g) => (
@@ -263,8 +269,9 @@ export const Toolbar = memo(function Toolbar({
         </select>
         <select
           value={statusFilter}
+          disabled={filtersDisabled}
           onChange={(e) => onStatusChange(e.target.value)}
-          className="native-field h-7 text-[12px] px-2 bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="native-field h-7 text-[12px] px-2 bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
         >
           <option value="all">All Status</option>
           <option value="alive">Alive</option>
