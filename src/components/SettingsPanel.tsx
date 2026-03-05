@@ -63,6 +63,7 @@ function buildScanPresetConfig(settings: AppSettings): ScanPresetConfig {
     profile_bitrate: settings.profile_bitrate,
     ffprobe_timeout_secs: settings.ffprobe_timeout_secs,
     ffmpeg_bitrate_timeout_secs: settings.ffmpeg_bitrate_timeout_secs,
+    accept_invalid_certs: settings.accept_invalid_certs,
     proxy_file: settings.proxy_file,
     test_geoblock: settings.test_geoblock,
     screenshots_dir: settings.screenshots_dir,
@@ -87,6 +88,7 @@ function applyScanPresetConfig(
     profile_bitrate: config.profile_bitrate,
     ffprobe_timeout_secs: config.ffprobe_timeout_secs,
     ffmpeg_bitrate_timeout_secs: config.ffmpeg_bitrate_timeout_secs,
+    accept_invalid_certs: config.accept_invalid_certs,
     proxy_file: config.proxy_file,
     test_geoblock: config.test_geoblock,
     screenshots_dir: config.screenshots_dir,
@@ -1212,6 +1214,22 @@ export function SettingsPanel({ settings, onSave, onClose }: SettingsPanelProps)
                     updateSetting("test_geoblock", checked, { immediate: true })
                   }
                   ariaLabel="Confirm geoblocks with proxies"
+                />
+              </div>
+
+              <div className={rowClass}>
+                <div>
+                  <p className="text-[13px] font-medium">Skip certificate verification (insecure)</p>
+                  <p className="text-[11px] text-text-tertiary mt-0.5">
+                    Accept invalid/self-signed TLS certificates during stream checks.
+                  </p>
+                </div>
+                <Switch
+                  checked={draft.accept_invalid_certs}
+                  onChange={(checked) =>
+                    updateSetting("accept_invalid_certs", checked, { immediate: true })
+                  }
+                  ariaLabel="Skip certificate verification"
                 />
               </div>
             </section>

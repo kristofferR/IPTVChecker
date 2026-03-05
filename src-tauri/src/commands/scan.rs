@@ -1011,6 +1011,7 @@ async fn execute_scan_run(
     let client = Arc::new(
         reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(5))
+            .danger_accept_invalid_certs(config.accept_invalid_certs)
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .unwrap_or_default(),

@@ -1147,6 +1147,7 @@ export default function App() {
       profile_bitrate: settings.profile_bitrate,
       ffprobe_timeout_secs: settings.ffprobe_timeout_secs,
       ffmpeg_bitrate_timeout_secs: settings.ffmpeg_bitrate_timeout_secs,
+      accept_invalid_certs: settings.accept_invalid_certs,
       proxy_file: settings.proxy_file,
       test_geoblock: settings.test_geoblock,
       screenshots_dir: settings.screenshots_dir,

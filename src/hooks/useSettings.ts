@@ -13,6 +13,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   profile_bitrate: false,
   ffprobe_timeout_secs: 30,
   ffmpeg_bitrate_timeout_secs: 60,
+  accept_invalid_certs: false,
   proxy_file: null,
   test_geoblock: false,
   screenshots_dir: null,
@@ -47,6 +48,7 @@ export function useSettings() {
     profile_bitrate: config.profile_bitrate,
     ffprobe_timeout_secs: config.ffprobe_timeout_secs,
     ffmpeg_bitrate_timeout_secs: config.ffmpeg_bitrate_timeout_secs,
+    accept_invalid_certs: config.accept_invalid_certs,
     proxy_file: config.proxy_file,
     test_geoblock: config.test_geoblock,
     screenshots_dir: config.screenshots_dir,
@@ -65,6 +67,7 @@ export function useSettings() {
     value.profile_bitrate === config.profile_bitrate &&
     value.ffprobe_timeout_secs === config.ffprobe_timeout_secs &&
     value.ffmpeg_bitrate_timeout_secs === config.ffmpeg_bitrate_timeout_secs &&
+    value.accept_invalid_certs === config.accept_invalid_certs &&
     value.proxy_file === config.proxy_file &&
     value.test_geoblock === config.test_geoblock &&
     value.screenshots_dir === config.screenshots_dir &&

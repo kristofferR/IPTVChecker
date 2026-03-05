@@ -69,6 +69,7 @@ pub struct AppSettings {
     pub profile_bitrate: bool,
     pub ffprobe_timeout_secs: f64,
     pub ffmpeg_bitrate_timeout_secs: f64,
+    pub accept_invalid_certs: bool,
     pub proxy_file: Option<String>,
     pub test_geoblock: bool,
     pub screenshots_dir: Option<String>,
@@ -97,6 +98,7 @@ pub struct ScanPresetConfig {
     pub profile_bitrate: bool,
     pub ffprobe_timeout_secs: f64,
     pub ffmpeg_bitrate_timeout_secs: f64,
+    pub accept_invalid_certs: bool,
     pub proxy_file: Option<String>,
     pub test_geoblock: bool,
     pub screenshots_dir: Option<String>,
@@ -123,6 +125,7 @@ impl ScanPresetConfig {
             profile_bitrate: settings.profile_bitrate,
             ffprobe_timeout_secs: settings.ffprobe_timeout_secs,
             ffmpeg_bitrate_timeout_secs: settings.ffmpeg_bitrate_timeout_secs,
+            accept_invalid_certs: settings.accept_invalid_certs,
             proxy_file: settings.proxy_file.clone(),
             test_geoblock: settings.test_geoblock,
             screenshots_dir: settings.screenshots_dir.clone(),
@@ -142,6 +145,7 @@ impl ScanPresetConfig {
         settings.profile_bitrate = self.profile_bitrate;
         settings.ffprobe_timeout_secs = self.ffprobe_timeout_secs;
         settings.ffmpeg_bitrate_timeout_secs = self.ffmpeg_bitrate_timeout_secs;
+        settings.accept_invalid_certs = self.accept_invalid_certs;
         settings.proxy_file = self.proxy_file.clone();
         settings.test_geoblock = self.test_geoblock;
         settings.screenshots_dir = self.screenshots_dir.clone();
@@ -188,6 +192,7 @@ impl Default for AppSettings {
             profile_bitrate: false,
             ffprobe_timeout_secs: DEFAULT_FFPROBE_TIMEOUT_SECS,
             ffmpeg_bitrate_timeout_secs: DEFAULT_FFMPEG_BITRATE_TIMEOUT_SECS,
+            accept_invalid_certs: false,
             proxy_file: None,
             test_geoblock: false,
             screenshots_dir: None,
@@ -213,6 +218,7 @@ mod tests {
     fn default_enables_scan_notifications() {
         let settings = AppSettings::default();
         assert!(settings.scan_notifications);
+        assert!(!settings.accept_invalid_certs);
     }
 
     #[test]
@@ -242,6 +248,7 @@ mod tests {
         base.retries = 7;
         base.user_agent = "PresetAgent/1.0".to_string();
         base.screenshot_format = ScreenshotFormat::Png;
+        base.accept_invalid_certs = true;
         let preset = ScanPresetConfig::from_settings(&base);
 
         let mut destination = AppSettings::default();
@@ -253,6 +260,7 @@ mod tests {
         assert_eq!(destination.retries, 7);
         assert_eq!(destination.user_agent, "PresetAgent/1.0");
         assert_eq!(destination.screenshot_format, ScreenshotFormat::Png);
+        assert!(destination.accept_invalid_certs);
         assert_eq!(destination.theme, super::ThemePreference::Dark);
         assert_eq!(destination.scan_history_limit, 99);
     }

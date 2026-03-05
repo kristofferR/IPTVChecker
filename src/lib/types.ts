@@ -86,6 +86,7 @@ export interface ScanConfig {
   profile_bitrate: boolean;
   ffprobe_timeout_secs: number;
   ffmpeg_bitrate_timeout_secs: number;
+  accept_invalid_certs: boolean;
   proxy_file: string | null;
   test_geoblock: boolean;
   screenshots_dir: string | null;
@@ -144,6 +145,7 @@ export interface AppSettings {
   profile_bitrate: boolean;
   ffprobe_timeout_secs: number;
   ffmpeg_bitrate_timeout_secs: number;
+  accept_invalid_certs: boolean;
   proxy_file: string | null;
   test_geoblock: boolean;
   screenshots_dir: string | null;
@@ -170,6 +172,7 @@ export interface ScanPresetConfig {
   profile_bitrate: boolean;
   ffprobe_timeout_secs: number;
   ffmpeg_bitrate_timeout_secs: number;
+  accept_invalid_certs: boolean;
   proxy_file: string | null;
   test_geoblock: boolean;
   screenshots_dir: string | null;

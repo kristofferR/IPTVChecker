@@ -522,6 +522,7 @@ mod tests {
             profile_bitrate: false,
             ffprobe_timeout_secs: 30.0,
             ffmpeg_bitrate_timeout_secs: 60.0,
+            accept_invalid_certs: false,
             proxy_file: None,
             test_geoblock: false,
             screenshots_dir: None,

@@ -47,6 +47,8 @@ pub struct ScanConfig {
     pub profile_bitrate: bool,
     pub ffprobe_timeout_secs: f64,
     pub ffmpeg_bitrate_timeout_secs: f64,
+    #[serde(default)]
+    pub accept_invalid_certs: bool,
     pub proxy_file: Option<String>,
     pub test_geoblock: bool,
     pub screenshots_dir: Option<String>,
@@ -183,6 +185,7 @@ mod tests {
             profile_bitrate: false,
             ffprobe_timeout_secs: 30.0,
             ffmpeg_bitrate_timeout_secs: 60.0,
+            accept_invalid_certs: false,
             proxy_file: None,
             test_geoblock: false,
             screenshots_dir: None,
@@ -266,5 +269,19 @@ mod tests {
 
         config.ffmpeg_bitrate_timeout_secs = MAX_FFMPEG_BITRATE_TIMEOUT_SECS + 1.0;
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn deserialize_missing_accept_invalid_certs_defaults_to_false() {
+        let mut value =
+            serde_json::to_value(valid_config()).expect("config should serialize to value");
+        value
+            .as_object_mut()
+            .expect("config JSON should be an object")
+            .remove("accept_invalid_certs");
+
+        let config: ScanConfig =
+            serde_json::from_value(value).expect("config should deserialize without field");
+        assert!(!config.accept_invalid_certs);
     }
 }
