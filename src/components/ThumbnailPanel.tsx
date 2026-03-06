@@ -147,6 +147,20 @@ export function ThumbnailPanel({
     return () => clearTimeout(timer);
   }, [lightboxRendered, lightboxVisible]);
 
+  // Escape in theater mode exits fullscreen but keeps lightbox open
+  useEffect(() => {
+    if (!theaterMode) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setTheaterMode(false);
+        void getCurrentWindow().setFullscreen(false);
+      }
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, [theaterMode]);
+
   if (!result) {
     return (
       <div className="flex items-center justify-center h-full text-text-tertiary text-[12px]">
