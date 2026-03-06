@@ -560,7 +560,7 @@ export function ThumbnailPanel({
                 )}
               </div>
             )}
-            {result.status === "alive" && !isPlaying && (result.resolution || result.fps || result.video_bitrate || result.audio_bitrate) && (
+            {result.status === "alive" && (result.resolution || result.fps || result.video_bitrate || result.audio_bitrate) && (
               <div className="flex items-center justify-center gap-2 mt-2">
                 {result.resolution && result.resolution !== "Unknown" && (
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">{result.width}x{result.height}</span>
