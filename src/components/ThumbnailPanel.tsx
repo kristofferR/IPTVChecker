@@ -126,17 +126,7 @@ export function ThumbnailPanel({
     <div className="native-scroll flex flex-col gap-3 p-4 overflow-y-auto select-none">
       <div className="flex items-center gap-2">
         <StatusBadge status={result.status} />
-        <h3 className="text-[14px] font-semibold truncate flex-1">{result.name}</h3>
-        {onPlayChannel && (
-          <button
-            type="button"
-            onClick={() => onPlayChannel(result)}
-            className="shrink-0 flex items-center justify-center w-7 h-7 rounded-full bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition-colors"
-            title="Open in player"
-          >
-            <Play className="w-3.5 h-3.5 ml-0.5" />
-          </button>
-        )}
+        <h3 className="text-[14px] font-semibold truncate">{result.name}</h3>
       </div>
 
       {screenshotUrl ? (
@@ -199,6 +189,20 @@ export function ThumbnailPanel({
           <p className="text-[11px] text-text-tertiary">Enable screenshots in Settings to capture thumbnails.</p>
         </div>
       ) : null}
+
+      {onPlayChannel && (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onPlayChannel(result)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition-colors"
+            title="Open in player"
+          >
+            <Play className="w-3.5 h-3.5" />
+            Play
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-2 text-[11px]">
         <div>
