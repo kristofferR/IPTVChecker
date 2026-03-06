@@ -1,6 +1,6 @@
 import { memo, type ReactNode } from "react";
 import type { ScanProgress, ScanSummary } from "../lib/types";
-import type { ScanState } from "../hooks/useScan";
+import type { ScanState } from "../lib/scanState";
 import {
   SFCheckmarkCircleFill,
   SFXmarkCircleFill,

@@ -24,7 +24,7 @@ import {
 } from "./SFSymbols";
 import type { PointerEvent, RefObject } from "react";
 import type { ChannelResult } from "../lib/types";
-import type { ScanState } from "../hooks/useScan";
+import type { ScanState } from "../lib/scanState";
 import { ExportMenu } from "./ExportMenu";
 import type { ExportScope } from "../lib/exportScope";
 

@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import { SFSquareArrowUp, SFChevronDown } from "./SFSymbols";
 import type { ChannelResult } from "../lib/types";
-import type { ScanState } from "../hooks/useScan";
 import {
   exportCsv,
   exportM3u,
@@ -29,7 +28,7 @@ import {
   PerformanceTime,
   triggerHaptic,
 } from "../lib/haptics";
-import { isScanActive } from "../lib/scanState";
+import { isScanActive, type ScanState } from "../lib/scanState";
 
 interface ExportMenuProps {
   scopeCounts: Record<ExportScope, number>;

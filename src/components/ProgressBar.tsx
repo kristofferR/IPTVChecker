@@ -1,7 +1,6 @@
 import { memo } from "react";
 import type { ScanProgress } from "../lib/types";
-import type { ScanState } from "../hooks/useScan";
-import { isScanActive } from "../lib/scanState";
+import { isScanActive, type ScanState } from "../lib/scanState";
 
 function formatEta(seconds: number | null): string {
   if (seconds == null || !Number.isFinite(seconds)) return "—";

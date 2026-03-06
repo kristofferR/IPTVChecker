@@ -19,6 +19,7 @@ import {
 import { ChannelRow } from "./ChannelRow";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { getChannelErrorReason } from "../lib/channelResults";
+import { statusLabel } from "../lib/format";
 import { measureUiPerf } from "../lib/perf";
 import { isScanActive, type ScanState } from "../lib/scanState";
 import { isPrimaryModifierPressed } from "../lib/shortcuts";
@@ -53,13 +54,6 @@ function buildM3uEntryText(channel: ChannelResult): string {
 const DEFAULT_VISIBLE_SINGLE_PLAYLIST_COLUMN_ORDER: ColumnKey[] =
   DEFAULT_VISIBLE_COLUMN_ORDER.filter((key) => key !== "playlist");
 
-function formatStatusLabel(status: ChannelResult["status"]): string {
-  return status
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
 function buildChannelMetadataSummary(channel: ChannelResult): string {
   const videoBitrate = channel.video_bitrate ?? "Unknown";
   const audioBitrate = channel.audio_bitrate
@@ -76,7 +70,7 @@ function buildChannelMetadataSummary(channel: ChannelResult): string {
     `Name: ${channel.name}`,
     `Group: ${channel.group}`,
     `Playlist: ${channel.playlist}`,
-    `Status: ${formatStatusLabel(channel.status)}`,
+    `Status: ${statusLabel(channel.status)}`,
     `Protocol: ${protocol.toUpperCase()}`,
     `Error Reason: ${errorReason}`,
     `URL: ${channel.url}`,
