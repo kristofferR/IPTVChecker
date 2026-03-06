@@ -34,6 +34,7 @@ interface ChannelTableProps {
   onSelectChannel: (result: ChannelResult) => void;
   onOpenChannel?: (result: ChannelResult) => void;
   onOpenExternal?: (result: ChannelResult) => void;
+  isPlaying?: boolean;
   onSelectionChange?: (selectedIndices: number[]) => void;
   onScanSelected?: (selectedIndices: number[]) => void;
   headerPortalRef?: RefObject<HTMLDivElement | null>;
@@ -195,6 +196,7 @@ export function ChannelTable({
   onSelectChannel,
   onOpenChannel,
   onOpenExternal,
+  isPlaying,
   onSelectionChange,
   onScanSelected,
   scanState,
@@ -663,6 +665,7 @@ export function ChannelTable({
           emitSelection(selected);
           setSelectionAnchor(result.index);
           onSelectChannel(result);
+          if (isPlaying) onOpenChannel?.(result);
         }
 
         virtualizer.scrollToIndex(next, { align: "auto" });
@@ -674,6 +677,8 @@ export function ChannelTable({
       selectedIndices,
       emitSelection,
       onSelectChannel,
+      onOpenChannel,
+      isPlaying,
       virtualizer,
     ],
   );

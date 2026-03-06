@@ -2030,6 +2030,7 @@ export default function App() {
                 onSelectChannel={handleSelectChannel}
                 onOpenChannel={handlePlayInApp}
                 onOpenExternal={handleOpenExternal}
+                isPlaying={streamPlayer.playerState !== "idle"}
                 onSelectionChange={setSelectedChannelIndices}
                 onScanSelected={handleScanSelected}
                 headerPortalRef={isMac ? headerPortalRef : undefined}
