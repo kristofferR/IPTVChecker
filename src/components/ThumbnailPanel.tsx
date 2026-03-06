@@ -487,7 +487,7 @@ export function ThumbnailPanel({
               {result.name}
             </h2>
             {isPlaying && videoElement && onTogglePause && onStopPlayer && onSetVolume && onToggleMute ? (
-              <div className="relative w-[800px] max-w-[88vw] mb-10">
+              <div className="relative w-[800px] max-w-[88vw] mb-14 mt-2">
                 <StreamPlayer
                   containerRef={lightboxPlayerRef}
                   playerState={playerState}
@@ -505,7 +505,7 @@ export function ThumbnailPanel({
                 <button
                   type="button"
                   onClick={onStopPlayer}
-                  className="absolute -bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 text-[13px] font-medium rounded-lg bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-colors"
+                  className="absolute -bottom-14 left-1/2 -translate-x-1/2 flex items-center gap-2 px-6 py-3 text-[15px] font-medium rounded-xl bg-red-600 hover:bg-red-500 text-white shadow-lg transition-colors"
                 >
                   <Square className="w-4 h-4" />
                   Stop
