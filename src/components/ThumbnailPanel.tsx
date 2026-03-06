@@ -489,7 +489,7 @@ export function ThumbnailPanel({
               {result.name}
             </h2>
             {isPlaying && videoElement && onTogglePause && onStopPlayer && onSetVolume && onToggleMute ? (
-              <div className="relative w-[800px] max-w-[88vw] mb-14 mt-2">
+              <div className="relative max-w-[88vw] mb-14 mt-2 [&>div]:rounded-xl [&>div]:border-white/15 [&>div]:shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]" style={{ width: "min(800px, 88vw)" }}>
                 <StreamPlayer
                   containerRef={lightboxPlayerRef}
                   playerState={playerState}
