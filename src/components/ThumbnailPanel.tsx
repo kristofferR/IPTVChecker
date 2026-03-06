@@ -223,23 +223,24 @@ export function ThumbnailPanel({
         <h3 className="text-[14px] font-semibold truncate">{result.name}</h3>
       </div>
 
-      {isPlaying && videoElement && onTogglePause && onStopPlayer && onSetVolume && onToggleMute ? (
-        <div className={lightboxOpen ? "invisible" : ""}>
-          <StreamPlayer
-            containerRef={sidebarPlayerRef}
-            playerState={playerState}
-            errorMessage={playerErrorMessage ?? null}
-            isPaused={isPaused ?? false}
-            volume={volume ?? 0.75}
-            muted={muted ?? false}
-            onTogglePause={onTogglePause}
-            onStop={onStopPlayer}
-            onSetVolume={onSetVolume}
-            onToggleMute={onToggleMute}
-            onOpenExternal={() => onOpenExternal?.(result)}
-            onRetry={() => onRetryPlay?.(result)}
-          />
-        </div>
+      {/* Hidden sidebar container keeps the ref alive for FLIP handoff from lightbox */}
+      {isPlaying && lightboxOpen && <div ref={sidebarPlayerRef} className="hidden" />}
+
+      {isPlaying && !lightboxOpen && videoElement && onTogglePause && onStopPlayer && onSetVolume && onToggleMute ? (
+        <StreamPlayer
+          containerRef={sidebarPlayerRef}
+          playerState={playerState}
+          errorMessage={playerErrorMessage ?? null}
+          isPaused={isPaused ?? false}
+          volume={volume ?? 0.75}
+          muted={muted ?? false}
+          onTogglePause={onTogglePause}
+          onStop={onStopPlayer}
+          onSetVolume={onSetVolume}
+          onToggleMute={onToggleMute}
+          onOpenExternal={() => onOpenExternal?.(result)}
+          onRetry={() => onRetryPlay?.(result)}
+        />
       ) : screenshotUrl ? (
         <button
           type="button"
