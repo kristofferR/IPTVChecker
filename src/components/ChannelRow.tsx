@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useState } from "react";
 import type { ChannelLogoSize, ChannelResult } from "../lib/types";
 import type { ColumnDefinition } from "../lib/tableColumns";
 import { Radio, Tv } from "lucide-react";
+import { getChannelErrorReason } from "../lib/channelResults";
 import { StatusBadge } from "./StatusBadge";
 import { extractTvgLogoUrl } from "../lib/extinf";
 import { channelLogoPixels, channelRowHeightPixels } from "../lib/channelLogoSize";
@@ -62,10 +63,7 @@ function ChannelRowImpl({
     () => Math.max(14, Math.round(logoSizePx * 0.78)),
     [logoSizePx],
   );
-  const errorReason =
-    result.error_reason?.trim() ||
-    result.last_error_reason?.trim() ||
-    null;
+  const errorReason = getChannelErrorReason(result);
   const drmStatusTitle = result.drm_system
     ? `DRM: ${result.drm_system}`
     : "DRM-protected stream";

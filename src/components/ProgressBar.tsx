@@ -1,6 +1,7 @@
 import { memo } from "react";
 import type { ScanProgress } from "../lib/types";
 import type { ScanState } from "../hooks/useScan";
+import { isScanActive } from "../lib/scanState";
 
 function formatEta(seconds: number | null): string {
   if (seconds == null || !Number.isFinite(seconds)) return "—";
@@ -34,7 +35,7 @@ export const ProgressBar = memo(function ProgressBar({
       ? Math.round((progress.completed / progress.total) * 100)
       : 0;
 
-  const showTelemetry = scanState === "scanning" || scanState === "paused";
+  const showTelemetry = isScanActive(scanState);
 
   let telemetryLabel: string | null = null;
   if (showTelemetry) {

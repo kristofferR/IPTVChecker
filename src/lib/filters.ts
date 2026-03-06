@@ -1,4 +1,5 @@
 import type { ChannelResult, ChannelStatus } from "./types";
+import { getChannelErrorReason } from "./channelResults";
 
 export type SortField =
   | "index"
@@ -235,8 +236,8 @@ export function sortResults(
         );
       case "error":
         return compareOptionalText(
-          a.error_reason ?? a.last_error_reason,
-          b.error_reason ?? b.last_error_reason,
+          getChannelErrorReason(a),
+          getChannelErrorReason(b),
           dir,
           a.index,
           b.index,

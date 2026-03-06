@@ -1,11 +1,12 @@
 import { CircleHelp, Filter } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { isScanActive, type ScanState } from "../lib/scanState";
 
 interface FilterBarProps {
   channelSearch: string;
   onChannelSearchChange: (value: string) => void;
   channelSearchError: string | null;
-  scanState: string;
+  scanState: ScanState;
   visible: boolean;
 }
 
@@ -16,7 +17,7 @@ export function FilterBar({
   scanState,
   visible,
 }: FilterBarProps) {
-  const isScanning = scanState === "scanning" || scanState === "paused";
+  const isScanning = isScanActive(scanState);
   const [showRegexHelp, setShowRegexHelp] = useState(false);
   const regexHelpRef = useRef<HTMLDivElement>(null);
 

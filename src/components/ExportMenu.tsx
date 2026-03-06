@@ -23,33 +23,13 @@ import {
   exportScopeLabel,
   type ExportScope,
 } from "../lib/exportScope";
-import {
-  COLUMN_ORDER_STORAGE_KEY,
-  DEFAULT_VISIBLE_COLUMN_ORDER,
-  type ColumnKey,
-} from "../lib/tableColumns";
+import { readStoredVisibleColumnOrder } from "../lib/tableColumns";
 import {
   HapticFeedbackPattern,
   PerformanceTime,
   triggerHaptic,
 } from "../lib/haptics";
-
-function readVisibleColumns(): ColumnKey[] {
-  const raw = localStorage.getItem(COLUMN_ORDER_STORAGE_KEY);
-  if (!raw) {
-    return DEFAULT_VISIBLE_COLUMN_ORDER;
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return DEFAULT_VISIBLE_COLUMN_ORDER;
-    }
-    return parsed.filter((value): value is ColumnKey => typeof value === "string");
-  } catch {
-    return DEFAULT_VISIBLE_COLUMN_ORDER;
-  }
-}
+import { isScanActive } from "../lib/scanState";
 
 interface ExportMenuProps {
   scopeCounts: Record<ExportScope, number>;
@@ -103,7 +83,7 @@ export function ExportMenu({
     return () => clearTimeout(timer);
   }, [feedback]);
 
-  const isPartial = scanState === "scanning" || scanState === "paused";
+  const isPartial = isScanActive(scanState);
   const normalizedPlaylistPath = playlistPath.replace(/\\/g, "/");
   const sourceDir = normalizedPlaylistPath.includes("/")
     ? normalizedPlaylistPath.slice(0, normalizedPlaylistPath.lastIndexOf("/"))
@@ -163,7 +143,7 @@ export function ExportMenu({
         scoped,
         path,
         playlistName,
-        readVisibleColumns().includes("latency"),
+        readStoredVisibleColumnOrder().includes("latency"),
       );
       setFeedback({
         kind: "success",

@@ -3,7 +3,9 @@ import { createPortal } from "react-dom";
 import { CircleHelp, Copy, ExternalLink, Fullscreen, ImageOff, LoaderCircle, Play, RotateCw, Shrink, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { ChannelResult } from "../lib/types";
+import { getChannelErrorReason } from "../lib/channelResults";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
+import { isScanActive, type ScanState } from "../lib/scanState";
 import { StatusBadge } from "./StatusBadge";
 import { StreamPlayer } from "./StreamPlayer";
 
@@ -13,7 +15,7 @@ interface ThumbnailPanelProps {
   screenshotLoading: boolean;
   screenshotLoadError: boolean;
   screenshotsEnabled: boolean;
-  scanState: "idle" | "scanning" | "paused" | "complete" | "cancelled";
+  scanState: ScanState;
   lightboxOpen: boolean;
   onLightboxChange: (open: boolean) => void;
   onPlayChannel?: (result: ChannelResult) => void;
@@ -170,13 +172,10 @@ export function ThumbnailPanel({
   }
 
   const retryCount = result.retry_count ?? 0;
-  const lastErrorReason =
-    result.error_reason?.trim() ||
-    result.last_error_reason?.trim() ||
-    null;
+  const lastErrorReason = getChannelErrorReason(result);
   const resolvedUrl = result.stream_url?.trim() || null;
   const showResolvedUrl = !!resolvedUrl && resolvedUrl !== result.url;
-  const scanActive = scanState === "scanning" || scanState === "paused";
+  const scanActive = isScanActive(scanState);
   const waitingForScanResult =
     scanActive && (result.status === "pending" || result.status === "checking");
   const showUnscannedPlaceholder =

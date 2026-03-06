@@ -53,3 +53,64 @@ export const DEFAULT_COLUMN_WIDTHS: Record<ColumnKey, number> =
     },
     {} as Record<ColumnKey, number>,
   );
+
+export function parseStoredColumnOrder(
+  raw: string | null,
+  fallbackOrder: ColumnKey[],
+): ColumnKey[] {
+  if (!raw) return fallbackOrder;
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return fallbackOrder;
+
+    const known = new Set(DEFAULT_COLUMN_ORDER);
+    const deduped: ColumnKey[] = [];
+    for (const item of parsed) {
+      if (typeof item !== "string") continue;
+      if (!known.has(item as ColumnKey)) continue;
+      if (deduped.includes(item as ColumnKey)) continue;
+      deduped.push(item as ColumnKey);
+    }
+
+    if (deduped.length === 0) {
+      return fallbackOrder;
+    }
+
+    for (const key of fallbackOrder) {
+      if (!deduped.includes(key)) deduped.push(key);
+    }
+    return deduped;
+  } catch {
+    return fallbackOrder;
+  }
+}
+
+export function readStoredVisibleColumnOrder(): ColumnKey[] {
+  return parseStoredColumnOrder(
+    localStorage.getItem(COLUMN_ORDER_STORAGE_KEY),
+    DEFAULT_VISIBLE_COLUMN_ORDER,
+  );
+}
+
+export function parseStoredColumnWidths(raw: string | null): Record<ColumnKey, number> {
+  const widths = { ...DEFAULT_COLUMN_WIDTHS };
+  if (!raw) return widths;
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return widths;
+
+    for (const key of DEFAULT_COLUMN_ORDER) {
+      const maybeWidth = parsed[key];
+      const minWidth = COLUMN_DEFINITION_MAP[key].minWidth;
+      if (typeof maybeWidth === "number" && Number.isFinite(maybeWidth)) {
+        widths[key] = Math.max(minWidth, Math.round(maybeWidth));
+      }
+    }
+  } catch {
+    // Ignore malformed persisted values.
+  }
+
+  return widths;
+}

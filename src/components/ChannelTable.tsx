@@ -12,11 +12,15 @@ import {
   DEFAULT_COLUMN_ORDER,
   DEFAULT_VISIBLE_COLUMN_ORDER,
   DEFAULT_COLUMN_WIDTHS,
+  parseStoredColumnOrder,
+  parseStoredColumnWidths,
   type ColumnKey,
 } from "../lib/tableColumns";
 import { ChannelRow } from "./ChannelRow";
 import { ArrowDown, ArrowUp } from "lucide-react";
+import { getChannelErrorReason } from "../lib/channelResults";
 import { measureUiPerf } from "../lib/perf";
+import { isScanActive, type ScanState } from "../lib/scanState";
 import { isPrimaryModifierPressed } from "../lib/shortcuts";
 import { channelRowHeightPixels } from "../lib/channelLogoSize";
 import { detectChannelProtocol } from "../lib/streamProtocol";
@@ -30,7 +34,7 @@ interface ChannelTableProps {
   statusFilter: string;
   isMac: boolean;
   channelLogoSize: ChannelLogoSize;
-  scanState?: "idle" | "scanning" | "paused" | "complete" | "cancelled";
+  scanState?: ScanState;
   onSelectChannel: (result: ChannelResult) => void;
   onOpenChannel?: (result: ChannelResult) => void;
   onOpenExternal?: (result: ChannelResult) => void;
@@ -66,10 +70,7 @@ function buildChannelMetadataSummary(channel: ChannelResult): string {
   const hasResolvedStreamUrl =
     !!resolvedStreamUrl && resolvedStreamUrl !== channel.url;
   const protocol = detectChannelProtocol(channel) ?? "Unknown";
-  const errorReason =
-    channel.error_reason?.trim() ||
-    channel.last_error_reason?.trim() ||
-    "N/A";
+  const errorReason = getChannelErrorReason(channel) ?? "N/A";
 
   const lines = [
     `Name: ${channel.name}`,
@@ -90,56 +91,6 @@ function buildChannelMetadataSummary(channel: ChannelResult): string {
   }
 
   return lines.join("\n");
-}
-
-function parseStoredOrder(raw: string | null, fallbackOrder: ColumnKey[]): ColumnKey[] {
-  if (!raw) return fallbackOrder;
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return fallbackOrder;
-
-    const known = new Set(DEFAULT_COLUMN_ORDER);
-    const deduped: ColumnKey[] = [];
-    for (const item of parsed) {
-      if (typeof item !== "string") continue;
-      if (!known.has(item as ColumnKey)) continue;
-      if (deduped.includes(item as ColumnKey)) continue;
-      deduped.push(item as ColumnKey);
-    }
-
-    if (deduped.length === 0) {
-      return fallbackOrder;
-    }
-
-    for (const key of fallbackOrder) {
-      if (!deduped.includes(key)) deduped.push(key);
-    }
-    return deduped;
-  } catch {
-    return fallbackOrder;
-  }
-}
-
-function parseStoredWidths(raw: string | null): Record<ColumnKey, number> {
-  const widths = { ...DEFAULT_COLUMN_WIDTHS };
-  if (!raw) return widths;
-
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return widths;
-
-    for (const key of DEFAULT_COLUMN_ORDER) {
-      const maybeWidth = parsed[key];
-      const minWidth = COLUMN_DEFINITION_MAP[key].minWidth;
-      if (typeof maybeWidth === "number" && Number.isFinite(maybeWidth)) {
-        widths[key] = Math.max(minWidth, Math.round(maybeWidth));
-      }
-    }
-  } catch {
-    // Ignore malformed persisted values.
-  }
-
-  return widths;
 }
 
 function columnOrderMatchesDefaults(
@@ -235,13 +186,13 @@ export function ChannelTable({
     width: number;
   } | null>(null);
   const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(() =>
-    parseStoredOrder(
+    parseStoredColumnOrder(
       localStorage.getItem(COLUMN_ORDER_STORAGE_KEY),
       DEFAULT_VISIBLE_SINGLE_PLAYLIST_COLUMN_ORDER,
     ),
   );
   const [columnWidths, setColumnWidths] = useState<Record<ColumnKey, number>>(
-    () => parseStoredWidths(localStorage.getItem(COLUMN_WIDTH_STORAGE_KEY)),
+    () => parseStoredColumnWidths(localStorage.getItem(COLUMN_WIDTH_STORAGE_KEY)),
   );
   const searchTextCacheRef = useRef<SearchTextCache>(new WeakMap());
   const filteredResultsRef = useRef<ChannelResult[]>([]);
@@ -1188,7 +1139,7 @@ export function ChannelTable({
         >
           <button
             onClick={handleScanSelected}
-            disabled={selectedIndices.size === 0 || scanState === "scanning" || scanState === "paused"}
+            disabled={selectedIndices.size === 0 || isScanActive(scanState)}
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
             type="button"
           >

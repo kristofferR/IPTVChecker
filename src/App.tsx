@@ -21,7 +21,6 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import type {
-  Channel,
   ChannelResult,
   PlaylistPreview,
   RecentPlaylistEntry,
@@ -66,7 +65,9 @@ import { detectPlatform, type Platform } from "./lib/platform";
 import { countStatusOptions, filterResults, type SearchTextCache } from "./lib/filters";
 import { logger } from "./lib/logger";
 import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/haptics";
+import { toPendingChannelResult } from "./lib/channelResults";
 import type { ExportScope } from "./lib/exportScope";
+import { isScanActive } from "./lib/scanState";
 import { isPrimaryModifierPressed } from "./lib/shortcuts";
 import { measureUiPerf, recordUiPerf, startLongTaskObserver } from "./lib/perf";
 import { shouldAutoRevealReportPanel } from "./lib/playlistReportVisibility";
@@ -199,29 +200,6 @@ async function canSendNotifications(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function channelToStubResult(ch: Channel): ChannelResult {
-  return {
-    ...ch,
-    status: "pending",
-    codec: null,
-    resolution: null,
-    width: null,
-    height: null,
-    fps: null,
-    latency_ms: null,
-    video_bitrate: null,
-    audio_bitrate: null,
-    audio_codec: null,
-    audio_only: false,
-    screenshot_path: null,
-    label_mismatches: [],
-    low_framerate: false,
-    error_message: null,
-    channel_id: `${ch.index}`,
-    stream_url: null,
-  };
 }
 
 function inferPlatformFromNavigator(): Platform {
@@ -976,8 +954,7 @@ export default function App() {
   useEffect(() => {
     const previousScanState = previousScanStateRef.current;
     previousScanStateRef.current = scanState;
-    const justFinished =
-      previousScanState === "scanning" || previousScanState === "paused";
+    const justFinished = isScanActive(previousScanState);
 
     if (scanState === "complete" && playlist) {
       void refreshHistory();
@@ -1060,7 +1037,7 @@ export default function App() {
       }
     };
 
-    if (scanState === "scanning" || scanState === "paused") {
+    if (isScanActive(scanState)) {
       const now = Date.now();
       const elapsed = now - lastOsProgressUpdateMsRef.current;
       const shouldUpdateNow =
@@ -1547,7 +1524,7 @@ export default function App() {
 
   const markManualReportVisibility = useCallback((nextVisible: boolean) => {
     reportWasAutoShownRef.current = false;
-    const isActiveScan = scanState === "scanning" || scanState === "paused";
+    const isActiveScan = isScanActive(scanState);
     if (!isActiveScan) {
       return;
     }
@@ -1587,7 +1564,7 @@ export default function App() {
 
   const handlePlayInApp = useCallback(
     (result: ChannelResult) => {
-      if (scanState === "scanning" || scanState === "paused") {
+      if (isScanActive(scanState)) {
         setPendingPlaybackChannel(result);
         return;
       }
@@ -1621,7 +1598,7 @@ export default function App() {
         if (completedResults.length > 0) {
           setSelectedChannel(completedResults[0]);
         } else if (playlist && playlist.channels.length > 0) {
-          setSelectedChannel(channelToStubResult(playlist.channels[0]));
+          setSelectedChannel(toPendingChannelResult(playlist.channels[0]));
         }
       }
       setSidebarHidden(false);
@@ -1889,7 +1866,7 @@ export default function App() {
         </div>
       )}
 
-      {screenshotsPaused && (scanState === "scanning" || scanState === "paused") && (
+      {screenshotsPaused && isScanActive(scanState) && (
         <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-[13px]">
           <span className="flex-1">Screenshot capture paused — low disk space</span>
         </div>
