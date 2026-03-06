@@ -2174,6 +2174,7 @@ export default function App() {
         duplicateCount={duplicateIndices.size}
         statusFilter={statusFilter}
         onStatusChange={handleStatusFilterChange}
+        onScoreClick={() => setShowReportPanel((v) => !v)}
       />
       <ProgressBar
         progress={progress}

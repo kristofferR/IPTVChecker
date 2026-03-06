@@ -22,6 +22,7 @@ interface StatsPanelProps {
   duplicateCount: number;
   statusFilter: string;
   onStatusChange: (value: string) => void;
+  onScoreClick?: () => void;
 }
 
 function Pill({
@@ -98,6 +99,7 @@ export const StatsPanel = memo(function StatsPanel({
   duplicateCount,
   statusFilter,
   onStatusChange,
+  onScoreClick,
 }: StatsPanelProps) {
   const stats = summary ?? progress;
   const effectiveLowFpsCount = summary?.low_framerate ?? lowFpsCount;
@@ -160,6 +162,7 @@ export const StatsPanel = memo(function StatsPanel({
           icon={null}
           label={`Score ${summary.playlist_score.overall.toFixed(1)}/10`}
           color="blue"
+          onClick={onScoreClick}
         />
       )}
       {showRightStatus && (
