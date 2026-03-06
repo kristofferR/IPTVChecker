@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { CircleHelp, Copy, ExternalLink, ImageOff, LoaderCircle, Play, RotateCw, Square, X } from "lucide-react";
+import { CircleHelp, Copy, ExternalLink, ImageOff, LoaderCircle, Maximize, Minimize, Play, RotateCw, Square, X } from "lucide-react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { ChannelResult } from "../lib/types";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
 import { StatusBadge } from "./StatusBadge";
@@ -60,6 +61,8 @@ export function ThumbnailPanel({
 }: ThumbnailPanelProps) {
   const [lightboxRendered, setLightboxRendered] = useState(false);
   const [lightboxVisible, setLightboxVisible] = useState(false);
+  const [theaterMode, setTheaterMode] = useState(false);
+  const [theaterHover, setTheaterHover] = useState(false);
   const [resolvedUrlCopied, setResolvedUrlCopied] = useState(false);
   const [urlCopied, setUrlCopied] = useState(false);
 
@@ -111,8 +114,12 @@ export function ThumbnailPanel({
   }, [isPlaying, videoElement, lightboxOpen, lightboxRendered, playerState]);
 
   const closeLightbox = useCallback(() => {
+    if (theaterMode) {
+      setTheaterMode(false);
+      void getCurrentWindow().setFullscreen(false);
+    }
     onLightboxChange(false);
-  }, [onLightboxChange]);
+  }, [onLightboxChange, theaterMode]);
 
   const openLightbox = useCallback(() => {
     if (!screenshotUrl) return;
@@ -126,8 +133,12 @@ export function ThumbnailPanel({
       requestAnimationFrame(() => setLightboxVisible(true));
     } else {
       setLightboxVisible(false);
+      if (theaterMode) {
+        setTheaterMode(false);
+        void getCurrentWindow().setFullscreen(false);
+      }
     }
-  }, [lightboxOpen]);
+  }, [lightboxOpen, theaterMode]);
 
   useEffect(() => {
     if (!lightboxRendered) return;
@@ -463,8 +474,10 @@ export function ThumbnailPanel({
 
       {lightboxRendered && createPortal(
         <div
-          className={`fixed inset-0 z-[80] flex items-center justify-center px-6 py-10 transition-all duration-200 ${
-            lightboxVisible ? "bg-black/70 opacity-100" : "bg-black/0 opacity-0"
+          className={`fixed inset-0 z-[80] flex items-center justify-center transition-all duration-200 ${
+            theaterMode ? "p-0" : "px-6 py-10"
+          } ${
+            lightboxVisible ? (theaterMode ? "bg-black opacity-100" : "bg-black/70 opacity-100") : "bg-black/0 opacity-0"
           }`}
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
@@ -475,22 +488,35 @@ export function ThumbnailPanel({
           <button
             type="button"
             onClick={closeLightbox}
-            className="absolute top-5 right-5 p-2 rounded-full bg-black/35 text-white hover:bg-black/55 transition-colors"
+            className={`absolute top-5 right-5 p-2 rounded-full bg-black/35 text-white hover:bg-black/55 transition-colors ${theaterMode ? "hidden" : ""}`}
             aria-label="Close image preview"
           >
             <X className="w-5 h-5" />
           </button>
           <div
-            className={`max-h-full max-w-full flex flex-col items-center gap-3 transition-all duration-200 ${
+            className={`flex flex-col items-center transition-all duration-200 ${
+              theaterMode ? "w-full h-full gap-0" : "max-h-full max-w-full gap-3"
+            } ${
               lightboxVisible ? "opacity-100 scale-100" : "opacity-0 scale-95"
             }`}
             onMouseDown={(event) => event.stopPropagation()}
           >
-            <h2 className="text-white text-[15px] font-semibold truncate max-w-[88vw] text-center drop-shadow-lg">
-              {result.name}
-            </h2>
+            {!theaterMode && (
+              <h2 className="text-white text-[15px] font-semibold truncate max-w-[88vw] text-center drop-shadow-lg">
+                {result.name}
+              </h2>
+            )}
             {isPlaying && videoElement && onTogglePause && onStopPlayer && onSetVolume && onToggleMute ? (
-              <div className="relative mb-14 mt-2 [&>div]:rounded-xl [&>div]:border-white/15 [&>div]:shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]" style={{ width: "min(calc(84vh * 16 / 9), 88vw)" }}>
+              <div
+                className={`relative ${
+                  theaterMode
+                    ? "w-full h-full [&>div]:rounded-none [&>div]:border-0 [&>div]:shadow-none [&>div]:aspect-auto [&>div]:h-full"
+                    : "mb-14 mt-2 [&>div]:rounded-xl [&>div]:border-white/15 [&>div]:shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]"
+                }`}
+                style={theaterMode ? undefined : { width: "min(calc(84vh * 16 / 9), 88vw)" }}
+                onMouseEnter={() => setTheaterHover(true)}
+                onMouseLeave={() => setTheaterHover(false)}
+              >
                 <StreamPlayer
                   containerRef={lightboxPlayerRef}
                   playerState={playerState}
@@ -507,12 +533,28 @@ export function ThumbnailPanel({
                 />
                 <button
                   type="button"
-                  onClick={onStopPlayer}
-                  className="absolute -bottom-14 left-1/2 -translate-x-1/2 flex items-center gap-2 px-6 py-3 text-[15px] font-medium rounded-xl bg-red-600 hover:bg-red-500 text-white shadow-lg transition-colors"
+                  onClick={() => {
+                    const next = !theaterMode;
+                    setTheaterMode(next);
+                    void getCurrentWindow().setFullscreen(next);
+                  }}
+                  className={`absolute top-3 right-3 p-2.5 rounded-xl bg-black/50 text-white hover:bg-black/70 transition-all duration-200 ${
+                    theaterHover ? "opacity-100" : "opacity-0"
+                  }`}
+                  title={theaterMode ? "Exit fullscreen" : "Fullscreen"}
                 >
-                  <Square className="w-4 h-4" />
-                  Stop
+                  {theaterMode ? <Minimize className="w-6 h-6" /> : <Maximize className="w-6 h-6" />}
                 </button>
+                {!theaterMode && (
+                  <button
+                    type="button"
+                    onClick={onStopPlayer}
+                    className="absolute -bottom-14 left-1/2 -translate-x-1/2 flex items-center gap-2 px-6 py-3 text-[15px] font-medium rounded-xl bg-red-600 hover:bg-red-500 text-white shadow-lg transition-colors"
+                  >
+                    <Square className="w-4 h-4" />
+                    Stop
+                  </button>
+                )}
               </div>
             ) : screenshotUrl ? (
               <img
@@ -536,7 +578,7 @@ export function ThumbnailPanel({
                 )}
               </div>
             )}
-            {!isPlaying && (onPlayChannel || onScanChannel) && (
+            {!theaterMode && !isPlaying && (onPlayChannel || onScanChannel) && (
               <div className="flex items-center gap-2 mt-1">
                 {onPlayChannel && (
                   <button
@@ -561,7 +603,7 @@ export function ThumbnailPanel({
                 )}
               </div>
             )}
-            <div className="flex items-center justify-center gap-2 mt-2 min-h-[24px]">
+            <div className={`flex items-center justify-center gap-2 mt-2 min-h-[24px] ${theaterMode ? "hidden" : ""}`}>
               {result.status === "alive" && (
                 <>
                   {result.resolution && result.resolution !== "Unknown" && (
