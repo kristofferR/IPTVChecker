@@ -218,8 +218,17 @@ export function ChannelTable({
   }, [columnOrder, defaultVisibleColumnOrder]);
 
   useEffect(() => {
-    if (localStorage.getItem(COLUMN_ORDER_STORAGE_KEY) !== null) return;
     if (columnOrderMatchesDefaults(columnOrder, defaultVisibleColumnOrder)) return;
+    // Only skip the reset if the user has genuinely customized the column order
+    // (i.e. it doesn't match either of the two known defaults).
+    const stored = localStorage.getItem(COLUMN_ORDER_STORAGE_KEY);
+    if (stored !== null) {
+      const parsed = parseStoredColumnOrder(stored, defaultVisibleColumnOrder);
+      const isOtherDefault =
+        columnOrderMatchesDefaults(parsed, DEFAULT_VISIBLE_COLUMN_ORDER) ||
+        columnOrderMatchesDefaults(parsed, DEFAULT_VISIBLE_SINGLE_PLAYLIST_COLUMN_ORDER);
+      if (!isOtherDefault) return;
+    }
     setColumnOrder([...defaultVisibleColumnOrder]);
   }, [columnOrder, defaultVisibleColumnOrder]);
 
