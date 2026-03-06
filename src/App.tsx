@@ -1986,6 +1986,7 @@ export default function App() {
               lightboxOpen={lightboxOpen}
               onLightboxChange={setLightboxOpen}
               onPlayChannel={handleOpenChannel}
+              onScanChannel={handleScanSelected}
             />
           </div>
         )}

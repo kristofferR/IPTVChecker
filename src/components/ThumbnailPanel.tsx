@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { CircleHelp, ImageOff, LoaderCircle, Play, X } from "lucide-react";
+import { CircleHelp, ImageOff, LoaderCircle, Play, RotateCw, X } from "lucide-react";
 import type { ChannelResult } from "../lib/types";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
 import { StatusBadge } from "./StatusBadge";
@@ -15,6 +15,7 @@ interface ThumbnailPanelProps {
   lightboxOpen: boolean;
   onLightboxChange: (open: boolean) => void;
   onPlayChannel?: (result: ChannelResult) => void;
+  onScanChannel?: (indices: number[]) => void;
 }
 
 export function ThumbnailPanel({
@@ -27,6 +28,7 @@ export function ThumbnailPanel({
   lightboxOpen,
   onLightboxChange,
   onPlayChannel,
+  onScanChannel,
 }: ThumbnailPanelProps) {
   const [lightboxRendered, setLightboxRendered] = useState(false);
   const [lightboxVisible, setLightboxVisible] = useState(false);
@@ -190,17 +192,31 @@ export function ThumbnailPanel({
         </div>
       ) : null}
 
-      {onPlayChannel && (
+      {(onPlayChannel || onScanChannel) && (
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => onPlayChannel(result)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition-colors"
-            title="Open in player"
-          >
-            <Play className="w-3.5 h-3.5" />
-            Play
-          </button>
+          {onPlayChannel && (
+            <button
+              type="button"
+              onClick={() => onPlayChannel(result)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition-colors"
+              title="Open in player"
+            >
+              <Play className="w-3.5 h-3.5" />
+              Play
+            </button>
+          )}
+          {onScanChannel && (
+            <button
+              type="button"
+              disabled={scanActive}
+              onClick={() => onScanChannel([result.index])}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-btn hover:bg-btn-hover text-text-primary border border-border-app shadow-sm transition-colors disabled:opacity-40 disabled:pointer-events-none"
+              title={scanActive ? "Scan in progress" : result.status === "pending" || result.status === "checking" ? "Scan channel" : "Rescan channel"}
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+              {result.status === "pending" || result.status === "checking" ? "Scan" : "Rescan"}
+            </button>
+          )}
         </div>
       )}
 
