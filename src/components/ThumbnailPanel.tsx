@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { CircleHelp, ImageOff, LoaderCircle, X } from "lucide-react";
+import { CircleHelp, ImageOff, LoaderCircle, Play, X } from "lucide-react";
 import type { ChannelResult } from "../lib/types";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
 import { StatusBadge } from "./StatusBadge";
@@ -14,6 +14,7 @@ interface ThumbnailPanelProps {
   scanState: "idle" | "scanning" | "paused" | "complete" | "cancelled";
   lightboxOpen: boolean;
   onLightboxChange: (open: boolean) => void;
+  onPlayChannel?: (result: ChannelResult) => void;
 }
 
 export function ThumbnailPanel({
@@ -25,6 +26,7 @@ export function ThumbnailPanel({
   scanState,
   lightboxOpen,
   onLightboxChange,
+  onPlayChannel,
 }: ThumbnailPanelProps) {
   const [lightboxRendered, setLightboxRendered] = useState(false);
   const [lightboxVisible, setLightboxVisible] = useState(false);
@@ -124,7 +126,17 @@ export function ThumbnailPanel({
     <div className="native-scroll flex flex-col gap-3 p-4 overflow-y-auto select-none">
       <div className="flex items-center gap-2">
         <StatusBadge status={result.status} />
-        <h3 className="text-[14px] font-semibold truncate">{result.name}</h3>
+        <h3 className="text-[14px] font-semibold truncate flex-1">{result.name}</h3>
+        {onPlayChannel && (
+          <button
+            type="button"
+            onClick={() => onPlayChannel(result)}
+            className="shrink-0 flex items-center justify-center w-7 h-7 rounded-full bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition-colors"
+            title="Open in player"
+          >
+            <Play className="w-3.5 h-3.5 ml-0.5" />
+          </button>
+        )}
       </div>
 
       {screenshotUrl ? (
