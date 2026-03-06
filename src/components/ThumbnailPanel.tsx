@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { CircleHelp, ImageOff, LoaderCircle, Play, RotateCw, X } from "lucide-react";
+import { CircleHelp, Copy, ImageOff, LoaderCircle, Play, RotateCw, X } from "lucide-react";
 import type { ChannelResult } from "../lib/types";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
 import { StatusBadge } from "./StatusBadge";
@@ -33,6 +33,7 @@ export function ThumbnailPanel({
   const [lightboxRendered, setLightboxRendered] = useState(false);
   const [lightboxVisible, setLightboxVisible] = useState(false);
   const [resolvedUrlCopied, setResolvedUrlCopied] = useState(false);
+  const [urlCopied, setUrlCopied] = useState(false);
 
   const closeLightbox = useCallback(() => {
     onLightboxChange(false);
@@ -114,6 +115,15 @@ export function ThumbnailPanel({
     }
   }, [resolvedUrl]);
 
+  const handleCopyUrl = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(result.url);
+      setUrlCopied(true);
+    } catch {
+      setUrlCopied(false);
+    }
+  }, [result.url]);
+
   useEffect(() => {
     if (!resolvedUrlCopied) return;
     const timer = window.setTimeout(() => setResolvedUrlCopied(false), 1200);
@@ -121,7 +131,14 @@ export function ThumbnailPanel({
   }, [resolvedUrlCopied]);
 
   useEffect(() => {
+    if (!urlCopied) return;
+    const timer = window.setTimeout(() => setUrlCopied(false), 1200);
+    return () => window.clearTimeout(timer);
+  }, [urlCopied]);
+
+  useEffect(() => {
     setResolvedUrlCopied(false);
+    setUrlCopied(false);
   }, [result.index, result.stream_url, result.url]);
 
   return (
@@ -217,6 +234,15 @@ export function ThumbnailPanel({
               {result.status === "pending" || result.status === "checking" ? "Scan" : "Rescan"}
             </button>
           )}
+          <button
+            type="button"
+            onClick={handleCopyUrl}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-btn hover:bg-btn-hover text-text-primary border border-border-app shadow-sm transition-colors"
+            title="Copy channel URL"
+          >
+            <Copy className="w-3.5 h-3.5" />
+            {urlCopied ? "Copied" : "Copy URL"}
+          </button>
         </div>
       )}
 
