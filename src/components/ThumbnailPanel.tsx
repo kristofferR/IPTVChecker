@@ -155,10 +155,12 @@ export function ThumbnailPanel({
   const waitingForScanResult =
     scanActive && (result.status === "pending" || result.status === "checking");
   const showUnscannedPlaceholder =
-    !scanActive && (result.status === "pending" || result.status === "checking");
+    !scanActive && result.status === "pending";
+  const showQuickCheckSpinner =
+    !scanActive && result.status === "checking";
   const loadingStoredScreenshot =
     screenshotLoading || (!!result.screenshot_path && !screenshotUrl && !screenshotLoadError);
-  const showLoadingPlaceholder = screenshotsEnabled && (waitingForScanResult || loadingStoredScreenshot);
+  const showLoadingPlaceholder = showQuickCheckSpinner || (screenshotsEnabled && (waitingForScanResult || loadingStoredScreenshot));
   const showScreenshotError =
     screenshotsEnabled &&
     !showLoadingPlaceholder &&
@@ -521,7 +523,9 @@ export function ThumbnailPanel({
               <div className={lightboxPlaceholderClass} />
             ) : (
               <div className={`flex flex-col items-center justify-center gap-2 ${lightboxPlaceholderClass}`}>
-                {result.status === "pending" || result.status === "checking" ? (
+                {result.status === "checking" ? (
+                  <LoaderCircle className="w-24 h-24 text-white/40 animate-spin" strokeWidth={1.5} />
+                ) : result.status === "pending" ? (
                   <>
                     <CircleHelp className="w-24 h-24 text-white/40" strokeWidth={1.5} />
                     <span className="text-white/50 text-[14px] font-medium">Unscanned</span>

@@ -639,6 +639,7 @@ pub fn run() {
             commands::scan::resume_scan,
             commands::scan::cancel_scan,
             commands::scan::reset_scan,
+            commands::scan::quick_check_channel,
             commands::export::export_csv,
             commands::export::export_split,
             commands::export::export_renamed,

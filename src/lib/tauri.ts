@@ -82,6 +82,10 @@ export async function resetScan(): Promise<void> {
   return invoke("reset_scan");
 }
 
+export async function quickCheckChannel(channel: ChannelResult): Promise<ChannelResult> {
+  return invoke("quick_check_channel", { channel });
+}
+
 export async function exportCsv(
   results: ChannelResult[],
   path: string,

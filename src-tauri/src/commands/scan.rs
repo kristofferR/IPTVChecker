@@ -1920,6 +1920,79 @@ pub async fn reset_scan(app: AppHandle, window: Window) -> Result<(), AppError> 
     Ok(())
 }
 
+/// Lightweight single-channel status check that bypasses the scan engine mutex.
+/// Used by the frontend when in-app playback fails — checks whether the stream
+/// is alive or dead and returns the updated result directly.
+#[tauri::command]
+pub async fn quick_check_channel(
+    app: AppHandle,
+    channel: ChannelResult,
+) -> Result<ChannelResult, AppError> {
+    let state = app.state::<Arc<AppState>>();
+    let settings = state.settings.lock().await.clone();
+
+    let cancel_token = CancellationToken::new();
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .danger_accept_invalid_certs(settings.accept_invalid_certs)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap_or_default();
+
+    let ffprobe_ok = {
+        let (_, fp) = ffmpeg::check_availability(&app).await;
+        fp
+    };
+
+    let outcome = if checker::uses_ffprobe_liveness(&channel.url) {
+        checker::check_channel_status_with_ffprobe_debug(
+            &app,
+            &channel.url,
+            settings.ffprobe_timeout_secs,
+            settings.retries,
+            settings.retry_backoff.clone(),
+            None,
+            ffprobe_ok,
+            &cancel_token,
+        )
+        .await
+    } else {
+        checker::check_channel_status_with_debug(
+            &client,
+            &channel.url,
+            settings.timeout,
+            settings.retries,
+            settings.retry_backoff.clone(),
+            settings.extended_timeout,
+            &settings.user_agent,
+            &cancel_token,
+        )
+        .await
+    };
+
+    let (status, stream_url, latency_ms, error_reason) = match outcome {
+        Ok(o) => {
+            let status = match o.status.as_str() {
+                "Alive" => ChannelStatus::Alive,
+                "DRM" => ChannelStatus::Drm,
+                "Geoblocked" => ChannelStatus::Geoblocked,
+                "Geoblocked (Confirmed)" => ChannelStatus::GeoblockedConfirmed,
+                "Geoblocked (Unconfirmed)" => ChannelStatus::GeoblockedUnconfirmed,
+                _ => ChannelStatus::Dead,
+            };
+            (status, o.stream_url, o.latency_ms, o.last_error_reason)
+        }
+        Err(_) => (ChannelStatus::Dead, None, None, None),
+    };
+
+    let mut result = channel;
+    result.status = status;
+    result.stream_url = stream_url;
+    result.latency_ms = latency_ms;
+    result.error_reason = error_reason;
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

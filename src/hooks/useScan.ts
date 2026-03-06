@@ -719,6 +719,14 @@ export function useScan() {
     [],
   );
 
+  const updateResult = useCallback((result: ChannelResult) => {
+    setResults((prev) => {
+      const updated = [...prev];
+      updated[result.index] = result;
+      return updated;
+    });
+  }, []);
+
   return {
     results,
     flatResults,
@@ -735,5 +743,6 @@ export function useScan() {
     pause,
     resume,
     initFromPlaylist,
+    updateResult,
   };
 }

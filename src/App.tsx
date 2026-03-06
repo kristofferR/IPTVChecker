@@ -45,6 +45,7 @@ import {
   checkFfmpegAvailable,
   readScreenshot,
   openChannelInPlayer,
+  quickCheckChannel,
 } from "./lib/tauri";
 import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
@@ -385,6 +386,7 @@ export default function App() {
     pause,
     resume,
     initFromPlaylist,
+    updateResult,
   } = useScan();
   const channelSearchError = useMemo(
     () => validateRegexPattern(channelSearch),
@@ -1295,7 +1297,13 @@ export default function App() {
   );
 
   handlePlaybackFailedRef.current = (result) => {
-    void startScanWithSelection([result.index]);
+    // Set "checking" status immediately, then run a lightweight backend check
+    const checking = { ...result, status: "checking" as const };
+    updateResult(checking);
+    quickCheckChannel(result).then(
+      (checked) => updateResult(checked),
+      () => updateResult({ ...result, status: "dead" as const }),
+    );
   };
 
   // Refs for menu event handlers so listeners never need re-registration
