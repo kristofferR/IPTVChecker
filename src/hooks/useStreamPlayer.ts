@@ -57,12 +57,19 @@ function createVideoElement(): HTMLVideoElement {
 
 const LOADING_TIMEOUT_MS = 15_000;
 
-export function useStreamPlayer(): UseStreamPlayerReturn {
+interface UseStreamPlayerOptions {
+  onPlaybackFailed?: (result: ChannelResult) => void;
+}
+
+export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlayerReturn {
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   if (!videoElRef.current) {
     videoElRef.current = createVideoElement();
   }
   const videoElement = videoElRef.current;
+
+  const onPlaybackFailedRef = useRef(options?.onPlaybackFailed);
+  onPlaybackFailedRef.current = options?.onPlaybackFailed;
 
   const [playerState, setPlayerState] = useState<PlayerState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -221,10 +228,12 @@ export function useStreamPlayer(): UseStreamPlayerReturn {
       const url = result.url;
       const streamType = classifyStream(url);
 
+      const currentResult = result;
       loadingTimerRef.current = setTimeout(() => {
         cleanup();
-        setPlayerState("error");
-        setErrorMessage("Connection timed out after 15 seconds.");
+        setPlayerState("idle");
+        setActiveChannelIndex(null);
+        onPlaybackFailedRef.current?.(currentResult);
       }, LOADING_TIMEOUT_MS);
 
       // 1. Try native playback first
@@ -258,12 +267,11 @@ export function useStreamPlayer(): UseStreamPlayerReturn {
         }
       }
 
-      // All methods failed
+      // All methods failed — fall back to scanning
       if (loadingTimerRef.current) { clearTimeout(loadingTimerRef.current); loadingTimerRef.current = null; }
-      setPlayerState("error");
-      setErrorMessage(
-        "Unable to play this stream in-app. The server may block browser playback (CORS). Try the external player instead.",
-      );
+      setPlayerState("idle");
+      setActiveChannelIndex(null);
+      onPlaybackFailedRef.current?.(result);
     },
     [cleanup, tryNativePlayback, tryHlsPlayback, tryMpegtsPlayback, videoElement],
   );

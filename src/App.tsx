@@ -359,7 +359,10 @@ export default function App() {
     action: "csv" | "split" | "renamed" | "m3u" | "scanlog";
   } | null>(null);
 
-  const streamPlayer = useStreamPlayer();
+  const handlePlaybackFailedRef = useRef<((result: ChannelResult) => void) | undefined>(undefined);
+  const streamPlayer = useStreamPlayer({
+    onPlaybackFailed: (result) => handlePlaybackFailedRef.current?.(result),
+  });
 
   const { settings, save: saveSettings, applyExternal: applyExternalSettings } = useSettings();
   const settingsRef = useRef(settings);
@@ -1290,6 +1293,10 @@ export default function App() {
     },
     [startScanWithSelection],
   );
+
+  handlePlaybackFailedRef.current = (result) => {
+    void startScanWithSelection([result.index]);
+  };
 
   // Refs for menu event handlers so listeners never need re-registration
   const handleOpenRef = useRef(handleOpen);
