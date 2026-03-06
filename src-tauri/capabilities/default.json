@@ -15,6 +15,8 @@
     "core:webview:allow-create-webview-window",
     "core:window:allow-start-dragging",
     "core:window:allow-set-progress-bar",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen",
     "os:default",
     "notification:default",
     "liquid-glass:default",
