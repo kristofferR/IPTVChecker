@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { CircleHelp, Copy, ExternalLink, ImageOff, LoaderCircle, Maximize, Minimize, Play, RotateCw, Square, X } from "lucide-react";
+import { CircleHelp, Copy, ExternalLink, Fullscreen, ImageOff, LoaderCircle, Play, RotateCw, Shrink, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { ChannelResult } from "../lib/types";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
@@ -543,7 +543,7 @@ export function ThumbnailPanel({
                   }`}
                   title={theaterMode ? "Exit fullscreen" : "Fullscreen"}
                 >
-                  {theaterMode ? <Minimize className="w-6 h-6" /> : <Maximize className="w-6 h-6" />}
+                  {theaterMode ? <Shrink className="w-6 h-6" /> : <Fullscreen className="w-6 h-6" />}
                 </button>
                 {!theaterMode && (
                   <button
