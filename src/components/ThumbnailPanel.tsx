@@ -242,6 +242,7 @@ export function ThumbnailPanel({
           onToggleMute={onToggleMute}
           onOpenExternal={() => onOpenExternal?.(result)}
           onRetry={() => onRetryPlay?.(result)}
+          onFullscreen={() => onLightboxChange(true)}
         />
       ) : screenshotUrl ? (
         <button
