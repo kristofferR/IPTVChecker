@@ -360,6 +360,7 @@ export default function App() {
     action: "csv" | "split" | "renamed" | "m3u" | "scanlog";
   } | null>(null);
 
+  const [playIntentActive, setPlayIntentActive] = useState(false);
   const handlePlaybackFailedRef = useRef<((result: ChannelResult) => void) | undefined>(undefined);
   const streamPlayer = useStreamPlayer({
     onPlaybackFailed: (result) => handlePlaybackFailedRef.current?.(result),
@@ -1590,15 +1591,22 @@ export default function App() {
         setPendingPlaybackChannel(result);
         return;
       }
+      setPlayIntentActive(true);
       streamPlayer.play(result);
     },
     [scanState, streamPlayer],
   );
 
+  const handleStopPlayer = useCallback(() => {
+    setPlayIntentActive(false);
+    streamPlayer.stop();
+  }, [streamPlayer]);
+
   const handleProceedPlayback = useCallback(() => {
     if (!pendingPlaybackChannel) return;
     const channel = pendingPlaybackChannel;
     setPendingPlaybackChannel(null);
+    setPlayIntentActive(true);
     streamPlayer.play(channel);
   }, [pendingPlaybackChannel, streamPlayer]);
 
@@ -1752,7 +1760,10 @@ export default function App() {
   // Auto-stop player when selected channel changes or is deselected
   useEffect(() => {
     if (streamPlayer.activeChannelIndex === null) return;
-    if (!liveSelectedChannel || liveSelectedChannel.index !== streamPlayer.activeChannelIndex) {
+    if (!liveSelectedChannel) {
+      setPlayIntentActive(false);
+      streamPlayer.stop();
+    } else if (liveSelectedChannel.index !== streamPlayer.activeChannelIndex) {
       streamPlayer.stop();
     }
   }, [liveSelectedChannel, streamPlayer]);
@@ -2021,7 +2032,7 @@ export default function App() {
               muted={streamPlayer.muted}
               videoElement={streamPlayer.videoElement}
               onTogglePause={streamPlayer.togglePause}
-              onStopPlayer={streamPlayer.stop}
+              onStopPlayer={handleStopPlayer}
               onSetVolume={streamPlayer.setVolume}
               onToggleMute={streamPlayer.toggleMute}
               onOpenExternal={handleOpenExternal}
@@ -2045,7 +2056,7 @@ export default function App() {
                 onSelectChannel={handleSelectChannel}
                 onOpenChannel={handlePlayInApp}
                 onOpenExternal={handleOpenExternal}
-                isPlaying={streamPlayer.playerState !== "idle"}
+                isPlaying={playIntentActive}
                 onSelectionChange={setSelectedChannelIndices}
                 onScanSelected={handleScanSelected}
                 headerPortalRef={isMac ? headerPortalRef : undefined}
