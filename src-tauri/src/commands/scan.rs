@@ -299,8 +299,7 @@ async fn compute_shared_url_result(
     let (probe_result, screenshot_result) = tokio::join!(ffprobe_fut, screenshot_fut);
 
     if let Some(snapshot) = probe_result {
-        shared.audio_only =
-            snapshot.track_presence.has_audio && !snapshot.track_presence.has_video;
+        shared.audio_only = snapshot.track_presence.has_audio && !snapshot.track_presence.has_video;
         if let Some(info) = snapshot.video_info {
             if !shared.audio_only {
                 shared.codec = Some(info.codec);
