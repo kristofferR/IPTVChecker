@@ -64,8 +64,9 @@ export function ThumbnailPanel({
   const [urlCopied, setUrlCopied] = useState(false);
 
   const closeLightbox = useCallback(() => {
+    if (isPlaying) onStopPlayer?.();
     onLightboxChange(false);
-  }, [onLightboxChange]);
+  }, [onLightboxChange, isPlaying, onStopPlayer]);
 
   const openLightbox = useCallback(() => {
     if (!screenshotUrl) return;
@@ -176,7 +177,7 @@ export function ThumbnailPanel({
         <h3 className="text-[14px] font-semibold truncate">{result.name}</h3>
       </div>
 
-      {isPlaying && videoRef && onTogglePause && onStopPlayer && onSetVolume && onToggleMute ? (
+      {isPlaying && !lightboxOpen && videoRef && onTogglePause && onStopPlayer && onSetVolume && onToggleMute ? (
         <StreamPlayer
           playerState={playerState}
           errorMessage={playerErrorMessage ?? null}
@@ -436,7 +437,24 @@ export function ThumbnailPanel({
             <h2 className="text-white text-[15px] font-semibold truncate max-w-[88vw] text-center drop-shadow-lg">
               {result.name}
             </h2>
-            {screenshotUrl ? (
+            {isPlaying && videoRef && onTogglePause && onStopPlayer && onSetVolume && onToggleMute ? (
+              <div className="w-[800px] max-w-[88vw]">
+                <StreamPlayer
+                  playerState={playerState}
+                  errorMessage={playerErrorMessage ?? null}
+                  isPaused={isPaused ?? false}
+                  volume={volume ?? 0.75}
+                  muted={muted ?? false}
+                  videoRef={videoRef}
+                  onTogglePause={onTogglePause}
+                  onStop={() => { onStopPlayer(); closeLightbox(); }}
+                  onSetVolume={onSetVolume}
+                  onToggleMute={onToggleMute}
+                  onOpenExternal={() => onOpenExternal?.(result)}
+                  onRetry={() => onRetryPlay?.(result)}
+                />
+              </div>
+            ) : screenshotUrl ? (
               <img
                 src={screenshotUrl}
                 alt={result.name}
@@ -456,7 +474,17 @@ export function ThumbnailPanel({
                 )}
               </div>
             )}
-            {result.status === "alive" && (result.resolution || result.fps || result.video_bitrate || result.audio_bitrate) && (
+            {!isPlaying && onPlayChannel && (
+              <button
+                type="button"
+                onClick={() => onPlayChannel(result)}
+                className="flex items-center gap-2 px-4 py-2 mt-1 text-[13px] font-medium rounded-lg bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-colors"
+              >
+                <Play className="w-4 h-4" />
+                Play
+              </button>
+            )}
+            {result.status === "alive" && !isPlaying && (result.resolution || result.fps || result.video_bitrate || result.audio_bitrate) && (
               <div className="flex items-center justify-center gap-2 mt-2">
                 {result.resolution && result.resolution !== "Unknown" && (
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">{result.width}x{result.height}</span>
