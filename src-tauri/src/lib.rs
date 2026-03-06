@@ -5,12 +5,14 @@ pub mod models;
 pub mod state;
 
 #[cfg(target_os = "macos")]
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use state::AppState;
 use tauri::webview::PageLoadEvent;
 use tauri::{Emitter, Manager};
+#[cfg(target_os = "macos")]
 use tauri_plugin_liquid_glass::{LiquidGlassConfig, LiquidGlassExt};
 use tauri_plugin_store::StoreExt;
 
@@ -18,7 +20,6 @@ use tauri_plugin_store::StoreExt;
 static APP_IS_QUITTING: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static WINDOW_CLOSED_BY_USER: AtomicBool = AtomicBool::new(false);
-#[cfg(target_os = "macos")]
 static NEXT_WINDOW_ID: AtomicUsize = AtomicUsize::new(1);
 
 #[cfg(target_os = "macos")]
@@ -88,7 +89,6 @@ fn schedule_macos_system_appearance_patch(app: tauri::AppHandle, window_label: S
     });
 }
 
-#[cfg(target_os = "macos")]
 fn create_window_from_main_config(app: &tauri::AppHandle, label: String) {
     let Some(mut window_config) = app
         .config()
@@ -121,20 +121,23 @@ fn create_window_from_main_config(app: &tauri::AppHandle, label: String) {
                 );
             }
 
-            if let Err(error) = app
-                .liquid_glass()
-                .set_effect(&window, LiquidGlassConfig::default())
+            #[cfg(target_os = "macos")]
             {
-                log::warn!(
-                    "Failed to apply liquid glass on recreated window: {}",
-                    error
-                );
-            }
+                if let Err(error) = app
+                    .liquid_glass()
+                    .set_effect(&window, LiquidGlassConfig::default())
+                {
+                    log::warn!(
+                        "Failed to apply liquid glass on recreated window: {}",
+                        error
+                    );
+                }
 
-            schedule_macos_system_appearance_patch(app.clone(), window.label().to_string());
+                schedule_macos_system_appearance_patch(app.clone(), window.label().to_string());
+            }
         }
         Err(error) => {
-            log::error!("Failed to recreate main window on reopen: {}", error);
+            log::error!("Failed to create window from main config: {}", error);
         }
     }
 }
@@ -144,7 +147,6 @@ fn create_fresh_main_window(app: &tauri::AppHandle) {
     create_window_from_main_config(app, "main".to_string());
 }
 
-#[cfg(target_os = "macos")]
 fn create_new_window(app: &tauri::AppHandle) {
     let id = NEXT_WINDOW_ID.fetch_add(1, Ordering::Relaxed);
     create_window_from_main_config(app, format!("main{}", id));
