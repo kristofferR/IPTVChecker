@@ -535,15 +535,30 @@ export function ThumbnailPanel({
                 )}
               </div>
             )}
-            {!isPlaying && onPlayChannel && (
-              <button
-                type="button"
-                onClick={() => onPlayChannel(result)}
-                className="flex items-center gap-2 px-4 py-2 mt-1 text-[13px] font-medium rounded-lg bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-colors"
-              >
-                <Play className="w-4 h-4" />
-                Play
-              </button>
+            {!isPlaying && (onPlayChannel || onScanChannel) && (
+              <div className="flex items-center gap-2 mt-1">
+                {onPlayChannel && (
+                  <button
+                    type="button"
+                    onClick={() => onPlayChannel(result)}
+                    className="flex items-center gap-2 px-4 py-2 text-[13px] font-medium rounded-lg bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-colors"
+                  >
+                    <Play className="w-4 h-4" />
+                    Play
+                  </button>
+                )}
+                {onScanChannel && (
+                  <button
+                    type="button"
+                    disabled={scanActive}
+                    onClick={() => onScanChannel([result.index])}
+                    className="flex items-center gap-2 px-4 py-2 text-[13px] font-medium rounded-lg bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    <RotateCw className="w-4 h-4" />
+                    {result.status === "pending" || result.status === "checking" ? "Scan" : "Rescan"}
+                  </button>
+                )}
+              </div>
             )}
             {result.status === "alive" && !isPlaying && (result.resolution || result.fps || result.video_bitrate || result.audio_bitrate) && (
               <div className="flex items-center justify-center gap-2 mt-2">
