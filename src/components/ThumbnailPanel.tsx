@@ -487,7 +487,7 @@ export function ThumbnailPanel({
               {result.name}
             </h2>
             {isPlaying && videoElement && onTogglePause && onStopPlayer && onSetVolume && onToggleMute ? (
-              <div className="w-[800px] max-w-[88vw]">
+              <div className="relative w-[800px] max-w-[88vw] mb-10">
                 <StreamPlayer
                   containerRef={lightboxPlayerRef}
                   playerState={playerState}
@@ -502,6 +502,14 @@ export function ThumbnailPanel({
                   onOpenExternal={() => onOpenExternal?.(result)}
                   onRetry={() => onRetryPlay?.(result)}
                 />
+                <button
+                  type="button"
+                  onClick={onStopPlayer}
+                  className="absolute -bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 text-[13px] font-medium rounded-lg bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-colors"
+                >
+                  <Square className="w-4 h-4" />
+                  Stop
+                </button>
               </div>
             ) : screenshotUrl ? (
               <img
