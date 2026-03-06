@@ -11,6 +11,7 @@ export interface UseStreamPlayerReturn {
   muted: boolean;
   isPaused: boolean;
   activeChannelIndex: number | null;
+  videoElement: HTMLVideoElement;
   play: (result: ChannelResult) => void;
   stop: () => void;
   togglePause: () => void;
@@ -43,11 +44,26 @@ function readStoredMuted(): boolean {
   return false;
 }
 
+function createVideoElement(): HTMLVideoElement {
+  const el = document.createElement("video");
+  el.playsInline = true;
+  el.style.width = "100%";
+  el.style.height = "100%";
+  el.style.objectFit = "contain";
+  el.style.background = "black";
+  el.style.display = "block";
+  return el;
+}
+
 const LOADING_TIMEOUT_MS = 15_000;
 
-export function useStreamPlayer(
-  videoRef: React.RefObject<HTMLVideoElement | null>,
-): UseStreamPlayerReturn {
+export function useStreamPlayer(): UseStreamPlayerReturn {
+  const videoElRef = useRef<HTMLVideoElement | null>(null);
+  if (!videoElRef.current) {
+    videoElRef.current = createVideoElement();
+  }
+  const videoElement = videoElRef.current;
+
   const [playerState, setPlayerState] = useState<PlayerState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [volume, setVolumeState] = useState(readStoredVolume);
@@ -72,20 +88,15 @@ export function useStreamPlayer(
       mpegtsPlayerRef.current.destroy();
       mpegtsPlayerRef.current = null;
     }
-    const video = videoRef.current;
-    if (video) {
-      video.pause();
-      video.removeAttribute("src");
-      video.load();
-    }
-  }, [videoRef]);
+    videoElement.pause();
+    videoElement.removeAttribute("src");
+    videoElement.load();
+  }, [videoElement]);
 
   const applyVolume = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.volume = volume;
-    video.muted = muted;
-  }, [videoRef, volume, muted]);
+    videoElement.volume = volume;
+    videoElement.muted = muted;
+  }, [videoElement, volume, muted]);
 
   useEffect(() => {
     applyVolume();
@@ -99,36 +110,32 @@ export function useStreamPlayer(
     try { localStorage.setItem("player-muted", String(muted)); } catch {}
   }, [muted]);
 
-  // Cleanup on unmount
   useEffect(() => cleanup, [cleanup]);
 
   const tryNativePlayback = useCallback(
     (url: string): Promise<boolean> => {
       return new Promise((resolve) => {
-        const video = videoRef.current;
-        if (!video) { resolve(false); return; }
-
         const onCanPlay = () => {
-          video.removeEventListener("canplay", onCanPlay);
-          video.removeEventListener("error", onError);
+          videoElement.removeEventListener("canplay", onCanPlay);
+          videoElement.removeEventListener("error", onError);
           resolve(true);
         };
         const onError = () => {
-          video.removeEventListener("canplay", onCanPlay);
-          video.removeEventListener("error", onError);
-          video.removeAttribute("src");
-          video.load();
+          videoElement.removeEventListener("canplay", onCanPlay);
+          videoElement.removeEventListener("error", onError);
+          videoElement.removeAttribute("src");
+          videoElement.load();
           resolve(false);
         };
 
-        video.addEventListener("canplay", onCanPlay, { once: true });
-        video.addEventListener("error", onError, { once: true });
-        video.src = url;
+        videoElement.addEventListener("canplay", onCanPlay, { once: true });
+        videoElement.addEventListener("error", onError, { once: true });
+        videoElement.src = url;
         applyVolume();
-        video.load();
+        videoElement.load();
       });
     },
-    [videoRef, applyVolume],
+    [videoElement, applyVolume],
   );
 
   const tryHlsPlayback = useCallback(
@@ -137,9 +144,6 @@ export function useStreamPlayer(
       if (!Hls.isSupported()) return false;
 
       return new Promise((resolve) => {
-        const video = videoRef.current;
-        if (!video) { resolve(false); return; }
-
         const hls = new Hls({
           maxBufferLength: 30,
           maxMaxBufferLength: 60,
@@ -158,11 +162,11 @@ export function useStreamPlayer(
         });
 
         hls.loadSource(url);
-        hls.attachMedia(video);
+        hls.attachMedia(videoElement);
         applyVolume();
       });
     },
-    [videoRef, applyVolume],
+    [videoElement, applyVolume],
   );
 
   const tryMpegtsPlayback = useCallback(
@@ -172,9 +176,6 @@ export function useStreamPlayer(
       if (!mpegts.isSupported()) return false;
 
       return new Promise((resolve) => {
-        const video = videoRef.current;
-        if (!video) { resolve(false); return; }
-
         const player = mpegts.createPlayer({
           type: "mpegts",
           url,
@@ -183,27 +184,27 @@ export function useStreamPlayer(
         mpegtsPlayerRef.current = player;
 
         const onCanPlay = () => {
-          video.removeEventListener("canplay", onCanPlay);
-          video.removeEventListener("error", onError);
+          videoElement.removeEventListener("canplay", onCanPlay);
+          videoElement.removeEventListener("error", onError);
           resolve(true);
         };
         const onError = () => {
-          video.removeEventListener("canplay", onCanPlay);
-          video.removeEventListener("error", onError);
+          videoElement.removeEventListener("canplay", onCanPlay);
+          videoElement.removeEventListener("error", onError);
           player.destroy();
           mpegtsPlayerRef.current = null;
           resolve(false);
         };
 
-        video.addEventListener("canplay", onCanPlay, { once: true });
-        video.addEventListener("error", onError, { once: true });
+        videoElement.addEventListener("canplay", onCanPlay, { once: true });
+        videoElement.addEventListener("error", onError, { once: true });
 
-        player.attachMediaElement(video);
+        player.attachMediaElement(videoElement);
         player.load();
         applyVolume();
       });
     },
-    [videoRef, applyVolume],
+    [videoElement, applyVolume],
   );
 
   const play = useCallback(
@@ -230,10 +231,7 @@ export function useStreamPlayer(
       const nativeOk = await tryNativePlayback(url);
       if (nativeOk) {
         if (loadingTimerRef.current) { clearTimeout(loadingTimerRef.current); loadingTimerRef.current = null; }
-        const video = videoRef.current;
-        if (video) {
-          try { await video.play(); } catch {}
-        }
+        try { await videoElement.play(); } catch {}
         setPlayerState("playing");
         return;
       }
@@ -243,10 +241,7 @@ export function useStreamPlayer(
         const hlsOk = await tryHlsPlayback(url);
         if (hlsOk) {
           if (loadingTimerRef.current) { clearTimeout(loadingTimerRef.current); loadingTimerRef.current = null; }
-          const video = videoRef.current;
-          if (video) {
-            try { await video.play(); } catch {}
-          }
+          try { await videoElement.play(); } catch {}
           setPlayerState("playing");
           return;
         }
@@ -257,10 +252,7 @@ export function useStreamPlayer(
         const mpegtsOk = await tryMpegtsPlayback(url);
         if (mpegtsOk) {
           if (loadingTimerRef.current) { clearTimeout(loadingTimerRef.current); loadingTimerRef.current = null; }
-          const video = videoRef.current;
-          if (video) {
-            try { await video.play(); } catch {}
-          }
+          try { await videoElement.play(); } catch {}
           setPlayerState("playing");
           return;
         }
@@ -273,7 +265,7 @@ export function useStreamPlayer(
         "Unable to play this stream in-app. The server may block browser playback (CORS). Try the external player instead.",
       );
     },
-    [cleanup, tryNativePlayback, tryHlsPlayback, tryMpegtsPlayback, videoRef],
+    [cleanup, tryNativePlayback, tryHlsPlayback, tryMpegtsPlayback, videoElement],
   );
 
   const stop = useCallback(() => {
@@ -285,16 +277,14 @@ export function useStreamPlayer(
   }, [cleanup]);
 
   const togglePause = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (video.paused) {
-      video.play().catch(() => {});
+    if (videoElement.paused) {
+      videoElement.play().catch(() => {});
       setIsPaused(false);
     } else {
-      video.pause();
+      videoElement.pause();
       setIsPaused(true);
     }
-  }, [videoRef]);
+  }, [videoElement]);
 
   const setVolume = useCallback((v: number) => {
     const clamped = Math.max(0, Math.min(1, v));
@@ -312,6 +302,7 @@ export function useStreamPlayer(
     muted,
     isPaused,
     activeChannelIndex,
+    videoElement,
     play,
     stop,
     togglePause,

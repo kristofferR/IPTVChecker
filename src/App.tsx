@@ -359,8 +359,7 @@ export default function App() {
     action: "csv" | "split" | "renamed" | "m3u" | "scanlog";
   } | null>(null);
 
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamPlayer = useStreamPlayer(videoRef);
+  const streamPlayer = useStreamPlayer();
 
   const { settings, save: saveSettings, applyExternal: applyExternalSettings } = useSettings();
   const settingsRef = useRef(settings);
@@ -2005,7 +2004,7 @@ export default function App() {
               isPaused={streamPlayer.isPaused}
               volume={streamPlayer.volume}
               muted={streamPlayer.muted}
-              videoRef={videoRef}
+              videoElement={streamPlayer.videoElement}
               onTogglePause={streamPlayer.togglePause}
               onStopPlayer={streamPlayer.stop}
               onSetVolume={streamPlayer.setVolume}

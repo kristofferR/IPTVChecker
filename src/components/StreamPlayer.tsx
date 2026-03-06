@@ -7,7 +7,7 @@ interface StreamPlayerProps {
   isPaused: boolean;
   volume: number;
   muted: boolean;
-  videoRef: React.RefObject<HTMLVideoElement | null>;
+  containerRef?: React.RefObject<HTMLDivElement | null>;
   onTogglePause: () => void;
   onStop: () => void;
   onSetVolume: (v: number) => void;
@@ -22,7 +22,7 @@ export function StreamPlayer({
   isPaused,
   volume,
   muted,
-  videoRef,
+  containerRef,
   onTogglePause,
   onStop,
   onSetVolume,
@@ -32,7 +32,6 @@ export function StreamPlayer({
 }: StreamPlayerProps) {
   const [controlsVisible, setControlsVisible] = useState(true);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
 
   const scheduleHide = useCallback(() => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
@@ -65,11 +64,7 @@ export function StreamPlayer({
       onMouseMove={showControls}
       onMouseEnter={showControls}
     >
-      <video
-        ref={videoRef}
-        className="w-full h-full object-contain bg-black"
-        playsInline
-      />
+      {/* Video element is appended here by ThumbnailPanel */}
 
       {/* Loading overlay */}
       {playerState === "loading" && (

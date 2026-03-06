@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CircleHelp, Copy, ExternalLink, ImageOff, LoaderCircle, Play, RotateCw, Square, X } from "lucide-react";
 import type { ChannelResult } from "../lib/types";
@@ -24,7 +24,7 @@ interface ThumbnailPanelProps {
   isPaused?: boolean;
   volume?: number;
   muted?: boolean;
-  videoRef?: React.RefObject<HTMLVideoElement | null>;
+  videoElement?: HTMLVideoElement;
   onTogglePause?: () => void;
   onStopPlayer?: () => void;
   onSetVolume?: (v: number) => void;
@@ -50,7 +50,7 @@ export function ThumbnailPanel({
   isPaused,
   volume,
   muted,
-  videoRef,
+  videoElement,
   onTogglePause,
   onStopPlayer,
   onSetVolume,
@@ -63,10 +63,56 @@ export function ThumbnailPanel({
   const [resolvedUrlCopied, setResolvedUrlCopied] = useState(false);
   const [urlCopied, setUrlCopied] = useState(false);
 
+  const sidebarPlayerRef = useRef<HTMLDivElement>(null);
+  const lightboxPlayerRef = useRef<HTMLDivElement>(null);
+
+  // Move the imperative video element between sidebar and lightbox containers.
+  // useLayoutEffect ensures the move happens before paint, so there's no flash.
+  useLayoutEffect(() => {
+    if (!isPlaying || !videoElement) return;
+
+    const target = (lightboxOpen && lightboxRendered && lightboxPlayerRef.current)
+      ? lightboxPlayerRef.current
+      : sidebarPlayerRef.current;
+    if (!target || videoElement.parentNode === target) return;
+
+    // FLIP: capture current position before move
+    const inDom = videoElement.parentNode && document.contains(videoElement.parentNode as Node);
+    const firstRect = inDom ? videoElement.getBoundingClientRect() : null;
+
+    target.appendChild(videoElement);
+
+    // FLIP: animate from old position to new
+    if (firstRect && firstRect.width > 0) {
+      const lastRect = videoElement.getBoundingClientRect();
+      const dx = firstRect.left - lastRect.left;
+      const dy = firstRect.top - lastRect.top;
+      const sw = firstRect.width / lastRect.width;
+      const sh = firstRect.height / lastRect.height;
+
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2 || Math.abs(sw - 1) > 0.01 || Math.abs(sh - 1) > 0.01) {
+        videoElement.style.transformOrigin = "top left";
+        videoElement.style.transform = `translate(${dx}px, ${dy}px) scale(${sw}, ${sh})`;
+        requestAnimationFrame(() => {
+          videoElement.style.transition = "transform 300ms cubic-bezier(0.4, 0, 0.2, 1)";
+          videoElement.style.transform = "";
+          videoElement.addEventListener("transitionend", () => {
+            videoElement.style.transition = "";
+            videoElement.style.transformOrigin = "";
+          }, { once: true });
+        });
+      }
+    }
+
+    // Resume if browser paused due to DOM detachment
+    if (playerState === "playing" && videoElement.paused) {
+      videoElement.play().catch(() => {});
+    }
+  }, [isPlaying, videoElement, lightboxOpen, lightboxRendered, playerState]);
+
   const closeLightbox = useCallback(() => {
-    if (isPlaying) onStopPlayer?.();
     onLightboxChange(false);
-  }, [onLightboxChange, isPlaying, onStopPlayer]);
+  }, [onLightboxChange]);
 
   const openLightbox = useCallback(() => {
     if (!screenshotUrl) return;
@@ -177,21 +223,23 @@ export function ThumbnailPanel({
         <h3 className="text-[14px] font-semibold truncate">{result.name}</h3>
       </div>
 
-      {isPlaying && !lightboxOpen && videoRef && onTogglePause && onStopPlayer && onSetVolume && onToggleMute ? (
-        <StreamPlayer
-          playerState={playerState}
-          errorMessage={playerErrorMessage ?? null}
-          isPaused={isPaused ?? false}
-          volume={volume ?? 0.75}
-          muted={muted ?? false}
-          videoRef={videoRef}
-          onTogglePause={onTogglePause}
-          onStop={onStopPlayer}
-          onSetVolume={onSetVolume}
-          onToggleMute={onToggleMute}
-          onOpenExternal={() => onOpenExternal?.(result)}
-          onRetry={() => onRetryPlay?.(result)}
-        />
+      {isPlaying && videoElement && onTogglePause && onStopPlayer && onSetVolume && onToggleMute ? (
+        <div className={lightboxOpen ? "invisible" : ""}>
+          <StreamPlayer
+            containerRef={sidebarPlayerRef}
+            playerState={playerState}
+            errorMessage={playerErrorMessage ?? null}
+            isPaused={isPaused ?? false}
+            volume={volume ?? 0.75}
+            muted={muted ?? false}
+            onTogglePause={onTogglePause}
+            onStop={onStopPlayer}
+            onSetVolume={onSetVolume}
+            onToggleMute={onToggleMute}
+            onOpenExternal={() => onOpenExternal?.(result)}
+            onRetry={() => onRetryPlay?.(result)}
+          />
+        </div>
       ) : screenshotUrl ? (
         <button
           type="button"
@@ -437,17 +485,17 @@ export function ThumbnailPanel({
             <h2 className="text-white text-[15px] font-semibold truncate max-w-[88vw] text-center drop-shadow-lg">
               {result.name}
             </h2>
-            {isPlaying && videoRef && onTogglePause && onStopPlayer && onSetVolume && onToggleMute ? (
+            {isPlaying && videoElement && onTogglePause && onStopPlayer && onSetVolume && onToggleMute ? (
               <div className="w-[800px] max-w-[88vw]">
                 <StreamPlayer
+                  containerRef={lightboxPlayerRef}
                   playerState={playerState}
                   errorMessage={playerErrorMessage ?? null}
                   isPaused={isPaused ?? false}
                   volume={volume ?? 0.75}
                   muted={muted ?? false}
-                  videoRef={videoRef}
                   onTogglePause={onTogglePause}
-                  onStop={() => { onStopPlayer(); closeLightbox(); }}
+                  onStop={onStopPlayer}
                   onSetVolume={onSetVolume}
                   onToggleMute={onToggleMute}
                   onOpenExternal={() => onOpenExternal?.(result)}
