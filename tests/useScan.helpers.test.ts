@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   applyResultBatch,
+  applyResultUpdates,
   isRunScopedEventForActiveRun,
 } from "../src/hooks/useScan.helpers";
 import type { ChannelResult } from "../src/lib/types";
@@ -59,5 +60,40 @@ describe("useScan helpers", () => {
     expect(updated[1]?.name).toBe("Updated 1");
     expect(updated[2]?.name).toBe("Updated 2");
     expect(updated).not.toBe(previous);
+  });
+
+  it("keeps by-index, flat, and metric state in sync for direct updates", () => {
+    const previousResult = makeResult(1, "Before");
+    const updatedResult = {
+      ...makeResult(1, "After"),
+      low_framerate: true,
+      label_mismatches: ["Resolution mismatch"],
+    };
+
+    const applied = applyResultUpdates(
+      {
+        resultsByIndex: [makeResult(0), previousResult],
+        flatResults: [makeResult(0), previousResult],
+        indexToFlatPos: new Map([
+          [0, 0],
+          [1, 1],
+        ]),
+        metrics: {
+          presentCount: 2,
+          lowFpsCount: 0,
+          mislabeledCount: 0,
+        },
+      },
+      [updatedResult],
+    );
+
+    expect(applied.resultsByIndex[1]?.name).toBe("After");
+    expect(applied.flatResults[1]?.name).toBe("After");
+    expect(applied.indexToFlatPos.get(1)).toBe(1);
+    expect(applied.metrics).toEqual({
+      presentCount: 2,
+      lowFpsCount: 1,
+      mislabeledCount: 1,
+    });
   });
 });

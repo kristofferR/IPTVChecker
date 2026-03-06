@@ -19,6 +19,19 @@ export type SortDirection = "asc" | "desc";
 
 export type SearchTextCache = WeakMap<ChannelResult, string>;
 
+export interface StatusOptionCounts {
+  [key: string]: number;
+  all: number;
+  alive: number;
+  drm: number;
+  dead: number;
+  geoblocked: number;
+  mislabeled: number;
+  audio_only: number;
+  duplicates: number;
+  pending: number;
+}
+
 const STATUS_ORDER: Record<ChannelStatus, number> = {
   alive: 0,
   drm: 1,
@@ -81,6 +94,67 @@ function compareOptionalText(
     return (leftIndex - rightIndex) * dir;
   }
   return compared;
+}
+
+function getSearchHaystack(
+  result: ChannelResult,
+  searchTextCache?: SearchTextCache,
+): string {
+  let haystack = searchTextCache?.get(result);
+  if (!haystack) {
+    haystack = `${result.name}\n${result.playlist}\n${result.group}`.toLowerCase();
+    searchTextCache?.set(result, haystack);
+  }
+  return haystack;
+}
+
+function matchesBaseFilters(
+  result: ChannelResult,
+  normalizedSearch: string,
+  hasSearch: boolean,
+  groupFilter: string,
+  hasGroupFilter: boolean,
+  searchTextCache?: SearchTextCache,
+): boolean {
+  if (hasSearch) {
+    const haystack = getSearchHaystack(result, searchTextCache);
+    if (!haystack.includes(normalizedSearch)) {
+      return false;
+    }
+  }
+
+  if (hasGroupFilter && result.group !== groupFilter) {
+    return false;
+  }
+
+  return true;
+}
+
+function matchesStatusFilter(
+  result: ChannelResult,
+  statusFilter: string,
+  duplicateIndices?: Set<number>,
+): boolean {
+  if (statusFilter === "" || statusFilter === "all") {
+    return true;
+  }
+  if (statusFilter === "duplicates") {
+    return duplicateIndices?.has(result.index) ?? false;
+  }
+  if (statusFilter === "audio_only") {
+    return result.audio_only;
+  }
+  if (statusFilter === "mislabeled") {
+    return result.label_mismatches.length > 0;
+  }
+  if (statusFilter === "geoblocked") {
+    return (
+      result.status === "geoblocked" ||
+      result.status === "geoblocked_confirmed" ||
+      result.status === "geoblocked_unconfirmed"
+    );
+  }
+  return result.status === statusFilter;
 }
 
 export function sortResults(
@@ -193,41 +267,92 @@ export function filterResults(
   }
 
   return results.filter((r) => {
-    if (hasSearch) {
-      let haystack = searchTextCache?.get(r);
-      if (!haystack) {
-        haystack = `${r.name}\n${r.playlist}\n${r.group}`.toLowerCase();
-        searchTextCache?.set(r, haystack);
-      }
-      if (!haystack.includes(normalizedSearch)) {
-        return false;
-      }
+    if (
+      !matchesBaseFilters(
+        r,
+        normalizedSearch,
+        hasSearch,
+        groupFilter,
+        hasGroupFilter,
+        searchTextCache,
+      )
+    ) {
+      return false;
     }
-    if (hasGroupFilter) {
-      if (r.group !== groupFilter) return false;
-    }
-    if (hasStatusFilter) {
-      if (statusFilter === "duplicates") {
-        return duplicateIndices?.has(r.index) ?? false;
-      }
-      if (statusFilter === "audio_only") {
-        return r.audio_only;
-      }
-      if (statusFilter === "mislabeled") {
-        return r.label_mismatches.length > 0;
-      }
-      if (statusFilter === "geoblocked") {
-        if (
-          r.status !== "geoblocked" &&
-          r.status !== "geoblocked_confirmed" &&
-          r.status !== "geoblocked_unconfirmed"
-        ) {
-          return false;
-        }
-      } else if (r.status !== statusFilter) {
-        return false;
-      }
+    if (hasStatusFilter && !matchesStatusFilter(r, statusFilter, duplicateIndices)) {
+      return false;
     }
     return true;
   });
+}
+
+export function countStatusOptions(
+  results: ChannelResult[],
+  search: string,
+  groupFilter: string,
+  duplicateIndices?: Set<number>,
+  searchTextCache?: SearchTextCache,
+): StatusOptionCounts {
+  const normalizedSearch = search.trim().toLowerCase();
+  const hasSearch = normalizedSearch.length > 0;
+  const hasGroupFilter = groupFilter !== "" && groupFilter !== "all";
+  const counts: StatusOptionCounts = {
+    all: 0,
+    alive: 0,
+    drm: 0,
+    dead: 0,
+    geoblocked: 0,
+    mislabeled: 0,
+    audio_only: 0,
+    duplicates: 0,
+    pending: 0,
+  };
+
+  for (const result of results) {
+    if (
+      !matchesBaseFilters(
+        result,
+        normalizedSearch,
+        hasSearch,
+        groupFilter,
+        hasGroupFilter,
+        searchTextCache,
+      )
+    ) {
+      continue;
+    }
+
+    counts.all += 1;
+    if (result.status === "alive") {
+      counts.alive += 1;
+    } else if (result.status === "drm") {
+      counts.drm += 1;
+    } else if (result.status === "dead") {
+      counts.dead += 1;
+    } else if (result.status === "pending") {
+      counts.pending += 1;
+    }
+
+    if (
+      result.status === "geoblocked" ||
+      result.status === "geoblocked_confirmed" ||
+      result.status === "geoblocked_unconfirmed"
+    ) {
+      counts.geoblocked += 1;
+    }
+
+    if (result.label_mismatches.length > 0) {
+      counts.mislabeled += 1;
+    }
+
+    if (result.audio_only) {
+      counts.audio_only += 1;
+    }
+
+    if (duplicateIndices?.has(result.index)) {
+      counts.duplicates += 1;
+    }
+  }
+
+  return counts;
 }

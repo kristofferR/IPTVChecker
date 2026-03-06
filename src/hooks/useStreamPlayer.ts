@@ -81,12 +81,22 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const hlsInstanceRef = useRef<import("hls.js").default | null>(null);
   const mpegtsPlayerRef = useRef<{ destroy(): void; attachMediaElement(el: HTMLMediaElement): void; load(): void } | null>(null);
   const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playbackAbortRef = useRef<AbortController | null>(null);
 
-  const cleanup = useCallback(() => {
+  const clearLoadingTimer = useCallback(() => {
     if (loadingTimerRef.current) {
       clearTimeout(loadingTimerRef.current);
       loadingTimerRef.current = null;
     }
+  }, []);
+
+  const cleanup = useCallback(() => {
+    const abortController = playbackAbortRef.current;
+    playbackAbortRef.current = null;
+    if (abortController && !abortController.signal.aborted) {
+      abortController.abort();
+    }
+    clearLoadingTimer();
     if (hlsInstanceRef.current) {
       hlsInstanceRef.current.destroy();
       hlsInstanceRef.current = null;
@@ -98,7 +108,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     videoElement.pause();
     videoElement.removeAttribute("src");
     videoElement.load();
-  }, [videoElement]);
+  }, [clearLoadingTimer, videoElement]);
 
   const applyVolume = useCallback(() => {
     videoElement.volume = volume;
@@ -120,23 +130,37 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   useEffect(() => cleanup, [cleanup]);
 
   const tryNativePlayback = useCallback(
-    (url: string): Promise<boolean> => {
+    (url: string, signal: AbortSignal): Promise<boolean> => {
       return new Promise((resolve) => {
-        const onCanPlay = () => {
+        if (signal.aborted) {
+          resolve(false);
+          return;
+        }
+
+        let settled = false;
+        const finish = (value: boolean) => {
+          if (settled) return;
+          settled = true;
           videoElement.removeEventListener("canplay", onCanPlay);
           videoElement.removeEventListener("error", onError);
-          resolve(true);
+          signal.removeEventListener("abort", onAbort);
+          resolve(value);
+        };
+        const onCanPlay = () => {
+          finish(true);
         };
         const onError = () => {
-          videoElement.removeEventListener("canplay", onCanPlay);
-          videoElement.removeEventListener("error", onError);
           videoElement.removeAttribute("src");
           videoElement.load();
-          resolve(false);
+          finish(false);
+        };
+        const onAbort = () => {
+          finish(false);
         };
 
         videoElement.addEventListener("canplay", onCanPlay, { once: true });
         videoElement.addEventListener("error", onError, { once: true });
+        signal.addEventListener("abort", onAbort, { once: true });
         videoElement.src = url;
         applyVolume();
         videoElement.load();
@@ -146,11 +170,18 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   );
 
   const tryHlsPlayback = useCallback(
-    async (url: string): Promise<boolean> => {
+    async (url: string, signal: AbortSignal): Promise<boolean> => {
       const { default: Hls } = await import("hls.js");
-      if (!Hls.isSupported()) return false;
+      if (signal.aborted || !Hls.isSupported()) return false;
 
       return new Promise((resolve) => {
+        let settled = false;
+        const finish = (value: boolean) => {
+          if (settled) return;
+          settled = true;
+          signal.removeEventListener("abort", onAbort);
+          resolve(value);
+        };
         const hls = new Hls({
           maxBufferLength: 30,
           maxMaxBufferLength: 60,
@@ -158,15 +189,23 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         hlsInstanceRef.current = hls;
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          resolve(true);
+          finish(true);
         });
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data.fatal) {
             hls.destroy();
             hlsInstanceRef.current = null;
-            resolve(false);
+            finish(false);
           }
         });
+        const onAbort = () => {
+          hls.destroy();
+          if (hlsInstanceRef.current === hls) {
+            hlsInstanceRef.current = null;
+          }
+          finish(false);
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
 
         hls.loadSource(url);
         hls.attachMedia(videoElement);
@@ -177,12 +216,21 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   );
 
   const tryMpegtsPlayback = useCallback(
-    async (url: string): Promise<boolean> => {
+    async (url: string, signal: AbortSignal): Promise<boolean> => {
       const mpegtsModule = await import("mpegts.js");
       const mpegts = mpegtsModule.default;
-      if (!mpegts.isSupported()) return false;
+      if (signal.aborted || !mpegts.isSupported()) return false;
 
       return new Promise((resolve) => {
+        let settled = false;
+        const finish = (value: boolean) => {
+          if (settled) return;
+          settled = true;
+          videoElement.removeEventListener("canplay", onCanPlay);
+          videoElement.removeEventListener("error", onError);
+          signal.removeEventListener("abort", onAbort);
+          resolve(value);
+        };
         const player = mpegts.createPlayer({
           type: "mpegts",
           url,
@@ -191,20 +239,24 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         mpegtsPlayerRef.current = player;
 
         const onCanPlay = () => {
-          videoElement.removeEventListener("canplay", onCanPlay);
-          videoElement.removeEventListener("error", onError);
-          resolve(true);
+          finish(true);
         };
         const onError = () => {
-          videoElement.removeEventListener("canplay", onCanPlay);
-          videoElement.removeEventListener("error", onError);
           player.destroy();
           mpegtsPlayerRef.current = null;
-          resolve(false);
+          finish(false);
+        };
+        const onAbort = () => {
+          player.destroy();
+          if (mpegtsPlayerRef.current === player) {
+            mpegtsPlayerRef.current = null;
+          }
+          finish(false);
         };
 
         videoElement.addEventListener("canplay", onCanPlay, { once: true });
         videoElement.addEventListener("error", onError, { once: true });
+        signal.addEventListener("abort", onAbort, { once: true });
 
         player.attachMediaElement(videoElement);
         player.load();
@@ -217,6 +269,12 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const play = useCallback(
     async (result: ChannelResult) => {
       cleanup();
+      const abortController = new AbortController();
+      playbackAbortRef.current = abortController;
+      const isCurrentPlayback = () =>
+        playbackAbortRef.current === abortController &&
+        !abortController.signal.aborted;
+
       setPlayerState("loading");
       setErrorMessage(null);
       setIsPaused(false);
@@ -230,6 +288,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
       const currentResult = result;
       loadingTimerRef.current = setTimeout(() => {
+        if (!isCurrentPlayback()) {
+          return;
+        }
         cleanup();
         setPlayerState("idle");
         setActiveChannelIndex(null);
@@ -237,20 +298,32 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       }, LOADING_TIMEOUT_MS);
 
       // 1. Try native playback first
-      const nativeOk = await tryNativePlayback(url);
+      const nativeOk = await tryNativePlayback(url, abortController.signal);
+      if (!isCurrentPlayback()) {
+        return;
+      }
       if (nativeOk) {
-        if (loadingTimerRef.current) { clearTimeout(loadingTimerRef.current); loadingTimerRef.current = null; }
+        clearLoadingTimer();
         try { await videoElement.play(); } catch {}
+        if (!isCurrentPlayback()) {
+          return;
+        }
         setPlayerState("playing");
         return;
       }
 
       // 2. Try hls.js for HLS or unknown streams
       if (streamType === "hls" || streamType === "unknown") {
-        const hlsOk = await tryHlsPlayback(url);
+        const hlsOk = await tryHlsPlayback(url, abortController.signal);
+        if (!isCurrentPlayback()) {
+          return;
+        }
         if (hlsOk) {
-          if (loadingTimerRef.current) { clearTimeout(loadingTimerRef.current); loadingTimerRef.current = null; }
+          clearLoadingTimer();
           try { await videoElement.play(); } catch {}
+          if (!isCurrentPlayback()) {
+            return;
+          }
           setPlayerState("playing");
           return;
         }
@@ -258,22 +331,38 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
       // 3. Try mpegts.js for MPEG-TS or unknown streams
       if (streamType === "mpegts" || streamType === "unknown") {
-        const mpegtsOk = await tryMpegtsPlayback(url);
+        const mpegtsOk = await tryMpegtsPlayback(url, abortController.signal);
+        if (!isCurrentPlayback()) {
+          return;
+        }
         if (mpegtsOk) {
-          if (loadingTimerRef.current) { clearTimeout(loadingTimerRef.current); loadingTimerRef.current = null; }
+          clearLoadingTimer();
           try { await videoElement.play(); } catch {}
+          if (!isCurrentPlayback()) {
+            return;
+          }
           setPlayerState("playing");
           return;
         }
       }
 
       // All methods failed — fall back to scanning
-      if (loadingTimerRef.current) { clearTimeout(loadingTimerRef.current); loadingTimerRef.current = null; }
+      clearLoadingTimer();
+      if (!isCurrentPlayback()) {
+        return;
+      }
       setPlayerState("idle");
       setActiveChannelIndex(null);
       onPlaybackFailedRef.current?.(result);
     },
-    [cleanup, tryNativePlayback, tryHlsPlayback, tryMpegtsPlayback, videoElement],
+    [
+      cleanup,
+      clearLoadingTimer,
+      tryNativePlayback,
+      tryHlsPlayback,
+      tryMpegtsPlayback,
+      videoElement,
+    ],
   );
 
   const stop = useCallback(() => {

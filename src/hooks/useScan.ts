@@ -18,20 +18,15 @@ import {
   runScopedScanErrorMessage,
 } from "../lib/scanErrorEvents";
 import {
-  applyResultBatch,
+  applyResultUpdates,
   isRunScopedEventForActiveRun,
+  type ScanUiMetrics,
 } from "./useScan.helpers";
 
 export type ScanState = "idle" | "scanning" | "paused" | "complete" | "cancelled";
 interface ScanTelemetry {
   throughputChannelsPerSecond: number | null;
   etaSeconds: number | null;
-}
-
-interface ScanUiMetrics {
-  presentCount: number;
-  lowFpsCount: number;
-  mislabeledCount: number;
 }
 
 const EMPTY_TELEMETRY: ScanTelemetry = {
@@ -111,7 +106,9 @@ export function useScan() {
   // Batch incoming results with requestAnimationFrame
   const pendingResults = useRef<ChannelResult[]>([]);
   const resultsRef = useRef<(ChannelResult | null)[]>([]);
+  const flatResultsRef = useRef<ChannelResult[]>([]);
   const indexToFlatPosRef = useRef<Map<number, number>>(new Map());
+  const uiMetricsRef = useRef<ScanUiMetrics>(EMPTY_UI_METRICS);
   const rafId = useRef<number | null>(null);
   const eventCount = useRef(0);
   const activeRunId = useRef<string | null>(null);
@@ -136,74 +133,31 @@ export function useScan() {
     if (pendingResults.current.length > 0) {
       const batch = pendingResults.current;
       pendingResults.current = [];
-      const previous = resultsRef.current;
-      const updated = applyResultBatch(previous, batch);
-      resultsRef.current = updated;
-      setResults(updated);
+      const next = applyResultUpdates(
+        {
+          resultsByIndex: resultsRef.current,
+          flatResults: flatResultsRef.current,
+          indexToFlatPos: indexToFlatPosRef.current,
+          metrics: uiMetricsRef.current,
+        },
+        batch,
+      );
 
-      let presentCount = presentCountRef.current;
-      let lowFpsCount = lowFpsCountRef.current;
-      let mislabeledCount = mislabeledCountRef.current;
-      let metricsChanged = false;
-      setFlatResults((prevFlat) => {
-        let nextFlat = prevFlat;
-        let flatChanged = false;
+      resultsRef.current = next.resultsByIndex;
+      flatResultsRef.current = next.flatResults;
+      indexToFlatPosRef.current = next.indexToFlatPos;
+      presentCountRef.current = next.metrics.presentCount;
+      lowFpsCountRef.current = next.metrics.lowFpsCount;
+      mislabeledCountRef.current = next.metrics.mislabeledCount;
+      uiMetricsRef.current = next.metrics;
 
-        for (const result of batch) {
-          const previousResult = previous[result.index];
-          if (!previousResult) {
-            presentCount += 1;
-            metricsChanged = true;
-          }
+      setResults(next.resultsByIndex);
+      setFlatResults(next.flatResults);
+      setUiMetrics(next.metrics);
 
-          const previousLowFps = previousResult?.low_framerate ?? false;
-          if (previousLowFps !== result.low_framerate) {
-            lowFpsCount += result.low_framerate ? 1 : -1;
-            metricsChanged = true;
-          }
-
-          const previousMislabeled =
-            (previousResult?.label_mismatches.length ?? 0) > 0;
-          const nextMislabeled = result.label_mismatches.length > 0;
-          if (previousMislabeled !== nextMislabeled) {
-            mislabeledCount += nextMislabeled ? 1 : -1;
-            metricsChanged = true;
-          }
-
-          const flatPos = indexToFlatPosRef.current.get(result.index);
-          if (flatPos == null) {
-            if (nextFlat === prevFlat) {
-              nextFlat = [...prevFlat];
-            }
-            indexToFlatPosRef.current.set(result.index, nextFlat.length);
-            nextFlat.push(result);
-            flatChanged = true;
-          } else if (nextFlat[flatPos] !== result) {
-            if (nextFlat === prevFlat) {
-              nextFlat = [...prevFlat];
-            }
-            nextFlat[flatPos] = result;
-            flatChanged = true;
-          }
-        }
-
-        if (metricsChanged) {
-          presentCountRef.current = presentCount;
-          lowFpsCountRef.current = lowFpsCount;
-          mislabeledCountRef.current = mislabeledCount;
-          setUiMetrics({
-            presentCount,
-            lowFpsCount,
-            mislabeledCount,
-          });
-        }
-
-        logger.debug(
-          `[useScan] flush: batch=${batch.length}, total array=${updated.length}, non-null=${presentCount}`,
-        );
-
-        return flatChanged ? nextFlat : prevFlat;
-      });
+      logger.debug(
+        `[useScan] flush: batch=${batch.length}, total array=${next.resultsByIndex.length}, non-null=${next.metrics.presentCount}`,
+      );
     }
     rafId.current = null;
   }, []);
@@ -545,10 +499,12 @@ export function useScan() {
 
       const rebuilt = buildFlatResultsAndMetrics(updated);
       resultsRef.current = updated;
+      flatResultsRef.current = rebuilt.flatResults;
       indexToFlatPosRef.current = rebuilt.indexToFlatPos;
       presentCountRef.current = rebuilt.metrics.presentCount;
       lowFpsCountRef.current = rebuilt.metrics.lowFpsCount;
       mislabeledCountRef.current = rebuilt.metrics.mislabeledCount;
+      uiMetricsRef.current = rebuilt.metrics;
 
       setResults(updated);
       setFlatResults(rebuilt.flatResults);
@@ -695,10 +651,12 @@ export function useScan() {
 
       logger.debug(`[useScan] initFromPlaylist: ${pending.length} channels`);
       resultsRef.current = pending;
+      flatResultsRef.current = rebuilt.flatResults;
       indexToFlatPosRef.current = rebuilt.indexToFlatPos;
       presentCountRef.current = rebuilt.metrics.presentCount;
       lowFpsCountRef.current = rebuilt.metrics.lowFpsCount;
       mislabeledCountRef.current = rebuilt.metrics.mislabeledCount;
+      uiMetricsRef.current = rebuilt.metrics;
       setResults(pending);
       setFlatResults(rebuilt.flatResults);
       setUiMetrics(rebuilt.metrics);
@@ -708,6 +666,7 @@ export function useScan() {
       setError(null);
       setScanState("idle");
       setTelemetry(EMPTY_TELEMETRY);
+      setScreenshotsPaused(false);
       pendingResults.current = [];
       eventCount.current = 0;
       activeRunId.current = null;
@@ -720,11 +679,27 @@ export function useScan() {
   );
 
   const updateResult = useCallback((result: ChannelResult) => {
-    setResults((prev) => {
-      const updated = [...prev];
-      updated[result.index] = result;
-      return updated;
-    });
+    const next = applyResultUpdates(
+        {
+          resultsByIndex: resultsRef.current,
+          flatResults: flatResultsRef.current,
+          indexToFlatPos: indexToFlatPosRef.current,
+          metrics: uiMetricsRef.current,
+        },
+        [result],
+      );
+
+    resultsRef.current = next.resultsByIndex;
+    flatResultsRef.current = next.flatResults;
+    indexToFlatPosRef.current = next.indexToFlatPos;
+    presentCountRef.current = next.metrics.presentCount;
+    lowFpsCountRef.current = next.metrics.lowFpsCount;
+    mislabeledCountRef.current = next.metrics.mislabeledCount;
+    uiMetricsRef.current = next.metrics;
+
+    setResults(next.resultsByIndex);
+    setFlatResults(next.flatResults);
+    setUiMetrics(next.metrics);
   }, []);
 
   return {

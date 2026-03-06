@@ -63,7 +63,7 @@ import { OpenSourceDialog } from "./components/OpenSourceDialog";
 import { AlertTriangle, ExternalLink, FolderOpen, Info, X } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { detectPlatform, type Platform } from "./lib/platform";
-import { filterResults } from "./lib/filters";
+import { countStatusOptions, filterResults, type SearchTextCache } from "./lib/filters";
 import { logger } from "./lib/logger";
 import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/haptics";
 import type { ExportScope } from "./lib/exportScope";
@@ -1611,6 +1611,7 @@ export default function App() {
   }, [pendingPlaybackChannel, streamPlayer]);
 
   const completedResults = flatResults;
+  const appSearchTextCacheRef = useRef<SearchTextCache>(new WeakMap());
   handleToggleSidebarRef.current = () => {
     const sidebarVisible = !sidebarHidden && !!selectedChannel;
     if (sidebarVisible) {
@@ -1637,6 +1638,7 @@ export default function App() {
             groupFilter,
             statusFilter,
             duplicateIndices,
+            appSearchTextCacheRef.current,
           ),
         {
           rows: completedResults.length,
@@ -1655,24 +1657,13 @@ export default function App() {
   );
 
   const statusOptionCounts = useMemo(() => {
-    const baseFiltered = filterResults(
+    return countStatusOptions(
       completedResults,
       deferredSearch,
       groupFilter,
-      "all",
       duplicateIndices,
+      appSearchTextCacheRef.current,
     );
-    return {
-      all: baseFiltered.length,
-      alive: filterResults(baseFiltered, "", "all", "alive", duplicateIndices).length,
-      drm: filterResults(baseFiltered, "", "all", "drm", duplicateIndices).length,
-      dead: filterResults(baseFiltered, "", "all", "dead", duplicateIndices).length,
-      geoblocked: filterResults(baseFiltered, "", "all", "geoblocked", duplicateIndices).length,
-      mislabeled: filterResults(baseFiltered, "", "all", "mislabeled", duplicateIndices).length,
-      audio_only: filterResults(baseFiltered, "", "all", "audio_only", duplicateIndices).length,
-      duplicates: filterResults(baseFiltered, "", "all", "duplicates", duplicateIndices).length,
-      pending: filterResults(baseFiltered, "", "all", "pending", duplicateIndices).length,
-    };
   }, [
     completedResults,
     deferredSearch,

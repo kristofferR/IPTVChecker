@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { filterResults } from "../src/lib/filters";
+import { countStatusOptions, filterResults } from "../src/lib/filters";
 import type { ChannelResult, ChannelStatus } from "../src/lib/types";
 
 function makeResult(
@@ -119,5 +119,39 @@ describe("filterResults", () => {
     expect(
       filterResults(resultsWithMislabeled, "", "all", "mislabeled").map((r) => r.index),
     ).toEqual([3]);
+  });
+
+  it("counts status options in one pass using the base filters", () => {
+    const resultsWithPendingAndMislabeled = [
+      ...results,
+      makeResult(3, {
+        name: "Sports Radio",
+        playlist: "Primary",
+        group: "Sports",
+        status: "pending",
+        audioOnly: true,
+        labelMismatches: ["Audio only mismatch"],
+      }),
+    ];
+    const duplicateSet = new Set<number>([2, 3]);
+
+    expect(
+      countStatusOptions(
+        resultsWithPendingAndMislabeled,
+        "sports",
+        "Sports",
+        duplicateSet,
+      ),
+    ).toEqual({
+      all: 3,
+      alive: 1,
+      drm: 0,
+      dead: 0,
+      geoblocked: 1,
+      mislabeled: 1,
+      audio_only: 2,
+      duplicates: 2,
+      pending: 1,
+    });
   });
 });
