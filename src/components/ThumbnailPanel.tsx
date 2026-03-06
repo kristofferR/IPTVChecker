@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { CircleHelp, Copy, ImageOff, LoaderCircle, Play, RotateCw, X } from "lucide-react";
+import { CircleHelp, Copy, ExternalLink, ImageOff, LoaderCircle, Play, RotateCw, Square, X } from "lucide-react";
 import type { ChannelResult } from "../lib/types";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
 import { StatusBadge } from "./StatusBadge";
+import { StreamPlayer } from "./StreamPlayer";
 
 interface ThumbnailPanelProps {
   result: ChannelResult | null;
@@ -16,6 +17,20 @@ interface ThumbnailPanelProps {
   onLightboxChange: (open: boolean) => void;
   onPlayChannel?: (result: ChannelResult) => void;
   onScanChannel?: (indices: number[]) => void;
+  // Stream player props
+  isPlaying?: boolean;
+  playerState?: "idle" | "loading" | "playing" | "error";
+  errorMessage?: string | null;
+  isPaused?: boolean;
+  volume?: number;
+  muted?: boolean;
+  videoRef?: React.RefObject<HTMLVideoElement | null>;
+  onTogglePause?: () => void;
+  onStopPlayer?: () => void;
+  onSetVolume?: (v: number) => void;
+  onToggleMute?: () => void;
+  onOpenExternal?: (result: ChannelResult) => void;
+  onRetryPlay?: (result: ChannelResult) => void;
 }
 
 export function ThumbnailPanel({
@@ -29,6 +44,19 @@ export function ThumbnailPanel({
   onLightboxChange,
   onPlayChannel,
   onScanChannel,
+  isPlaying,
+  playerState = "idle",
+  errorMessage: playerErrorMessage,
+  isPaused,
+  volume,
+  muted,
+  videoRef,
+  onTogglePause,
+  onStopPlayer,
+  onSetVolume,
+  onToggleMute,
+  onOpenExternal,
+  onRetryPlay,
 }: ThumbnailPanelProps) {
   const [lightboxRendered, setLightboxRendered] = useState(false);
   const [lightboxVisible, setLightboxVisible] = useState(false);
@@ -148,7 +176,22 @@ export function ThumbnailPanel({
         <h3 className="text-[14px] font-semibold truncate">{result.name}</h3>
       </div>
 
-      {screenshotUrl ? (
+      {isPlaying && videoRef && onTogglePause && onStopPlayer && onSetVolume && onToggleMute ? (
+        <StreamPlayer
+          playerState={playerState}
+          errorMessage={playerErrorMessage ?? null}
+          isPaused={isPaused ?? false}
+          volume={volume ?? 0.75}
+          muted={muted ?? false}
+          videoRef={videoRef}
+          onTogglePause={onTogglePause}
+          onStop={onStopPlayer}
+          onSetVolume={onSetVolume}
+          onToggleMute={onToggleMute}
+          onOpenExternal={() => onOpenExternal?.(result)}
+          onRetry={() => onRetryPlay?.(result)}
+        />
+      ) : screenshotUrl ? (
         <button
           type="button"
           onClick={openLightbox}
@@ -212,14 +255,36 @@ export function ThumbnailPanel({
       {(onPlayChannel || onScanChannel) && (
         <div className="flex items-center gap-2">
           {onPlayChannel && (
+            isPlaying ? (
+              <button
+                type="button"
+                onClick={onStopPlayer}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-red-600 hover:bg-red-500 text-white shadow-sm transition-colors"
+                title="Stop playback"
+              >
+                <Square className="w-3.5 h-3.5" />
+                Stop
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onPlayChannel(result)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition-colors"
+                title="Preview in app"
+              >
+                <Play className="w-3.5 h-3.5" />
+                Play
+              </button>
+            )
+          )}
+          {onOpenExternal && (
             <button
               type="button"
-              onClick={() => onPlayChannel(result)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition-colors"
-              title="Open in player"
+              onClick={() => onOpenExternal(result)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-btn hover:bg-btn-hover text-text-primary border border-border-app shadow-sm transition-colors"
+              title="Open in external player"
             >
-              <Play className="w-3.5 h-3.5" />
-              Play
+              <ExternalLink className="w-3.5 h-3.5" />
             </button>
           )}
           {onScanChannel && (

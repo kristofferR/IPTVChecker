@@ -33,6 +33,7 @@ interface ChannelTableProps {
   scanState?: "idle" | "scanning" | "paused" | "complete" | "cancelled";
   onSelectChannel: (result: ChannelResult) => void;
   onOpenChannel?: (result: ChannelResult) => void;
+  onOpenExternal?: (result: ChannelResult) => void;
   onSelectionChange?: (selectedIndices: number[]) => void;
   onScanSelected?: (selectedIndices: number[]) => void;
   headerPortalRef?: RefObject<HTMLDivElement | null>;
@@ -193,6 +194,7 @@ export function ChannelTable({
   channelLogoSize,
   onSelectChannel,
   onOpenChannel,
+  onOpenExternal,
   onSelectionChange,
   onScanSelected,
   scanState,
@@ -881,11 +883,17 @@ export function ChannelTable({
     );
   }, [contextMenuState, copyText, getSelectedChannels]);
 
-  const handleOpenInPlayer = useCallback(() => {
+  const handlePreviewChannel = useCallback(() => {
     if (!contextMenuState) return;
     onOpenChannel?.(contextMenuState.channel);
     setContextMenuState(null);
   }, [contextMenuState, onOpenChannel]);
+
+  const handleOpenInExternalPlayer = useCallback(() => {
+    if (!contextMenuState) return;
+    onOpenExternal?.(contextMenuState.channel);
+    setContextMenuState(null);
+  }, [contextMenuState, onOpenExternal]);
 
   const findColumnAtX = useCallback(
     (x: number): ColumnKey | null => {
@@ -1190,11 +1198,18 @@ export function ChannelTable({
           </button>
           <div className="h-px my-1 bg-border-subtle" />
           <button
-            onClick={handleOpenInPlayer}
+            onClick={handlePreviewChannel}
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
-            Open in Default Player
+            Preview
+          </button>
+          <button
+            onClick={handleOpenInExternalPlayer}
+            className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+            type="button"
+          >
+            Open in External Player
           </button>
           <button
             onClick={handleCopyChannelName}

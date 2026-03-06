@@ -48,6 +48,7 @@ import {
 } from "./lib/tauri";
 import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
+import { useStreamPlayer } from "./hooks/useStreamPlayer";
 import { Toolbar } from "./components/Toolbar";
 import { FilterBar } from "./components/FilterBar";
 import { ChannelTable } from "./components/ChannelTable";
@@ -357,6 +358,9 @@ export default function App() {
     id: number;
     action: "csv" | "split" | "renamed" | "m3u" | "scanlog";
   } | null>(null);
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamPlayer = useStreamPlayer(videoRef);
 
   const { settings, save: saveSettings, applyExternal: applyExternalSettings } = useSettings();
   const settingsRef = useRef(settings);
@@ -1554,7 +1558,7 @@ export default function App() {
     setShowReportPanel(false);
   }, [markManualReportVisibility]);
 
-  const launchChannelInPlayer = useCallback(async (result: ChannelResult) => {
+  const handleOpenExternal = useCallback(async (result: ChannelResult) => {
     try {
       await openChannelInPlayer({
         extinf_line: result.extinf_line,
@@ -1566,23 +1570,23 @@ export default function App() {
     }
   }, []);
 
-  const handleOpenChannel = useCallback(
+  const handlePlayInApp = useCallback(
     (result: ChannelResult) => {
       if (scanState === "scanning" || scanState === "paused") {
         setPendingPlaybackChannel(result);
         return;
       }
-      void launchChannelInPlayer(result);
+      streamPlayer.play(result);
     },
-    [scanState, launchChannelInPlayer],
+    [scanState, streamPlayer],
   );
 
   const handleProceedPlayback = useCallback(() => {
     if (!pendingPlaybackChannel) return;
     const channel = pendingPlaybackChannel;
     setPendingPlaybackChannel(null);
-    void launchChannelInPlayer(channel);
-  }, [pendingPlaybackChannel, launchChannelInPlayer]);
+    streamPlayer.play(channel);
+  }, [pendingPlaybackChannel, streamPlayer]);
 
   const completedResults = flatResults;
   handleToggleSidebarRef.current = () => {
@@ -1730,6 +1734,14 @@ export default function App() {
     selectedChannel != null
       ? (results[selectedChannel.index] ?? selectedChannel)
       : null;
+
+  // Auto-stop player when selected channel changes or is deselected
+  useEffect(() => {
+    if (streamPlayer.activeChannelIndex === null) return;
+    if (!liveSelectedChannel || liveSelectedChannel.index !== streamPlayer.activeChannelIndex) {
+      streamPlayer.stop();
+    }
+  }, [liveSelectedChannel, streamPlayer]);
 
   // Load screenshot via custom Tauri command (bypasses fs/asset scope issues)
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
@@ -1985,8 +1997,21 @@ export default function App() {
               scanState={scanState}
               lightboxOpen={lightboxOpen}
               onLightboxChange={setLightboxOpen}
-              onPlayChannel={handleOpenChannel}
+              onPlayChannel={handlePlayInApp}
               onScanChannel={handleScanSelected}
+              isPlaying={streamPlayer.playerState !== "idle"}
+              playerState={streamPlayer.playerState}
+              errorMessage={streamPlayer.errorMessage}
+              isPaused={streamPlayer.isPaused}
+              volume={streamPlayer.volume}
+              muted={streamPlayer.muted}
+              videoRef={videoRef}
+              onTogglePause={streamPlayer.togglePause}
+              onStopPlayer={streamPlayer.stop}
+              onSetVolume={streamPlayer.setVolume}
+              onToggleMute={streamPlayer.toggleMute}
+              onOpenExternal={handleOpenExternal}
+              onRetryPlay={(result) => streamPlayer.play(result)}
             />
           </div>
         )}
@@ -2004,7 +2029,8 @@ export default function App() {
                 isMac={isMac}
                 channelLogoSize={settings.channel_logo_size}
                 onSelectChannel={handleSelectChannel}
-                onOpenChannel={handleOpenChannel}
+                onOpenChannel={handlePlayInApp}
+                onOpenExternal={handleOpenExternal}
                 onSelectionChange={setSelectedChannelIndices}
                 onScanSelected={handleScanSelected}
                 headerPortalRef={isMac ? headerPortalRef : undefined}
