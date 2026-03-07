@@ -597,7 +597,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   <div>
                     <p className="text-[13px] font-medium">Profile video bitrate</p>
                     <p className="text-[11px] text-text-tertiary mt-0.5">
-                      Deeper ffmpeg sampling for more accurate bitrate values.
+                      Captures 10s of each stream for accurate video bitrate values. Much slower.
                     </p>
                   </div>
                   <Switch
