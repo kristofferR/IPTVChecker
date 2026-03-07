@@ -75,6 +75,12 @@ fn serialize_xtream_recent_value(value: &XtreamRecentValue) -> Option<String> {
     serde_json::to_string(value).ok()
 }
 
+/// Dedup key for Xtream entries: server + username (ignoring password).
+fn xtream_dedup_key(value: &str) -> Option<(String, String)> {
+    let parsed = parse_xtream_recent_value(value)?;
+    Some((parsed.server, parsed.username))
+}
+
 fn xtream_host_label(server: &str) -> String {
     let Ok(parsed) = Url::parse(server) else {
         return server.to_string();
@@ -141,6 +147,7 @@ fn save_recent_playlists(app: &tauri::AppHandle, entries: &[RecentPlaylistEntry]
 fn sanitize_recent_playlists(entries: Vec<RecentPlaylistEntry>) -> Vec<RecentPlaylistEntry> {
     let mut sanitized = Vec::new();
     let mut seen: HashSet<(RecentPlaylistKind, String)> = HashSet::new();
+    let mut seen_xtream: HashSet<(String, String)> = HashSet::new();
 
     for entry in entries {
         let raw_value = entry.value.trim();
@@ -161,6 +168,11 @@ fn sanitize_recent_playlists(entries: Vec<RecentPlaylistEntry>) -> Vec<RecentPla
                 let Some(source) = parse_xtream_recent_value(raw_value) else {
                     continue;
                 };
+                let xtream_key = (source.server.clone(), source.username.clone());
+                if seen_xtream.contains(&xtream_key) {
+                    continue;
+                }
+                seen_xtream.insert(xtream_key);
                 let Some(serialized) = serialize_xtream_recent_value(&source) else {
                     continue;
                 };
@@ -335,7 +347,22 @@ pub async fn add_recent_playlist(
     };
 
     let mut entries = load_recent_playlists(&app);
-    entries.retain(|entry| !(entry.kind == recent.kind && entry.value == value));
+    let xtream_key = if recent.kind == RecentPlaylistKind::Xtream {
+        xtream_dedup_key(&value)
+    } else {
+        None
+    };
+    entries.retain(|entry| {
+        if entry.kind != recent.kind {
+            return true;
+        }
+        if let Some((ref server, ref username)) = xtream_key {
+            if let Some((s, u)) = xtream_dedup_key(&entry.value) {
+                return &s != server || &u != username;
+            }
+        }
+        entry.value != value
+    });
     entries.insert(
         0,
         RecentPlaylistEntry {
@@ -402,6 +429,29 @@ mod tests {
             sanitized[0].value,
             "{\"server\":\"https://demo.example.com\",\"username\":\"alice\"}"
         );
+    }
+
+    #[test]
+    fn sanitize_recent_playlists_dedupes_xtream_with_and_without_password() {
+        let entries = vec![
+            RecentPlaylistEntry {
+                kind: RecentPlaylistKind::Xtream,
+                value: "{\"server\":\"https://demo.example.com\",\"username\":\"alice\",\"password\":\"secret\"}"
+                    .to_string(),
+                label: "".to_string(),
+            },
+            RecentPlaylistEntry {
+                kind: RecentPlaylistKind::Xtream,
+                value: "{\"server\":\"https://demo.example.com\",\"username\":\"alice\"}"
+                    .to_string(),
+                label: "".to_string(),
+            },
+        ];
+
+        let sanitized = sanitize_recent_playlists(entries);
+        assert_eq!(sanitized.len(), 1);
+        // The first entry (with password) should win
+        assert!(sanitized[0].value.contains("password"));
     }
 
     #[test]
