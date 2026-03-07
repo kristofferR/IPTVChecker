@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LoaderCircle, Maximize, Pause, Play, Square, Volume2, VolumeX } from "lucide-react";
+import { LoaderCircle, Maximize, Pause, PictureInPicture2, Play, Square, Volume2, VolumeX } from "lucide-react";
 
 interface StreamPlayerProps {
   playerState: "idle" | "loading" | "playing" | "error";
@@ -15,6 +15,7 @@ interface StreamPlayerProps {
   onOpenExternal: () => void;
   onRetry: () => void;
   onFullscreen?: () => void;
+  onPip?: () => void;
 }
 
 export function StreamPlayer({
@@ -31,6 +32,7 @@ export function StreamPlayer({
   onOpenExternal,
   onRetry,
   onFullscreen,
+  onPip,
 }: StreamPlayerProps) {
   const [controlsVisible, setControlsVisible] = useState(true);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -145,6 +147,16 @@ export function StreamPlayer({
             className="w-16 h-1 accent-white cursor-pointer"
             title={`Volume: ${Math.round((muted ? 0 : volume) * 100)}%`}
           />
+          {onPip && (
+            <button
+              type="button"
+              onClick={onPip}
+              className="p-1 text-white hover:text-white/80 transition-colors ml-1"
+              title="Picture-in-Picture"
+            >
+              <PictureInPicture2 className="w-4 h-4" />
+            </button>
+          )}
           {onFullscreen && (
             <button
               type="button"

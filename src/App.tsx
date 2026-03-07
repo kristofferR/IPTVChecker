@@ -1595,6 +1595,16 @@ export default function App() {
     streamPlayer.stop();
   }, [streamPlayer]);
 
+  const handlePip = useCallback(() => {
+    const video = streamPlayer.videoElement;
+    if (!video) return;
+    if (document.pictureInPictureElement) {
+      document.exitPictureInPicture().catch(() => {});
+    } else if (document.pictureInPictureEnabled) {
+      video.requestPictureInPicture().catch(() => {});
+    }
+  }, [streamPlayer.videoElement]);
+
   const handleProceedPlayback = useCallback(() => {
     if (!pendingPlaybackChannel) return;
     const channel = pendingPlaybackChannel;
@@ -2025,6 +2035,7 @@ export default function App() {
               onToggleMute={streamPlayer.toggleMute}
               onOpenExternal={handleOpenExternal}
               onRetryPlay={(result) => streamPlayer.play(result)}
+              onPip={document.pictureInPictureEnabled ? handlePip : undefined}
             />
           </div>
         )}

@@ -34,6 +34,7 @@ interface ThumbnailPanelProps {
   onToggleMute?: () => void;
   onOpenExternal?: (result: ChannelResult) => void;
   onRetryPlay?: (result: ChannelResult) => void;
+  onPip?: () => void;
 }
 
 export function ThumbnailPanel({
@@ -60,6 +61,7 @@ export function ThumbnailPanel({
   onToggleMute,
   onOpenExternal,
   onRetryPlay,
+  onPip,
 }: ThumbnailPanelProps) {
   const [lightboxRendered, setLightboxRendered] = useState(false);
   const [lightboxVisible, setLightboxVisible] = useState(false);
@@ -267,6 +269,7 @@ export function ThumbnailPanel({
           onOpenExternal={() => onOpenExternal?.(result)}
           onRetry={() => onRetryPlay?.(result)}
           onFullscreen={() => onLightboxChange(true)}
+          onPip={onPip}
         />
       ) : screenshotUrl ? (
         <button
@@ -543,6 +546,7 @@ export function ThumbnailPanel({
                   onToggleMute={onToggleMute}
                   onOpenExternal={() => onOpenExternal?.(result)}
                   onRetry={() => onRetryPlay?.(result)}
+                  onPip={onPip ? () => { onPip(); closeLightbox(); } : undefined}
                 />
                 <button
                   type="button"
