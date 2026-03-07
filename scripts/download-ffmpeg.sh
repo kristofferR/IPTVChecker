@@ -16,7 +16,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="${SCRIPT_DIR}/../src-tauri/binaries"
 
-TARGET="${1:-$(rustc --print host-tuple 2>/dev/null || rustc -vV | sed -n 's/^host: //p')}"
+HOST_TARGET="$(rustc --print host-tuple 2>/dev/null || rustc -vV | sed -n 's/^host: //p')"
+TARGET="${1:-${HOST_TARGET}}"
 
 # Windows binaries need .exe extension
 EXT=""
@@ -128,11 +129,15 @@ case "${TARGET}" in
 esac
 
 echo "Done. Binaries in ${BIN_DIR}/"
-# Show versions
-for name in ffmpeg ffprobe; do
-    local_bin="${BIN_DIR}/${name}-${TARGET}${EXT}"
-    if [[ -x "${local_bin}" ]]; then
-        version=$("${local_bin}" -version 2>&1 | head -1)
-        echo "  ${name}: ${version}"
-    fi
-done
+if [[ "${TARGET}" == "${HOST_TARGET}" ]]; then
+    # Show versions only when the downloaded binaries match the current host arch.
+    for name in ffmpeg ffprobe; do
+        local_bin="${BIN_DIR}/${name}-${TARGET}${EXT}"
+        if [[ -x "${local_bin}" ]]; then
+            version=$("${local_bin}" -version 2>&1 | head -1)
+            echo "  ${name}: ${version}"
+        fi
+    done
+else
+    echo "  Skipping local version check for cross-target binaries (${TARGET} on ${HOST_TARGET})"
+fi
