@@ -107,6 +107,7 @@ export function useScan() {
     () => new Set(),
   );
   const [screenshotsPaused, setScreenshotsPaused] = useState(false);
+  const [networkPaused, setNetworkPaused] = useState(false);
 
   // Batch incoming results with requestAnimationFrame
   const pendingResults = useRef<ChannelResult[]>([]);
@@ -438,6 +439,24 @@ export function useScan() {
         }),
       );
 
+      unlisteners.push(
+        await listen<ScanEvent<null>>("scan://network-paused", (event) => {
+          if (isRunScopedEventForActiveRun(activeRunId.current, event.payload.run_id)) {
+            logger.debug("[useScan] scan://network-paused received");
+            setNetworkPaused(true);
+          }
+        }),
+      );
+
+      unlisteners.push(
+        await listen<ScanEvent<null>>("scan://network-resumed", (event) => {
+          if (isRunScopedEventForActiveRun(activeRunId.current, event.payload.run_id)) {
+            logger.debug("[useScan] scan://network-resumed received");
+            setNetworkPaused(false);
+          }
+        }),
+      );
+
       logger.debug("[useScan] All event listeners registered");
     };
 
@@ -509,6 +528,7 @@ export function useScan() {
       setScanState("scanning");
       setTelemetry(EMPTY_TELEMETRY);
       setScreenshotsPaused(false);
+      setNetworkPaused(false);
       pendingResults.current = [];
       eventCount.current = 0;
       activeRunId.current = null;
@@ -617,6 +637,7 @@ export function useScan() {
       setScanState("idle");
       setTelemetry(EMPTY_TELEMETRY);
       setScreenshotsPaused(false);
+      setNetworkPaused(false);
       pendingResults.current = [];
       eventCount.current = 0;
       activeRunId.current = null;
@@ -653,6 +674,7 @@ export function useScan() {
     error,
     telemetry,
     screenshotsPaused,
+    networkPaused,
     start,
     cancel,
     pause,

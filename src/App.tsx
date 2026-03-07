@@ -368,6 +368,7 @@ export default function App() {
     error,
     telemetry,
     screenshotsPaused,
+    networkPaused,
     start,
     cancel,
     pause,
@@ -1017,11 +1018,13 @@ export default function App() {
           ? Math.min(100, Math.max(0, (progress.completed / progress.total) * 100))
           : 0;
       const status =
-        scanState === "paused"
-          ? ProgressBarStatus.Paused
-          : progress
-            ? ProgressBarStatus.Normal
-            : ProgressBarStatus.Indeterminate;
+        networkPaused
+          ? ProgressBarStatus.Error
+          : scanState === "paused"
+            ? ProgressBarStatus.Paused
+            : progress
+              ? ProgressBarStatus.Normal
+              : ProgressBarStatus.Indeterminate;
 
       void appWindow
         .setProgressBar({
@@ -1077,7 +1080,7 @@ export default function App() {
 
     clearNativeProgressIndicators();
     return clearScheduledUpdate;
-  }, [scanState, progress, isMac]);
+  }, [scanState, progress, isMac, networkPaused]);
 
   const handleDroppedPaths = useCallback((paths: string[]) => {
     const playlistPath = paths.find((path) =>
@@ -1899,6 +1902,13 @@ export default function App() {
       {screenshotsPaused && isScanActive(scanState) && (
         <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-[13px]">
           <span className="flex-1">Screenshot capture paused — low disk space</span>
+        </div>
+      )}
+
+      {networkPaused && isScanActive(scanState) && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-orange-500/10 border-b border-orange-500/20 text-orange-400 text-[13px]">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span className="flex-1">Scan paused — network connectivity lost. Waiting for recovery...</span>
         </div>
       )}
 

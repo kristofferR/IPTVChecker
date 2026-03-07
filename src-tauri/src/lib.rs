@@ -210,6 +210,17 @@ fn emit_menu_event_to_focused_window(app: &tauri::AppHandle, event_name: &str) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Workaround for webkit2gtk DMABUF rendering issues on Wayland (common with
+    // NVIDIA and some Intel GPUs). Must be set before any GTK/webkit2gtk init.
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var("WAYLAND_DISPLAY").is_ok()
+            && std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").is_err()
+        {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
+
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
@@ -638,6 +649,18 @@ pub fn run() {
                             app.exit(0);
                         }
                         _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        // Left-click on tray icon shows/focuses the main window
+                        if matches!(event, tauri::tray::TrayIconEvent::Click { .. }) {
+                            if let Some(window) =
+                                tray.app_handle().get_webview_window("main")
+                            {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
+                        }
                     });
 
                 if let Some(icon) = app.default_window_icon().cloned() {
@@ -646,6 +669,16 @@ pub fn run() {
 
                 if let Err(error) = tray_builder.build(app) {
                     log::warn!("Failed to initialize system tray: {}", error);
+                }
+            }
+
+            // On Linux, ensure native window decorations are visible and the
+            // window title is set (overlay titlebar is macOS/Windows only).
+            #[cfg(target_os = "linux")]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_decorations(true);
+                    let _ = window.set_title("IPTV Checker");
                 }
             }
 

@@ -719,100 +719,72 @@ fn extract_xtream_max_connections(payload: &serde_json::Value) -> Option<u32> {
 /// Timeout for the (potentially large) JSON stream list downloads.
 const XTREAM_JSON_API_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Build an M3U playlist from the Xtream JSON API (`get_live_categories` +
-/// `get_live_streams`).  This is the fallback when `/get.php` is blocked.
-async fn fetch_xtream_playlist_via_json_api(
-    server: &Url,
-    username: &str,
-    password: &str,
-) -> Result<Vec<u8>, AppError> {
-    let categories_url =
-        build_xtream_player_api_action_url(server, username, password, "get_live_categories");
-    let streams_url =
-        build_xtream_player_api_action_url(server, username, password, "get_live_streams");
-
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
-        .timeout(XTREAM_JSON_API_TIMEOUT)
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| AppError::Other(format!("Failed to build HTTP client: {}", e)))?;
-
-    let (cats_resp, streams_resp) = tokio::join!(
-        client
-            .get(categories_url)
-            .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
-            .send(),
-        client
-            .get(streams_url)
-            .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
-            .send(),
-    );
-
-    let cats_resp = cats_resp.map_err(|e| {
-        AppError::Other(format!("Failed to fetch Xtream categories: {}", e))
-    })?;
-    let streams_resp = streams_resp.map_err(|e| {
-        AppError::Other(format!("Failed to fetch Xtream live streams: {}", e))
-    })?;
-
-    if !cats_resp.status().is_success() {
-        return Err(AppError::Other(format!(
-            "Xtream categories API returned HTTP {}",
-            cats_resp.status()
-        )));
+/// Fetch a single Xtream JSON API endpoint, returning parsed JSON array.
+/// Returns an empty Vec on non-2xx or parse failures (best-effort for optional content).
+async fn fetch_xtream_json_array(
+    client: &reqwest::Client,
+    url: reqwest::Url,
+    label: &str,
+) -> Vec<serde_json::Value> {
+    match client
+        .get(url)
+        .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.bytes().await {
+                Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+                Err(e) => {
+                    log::warn!("Failed to read Xtream {} response: {}", label, e);
+                    Vec::new()
+                }
+            }
+        }
+        Ok(resp) => {
+            log::warn!("Xtream {} API returned HTTP {}", label, resp.status());
+            Vec::new()
+        }
+        Err(e) => {
+            log::warn!("Failed to fetch Xtream {}: {}", label, e);
+            Vec::new()
+        }
     }
-    if !streams_resp.status().is_success() {
-        return Err(AppError::Other(format!(
-            "Xtream live streams API returned HTTP {}",
-            streams_resp.status()
-        )));
-    }
+}
 
-    let cats_bytes = cats_resp.bytes().await.map_err(|e| {
-        AppError::Other(format!("Failed to read Xtream categories response: {}", e))
-    })?;
-    let streams_bytes = streams_resp.bytes().await.map_err(|e| {
-        AppError::Other(format!("Failed to read Xtream live streams response: {}", e))
-    })?;
-
-    let categories: Vec<serde_json::Value> =
-        serde_json::from_slice(&cats_bytes).unwrap_or_default();
-    let streams: Vec<serde_json::Value> = serde_json::from_slice(&streams_bytes)
-        .map_err(|e| AppError::Parse(format!("Failed to parse Xtream live streams JSON: {}", e)))?;
-
-    if streams.is_empty() {
-        return Err(AppError::Other(
-            "Xtream server returned an empty channel list".to_string(),
-        ));
-    }
-
-    // Build a category_id -> category_name lookup.
-    let cat_map: HashMap<String, String> = categories
+/// Build category_id -> category_name lookup from a JSON categories array.
+fn build_category_map(categories: &[serde_json::Value]) -> HashMap<String, String> {
+    categories
         .iter()
         .filter_map(|cat| {
             let id = cat.get("category_id")?.as_str()?.to_string();
             let name = cat.get("category_name")?.as_str()?.to_string();
             Some((id, name))
         })
-        .collect();
+        .collect()
+}
 
-    // Derive the base stream URL: http(s)://server/live/username/password/
-    let stream_base = {
-        let mut base = server.clone();
-        let mut path = base.path().trim_end_matches('/').to_string();
-        path.push_str(&format!("/live/{}/{}/", username, password));
-        base.set_path(&path);
-        base.set_query(None);
-        base.set_fragment(None);
-        base.to_string()
-    };
+/// Build base stream URL for a given content type path segment.
+fn build_xtream_stream_base(server: &Url, segment: &str, username: &str, password: &str) -> String {
+    let mut base = server.clone();
+    let mut path = base.path().trim_end_matches('/').to_string();
+    path.push_str(&format!("/{}/{}/{}/", segment, username, password));
+    base.set_path(&path);
+    base.set_query(None);
+    base.set_fragment(None);
+    base.to_string()
+}
 
-    let mut m3u = String::with_capacity(streams.len() * 200);
-    m3u.push_str("#EXTM3U\n");
-
-    for entry in &streams {
+/// Append M3U entries for a list of Xtream streams.
+fn append_xtream_streams_to_m3u(
+    m3u: &mut String,
+    streams: &[serde_json::Value],
+    cat_map: &HashMap<String, String>,
+    stream_base: &str,
+    extension: &str,
+) -> usize {
+    let mut count = 0;
+    for entry in streams {
         let name = entry
             .get("name")
             .and_then(|v| v.as_str())
@@ -832,21 +804,182 @@ async fn fetch_xtream_playlist_via_json_api(
             .unwrap_or("");
         let group = entry
             .get("category_id")
-            .and_then(|v| v.as_str())
+            .and_then(|v| v.as_str().or_else(|| {
+                // Some servers return category_id as a number
+                None
+            }))
             .and_then(|id| cat_map.get(id))
             .map(|s| s.as_str())
             .unwrap_or("");
+
+        // Also try category_id as number
+        let group = if group.is_empty() {
+            match entry.get("category_id") {
+                Some(serde_json::Value::Number(n)) => {
+                    cat_map.get(&n.to_string()).map(|s| s.as_str()).unwrap_or("")
+                }
+                _ => "",
+            }
+        } else {
+            group
+        };
 
         m3u.push_str(&format!(
             "#EXTINF:-1 tvg-id=\"{}\" tvg-logo=\"{}\" group-title=\"{}\",{}\n",
             tvg_id, tvg_logo, group, name
         ));
-        m3u.push_str(&format!("{}{}.ts\n", stream_base, stream_id));
+        m3u.push_str(&format!("{}{}.{}\n", stream_base, stream_id, extension));
+        count += 1;
+    }
+    count
+}
+
+/// Build an M3U playlist from the Xtream JSON API. Fetches live streams,
+/// VOD (movies), and series using structured JSON endpoints. Falls back
+/// gracefully — if VOD/series endpoints fail, the playlist still contains
+/// live channels.
+async fn fetch_xtream_playlist_via_json_api(
+    server: &Url,
+    username: &str,
+    password: &str,
+) -> Result<Vec<u8>, AppError> {
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
+        .timeout(XTREAM_JSON_API_TIMEOUT)
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| AppError::Other(format!("Failed to build HTTP client: {}", e)))?;
+
+    // Fetch all content types in parallel
+    let live_cats_url =
+        build_xtream_player_api_action_url(server, username, password, "get_live_categories");
+    let live_streams_url =
+        build_xtream_player_api_action_url(server, username, password, "get_live_streams");
+    let vod_cats_url =
+        build_xtream_player_api_action_url(server, username, password, "get_vod_categories");
+    let vod_streams_url =
+        build_xtream_player_api_action_url(server, username, password, "get_vod_streams");
+    let series_cats_url =
+        build_xtream_player_api_action_url(server, username, password, "get_series_categories");
+    let series_url =
+        build_xtream_player_api_action_url(server, username, password, "get_series");
+
+    let (live_cats, live_streams, vod_cats, vod_streams, series_cats, series_list) = tokio::join!(
+        fetch_xtream_json_array(&client, live_cats_url, "live categories"),
+        fetch_xtream_json_array(&client, live_streams_url, "live streams"),
+        fetch_xtream_json_array(&client, vod_cats_url, "VOD categories"),
+        fetch_xtream_json_array(&client, vod_streams_url, "VOD streams"),
+        fetch_xtream_json_array(&client, series_cats_url, "series categories"),
+        fetch_xtream_json_array(&client, series_url, "series"),
+    );
+
+    if live_streams.is_empty() && vod_streams.is_empty() && series_list.is_empty() {
+        return Err(AppError::Other(
+            "Xtream server returned no content (no live, VOD, or series entries)".to_string(),
+        ));
+    }
+
+    // Build category lookups
+    let live_cat_map = build_category_map(&live_cats);
+    let vod_cat_map = build_category_map(&vod_cats);
+    let series_cat_map = build_category_map(&series_cats);
+
+    // Build base URLs for each content type
+    let live_base = build_xtream_stream_base(server, "live", username, password);
+    let movie_base = build_xtream_stream_base(server, "movie", username, password);
+    let series_base = build_xtream_stream_base(server, "series", username, password);
+
+    let estimated_total = live_streams.len() + vod_streams.len() + series_list.len();
+    let mut m3u = String::with_capacity(estimated_total * 200);
+    m3u.push_str("#EXTM3U\n");
+
+    // Live streams → .ts extension
+    let live_count =
+        append_xtream_streams_to_m3u(&mut m3u, &live_streams, &live_cat_map, &live_base, "ts");
+
+    // VOD streams → container extension from API or default .mp4
+    let mut vod_count = 0;
+    for entry in &vod_streams {
+        let name = entry
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown");
+        let stream_id = match entry.get("stream_id") {
+            Some(serde_json::Value::Number(n)) => n.to_string(),
+            Some(serde_json::Value::String(s)) => s.clone(),
+            _ => continue,
+        };
+        let tvg_logo = entry
+            .get("stream_icon")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let container_extension = entry
+            .get("container_extension")
+            .and_then(|v| v.as_str())
+            .unwrap_or("mp4");
+        let group = entry
+            .get("category_id")
+            .and_then(|v| match v {
+                serde_json::Value::String(s) => vod_cat_map.get(s.as_str()),
+                serde_json::Value::Number(n) => vod_cat_map.get(&n.to_string()),
+                _ => None,
+            })
+            .map(|s| s.as_str())
+            .unwrap_or("");
+
+        m3u.push_str(&format!(
+            "#EXTINF:-1 tvg-logo=\"{}\" group-title=\"VOD: {}\",{}\n",
+            tvg_logo, group, name
+        ));
+        m3u.push_str(&format!(
+            "{}{}.{}\n",
+            movie_base, stream_id, container_extension
+        ));
+        vod_count += 1;
+    }
+
+    // Series → each series entry gets a representative URL
+    let mut series_count = 0;
+    for entry in &series_list {
+        let name = entry
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown");
+        let series_id = match entry.get("series_id") {
+            Some(serde_json::Value::Number(n)) => n.to_string(),
+            Some(serde_json::Value::String(s)) => s.clone(),
+            _ => continue,
+        };
+        let tvg_logo = entry
+            .get("cover")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let group = entry
+            .get("category_id")
+            .and_then(|v| match v {
+                serde_json::Value::String(s) => series_cat_map.get(s.as_str()),
+                serde_json::Value::Number(n) => series_cat_map.get(&n.to_string()),
+                _ => None,
+            })
+            .map(|s| s.as_str())
+            .unwrap_or("");
+
+        m3u.push_str(&format!(
+            "#EXTINF:-1 tvg-logo=\"{}\" group-title=\"Series: {}\",{}\n",
+            tvg_logo, group, name
+        ));
+        // Series entries use the series path with series_id
+        m3u.push_str(&format!("{}{}.ts\n", series_base, series_id));
+        series_count += 1;
     }
 
     log::info!(
-        "Built M3U from Xtream JSON API: {} channels",
-        streams.len()
+        "Built M3U from Xtream JSON API: {} live, {} VOD, {} series ({} total)",
+        live_count,
+        vod_count,
+        series_count,
+        live_count + vod_count + series_count
     );
 
     Ok(m3u.into_bytes())

@@ -204,6 +204,14 @@ body {
   --toolbar-pr: 138px;
 }
 
+/* Linux: native WM decorations — no overlay padding, use DE scrollbar style */
+[data-platform="linux"] {
+  --toolbar-pt: 0.5rem;
+  --toolbar-pl: 1rem;
+  scrollbar-color: var(--text-tertiary) transparent;
+  scrollbar-width: thin;
+}
+
 /* Native-feeling scroll containers on macOS */
 [data-platform="macos"] .native-scroll {
   -webkit-overflow-scrolling: touch;

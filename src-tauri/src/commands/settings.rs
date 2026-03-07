@@ -764,7 +764,10 @@ pub async fn read_screenshot(app: tauri::AppHandle, path: String) -> Result<Stri
     let allowed_roots = allowed_screenshot_roots(&app).await;
     let validated_path = validate_screenshot_path(requested, &allowed_roots)?;
 
-    let bytes = std::fs::read(&validated_path)
+    let validated_path_clone = validated_path.clone();
+    let bytes = tokio::task::spawn_blocking(move || std::fs::read(&validated_path_clone))
+        .await
+        .map_err(|e| AppError::Other(format!("Failed to read screenshot: {}", e)))?
         .map_err(|e| AppError::Other(format!("Failed to read screenshot: {}", e)))?;
 
     let mime = match validated_path
@@ -789,7 +792,11 @@ pub async fn get_screenshot_cache_stats(
     app: tauri::AppHandle,
 ) -> Result<ScreenshotCacheStats, AppError> {
     let cache_root = screenshot_cache_root(&app);
-    let (total_bytes, file_count) = collect_dir_stats(&cache_root).map_err(AppError::Io)?;
+    let cache_root_clone = cache_root.clone();
+    let (total_bytes, file_count) = tokio::task::spawn_blocking(move || collect_dir_stats(&cache_root_clone))
+        .await
+        .map_err(|e| AppError::Other(format!("Failed to collect screenshot stats: {}", e)))?
+        .map_err(AppError::Io)?;
     let state = app.state::<Arc<AppState>>();
     let threshold_gb = state.settings.lock().await.low_space_threshold_gb;
     let disk_space = Some(disk::get_disk_space_info(&cache_root, threshold_gb));
@@ -807,9 +814,17 @@ pub async fn clear_screenshot_cache(
     app: tauri::AppHandle,
 ) -> Result<ScreenshotCacheStats, AppError> {
     let cache_root = screenshot_cache_root(&app);
-    if cache_root.exists() {
-        fs::remove_dir_all(&cache_root).map_err(AppError::Io)?;
-    }
+    let cache_root_clone = cache_root.clone();
+    tokio::task::spawn_blocking(move || {
+        if cache_root_clone.exists() {
+            fs::remove_dir_all(&cache_root_clone)
+        } else {
+            Ok(())
+        }
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to clear screenshot cache: {}", e)))?
+    .map_err(AppError::Io)?;
 
     Ok(ScreenshotCacheStats {
         file_count: 0,

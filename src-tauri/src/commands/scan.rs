@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::commands::history;
 use crate::commands::settings;
-use crate::engine::{checker, disk, ffmpeg, parser, proxy, resume};
+use crate::engine::{checker, connectivity, disk, ffmpeg, parser, proxy, resume};
 use crate::error::AppError;
 use crate::models::backend_perf::BackendPerfSample;
 use crate::models::channel::{Channel, ChannelResult, ChannelStatus};
@@ -1097,8 +1097,13 @@ async fn execute_scan_run(
     let resumed_indices: HashSet<usize> =
         resumed_results.iter().map(|result| result.index).collect();
     if resumed_indices.is_empty() {
-        let _ = std::fs::write(&log_file, "");
-        let _ = std::fs::remove_file(&checkpoint_file);
+        let log_file_clone = log_file.clone();
+        let checkpoint_file_clone = checkpoint_file.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            let _ = std::fs::write(&log_file_clone, "");
+            let _ = std::fs::remove_file(&checkpoint_file_clone);
+        })
+        .await;
     } else {
         channels.retain(|channel| !resumed_indices.contains(&channel.index));
         log::info!(
@@ -1174,11 +1179,12 @@ async fn execute_scan_run(
                     .to_string()
             }
         };
-        if let Err(error) = std::fs::create_dir_all(&dir) {
-            return Err(AppError::Other(format!(
-                "Failed to create screenshots directory: {}",
-                error
-            )));
+        {
+            let dir_clone = dir.clone();
+            tokio::task::spawn_blocking(move || std::fs::create_dir_all(&dir_clone))
+                .await
+                .map_err(|e| AppError::Other(format!("Failed to create screenshots directory: {}", e)))?
+                .map_err(|e| AppError::Other(format!("Failed to create screenshots directory: {}", e)))?;
         }
 
         // Write scan metadata for eviction logic
@@ -1189,8 +1195,11 @@ async fn execute_scan_run(
                 "playlist_file": config.file_path.clone(),
             });
             let meta_path = std::path::Path::new(&dir).join(".scan-meta.json");
-            if let Err(error) = std::fs::write(&meta_path, meta.to_string()) {
-                log::warn!("Failed to write scan metadata: {}", error);
+            let meta_str = meta.to_string();
+            match tokio::task::spawn_blocking(move || std::fs::write(&meta_path, meta_str)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => log::warn!("Failed to write scan metadata: {}", error),
+                Err(error) => log::warn!("Failed to write scan metadata (join): {}", error),
             }
 
             // Pre-scan eviction: remove old dirs per retention policy
@@ -1414,6 +1423,9 @@ async fn execute_scan_run(
     let disk_check_counter = Arc::new(AtomicUsize::new(0));
     let eviction_in_progress = Arc::new(AtomicBool::new(false));
 
+    // Network connectivity tracking — consecutive network-level failures trigger a check
+    let consecutive_net_failures = Arc::new(std::sync::atomic::AtomicU32::new(0));
+
     let mut handles = Vec::new();
 
     for channel in channels {
@@ -1435,6 +1447,33 @@ async fn execute_scan_run(
                 Some(&run_id),
             )
             .await;
+        }
+
+        // Check if enough consecutive network failures have occurred to warrant a connectivity check
+        if consecutive_net_failures.load(Ordering::Relaxed) >= connectivity::CONSECUTIVE_FAILURE_THRESHOLD {
+            if !connectivity::check_connectivity().await {
+                log::warn!("Network connectivity lost — pausing scan until recovery");
+                let _ = app.emit(
+                    "scan://network-paused",
+                    ScanEvent {
+                        run_id: run_id.clone(),
+                        payload: (),
+                    },
+                );
+                let recovered = connectivity::wait_for_connectivity_recovery(&cancel_token).await;
+                if !recovered {
+                    break; // cancelled while waiting
+                }
+                log::info!("Network connectivity restored — resuming scan");
+                let _ = app.emit(
+                    "scan://network-resumed",
+                    ScanEvent {
+                        run_id: run_id.clone(),
+                        payload: (),
+                    },
+                );
+            }
+            consecutive_net_failures.store(0, Ordering::Relaxed);
         }
 
         let permit = semaphore.clone().acquire_owned().await;
@@ -1474,6 +1513,7 @@ async fn execute_scan_run(
         let eviction_in_progress = Arc::clone(&eviction_in_progress);
         let using_custom_dir = using_custom_screenshots_dir;
         let low_space_threshold_gb = low_space_threshold_gb;
+        let consecutive_net_failures = Arc::clone(&consecutive_net_failures);
 
         let handle = tokio::spawn(async move {
             let _permit = permit;
@@ -1617,6 +1657,21 @@ async fn execute_scan_run(
                     )
                 }
             };
+
+            // Track consecutive network-level failures for connectivity detection
+            if shared.status == ChannelStatus::Dead {
+                if let Some(ref reason) = shared.error_reason {
+                    if connectivity::is_network_level_error(reason) {
+                        consecutive_net_failures.fetch_add(1, Ordering::Relaxed);
+                    } else {
+                        consecutive_net_failures.store(0, Ordering::Relaxed);
+                    }
+                } else {
+                    consecutive_net_failures.store(0, Ordering::Relaxed);
+                }
+            } else {
+                consecutive_net_failures.store(0, Ordering::Relaxed);
+            }
 
             if timing.check_ms > 0.0 {
                 record_backend_perf(

@@ -50,6 +50,23 @@
       "binaries/ffmpeg",
       "binaries/ffprobe"
     ],
+    "windows": {
+      "nsis": {
+        "displayLanguageSelector": false
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0", "libayatana-appindicator3-1"],
+        "section": "utility"
+      },
+      "rpm": {
+        "depends": ["webkit2gtk4.1", "gtk3", "libayatana-appindicator-gtk3"]
+      },
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    },
     "fileAssociations": [
       {
         "ext": [
