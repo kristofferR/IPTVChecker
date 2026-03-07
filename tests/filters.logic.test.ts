@@ -147,6 +147,7 @@ describe("filterResults", () => {
       alive: 1,
       drm: 0,
       dead: 0,
+      placeholder: 0,
       geoblocked: 1,
       mislabeled: 1,
       audio_only: 2,
