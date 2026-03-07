@@ -57,28 +57,33 @@ download_btbn() {
     local archive="ffmpeg-master-latest-${platform}-gpl"
 
     local ext_archive=".tar.xz"
-    local extract_cmd="tar xf"
     # BtbN uses platform labels like win64/winarm64 here, not Rust target triples.
     if [[ "${platform}" == win* ]]; then
         ext_archive=".zip"
-        extract_cmd="unzip -o"
     fi
 
     local url="${base}/${archive}${ext_archive}"
     echo "  Downloading from ${url}"
 
-    local tmpfile
-    tmpfile="$(mktemp)"
-    curl -fSL "${url}" -o "${tmpfile}"
-
     local tmpdir
     tmpdir="$(mktemp -d)"
-    cd "${tmpdir}"
-    ${extract_cmd} "${tmpfile}"
-    cd - > /dev/null
+    local tmpfile="${tmpdir}/archive${ext_archive}"
+    local extract_dir="${tmpdir}/extract"
+    mkdir -p "${extract_dir}"
+    curl -fSL "${url}" -o "${tmpfile}"
+
+    if [[ "${ext_archive}" == ".zip" ]]; then
+        if command -v powershell.exe >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1; then
+            powershell.exe -NoProfile -Command "Expand-Archive -LiteralPath '$(cygpath -w "${tmpfile}")' -DestinationPath '$(cygpath -w "${extract_dir}")' -Force" > /dev/null
+        else
+            unzip -o "${tmpfile}" -d "${extract_dir}" > /dev/null
+        fi
+    else
+        tar xf "${tmpfile}" -C "${extract_dir}"
+    fi
 
     for name in ffmpeg ffprobe; do
-        local src="${tmpdir}/${archive}/bin/${name}${EXT}"
+        local src="${extract_dir}/${archive}/bin/${name}${EXT}"
         local output="${BIN_DIR}/${name}-${TARGET}${EXT}"
         if [[ -f "${output}" ]]; then
             echo "  ${name}: already exists, skipping"
