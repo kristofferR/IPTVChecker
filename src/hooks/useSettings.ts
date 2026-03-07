@@ -3,17 +3,17 @@ import type { AppSettings, ScanPresetConfig } from "../lib/types";
 import { getScanPresets, getSettings, updateSettings } from "../lib/tauri";
 
 const DEFAULT_SETTINGS: AppSettings = {
-  timeout: 10.0,
+  timeout: 8.0,
   extended_timeout: null,
   concurrency: 1,
-  retries: 3,
-  retry_backoff: "linear",
+  retries: 1,
+  retry_backoff: "none",
   user_agent: "VLC/3.0.23 LibVLC/3.0.23",
   skip_screenshots: false,
   profile_bitrate: false,
-  ffprobe_timeout_secs: 30,
-  ffmpeg_bitrate_timeout_secs: 60,
-  accept_invalid_certs: false,
+  ffprobe_timeout_secs: 8,
+  ffmpeg_bitrate_timeout_secs: 30,
+  accept_invalid_certs: true,
   proxy_file: null,
   test_geoblock: false,
   screenshots_dir: null,

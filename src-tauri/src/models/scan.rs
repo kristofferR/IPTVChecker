@@ -26,7 +26,7 @@ pub enum RetryBackoff {
 
 impl Default for RetryBackoff {
     fn default() -> Self {
-        Self::Linear
+        Self::None
     }
 }
 
@@ -188,8 +188,8 @@ mod tests {
             timeout: 10.0,
             extended_timeout: Some(20.0),
             concurrency: 1,
-            retries: 3,
-            retry_backoff: RetryBackoff::Linear,
+            retries: 1,
+            retry_backoff: RetryBackoff::None,
             user_agent: "VLC/3.0.23 LibVLC/3.0.23".to_string(),
             skip_screenshots: false,
             profile_bitrate: false,

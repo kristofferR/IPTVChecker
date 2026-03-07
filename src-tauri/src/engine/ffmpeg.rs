@@ -13,8 +13,8 @@ const FALLBACK_SCREENSHOT_STEM: &str = "channel";
 const MAX_STDERR_EXCERPT_CHARS: usize = 600;
 const MAX_FFPROBE_OUTPUT_CHARS: usize = 16_000;
 const PNG_SIGNATURE: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
-const FFPROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-const FFMPEG_BITRATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+const FFPROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+const FFMPEG_BITRATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 // Compile-time target triple for resolving sidecar binary paths.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
