@@ -14,7 +14,7 @@ interface OpenSourceDialogProps {
   initialXtream?: XtreamRecentSource | null;
   initialStalker?: StalkerOpenRequest | null;
   onOpenUrl: (url: string) => Promise<string | true>;
-  onOpenXtream: (source: XtreamOpenRequest) => Promise<string | true>;
+  onOpenXtream: (source: XtreamOpenRequest, savePassword?: boolean) => Promise<string | true>;
   onOpenStalker: (source: StalkerOpenRequest) => Promise<string | true>;
   onClose: () => void;
 }
@@ -44,7 +44,12 @@ export function OpenSourceDialog({
   const [url, setUrl] = useState(initialUrl ?? "");
   const [xtreamServer, setXtreamServer] = useState(initialXtream?.server ?? "");
   const [xtreamUsername, setXtreamUsername] = useState(initialXtream?.username ?? "");
-  const [xtreamPassword, setXtreamPassword] = useState("");
+  const [xtreamPassword, setXtreamPassword] = useState(
+    initialXtream?.password ?? "",
+  );
+  const [xtreamSavePassword, setXtreamSavePassword] = useState(
+    !!initialXtream?.password,
+  );
   const [stalkerPortal, setStalkerPortal] = useState(initialStalker?.portal ?? "");
   const [stalkerMac, setStalkerMac] = useState(initialStalker?.mac ?? "");
   const [localError, setLocalError] = useState<string | null>(null);
@@ -52,6 +57,7 @@ export function OpenSourceDialog({
 
   const initialXtreamServer = initialXtream?.server ?? "";
   const initialXtreamUsername = initialXtream?.username ?? "";
+  const initialXtreamPassword = initialXtream?.password ?? "";
   const initialStalkerPortal = initialStalker?.portal ?? "";
   const initialStalkerMac = initialStalker?.mac ?? "";
 
@@ -60,7 +66,8 @@ export function OpenSourceDialog({
     setUrl(initialUrl ?? "");
     setXtreamServer(initialXtreamServer);
     setXtreamUsername(initialXtreamUsername);
-    setXtreamPassword("");
+    setXtreamPassword(initialXtreamPassword);
+    setXtreamSavePassword(!!initialXtreamPassword);
     setStalkerPortal(initialStalkerPortal);
     setStalkerMac(initialStalkerMac);
     setLocalError(null);
@@ -70,6 +77,7 @@ export function OpenSourceDialog({
     initialUrl,
     initialXtreamServer,
     initialXtreamUsername,
+    initialXtreamPassword,
     initialStalkerPortal,
     initialStalkerMac,
   ]);
@@ -158,11 +166,14 @@ export function OpenSourceDialog({
         return;
       }
 
-      const xtreamResult = await onOpenXtream({
-        server: xtreamServer.trim(),
-        username,
-        password,
-      });
+      const xtreamResult = await onOpenXtream(
+        {
+          server: xtreamServer.trim(),
+          username,
+          password,
+        },
+        xtreamSavePassword,
+      );
       setXtreamPassword("");
       if (xtreamResult === true) {
         handleClose();
@@ -179,6 +190,7 @@ export function OpenSourceDialog({
     setLocalError(null);
     if (nextMode !== "xtream") {
       setXtreamPassword("");
+      setXtreamSavePassword(false);
     }
   };
 
@@ -307,6 +319,19 @@ export function OpenSourceDialog({
                   className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[14px] text-text-primary placeholder:text-text-muted focus:border-blue-500 focus:outline-none"
                 />
               </div>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={xtreamSavePassword}
+                  onChange={(event) =>
+                    setXtreamSavePassword(event.target.checked)
+                  }
+                  className="rounded border-border-app accent-blue-600"
+                />
+                <span className="text-[12px] text-text-secondary">
+                  Save password in recents
+                </span>
+              </label>
             </div>
           ) : (
             <div className="space-y-3">

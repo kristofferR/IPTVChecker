@@ -23,6 +23,8 @@ pub enum RecentPlaylistKind {
 struct XtreamRecentValue {
     server: String,
     username: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    password: Option<String>,
 }
 
 fn normalize_xtream_server(server: &str) -> Option<String> {
@@ -59,7 +61,14 @@ fn parse_xtream_recent_value(value: &str) -> Option<XtreamRecentValue> {
         return None;
     }
     let server = normalize_xtream_server(&parsed.server)?;
-    Some(XtreamRecentValue { server, username })
+    let password = parsed
+        .password
+        .filter(|p| !p.is_empty());
+    Some(XtreamRecentValue {
+        server,
+        username,
+        password,
+    })
 }
 
 fn serialize_xtream_recent_value(value: &XtreamRecentValue) -> Option<String> {

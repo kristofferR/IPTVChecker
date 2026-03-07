@@ -101,6 +101,7 @@ export interface StalkerOpenRequest {
 export interface XtreamRecentSource {
   server: string;
   username: string;
+  password?: string;
 }
 
 export interface ScanConfig {

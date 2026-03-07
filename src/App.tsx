@@ -234,10 +234,14 @@ interface OpenSourceDialogState {
 }
 
 function serializeXtreamRecent(source: XtreamRecentSource): string {
-  return JSON.stringify({
+  const obj: Record<string, string> = {
     server: source.server.trim(),
     username: source.username.trim(),
-  });
+  };
+  if (source.password) {
+    obj.password = source.password;
+  }
+  return JSON.stringify(obj);
 }
 
 function parseXtreamRecent(value: string): XtreamRecentSource | null {
@@ -249,7 +253,11 @@ function parseXtreamRecent(value: string): XtreamRecentSource | null {
     if (!server || !username) {
       return null;
     }
-    return { server, username };
+    const password =
+      typeof parsed.password === "string" && parsed.password
+        ? parsed.password
+        : undefined;
+    return { server, username, password };
   } catch {
     return null;
   }
@@ -705,7 +713,7 @@ export default function App() {
   }, [channelSearch, initFromPlaylist, refreshRecentPlaylists]);
 
   const openPlaylistXtreamValue = useCallback(
-    async (source: XtreamOpenRequest): Promise<string | true> => {
+    async (source: XtreamOpenRequest, savePassword?: boolean): Promise<string | true> => {
       setPlaylistOpenError(null);
       try {
         const searchTrimmed = channelSearch.trim() || undefined;
@@ -746,6 +754,7 @@ export default function App() {
             serializeXtreamRecent({
               server: source.server,
               username: source.username,
+              password: savePassword ? source.password : undefined,
             }),
           );
           setRecentPlaylists(entries);
@@ -885,6 +894,13 @@ export default function App() {
           void refreshRecentPlaylists();
           return;
         }
+        if (source.password) {
+          void openPlaylistXtreamValue(
+            { server: source.server, username: source.username, password: source.password },
+            true,
+          );
+          return;
+        }
         openSourceDialog({
           mode: "xtream",
           initialUrl: "",
@@ -895,7 +911,7 @@ export default function App() {
       }
       void openPlaylistPath(entry.value);
     },
-    [openPlaylistPath, openPlaylistUrlValue, openSourceDialog, refreshRecentPlaylists],
+    [openPlaylistPath, openPlaylistUrlValue, openPlaylistXtreamValue, openSourceDialog, refreshRecentPlaylists],
   );
 
   const recentPlaylistsRef = useRef<RecentPlaylistEntry[]>(recentPlaylists);
