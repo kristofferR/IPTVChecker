@@ -26,6 +26,7 @@ export interface StatusOptionCounts {
   alive: number;
   drm: number;
   dead: number;
+  placeholder: number;
   geoblocked: number;
   mislabeled: number;
   audio_only: number;
@@ -39,6 +40,7 @@ const STATUS_ORDER: Record<ChannelStatus, number> = {
   geoblocked: 2,
   geoblocked_confirmed: 2,
   geoblocked_unconfirmed: 2,
+  placeholder: 2.5,
   dead: 3,
   checking: 4,
   pending: 5,
@@ -135,6 +137,7 @@ function matchesStatusFilter(
   result: ChannelResult,
   statusFilter: string,
   duplicateIndices?: Set<number>,
+  separatePlaceholder?: boolean,
 ): boolean {
   if (statusFilter === "" || statusFilter === "all") {
     return true;
@@ -154,6 +157,9 @@ function matchesStatusFilter(
       result.status === "geoblocked_confirmed" ||
       result.status === "geoblocked_unconfirmed"
     );
+  }
+  if (statusFilter === "dead" && !separatePlaceholder) {
+    return result.status === "dead" || result.status === "placeholder";
   }
   return result.status === statusFilter;
 }
@@ -257,6 +263,7 @@ export function filterResults(
   statusFilter: string,
   duplicateIndices?: Set<number>,
   searchTextCache?: SearchTextCache,
+  separatePlaceholder?: boolean,
 ): ChannelResult[] {
   const normalizedSearch = search.trim().toLowerCase();
   const hasSearch = normalizedSearch.length > 0;
@@ -280,7 +287,7 @@ export function filterResults(
     ) {
       return false;
     }
-    if (hasStatusFilter && !matchesStatusFilter(r, statusFilter, duplicateIndices)) {
+    if (hasStatusFilter && !matchesStatusFilter(r, statusFilter, duplicateIndices, separatePlaceholder)) {
       return false;
     }
     return true;
@@ -293,6 +300,7 @@ export function countStatusOptions(
   groupFilter: string,
   duplicateIndices?: Set<number>,
   searchTextCache?: SearchTextCache,
+  separatePlaceholder?: boolean,
 ): StatusOptionCounts {
   const normalizedSearch = search.trim().toLowerCase();
   const hasSearch = normalizedSearch.length > 0;
@@ -302,6 +310,7 @@ export function countStatusOptions(
     alive: 0,
     drm: 0,
     dead: 0,
+    placeholder: 0,
     geoblocked: 0,
     mislabeled: 0,
     audio_only: 0,
@@ -330,6 +339,12 @@ export function countStatusOptions(
       counts.drm += 1;
     } else if (result.status === "dead") {
       counts.dead += 1;
+    } else if (result.status === "placeholder") {
+      if (separatePlaceholder) {
+        counts.placeholder += 1;
+      } else {
+        counts.dead += 1;
+      }
     } else if (result.status === "pending") {
       counts.pending += 1;
     }

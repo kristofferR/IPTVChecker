@@ -186,7 +186,7 @@ pub async fn export_split(results: Vec<ChannelResult>, base_path: String) -> Res
             let entry = build_m3u_entry(r);
             match r.status {
                 ChannelStatus::Alive => buckets.working.push(entry),
-                ChannelStatus::Dead => buckets.dead.push(entry),
+                ChannelStatus::Dead | ChannelStatus::Placeholder => buckets.dead.push(entry),
                 ChannelStatus::Drm => buckets.drm.push(entry),
                 ChannelStatus::Geoblocked
                 | ChannelStatus::GeoblockedConfirmed
@@ -701,6 +701,7 @@ mod tests {
                 total: 1,
                 alive: 1,
                 dead: 0,
+                placeholder: 0,
                 geoblocked: 0,
                 drm: 0,
                 low_framerate: 0,

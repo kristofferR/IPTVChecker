@@ -289,6 +289,9 @@ export const Toolbar = memo(function Toolbar({
           <option value="drm">{statusLabel("drm", "DRM")}</option>
           <option value="dead">{statusLabel("dead", "Dead")}</option>
           <option value="geoblocked">{statusLabel("geoblocked", "Geoblocked")}</option>
+          {(statusOptionCounts.placeholder ?? 0) > 0 && (
+            <option value="placeholder">{statusLabel("placeholder", "Placeholder")}</option>
+          )}
           <option value="mislabeled">{statusLabel("mislabeled", "Mislabeled")}</option>
           <option value="audio_only">{statusLabel("audio_only", "Audio Only")}</option>
           <option value="duplicates">{statusLabel("duplicates", "Duplicates")}</option>

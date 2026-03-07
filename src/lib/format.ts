@@ -31,6 +31,13 @@ const STATUS_METADATA: Record<
     icon: "✕",
     dot: "bg-red-500",
   },
+  placeholder: {
+    label: "Placeholder",
+    color: "text-orange-400",
+    background: "bg-orange-500/10 text-orange-400 border-orange-500/20",
+    icon: "▪",
+    dot: "bg-orange-500",
+  },
   geoblocked: {
     label: "Geoblocked",
     color: "text-yellow-400",

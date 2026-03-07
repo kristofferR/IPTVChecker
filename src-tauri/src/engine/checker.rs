@@ -73,6 +73,28 @@ pub fn uses_ffprobe_liveness(url: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Known placeholder video file path patterns (case-insensitive).
+const PLACEHOLDER_PATHS: &[&str] = &[
+    "/video/black.ts",
+    "/black.ts",
+    "/blank.ts",
+    "/video/blank.ts",
+    "/placeholder.ts",
+    "/video/placeholder.ts",
+    "/null.ts",
+    "/video/null.ts",
+];
+
+fn is_placeholder_url(url: &str) -> bool {
+    let path = match Url::parse(url) {
+        Ok(parsed) => parsed.path().to_ascii_lowercase(),
+        Err(_) => return false,
+    };
+    PLACEHOLDER_PATHS
+        .iter()
+        .any(|pattern| path.ends_with(pattern))
+}
+
 /// Internal result from a single verification attempt.
 #[derive(Debug, PartialEq, Eq)]
 enum VerifyResult {
@@ -80,6 +102,10 @@ enum VerifyResult {
         stream_url: Option<String>,
         latency_ms: Option<u64>,
         drm_system: Option<String>,
+    },
+    Placeholder {
+        stream_url: Option<String>,
+        latency_ms: Option<u64>,
     },
     Dead {
         latency_ms: Option<u64>,
@@ -665,6 +691,12 @@ async fn verify(
             .await;
         }
 
+        if is_placeholder_url(&final_url) {
+            return VerifyResult::Placeholder {
+                stream_url: Some(final_url),
+                latency_ms: effective_root_latency,
+            };
+        }
         return VerifyResult::Alive {
             stream_url: Some(final_url),
             latency_ms: effective_root_latency,
@@ -705,11 +737,20 @@ async fn verify(
             latency_ms,
             drm_system,
             ..
-        } => VerifyResult::Alive {
-            stream_url: Some(final_url),
-            latency_ms,
-            drm_system,
-        },
+        } => {
+            if is_placeholder_url(&final_url) {
+                VerifyResult::Placeholder {
+                    stream_url: Some(final_url),
+                    latency_ms,
+                }
+            } else {
+                VerifyResult::Alive {
+                    stream_url: Some(final_url),
+                    latency_ms,
+                    drm_system,
+                }
+            }
+        }
         _ => result,
     }
 }
@@ -1107,6 +1148,7 @@ pub async fn check_channel_status_with_debug(
                         Some(format!("Detected DRM system: {}", system)),
                     ),
                     VerifyResult::Alive { .. } => ("Alive".to_string(), None),
+                    VerifyResult::Placeholder { .. } => ("Placeholder".to_string(), None),
                     VerifyResult::Dead { reason, .. } => ("Dead".to_string(), reason.clone()),
                     VerifyResult::Geoblocked { reason, .. } => {
                         ("Geoblocked".to_string(), reason.clone())
@@ -1147,6 +1189,22 @@ pub async fn check_channel_status_with_debug(
                             last_error_reason,
                             drm_system,
                             successful_attempt: Some(attempt_number),
+                            attempts: attempt_logs,
+                        });
+                    }
+                    VerifyResult::Placeholder {
+                        stream_url,
+                        latency_ms,
+                    } => {
+                        log::info!("Channel placeholder: {}", url);
+                        return Ok(AttemptOutcome {
+                            status: "Placeholder".to_string(),
+                            stream_url,
+                            latency_ms,
+                            retries_used,
+                            last_error_reason,
+                            drm_system: None,
+                            successful_attempt: None,
                             attempts: attempt_logs,
                         });
                     }

@@ -500,6 +500,7 @@ export function useScan() {
         total: Math.max(0, initialTotal),
         alive: 0,
         dead: 0,
+        placeholder: 0,
         geoblocked: 0,
         drm: 0,
       });

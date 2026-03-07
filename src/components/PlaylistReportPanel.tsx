@@ -486,6 +486,12 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                 {statusSnapshot?.alive ?? 0} / {statusSnapshot?.dead ?? 0} / {statusSnapshot?.geoblocked ?? 0}
               </span>
             </div>
+            {(statusSnapshot?.placeholder ?? 0) > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-text-tertiary">Placeholder</span>
+                <span className="text-orange-400">{statusSnapshot?.placeholder}</span>
+              </div>
+            )}
             <div className="flex items-center justify-between">
               <span className="text-text-tertiary">Ping P50</span>
               <span className="text-text-primary">

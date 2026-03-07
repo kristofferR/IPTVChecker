@@ -84,6 +84,7 @@ pub struct AppSettings {
     pub screenshot_format: ScreenshotFormat,
     pub screenshot_retention_count: u32,
     pub low_space_threshold_gb: f64,
+    pub separate_placeholder_status: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -208,6 +209,7 @@ impl Default for AppSettings {
             screenshot_format: ScreenshotFormat::default(),
             screenshot_retention_count: 1,
             low_space_threshold_gb: 5.0,
+            separate_placeholder_status: true,
         }
     }
 }

@@ -201,6 +201,7 @@ async fn compute_shared_url_result(
         "Alive" => ChannelStatus::Alive,
         "DRM" => ChannelStatus::Drm,
         "Dead" => ChannelStatus::Dead,
+        "Placeholder" => ChannelStatus::Placeholder,
         "Geoblocked" => ChannelStatus::Geoblocked,
         "Geoblocked (Confirmed)" => ChannelStatus::GeoblockedConfirmed,
         "Geoblocked (Unconfirmed)" => ChannelStatus::GeoblockedUnconfirmed,
@@ -217,14 +218,32 @@ async fn compute_shared_url_result(
     };
 
     if !matches!(status, ChannelStatus::Alive | ChannelStatus::Drm) || cancel.is_cancelled() {
+        let effective_status = if cancel.is_cancelled() {
+            ChannelStatus::Dead
+        } else {
+            status
+        };
         return Ok((
-            SharedUrlResult::dead(
-                stream_url,
+            SharedUrlResult {
+                status: effective_status,
+                drm_system: None,
                 latency_ms,
-                (retry_count > 0).then_some(retry_count),
+                codec: None,
+                resolution: None,
+                width: None,
+                height: None,
+                fps: None,
+                video_bitrate: None,
+                audio_bitrate: None,
+                audio_codec: None,
+                audio_only: false,
+                screenshot_path: None,
+                low_framerate: false,
+                stream_url,
+                retry_count: (retry_count > 0).then_some(retry_count),
                 error_reason,
                 channel_log,
-            ),
+            },
             timing,
         ));
     }
@@ -460,6 +479,7 @@ struct ScanCounters {
     completed: usize,
     alive: usize,
     dead: usize,
+    placeholder: usize,
     geoblocked: usize,
     drm: usize,
     low_framerate: usize,
@@ -490,6 +510,7 @@ impl ScanCounters {
         match result.status {
             ChannelStatus::Alive => self.alive += 1,
             ChannelStatus::Dead => self.dead += 1,
+            ChannelStatus::Placeholder => self.placeholder += 1,
             ChannelStatus::Drm => self.drm += 1,
             ChannelStatus::Geoblocked
             | ChannelStatus::GeoblockedConfirmed
@@ -512,6 +533,7 @@ impl ScanCounters {
             total,
             alive: self.alive,
             dead: self.dead,
+            placeholder: self.placeholder,
             geoblocked: self.geoblocked,
             drm: self.drm,
         }
@@ -522,6 +544,7 @@ impl ScanCounters {
             total,
             alive: self.alive,
             dead: self.dead,
+            placeholder: self.placeholder,
             geoblocked: self.geoblocked,
             drm: self.drm,
             low_framerate: self.low_framerate,
@@ -986,6 +1009,7 @@ async fn execute_scan_run(
             total: 0,
             alive: 0,
             dead: 0,
+            placeholder: 0,
             geoblocked: 0,
             drm: 0,
             low_framerate: 0,

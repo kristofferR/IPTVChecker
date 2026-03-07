@@ -642,6 +642,22 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     ariaLabel="Auto-reveal report panel"
                   />
                 </div>
+
+                <div className={rowClass}>
+                  <div>
+                    <p className="text-[13px] font-medium">Separate placeholder status</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Show placeholder streams as a distinct status. When off, they are grouped under Dead.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={draft.separate_placeholder_status}
+                    onChange={(checked) =>
+                      updateSetting("separate_placeholder_status", checked, { immediate: true })
+                    }
+                    ariaLabel="Separate placeholder status"
+                  />
+                </div>
               </section>
 
               <section className={blockClass}>

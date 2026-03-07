@@ -1632,6 +1632,7 @@ export default function App() {
             statusFilter,
             duplicateIndices,
             appSearchTextCacheRef.current,
+            settings.separate_placeholder_status,
           ),
         {
           rows: completedResults.length,
@@ -1646,6 +1647,7 @@ export default function App() {
       groupFilter,
       statusFilter,
       duplicateIndices,
+      settings.separate_placeholder_status,
     ],
   );
 
@@ -1656,12 +1658,14 @@ export default function App() {
       groupFilter,
       duplicateIndices,
       appSearchTextCacheRef.current,
+      settings.separate_placeholder_status,
     );
   }, [
     completedResults,
     deferredSearch,
     groupFilter,
     duplicateIndices,
+    settings.separate_placeholder_status,
   ]);
 
   const exportContextRef = useRef({
@@ -2044,6 +2048,7 @@ export default function App() {
                 onSelectionChange={setSelectedChannelIndices}
                 onScanSelected={handleScanSelected}
                 headerPortalRef={isMac ? headerPortalRef : undefined}
+                separatePlaceholder={settings.separate_placeholder_status}
               />
             </Profiler>
           ) : (

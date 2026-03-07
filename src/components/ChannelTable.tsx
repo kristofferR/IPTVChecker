@@ -43,6 +43,7 @@ interface ChannelTableProps {
   onSelectionChange?: (selectedIndices: number[]) => void;
   onScanSelected?: (selectedIndices: number[]) => void;
   headerPortalRef?: RefObject<HTMLDivElement | null>;
+  separatePlaceholder?: boolean;
 }
 
 type CopyAction = "name" | "url" | "m3u" | "metadata";
@@ -146,6 +147,7 @@ export function ChannelTable({
   onScanSelected,
   scanState,
   headerPortalRef,
+  separatePlaceholder,
 }: ChannelTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -275,6 +277,7 @@ export function ChannelTable({
             statusFilter,
             duplicateIndices,
             searchTextCacheRef.current,
+            separatePlaceholder,
           );
           return sortResults(filtered, sortField, sortDir);
         },
@@ -294,6 +297,7 @@ export function ChannelTable({
       duplicateIndices,
       sortField,
       sortDir,
+      separatePlaceholder,
     ],
   );
 

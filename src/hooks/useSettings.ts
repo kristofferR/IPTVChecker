@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   screenshot_format: "webp",
   screenshot_retention_count: 1,
   low_space_threshold_gb: 5.0,
+  separate_placeholder_status: true,
 };
 
 export function useSettings() {

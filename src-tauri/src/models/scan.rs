@@ -129,6 +129,8 @@ pub struct ScanProgress {
     pub total: usize,
     pub alive: usize,
     pub dead: usize,
+    #[serde(default)]
+    pub placeholder: usize,
     pub geoblocked: usize,
     #[serde(default)]
     pub drm: usize,
@@ -139,6 +141,8 @@ pub struct ScanSummary {
     pub total: usize,
     pub alive: usize,
     pub dead: usize,
+    #[serde(default)]
+    pub placeholder: usize,
     pub geoblocked: usize,
     #[serde(default)]
     pub drm: usize,

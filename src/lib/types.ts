@@ -4,6 +4,7 @@ export type ChannelStatus =
   | "alive"
   | "drm"
   | "dead"
+  | "placeholder"
   | "geoblocked"
   | "geoblocked_confirmed"
   | "geoblocked_unconfirmed";
@@ -136,6 +137,7 @@ export interface ScanProgress {
   total: number;
   alive: number;
   dead: number;
+  placeholder: number;
   geoblocked: number;
   drm: number;
 }
@@ -144,6 +146,7 @@ export interface ScanSummary {
   total: number;
   alive: number;
   dead: number;
+  placeholder: number;
   geoblocked: number;
   drm: number;
   low_framerate: number;
@@ -202,6 +205,7 @@ export interface AppSettings {
   screenshot_format: ScreenshotFormat;
   screenshot_retention_count: number;
   low_space_threshold_gb: number;
+  separate_placeholder_status: boolean;
 }
 
 export interface ScanPresetConfig {

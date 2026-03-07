@@ -487,6 +487,7 @@ mod tests {
                     .iter()
                     .filter(|result| result.status == ChannelStatus::Dead)
                     .count(),
+                placeholder: 0,
                 geoblocked: 0,
                 drm: results
                     .iter()
@@ -586,6 +587,10 @@ mod tests {
                 .iter()
                 .filter(|result| result.status == ChannelStatus::Dead)
                 .count(),
+            placeholder: results
+                .iter()
+                .filter(|result| result.status == ChannelStatus::Placeholder)
+                .count(),
             geoblocked: results
                 .iter()
                 .filter(|result| {
@@ -667,6 +672,7 @@ mod tests {
                     total: 1,
                     alive: 1,
                     dead: 0,
+                    placeholder: 0,
                     geoblocked: 0,
                     drm: 0,
                     low_framerate: 0,
