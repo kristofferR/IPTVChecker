@@ -299,6 +299,16 @@ pub fn run() {
             .close_window()
             .build()?;
 
+        let edit_menu = SubmenuBuilder::new(app, "Edit")
+            .undo()
+            .redo()
+            .separator()
+            .cut()
+            .copy()
+            .paste()
+            .select_all()
+            .build()?;
+
         let toggle_sidebar_item =
             MenuItemBuilder::with_id("menu.view.toggle_sidebar", "Toggle Sidebar")
                 .accelerator("Cmd+Shift+L")
@@ -356,6 +366,7 @@ pub fn run() {
         MenuBuilder::new(app)
             .item(&app_menu)
             .item(&file_menu)
+            .item(&edit_menu)
             .item(&scan_menu)
             .item(&view_menu)
             .item(&help_menu)
@@ -407,6 +418,16 @@ pub fn run() {
             .separator()
             .item(&settings_item)
             .quit()
+            .build()?;
+
+        let edit_menu = SubmenuBuilder::new(app, "Edit")
+            .undo()
+            .redo()
+            .separator()
+            .cut()
+            .copy()
+            .paste()
+            .select_all()
             .build()?;
 
         let toggle_sidebar_item =
@@ -465,6 +486,7 @@ pub fn run() {
 
         MenuBuilder::new(app)
             .item(&file_menu)
+            .item(&edit_menu)
             .item(&scan_menu)
             .item(&view_menu)
             .item(&help_menu)
