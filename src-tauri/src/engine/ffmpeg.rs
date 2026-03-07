@@ -23,8 +23,12 @@ const TARGET_TRIPLE: &str = "aarch64-apple-darwin";
 const TARGET_TRIPLE: &str = "x86_64-apple-darwin";
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const TARGET_TRIPLE: &str = "x86_64-unknown-linux-gnu";
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+const TARGET_TRIPLE: &str = "aarch64-unknown-linux-gnu";
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 const TARGET_TRIPLE: &str = "x86_64-pc-windows-msvc";
+#[cfg(all(target_os = "windows", target_arch = "aarch64"))]
+const TARGET_TRIPLE: &str = "aarch64-pc-windows-msvc";
 
 /// Resolve the path to an executable, preferring the bundled sidecar binary
 /// over the system PATH. This bypasses the Tauri shell plugin which can
