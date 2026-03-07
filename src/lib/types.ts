@@ -277,5 +277,33 @@ export interface RecentPlaylistEntry {
   label: string;
 }
 
+export interface XtreamChannelProbe {
+  stream_id: string;
+  latency_ms: number | null;
+  resolved_url: string | null;
+  codec: string | null;
+  resolution: string | null;
+  fps: number | null;
+  screenshot: string | null;
+}
+
+export interface XtreamServerTestResult {
+  server: string;
+  success: boolean;
+  api_latency_ms: number | null;
+  avg_stream_latency_ms: number | null;
+  resolved_host: string | null;
+  channel_probes: XtreamChannelProbe[];
+  error: string | null;
+  account_status: string | null;
+  max_connections: number | null;
+}
+
+export interface XtreamServerTestReport {
+  results: XtreamServerTestResult[];
+  same_cdn: boolean;
+  channels_probed: number;
+}
+
 export type RetryBackoff = "none" | "linear" | "exponential";
 export type ThemePreference = "system" | "light" | "dark";

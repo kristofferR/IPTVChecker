@@ -686,6 +686,7 @@ pub fn run() {
             commands::recent::get_recent_playlists,
             commands::recent::add_recent_playlist,
             commands::recent::clear_recent_playlists,
+            commands::playlist::test_xtream_servers,
         ])
         .on_page_load(|webview, payload| {
             if payload.event() != PageLoadEvent::Finished {

@@ -85,7 +85,7 @@ const PLACEHOLDER_PATHS: &[&str] = &[
     "/video/null.ts",
 ];
 
-fn is_placeholder_url(url: &str) -> bool {
+pub(crate) fn is_placeholder_url(url: &str) -> bool {
     let path = match Url::parse(url) {
         Ok(parsed) => parsed.path().to_ascii_lowercase(),
         Err(_) => return false,

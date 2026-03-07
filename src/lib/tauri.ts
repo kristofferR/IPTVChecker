@@ -12,6 +12,7 @@ import type {
   ScreenshotCacheStats,
   StalkerOpenRequest,
   XtreamOpenRequest,
+  XtreamServerTestReport,
 } from "./types";
 
 export async function openPlaylist(
@@ -220,6 +221,14 @@ export async function addRecentPlaylist(
 
 export async function clearRecentPlaylists(): Promise<RecentPlaylistEntry[]> {
   return invoke("clear_recent_playlists");
+}
+
+export async function testXtreamServers(
+  servers: string[],
+  username: string,
+  password: string,
+): Promise<XtreamServerTestReport> {
+  return invoke("test_xtream_servers", { servers, username, password });
 }
 
 export async function openChannelInPlayer(channel: {
