@@ -58,7 +58,8 @@ download_btbn() {
 
     local ext_archive=".tar.xz"
     local extract_cmd="tar xf"
-    if [[ "${platform}" == *windows* ]]; then
+    # BtbN uses platform labels like win64/winarm64 here, not Rust target triples.
+    if [[ "${platform}" == win* ]]; then
         ext_archive=".zip"
         extract_cmd="unzip -o"
     fi
