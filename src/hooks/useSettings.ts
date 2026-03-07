@@ -8,7 +8,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   concurrency: 1,
   retries: 3,
   retry_backoff: "linear",
-  user_agent: "VLC/3.0.14 LibVLC/3.0.14",
+  user_agent: "VLC/3.0.23 LibVLC/3.0.23",
   skip_screenshots: false,
   profile_bitrate: false,
   ffprobe_timeout_secs: 30,

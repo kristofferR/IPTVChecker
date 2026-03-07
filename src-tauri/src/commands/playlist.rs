@@ -26,8 +26,9 @@ pub struct StalkerOpenRequest {
 }
 
 const PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-const PLAYLIST_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
-const PLAYLIST_DOWNLOAD_MAX_BYTES: u64 = 10 * 1024 * 1024;
+const PLAYLIST_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
+const PLAYLIST_DOWNLOAD_MAX_BYTES: u64 = 200 * 1024 * 1024;
+const PLAYLIST_DOWNLOAD_USER_AGENT: &str = "VLC/3.0.23 LibVLC/3.0.23";
 const XTREAM_PLAYER_API_TIMEOUT: Duration = Duration::from_secs(8);
 const STALKER_API_TIMEOUT: Duration = Duration::from_secs(12);
 const STALKER_USER_AGENT: &str =
@@ -175,7 +176,7 @@ async fn lookup_ip_location(ip: IpAddr) -> Option<String> {
     let url = format!("https://ipapi.co/{}/json/", ip);
     let response = client
         .get(url)
-        .header(reqwest::header::USER_AGENT, "IPTV-Checker-GUI/1.0")
+        .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
         .send()
         .await
         .ok()?;
@@ -350,6 +351,7 @@ async fn download_playlist_bytes(
         .redirect(reqwest::redirect::Policy::limited(10))
         .connect_timeout(connect_timeout)
         .timeout(timeout)
+        .danger_accept_invalid_certs(true)
         .build()
         .map_err(|error| {
             AppError::Other(format!(
@@ -359,7 +361,7 @@ async fn download_playlist_bytes(
         })?;
     let mut request = client
         .get(download_url.clone())
-        .header(reqwest::header::USER_AGENT, "IPTV-Checker-GUI/1.0");
+        .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT);
     if let Some(metadata) = cache_metadata {
         if let Some(ref etag) = metadata.etag {
             request = request.header(reqwest::header::IF_NONE_MATCH, etag);
@@ -712,6 +714,181 @@ fn extract_xtream_max_connections(payload: &serde_json::Value) -> Option<u32> {
         })
 }
 
+/// Timeout for the (potentially large) JSON stream list downloads.
+const XTREAM_JSON_API_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Build an M3U playlist from the Xtream JSON API (`get_live_categories` +
+/// `get_live_streams`).  This is the fallback when `/get.php` is blocked.
+async fn fetch_xtream_playlist_via_json_api(
+    server: &Url,
+    username: &str,
+    password: &str,
+) -> Result<Vec<u8>, AppError> {
+    let categories_url =
+        build_xtream_player_api_action_url(server, username, password, "get_live_categories");
+    let streams_url =
+        build_xtream_player_api_action_url(server, username, password, "get_live_streams");
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
+        .timeout(XTREAM_JSON_API_TIMEOUT)
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| AppError::Other(format!("Failed to build HTTP client: {}", e)))?;
+
+    let (cats_resp, streams_resp) = tokio::join!(
+        client
+            .get(categories_url)
+            .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
+            .send(),
+        client
+            .get(streams_url)
+            .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
+            .send(),
+    );
+
+    let cats_resp = cats_resp.map_err(|e| {
+        AppError::Other(format!("Failed to fetch Xtream categories: {}", e))
+    })?;
+    let streams_resp = streams_resp.map_err(|e| {
+        AppError::Other(format!("Failed to fetch Xtream live streams: {}", e))
+    })?;
+
+    if !cats_resp.status().is_success() {
+        return Err(AppError::Other(format!(
+            "Xtream categories API returned HTTP {}",
+            cats_resp.status()
+        )));
+    }
+    if !streams_resp.status().is_success() {
+        return Err(AppError::Other(format!(
+            "Xtream live streams API returned HTTP {}",
+            streams_resp.status()
+        )));
+    }
+
+    let cats_bytes = cats_resp.bytes().await.map_err(|e| {
+        AppError::Other(format!("Failed to read Xtream categories response: {}", e))
+    })?;
+    let streams_bytes = streams_resp.bytes().await.map_err(|e| {
+        AppError::Other(format!("Failed to read Xtream live streams response: {}", e))
+    })?;
+
+    let categories: Vec<serde_json::Value> =
+        serde_json::from_slice(&cats_bytes).unwrap_or_default();
+    let streams: Vec<serde_json::Value> = serde_json::from_slice(&streams_bytes)
+        .map_err(|e| AppError::Parse(format!("Failed to parse Xtream live streams JSON: {}", e)))?;
+
+    if streams.is_empty() {
+        return Err(AppError::Other(
+            "Xtream server returned an empty channel list".to_string(),
+        ));
+    }
+
+    // Build a category_id -> category_name lookup.
+    let cat_map: HashMap<String, String> = categories
+        .iter()
+        .filter_map(|cat| {
+            let id = cat.get("category_id")?.as_str()?.to_string();
+            let name = cat.get("category_name")?.as_str()?.to_string();
+            Some((id, name))
+        })
+        .collect();
+
+    // Derive the base stream URL: http(s)://server/live/username/password/
+    let stream_base = {
+        let mut base = server.clone();
+        let mut path = base.path().trim_end_matches('/').to_string();
+        path.push_str(&format!("/live/{}/{}/", username, password));
+        base.set_path(&path);
+        base.set_query(None);
+        base.set_fragment(None);
+        base.to_string()
+    };
+
+    let mut m3u = String::with_capacity(streams.len() * 200);
+    m3u.push_str("#EXTM3U\n");
+
+    for entry in &streams {
+        let name = entry
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown");
+        let stream_id = match entry.get("stream_id") {
+            Some(serde_json::Value::Number(n)) => n.to_string(),
+            Some(serde_json::Value::String(s)) => s.clone(),
+            _ => continue,
+        };
+        let tvg_id = entry
+            .get("epg_channel_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let tvg_logo = entry
+            .get("stream_icon")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let group = entry
+            .get("category_id")
+            .and_then(|v| v.as_str())
+            .and_then(|id| cat_map.get(id))
+            .map(|s| s.as_str())
+            .unwrap_or("");
+
+        m3u.push_str(&format!(
+            "#EXTINF:-1 tvg-id=\"{}\" tvg-logo=\"{}\" group-title=\"{}\",{}\n",
+            tvg_id, tvg_logo, group, name
+        ));
+        m3u.push_str(&format!("{}{}.ts\n", stream_base, stream_id));
+    }
+
+    log::info!(
+        "Built M3U from Xtream JSON API: {} channels",
+        streams.len()
+    );
+
+    Ok(m3u.into_bytes())
+}
+
+/// Write raw bytes to the playlist cache, using the same atomic-rename
+/// strategy as `download_playlist_to_cache`.
+fn write_bytes_to_cache(cache_path: &std::path::Path, bytes: &[u8]) -> Result<(), AppError> {
+    cleanup_stale_cache_temp_files(cache_path);
+    let tmp_suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let tmp_path = cache_path.with_file_name(format!(
+        "{}.{}.tmp",
+        cache_path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| "playlist.m3u8".to_string()),
+        tmp_suffix
+    ));
+
+    let result = (|| -> Result<(), AppError> {
+        std::fs::write(&tmp_path, bytes).map_err(AppError::Io)?;
+        match std::fs::rename(&tmp_path, cache_path) {
+            Ok(()) => {}
+            Err(first_error) => {
+                if cache_path.exists() {
+                    std::fs::remove_file(cache_path).map_err(AppError::Io)?;
+                    std::fs::rename(&tmp_path, cache_path).map_err(AppError::Io)?;
+                } else {
+                    return Err(AppError::Io(first_error));
+                }
+            }
+        }
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+    result
+}
+
 async fn fetch_xtream_account_info(
     server: &Url,
     username: &str,
@@ -724,13 +901,14 @@ async fn fetch_xtream_account_info(
         .redirect(reqwest::redirect::Policy::limited(10))
         .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
         .timeout(XTREAM_PLAYER_API_TIMEOUT)
+        .danger_accept_invalid_certs(true)
         .build()
         .ok()?;
 
     for endpoint in [account_info_url, api_url.clone()] {
         let response = client
             .get(endpoint.clone())
-            .header(reqwest::header::USER_AGENT, "IPTV-Checker-GUI/1.0")
+            .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
             .send()
             .await
             .ok()?;
@@ -1398,7 +1576,10 @@ pub async fn open_playlist_xtream(
     let source_key = build_xtream_source_key(&server, &username);
     let download_url = build_xtream_download_url(&server, &username, &password);
     let data_dir = app_data_dir(&app)?;
-    let (xtream_account_info, cached_path_result) = tokio::join!(
+    let cache_path = remote_playlist_cache_path_from_data_dir(&data_dir, &source_key)?;
+
+    // Try /get.php and account info in parallel.
+    let (xtream_account_info, m3u_result) = tokio::join!(
         fetch_xtream_account_info(&server, &username, &password),
         download_playlist_to_cache_in_data_dir(
             &data_dir,
@@ -1407,7 +1588,22 @@ pub async fn open_playlist_xtream(
             "Xtream playlist",
         )
     );
-    let cached_path = cached_path_result?;
+
+    // If /get.php failed, fall back to the JSON API.
+    let cached_path = match m3u_result {
+        Ok(path) => path,
+        Err(get_php_error) => {
+            log::info!(
+                "Xtream /get.php download failed ({}), falling back to JSON API",
+                get_php_error
+            );
+            let m3u_bytes =
+                fetch_xtream_playlist_via_json_api(&server, &username, &password).await?;
+            write_bytes_to_cache(&cache_path, &m3u_bytes)?;
+            cache_path.to_string_lossy().to_string()
+        }
+    };
+
     let mut preview = parser::parse_playlist(&cached_path, &group_filter, &channel_search)?;
     preview.source_identity = Some(source_key);
     preview.xtream_max_connections = xtream_account_info

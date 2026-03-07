@@ -13,9 +13,9 @@ interface OpenSourceDialogProps {
   initialUrl?: string;
   initialXtream?: XtreamRecentSource | null;
   initialStalker?: StalkerOpenRequest | null;
-  onOpenUrl: (url: string) => Promise<boolean>;
-  onOpenXtream: (source: XtreamOpenRequest) => Promise<boolean>;
-  onOpenStalker: (source: StalkerOpenRequest) => Promise<boolean>;
+  onOpenUrl: (url: string) => Promise<string | true>;
+  onOpenXtream: (source: XtreamOpenRequest) => Promise<string | true>;
+  onOpenStalker: (source: StalkerOpenRequest) => Promise<string | true>;
   onClose: () => void;
 }
 
@@ -106,9 +106,11 @@ export function OpenSourceDialog({
           return;
         }
 
-        const opened = await onOpenUrl(url.trim());
-        if (opened) {
+        const urlResult = await onOpenUrl(url.trim());
+        if (urlResult === true) {
           handleClose();
+        } else {
+          setLocalError(urlResult);
         }
         return;
       }
@@ -126,12 +128,14 @@ export function OpenSourceDialog({
           return;
         }
 
-        const opened = await onOpenStalker({
+        const stalkerResult = await onOpenStalker({
           portal: stalkerPortal.trim(),
           mac,
         });
-        if (opened) {
+        if (stalkerResult === true) {
           handleClose();
+        } else {
+          setLocalError(stalkerResult);
         }
         return;
       }
@@ -154,14 +158,16 @@ export function OpenSourceDialog({
         return;
       }
 
-      const opened = await onOpenXtream({
+      const xtreamResult = await onOpenXtream({
         server: xtreamServer.trim(),
         username,
         password,
       });
       setXtreamPassword("");
-      if (opened) {
+      if (xtreamResult === true) {
         handleClose();
+      } else {
+        setLocalError(xtreamResult);
       }
     } finally {
       setSubmitting(false);

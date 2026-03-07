@@ -190,7 +190,7 @@ mod tests {
             concurrency: 1,
             retries: 3,
             retry_backoff: RetryBackoff::Linear,
-            user_agent: "VLC/3.0.14 LibVLC/3.0.14".to_string(),
+            user_agent: "VLC/3.0.23 LibVLC/3.0.23".to_string(),
             skip_screenshots: false,
             profile_bitrate: false,
             ffprobe_timeout_secs: 30.0,

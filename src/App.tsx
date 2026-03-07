@@ -663,7 +663,7 @@ export default function App() {
     await openPlaylistPath(selectedPath);
   }, [openPlaylistPath]);
 
-  const openPlaylistUrlValue = useCallback(async (url: string): Promise<boolean> => {
+  const openPlaylistUrlValue = useCallback(async (url: string): Promise<string | true> => {
     setPlaylistOpenError(null);
     try {
       const searchTrimmed = channelSearch.trim() || undefined;
@@ -694,18 +694,18 @@ export default function App() {
       return true;
     } catch (err) {
       logger.error("[App] Failed to open playlist URL", err);
-      setPlaylistOpenError(formatPlaylistOpenError(err));
+      const message = formatPlaylistOpenError(err);
       setSelectedChannel(null);
       setSelectedChannelIndices([]);
       setPendingPlaybackChannel(null);
       setShowHistory(false);
       void refreshRecentPlaylists();
-      return false;
+      return message;
     }
   }, [channelSearch, initFromPlaylist, refreshRecentPlaylists]);
 
   const openPlaylistXtreamValue = useCallback(
-    async (source: XtreamOpenRequest): Promise<boolean> => {
+    async (source: XtreamOpenRequest): Promise<string | true> => {
       setPlaylistOpenError(null);
       try {
         const searchTrimmed = channelSearch.trim() || undefined;
@@ -755,20 +755,20 @@ export default function App() {
         return true;
       } catch (err) {
         logger.error("[App] Failed to open Xtream playlist", err);
-        setPlaylistOpenError(formatPlaylistOpenError(err));
+        const message = formatPlaylistOpenError(err);
         setSelectedChannel(null);
         setSelectedChannelIndices([]);
         setPendingPlaybackChannel(null);
         setShowHistory(false);
         void refreshRecentPlaylists();
-        return false;
+        return message;
       }
     },
     [channelSearch, initFromPlaylist, refreshRecentPlaylists],
   );
 
   const openPlaylistStalkerValue = useCallback(
-    async (source: StalkerOpenRequest): Promise<boolean> => {
+    async (source: StalkerOpenRequest): Promise<string | true> => {
       setPlaylistOpenError(null);
       try {
         const searchTrimmed = channelSearch.trim() || undefined;
@@ -793,12 +793,12 @@ export default function App() {
         return true;
       } catch (err) {
         logger.error("[App] Failed to open Stalker playlist", err);
-        setPlaylistOpenError(formatPlaylistOpenError(err));
+        const message = formatPlaylistOpenError(err);
         setSelectedChannel(null);
         setSelectedChannelIndices([]);
         setPendingPlaybackChannel(null);
         setShowHistory(false);
-        return false;
+        return message;
       }
     },
     [channelSearch, initFromPlaylist],
