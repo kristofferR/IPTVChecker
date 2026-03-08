@@ -416,7 +416,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    document.documentElement.classList.add("no-transitions");
     document.documentElement.dataset.theme = settings.theme;
+    requestAnimationFrame(() => {
+      document.documentElement.classList.remove("no-transitions");
+    });
   }, [settings.theme]);
 
   // Sync settings changes from the settings window

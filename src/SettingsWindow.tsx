@@ -7,7 +7,11 @@ export function SettingsWindow() {
   const { settings, save, loading } = useSettings();
 
   useEffect(() => {
+    document.documentElement.classList.add("no-transitions");
     document.documentElement.dataset.theme = settings.theme;
+    requestAnimationFrame(() => {
+      document.documentElement.classList.remove("no-transitions");
+    });
   }, [settings.theme]);
 
   // Mark this as a settings window so CSS can apply opaque backgrounds

@@ -534,6 +534,12 @@ body {
   }
 }
 
+/* Suppress transitions during theme switches to prevent janky repaint */
+.no-transitions,
+.no-transitions * {
+  transition-duration: 0s !important;
+}
+
 /* Prevent layout thrashing on heavy scroll containers */
 .channel-table-body {
   contain: strict;
