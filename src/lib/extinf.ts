@@ -56,8 +56,7 @@ export function getExtinfAttribute(
   return value.length > 0 ? value : null;
 }
 
-export function extractTvgLogoUrl(extinfLine: string): string | null {
-  const raw = getExtinfAttribute(extinfLine, "tvg-logo");
+export function normalizeTvgLogoUrl(raw: string | null | undefined): string | null {
   if (!raw) return null;
 
   const candidate = raw.trim();
@@ -75,4 +74,8 @@ export function extractTvgLogoUrl(extinfLine: string): string | null {
   }
 
   return null;
+}
+
+export function extractTvgLogoUrl(extinfLine: string): string | null {
+  return normalizeTvgLogoUrl(getExtinfAttribute(extinfLine, "tvg-logo"));
 }

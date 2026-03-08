@@ -4,9 +4,10 @@ import type { ColumnDefinition } from "../lib/tableColumns";
 import { Radio, Tv } from "lucide-react";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { StatusBadge } from "./StatusBadge";
-import { extractTvgLogoUrl } from "../lib/extinf";
+import { extractTvgLogoUrl, normalizeTvgLogoUrl } from "../lib/extinf";
 import { channelLogoPixels, channelRowHeightPixels } from "../lib/channelLogoSize";
 import { detectChannelProtocol } from "../lib/streamProtocol";
+import { useLogoCacheStatus } from "../lib/logoCache";
 
 function formatLatency(latencyMs: number): string {
   if (latencyMs < 1000) {
@@ -55,7 +56,13 @@ function ChannelRowImpl({
   onRowContextMenu,
 }: ChannelRowProps) {
   const isAlive = result.status === "alive";
-  const logoUrl = useMemo(() => extractTvgLogoUrl(result.extinf_line), [result.extinf_line]);
+  const logoUrl = useMemo(
+    () =>
+      normalizeTvgLogoUrl(result.tvg_logo) ??
+      extractTvgLogoUrl(result.extinf_line),
+    [result.extinf_line, result.tvg_logo],
+  );
+  const logoStatus = useLogoCacheStatus(logoUrl);
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   const logoSizePx = useMemo(() => channelLogoPixels(channelLogoSize), [channelLogoSize]);
   const rowHeightPx = useMemo(() => channelRowHeightPixels(channelLogoSize), [channelLogoSize]);
@@ -111,13 +118,14 @@ function ChannelRowImpl({
         const kindLabel = result.audio_only ? "Audio-only stream" : "Video stream";
         return (
           <span className="inline-flex min-w-0 items-center gap-1.5 px-2 font-medium">
-            {logoUrl && !logoLoadFailed ? (
+            {logoUrl && !logoLoadFailed && logoStatus === "ready" ? (
               <img
                 src={logoUrl}
                 alt={`${result.name} logo`}
                 className="shrink-0 rounded-sm object-contain ring-1 ring-border-subtle bg-panel-subtle"
                 style={{ width: `${logoSizePx}px`, height: `${logoSizePx}px` }}
                 loading="lazy"
+                decoding="async"
                 referrerPolicy="no-referrer"
                 onError={() => {
                   setLogoLoadFailed(true);
