@@ -33,9 +33,12 @@ interface ChannelTableProps {
   onOpenExternal?: (result: ChannelResult) => void;
   onScanSelected?: (selectedIndices: number[]) => void;
   headerPortalRef?: RefObject<HTMLDivElement | null>;
+  toolbarHeight: number;
 }
 
 type CopyAction = "name" | "url" | "m3u" | "metadata";
+
+function noopRowEvent(_event: React.MouseEvent<HTMLDivElement>) {}
 
 function buildM3uEntryText(channel: ChannelResult): string {
   return [channel.extinf_line, ...channel.metadata_lines, channel.url].join("\n");
@@ -125,6 +128,7 @@ export function ChannelTable({
   onOpenExternal,
   onScanSelected,
   headerPortalRef,
+  toolbarHeight,
 }: ChannelTableProps) {
   const completedResults = useAppStore((s) => s.flatResults);
   const resultsByIndex = useAppStore((s) => s.results);
@@ -171,6 +175,10 @@ export function ChannelTable({
     key: ColumnKey;
     width: number;
   } | null>(null);
+  const [revealScrollState, setRevealScrollState] = useState({
+    scrollTop: 0,
+    scrollLeft: 0,
+  });
   const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(() =>
     parseStoredColumnOrder(
       localStorage.getItem(COLUMN_ORDER_STORAGE_KEY),
@@ -1013,38 +1021,174 @@ export function ChannelTable({
   );
 
   const headerRef = useRef<HTMLDivElement>(null);
-  const headerScrollRafRef = useRef<number | null>(null);
-  const lastHeaderScrollLeftRef = useRef(0);
+  const scrollSyncRafRef = useRef<number | null>(null);
+  const lastRevealScrollStateRef = useRef(revealScrollState);
+  const portalTarget = headerPortalRef?.current;
+  const hasMacHeaderReveal = isMac && Boolean(portalTarget) && toolbarHeight > 0;
 
-  const syncHeaderScroll = useCallback(() => {
-    if (headerScrollRafRef.current !== null) {
+  const handleTableScroll = useCallback(() => {
+    if (scrollSyncRafRef.current !== null) {
       return;
     }
-    headerScrollRafRef.current = window.requestAnimationFrame(() => {
-      headerScrollRafRef.current = null;
-      if (!headerRef.current || !parentRef.current) {
+    scrollSyncRafRef.current = window.requestAnimationFrame(() => {
+      scrollSyncRafRef.current = null;
+      const scrollElement = parentRef.current;
+      if (!scrollElement) {
         return;
       }
-      const nextScrollLeft = parentRef.current.scrollLeft;
-      if (lastHeaderScrollLeftRef.current === nextScrollLeft) {
+
+      const nextScrollTop = scrollElement.scrollTop;
+      const nextScrollLeft = scrollElement.scrollLeft;
+
+      if (headerRef.current && headerRef.current.scrollLeft !== nextScrollLeft) {
+        headerRef.current.scrollLeft = nextScrollLeft;
+      }
+
+      if (!hasMacHeaderReveal) {
         return;
       }
-      lastHeaderScrollLeftRef.current = nextScrollLeft;
-      headerRef.current.scrollLeft = nextScrollLeft;
+
+      const previous = lastRevealScrollStateRef.current;
+      if (
+        previous.scrollTop === nextScrollTop &&
+        previous.scrollLeft === nextScrollLeft
+      ) {
+        return;
+      }
+
+      const nextRevealScrollState = {
+        scrollTop: nextScrollTop,
+        scrollLeft: nextScrollLeft,
+      };
+      lastRevealScrollStateRef.current = nextRevealScrollState;
+      setRevealScrollState(nextRevealScrollState);
     });
-  }, []);
+  }, [hasMacHeaderReveal]);
 
   useEffect(
     () => () => {
-      if (headerScrollRafRef.current !== null) {
-        window.cancelAnimationFrame(headerScrollRafRef.current);
+      if (scrollSyncRafRef.current !== null) {
+        window.cancelAnimationFrame(scrollSyncRafRef.current);
       }
     },
     [],
   );
 
-  const portalTarget = headerPortalRef?.current;
+  useEffect(() => {
+    if (!hasMacHeaderReveal) {
+      if (
+        lastRevealScrollStateRef.current.scrollTop !== 0 ||
+        lastRevealScrollStateRef.current.scrollLeft !== 0
+      ) {
+        lastRevealScrollStateRef.current = { scrollTop: 0, scrollLeft: 0 };
+        setRevealScrollState({ scrollTop: 0, scrollLeft: 0 });
+      }
+      return;
+    }
+
+    const scrollElement = parentRef.current;
+    if (!scrollElement) {
+      return;
+    }
+
+    const nextRevealScrollState = {
+      scrollTop: scrollElement.scrollTop,
+      scrollLeft: scrollElement.scrollLeft,
+    };
+
+    if (headerRef.current && headerRef.current.scrollLeft !== nextRevealScrollState.scrollLeft) {
+      headerRef.current.scrollLeft = nextRevealScrollState.scrollLeft;
+    }
+
+    lastRevealScrollStateRef.current = nextRevealScrollState;
+    setRevealScrollState((prev) =>
+      prev.scrollTop === nextRevealScrollState.scrollTop &&
+      prev.scrollLeft === nextRevealScrollState.scrollLeft
+        ? prev
+        : nextRevealScrollState,
+    );
+  }, [hasMacHeaderReveal, toolbarHeight]);
+
   const virtualItems = virtualizer.getVirtualItems();
+  const revealVirtualItems = hasMacHeaderReveal
+    ? virtualItems.filter((virtualRow) => {
+        const rowStart = virtualRow.start;
+        const rowEnd = virtualRow.start + virtualRow.size;
+        return (
+          rowEnd - revealScrollState.scrollTop > -toolbarHeight &&
+          rowStart - revealScrollState.scrollTop < 0
+        );
+      })
+    : [];
+  const scrollContainerTop = hasMacHeaderReveal
+    ? 0
+    : "calc(-1 * var(--toolbar-height, 0px))";
+  const contentPaddingTop = portalTarget ? undefined : "calc(var(--toolbar-height, 0px) + 2rem)";
+
+  const renderVirtualRows = useCallback(
+    (
+      items: typeof virtualItems,
+      mode: "main" | "reveal",
+    ) =>
+      items.map((virtualRow) => {
+        const result = filteredResults[virtualRow.index];
+        if (!result) {
+          return null;
+        }
+
+        const rowTop =
+          mode === "main"
+            ? virtualRow.start
+            : virtualRow.start - revealScrollState.scrollTop + toolbarHeight;
+
+        return (
+          <div
+            key={mode === "main" ? virtualRow.key : `reveal-${virtualRow.key}`}
+            style={{
+              position: "absolute",
+              top: `${rowTop}px`,
+              left: 0,
+              width: `${tableWidth}px`,
+              height: `${virtualRow.size}px`,
+            }}
+          >
+            <ChannelRow
+              rowIndex={virtualRow.index}
+              result={result}
+              channelLogoSize={channelLogoSize}
+              onRowClick={mode === "main" ? handleRowClick : noopRowEvent}
+              onRowDoubleClick={
+                mode === "main" ? handleRowDoubleClick : noopRowEvent
+              }
+              onRowContextMenu={
+                mode === "main" ? handleRowContextMenu : noopRowEvent
+              }
+              selected={selectedIndices.has(result.index)}
+              duplicate={duplicateIndices.has(result.index)}
+              focused={focusedRow === virtualRow.index}
+              columns={columns}
+              gridTemplateColumns={gridTemplateColumns}
+              tableWidth={tableWidth}
+            />
+          </div>
+        );
+      }),
+    [
+      channelLogoSize,
+      columns,
+      duplicateIndices,
+      filteredResults,
+      focusedRow,
+      gridTemplateColumns,
+      handleRowClick,
+      handleRowContextMenu,
+      handleRowDoubleClick,
+      revealScrollState.scrollTop,
+      selectedIndices,
+      tableWidth,
+      toolbarHeight,
+    ],
+  );
 
   const headerElement = (
     <div
@@ -1132,17 +1276,46 @@ export function ChannelTable({
       {/* Column header — portaled into toolbar on macOS, or inline fallback */}
       {portalTarget ? createPortal(headerElement, portalTarget) : headerElement}
 
-      {/* Scroll container — extends behind toolbar, content scrolls behind header */}
+      {hasMacHeaderReveal && revealVirtualItems.length > 0 && (
+        <div
+          aria-hidden="true"
+          className="channel-table-reveal absolute left-0 right-0 overflow-hidden pointer-events-none"
+          style={{
+            top: `${-toolbarHeight}px`,
+            height: `${toolbarHeight}px`,
+          }}
+        >
+          <div
+            style={{
+              position: "relative",
+              width: `${tableWidth}px`,
+              minWidth: `${tableWidth}px`,
+              height: "100%",
+              transform: `translateX(-${revealScrollState.scrollLeft}px)`,
+            }}
+          >
+            {renderVirtualRows(revealVirtualItems, "reveal")}
+          </div>
+        </div>
+      )}
+
+      {/* Scroll container — main viewport owns the native scrollbar */}
       <div
         ref={parentRef}
         tabIndex={0}
         onKeyDown={handleKeyDown}
         onContextMenu={(event) => event.preventDefault()}
-        onScroll={syncHeaderScroll}
+        onScroll={handleTableScroll}
         className="channel-table-body native-scroll absolute left-0 right-0 bottom-0 overflow-auto focus:outline-none"
-        style={{ top: "calc(-1 * var(--toolbar-height, 0px))" }}
+        style={{ top: scrollContainerTop }}
       >
-        <div style={{ minWidth: `${tableWidth}px`, minHeight: "100%", paddingTop: `calc(var(--toolbar-height, 0px)${portalTarget ? "" : " + 2rem"})` }}>
+        <div
+          style={{
+            minWidth: `${tableWidth}px`,
+            minHeight: "100%",
+            paddingTop: contentPaddingTop,
+          }}
+        >
 
           {filteredResults.length === 0 ? (
             <div className="flex items-center justify-center text-text-tertiary text-sm min-h-64">
@@ -1156,36 +1329,7 @@ export function ChannelTable({
                 position: "relative",
               }}
             >
-              {virtualItems.map((virtualRow) => {
-                const result = filteredResults[virtualRow.index];
-                return (
-                  <div
-                    key={virtualRow.key}
-                    style={{
-                      position: "absolute",
-                      top: `${virtualRow.start}px`,
-                      left: 0,
-                      width: `${tableWidth}px`,
-                      height: `${virtualRow.size}px`,
-                    }}
-                  >
-                    <ChannelRow
-                      rowIndex={virtualRow.index}
-                      result={result}
-                      channelLogoSize={channelLogoSize}
-                      onRowClick={handleRowClick}
-                      onRowDoubleClick={handleRowDoubleClick}
-                      onRowContextMenu={handleRowContextMenu}
-                      selected={selectedIndices.has(result.index)}
-                      duplicate={duplicateIndices.has(result.index)}
-                      focused={focusedRow === virtualRow.index}
-                      columns={columns}
-                      gridTemplateColumns={gridTemplateColumns}
-                      tableWidth={tableWidth}
-                    />
-                  </div>
-                );
-              })}
+              {renderVirtualRows(virtualItems, "main")}
             </div>
           )}
         </div>

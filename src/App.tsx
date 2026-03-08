@@ -1854,6 +1854,7 @@ export default function App() {
   }, [liveSelectedChannel, streamPlayer]);
 
   const headerPortalRef = useRef<HTMLDivElement>(null);
+  const [toolbarHeight, setToolbarHeight] = useState(0);
   const tableProfilerEnabled =
     uiPerfEnabled() &&
     (playlist?.channels.length ?? 0) <= TABLE_PROFILER_ROW_LIMIT;
@@ -1864,6 +1865,7 @@ export default function App() {
       onOpenExternal={handleOpenExternal}
       onScanSelected={handleScanSelected}
       headerPortalRef={isMac ? headerPortalRef : undefined}
+      toolbarHeight={toolbarHeight}
     />
   );
   const toolbarMeasureRef = useRef<HTMLDivElement>(null);
@@ -1871,7 +1873,11 @@ export default function App() {
     const el = toolbarMeasureRef.current;
     if (!el) return;
     const update = () => {
-      document.documentElement.style.setProperty("--toolbar-height", `${el.offsetHeight}px`);
+      const nextToolbarHeight = el.offsetHeight;
+      document.documentElement.style.setProperty("--toolbar-height", `${nextToolbarHeight}px`);
+      setToolbarHeight((prev) =>
+        prev === nextToolbarHeight ? prev : nextToolbarHeight,
+      );
     };
     update();
     const observer = new ResizeObserver(update);
