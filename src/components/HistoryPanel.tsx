@@ -27,7 +27,7 @@ function formatScope(entry: ScanHistoryItem): string {
   return parts.length > 0 ? parts.join(" | ") : "Full playlist";
 }
 
-export function HistoryPanel({
+export default function HistoryPanel({
   playlistName,
   entries,
   loading,

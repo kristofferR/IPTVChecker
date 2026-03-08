@@ -285,7 +285,7 @@ function ServerTestModal({
   );
 }
 
-export function OpenSourceDialog({
+export default function OpenSourceDialog({
   initialMode,
   initialUrl,
   initialXtream,

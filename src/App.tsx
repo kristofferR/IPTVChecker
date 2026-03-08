@@ -1,6 +1,8 @@
 import {
+  lazy,
   Profiler,
   startTransition,
+  Suspense,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -56,9 +58,9 @@ import { PlaylistReportPanel } from "./components/PlaylistReportPanel";
 import { ThumbnailPanel } from "./components/ThumbnailPanel";
 import { StatsPanel } from "./components/StatsPanel";
 import { ProgressBar } from "./components/ProgressBar";
-import { KeyboardShortcutsDialog } from "./components/KeyboardShortcutsDialog";
-import { HistoryPanel } from "./components/HistoryPanel";
-import { OpenSourceDialog } from "./components/OpenSourceDialog";
+const KeyboardShortcutsDialog = lazy(() => import("./components/KeyboardShortcutsDialog"));
+const HistoryPanel = lazy(() => import("./components/HistoryPanel"));
+const OpenSourceDialog = lazy(() => import("./components/OpenSourceDialog"));
 import { AlertTriangle, ExternalLink, FolderOpen, Info, Loader2, X } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { detectPlatform, type Platform } from "./lib/platform";
@@ -2260,40 +2262,46 @@ export default function App() {
       </div>
 
       {openSourceDialogState && (
-        <OpenSourceDialog
-          initialMode={openSourceDialogState.mode}
-          initialUrl={openSourceDialogState.initialUrl}
-          initialXtream={openSourceDialogState.initialXtream}
-          initialStalker={openSourceDialogState.initialStalker}
-          onOpenUrl={openPlaylistUrlValue}
-          onOpenXtream={openPlaylistXtreamValue}
-          onOpenStalker={openPlaylistStalkerValue}
-          onClose={() => setOpenSourceDialogState(null)}
-        />
+        <Suspense fallback={null}>
+          <OpenSourceDialog
+            initialMode={openSourceDialogState.mode}
+            initialUrl={openSourceDialogState.initialUrl}
+            initialXtream={openSourceDialogState.initialXtream}
+            initialStalker={openSourceDialogState.initialStalker}
+            onOpenUrl={openPlaylistUrlValue}
+            onOpenXtream={openPlaylistXtreamValue}
+            onOpenStalker={openPlaylistStalkerValue}
+            onClose={() => setOpenSourceDialogState(null)}
+          />
+        </Suspense>
       )}
 
       {showKeyboardShortcuts && (
-        <KeyboardShortcutsDialog
-          modifierLabel={modKey}
-          onClose={() => setShowKeyboardShortcuts(false)}
-        />
+        <Suspense fallback={null}>
+          <KeyboardShortcutsDialog
+            modifierLabel={modKey}
+            onClose={() => setShowKeyboardShortcuts(false)}
+          />
+        </Suspense>
       )}
 
       {showHistory && playlist && (
-        <HistoryPanel
-          playlistName={playlist.file_name}
-          entries={historyEntries}
-          loading={historyLoading}
-          error={historyError}
-          clearing={historyClearing}
-          onRefresh={() => {
-            void refreshHistory();
-          }}
-          onClear={() => {
-            void handleClearHistory();
-          }}
-          onClose={() => setShowHistory(false)}
-        />
+        <Suspense fallback={null}>
+          <HistoryPanel
+            playlistName={playlist.file_name}
+            entries={historyEntries}
+            loading={historyLoading}
+            error={historyError}
+            clearing={historyClearing}
+            onRefresh={() => {
+              void refreshHistory();
+            }}
+            onClear={() => {
+              void handleClearHistory();
+            }}
+            onClose={() => setShowHistory(false)}
+          />
+        </Suspense>
       )}
 
       {isDragOver && (

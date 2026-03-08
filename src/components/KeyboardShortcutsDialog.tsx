@@ -54,7 +54,7 @@ interface KeyboardShortcutsDialogProps {
   onClose: () => void;
 }
 
-export function KeyboardShortcutsDialog({
+export default function KeyboardShortcutsDialog({
   modifierLabel,
   onClose,
 }: KeyboardShortcutsDialogProps) {
