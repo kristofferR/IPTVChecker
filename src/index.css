@@ -148,6 +148,10 @@ html, body, #root {
   background: var(--surface-bg);
 }
 
+html {
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   overflow: hidden;
@@ -528,6 +532,12 @@ body {
   [data-platform="macos"] .glass-material {
     background: transparent !important;
   }
+}
+
+/* Prevent layout thrashing on heavy scroll containers */
+.channel-table-body {
+  contain: strict;
+  content-visibility: auto;
 }
 
 @keyframes report-panel-slide-in-right {

@@ -1117,7 +1117,7 @@ export function ChannelTable({
         onKeyDown={handleKeyDown}
         onContextMenu={(event) => event.preventDefault()}
         onScroll={syncHeaderScroll}
-        className="native-scroll native-scroll-toolbar-cutout absolute left-0 right-0 bottom-0 overflow-auto focus:outline-none"
+        className="channel-table-body native-scroll native-scroll-toolbar-cutout absolute left-0 right-0 bottom-0 overflow-auto focus:outline-none"
         style={{ top: "calc(-1 * var(--toolbar-height, 0px))" }}
       >
         <div style={{ minWidth: `${tableWidth}px`, minHeight: "100%", paddingTop: `calc(var(--toolbar-height, 0px)${portalTarget ? "" : " + 2rem"})` }}>
