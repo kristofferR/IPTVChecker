@@ -305,8 +305,6 @@ export default function App() {
     historyLoading, setHistoryLoading,
     historyError, setHistoryError,
     historyClearing, setHistoryClearing,
-    // Settings (from store, will be populated by useSettings hook below)
-    settings: _storeSettings,
   } = useAppStore();
   const modKey = isMac ? "Cmd" : "Ctrl";
   const deferredSearch = useDeferredValue(search);
@@ -321,6 +319,9 @@ export default function App() {
   });
 
   const { settings, save: saveSettings, applyExternal: applyExternalSettings } = useSettings();
+  // Sync settings to the Zustand store so child components can subscribe
+  const storeSetSettings = useAppStore((s) => s.setSettings);
+  useEffect(() => { storeSetSettings(settings); }, [settings, storeSetSettings]);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const saveSettingsRef = useRef(saveSettings);
