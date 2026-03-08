@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, startTransition, useMemo } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   BarChart3,
@@ -24,18 +24,22 @@ import {
 } from "./SFSymbols";
 import type { PointerEvent, RefObject } from "react";
 import type { ChannelResult } from "../lib/types";
-import type { ScanState } from "../lib/scanState";
-import { ExportMenu } from "./ExportMenu";
 import type { ExportScope } from "../lib/exportScope";
+import { ExportMenu } from "./ExportMenu";
+import { useAppStore } from "../store";
 
-export interface MenuExportRequest {
-  id: number;
-  action: "csv" | "split" | "renamed" | "m3u" | "scanlog";
+function validateRegex(pattern: string): string | null {
+  const trimmed = pattern.trim();
+  if (!trimmed) return null;
+  try {
+    new RegExp(trimmed);
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
 }
 
 interface ToolbarProps {
-  useWindowDragRegion: boolean;
-  platform: "macos" | "windows" | "linux";
   onOpen: () => void;
   onOpenFolder: () => void;
   onOpenUrl: () => void;
@@ -43,27 +47,11 @@ interface ToolbarProps {
   onPauseScan: () => void;
   onResumeScan: () => void;
   onStopScan: () => void;
-  onOpenHistory: () => void;
   onOpenSettings: () => void;
   onToggleReport: () => void;
-  scanState: ScanState;
-  hasPlaylist: boolean;
-  showReport: boolean;
+  searchInputRef?: RefObject<HTMLInputElement | null>;
   exportScopeCounts: Record<ExportScope, number>;
   resolveExportScopeResults: (scope: ExportScope) => ChannelResult[];
-  playlistName: string;
-  playlistPath: string;
-  selectedCount: number;
-  menuExportRequest: MenuExportRequest | null;
-  scanBlockedReason: string | null;
-  search: string;
-  searchInputRef?: RefObject<HTMLInputElement | null>;
-  onSearchChange: (value: string) => void;
-  groups: string[];
-  groupFilter: string;
-  onGroupChange: (value: string) => void;
-  statusFilter: string;
-  onStatusChange: (value: string) => void;
   statusOptionCounts: Record<string, number>;
 }
 
@@ -77,8 +65,6 @@ const dragIgnoreSelector =
   "button, input, textarea, select, a, [role='button'], [contenteditable='true'], [data-no-window-drag]";
 
 export const Toolbar = memo(function Toolbar({
-  useWindowDragRegion,
-  platform,
   onOpen,
   onOpenFolder,
   onOpenUrl,
@@ -86,29 +72,37 @@ export const Toolbar = memo(function Toolbar({
   onPauseScan,
   onResumeScan,
   onStopScan,
-  onOpenHistory,
   onOpenSettings,
   onToggleReport,
-  scanState,
-  hasPlaylist,
-  showReport,
+  searchInputRef,
   exportScopeCounts,
   resolveExportScopeResults,
-  playlistName,
-  playlistPath,
-  selectedCount,
-  menuExportRequest,
-  scanBlockedReason,
-  search,
-  searchInputRef,
-  onSearchChange,
-  groups,
-  groupFilter,
-  onGroupChange,
-  statusFilter,
-  onStatusChange,
   statusOptionCounts,
 }: ToolbarProps) {
+  // --- Store reads ---
+  const platform = useAppStore((s) => s.platform);
+  const scanState = useAppStore((s) => s.scanState);
+  const search = useAppStore((s) => s.search);
+  const channelSearch = useAppStore((s) => s.channelSearch);
+  const groupFilter = useAppStore((s) => s.groupFilter);
+  const statusFilter = useAppStore((s) => s.statusFilter);
+  const menuExportRequest = useAppStore((s) => s.menuExportRequest);
+  const showReport = useAppStore(
+    (s) => s.playlist !== null && s.showReportPanel,
+  );
+  const hasPlaylist = useAppStore((s) => s.playlist !== null);
+  const playlistName = useAppStore((s) => s.playlist?.file_name ?? "");
+  const playlistPath = useAppStore((s) => s.playlist?.file_path ?? "");
+  const groups = useAppStore((s) => s.playlist?.groups ?? []);
+  const selectedCount = useAppStore((s) => s.selectedChannelIndices.length);
+
+  // --- Derived values ---
+  const useWindowDragRegion = platform !== "linux";
+  const scanBlockedReason = useMemo(() => {
+    const err = validateRegex(channelSearch);
+    return err ? `Invalid pre-scan regex: ${err}` : null;
+  }, [channelSearch]);
+
   const isMac = platform === "macos";
   const scanning = scanState === "scanning";
   const paused = scanState === "paused";
@@ -142,6 +136,26 @@ export const Toolbar = memo(function Toolbar({
 
     // Keep native drag-region behavior intact for secondary windows.
     void getCurrentWindow().startDragging();
+  };
+
+  const handleSearchChange = (value: string) => {
+    useAppStore.getState().setSearch(value);
+  };
+
+  const handleGroupChange = (value: string) => {
+    startTransition(() => {
+      useAppStore.getState().setGroupFilter(value);
+    });
+  };
+
+  const handleStatusChange = (value: string) => {
+    startTransition(() => {
+      useAppStore.getState().setStatusFilter(value);
+    });
+  };
+
+  const handleOpenHistory = () => {
+    useAppStore.getState().setShowHistory(true);
   };
 
   const dragRegionAttr = useWindowDragRegion ? true : undefined;
@@ -268,7 +282,7 @@ export const Toolbar = memo(function Toolbar({
         <select
           value={groupFilter}
           disabled={filtersDisabled}
-          onChange={(e) => onGroupChange(e.target.value)}
+          onChange={(e) => handleGroupChange(e.target.value)}
           className="native-field h-7 text-[12px] px-2 bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
         >
           <option value="all">All Groups</option>
@@ -281,7 +295,7 @@ export const Toolbar = memo(function Toolbar({
         <select
           value={statusFilter}
           disabled={filtersDisabled}
-          onChange={(e) => onStatusChange(e.target.value)}
+          onChange={(e) => handleStatusChange(e.target.value)}
           className="native-field h-7 text-[12px] px-2 bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
         >
           <option value="all">{statusLabel("all", "All Status")}</option>
@@ -305,7 +319,7 @@ export const Toolbar = memo(function Toolbar({
             placeholder="Search..."
             value={search}
             disabled={filtersDisabled}
-            onChange={(e) => onSearchChange(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
             className="native-field h-7 w-[clamp(9rem,16vw,12.5rem)] pl-7 pr-2 text-[12px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:cursor-not-allowed"
           />
         </div>
@@ -335,7 +349,7 @@ export const Toolbar = memo(function Toolbar({
         </button>
 
         <button
-          onClick={onOpenHistory}
+          onClick={handleOpenHistory}
           disabled={!hasPlaylist}
           className={isMac ? btn : `${btn} px-2.5`}
           title="History"

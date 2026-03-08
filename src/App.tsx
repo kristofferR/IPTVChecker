@@ -292,7 +292,7 @@ export default function App() {
     playbackError, setPlaybackError,
     scanInputError, setScanInputError,
     menuInfo, setMenuInfo,
-    menuExportRequest, queueMenuExportRequest,
+    queueMenuExportRequest,
     updateNotice, setUpdateNotice,
     appVersion, setAppVersion,
     openSourceDialogState, setOpenSourceDialogState,
@@ -1735,16 +1735,6 @@ export default function App() {
     [completedResults.length, filteredExportResults.length, selectedChannelIndices.length],
   );
 
-  const handleSearchChange = useCallback((value: string) => {
-    setSearch(value);
-  }, []);
-
-  const handleGroupFilterChange = useCallback((value: string) => {
-    startTransition(() => {
-      setGroupFilter(value);
-    });
-  }, []);
-
   const handleStatusFilterChange = useCallback((value: string) => {
     startTransition(() => {
       setStatusFilter(value);
@@ -1854,8 +1844,6 @@ export default function App() {
     <div className="flex flex-col h-screen bg-surface">
       <div ref={toolbarMeasureRef} className={`relative z-20 ${isMac ? "glass-material bg-panel" : ""}`}>
       <Toolbar
-        useWindowDragRegion={platform !== "linux"}
-        platform={platform}
         onOpen={handleOpen}
         onOpenFolder={handleOpenFolder}
         onOpenUrl={handleOpenUrl}
@@ -1863,29 +1851,11 @@ export default function App() {
         onPauseScan={pause}
         onResumeScan={resume}
         onStopScan={cancel}
-        onOpenHistory={openHistoryPanel}
         onOpenSettings={handleOpenSettings}
         onToggleReport={handleToggleReport}
-        scanState={scanState}
-        hasPlaylist={playlist !== null}
-        showReport={playlist !== null && showReportPanel}
+        searchInputRef={searchInputRef}
         exportScopeCounts={exportScopeCounts}
         resolveExportScopeResults={resolveExportScopeResults}
-        playlistName={playlist?.file_name ?? ""}
-        playlistPath={playlist?.file_path ?? ""}
-        selectedCount={selectedChannelIndices.length}
-        menuExportRequest={menuExportRequest}
-        scanBlockedReason={
-          channelSearchError ? `Invalid pre-scan regex: ${channelSearchError}` : null
-        }
-        search={search}
-        searchInputRef={searchInputRef}
-        onSearchChange={handleSearchChange}
-        groups={playlist?.groups ?? []}
-        groupFilter={groupFilter}
-        onGroupChange={handleGroupFilterChange}
-        statusFilter={statusFilter}
-        onStatusChange={handleStatusFilterChange}
         statusOptionCounts={statusOptionCounts}
       />
       {isMac && playlist && (
