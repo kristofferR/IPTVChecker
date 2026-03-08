@@ -1,7 +1,7 @@
-import { useRef, useState, useMemo, useCallback, useEffect, type RefObject } from "react";
+import { useRef, useState, useMemo, useCallback, useEffect, useDeferredValue, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { ChannelLogoSize, ChannelResult } from "../lib/types";
+import type { ChannelResult } from "../lib/types";
 import type { SearchTextCache, SortDirection, SortField } from "../lib/filters";
 import { filterResults, sortResults } from "../lib/filters";
 import {
@@ -21,29 +21,19 @@ import { ArrowDown, ArrowUp } from "lucide-react";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { statusLabel } from "../lib/format";
 import { measureUiPerf } from "../lib/perf";
-import { isScanActive, type ScanState } from "../lib/scanState";
+import { isScanActive } from "../lib/scanState";
 import { isPrimaryModifierPressed } from "../lib/shortcuts";
 import { channelRowHeightPixels } from "../lib/channelLogoSize";
 import { detectChannelProtocol } from "../lib/streamProtocol";
+import { useAppStore } from "../store";
 
 interface ChannelTableProps {
-  resultsByIndex: (ChannelResult | null)[];
   completedResults: ChannelResult[];
-  duplicateIndices: Set<number>;
-  search: string;
-  groupFilter: string;
-  statusFilter: string;
-  isMac: boolean;
-  channelLogoSize: ChannelLogoSize;
-  scanState?: ScanState;
   onSelectChannel: (result: ChannelResult) => void;
   onOpenChannel?: (result: ChannelResult) => void;
   onOpenExternal?: (result: ChannelResult) => void;
-  isPlaying?: boolean;
-  onSelectionChange?: (selectedIndices: number[]) => void;
   onScanSelected?: (selectedIndices: number[]) => void;
   headerPortalRef?: RefObject<HTMLDivElement | null>;
-  separatePlaceholder?: boolean;
 }
 
 type CopyAction = "name" | "url" | "m3u" | "metadata";
@@ -131,24 +121,25 @@ function keepMenuInViewport(
 }
 
 export function ChannelTable({
-  resultsByIndex,
   completedResults,
-  duplicateIndices,
-  search,
-  groupFilter,
-  statusFilter,
-  isMac,
-  channelLogoSize,
   onSelectChannel,
   onOpenChannel,
   onOpenExternal,
-  isPlaying,
-  onSelectionChange,
   onScanSelected,
-  scanState,
   headerPortalRef,
-  separatePlaceholder,
 }: ChannelTableProps) {
+  const resultsByIndex = useAppStore((s) => s.results);
+  const duplicateIndices = useAppStore((s) => s.duplicateIndices);
+  const groupFilter = useAppStore((s) => s.groupFilter);
+  const statusFilter = useAppStore((s) => s.statusFilter);
+  const scanState = useAppStore((s) => s.scanState);
+  const isMac = useAppStore((s) => s.isMac);
+  const channelLogoSize = useAppStore((s) => s.settings.channel_logo_size);
+  const isPlaying = useAppStore((s) => s.playIntentActive);
+  const separatePlaceholder = useAppStore((s) => s.settings.separate_placeholder_status);
+  const onSelectionChange = useAppStore((s) => s.setSelectedChannelIndices);
+  const rawSearch = useAppStore((s) => s.search);
+  const search = useDeferredValue(rawSearch);
   const parentRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const copyFeedbackTimerRef = useRef<number | null>(null);

@@ -297,7 +297,7 @@ export default function App() {
     appVersion, setAppVersion,
     openSourceDialogState, setOpenSourceDialogState,
     // Player
-    playIntentActive, setPlayIntentActive,
+    setPlayIntentActive,
     pendingPlaybackChannel, setPendingPlaybackChannel,
     // History
     showHistory, setShowHistory,
@@ -2031,23 +2031,12 @@ export default function App() {
           {playlist ? (
             <Profiler id="ChannelTable" onRender={handleTableProfilerRender}>
               <ChannelTable
-                resultsByIndex={results}
                 completedResults={completedResults}
-                duplicateIndices={duplicateIndices}
-                search={deferredSearch}
-                groupFilter={groupFilter}
-                statusFilter={statusFilter}
-                scanState={scanState}
-                isMac={isMac}
-                channelLogoSize={settings.channel_logo_size}
                 onSelectChannel={handleSelectChannel}
                 onOpenChannel={handlePlayInApp}
                 onOpenExternal={handleOpenExternal}
-                isPlaying={playIntentActive}
-                onSelectionChange={setSelectedChannelIndices}
                 onScanSelected={handleScanSelected}
                 headerPortalRef={isMac ? headerPortalRef : undefined}
-                separatePlaceholder={settings.separate_placeholder_status}
               />
             </Profiler>
           ) : (
