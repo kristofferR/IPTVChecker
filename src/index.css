@@ -531,6 +531,18 @@ body {
   contain: layout size style;
 }
 
+.channel-table-viewport {
+  contain: layout style paint;
+}
+
+.channel-table-body.is-scrolling .channel-row {
+  pointer-events: none;
+}
+
+.channel-table-body.is-scrolling .channel-row:hover {
+  background: inherit;
+}
+
 /* Mirror rows into the macOS glass header without moving the real scrollport. */
 .channel-table-reveal {
   contain: layout style paint;

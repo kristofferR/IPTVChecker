@@ -254,6 +254,7 @@ export function ChannelTable({
 
   const SCROLLBAR_ALLOWANCE = 15;
   const [containerWidth, setContainerWidth] = useState(0);
+  const [containerHeight, setContainerHeight] = useState(0);
 
   useEffect(() => {
     const el = parentRef.current;
@@ -261,6 +262,7 @@ export function ChannelTable({
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
         setContainerWidth(entry.contentRect.width);
+        setContainerHeight(entry.contentRect.height);
       }
     });
     ro.observe(el);
@@ -1110,6 +1112,7 @@ export function ChannelTable({
   }, [hasMacHeaderReveal, toolbarHeight]);
 
   const virtualItems = virtualizer.getVirtualItems();
+  const isTableScrolling = virtualizer.isScrolling;
   const revealVirtualItems = hasMacHeaderReveal
     ? virtualItems.filter((virtualRow) => {
         const rowStart = virtualRow.start;
@@ -1138,7 +1141,9 @@ export function ChannelTable({
 
         const rowTop =
           mode === "main"
-            ? virtualRow.start
+            ? hasMacHeaderReveal
+              ? virtualRow.start - revealScrollState.scrollTop
+              : virtualRow.start
             : virtualRow.start - revealScrollState.scrollTop + toolbarHeight;
 
         return (
@@ -1183,6 +1188,7 @@ export function ChannelTable({
       handleRowClick,
       handleRowContextMenu,
       handleRowDoubleClick,
+      hasMacHeaderReveal,
       revealScrollState.scrollTop,
       selectedIndices,
       tableWidth,
@@ -1306,7 +1312,9 @@ export function ChannelTable({
         onKeyDown={handleKeyDown}
         onContextMenu={(event) => event.preventDefault()}
         onScroll={handleTableScroll}
-        className="channel-table-body native-scroll absolute left-0 right-0 bottom-0 overflow-auto focus:outline-none"
+        className={`channel-table-body native-scroll absolute left-0 right-0 bottom-0 overflow-auto focus:outline-none ${
+          isTableScrolling ? "is-scrolling" : ""
+        }`}
         style={{ top: scrollContainerTop }}
       >
         <div
@@ -1329,7 +1337,26 @@ export function ChannelTable({
                 position: "relative",
               }}
             >
-              {renderVirtualRows(virtualItems, "main")}
+              {hasMacHeaderReveal ? (
+                <div
+                  className="sticky top-0 left-0 h-0 overflow-visible"
+                >
+                  <div
+                    className="channel-table-viewport"
+                    style={{
+                      position: "relative",
+                      width: `${tableWidth}px`,
+                      minWidth: `${tableWidth}px`,
+                      height: `${containerHeight}px`,
+                      overflow: "hidden",
+                    }}
+                  >
+                    {renderVirtualRows(virtualItems, "main")}
+                  </div>
+                </div>
+              ) : (
+                renderVirtualRows(virtualItems, "main")
+              )}
             </div>
           )}
         </div>
