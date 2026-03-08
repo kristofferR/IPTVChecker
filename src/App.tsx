@@ -59,7 +59,7 @@ import { ProgressBar } from "./components/ProgressBar";
 import { KeyboardShortcutsDialog } from "./components/KeyboardShortcutsDialog";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { OpenSourceDialog } from "./components/OpenSourceDialog";
-import { AlertTriangle, ExternalLink, FolderOpen, Info, X } from "lucide-react";
+import { AlertTriangle, ExternalLink, FolderOpen, Info, Loader2, X } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { detectPlatform, type Platform } from "./lib/platform";
 import { countStatusOptions, filterResults, type SearchTextCache } from "./lib/filters";
@@ -312,6 +312,7 @@ export default function App() {
   const [playlistOpenError, setPlaylistOpenError] = useState<string | null>(
     null,
   );
+  const [playlistLoading, setPlaylistLoading] = useState(false);
   const [scanInputError, setScanInputError] = useState<string | null>(null);
   const [pendingPlaybackChannel, setPendingPlaybackChannel] =
     useState<ChannelResult | null>(null);
@@ -605,6 +606,7 @@ export default function App() {
 
   const openPlaylistPath = useCallback(async (selectedPath: string) => {
     setPlaylistOpenError(null);
+    setPlaylistLoading(true);
     try {
       const searchTrimmed = channelSearch.trim() || undefined;
       logger.debug(
@@ -640,6 +642,8 @@ export default function App() {
       setPendingPlaybackChannel(null);
       setShowHistory(false);
       void refreshRecentPlaylists();
+    } finally {
+      setPlaylistLoading(false);
     }
   }, [initFromPlaylist, channelSearch, refreshRecentPlaylists]);
 
@@ -674,6 +678,7 @@ export default function App() {
 
   const openPlaylistUrlValue = useCallback(async (url: string): Promise<string | true> => {
     setPlaylistOpenError(null);
+    setPlaylistLoading(true);
     try {
       const searchTrimmed = channelSearch.trim() || undefined;
       logger.debug(
@@ -710,12 +715,15 @@ export default function App() {
       setShowHistory(false);
       void refreshRecentPlaylists();
       return message;
+    } finally {
+      setPlaylistLoading(false);
     }
   }, [channelSearch, initFromPlaylist, refreshRecentPlaylists]);
 
   const openPlaylistXtreamValue = useCallback(
     async (source: XtreamOpenRequest, savePassword?: boolean): Promise<string | true> => {
       setPlaylistOpenError(null);
+      setPlaylistLoading(true);
       try {
         const searchTrimmed = channelSearch.trim() || undefined;
         logger.debug(
@@ -772,6 +780,8 @@ export default function App() {
         setShowHistory(false);
         void refreshRecentPlaylists();
         return message;
+      } finally {
+        setPlaylistLoading(false);
       }
     },
     [channelSearch, initFromPlaylist, refreshRecentPlaylists],
@@ -780,6 +790,7 @@ export default function App() {
   const openPlaylistStalkerValue = useCallback(
     async (source: StalkerOpenRequest): Promise<string | true> => {
       setPlaylistOpenError(null);
+      setPlaylistLoading(true);
       try {
         const searchTrimmed = channelSearch.trim() || undefined;
         logger.debug(
@@ -809,6 +820,8 @@ export default function App() {
         setPendingPlaybackChannel(null);
         setShowHistory(false);
         return message;
+      } finally {
+        setPlaylistLoading(false);
       }
     },
     [channelSearch, initFromPlaylist],
@@ -2111,84 +2124,95 @@ export default function App() {
           ) : (
             <div className="flex-1 flex items-center justify-center text-text-tertiary">
               <div className="text-center px-4">
-                <p className="text-lg font-medium mb-2">
-                  No playlist loaded
-                </p>
-                <p className="text-[15px] mb-4">
-                  Click Open or press{" "}
-                  <kbd className="px-2 py-0.5 bg-input rounded text-[13px] border border-border-app">
-                    {modKey}+O
-                  </kbd>{" "}
-                  to load an M3U playlist
-                </p>
-                <div className="flex flex-wrap items-center justify-center gap-2">
-                  <button
-                    onClick={handleOpen}
-                    className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-600/25 transition-colors"
-                    type="button"
-                  >
-                    <FolderOpen className="w-4 h-4" />
-                    Open File
-                  </button>
-                  <button
-                    onClick={handleOpenFolder}
-                    className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
-                    type="button"
-                  >
-                    <FolderOpen className="w-4 h-4" />
-                    Open Folder
-                  </button>
-                  <button
-                    onClick={handleOpenUrl}
-                    className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
-                    type="button"
-                  >
-                    Add URL
-                  </button>
-                  <button
-                    onClick={handleOpenXtream}
-                    className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
-                    type="button"
-                  >
-                    Add Xtream
-                  </button>
-                </div>
-
-                {startScreenRecentPlaylists.length > 0 && (
-                  <div className="mt-6 text-left mx-auto max-w-xl">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-[12px] uppercase tracking-[0.08em] text-text-tertiary">
-                        Open Recent
-                      </p>
+                {playlistLoading ? (
+                  <>
+                    <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-blue-500" />
+                    <p className="text-lg font-medium">
+                      Loading playlist…
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-lg font-medium mb-2">
+                      No playlist loaded
+                    </p>
+                    <p className="text-[15px] mb-4">
+                      Click Open or press{" "}
+                      <kbd className="px-2 py-0.5 bg-input rounded text-[13px] border border-border-app">
+                        {modKey}+O
+                      </kbd>{" "}
+                      to load an M3U playlist
+                    </p>
+                    <div className="flex flex-wrap items-center justify-center gap-2">
                       <button
-                        onClick={() => {
-                          void handleClearRecentPlaylists();
-                        }}
-                        className="text-[12px] text-text-tertiary hover:text-text-primary transition-colors"
+                        onClick={handleOpen}
+                        className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-600/25 transition-colors"
                         type="button"
                       >
-                        Clear
+                        <FolderOpen className="w-4 h-4" />
+                        Open File
+                      </button>
+                      <button
+                        onClick={handleOpenFolder}
+                        className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
+                        type="button"
+                      >
+                        <FolderOpen className="w-4 h-4" />
+                        Open Folder
+                      </button>
+                      <button
+                        onClick={handleOpenUrl}
+                        className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
+                        type="button"
+                      >
+                        Add URL
+                      </button>
+                      <button
+                        onClick={handleOpenXtream}
+                        className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
+                        type="button"
+                      >
+                        Add Xtream
                       </button>
                     </div>
-                    <div className="space-y-1">
-                      {startScreenRecentPlaylists.map((entry) => (
-                        <button
-                          key={`${entry.kind}:${entry.value}`}
-                          onClick={() => handleOpenRecent(entry)}
-                          className="w-full text-left px-3 py-2 rounded-lg border border-border-subtle hover:border-border-app hover:bg-panel-subtle transition-colors"
-                          type="button"
-                          title={recentTitle(entry)}
-                        >
-                          <span className="text-[13px] text-text-primary block truncate">
-                            {entry.label}
-                          </span>
-                          <span className="text-[11px] text-text-tertiary block truncate mt-0.5">
-                            {recentValueLabel(entry)}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+
+                    {startScreenRecentPlaylists.length > 0 && (
+                      <div className="mt-6 text-left mx-auto max-w-xl">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-[12px] uppercase tracking-[0.08em] text-text-tertiary">
+                            Open Recent
+                          </p>
+                          <button
+                            onClick={() => {
+                              void handleClearRecentPlaylists();
+                            }}
+                            className="text-[12px] text-text-tertiary hover:text-text-primary transition-colors"
+                            type="button"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                        <div className="space-y-1">
+                          {startScreenRecentPlaylists.map((entry) => (
+                            <button
+                              key={`${entry.kind}:${entry.value}`}
+                              onClick={() => handleOpenRecent(entry)}
+                              className="w-full text-left px-3 py-2 rounded-lg border border-border-subtle hover:border-border-app hover:bg-panel-subtle transition-colors"
+                              type="button"
+                              title={recentTitle(entry)}
+                            >
+                              <span className="text-[13px] text-text-primary block truncate">
+                                {entry.label}
+                              </span>
+                              <span className="text-[11px] text-text-tertiary block truncate mt-0.5">
+                                {recentValueLabel(entry)}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
