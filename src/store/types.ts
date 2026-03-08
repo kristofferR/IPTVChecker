@@ -138,12 +138,14 @@ export interface UiSlice {
   openSourceDialogState: OpenSourceDialogState | null;
 
   setPlatform: (platform: Platform) => void;
+  setSidebarHidden: (hidden: boolean) => void;
   toggleSidebar: () => void;
   setSidebarWidth: (width: number) => void;
   toggleReportPanel: () => void;
   setShowReportPanel: (show: boolean) => void;
   setReportSidebarWidth: (width: number) => void;
   setLightboxOpen: (open: boolean) => void;
+  toggleLightboxOpen: () => void;
   setShowKeyboardShortcuts: (show: boolean) => void;
   setIsDragOver: (over: boolean) => void;
   setFfmpegWarning: (warn: boolean) => void;
@@ -152,6 +154,7 @@ export interface UiSlice {
   setScanInputError: (error: string | null) => void;
   setMenuInfo: (info: string | null) => void;
   setMenuExportRequest: (request: MenuExportRequest | null) => void;
+  queueMenuExportRequest: (action: MenuExportRequest["action"]) => void;
   setUpdateNotice: (notice: UpdateNotice | null) => void;
   setAppVersion: (version: string) => void;
   setOpenSourceDialogState: (state: OpenSourceDialogState | null) => void;

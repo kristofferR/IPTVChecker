@@ -23,7 +23,6 @@ export const createUiSlice: StateCreator<AppStore, [], [], UiSlice> = (set) => (
   ffmpegWarning: false,
   errorDismissed: false,
   playbackError: null,
-  playlistOpenError: null,
   scanInputError: null,
   menuInfo: null,
   menuExportRequest: null,
@@ -32,12 +31,14 @@ export const createUiSlice: StateCreator<AppStore, [], [], UiSlice> = (set) => (
   openSourceDialogState: null,
 
   setPlatform: (platform) => set({ platform, isMac: platform === "macos" }),
+  setSidebarHidden: (sidebarHidden) => set({ sidebarHidden }),
   toggleSidebar: () => set((state) => ({ sidebarHidden: !state.sidebarHidden })),
   setSidebarWidth: (sidebarWidth) => set({ sidebarWidth }),
   toggleReportPanel: () => set((state) => ({ showReportPanel: !state.showReportPanel })),
   setShowReportPanel: (showReportPanel) => set({ showReportPanel }),
   setReportSidebarWidth: (reportSidebarWidth) => set({ reportSidebarWidth }),
   setLightboxOpen: (lightboxOpen) => set({ lightboxOpen }),
+  toggleLightboxOpen: () => set((state) => ({ lightboxOpen: !state.lightboxOpen })),
   setShowKeyboardShortcuts: (showKeyboardShortcuts) => set({ showKeyboardShortcuts }),
   setIsDragOver: (isDragOver) => set({ isDragOver }),
   setFfmpegWarning: (ffmpegWarning) => set({ ffmpegWarning }),
@@ -46,6 +47,10 @@ export const createUiSlice: StateCreator<AppStore, [], [], UiSlice> = (set) => (
   setScanInputError: (scanInputError) => set({ scanInputError }),
   setMenuInfo: (menuInfo) => set({ menuInfo }),
   setMenuExportRequest: (menuExportRequest) => set({ menuExportRequest }),
+  queueMenuExportRequest: (action) =>
+    set((state) => ({
+      menuExportRequest: { id: (state.menuExportRequest?.id ?? 0) + 1, action },
+    })),
   setUpdateNotice: (updateNotice) => set({ updateNotice }),
   setAppVersion: (appVersion) => set({ appVersion }),
   setOpenSourceDialogState: (openSourceDialogState) => set({ openSourceDialogState }),

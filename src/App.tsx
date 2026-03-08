@@ -24,10 +24,8 @@ import {
 } from "@tauri-apps/plugin-notification";
 import type {
   ChannelResult,
-  PlaylistPreview,
   RecentPlaylistEntry,
   ScanConfig,
-  ScanHistoryItem,
   StalkerOpenRequest,
   XtreamOpenRequest,
   XtreamRecentSource,
@@ -51,6 +49,8 @@ import {
 import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
 import { useStreamPlayer } from "./hooks/useStreamPlayer";
+import { useAppStore } from "./store";
+import type { OpenSourceDialogState, UpdateNotice } from "./store/types";
 import { Toolbar } from "./components/Toolbar";
 import { FilterBar } from "./components/FilterBar";
 import { ChannelTable } from "./components/ChannelTable";
@@ -63,7 +63,7 @@ const HistoryPanel = lazy(() => import("./components/HistoryPanel"));
 const OpenSourceDialog = lazy(() => import("./components/OpenSourceDialog"));
 import { AlertTriangle, ExternalLink, FolderOpen, Info, Loader2, X } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
-import { detectPlatform, inferPlatformFromNavigator, type Platform } from "./lib/platform";
+import { detectPlatform } from "./lib/platform";
 import { countStatusOptions, filterResults, type SearchTextCache } from "./lib/filters";
 import { logger } from "./lib/logger";
 import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/haptics";
@@ -122,12 +122,6 @@ const GITHUB_LATEST_RELEASE_API =
   "https://api.github.com/repos/kristofferR/IPTVChecker-GUI/releases/latest";
 const GITHUB_RELEASES_PAGE =
   "https://github.com/kristofferR/IPTVChecker-GUI/releases";
-
-interface UpdateNotice {
-  latest_version: string;
-  release_url: string;
-  checked_at_epoch_ms: number;
-}
 
 function normalizeVersion(version: string): string {
   return version.trim().replace(/^v/i, "");
@@ -219,15 +213,6 @@ function shouldSkipUpdateCheck(
   );
 }
 
-type OpenSourceMode = "url" | "xtream" | "stalker";
-
-interface OpenSourceDialogState {
-  mode: OpenSourceMode;
-  initialUrl: string;
-  initialXtream: XtreamRecentSource | null;
-  initialStalker: StalkerOpenRequest | null;
-}
-
 function serializeXtreamRecent(source: XtreamRecentSource): string {
   const obj: Record<string, string> = {
     server: source.server.trim(),
@@ -284,65 +269,52 @@ function recentTitle(entry: RecentPlaylistEntry): string {
 }
 
 export default function App() {
-  const [platform, setPlatform] = useState<Platform>(inferPlatformFromNavigator);
-  const isMac = platform === "macos";
+  const {
+    // Playlist
+    playlist, setPlaylist, playlistLoading, setPlaylistLoading,
+    playlistOpenError, setPlaylistOpenError, recentPlaylists, setRecentPlaylists,
+    // Filter
+    search, setSearch, channelSearch, setChannelSearch,
+    groupFilter, setGroupFilter, statusFilter, setStatusFilter,
+    // Selection
+    selectedChannel, setSelectedChannel,
+    selectedChannelIndices, setSelectedChannelIndices,
+    // UI
+    platform, setPlatform, isMac,
+    sidebarHidden, setSidebarHidden, sidebarWidth, setSidebarWidth,
+    showReportPanel, setShowReportPanel, toggleReportPanel,
+    reportSidebarWidth, setReportSidebarWidth,
+    lightboxOpen, setLightboxOpen, toggleLightboxOpen,
+    showKeyboardShortcuts, setShowKeyboardShortcuts,
+    isDragOver, setIsDragOver,
+    ffmpegWarning, setFfmpegWarning,
+    errorDismissed, setErrorDismissed,
+    playbackError, setPlaybackError,
+    scanInputError, setScanInputError,
+    menuInfo, setMenuInfo,
+    menuExportRequest, queueMenuExportRequest,
+    updateNotice, setUpdateNotice,
+    appVersion, setAppVersion,
+    openSourceDialogState, setOpenSourceDialogState,
+    // Player
+    playIntentActive, setPlayIntentActive,
+    pendingPlaybackChannel, setPendingPlaybackChannel,
+    // History
+    showHistory, setShowHistory,
+    historyEntries, setHistoryEntries,
+    historyLoading, setHistoryLoading,
+    historyError, setHistoryError,
+    historyClearing, setHistoryClearing,
+    // Settings (from store, will be populated by useSettings hook below)
+    settings: _storeSettings,
+  } = useAppStore();
   const modKey = isMac ? "Cmd" : "Ctrl";
-
-  const [playlist, setPlaylist] = useState<PlaylistPreview | null>(null);
-  const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
-  const [channelSearch, setChannelSearch] = useState("");
-  const [groupFilter, setGroupFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [selectedChannel, setSelectedChannel] = useState<ChannelResult | null>(
-    null,
-  );
-  const [selectedChannelIndices, setSelectedChannelIndices] = useState<number[]>(
-    [],
-  );
-  const [lightboxOpen, setLightboxOpen] = useState(false);
-  const [ffmpegWarning, setFfmpegWarning] = useState(false);
-  const [errorDismissed, setErrorDismissed] = useState(false);
-  const [playbackError, setPlaybackError] = useState<string | null>(null);
-  const [playlistOpenError, setPlaylistOpenError] = useState<string | null>(
-    null,
-  );
-  const [playlistLoading, setPlaylistLoading] = useState(false);
-  const [scanInputError, setScanInputError] = useState<string | null>(null);
-  const [pendingPlaybackChannel, setPendingPlaybackChannel] =
-    useState<ChannelResult | null>(null);
-  const [sidebarHidden, setSidebarHidden] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const saved = localStorage.getItem("sidebar-width");
-    return saved ? Math.max(100, Math.min(600, Number(saved))) : 288;
-  });
-  const [showReportPanel, setShowReportPanel] = useState(false);
-  const [reportSidebarWidth, setReportSidebarWidth] = useState(() => {
-    const saved = localStorage.getItem("report-sidebar-width");
-    return saved ? Math.max(260, Math.min(700, Number(saved))) : 330;
-  });
+
   const sidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const reportSidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [menuInfo, setMenuInfo] = useState<string | null>(null);
-  const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
-  const [openSourceDialogState, setOpenSourceDialogState] =
-    useState<OpenSourceDialogState | null>(null);
-  const [isDragOver, setIsDragOver] = useState(false);
-  const [historyEntries, setHistoryEntries] = useState<ScanHistoryItem[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyError, setHistoryError] = useState<string | null>(null);
-  const [historyClearing, setHistoryClearing] = useState(false);
-  const [recentPlaylists, setRecentPlaylists] = useState<RecentPlaylistEntry[]>([]);
-  const [appVersion, setAppVersion] = useState<string>("");
-  const [updateNotice, setUpdateNotice] = useState<UpdateNotice | null>(null);
-  const [menuExportRequest, setMenuExportRequest] = useState<{
-    id: number;
-    action: "csv" | "split" | "renamed" | "m3u" | "scanlog";
-  } | null>(null);
 
-  const [playIntentActive, setPlayIntentActive] = useState(false);
   const handlePlaybackFailedRef = useRef<((result: ChannelResult) => void) | undefined>(undefined);
   const streamPlayer = useStreamPlayer({
     onPlaybackFailed: (result) => handlePlaybackFailedRef.current?.(result),
@@ -1198,7 +1170,7 @@ export default function App() {
         const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
         if (tag === "input" || tag === "textarea" || tag === "select" || (e.target as HTMLElement)?.isContentEditable) return;
         e.preventDefault();
-        setLightboxOpen((prev) => !prev);
+        toggleLightboxOpen();
       }
       if (e.key === "Escape") {
         if (lightboxOpenRef.current) {
@@ -1345,10 +1317,7 @@ export default function App() {
     let cancelled = false;
     const unlisten: Array<() => void> = [];
     const queueExport = (action: "csv" | "split" | "renamed" | "m3u" | "scanlog") => {
-      setMenuExportRequest((prev) => ({
-        id: (prev?.id ?? 0) + 1,
-        action,
-      }));
+      queueMenuExportRequest(action);
     };
 
     const setup = async () => {
@@ -1568,12 +1537,10 @@ export default function App() {
   }, [scanState]);
 
   const handleToggleReport = useCallback(() => {
-    setShowReportPanel((current) => {
-      const next = !current;
-      markManualReportVisibility(next);
-      return next;
-    });
-  }, [markManualReportVisibility]);
+    const next = !showReportPanel;
+    markManualReportVisibility(next);
+    setShowReportPanel(next);
+  }, [showReportPanel, markManualReportVisibility, setShowReportPanel]);
   handleToggleReportRef.current = handleToggleReport;
 
   const handleCloseReport = useCallback(() => {
@@ -2243,7 +2210,7 @@ export default function App() {
         duplicateCount={duplicateIndices.size}
         statusFilter={statusFilter}
         onStatusChange={handleStatusFilterChange}
-        onScoreClick={() => setShowReportPanel((v) => !v)}
+        onScoreClick={() => toggleReportPanel()}
       />
       <ProgressBar
         progress={progress}
