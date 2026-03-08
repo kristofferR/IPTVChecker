@@ -10,6 +10,7 @@ import {
   SFExclamationTriangleFill,
   SFTagFill,
   SFDocOnDocFill,
+  SFPhotoFill,
 } from "./SFSymbols";
 
 interface StatsPanelProps {
@@ -155,6 +156,15 @@ export const StatsPanel = memo(function StatsPanel({
             active={statusFilter === "geoblocked"}
             onClick={() => toggleFilter("geoblocked")}
           />
+          {stats.placeholder > 0 && (
+            <Pill
+              icon={<SFPhotoFill className={iconSize} />}
+              label={String(stats.placeholder)}
+              color="orange"
+              active={statusFilter === "placeholder"}
+              onClick={() => toggleFilter("placeholder")}
+            />
+          )}
         </>
       )}
       {summary?.playlist_score && (

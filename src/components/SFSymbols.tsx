@@ -25,6 +25,7 @@ import {
   sfTagFill,
   sfChevronDown,
   sfDocumentViewfinder,
+  sfPhotoFill,
 } from "@bradleyhodges/sfsymbols";
 
 type IconProps = ComponentProps<"svg">;
@@ -79,3 +80,4 @@ export const SFDocOnDocFill = makeSFIcon(sfDocumentOnDocumentFill);
 export const SFTagFill = makeSFIcon(sfTagFill);
 export const SFChevronDown = makeSFIcon(sfChevronDown);
 export const SFDocumentViewfinder = makeSFIcon(sfDocumentViewfinder);
+export const SFPhotoFill = makeSFIcon(sfPhotoFill);
