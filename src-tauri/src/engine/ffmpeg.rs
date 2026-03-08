@@ -1027,9 +1027,64 @@ fn contains_word(haystack: &str, word: &str) -> bool {
     false
 }
 
+/// Normalize Unicode superscript/subscript characters to ASCII equivalents.
+///
+/// Some IPTV providers use Unicode superscript characters in channel or group
+/// names, e.g. "ᵁᴴᴰ ³⁸⁴⁰ᴾ" instead of "UHD 3840P". This normalizes those
+/// characters so label-matching logic can detect quality tags reliably.
+fn normalize_superscript(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            // Superscript digits
+            '\u{2070}' => '0',
+            '\u{00B9}' => '1',
+            '\u{00B2}' => '2',
+            '\u{00B3}' => '3',
+            '\u{2074}' => '4',
+            '\u{2075}' => '5',
+            '\u{2076}' => '6',
+            '\u{2077}' => '7',
+            '\u{2078}' => '8',
+            '\u{2079}' => '9',
+            // Subscript digits
+            '\u{2080}' => '0',
+            '\u{2081}' => '1',
+            '\u{2082}' => '2',
+            '\u{2083}' => '3',
+            '\u{2084}' => '4',
+            '\u{2085}' => '5',
+            '\u{2086}' => '6',
+            '\u{2087}' => '7',
+            '\u{2088}' => '8',
+            '\u{2089}' => '9',
+            // Modifier/superscript letters (Latin small capitals & modifiers)
+            '\u{1D2C}' => 'A',
+            '\u{1D2E}' => 'B',
+            '\u{1D30}' => 'D',
+            '\u{1D31}' => 'E',
+            '\u{1D33}' => 'G',
+            '\u{1D34}' => 'H',
+            '\u{1D35}' => 'I',
+            '\u{1D36}' => 'J',
+            '\u{1D37}' => 'K',
+            '\u{1D38}' => 'L',
+            '\u{1D39}' => 'M',
+            '\u{1D3A}' => 'N',
+            '\u{1D3C}' => 'O',
+            '\u{1D3E}' => 'P',
+            '\u{1D3F}' => 'R',
+            '\u{1D40}' => 'T',
+            '\u{1D41}' => 'U',
+            '\u{1D42}' => 'W',
+            '\u{02B8}' => 'y',
+            other => other,
+        })
+        .collect()
+}
+
 /// Check label mismatch between channel name and actual resolution.
 pub fn check_label_mismatch(channel_name: &str, resolution: &str) -> Vec<String> {
-    let name_lower = channel_name.to_lowercase();
+    let name_lower = normalize_superscript(channel_name).to_lowercase();
     let mut mismatches = Vec::new();
 
     if name_lower.contains("4k") || name_lower.contains("uhd") {
@@ -1056,8 +1111,8 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        build_screenshot_file_name, check_label_mismatch, contains_word, parse_ffprobe_fps,
-        parse_probe_snapshot, parse_stream_track_presence, resolution_label,
+        build_screenshot_file_name, check_label_mismatch, contains_word, normalize_superscript,
+        parse_ffprobe_fps, parse_probe_snapshot, parse_stream_track_presence, resolution_label,
         sanitize_screenshot_stem, screenshot_header_is_valid, unique_screenshot_output_path,
         validate_captured_screenshot, ScreenshotFormat, MAX_SCREENSHOT_STEM_LEN,
     };
@@ -1249,5 +1304,27 @@ mod tests {
         // "hd" as part of a name should NOT trigger mismatch
         assert!(check_label_mismatch("Ahmad TV", "480p").is_empty());
         assert!(check_label_mismatch("Shahd Channel", "480p").is_empty());
+    }
+
+    #[test]
+    fn normalize_superscript_digits_and_letters() {
+        assert_eq!(normalize_superscript("⁴ᴷ"), "4K");
+        assert_eq!(normalize_superscript("ᵁᴴᴰ"), "UHD");
+        assert_eq!(normalize_superscript("³⁸⁴⁰ᴾ"), "3840P");
+        assert_eq!(normalize_superscript("¹⁰⁸⁰ᴾ"), "1080P");
+        assert_eq!(normalize_superscript("ᴰᴼᴸᴮʸ ᴬᵁᴰᴵᴼ"), "DOLBy AUDIO");
+        // Plain ASCII passes through unchanged
+        assert_eq!(normalize_superscript("4K UHD"), "4K UHD");
+    }
+
+    #[test]
+    fn label_mismatch_unicode_superscript_4k() {
+        // "ᵁᴴᴰ ³⁸⁴⁰ᴾ" should be treated as 4K label
+        assert!(check_label_mismatch("NO - Movie ᵁᴴᴰ ³⁸⁴⁰ᴾ", "4K").is_empty());
+        assert!(!check_label_mismatch("NO - Movie ᵁᴴᴰ ³⁸⁴⁰ᴾ", "1080p").is_empty());
+
+        // "⁴ᴷ" alone should also match
+        assert!(check_label_mismatch("Channel ⁴ᴷ", "4K").is_empty());
+        assert!(!check_label_mismatch("Channel ⁴ᴷ", "720p").is_empty());
     }
 }
