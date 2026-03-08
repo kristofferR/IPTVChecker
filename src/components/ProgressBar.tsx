@@ -1,6 +1,6 @@
 import { memo } from "react";
-import type { ScanProgress } from "../lib/types";
-import { isScanActive, type ScanState } from "../lib/scanState";
+import { isScanActive } from "../lib/scanState";
+import { useAppStore } from "../store";
 
 function formatEta(seconds: number | null): string {
   if (seconds == null || !Number.isFinite(seconds)) return "—";
@@ -14,19 +14,13 @@ function formatEta(seconds: number | null): string {
   return `${secs}s`;
 }
 
-interface ProgressBarProps {
-  progress: ScanProgress | null;
-  scanState: ScanState;
-  throughputChannelsPerSecond: number | null;
-  etaSeconds: number | null;
-}
-
-export const ProgressBar = memo(function ProgressBar({
-  progress,
-  scanState,
-  throughputChannelsPerSecond,
-  etaSeconds,
-}: ProgressBarProps) {
+export const ProgressBar = memo(function ProgressBar() {
+  const progress = useAppStore((s) => s.progress);
+  const scanState = useAppStore((s) => s.scanState);
+  const throughputChannelsPerSecond = useAppStore(
+    (s) => s.telemetry.throughputChannelsPerSecond,
+  );
+  const etaSeconds = useAppStore((s) => s.telemetry.etaSeconds);
   if (!progress) return null;
 
   const percent =

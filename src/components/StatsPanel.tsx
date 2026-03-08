@@ -1,6 +1,4 @@
 import { memo, type ReactNode } from "react";
-import type { ScanProgress, ScanSummary } from "../lib/types";
-import type { ScanState } from "../lib/scanState";
 import {
   SFCheckmarkCircleFill,
   SFXmarkCircleFill,
@@ -12,16 +10,9 @@ import {
   SFDocOnDocFill,
   SFPhotoFill,
 } from "./SFSymbols";
+import { useAppStore } from "../store";
 
 interface StatsPanelProps {
-  progress: ScanProgress | null;
-  summary: ScanSummary | null;
-  totalChannels: number;
-  scanState: ScanState;
-  lowFpsCount: number;
-  mislabeledCount: number;
-  duplicateCount: number;
-  statusFilter: string;
   onStatusChange: (value: string) => void;
   onScoreClick?: () => void;
 }
@@ -91,17 +82,19 @@ function Pill({
 const iconSize = "w-3 h-3";
 
 export const StatsPanel = memo(function StatsPanel({
-  progress,
-  summary,
-  totalChannels,
-  scanState,
-  lowFpsCount,
-  mislabeledCount,
-  duplicateCount,
-  statusFilter,
   onStatusChange,
   onScoreClick,
 }: StatsPanelProps) {
+  const progress = useAppStore((s) => s.progress);
+  const summary = useAppStore((s) => s.summary);
+  const totalChannels = useAppStore(
+    (s) => s.playlist?.total_channels ?? 0,
+  );
+  const scanState = useAppStore((s) => s.scanState);
+  const lowFpsCount = useAppStore((s) => s.uiMetrics.lowFpsCount);
+  const mislabeledCount = useAppStore((s) => s.uiMetrics.mislabeledCount);
+  const duplicateCount = useAppStore((s) => s.duplicateIndices.size);
+  const statusFilter = useAppStore((s) => s.statusFilter);
   const stats = summary ?? progress;
   const effectiveLowFpsCount = summary?.low_framerate ?? lowFpsCount;
   const effectiveMislabeledCount = summary?.mislabeled ?? mislabeledCount;

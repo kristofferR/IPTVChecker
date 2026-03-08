@@ -1,22 +1,28 @@
 import { CircleHelp, Filter } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { isScanActive, type ScanState } from "../lib/scanState";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { isScanActive } from "../lib/scanState";
+import { useAppStore } from "../store";
 
-interface FilterBarProps {
-  channelSearch: string;
-  onChannelSearchChange: (value: string) => void;
-  channelSearchError: string | null;
-  scanState: ScanState;
-  visible: boolean;
+function validateRegex(pattern: string): string | null {
+  const trimmed = pattern.trim();
+  if (!trimmed) return null;
+  try {
+    new RegExp(trimmed);
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
 }
 
-export function FilterBar({
-  channelSearch,
-  onChannelSearchChange,
-  channelSearchError,
-  scanState,
-  visible,
-}: FilterBarProps) {
+export function FilterBar() {
+  const channelSearch = useAppStore((s) => s.channelSearch);
+  const setChannelSearch = useAppStore((s) => s.setChannelSearch);
+  const scanState = useAppStore((s) => s.scanState);
+  const visible = useAppStore((s) => s.settings.show_prescan_filter);
+  const channelSearchError = useMemo(
+    () => validateRegex(channelSearch),
+    [channelSearch],
+  );
   const isScanning = isScanActive(scanState);
   const [showRegexHelp, setShowRegexHelp] = useState(false);
   const regexHelpRef = useRef<HTMLDivElement>(null);
@@ -55,7 +61,7 @@ export function FilterBar({
             type="text"
             placeholder="Pre-scan filter (regex)"
             value={channelSearch}
-            onChange={(e) => onChannelSearchChange(e.target.value)}
+            onChange={(e) => setChannelSearch(e.target.value)}
             disabled={isScanning}
             className={`native-field w-full min-h-9 pl-9 pr-9 py-1.5 text-[13px] bg-input border rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 ${
               channelSearchError ? "border-red-500" : "border-border-app"

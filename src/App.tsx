@@ -329,13 +329,11 @@ export default function App() {
   const {
     results,
     flatResults,
-    uiMetrics,
     duplicateIndices,
     progress,
     summary,
     scanState,
     error,
-    telemetry,
     screenshotsPaused,
     networkPaused,
     start,
@@ -2021,13 +2019,7 @@ export default function App() {
         </div>
       )}
 
-      <FilterBar
-        channelSearch={channelSearch}
-        onChannelSearchChange={setChannelSearch}
-        channelSearchError={channelSearchError}
-        scanState={scanState}
-        visible={settings.show_prescan_filter}
-      />
+      <FilterBar />
 
       <div className="flex flex-col flex-1 min-h-0">
       <div className="flex flex-1 min-h-0 bg-content">
@@ -2202,23 +2194,10 @@ export default function App() {
       </div>
 
       <StatsPanel
-        progress={progress}
-        summary={summary}
-        scanState={scanState}
-        totalChannels={playlist?.total_channels ?? 0}
-        lowFpsCount={uiMetrics.lowFpsCount}
-        mislabeledCount={uiMetrics.mislabeledCount}
-        duplicateCount={duplicateIndices.size}
-        statusFilter={statusFilter}
         onStatusChange={handleStatusFilterChange}
         onScoreClick={() => toggleReportPanel()}
       />
-      <ProgressBar
-        progress={progress}
-        scanState={scanState}
-        throughputChannelsPerSecond={telemetry.throughputChannelsPerSecond}
-        etaSeconds={telemetry.etaSeconds}
-      />
+      <ProgressBar />
       </div>
       </div>
 
