@@ -17,7 +17,7 @@ declare global {
   }
 }
 
-function perfEnabled(): boolean {
+export function uiPerfEnabled(): boolean {
   if (!import.meta.env.DEV) {
     return false;
   }
@@ -25,7 +25,7 @@ function perfEnabled(): boolean {
 }
 
 export function recordUiPerf(sample: Omit<UiPerfSample, "atEpochMs">): void {
-  if (!perfEnabled()) {
+  if (!uiPerfEnabled()) {
     return;
   }
 
@@ -50,7 +50,7 @@ export function measureUiPerf<T>(
   run: () => T,
   meta?: Record<string, string | number | boolean | null>,
 ): T {
-  if (!perfEnabled()) {
+  if (!uiPerfEnabled()) {
     return run();
   }
 
@@ -97,7 +97,7 @@ export function summarizeUiPerf(metric: string): {
 }
 
 export function startLongTaskObserver(): void {
-  if (!perfEnabled()) {
+  if (!uiPerfEnabled()) {
     return;
   }
   if (window.__iptvUiLongTaskObserverStarted) {

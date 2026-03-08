@@ -218,23 +218,9 @@ body {
 
 /* Native-feeling scroll containers on macOS */
 [data-platform="macos"] .native-scroll {
-  -webkit-overflow-scrolling: touch;
   scroll-behavior: auto;
   overscroll-behavior: auto;
 }
-
-/* Only scroll regions that extend under the titlebar need the toolbar cutout. */
-[data-platform="macos"] .native-scroll-toolbar-cutout {
-  clip-path: polygon(
-    0 0,
-    calc(100% - 15px) 0,
-    calc(100% - 15px) var(--toolbar-height, 0px),
-    100% var(--toolbar-height, 0px),
-    100% 100%,
-    0 100%
-  );
-}
-
 
 /* macOS: Tahoe glass pill groups */
 [data-platform="macos"] .toolbar-group {
@@ -540,10 +526,9 @@ body {
   transition-duration: 0s !important;
 }
 
-/* Prevent layout thrashing on heavy scroll containers */
+/* Keep the table isolated for layout without deferring paint during scroll. */
 .channel-table-body {
-  contain: strict;
-  content-visibility: auto;
+  contain: layout size style;
 }
 
 @keyframes report-panel-slide-in-right {

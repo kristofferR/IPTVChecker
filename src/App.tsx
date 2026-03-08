@@ -67,7 +67,7 @@ import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/hap
 import { toPendingChannelResult } from "./lib/channelResults";
 import { isScanActive } from "./lib/scanState";
 import { isPrimaryModifierPressed } from "./lib/shortcuts";
-import { recordUiPerf, startLongTaskObserver } from "./lib/perf";
+import { recordUiPerf, startLongTaskObserver, uiPerfEnabled } from "./lib/perf";
 import { shouldAutoRevealReportPanel } from "./lib/playlistReportVisibility";
 
 function errorToString(err: unknown): string {
@@ -114,6 +114,7 @@ const OS_PROGRESS_UPDATE_INTERVAL_MS = 2000;
 const UPDATE_LAST_CHECK_KEY = "updates:last-check-epoch-ms";
 const UPDATE_CACHE_KEY = "updates:last-available-release";
 const START_SCREEN_RECENT_LIMIT = 5;
+const TABLE_PROFILER_ROW_LIMIT = 50_000;
 const GITHUB_LATEST_RELEASE_API =
   "https://api.github.com/repos/kristofferR/IPTVChecker-GUI/releases/latest";
 const GITHUB_RELEASES_PAGE =
@@ -1841,7 +1842,6 @@ export default function App() {
     },
     [],
   );
-
   // Auto-stop player when selected channel changes or is deselected
   useEffect(() => {
     if (streamPlayer.activeChannelIndex === null) return;
@@ -1854,6 +1854,18 @@ export default function App() {
   }, [liveSelectedChannel, streamPlayer]);
 
   const headerPortalRef = useRef<HTMLDivElement>(null);
+  const tableProfilerEnabled =
+    uiPerfEnabled() &&
+    (playlist?.channels.length ?? 0) <= TABLE_PROFILER_ROW_LIMIT;
+  const channelTableElement = (
+    <ChannelTable
+      onSelectChannel={handleSelectChannel}
+      onOpenChannel={handlePlayInApp}
+      onOpenExternal={handleOpenExternal}
+      onScanSelected={handleScanSelected}
+      headerPortalRef={isMac ? headerPortalRef : undefined}
+    />
+  );
   const toolbarMeasureRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = toolbarMeasureRef.current;
@@ -2025,15 +2037,13 @@ export default function App() {
         )}
         <div className="flex flex-col flex-1 min-w-0">
           {playlist ? (
-            <Profiler id="ChannelTable" onRender={handleTableProfilerRender}>
-              <ChannelTable
-                onSelectChannel={handleSelectChannel}
-                onOpenChannel={handlePlayInApp}
-                onOpenExternal={handleOpenExternal}
-                onScanSelected={handleScanSelected}
-                headerPortalRef={isMac ? headerPortalRef : undefined}
-              />
-            </Profiler>
+            tableProfilerEnabled ? (
+              <Profiler id="ChannelTable" onRender={handleTableProfilerRender}>
+                {channelTableElement}
+              </Profiler>
+            ) : (
+              channelTableElement
+            )
           ) : (
             <div className="flex-1 flex items-center justify-center text-text-tertiary">
               <div className="text-center px-4">

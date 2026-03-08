@@ -327,11 +327,20 @@ export function ChannelTable({
     ],
   );
 
+  const estimatedRowHeight = channelRowHeightPixels(channelLogoSize);
+  const getVirtualItemKey = useCallback(
+    (index: number) => filteredResultsRef.current[index]?.index ?? index,
+    [],
+  );
+
   const virtualizer = useVirtualizer({
     count: filteredResults.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => channelRowHeightPixels(channelLogoSize),
-    overscan: 20,
+    getItemKey: getVirtualItemKey,
+    estimateSize: () => estimatedRowHeight,
+    overscan: 250,
+    isScrollingResetDelay: 300,
+    useFlushSync: false,
   });
 
   useEffect(() => {
@@ -1004,12 +1013,35 @@ export function ChannelTable({
   );
 
   const headerRef = useRef<HTMLDivElement>(null);
+  const headerScrollRafRef = useRef<number | null>(null);
+  const lastHeaderScrollLeftRef = useRef(0);
 
   const syncHeaderScroll = useCallback(() => {
-    if (headerRef.current && parentRef.current) {
-      headerRef.current.scrollLeft = parentRef.current.scrollLeft;
+    if (headerScrollRafRef.current !== null) {
+      return;
     }
+    headerScrollRafRef.current = window.requestAnimationFrame(() => {
+      headerScrollRafRef.current = null;
+      if (!headerRef.current || !parentRef.current) {
+        return;
+      }
+      const nextScrollLeft = parentRef.current.scrollLeft;
+      if (lastHeaderScrollLeftRef.current === nextScrollLeft) {
+        return;
+      }
+      lastHeaderScrollLeftRef.current = nextScrollLeft;
+      headerRef.current.scrollLeft = nextScrollLeft;
+    });
   }, []);
+
+  useEffect(
+    () => () => {
+      if (headerScrollRafRef.current !== null) {
+        window.cancelAnimationFrame(headerScrollRafRef.current);
+      }
+    },
+    [],
+  );
 
   const portalTarget = headerPortalRef?.current;
   const virtualItems = virtualizer.getVirtualItems();
@@ -1107,7 +1139,7 @@ export function ChannelTable({
         onKeyDown={handleKeyDown}
         onContextMenu={(event) => event.preventDefault()}
         onScroll={syncHeaderScroll}
-        className="channel-table-body native-scroll native-scroll-toolbar-cutout absolute left-0 right-0 bottom-0 overflow-auto focus:outline-none"
+        className="channel-table-body native-scroll absolute left-0 right-0 bottom-0 overflow-auto focus:outline-none"
         style={{ top: "calc(-1 * var(--toolbar-height, 0px))" }}
       >
         <div style={{ minWidth: `${tableWidth}px`, minHeight: "100%", paddingTop: `calc(var(--toolbar-height, 0px)${portalTarget ? "" : " + 2rem"})` }}>
@@ -1131,11 +1163,10 @@ export function ChannelTable({
                     key={virtualRow.key}
                     style={{
                       position: "absolute",
-                      top: 0,
+                      top: `${virtualRow.start}px`,
                       left: 0,
                       width: `${tableWidth}px`,
                       height: `${virtualRow.size}px`,
-                      transform: `translateY(${virtualRow.start}px)`,
                     }}
                   >
                     <ChannelRow
