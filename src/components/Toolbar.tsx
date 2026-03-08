@@ -1,4 +1,12 @@
-import { memo, startTransition, useMemo } from "react";
+import {
+  memo,
+  startTransition,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+} from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   BarChart3,
@@ -25,6 +33,12 @@ import {
 import type { PointerEvent, RefObject } from "react";
 import type { ChannelResult } from "../lib/types";
 import type { ExportScope } from "../lib/exportScope";
+import {
+  countStatusOptions,
+  filterResults,
+  type SearchTextCache,
+} from "../lib/filters";
+import { measureUiPerf } from "../lib/perf";
 import { ExportMenu } from "./ExportMenu";
 import { useAppStore } from "../store";
 
@@ -50,9 +64,6 @@ interface ToolbarProps {
   onOpenSettings: () => void;
   onToggleReport: () => void;
   searchInputRef?: RefObject<HTMLInputElement | null>;
-  exportScopeCounts: Record<ExportScope, number>;
-  resolveExportScopeResults: (scope: ExportScope) => ChannelResult[];
-  statusOptionCounts: Record<string, number>;
 }
 
 const toolbarBtn =
@@ -63,6 +74,8 @@ const toolbarBtnMac =
 
 const dragIgnoreSelector =
   "button, input, textarea, select, a, [role='button'], [contenteditable='true'], [data-no-window-drag]";
+
+const EMPTY_GROUPS: string[] = [];
 
 export const Toolbar = memo(function Toolbar({
   onOpen,
@@ -75,17 +88,17 @@ export const Toolbar = memo(function Toolbar({
   onOpenSettings,
   onToggleReport,
   searchInputRef,
-  exportScopeCounts,
-  resolveExportScopeResults,
-  statusOptionCounts,
 }: ToolbarProps) {
   // --- Store reads ---
   const platform = useAppStore((s) => s.platform);
   const scanState = useAppStore((s) => s.scanState);
   const search = useAppStore((s) => s.search);
+  const deferredSearch = useDeferredValue(search);
   const channelSearch = useAppStore((s) => s.channelSearch);
   const groupFilter = useAppStore((s) => s.groupFilter);
   const statusFilter = useAppStore((s) => s.statusFilter);
+  const completedResults = useAppStore((s) => s.flatResults);
+  const duplicateIndices = useAppStore((s) => s.duplicateIndices);
   const menuExportRequest = useAppStore((s) => s.menuExportRequest);
   const showReport = useAppStore(
     (s) => s.playlist !== null && s.showReportPanel,
@@ -93,8 +106,103 @@ export const Toolbar = memo(function Toolbar({
   const hasPlaylist = useAppStore((s) => s.playlist !== null);
   const playlistName = useAppStore((s) => s.playlist?.file_name ?? "");
   const playlistPath = useAppStore((s) => s.playlist?.file_path ?? "");
-  const groups = useAppStore((s) => s.playlist?.groups ?? []);
-  const selectedCount = useAppStore((s) => s.selectedChannelIndices.length);
+  const groups = useAppStore((s) => s.playlist?.groups ?? EMPTY_GROUPS);
+  const selectedIndices = useAppStore((s) => s.selectedChannelIndices);
+  const separatePlaceholder = useAppStore(
+    (s) => s.settings.separate_placeholder_status,
+  );
+  const searchTextCacheRef = useRef<SearchTextCache>(new WeakMap());
+
+  const filteredExportResults = useMemo(
+    () =>
+      measureUiPerf(
+        "toolbar.export-filter",
+        () =>
+          filterResults(
+            completedResults,
+            deferredSearch,
+            groupFilter,
+            statusFilter,
+            duplicateIndices,
+            searchTextCacheRef.current,
+            separatePlaceholder,
+          ),
+        {
+          rows: completedResults.length,
+          search: deferredSearch.length,
+          group: groupFilter,
+          status: statusFilter,
+        },
+      ),
+    [
+      completedResults,
+      deferredSearch,
+      groupFilter,
+      statusFilter,
+      duplicateIndices,
+      separatePlaceholder,
+    ],
+  );
+
+  const statusOptionCounts = useMemo(
+    () =>
+      countStatusOptions(
+        completedResults,
+        deferredSearch,
+        groupFilter,
+        duplicateIndices,
+        searchTextCacheRef.current,
+        separatePlaceholder,
+      ),
+    [
+      completedResults,
+      deferredSearch,
+      groupFilter,
+      duplicateIndices,
+      separatePlaceholder,
+    ],
+  );
+
+  const exportContextRef = useRef({
+    all: completedResults,
+    filtered: filteredExportResults,
+    selectedIndices,
+  });
+
+  useEffect(() => {
+    exportContextRef.current = {
+      all: completedResults,
+      filtered: filteredExportResults,
+      selectedIndices,
+    };
+  }, [completedResults, filteredExportResults, selectedIndices]);
+
+  const resolveExportScopeResults = useCallback(
+    (scope: ExportScope): ChannelResult[] => {
+      const context = exportContextRef.current;
+      if (scope === "all") {
+        return context.all;
+      }
+      if (scope === "filtered") {
+        return context.filtered;
+      }
+      if (context.selectedIndices.length === 0) {
+        return [];
+      }
+      const selectedSet = new Set(context.selectedIndices);
+      return context.all.filter((result) => selectedSet.has(result.index));
+    },
+    [],
+  );
+
+  const exportScopeCounts = useMemo(
+    () => ({
+      all: completedResults.length,
+      filtered: filteredExportResults.length,
+      selected: selectedIndices.length,
+    }),
+    [completedResults.length, filteredExportResults.length, selectedIndices.length],
+  );
 
   // --- Derived values ---
   const useWindowDragRegion = platform !== "linux";
@@ -108,7 +216,10 @@ export const Toolbar = memo(function Toolbar({
   const paused = scanState === "paused";
   const inScanSession = scanning || paused;
   const hasResults = exportScopeCounts.all > 0;
-  const scanLabel = selectedCount > 0 ? `Scan Selected (${selectedCount})` : "Scan";
+  const scanLabel =
+    selectedIndices.length > 0
+      ? `Scan Selected (${selectedIndices.length})`
+      : "Scan";
   const scanDisabledReason = !hasPlaylist
     ? "Open a playlist first"
     : scanBlockedReason;

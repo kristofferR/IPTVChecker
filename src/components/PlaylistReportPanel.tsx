@@ -2,14 +2,11 @@ import { memo, useMemo } from "react";
 import { BarChart3, X } from "lucide-react";
 import type {
   ChannelResult,
-  PlaylistPreview,
   PlaylistScore,
-  ScanProgress,
-  ScanSummary,
 } from "../lib/types";
-import type { ScanState } from "../lib/scanState";
 import { summarizeLanguageDistribution } from "../lib/languageDistribution";
 import { summarizeEpgCoverage } from "../lib/epgCoverage";
+import { useAppStore } from "../store";
 import {
   hasScanStarted,
   shouldShowContentCounts,
@@ -17,11 +14,6 @@ import {
 } from "../lib/playlistReportVisibility";
 
 interface PlaylistReportPanelProps {
-  playlist: PlaylistPreview;
-  results: ChannelResult[];
-  progress: ScanProgress | null;
-  summary: ScanSummary | null;
-  scanState: ScanState;
   placement?: "left" | "right";
   widthPx?: number;
   onResizeStart?: (event: React.MouseEvent<HTMLDivElement>) => void;
@@ -157,16 +149,19 @@ function formatEpoch(epoch: number | null | undefined): string {
 }
 
 export const PlaylistReportPanel = memo(function PlaylistReportPanel({
-  playlist,
-  results,
-  progress,
-  summary,
-  scanState,
   placement = "left",
   widthPx = 330,
   onResizeStart,
   onClose,
 }: PlaylistReportPanelProps) {
+  const playlist = useAppStore((s) => s.playlist);
+  const results = useAppStore((s) => s.flatResults);
+  const progress = useAppStore((s) => s.progress);
+  const summary = useAppStore((s) => s.summary);
+  const scanState = useAppStore((s) => s.scanState);
+  if (!playlist) {
+    return null;
+  }
   const statusSnapshot = summary ?? progress;
 
   const latencyStats = useMemo(() => {

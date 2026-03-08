@@ -86,22 +86,11 @@ function buildFlatResultsAndMetrics(
   };
 }
 
-export function useScan() {
-  // Read state from store (reactive)
-  const {
-    results, setResults,
-    flatResults, setFlatResults,
-    uiMetrics, setUiMetrics,
-    duplicateIndices, setDuplicateIndices,
-    progress, setProgress,
-    summary, setSummary,
-    scanState, setScanState,
-    scanError, setScanError,
-    telemetry, setTelemetry,
-    screenshotsPaused, setScreenshotsPaused,
-    networkPaused, setNetworkPaused,
-  } = useAppStore();
+// Helper to access store setters without subscribing to re-renders.
+// All writes inside callbacks use this instead of destructuring from useAppStore().
+const getStore = () => useAppStore.getState();
 
+export function useScan() {
   // Batch incoming results with requestAnimationFrame
   const pendingResults = useRef<ChannelResult[]>([]);
   const resultsRef = useRef<(ChannelResult | null)[]>([]);
@@ -137,9 +126,11 @@ export function useScan() {
       indexToFlatPosRef.current = next.indexToFlatPos;
       uiMetricsRef.current = next.metrics;
 
-      setResults(next.resultsByIndex);
-      setFlatResults(next.flatResults);
-      setUiMetrics(next.metrics);
+      getStore().applyScanCollections({
+        results: next.resultsByIndex,
+        flatResults: next.flatResults,
+        uiMetrics: next.metrics,
+      });
     },
     [],
   );
@@ -209,7 +200,7 @@ export function useScan() {
   }, []);
 
   const handleProgressUpdate = useCallback((nextProgress: ScanProgress) => {
-    setProgress(nextProgress);
+    const s = getStore();
 
     // Throttle telemetry updates to avoid flicker (issue #79)
     const now = performance.now();
@@ -217,13 +208,17 @@ export function useScan() {
       now - lastTelemetryUpdateMs.current < TELEMETRY_THROTTLE_MS &&
       lastTelemetryUpdateMs.current > 0
     ) {
+      s.applyScanRuntime({ progress: nextProgress });
       return;
     }
 
     // Sliding-window throughput: use last N completion timestamps
     const samples = completionActiveMs.current;
     if (samples.length < MIN_SAMPLES_FOR_TELEMETRY) {
-      setTelemetry(EMPTY_TELEMETRY);
+      s.applyScanRuntime({
+        progress: nextProgress,
+        telemetry: EMPTY_TELEMETRY,
+      });
       return;
     }
 
@@ -234,29 +229,40 @@ export function useScan() {
     const windowCount = samples.length - 1 - windowStart;
 
     if (windowDurationSec <= 0 || windowCount <= 0) {
-      setTelemetry(EMPTY_TELEMETRY);
+      s.applyScanRuntime({
+        progress: nextProgress,
+        telemetry: EMPTY_TELEMETRY,
+      });
       return;
     }
 
     const throughput = windowCount / windowDurationSec;
     if (!Number.isFinite(throughput) || throughput <= 0) {
-      setTelemetry(EMPTY_TELEMETRY);
+      s.applyScanRuntime({
+        progress: nextProgress,
+        telemetry: EMPTY_TELEMETRY,
+      });
       return;
     }
 
     const remaining = Math.max(0, nextProgress.total - nextProgress.completed);
     const etaSeconds = remaining > 0 ? remaining / throughput : 0;
-    setTelemetry({
-      throughputChannelsPerSecond: throughput,
-      etaSeconds: Number.isFinite(etaSeconds) ? etaSeconds : null,
+    s.applyScanRuntime({
+      progress: nextProgress,
+      telemetry: {
+        throughputChannelsPerSecond: throughput,
+        etaSeconds: Number.isFinite(etaSeconds) ? etaSeconds : null,
+      },
     });
     lastTelemetryUpdateMs.current = now;
   }, []);
 
   const applyScanError = useCallback((message: string) => {
-    setScanError(message);
-    setScanState("idle");
-    setTelemetry(EMPTY_TELEMETRY);
+    getStore().applyScanRuntime({
+      scanError: message,
+      scanState: "idle",
+      telemetry: EMPTY_TELEMETRY,
+    });
     activeRunId.current = null;
     runClock.current = null;
   }, []);
@@ -331,9 +337,11 @@ export function useScan() {
             return;
           }
           logger.debug("[useScan] scan://complete received", event.payload);
-          setSummary(event.payload.payload);
-          setScanState("complete");
-          setTelemetry(EMPTY_TELEMETRY);
+          getStore().applyScanRuntime({
+            summary: event.payload.payload,
+            scanState: "complete",
+            telemetry: EMPTY_TELEMETRY,
+          });
           pendingScanError.current = null;
           activeRunId.current = null;
           runClock.current = null;
@@ -352,9 +360,11 @@ export function useScan() {
           }
           logger.debug("[useScan] scan://cancelled received", event.payload);
           cancelling.current = false;
-          setSummary(event.payload.payload);
-          setScanState("cancelled");
-          setTelemetry(EMPTY_TELEMETRY);
+          getStore().applyScanRuntime({
+            summary: event.payload.payload,
+            scanState: "cancelled",
+            telemetry: EMPTY_TELEMETRY,
+          });
           pendingScanError.current = null;
           activeRunId.current = null;
           runClock.current = null;
@@ -375,7 +385,7 @@ export function useScan() {
           if (activeRun && activeRun.runId === event.payload.run_id) {
             activeRun.pausedAtMs = performance.now();
           }
-          setScanState("paused");
+          getStore().applyScanRuntime({ scanState: "paused" });
         }),
       );
 
@@ -399,7 +409,7 @@ export function useScan() {
             activeRun.accumulatedPausedMs += now - activeRun.pausedAtMs;
             activeRun.pausedAtMs = null;
           }
-          setScanState("scanning");
+          getStore().applyScanRuntime({ scanState: "scanning" });
         }),
       );
 
@@ -427,7 +437,7 @@ export function useScan() {
         await listen<ScanEvent<null>>("scan://screenshots-paused", (event) => {
           if (isRunScopedEventForActiveRun(activeRunId.current, event.payload.run_id)) {
             logger.debug("[useScan] scan://screenshots-paused received");
-            setScreenshotsPaused(true);
+            getStore().applyScanRuntime({ screenshotsPaused: true });
           }
         }),
       );
@@ -436,7 +446,7 @@ export function useScan() {
         await listen<ScanEvent<null>>("scan://network-paused", (event) => {
           if (isRunScopedEventForActiveRun(activeRunId.current, event.payload.run_id)) {
             logger.debug("[useScan] scan://network-paused received");
-            setNetworkPaused(true);
+            getStore().applyScanRuntime({ networkPaused: true });
           }
         }),
       );
@@ -445,7 +455,7 @@ export function useScan() {
         await listen<ScanEvent<null>>("scan://network-resumed", (event) => {
           if (isRunScopedEventForActiveRun(activeRunId.current, event.payload.run_id)) {
             logger.debug("[useScan] scan://network-resumed received");
-            setNetworkPaused(false);
+            getStore().applyScanRuntime({ networkPaused: false });
           }
         }),
       );
@@ -507,21 +517,23 @@ export function useScan() {
         indexToFlatPos: rebuilt.indexToFlatPos,
         metrics: rebuilt.metrics,
       });
-      setProgress({
-        completed: 0,
-        total: Math.max(0, initialTotal),
-        alive: 0,
-        dead: 0,
-        placeholder: 0,
-        geoblocked: 0,
-        drm: 0,
+      getStore().applyScanRuntime({
+        progress: {
+          completed: 0,
+          total: Math.max(0, initialTotal),
+          alive: 0,
+          dead: 0,
+          placeholder: 0,
+          geoblocked: 0,
+          drm: 0,
+        },
+        summary: null,
+        scanError: null,
+        scanState: "scanning",
+        telemetry: EMPTY_TELEMETRY,
+        screenshotsPaused: false,
+        networkPaused: false,
       });
-      setSummary(null);
-      setScanError(null);
-      setScanState("scanning");
-      setTelemetry(EMPTY_TELEMETRY);
-      setScreenshotsPaused(false);
-      setNetworkPaused(false);
       pendingResults.current = [];
       eventCount.current = 0;
       activeRunId.current = null;
@@ -552,10 +564,12 @@ export function useScan() {
       } catch (err) {
         logger.error("[useScan] startScan IPC error:", err);
         pendingScanError.current = null;
-        setScanError(String(err));
-        setProgress(null);
-        setScanState("idle");
-        setTelemetry(EMPTY_TELEMETRY);
+        getStore().applyScanRuntime({
+          scanError: String(err),
+          progress: null,
+          scanState: "idle",
+          telemetry: EMPTY_TELEMETRY,
+        });
         activeRunId.current = null;
         runClock.current = null;
       }
@@ -575,8 +589,10 @@ export function useScan() {
     // Reflect stopped state in the UI immediately (issue #148).
     // The backend scan://cancelled event will still arrive later to
     // deliver the summary and clean up activeRunId.
-    setScanState("cancelled");
-    setTelemetry(EMPTY_TELEMETRY);
+    getStore().applyScanRuntime({
+      scanState: "cancelled",
+      telemetry: EMPTY_TELEMETRY,
+    });
     try {
       await cancelScan();
     } catch {
@@ -623,14 +639,16 @@ export function useScan() {
         indexToFlatPos: rebuilt.indexToFlatPos,
         metrics: rebuilt.metrics,
       });
-      setDuplicateIndices(duplicates);
-      setProgress(null);
-      setSummary(null);
-      setScanError(null);
-      setScanState("idle");
-      setTelemetry(EMPTY_TELEMETRY);
-      setScreenshotsPaused(false);
-      setNetworkPaused(false);
+      getStore().applyScanRuntime({
+        duplicateIndices: duplicates,
+        progress: null,
+        summary: null,
+        scanError: null,
+        scanState: "idle",
+        telemetry: EMPTY_TELEMETRY,
+        screenshotsPaused: false,
+        networkPaused: false,
+      });
       pendingResults.current = [];
       eventCount.current = 0;
       activeRunId.current = null;
@@ -657,17 +675,6 @@ export function useScan() {
   }, [commitCollections]);
 
   return {
-    results,
-    flatResults,
-    uiMetrics,
-    duplicateIndices,
-    progress,
-    summary,
-    scanState,
-    error: scanError,
-    telemetry,
-    screenshotsPaused,
-    networkPaused,
     start,
     cancel,
     pause,

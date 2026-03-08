@@ -1,5 +1,11 @@
 import type { StateCreator } from "zustand";
-import type { AppStore, ScanSlice, ScanTelemetry } from "../types";
+import type {
+  AppStore,
+  ScanCollectionsUpdate,
+  ScanRuntimeUpdate,
+  ScanSlice,
+  ScanTelemetry,
+} from "../types";
 
 export const EMPTY_TELEMETRY: ScanTelemetry = {
   throughputChannelsPerSecond: null,
@@ -30,4 +36,11 @@ export const createScanSlice: StateCreator<AppStore, [], [], ScanSlice> = (set) 
   setTelemetry: (telemetry) => set({ telemetry }),
   setScreenshotsPaused: (screenshotsPaused) => set({ screenshotsPaused }),
   setNetworkPaused: (networkPaused) => set({ networkPaused }),
+  applyScanCollections: (update: ScanCollectionsUpdate) =>
+    set({
+      results: update.results,
+      flatResults: update.flatResults,
+      uiMetrics: update.uiMetrics,
+    }),
+  applyScanRuntime: (update: ScanRuntimeUpdate) => set(update),
 });

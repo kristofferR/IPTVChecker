@@ -38,6 +38,23 @@ export interface ScanTelemetry {
   etaSeconds: number | null;
 }
 
+export interface ScanCollectionsUpdate {
+  results: (ChannelResult | null)[];
+  flatResults: ChannelResult[];
+  uiMetrics: ScanUiMetrics;
+}
+
+export interface ScanRuntimeUpdate {
+  duplicateIndices?: Set<number>;
+  progress?: ScanProgress | null;
+  summary?: ScanSummary | null;
+  scanState?: ScanState;
+  scanError?: string | null;
+  telemetry?: ScanTelemetry;
+  screenshotsPaused?: boolean;
+  networkPaused?: boolean;
+}
+
 export interface ScanSlice {
   results: (ChannelResult | null)[];
   flatResults: ChannelResult[];
@@ -62,6 +79,8 @@ export interface ScanSlice {
   setTelemetry: (telemetry: ScanTelemetry) => void;
   setScreenshotsPaused: (paused: boolean) => void;
   setNetworkPaused: (paused: boolean) => void;
+  applyScanCollections: (update: ScanCollectionsUpdate) => void;
+  applyScanRuntime: (update: ScanRuntimeUpdate) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -197,9 +216,12 @@ export interface HistorySlice {
 export interface SettingsSlice {
   settings: AppSettings;
   settingsLoading: boolean;
+  settingsHydrated: boolean;
 
   setSettings: (settings: AppSettings) => void;
   setSettingsLoading: (loading: boolean) => void;
+  loadSettings: () => Promise<void>;
+  saveSettings: (settings: AppSettings) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

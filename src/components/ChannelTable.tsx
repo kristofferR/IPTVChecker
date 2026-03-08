@@ -28,7 +28,6 @@ import { detectChannelProtocol } from "../lib/streamProtocol";
 import { useAppStore } from "../store";
 
 interface ChannelTableProps {
-  completedResults: ChannelResult[];
   onSelectChannel: (result: ChannelResult) => void;
   onOpenChannel?: (result: ChannelResult) => void;
   onOpenExternal?: (result: ChannelResult) => void;
@@ -121,13 +120,13 @@ function keepMenuInViewport(
 }
 
 export function ChannelTable({
-  completedResults,
   onSelectChannel,
   onOpenChannel,
   onOpenExternal,
   onScanSelected,
   headerPortalRef,
 }: ChannelTableProps) {
+  const completedResults = useAppStore((s) => s.flatResults);
   const resultsByIndex = useAppStore((s) => s.results);
   const duplicateIndices = useAppStore((s) => s.duplicateIndices);
   const groupFilter = useAppStore((s) => s.groupFilter);

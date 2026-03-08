@@ -3,7 +3,6 @@ import {
   Profiler,
   Suspense,
   useCallback,
-  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -49,7 +48,7 @@ import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
 import { useStreamPlayer } from "./hooks/useStreamPlayer";
 import { useAppStore } from "./store";
-import type { OpenSourceDialogState, UpdateNotice } from "./store/types";
+import type { AppStore, OpenSourceDialogState, UpdateNotice } from "./store/types";
 import { Toolbar } from "./components/Toolbar";
 import { FilterBar } from "./components/FilterBar";
 import { ChannelTable } from "./components/ChannelTable";
@@ -63,14 +62,12 @@ const OpenSourceDialog = lazy(() => import("./components/OpenSourceDialog"));
 import { AlertTriangle, ExternalLink, FolderOpen, Info, Loader2, X } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { detectPlatform } from "./lib/platform";
-import { countStatusOptions, filterResults, type SearchTextCache } from "./lib/filters";
 import { logger } from "./lib/logger";
 import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/haptics";
 import { toPendingChannelResult } from "./lib/channelResults";
-import type { ExportScope } from "./lib/exportScope";
 import { isScanActive } from "./lib/scanState";
 import { isPrimaryModifierPressed } from "./lib/shortcuts";
-import { measureUiPerf, recordUiPerf, startLongTaskObserver } from "./lib/perf";
+import { recordUiPerf, startLongTaskObserver } from "./lib/perf";
 import { shouldAutoRevealReportPanel } from "./lib/playlistReportVisibility";
 
 function errorToString(err: unknown): string {
@@ -164,6 +161,9 @@ function readCachedUpdateNotice(): UpdateNotice | null {
     return null;
   }
 }
+
+// Non-reactive store access for writes inside callbacks/effects.
+const getStore = () => useAppStore.getState();
 
 function formatScanNotificationBody(stats: {
   alive: number;
@@ -267,688 +267,249 @@ function recentTitle(entry: RecentPlaylistEntry): string {
   return `${source.server} (${source.username})`;
 }
 
-export default function App() {
-  const {
-    // Playlist
-    playlist, setPlaylist, playlistLoading, setPlaylistLoading,
-    playlistOpenError, setPlaylistOpenError, recentPlaylists, setRecentPlaylists,
-    // Filter
-    search, setSearch, channelSearch, setChannelSearch,
-    groupFilter, setGroupFilter, statusFilter, setStatusFilter,
-    // Selection
-    selectedChannel, setSelectedChannel,
-    selectedChannelIndices, setSelectedChannelIndices,
-    // UI
-    platform, setPlatform, isMac,
-    sidebarHidden, setSidebarHidden, sidebarWidth, setSidebarWidth,
-    showReportPanel, setShowReportPanel,
-    reportSidebarWidth, setReportSidebarWidth,
-    lightboxOpen, setLightboxOpen, toggleLightboxOpen,
-    showKeyboardShortcuts, setShowKeyboardShortcuts,
-    isDragOver, setIsDragOver,
-    ffmpegWarning, setFfmpegWarning,
-    errorDismissed, setErrorDismissed,
-    playbackError, setPlaybackError,
-    scanInputError, setScanInputError,
-    menuInfo, setMenuInfo,
-    queueMenuExportRequest,
-    updateNotice, setUpdateNotice,
-    appVersion, setAppVersion,
-    openSourceDialogState, setOpenSourceDialogState,
-    // Player
-    setPlayIntentActive,
-    pendingPlaybackChannel, setPendingPlaybackChannel,
-    // History
-    showHistory, setShowHistory,
-    historyEntries, setHistoryEntries,
-    historyLoading, setHistoryLoading,
-    historyError, setHistoryError,
-    historyClearing, setHistoryClearing,
-  } = useAppStore();
-  const modKey = isMac ? "Cmd" : "Ctrl";
-  const deferredSearch = useDeferredValue(search);
+const selectLiveSelectedChannel = (state: AppStore): ChannelResult | null => {
+  const selected = state.selectedChannel;
+  return selected ? (state.results[selected.index] ?? selected) : null;
+};
 
-  const sidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  const reportSidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+type StreamPlayerController = ReturnType<typeof useStreamPlayer>;
 
-  const handlePlaybackFailedRef = useRef<((result: ChannelResult) => void) | undefined>(undefined);
-  const streamPlayer = useStreamPlayer({
-    onPlaybackFailed: (result) => handlePlaybackFailedRef.current?.(result),
-  });
+function ScanPauseBanners() {
+  const scanState = useAppStore((s) => s.scanState);
+  const screenshotsPaused = useAppStore((s) => s.screenshotsPaused);
+  const networkPaused = useAppStore((s) => s.networkPaused);
 
-  const { settings, save: saveSettings, applyExternal: applyExternalSettings } = useSettings();
-  // Sync settings to the Zustand store so child components can subscribe
-  const storeSetSettings = useAppStore((s) => s.setSettings);
-  useEffect(() => { storeSetSettings(settings); }, [settings, storeSetSettings]);
-  const settingsRef = useRef(settings);
-  settingsRef.current = settings;
-  const saveSettingsRef = useRef(saveSettings);
-  saveSettingsRef.current = saveSettings;
-  const {
-    results,
-    flatResults,
-    duplicateIndices,
-    progress,
-    summary,
-    scanState,
-    error,
-    screenshotsPaused,
-    networkPaused,
-    start,
-    cancel,
-    pause,
-    resume,
-    initFromPlaylist,
-    updateResult,
-  } = useScan();
-  const channelSearchError = useMemo(
-    () => validateRegexPattern(channelSearch),
-    [channelSearch],
+  return (
+    <>
+      {screenshotsPaused && isScanActive(scanState) && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-[13px]">
+          <span className="flex-1">Screenshot capture paused — low disk space</span>
+        </div>
+      )}
+
+      {networkPaused && isScanActive(scanState) && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-orange-500/10 border-b border-orange-500/20 text-orange-400 text-[13px]">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span className="flex-1">Scan paused — network connectivity lost. Waiting for recovery...</span>
+        </div>
+      )}
+    </>
   );
-  const reportAutoRevealBlockedRef = useRef(false);
-  const reportAutoRevealDoneRef = useRef(false);
-  const reportWasAutoShownRef = useRef(false);
-  const reportAutoRevealPreviousScanStateRef = useRef(scanState);
+}
+
+function SelectedChannelSidebar({
+  sidebarWidth,
+  onResizeStart,
+  streamPlayer,
+  onPlayChannel,
+  onScanChannel,
+  onStopPlayer,
+  onOpenExternal,
+  onPip,
+}: {
+  sidebarWidth: number;
+  onResizeStart: (event: React.MouseEvent) => void;
+  streamPlayer: StreamPlayerController;
+  onPlayChannel: (result: ChannelResult) => void;
+  onScanChannel: (indices: number[]) => void;
+  onStopPlayer: () => void;
+  onOpenExternal: (result: ChannelResult) => void;
+  onPip?: () => void;
+}) {
+  const liveSelectedChannel = useAppStore(selectLiveSelectedChannel);
+  const playlist = useAppStore((s) => s.playlist);
+  const scanState = useAppStore((s) => s.scanState);
+  const lightboxOpen = useAppStore((s) => s.lightboxOpen);
+  const screenshotsEnabled = useAppStore((s) => !s.settings.skip_screenshots);
+  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
+  const [screenshotLoading, setScreenshotLoading] = useState(false);
+  const [screenshotLoadError, setScreenshotLoadError] = useState(false);
+  const screenshotPathRef = useRef<string | null>(null);
+  const screenshotCacheRef = useRef(new Map<string, string>());
 
   useEffect(() => {
-    document.documentElement.dataset.platform = platform;
-    if (platform !== "macos") return;
-
-    let cancelled = false;
-    const applyLiquidGlass = (attempt = 0) => {
-      setLiquidGlassEffect({}).catch(() => {
-        if (cancelled || attempt >= 5) return;
-        window.setTimeout(() => applyLiquidGlass(attempt + 1), 120 * (attempt + 1));
-      });
-    };
-
-    applyLiquidGlass();
-    return () => {
-      cancelled = true;
-    };
-  }, [platform]);
-
-  // Detect platform via native plugin and refresh the initial fallback.
-  useEffect(() => {
-    detectPlatform()
-      .then((p) => {
-        setPlatform(p);
-      })
-      .catch(() => {
-        // Keep navigator-based fallback when plugin-os isn't available yet.
-      });
-  }, []);
-
-  useEffect(() => {
-    document.documentElement.classList.add("no-transitions");
-    document.documentElement.dataset.theme = settings.theme;
-    requestAnimationFrame(() => {
-      document.documentElement.classList.remove("no-transitions");
-    });
-  }, [settings.theme]);
-
-  // Sync settings changes from the settings window
-  useEffect(() => {
-    let off: (() => void) | undefined;
-    listen<AppSettings>("settings-changed", (event) => {
-      applyExternalSettings(event.payload);
-    }).then((unlisten) => {
-      off = unlisten;
-    });
-    return () => off?.();
-  }, [applyExternalSettings]);
-
-  useEffect(() => {
-    startLongTaskObserver();
-  }, []);
-
-  // Check ffmpeg on mount
-  useEffect(() => {
-    checkFfmpegAvailable().then(([ffmpeg, ffprobe]) => {
-      if (!ffmpeg || !ffprobe) {
-        setFfmpegWarning(true);
-      }
-    });
-  }, []);
-
-  // Auto-dismiss error banner after 10 seconds
-  useEffect(() => {
-    if (error) {
-      setErrorDismissed(false);
-      const timer = setTimeout(() => setErrorDismissed(true), 10000);
-      return () => clearTimeout(timer);
-    }
-  }, [error]);
-
-  useEffect(() => {
-    if (!playbackError) return;
-    const timer = setTimeout(() => setPlaybackError(null), 10000);
-    return () => clearTimeout(timer);
-  }, [playbackError]);
-
-  useEffect(() => {
-    if (!playlistOpenError) return;
-    const timer = setTimeout(() => setPlaylistOpenError(null), 10000);
-    return () => clearTimeout(timer);
-  }, [playlistOpenError]);
-
-  useEffect(() => {
-    if (!scanInputError) return;
-    const timer = setTimeout(() => setScanInputError(null), 8000);
-    return () => clearTimeout(timer);
-  }, [scanInputError]);
-
-  useEffect(() => {
-    if (!channelSearchError) {
-      setScanInputError(null);
-    }
-  }, [channelSearchError]);
-
-  useEffect(() => {
-    if (!menuInfo) return;
-    const timer = setTimeout(() => setMenuInfo(null), 8000);
-    return () => clearTimeout(timer);
-  }, [menuInfo]);
-
-  const refreshRecentPlaylists = useCallback(async () => {
-    try {
-      const entries = await getRecentPlaylists();
-      setRecentPlaylists(entries);
-    } catch {
-      // Ignore recent-list load failures.
-    }
-  }, []);
-
-  const handleClearRecentPlaylists = useCallback(async () => {
-    try {
-      const entries = await clearRecentPlaylists();
-      setRecentPlaylists(entries);
-    } catch {
-      // Ignore clear failures.
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshRecentPlaylists();
-  }, [refreshRecentPlaylists]);
-
-  const checkForUpdates = useCallback(
-    async (force: boolean, knownCurrentVersion?: string) => {
-      const now = Date.now();
-      const lastCheckedRaw = localStorage.getItem(UPDATE_LAST_CHECK_KEY);
-      if (shouldSkipUpdateCheck(force, now, lastCheckedRaw)) {
-        return;
-      }
-
-      try {
-        const currentVersion = normalizeVersion(
-          knownCurrentVersion ?? (await getVersion()),
-        );
-        setAppVersion(currentVersion);
-
-        const response = await fetch(GITHUB_LATEST_RELEASE_API, {
-          headers: {
-            Accept: "application/vnd.github+json",
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        const release = (await response.json()) as {
-          tag_name?: string;
-          html_url?: string;
-        };
-
-        const latestVersion = normalizeVersion(release.tag_name ?? "");
-        if (!latestVersion) {
-          throw new Error("Latest release version is missing");
-        }
-
-        localStorage.setItem(UPDATE_LAST_CHECK_KEY, String(now));
-
-        if (compareVersions(latestVersion, currentVersion) > 0) {
-          const notice: UpdateNotice = {
-            latest_version: latestVersion,
-            release_url: release.html_url || GITHUB_RELEASES_PAGE,
-            checked_at_epoch_ms: now,
-          };
-          setUpdateNotice(notice);
-          localStorage.setItem(UPDATE_CACHE_KEY, JSON.stringify(notice));
-          if (force) {
-            setMenuInfo(`Update available: v${latestVersion}`);
-          }
-          return;
-        }
-
-        setUpdateNotice(null);
-        localStorage.removeItem(UPDATE_CACHE_KEY);
-        if (force) {
-          setMenuInfo(`You're up to date (v${currentVersion}).`);
-        }
-      } catch (err) {
-        if (force) {
-          setMenuInfo(`Update check failed: ${errorToString(err)}`);
-        }
-      }
-    },
-    [],
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const runInitialUpdateCheck = async () => {
-      let currentVersion = "";
-      try {
-        currentVersion = normalizeVersion(await getVersion());
-        if (!cancelled) {
-          setAppVersion(currentVersion);
-        }
-      } catch {
-        currentVersion = "";
-      }
-
-      if (cancelled) return;
-
-      const cachedNotice = readCachedUpdateNotice();
-      if (
-        cachedNotice &&
-        currentVersion &&
-        compareVersions(cachedNotice.latest_version, currentVersion) > 0
-      ) {
-        setUpdateNotice(cachedNotice);
-      } else if (cachedNotice) {
-        localStorage.removeItem(UPDATE_CACHE_KEY);
-      }
-
-      await checkForUpdates(false, currentVersion || undefined);
-    };
-
-    void runInitialUpdateCheck();
-    return () => {
-      cancelled = true;
-    };
-  }, [checkForUpdates]);
-
-  const openPlaylistPath = useCallback(async (selectedPath: string) => {
-    setPlaylistOpenError(null);
-    setPlaylistLoading(true);
-    try {
-      const searchTrimmed = channelSearch.trim() || undefined;
-      logger.debug(
-        `[App] Opening playlist: ${selectedPath}, channelSearch: "${searchTrimmed ?? ""}"`,
-      );
-      const preview = await openPlaylist(selectedPath, undefined, searchTrimmed);
-      logger.debug(
-        `[App] Playlist loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
-        preview.groups,
-      );
-      setPlaylist(preview);
-      initFromPlaylist(preview.channels);
-      setSearch("");
-      setGroupFilter("all");
-      setStatusFilter("all");
-      setPlaylistOpenError(null);
-      setSelectedChannel(null);
-      setSelectedChannelIndices([]);
-      setPendingPlaybackChannel(null);
-      setShowHistory(false);
-      try {
-        const entries = await addRecentPlaylist("file", selectedPath);
-        setRecentPlaylists(entries);
-      } catch {
-        // Ignore recent-list update failures.
-      }
-    } catch (err) {
-      logger.error("[App] Failed to open playlist", err);
-      setPlaylistOpenError(formatPlaylistOpenError(err));
-      // Keep app interaction predictable after a failed open attempt.
-      setSelectedChannel(null);
-      setSelectedChannelIndices([]);
-      setPendingPlaybackChannel(null);
-      setShowHistory(false);
-      void refreshRecentPlaylists();
-    } finally {
-      setPlaylistLoading(false);
-    }
-  }, [initFromPlaylist, channelSearch, refreshRecentPlaylists]);
-
-  const handleOpen = useCallback(async () => {
-    const path = await open({
-      multiple: false,
-      filters: [
-        { name: "M3U Playlists", extensions: ["m3u", "m3u8"] },
-      ],
-      directory: false,
-    });
-    if (!path) return;
-
-    const selectedPath = Array.isArray(path) ? path[0] : path;
-    if (!selectedPath) return;
-
-    await openPlaylistPath(selectedPath);
-  }, [openPlaylistPath]);
-
-  const handleOpenFolder = useCallback(async () => {
-    const path = await open({
-      multiple: false,
-      directory: true,
-    });
-    if (!path) return;
-
-    const selectedPath = Array.isArray(path) ? path[0] : path;
-    if (!selectedPath) return;
-
-    await openPlaylistPath(selectedPath);
-  }, [openPlaylistPath]);
-
-  const openPlaylistUrlValue = useCallback(async (url: string): Promise<string | true> => {
-    setPlaylistOpenError(null);
-    setPlaylistLoading(true);
-    try {
-      const searchTrimmed = channelSearch.trim() || undefined;
-      logger.debug(
-        `[App] Opening playlist URL: ${url}, channelSearch: "${searchTrimmed ?? ""}"`,
-      );
-      const preview = await openPlaylistUrl(url, undefined, searchTrimmed);
-      logger.debug(
-        `[App] Playlist URL loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
-        preview.groups,
-      );
-      setPlaylist(preview);
-      initFromPlaylist(preview.channels);
-      setSearch("");
-      setGroupFilter("all");
-      setStatusFilter("all");
-      setPlaylistOpenError(null);
-      setSelectedChannel(null);
-      setSelectedChannelIndices([]);
-      setPendingPlaybackChannel(null);
-      setShowHistory(false);
-      try {
-        const entries = await addRecentPlaylist("url", url);
-        setRecentPlaylists(entries);
-      } catch {
-        // Ignore recent-list update failures.
-      }
-      return true;
-    } catch (err) {
-      logger.error("[App] Failed to open playlist URL", err);
-      const message = formatPlaylistOpenError(err);
-      setSelectedChannel(null);
-      setSelectedChannelIndices([]);
-      setPendingPlaybackChannel(null);
-      setShowHistory(false);
-      void refreshRecentPlaylists();
-      return message;
-    } finally {
-      setPlaylistLoading(false);
-    }
-  }, [channelSearch, initFromPlaylist, refreshRecentPlaylists]);
-
-  const openPlaylistXtreamValue = useCallback(
-    async (source: XtreamOpenRequest, savePassword?: boolean): Promise<string | true> => {
-      setPlaylistOpenError(null);
-      setPlaylistLoading(true);
-      try {
-        const searchTrimmed = channelSearch.trim() || undefined;
-        logger.debug(
-          `[App] Opening Xtream playlist: server=${source.server}, username=${source.username}, channelSearch="${searchTrimmed ?? ""}"`,
-        );
-        const preview = await openPlaylistXtream(source, undefined, searchTrimmed);
-        logger.debug(
-          `[App] Xtream playlist loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
-          preview.groups,
-        );
-        if (
-          typeof preview.xtream_max_connections === "number" &&
-          Number.isFinite(preview.xtream_max_connections) &&
-          preview.xtream_max_connections > 0
-        ) {
-          const effectiveConcurrency = Math.max(
-            1,
-            Math.min(20, Math.round(preview.xtream_max_connections)),
-          );
-          setMenuInfo(
-            `Xtream max connections detected: ${preview.xtream_max_connections}. Scan concurrency will use ${effectiveConcurrency}.`,
-          );
-        }
-        setPlaylist(preview);
-        initFromPlaylist(preview.channels);
-        setSearch("");
-        setGroupFilter("all");
-        setStatusFilter("all");
-        setPlaylistOpenError(null);
-        setSelectedChannel(null);
-        setSelectedChannelIndices([]);
-        setPendingPlaybackChannel(null);
-        setShowHistory(false);
-        try {
-          const entries = await addRecentPlaylist(
-            "xtream",
-            serializeXtreamRecent({
-              server: source.server,
-              username: source.username,
-              password: savePassword ? source.password : undefined,
-            }),
-          );
-          setRecentPlaylists(entries);
-        } catch {
-          // Ignore recent-list update failures.
-        }
-        return true;
-      } catch (err) {
-        logger.error("[App] Failed to open Xtream playlist", err);
-        const message = formatPlaylistOpenError(err);
-        setSelectedChannel(null);
-        setSelectedChannelIndices([]);
-        setPendingPlaybackChannel(null);
-        setShowHistory(false);
-        void refreshRecentPlaylists();
-        return message;
-      } finally {
-        setPlaylistLoading(false);
-      }
-    },
-    [channelSearch, initFromPlaylist, refreshRecentPlaylists],
-  );
-
-  const openPlaylistStalkerValue = useCallback(
-    async (source: StalkerOpenRequest): Promise<string | true> => {
-      setPlaylistOpenError(null);
-      setPlaylistLoading(true);
-      try {
-        const searchTrimmed = channelSearch.trim() || undefined;
-        logger.debug(
-          `[App] Opening Stalker playlist: portal=${source.portal}, mac=${source.mac}, channelSearch="${searchTrimmed ?? ""}"`,
-        );
-        const preview = await openPlaylistStalker(source, undefined, searchTrimmed);
-        logger.debug(
-          `[App] Stalker playlist loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
-          preview.groups,
-        );
-        setPlaylist(preview);
-        initFromPlaylist(preview.channels);
-        setSearch("");
-        setGroupFilter("all");
-        setStatusFilter("all");
-        setPlaylistOpenError(null);
-        setSelectedChannel(null);
-        setSelectedChannelIndices([]);
-        setPendingPlaybackChannel(null);
-        setShowHistory(false);
-        return true;
-      } catch (err) {
-        logger.error("[App] Failed to open Stalker playlist", err);
-        const message = formatPlaylistOpenError(err);
-        setSelectedChannel(null);
-        setSelectedChannelIndices([]);
-        setPendingPlaybackChannel(null);
-        setShowHistory(false);
-        return message;
-      } finally {
-        setPlaylistLoading(false);
-      }
-    },
-    [channelSearch, initFromPlaylist],
-  );
-
-  const openSourceDialog = useCallback((state: OpenSourceDialogState) => {
-    setOpenSourceDialogState(state);
-  }, []);
-
-  const handleOpenUrl = useCallback(() => {
-    openSourceDialog({
-      mode: "url",
-      initialUrl: "",
-      initialXtream: null,
-      initialStalker: null,
-    });
-  }, [openSourceDialog]);
-
-  const handleOpenXtream = useCallback(() => {
-    openSourceDialog({
-      mode: "xtream",
-      initialUrl: "",
-      initialXtream: null,
-      initialStalker: null,
-    });
-  }, [openSourceDialog]);
-
-  const refreshHistory = useCallback(async () => {
-    if (!playlist) {
-      setHistoryEntries([]);
-      setHistoryError(null);
-      return;
-    }
-
-    setHistoryLoading(true);
-    setHistoryError(null);
-    try {
-      const items = await getScanHistory(
-        playlist.file_path,
-        playlist.source_identity,
-      );
-      setHistoryEntries(items);
-    } catch (err) {
-      setHistoryError(errorToString(err));
-    } finally {
-      setHistoryLoading(false);
-    }
+    screenshotCacheRef.current.clear();
   }, [playlist]);
 
-  const handleClearHistory = useCallback(async () => {
-    if (!playlist) return;
+  useEffect(() => {
+    const path = liveSelectedChannel?.screenshot_path?.trim() || null;
+    if (path === screenshotPathRef.current) return;
+    screenshotPathRef.current = path;
 
-    setHistoryClearing(true);
-    setHistoryError(null);
-    try {
-      await clearScanHistory(playlist.file_path, playlist.source_identity);
-      await refreshHistory();
-    } catch (err) {
-      setHistoryError(errorToString(err));
-    } finally {
-      setHistoryClearing(false);
-    }
-  }, [playlist, refreshHistory]);
-
-  const openHistoryPanel = useCallback(() => {
-    if (!playlist) {
-      setMenuInfo("Open a playlist first to view scan history.");
+    if (!path) {
+      setScreenshotUrl(null);
+      setScreenshotLoading(false);
+      setScreenshotLoadError(false);
       return;
     }
-    setShowHistory(true);
-    void refreshHistory();
-  }, [playlist, refreshHistory]);
 
-  const handleOpenRecent = useCallback(
-    (entry: RecentPlaylistEntry) => {
-      if (entry.kind === "url") {
-        void openPlaylistUrlValue(entry.value);
-        return;
-      }
-      if (entry.kind === "xtream") {
-        const source = parseXtreamRecent(entry.value);
-        if (!source) {
-          setMenuInfo("This Xtream recent entry is invalid.");
-          void refreshRecentPlaylists();
-          return;
-        }
-        if (source.password) {
-          void openPlaylistXtreamValue(
-            { server: source.server, username: source.username, password: source.password },
-            true,
-          );
-          return;
-        }
-        openSourceDialog({
-          mode: "xtream",
-          initialUrl: "",
-          initialXtream: source,
-          initialStalker: null,
-        });
-        return;
-      }
-      void openPlaylistPath(entry.value);
-    },
-    [openPlaylistPath, openPlaylistUrlValue, openPlaylistXtreamValue, openSourceDialog, refreshRecentPlaylists],
-  );
+    const cached = screenshotCacheRef.current.get(path);
+    if (cached) {
+      setScreenshotUrl(cached);
+      setScreenshotLoading(false);
+      setScreenshotLoadError(false);
+      return;
+    }
 
-  const recentPlaylistsRef = useRef<RecentPlaylistEntry[]>(recentPlaylists);
-  useEffect(() => {
-    recentPlaylistsRef.current = recentPlaylists;
-  }, [recentPlaylists]);
-  const startScreenRecentPlaylists = useMemo(
-    () => recentPlaylists.slice(0, START_SCREEN_RECENT_LIMIT),
-    [recentPlaylists],
+    let stale = false;
+    setScreenshotLoading(true);
+    setScreenshotLoadError(false);
+    readScreenshot(path)
+      .then((dataUrl) => {
+        if (!stale) {
+          screenshotCacheRef.current.set(path, dataUrl);
+          setScreenshotUrl(dataUrl);
+          setScreenshotLoading(false);
+          setScreenshotLoadError(false);
+        }
+      })
+      .catch(() => {
+        if (!stale) {
+          setScreenshotUrl(null);
+          setScreenshotLoading(false);
+          setScreenshotLoadError(true);
+        }
+      });
+    return () => {
+      stale = true;
+    };
+  }, [liveSelectedChannel?.screenshot_path]);
+
+  if (!liveSelectedChannel) {
+    return null;
+  }
+
+  return (
+    <div
+      className="relative border-r border-border-app bg-panel-muted shrink-0"
+      style={{ width: `${sidebarWidth}px` }}
+    >
+      <div
+        onMouseDown={onResizeStart}
+        className="absolute right-0 top-0 bottom-0 w-1 translate-x-1/2 cursor-col-resize z-10 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors"
+      />
+      <ThumbnailPanel
+        result={liveSelectedChannel}
+        screenshotUrl={screenshotUrl}
+        screenshotLoading={screenshotLoading}
+        screenshotLoadError={screenshotLoadError}
+        screenshotsEnabled={screenshotsEnabled}
+        scanState={scanState}
+        lightboxOpen={lightboxOpen}
+        onLightboxChange={(value) => getStore().setLightboxOpen(value)}
+        onPlayChannel={onPlayChannel}
+        onScanChannel={onScanChannel}
+        isPlaying={streamPlayer.playerState !== "idle"}
+        playerState={streamPlayer.playerState}
+        errorMessage={streamPlayer.errorMessage}
+        isPaused={streamPlayer.isPaused}
+        volume={streamPlayer.volume}
+        muted={streamPlayer.muted}
+        videoElement={streamPlayer.videoElement}
+        onTogglePause={streamPlayer.togglePause}
+        onStopPlayer={onStopPlayer}
+        onSetVolume={streamPlayer.setVolume}
+        onToggleMute={streamPlayer.toggleMute}
+        onOpenExternal={onOpenExternal}
+        onRetryPlay={(result) => streamPlayer.play(result)}
+        onPip={document.pictureInPictureEnabled ? onPip : undefined}
+      />
+    </div>
   );
+}
+
+function ScanRuntimeEffects({
+  refreshHistory,
+  reportAutoRevealBlockedRef,
+  reportAutoRevealDoneRef,
+  reportWasAutoShownRef,
+}: {
+  refreshHistory: () => Promise<void>;
+  reportAutoRevealBlockedRef: { current: boolean };
+  reportAutoRevealDoneRef: { current: boolean };
+  reportWasAutoShownRef: { current: boolean };
+}) {
+  const playlist = useAppStore((s) => s.playlist);
+  const progress = useAppStore((s) => s.progress);
+  const summary = useAppStore((s) => s.summary);
+  const scanState = useAppStore((s) => s.scanState);
+  const isMac = useAppStore((s) => s.isMac);
+  const networkPaused = useAppStore((s) => s.networkPaused);
+  const scanNotifications = useAppStore((s) => s.settings.scan_notifications);
+  const reportAutoReveal = useAppStore((s) => s.settings.report_auto_reveal);
+  const showReportPanel = useAppStore((s) => s.showReportPanel);
   const previousScanStateRef = useRef(scanState);
+  const reportAutoRevealPreviousScanStateRef = useRef(scanState);
   const osProgressTimerRef = useRef<number | null>(null);
   const lastOsProgressUpdateMsRef = useRef(0);
 
   useEffect(() => {
-    let active = true;
-    let actionListener: { unregister: () => Promise<void> } | null = null;
-
-    onAction(() => {
-      if (!active) return;
-      const mainWindow = getCurrentWindow();
-      void mainWindow.unminimize().catch(() => {});
-      void mainWindow.show().catch(() => {});
-      void mainWindow.setFocus().catch(() => {});
-    })
-      .then((listener) => {
-        if (!active) {
-          void listener.unregister();
-          return;
-        }
-        actionListener = listener;
-      })
-      .catch(() => {
-        // Notification action listener unavailable on this platform/runtime.
-      });
-
-    return () => {
-      active = false;
-      if (actionListener) {
-        void actionListener.unregister();
-      }
-    };
-  }, []);
+    reportAutoRevealBlockedRef.current = false;
+    reportAutoRevealDoneRef.current = false;
+    reportWasAutoShownRef.current = false;
+    getStore().setShowReportPanel(false);
+  }, [playlist, reportAutoRevealBlockedRef, reportAutoRevealDoneRef, reportWasAutoShownRef]);
 
   useEffect(() => {
-    if (!playlist) {
-      setHistoryEntries([]);
-      setHistoryError(null);
-      setShowHistory(false);
+    const previous = reportAutoRevealPreviousScanStateRef.current;
+    const scanJustStarted =
+      scanState === "scanning" &&
+      previous !== "scanning" &&
+      previous !== "paused";
+
+    if (scanJustStarted) {
+      reportAutoRevealBlockedRef.current = false;
+      reportAutoRevealDoneRef.current = false;
+      if (reportWasAutoShownRef.current && showReportPanel) {
+        getStore().setShowReportPanel(false);
+      }
+      reportWasAutoShownRef.current = false;
+    }
+
+    reportAutoRevealPreviousScanStateRef.current = scanState;
+  }, [
+    reportAutoRevealBlockedRef,
+    reportAutoRevealDoneRef,
+    reportWasAutoShownRef,
+    scanState,
+    showReportPanel,
+  ]);
+
+  useEffect(() => {
+    if (!playlist || showReportPanel) {
+      return;
+    }
+    if (!reportAutoReveal) {
+      return;
+    }
+    if (reportAutoRevealBlockedRef.current || reportAutoRevealDoneRef.current) {
       return;
     }
 
-    void refreshHistory();
-  }, [playlist, refreshHistory]);
+    const active =
+      scanState === "scanning" ||
+      scanState === "paused" ||
+      scanState === "complete";
+    if (!active) {
+      return;
+    }
+    if (!shouldAutoRevealReportPanel(progress, playlist.total_channels)) {
+      return;
+    }
+
+    reportAutoRevealDoneRef.current = true;
+    reportWasAutoShownRef.current = true;
+    getStore().setShowReportPanel(true);
+  }, [
+    playlist,
+    progress,
+    reportAutoReveal,
+    reportAutoRevealBlockedRef,
+    reportAutoRevealDoneRef,
+    reportWasAutoShownRef,
+    scanState,
+    showReportPanel,
+  ]);
 
   useEffect(() => {
     const previousScanState = previousScanStateRef.current;
@@ -968,7 +529,7 @@ export default function App() {
       );
     }
 
-    if (!settings.scan_notifications || !summary) return;
+    if (!scanNotifications || !summary) return;
     if (scanState !== "complete" && scanState !== "cancelled") return;
 
     const title = scanState === "complete" ? "Scan complete" : "Scan cancelled";
@@ -983,7 +544,7 @@ export default function App() {
         autoCancel: true,
       });
     })();
-  }, [scanState, settings.scan_notifications, summary, playlist, refreshHistory]);
+  }, [scanNotifications, scanState, summary, playlist, refreshHistory]);
 
   useEffect(() => {
     const appWindow = getCurrentWindow();
@@ -1064,13 +625,676 @@ export default function App() {
     return clearScheduledUpdate;
   }, [scanState, progress, isMac, networkPaused]);
 
+  return null;
+}
+
+export default function App() {
+  // Individual selectors — only re-render when the specific value changes
+  const playlist = useAppStore((s) => s.playlist);
+  const playlistLoading = useAppStore((s) => s.playlistLoading);
+  const playlistOpenError = useAppStore((s) => s.playlistOpenError);
+  const recentPlaylists = useAppStore((s) => s.recentPlaylists);
+  const channelSearch = useAppStore((s) => s.channelSearch);
+  const platform = useAppStore((s) => s.platform);
+  const isMac = useAppStore((s) => s.isMac);
+  const sidebarHidden = useAppStore((s) => s.sidebarHidden);
+  const sidebarWidth = useAppStore((s) => s.sidebarWidth);
+  const showReportPanel = useAppStore((s) => s.showReportPanel);
+  const reportSidebarWidth = useAppStore((s) => s.reportSidebarWidth);
+  const lightboxOpen = useAppStore((s) => s.lightboxOpen);
+  const showKeyboardShortcuts = useAppStore((s) => s.showKeyboardShortcuts);
+  const isDragOver = useAppStore((s) => s.isDragOver);
+  const ffmpegWarning = useAppStore((s) => s.ffmpegWarning);
+  const errorDismissed = useAppStore((s) => s.errorDismissed);
+  const playbackError = useAppStore((s) => s.playbackError);
+  const scanInputError = useAppStore((s) => s.scanInputError);
+  const menuInfo = useAppStore((s) => s.menuInfo);
+  const updateNotice = useAppStore((s) => s.updateNotice);
+  const appVersion = useAppStore((s) => s.appVersion);
+  const openSourceDialogState = useAppStore((s) => s.openSourceDialogState);
+  const pendingPlaybackChannel = useAppStore((s) => s.pendingPlaybackChannel);
+  const liveSelectedChannel = useAppStore(selectLiveSelectedChannel);
+  const scanError = useAppStore((s) => s.scanError);
+  const showHistory = useAppStore((s) => s.showHistory);
+  const historyEntries = useAppStore((s) => s.historyEntries);
+  const historyLoading = useAppStore((s) => s.historyLoading);
+  const historyError = useAppStore((s) => s.historyError);
+  const historyClearing = useAppStore((s) => s.historyClearing);
+  const modKey = isMac ? "Cmd" : "Ctrl";
+
+  const sidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const reportSidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePlaybackFailedRef = useRef<((result: ChannelResult) => void) | undefined>(undefined);
+  const streamPlayer = useStreamPlayer({
+    onPlaybackFailed: (result) => handlePlaybackFailedRef.current?.(result),
+  });
+
+  const { settings, save: saveSettings, applyExternal: applyExternalSettings } = useSettings();
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const saveSettingsRef = useRef(saveSettings);
+  saveSettingsRef.current = saveSettings;
+  const {
+    start,
+    cancel,
+    pause,
+    resume,
+    initFromPlaylist,
+    updateResult,
+  } = useScan();
+  const channelSearchError = useMemo(
+    () => validateRegexPattern(channelSearch),
+    [channelSearch],
+  );
+  const reportAutoRevealBlockedRef = useRef(false);
+  const reportAutoRevealDoneRef = useRef(false);
+  const reportWasAutoShownRef = useRef(false);
+
+  useEffect(() => {
+    document.documentElement.dataset.platform = platform;
+    if (platform !== "macos") return;
+
+    let cancelled = false;
+    const applyLiquidGlass = (attempt = 0) => {
+      setLiquidGlassEffect({}).catch(() => {
+        if (cancelled || attempt >= 5) return;
+        window.setTimeout(() => applyLiquidGlass(attempt + 1), 120 * (attempt + 1));
+      });
+    };
+
+    applyLiquidGlass();
+    return () => {
+      cancelled = true;
+    };
+  }, [platform]);
+
+  // Detect platform via native plugin and refresh the initial fallback.
+  useEffect(() => {
+    detectPlatform()
+      .then((p) => {
+        getStore().setPlatform(p);
+      })
+      .catch(() => {
+        // Keep navigator-based fallback when plugin-os isn't available yet.
+      });
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.classList.add("no-transitions");
+    document.documentElement.dataset.theme = settings.theme;
+    requestAnimationFrame(() => {
+      document.documentElement.classList.remove("no-transitions");
+    });
+  }, [settings.theme]);
+
+  // Sync settings changes from the settings window
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    listen<AppSettings>("settings-changed", (event) => {
+      applyExternalSettings(event.payload);
+    }).then((unlisten) => {
+      off = unlisten;
+    });
+    return () => off?.();
+  }, [applyExternalSettings]);
+
+  useEffect(() => {
+    startLongTaskObserver();
+  }, []);
+
+  // Check ffmpeg on mount
+  useEffect(() => {
+    checkFfmpegAvailable().then(([ffmpeg, ffprobe]) => {
+      if (!ffmpeg || !ffprobe) {
+        getStore().setFfmpegWarning(true);
+      }
+    });
+  }, []);
+
+  // Auto-dismiss error banner after 10 seconds
+  useEffect(() => {
+    if (scanError) {
+      getStore().setErrorDismissed(false);
+      const timer = setTimeout(() => getStore().setErrorDismissed(true), 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [scanError]);
+
+  useEffect(() => {
+    if (!playbackError) return;
+    const timer = setTimeout(() => getStore().setPlaybackError(null), 10000);
+    return () => clearTimeout(timer);
+  }, [playbackError]);
+
+  useEffect(() => {
+    if (!playlistOpenError) return;
+    const timer = setTimeout(() => getStore().setPlaylistOpenError(null), 10000);
+    return () => clearTimeout(timer);
+  }, [playlistOpenError]);
+
+  useEffect(() => {
+    if (!scanInputError) return;
+    const timer = setTimeout(() => getStore().setScanInputError(null), 8000);
+    return () => clearTimeout(timer);
+  }, [scanInputError]);
+
+  useEffect(() => {
+    if (!channelSearchError) {
+      getStore().setScanInputError(null);
+    }
+  }, [channelSearchError]);
+
+  useEffect(() => {
+    if (!menuInfo) return;
+    const timer = setTimeout(() => getStore().setMenuInfo(null), 8000);
+    return () => clearTimeout(timer);
+  }, [menuInfo]);
+
+  const refreshRecentPlaylists = useCallback(async () => {
+    try {
+      const entries = await getRecentPlaylists();
+      getStore().setRecentPlaylists(entries);
+    } catch {
+      // Ignore recent-list load failures.
+    }
+  }, []);
+
+  const handleClearRecentPlaylists = useCallback(async () => {
+    try {
+      const entries = await clearRecentPlaylists();
+      getStore().setRecentPlaylists(entries);
+    } catch {
+      // Ignore clear failures.
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshRecentPlaylists();
+  }, [refreshRecentPlaylists]);
+
+  const checkForUpdates = useCallback(
+    async (force: boolean, knownCurrentVersion?: string) => {
+      const now = Date.now();
+      const lastCheckedRaw = localStorage.getItem(UPDATE_LAST_CHECK_KEY);
+      if (shouldSkipUpdateCheck(force, now, lastCheckedRaw)) {
+        return;
+      }
+
+      try {
+        const currentVersion = normalizeVersion(
+          knownCurrentVersion ?? (await getVersion()),
+        );
+        getStore().setAppVersion(currentVersion);
+
+        const response = await fetch(GITHUB_LATEST_RELEASE_API, {
+          headers: {
+            Accept: "application/vnd.github+json",
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const release = (await response.json()) as {
+          tag_name?: string;
+          html_url?: string;
+        };
+
+        const latestVersion = normalizeVersion(release.tag_name ?? "");
+        if (!latestVersion) {
+          throw new Error("Latest release version is missing");
+        }
+
+        localStorage.setItem(UPDATE_LAST_CHECK_KEY, String(now));
+
+        if (compareVersions(latestVersion, currentVersion) > 0) {
+          const notice: UpdateNotice = {
+            latest_version: latestVersion,
+            release_url: release.html_url || GITHUB_RELEASES_PAGE,
+            checked_at_epoch_ms: now,
+          };
+          getStore().setUpdateNotice(notice);
+          localStorage.setItem(UPDATE_CACHE_KEY, JSON.stringify(notice));
+          if (force) {
+            getStore().setMenuInfo(`Update available: v${latestVersion}`);
+          }
+          return;
+        }
+
+        getStore().setUpdateNotice(null);
+        localStorage.removeItem(UPDATE_CACHE_KEY);
+        if (force) {
+          getStore().setMenuInfo(`You're up to date (v${currentVersion}).`);
+        }
+      } catch (err) {
+        if (force) {
+          getStore().setMenuInfo(`Update check failed: ${errorToString(err)}`);
+        }
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const runInitialUpdateCheck = async () => {
+      let currentVersion = "";
+      try {
+        currentVersion = normalizeVersion(await getVersion());
+        if (!cancelled) {
+          getStore().setAppVersion(currentVersion);
+        }
+      } catch {
+        currentVersion = "";
+      }
+
+      if (cancelled) return;
+
+      const cachedNotice = readCachedUpdateNotice();
+      if (
+        cachedNotice &&
+        currentVersion &&
+        compareVersions(cachedNotice.latest_version, currentVersion) > 0
+      ) {
+        getStore().setUpdateNotice(cachedNotice);
+      } else if (cachedNotice) {
+        localStorage.removeItem(UPDATE_CACHE_KEY);
+      }
+
+      await checkForUpdates(false, currentVersion || undefined);
+    };
+
+    void runInitialUpdateCheck();
+    return () => {
+      cancelled = true;
+    };
+  }, [checkForUpdates]);
+
+  const openPlaylistPath = useCallback(async (selectedPath: string) => {
+    getStore().setPlaylistOpenError(null);
+    getStore().setPlaylistLoading(true);
+    try {
+      const searchTrimmed = channelSearch.trim() || undefined;
+      logger.debug(
+        `[App] Opening playlist: ${selectedPath}, channelSearch: "${searchTrimmed ?? ""}"`,
+      );
+      const preview = await openPlaylist(selectedPath, undefined, searchTrimmed);
+      logger.debug(
+        `[App] Playlist loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
+        preview.groups,
+      );
+      getStore().setPlaylist(preview);
+      initFromPlaylist(preview.channels);
+      getStore().setSearch("");
+      getStore().setGroupFilter("all");
+      getStore().setStatusFilter("all");
+      getStore().setPlaylistOpenError(null);
+      getStore().setSelectedChannel(null);
+      getStore().setSelectedChannelIndices([]);
+      getStore().setPendingPlaybackChannel(null);
+      getStore().setShowHistory(false);
+      try {
+        const entries = await addRecentPlaylist("file", selectedPath);
+        getStore().setRecentPlaylists(entries);
+      } catch {
+        // Ignore recent-list update failures.
+      }
+    } catch (err) {
+      logger.error("[App] Failed to open playlist", err);
+      getStore().setPlaylistOpenError(formatPlaylistOpenError(err));
+      // Keep app interaction predictable after a failed open attempt.
+      getStore().setSelectedChannel(null);
+      getStore().setSelectedChannelIndices([]);
+      getStore().setPendingPlaybackChannel(null);
+      getStore().setShowHistory(false);
+      void refreshRecentPlaylists();
+    } finally {
+      getStore().setPlaylistLoading(false);
+    }
+  }, [initFromPlaylist, channelSearch, refreshRecentPlaylists]);
+
+  const handleOpen = useCallback(async () => {
+    const path = await open({
+      multiple: false,
+      filters: [
+        { name: "M3U Playlists", extensions: ["m3u", "m3u8"] },
+      ],
+      directory: false,
+    });
+    if (!path) return;
+
+    const selectedPath = Array.isArray(path) ? path[0] : path;
+    if (!selectedPath) return;
+
+    await openPlaylistPath(selectedPath);
+  }, [openPlaylistPath]);
+
+  const handleOpenFolder = useCallback(async () => {
+    const path = await open({
+      multiple: false,
+      directory: true,
+    });
+    if (!path) return;
+
+    const selectedPath = Array.isArray(path) ? path[0] : path;
+    if (!selectedPath) return;
+
+    await openPlaylistPath(selectedPath);
+  }, [openPlaylistPath]);
+
+  const openPlaylistUrlValue = useCallback(async (url: string): Promise<string | true> => {
+    getStore().setPlaylistOpenError(null);
+    getStore().setPlaylistLoading(true);
+    try {
+      const searchTrimmed = channelSearch.trim() || undefined;
+      logger.debug(
+        `[App] Opening playlist URL: ${url}, channelSearch: "${searchTrimmed ?? ""}"`,
+      );
+      const preview = await openPlaylistUrl(url, undefined, searchTrimmed);
+      logger.debug(
+        `[App] Playlist URL loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
+        preview.groups,
+      );
+      getStore().setPlaylist(preview);
+      initFromPlaylist(preview.channels);
+      getStore().setSearch("");
+      getStore().setGroupFilter("all");
+      getStore().setStatusFilter("all");
+      getStore().setPlaylistOpenError(null);
+      getStore().setSelectedChannel(null);
+      getStore().setSelectedChannelIndices([]);
+      getStore().setPendingPlaybackChannel(null);
+      getStore().setShowHistory(false);
+      try {
+        const entries = await addRecentPlaylist("url", url);
+        getStore().setRecentPlaylists(entries);
+      } catch {
+        // Ignore recent-list update failures.
+      }
+      return true;
+    } catch (err) {
+      logger.error("[App] Failed to open playlist URL", err);
+      const message = formatPlaylistOpenError(err);
+      getStore().setSelectedChannel(null);
+      getStore().setSelectedChannelIndices([]);
+      getStore().setPendingPlaybackChannel(null);
+      getStore().setShowHistory(false);
+      void refreshRecentPlaylists();
+      return message;
+    } finally {
+      getStore().setPlaylistLoading(false);
+    }
+  }, [channelSearch, initFromPlaylist, refreshRecentPlaylists]);
+
+  const openPlaylistXtreamValue = useCallback(
+    async (source: XtreamOpenRequest, savePassword?: boolean): Promise<string | true> => {
+      getStore().setPlaylistOpenError(null);
+      getStore().setPlaylistLoading(true);
+      try {
+        const searchTrimmed = channelSearch.trim() || undefined;
+        logger.debug(
+          `[App] Opening Xtream playlist: server=${source.server}, username=${source.username}, channelSearch="${searchTrimmed ?? ""}"`,
+        );
+        const preview = await openPlaylistXtream(source, undefined, searchTrimmed);
+        logger.debug(
+          `[App] Xtream playlist loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
+          preview.groups,
+        );
+        if (
+          typeof preview.xtream_max_connections === "number" &&
+          Number.isFinite(preview.xtream_max_connections) &&
+          preview.xtream_max_connections > 0
+        ) {
+          const effectiveConcurrency = Math.max(
+            1,
+            Math.min(20, Math.round(preview.xtream_max_connections)),
+          );
+          getStore().setMenuInfo(
+            `Xtream max connections detected: ${preview.xtream_max_connections}. Scan concurrency will use ${effectiveConcurrency}.`,
+          );
+        }
+        getStore().setPlaylist(preview);
+        initFromPlaylist(preview.channels);
+        getStore().setSearch("");
+        getStore().setGroupFilter("all");
+        getStore().setStatusFilter("all");
+        getStore().setPlaylistOpenError(null);
+        getStore().setSelectedChannel(null);
+        getStore().setSelectedChannelIndices([]);
+        getStore().setPendingPlaybackChannel(null);
+        getStore().setShowHistory(false);
+        try {
+          const entries = await addRecentPlaylist(
+            "xtream",
+            serializeXtreamRecent({
+              server: source.server,
+              username: source.username,
+              password: savePassword ? source.password : undefined,
+            }),
+          );
+          getStore().setRecentPlaylists(entries);
+        } catch {
+          // Ignore recent-list update failures.
+        }
+        return true;
+      } catch (err) {
+        logger.error("[App] Failed to open Xtream playlist", err);
+        const message = formatPlaylistOpenError(err);
+        getStore().setSelectedChannel(null);
+        getStore().setSelectedChannelIndices([]);
+        getStore().setPendingPlaybackChannel(null);
+        getStore().setShowHistory(false);
+        void refreshRecentPlaylists();
+        return message;
+      } finally {
+        getStore().setPlaylistLoading(false);
+      }
+    },
+    [channelSearch, initFromPlaylist, refreshRecentPlaylists],
+  );
+
+  const openPlaylistStalkerValue = useCallback(
+    async (source: StalkerOpenRequest): Promise<string | true> => {
+      getStore().setPlaylistOpenError(null);
+      getStore().setPlaylistLoading(true);
+      try {
+        const searchTrimmed = channelSearch.trim() || undefined;
+        logger.debug(
+          `[App] Opening Stalker playlist: portal=${source.portal}, mac=${source.mac}, channelSearch="${searchTrimmed ?? ""}"`,
+        );
+        const preview = await openPlaylistStalker(source, undefined, searchTrimmed);
+        logger.debug(
+          `[App] Stalker playlist loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
+          preview.groups,
+        );
+        getStore().setPlaylist(preview);
+        initFromPlaylist(preview.channels);
+        getStore().setSearch("");
+        getStore().setGroupFilter("all");
+        getStore().setStatusFilter("all");
+        getStore().setPlaylistOpenError(null);
+        getStore().setSelectedChannel(null);
+        getStore().setSelectedChannelIndices([]);
+        getStore().setPendingPlaybackChannel(null);
+        getStore().setShowHistory(false);
+        return true;
+      } catch (err) {
+        logger.error("[App] Failed to open Stalker playlist", err);
+        const message = formatPlaylistOpenError(err);
+        getStore().setSelectedChannel(null);
+        getStore().setSelectedChannelIndices([]);
+        getStore().setPendingPlaybackChannel(null);
+        getStore().setShowHistory(false);
+        return message;
+      } finally {
+        getStore().setPlaylistLoading(false);
+      }
+    },
+    [channelSearch, initFromPlaylist],
+  );
+
+  const openSourceDialog = useCallback((state: OpenSourceDialogState) => {
+    getStore().setOpenSourceDialogState(state);
+  }, []);
+
+  const handleOpenUrl = useCallback(() => {
+    openSourceDialog({
+      mode: "url",
+      initialUrl: "",
+      initialXtream: null,
+      initialStalker: null,
+    });
+  }, [openSourceDialog]);
+
+  const handleOpenXtream = useCallback(() => {
+    openSourceDialog({
+      mode: "xtream",
+      initialUrl: "",
+      initialXtream: null,
+      initialStalker: null,
+    });
+  }, [openSourceDialog]);
+
+  const refreshHistory = useCallback(async () => {
+    if (!playlist) {
+      getStore().setHistoryEntries([]);
+      getStore().setHistoryError(null);
+      return;
+    }
+
+    getStore().setHistoryLoading(true);
+    getStore().setHistoryError(null);
+    try {
+      const items = await getScanHistory(
+        playlist.file_path,
+        playlist.source_identity,
+      );
+      getStore().setHistoryEntries(items);
+    } catch (err) {
+      getStore().setHistoryError(errorToString(err));
+    } finally {
+      getStore().setHistoryLoading(false);
+    }
+  }, [playlist]);
+
+  const handleClearHistory = useCallback(async () => {
+    if (!playlist) return;
+
+    getStore().setHistoryClearing(true);
+    getStore().setHistoryError(null);
+    try {
+      await clearScanHistory(playlist.file_path, playlist.source_identity);
+      await refreshHistory();
+    } catch (err) {
+      getStore().setHistoryError(errorToString(err));
+    } finally {
+      getStore().setHistoryClearing(false);
+    }
+  }, [playlist, refreshHistory]);
+
+  const openHistoryPanel = useCallback(() => {
+    if (!playlist) {
+      getStore().setMenuInfo("Open a playlist first to view scan history.");
+      return;
+    }
+    getStore().setShowHistory(true);
+    void refreshHistory();
+  }, [playlist, refreshHistory]);
+
+  const handleOpenRecent = useCallback(
+    (entry: RecentPlaylistEntry) => {
+      if (entry.kind === "url") {
+        void openPlaylistUrlValue(entry.value);
+        return;
+      }
+      if (entry.kind === "xtream") {
+        const source = parseXtreamRecent(entry.value);
+        if (!source) {
+          getStore().setMenuInfo("This Xtream recent entry is invalid.");
+          void refreshRecentPlaylists();
+          return;
+        }
+        if (source.password) {
+          void openPlaylistXtreamValue(
+            { server: source.server, username: source.username, password: source.password },
+            true,
+          );
+          return;
+        }
+        openSourceDialog({
+          mode: "xtream",
+          initialUrl: "",
+          initialXtream: source,
+          initialStalker: null,
+        });
+        return;
+      }
+      void openPlaylistPath(entry.value);
+    },
+    [openPlaylistPath, openPlaylistUrlValue, openPlaylistXtreamValue, openSourceDialog, refreshRecentPlaylists],
+  );
+
+  const recentPlaylistsRef = useRef<RecentPlaylistEntry[]>(recentPlaylists);
+  useEffect(() => {
+    recentPlaylistsRef.current = recentPlaylists;
+  }, [recentPlaylists]);
+  const startScreenRecentPlaylists = useMemo(
+    () => recentPlaylists.slice(0, START_SCREEN_RECENT_LIMIT),
+    [recentPlaylists],
+  );
+
+  useEffect(() => {
+    let active = true;
+    let actionListener: { unregister: () => Promise<void> } | null = null;
+
+    onAction(() => {
+      if (!active) return;
+      const mainWindow = getCurrentWindow();
+      void mainWindow.unminimize().catch(() => {});
+      void mainWindow.show().catch(() => {});
+      void mainWindow.setFocus().catch(() => {});
+    })
+      .then((listener) => {
+        if (!active) {
+          void listener.unregister();
+          return;
+        }
+        actionListener = listener;
+      })
+      .catch(() => {
+        // Notification action listener unavailable on this platform/runtime.
+      });
+
+    return () => {
+      active = false;
+      if (actionListener) {
+        void actionListener.unregister();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!playlist) {
+      getStore().setHistoryEntries([]);
+      getStore().setHistoryError(null);
+      getStore().setShowHistory(false);
+      return;
+    }
+
+    void refreshHistory();
+  }, [playlist, refreshHistory]);
+
   const handleDroppedPaths = useCallback((paths: string[]) => {
     const playlistPath = paths.find((path) =>
       path.toLowerCase().endsWith(".m3u") || path.toLowerCase().endsWith(".m3u8"),
     );
 
     if (!playlistPath) {
-      setMenuInfo("Dropped file is not an M3U/M3U8 playlist.");
+      getStore().setMenuInfo("Dropped file is not an M3U/M3U8 playlist.");
       return;
     }
 
@@ -1086,15 +1310,15 @@ export default function App() {
         if (!mounted) return;
         const payload = event.payload;
         if (payload.type === "over" || payload.type === "enter") {
-          setIsDragOver(true);
+          getStore().setIsDragOver(true);
           return;
         }
         if (payload.type === "drop") {
-          setIsDragOver(false);
+          getStore().setIsDragOver(false);
           handleDroppedPaths(payload.paths);
           return;
         }
-        setIsDragOver(false);
+        getStore().setIsDragOver(false);
       })
       .then((off) => {
         unlisten = off;
@@ -1105,7 +1329,7 @@ export default function App() {
 
     return () => {
       mounted = false;
-      setIsDragOver(false);
+      getStore().setIsDragOver(false);
       unlisten?.();
     };
   }, [handleDroppedPaths]);
@@ -1162,33 +1386,33 @@ export default function App() {
       }
       if (hasPrimaryModifier && (e.key === "/" || e.code === "Slash")) {
         e.preventDefault();
-        setShowKeyboardShortcuts(true);
+        getStore().setShowKeyboardShortcuts(true);
       }
       if (e.key === " " && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
         const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
         if (tag === "input" || tag === "textarea" || tag === "select" || (e.target as HTMLElement)?.isContentEditable) return;
         e.preventDefault();
-        toggleLightboxOpen();
+        getStore().toggleLightboxOpen();
       }
       if (e.key === "Escape") {
         if (lightboxOpenRef.current) {
-          setLightboxOpen(false);
+          getStore().setLightboxOpen(false);
           return;
         }
         if (pendingPlaybackRef.current) {
-          setPendingPlaybackChannel(null);
+          getStore().setPendingPlaybackChannel(null);
           return;
         }
         if (openSourceDialogRef.current) {
-          setOpenSourceDialogState(null);
+          getStore().setOpenSourceDialogState(null);
           return;
         }
         if (showKeyboardShortcutsRef.current) {
-          setShowKeyboardShortcuts(false);
+          getStore().setShowKeyboardShortcuts(false);
           return;
         }
         if (showHistoryRef.current) {
-          setShowHistory(false);
+          getStore().setShowHistory(false);
           return;
         }
       }
@@ -1215,53 +1439,60 @@ export default function App() {
   }, []);
 
   const startScanWithSelection = useCallback(async (selection: number[]) => {
-    if (channelSearchError) {
-      setScanInputError(`Invalid pre-scan regex: ${channelSearchError}`);
+    const state = getStore();
+    const currentPlaylist = state.playlist;
+    const currentChannelSearch = state.channelSearch;
+    const currentGroupFilter = state.groupFilter;
+    const currentSettings = state.settings;
+    const currentChannelSearchError = validateRegexPattern(currentChannelSearch);
+
+    if (currentChannelSearchError) {
+      state.setScanInputError(`Invalid pre-scan regex: ${currentChannelSearchError}`);
       return false;
     }
 
-    if (!playlist) return false;
+    if (!currentPlaylist) return false;
 
     const config: ScanConfig = {
-      file_path: playlist.file_path,
-      source_identity: playlist.source_identity ?? null,
-      group_filter: groupFilter !== "all" ? groupFilter : null,
-      channel_search: channelSearch.trim() || null,
+      file_path: currentPlaylist.file_path,
+      source_identity: currentPlaylist.source_identity ?? null,
+      group_filter: currentGroupFilter !== "all" ? currentGroupFilter : null,
+      channel_search: currentChannelSearch.trim() || null,
       selected_indices: selection.length > 0 ? selection : null,
-      timeout: settings.timeout,
-      extended_timeout: settings.extended_timeout,
+      timeout: currentSettings.timeout,
+      extended_timeout: currentSettings.extended_timeout,
       concurrency:
-        typeof playlist.xtream_max_connections === "number" &&
-        Number.isFinite(playlist.xtream_max_connections) &&
-        playlist.xtream_max_connections > 0
-          ? Math.max(1, Math.min(20, Math.round(playlist.xtream_max_connections)))
-          : settings.concurrency,
-      retries: settings.retries,
-      retry_backoff: settings.retry_backoff,
-      user_agent: settings.user_agent,
-      skip_screenshots: settings.skip_screenshots,
-      profile_bitrate: settings.profile_bitrate,
-      ffprobe_timeout_secs: settings.ffprobe_timeout_secs,
-      ffmpeg_bitrate_timeout_secs: settings.ffmpeg_bitrate_timeout_secs,
-      accept_invalid_certs: settings.accept_invalid_certs,
-      proxy_file: settings.proxy_file,
-      test_geoblock: settings.test_geoblock,
-      screenshots_dir: settings.screenshots_dir,
+        typeof currentPlaylist.xtream_max_connections === "number" &&
+        Number.isFinite(currentPlaylist.xtream_max_connections) &&
+        currentPlaylist.xtream_max_connections > 0
+          ? Math.max(1, Math.min(20, Math.round(currentPlaylist.xtream_max_connections)))
+          : currentSettings.concurrency,
+      retries: currentSettings.retries,
+      retry_backoff: currentSettings.retry_backoff,
+      user_agent: currentSettings.user_agent,
+      skip_screenshots: currentSettings.skip_screenshots,
+      profile_bitrate: currentSettings.profile_bitrate,
+      ffprobe_timeout_secs: currentSettings.ffprobe_timeout_secs,
+      ffmpeg_bitrate_timeout_secs: currentSettings.ffmpeg_bitrate_timeout_secs,
+      accept_invalid_certs: currentSettings.accept_invalid_certs,
+      proxy_file: currentSettings.proxy_file,
+      test_geoblock: currentSettings.test_geoblock,
+      screenshots_dir: currentSettings.screenshots_dir,
       client_capabilities: {
         event_batch_v1: true,
       },
     };
 
-    await start(config, playlist.total_channels, selection);
+    await start(config, currentPlaylist.total_channels, selection);
     return true;
-  }, [playlist, settings, groupFilter, channelSearch, start, channelSearchError]);
+  }, [start]);
 
   const handleStartScan = useCallback(async () => {
-    const started = await startScanWithSelection(selectedChannelIndices);
+    const started = await startScanWithSelection(getStore().selectedChannelIndices);
     if (started) {
       void triggerHaptic(HapticFeedbackPattern.LevelChange, PerformanceTime.Now);
     }
-  }, [selectedChannelIndices, startScanWithSelection]);
+  }, [startScanWithSelection]);
 
   const handleScanSelected = useCallback(
     (indices: number[]) => {
@@ -1315,7 +1546,7 @@ export default function App() {
     let cancelled = false;
     const unlisten: Array<() => void> = [];
     const queueExport = (action: "csv" | "split" | "renamed" | "m3u" | "scanlog") => {
-      queueMenuExportRequest(action);
+      getStore().queueMenuExportRequest(action);
     };
 
     const setup = async () => {
@@ -1342,10 +1573,10 @@ export default function App() {
           void saveSettingsRef.current({ ...current, show_prescan_filter: !current.show_prescan_filter });
         }),
         listen("menu://clear-filters", () => {
-          setSearch("");
-          setChannelSearch("");
-          setGroupFilter("all");
-          setStatusFilter("all");
+          getStore().setSearch("");
+          getStore().setChannelSearch("");
+          getStore().setGroupFilter("all");
+          getStore().setStatusFilter("all");
         }),
         listen("menu://open-history", () => openHistoryPanelRef.current()),
         listen("menu://start-scan", () => void handleStartScanRef.current()),
@@ -1354,7 +1585,7 @@ export default function App() {
         listen("menu://stop-scan", () => void cancelRef.current()),
         listen("menu://open-settings", () => handleOpenSettingsRef.current()),
         listen("menu://check-updates", () => void checkForUpdatesRef.current(true)),
-        listen("menu://keyboard-shortcuts", () => setShowKeyboardShortcuts(true)),
+        listen("menu://keyboard-shortcuts", () => getStore().setShowKeyboardShortcuts(true)),
       ]);
       if (cancelled) {
         for (const off of listeners) off();
@@ -1380,7 +1611,7 @@ export default function App() {
       if (!sidebarDragRef.current) return;
       const delta = ev.clientX - sidebarDragRef.current.startX;
       const newWidth = Math.max(100, Math.min(600, sidebarDragRef.current.startWidth + delta));
-      setSidebarWidth(newWidth);
+      getStore().setSidebarWidth(newWidth);
     };
 
     const onMouseUp = () => {
@@ -1411,7 +1642,7 @@ export default function App() {
         260,
         Math.min(700, reportSidebarDragRef.current.startWidth + delta),
       );
-      setReportSidebarWidth(newWidth);
+      getStore().setReportSidebarWidth(newWidth);
     };
 
     const onMouseUp = () => {
@@ -1436,61 +1667,8 @@ export default function App() {
     localStorage.setItem("report-sidebar-width", String(reportSidebarWidth));
   }, [reportSidebarWidth]);
 
-  useEffect(() => {
-    reportAutoRevealBlockedRef.current = false;
-    reportAutoRevealDoneRef.current = false;
-    reportWasAutoShownRef.current = false;
-    setShowReportPanel(false);
-  }, [playlist]);
-
-  useEffect(() => {
-    const previous = reportAutoRevealPreviousScanStateRef.current;
-    const scanJustStarted =
-      scanState === "scanning" &&
-      previous !== "scanning" &&
-      previous !== "paused";
-
-    if (scanJustStarted) {
-      reportAutoRevealBlockedRef.current = false;
-      reportAutoRevealDoneRef.current = false;
-      if (reportWasAutoShownRef.current && showReportPanel) {
-        setShowReportPanel(false);
-      }
-      reportWasAutoShownRef.current = false;
-    }
-
-    reportAutoRevealPreviousScanStateRef.current = scanState;
-  }, [scanState, showReportPanel]);
-
-  useEffect(() => {
-    if (!playlist || showReportPanel) {
-      return;
-    }
-    if (!settings.report_auto_reveal) {
-      return;
-    }
-    if (reportAutoRevealBlockedRef.current || reportAutoRevealDoneRef.current) {
-      return;
-    }
-
-    const isScanActive =
-      scanState === "scanning" ||
-      scanState === "paused" ||
-      scanState === "complete";
-    if (!isScanActive) {
-      return;
-    }
-    if (!shouldAutoRevealReportPanel(progress, playlist.total_channels)) {
-      return;
-    }
-
-    reportAutoRevealDoneRef.current = true;
-    reportWasAutoShownRef.current = true;
-    setShowReportPanel(true);
-  }, [playlist, progress, scanState, settings.report_auto_reveal, showReportPanel]);
-
   const handleSelectChannel = useCallback((result: ChannelResult) => {
-    setSelectedChannel(result);
+    getStore().setSelectedChannel(result);
   }, []);
 
   const handleOpenSettings = useCallback(async () => {
@@ -1522,7 +1700,7 @@ export default function App() {
 
   const markManualReportVisibility = useCallback((nextVisible: boolean) => {
     reportWasAutoShownRef.current = false;
-    const isActiveScan = isScanActive(scanState);
+    const isActiveScan = isScanActive(getStore().scanState);
     if (!isActiveScan) {
       return;
     }
@@ -1532,18 +1710,18 @@ export default function App() {
       return;
     }
     reportAutoRevealBlockedRef.current = true;
-  }, [scanState]);
+  }, []);
 
   const handleToggleReport = useCallback(() => {
     const next = !showReportPanel;
     markManualReportVisibility(next);
-    setShowReportPanel(next);
-  }, [showReportPanel, markManualReportVisibility, setShowReportPanel]);
+    getStore().setShowReportPanel(next);
+  }, [showReportPanel, markManualReportVisibility]);
   handleToggleReportRef.current = handleToggleReport;
 
   const handleCloseReport = useCallback(() => {
     markManualReportVisibility(false);
-    setShowReportPanel(false);
+    getStore().setShowReportPanel(false);
   }, [markManualReportVisibility]);
 
   const handleOpenExternal = useCallback(async (result: ChannelResult) => {
@@ -1554,24 +1732,24 @@ export default function App() {
         url: result.url,
       });
     } catch (err) {
-      setPlaybackError(String(err));
+      getStore().setPlaybackError(String(err));
     }
   }, []);
 
   const handlePlayInApp = useCallback(
     (result: ChannelResult) => {
-      if (isScanActive(scanState)) {
-        setPendingPlaybackChannel(result);
+      if (isScanActive(getStore().scanState)) {
+        getStore().setPendingPlaybackChannel(result);
         return;
       }
-      setPlayIntentActive(true);
+      getStore().setPlayIntentActive(true);
       streamPlayer.play(result);
     },
-    [scanState, streamPlayer],
+    [streamPlayer],
   );
 
   const handleStopPlayer = useCallback(() => {
-    setPlayIntentActive(false);
+    getStore().setPlayIntentActive(false);
     streamPlayer.stop();
   }, [streamPlayer]);
 
@@ -1588,8 +1766,8 @@ export default function App() {
   const handleProceedPlayback = useCallback(() => {
     if (!pendingPlaybackChannel) return;
     const channel = pendingPlaybackChannel;
-    setPendingPlaybackChannel(null);
-    setPlayIntentActive(true);
+    getStore().setPendingPlaybackChannel(null);
+    getStore().setPlayIntentActive(true);
     streamPlayer.play(channel);
   }, [pendingPlaybackChannel, streamPlayer]);
 
@@ -1605,7 +1783,8 @@ export default function App() {
     if (last && last.index === idx && last.meta === meta) return;
     lastMergedMetaRef.current = { index: idx, meta };
 
-    const existing = results[idx];
+    const state = getStore();
+    const existing = state.results[idx];
     if (!existing) return;
 
     let changed = false;
@@ -1623,117 +1802,30 @@ export default function App() {
     if (changed) {
       updateResult(updated);
       // Also update selectedChannel if it's the same index
-      if (selectedChannel?.index === idx) {
-        setSelectedChannel(updated);
+      if (state.selectedChannel?.index === idx) {
+        getStore().setSelectedChannel(updated);
       }
     }
-  }, [streamPlayer.streamMetadata, streamPlayer.activeChannelIndex, results, updateResult, selectedChannel]);
+  }, [streamPlayer.streamMetadata, streamPlayer.activeChannelIndex, updateResult]);
 
-  const completedResults = flatResults;
-  const appSearchTextCacheRef = useRef<SearchTextCache>(new WeakMap());
   handleToggleSidebarRef.current = () => {
-    const sidebarVisible = !sidebarHidden && !!selectedChannel;
+    const state = getStore();
+    const sidebarVisible = !state.sidebarHidden && !!state.selectedChannel;
     if (sidebarVisible) {
-      setSidebarHidden(true);
+      getStore().setSidebarHidden(true);
     } else {
-      if (!selectedChannel) {
-        if (completedResults.length > 0) {
-          setSelectedChannel(completedResults[0]);
-        } else if (playlist && playlist.channels.length > 0) {
-          setSelectedChannel(toPendingChannelResult(playlist.channels[0]));
+      if (!state.selectedChannel) {
+        if (state.flatResults.length > 0) {
+          getStore().setSelectedChannel(state.flatResults[0]);
+        } else if (state.playlist && state.playlist.channels.length > 0) {
+          getStore().setSelectedChannel(
+            toPendingChannelResult(state.playlist.channels[0]),
+          );
         }
       }
-      setSidebarHidden(false);
+      getStore().setSidebarHidden(false);
     }
   };
-  const filteredExportResults = useMemo(
-    () =>
-      measureUiPerf(
-        "app.export-filter",
-        () =>
-          filterResults(
-            completedResults,
-            deferredSearch,
-            groupFilter,
-            statusFilter,
-            duplicateIndices,
-            appSearchTextCacheRef.current,
-            settings.separate_placeholder_status,
-          ),
-        {
-          rows: completedResults.length,
-          search: deferredSearch.length,
-          group: groupFilter,
-          status: statusFilter,
-        },
-      ),
-    [
-      completedResults,
-      deferredSearch,
-      groupFilter,
-      statusFilter,
-      duplicateIndices,
-      settings.separate_placeholder_status,
-    ],
-  );
-
-  const statusOptionCounts = useMemo(() => {
-    return countStatusOptions(
-      completedResults,
-      deferredSearch,
-      groupFilter,
-      duplicateIndices,
-      appSearchTextCacheRef.current,
-      settings.separate_placeholder_status,
-    );
-  }, [
-    completedResults,
-    deferredSearch,
-    groupFilter,
-    duplicateIndices,
-    settings.separate_placeholder_status,
-  ]);
-
-  const exportContextRef = useRef({
-    all: completedResults,
-    filtered: filteredExportResults,
-    selectedIndices: selectedChannelIndices,
-  });
-  useEffect(() => {
-    exportContextRef.current = {
-      all: completedResults,
-      filtered: filteredExportResults,
-      selectedIndices: selectedChannelIndices,
-    };
-  }, [completedResults, filteredExportResults, selectedChannelIndices]);
-
-  const resolveExportScopeResults = useCallback(
-    (scope: ExportScope): ChannelResult[] => {
-      const context = exportContextRef.current;
-      if (scope === "all") {
-        return context.all;
-      }
-      if (scope === "filtered") {
-        return context.filtered;
-      }
-      if (context.selectedIndices.length === 0) {
-        return [];
-      }
-      const selectedSet = new Set(context.selectedIndices);
-      return context.all.filter((result) => selectedSet.has(result.index));
-    },
-    [],
-  );
-
-  const exportScopeCounts = useMemo(
-    () => ({
-      all: completedResults.length,
-      filtered: filteredExportResults.length,
-      selected: selectedChannelIndices.length,
-    }),
-    [completedResults.length, filteredExportResults.length, selectedChannelIndices.length],
-  );
-
 
   const handleTableProfilerRender = useCallback<ProfilerOnRenderCallback>(
     (id, phase, actualDuration, baseDuration) => {
@@ -1750,75 +1842,16 @@ export default function App() {
     [],
   );
 
-  // Keep sidebar in sync with live scan results
-  const liveSelectedChannel =
-    selectedChannel != null
-      ? (results[selectedChannel.index] ?? selectedChannel)
-      : null;
-
   // Auto-stop player when selected channel changes or is deselected
   useEffect(() => {
     if (streamPlayer.activeChannelIndex === null) return;
     if (!liveSelectedChannel) {
-      setPlayIntentActive(false);
+      getStore().setPlayIntentActive(false);
       streamPlayer.stop();
     } else if (liveSelectedChannel.index !== streamPlayer.activeChannelIndex) {
       streamPlayer.stop();
     }
   }, [liveSelectedChannel, streamPlayer]);
-
-  // Load screenshot via custom Tauri command (bypasses fs/asset scope issues)
-  const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
-  const [screenshotLoading, setScreenshotLoading] = useState(false);
-  const [screenshotLoadError, setScreenshotLoadError] = useState(false);
-  const screenshotPathRef = useRef<string | null>(null);
-  const screenshotCacheRef = useRef(new Map<string, string>());
-  useEffect(() => {
-    screenshotCacheRef.current.clear();
-  }, [playlist]);
-  useEffect(() => {
-    const path = liveSelectedChannel?.screenshot_path?.trim() || null;
-    if (path === screenshotPathRef.current) return;
-    screenshotPathRef.current = path;
-
-    if (!path) {
-      setScreenshotUrl(null);
-      setScreenshotLoading(false);
-      setScreenshotLoadError(false);
-      return;
-    }
-
-    const cached = screenshotCacheRef.current.get(path);
-    if (cached) {
-      setScreenshotUrl(cached);
-      setScreenshotLoading(false);
-      setScreenshotLoadError(false);
-      return;
-    }
-
-    let stale = false;
-    setScreenshotLoading(true);
-    setScreenshotLoadError(false);
-    readScreenshot(path)
-      .then((dataUrl) => {
-        if (!stale) {
-          screenshotCacheRef.current.set(path, dataUrl);
-          setScreenshotUrl(dataUrl);
-          setScreenshotLoading(false);
-          setScreenshotLoadError(false);
-        }
-      })
-      .catch(() => {
-        if (!stale) {
-          setScreenshotUrl(null);
-          setScreenshotLoading(false);
-          setScreenshotLoadError(true);
-        }
-      });
-    return () => {
-      stale = true;
-    };
-  }, [liveSelectedChannel?.screenshot_path]);
 
   const headerPortalRef = useRef<HTMLDivElement>(null);
   const toolbarMeasureRef = useRef<HTMLDivElement>(null);
@@ -1836,6 +1869,12 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen bg-surface">
+      <ScanRuntimeEffects
+        refreshHistory={refreshHistory}
+        reportAutoRevealBlockedRef={reportAutoRevealBlockedRef}
+        reportAutoRevealDoneRef={reportAutoRevealDoneRef}
+        reportWasAutoShownRef={reportWasAutoShownRef}
+      />
       <div ref={toolbarMeasureRef} className={`relative z-20 ${isMac ? "glass-material bg-panel" : ""}`}>
       <Toolbar
         onOpen={handleOpen}
@@ -1848,9 +1887,6 @@ export default function App() {
         onOpenSettings={handleOpenSettings}
         onToggleReport={handleToggleReport}
         searchInputRef={searchInputRef}
-        exportScopeCounts={exportScopeCounts}
-        resolveExportScopeResults={resolveExportScopeResults}
-        statusOptionCounts={statusOptionCounts}
       />
       {isMac && playlist && (
         <div
@@ -1876,25 +1912,13 @@ export default function App() {
           ffmpeg/ffprobe not found. Screenshots and media info will be disabled.
         </div>
       )}
+      <ScanPauseBanners />
 
-      {screenshotsPaused && isScanActive(scanState) && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-[13px]">
-          <span className="flex-1">Screenshot capture paused — low disk space</span>
-        </div>
-      )}
-
-      {networkPaused && isScanActive(scanState) && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-orange-500/10 border-b border-orange-500/20 text-orange-400 text-[13px]">
-          <AlertTriangle className="w-4 h-4 shrink-0" />
-          <span className="flex-1">Scan paused — network connectivity lost. Waiting for recovery...</span>
-        </div>
-      )}
-
-      {error && !errorDismissed && (
+      {scanError && !errorDismissed && (
         <div className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border-b border-red-500/20 text-red-400 text-[13px]">
-          <span className="flex-1">{error}</span>
+          <span className="flex-1">{scanError}</span>
           <button
-            onClick={() => setErrorDismissed(true)}
+            onClick={() => getStore().setErrorDismissed(true)}
             className="p-1 hover:bg-red-500/20 rounded transition-colors"
           >
             <X className="w-4 h-4" />
@@ -1906,7 +1930,7 @@ export default function App() {
         <div className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border-b border-red-500/20 text-red-400 text-[13px]">
           <span className="flex-1">{playbackError}</span>
           <button
-            onClick={() => setPlaybackError(null)}
+            onClick={() => getStore().setPlaybackError(null)}
             className="p-1 hover:bg-red-500/20 rounded transition-colors"
             type="button"
           >
@@ -1919,7 +1943,7 @@ export default function App() {
         <div className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border-b border-red-500/20 text-red-400 text-[13px]">
           <span className="flex-1">{playlistOpenError}</span>
           <button
-            onClick={() => setPlaylistOpenError(null)}
+            onClick={() => getStore().setPlaylistOpenError(null)}
             className="p-1 hover:bg-red-500/20 rounded transition-colors"
             type="button"
           >
@@ -1932,7 +1956,7 @@ export default function App() {
         <div className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border-b border-red-500/20 text-red-400 text-[13px]">
           <span className="flex-1">{scanInputError}</span>
           <button
-            onClick={() => setScanInputError(null)}
+            onClick={() => getStore().setScanInputError(null)}
             className="p-1 hover:bg-red-500/20 rounded transition-colors"
             type="button"
           >
@@ -1946,7 +1970,7 @@ export default function App() {
           <Info className="w-4 h-4" />
           <span className="flex-1">{menuInfo}</span>
           <button
-            onClick={() => setMenuInfo(null)}
+            onClick={() => getStore().setMenuInfo(null)}
             className="p-1 hover:bg-blue-500/20 rounded transition-colors"
             type="button"
           >
@@ -1972,7 +1996,7 @@ export default function App() {
           </a>
           <button
             onClick={() => {
-              setUpdateNotice(null);
+              getStore().setUpdateNotice(null);
               localStorage.removeItem(UPDATE_CACHE_KEY);
             }}
             className="p-1 hover:bg-emerald-500/20 rounded transition-colors"
@@ -1988,44 +2012,21 @@ export default function App() {
       <div className="flex flex-col flex-1 min-h-0">
       <div className="flex flex-1 min-h-0 bg-content">
         {liveSelectedChannel && !sidebarHidden && (
-          <div className="relative border-r border-border-app bg-panel-muted shrink-0" style={{ width: `${sidebarWidth}px` }}>
-            <div
-              onMouseDown={handleSidebarDragStart}
-              className="absolute right-0 top-0 bottom-0 w-1 translate-x-1/2 cursor-col-resize z-10 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors"
-            />
-            <ThumbnailPanel
-              result={liveSelectedChannel}
-              screenshotUrl={screenshotUrl}
-              screenshotLoading={screenshotLoading}
-              screenshotLoadError={screenshotLoadError}
-              screenshotsEnabled={!settings.skip_screenshots}
-              scanState={scanState}
-              lightboxOpen={lightboxOpen}
-              onLightboxChange={setLightboxOpen}
-              onPlayChannel={handlePlayInApp}
-              onScanChannel={handleScanSelected}
-              isPlaying={streamPlayer.playerState !== "idle"}
-              playerState={streamPlayer.playerState}
-              errorMessage={streamPlayer.errorMessage}
-              isPaused={streamPlayer.isPaused}
-              volume={streamPlayer.volume}
-              muted={streamPlayer.muted}
-              videoElement={streamPlayer.videoElement}
-              onTogglePause={streamPlayer.togglePause}
-              onStopPlayer={handleStopPlayer}
-              onSetVolume={streamPlayer.setVolume}
-              onToggleMute={streamPlayer.toggleMute}
-              onOpenExternal={handleOpenExternal}
-              onRetryPlay={(result) => streamPlayer.play(result)}
-              onPip={document.pictureInPictureEnabled ? handlePip : undefined}
-            />
-          </div>
+          <SelectedChannelSidebar
+            sidebarWidth={sidebarWidth}
+            onResizeStart={handleSidebarDragStart}
+            streamPlayer={streamPlayer}
+            onPlayChannel={handlePlayInApp}
+            onScanChannel={handleScanSelected}
+            onStopPlayer={handleStopPlayer}
+            onOpenExternal={handleOpenExternal}
+            onPip={handlePip}
+          />
         )}
         <div className="flex flex-col flex-1 min-w-0">
           {playlist ? (
             <Profiler id="ChannelTable" onRender={handleTableProfilerRender}>
               <ChannelTable
-                completedResults={completedResults}
                 onSelectChannel={handleSelectChannel}
                 onOpenChannel={handlePlayInApp}
                 onOpenExternal={handleOpenExternal}
@@ -2133,11 +2134,6 @@ export default function App() {
 
         {playlist && showReportPanel && (
           <PlaylistReportPanel
-            playlist={playlist}
-            results={completedResults}
-            progress={progress}
-            summary={summary}
-            scanState={scanState}
             placement="right"
             widthPx={reportSidebarWidth}
             onResizeStart={handleReportSidebarDragStart}
@@ -2161,7 +2157,7 @@ export default function App() {
             onOpenUrl={openPlaylistUrlValue}
             onOpenXtream={openPlaylistXtreamValue}
             onOpenStalker={openPlaylistStalkerValue}
-            onClose={() => setOpenSourceDialogState(null)}
+            onClose={() => getStore().setOpenSourceDialogState(null)}
           />
         </Suspense>
       )}
@@ -2170,7 +2166,7 @@ export default function App() {
         <Suspense fallback={null}>
           <KeyboardShortcutsDialog
             modifierLabel={modKey}
-            onClose={() => setShowKeyboardShortcuts(false)}
+            onClose={() => getStore().setShowKeyboardShortcuts(false)}
           />
         </Suspense>
       )}
@@ -2189,7 +2185,7 @@ export default function App() {
             onClear={() => {
               void handleClearHistory();
             }}
-            onClose={() => setShowHistory(false)}
+            onClose={() => getStore().setShowHistory(false)}
           />
         </Suspense>
       )}
@@ -2223,7 +2219,7 @@ export default function App() {
             </p>
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
-                onClick={() => setPendingPlaybackChannel(null)}
+                onClick={() => getStore().setPendingPlaybackChannel(null)}
                 className="macos-btn px-3 py-2 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
                 type="button"
               >
