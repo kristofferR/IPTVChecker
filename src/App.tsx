@@ -63,7 +63,7 @@ const HistoryPanel = lazy(() => import("./components/HistoryPanel"));
 const OpenSourceDialog = lazy(() => import("./components/OpenSourceDialog"));
 import { AlertTriangle, ExternalLink, FolderOpen, Info, Loader2, X } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
-import { detectPlatform, type Platform } from "./lib/platform";
+import { detectPlatform, inferPlatformFromNavigator, type Platform } from "./lib/platform";
 import { countStatusOptions, filterResults, type SearchTextCache } from "./lib/filters";
 import { logger } from "./lib/logger";
 import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/haptics";
@@ -202,13 +202,6 @@ async function canSendNotifications(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function inferPlatformFromNavigator(): Platform {
-  const platformName = navigator.platform.toLowerCase();
-  if (platformName.includes("mac")) return "macos";
-  if (platformName.includes("win")) return "windows";
-  return "linux";
 }
 
 function shouldSkipUpdateCheck(

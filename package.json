@@ -33,7 +33,8 @@
     "react-dom": "^19",
     "tauri-plugin-liquid-glass-api": "^0.1.6",
     "tauri-plugin-macos-haptics-api": "^1.0.0",
-    "tauri-plugin-mcp": "^0.1.0"
+    "tauri-plugin-mcp": "^0.1.0",
+    "zustand": "^5.0.11"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4",
