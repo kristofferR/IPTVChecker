@@ -121,7 +121,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     // 1. HLS.js — richest data
     const hls = hlsInstanceRef.current;
     if (hls) {
-      const level = hls.levels?.[hls.currentLevel];
+      // currentLevel can be -1 in auto mode before a level is selected
+      const levelIdx = hls.currentLevel >= 0 ? hls.currentLevel : (hls.levels?.length ? 0 : -1);
+      const level = levelIdx >= 0 ? hls.levels?.[levelIdx] : undefined;
       if (level) {
         if (level.width && level.height) {
           meta.width = level.width;
@@ -147,6 +149,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         videoCodec?: string; audioCodec?: string;
         width?: number; height?: number;
         hasVideo?: boolean; hasAudio?: boolean;
+        fps?: number; videoDataRate?: number; audioDataRate?: number;
       } }).mediaInfo;
       if (info) {
         if (!meta.width && info.width && info.height) {
@@ -156,6 +159,14 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
         if (!meta.codec && info.videoCodec) meta.codec = normalizeCodecName(info.videoCodec);
         if (!meta.audioCodec && info.audioCodec) meta.audioCodec = normalizeCodecName(info.audioCodec);
+        if (!meta.fps && info.fps) meta.fps = Math.round(info.fps);
+        if (!meta.videoBitrate && info.videoDataRate) {
+          const kbps = Math.round(info.videoDataRate);
+          meta.videoBitrate = kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbps` : `${kbps} kbps`;
+        }
+        if (!meta.audioBitrate && info.audioDataRate) {
+          meta.audioBitrate = String(Math.round(info.audioDataRate));
+        }
         if (info.hasAudio && !info.hasVideo) meta.audioOnly = true;
       }
     }
@@ -182,32 +193,58 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       handlers.push({ target, event, handler });
     };
 
-    // Listen for loadedmetadata on the video element
+    // Listen for metadata-related events on the video element.
+    // loadedmetadata may have already fired by the time we set up listeners,
+    // so also listen on playing/resize as fallbacks.
     addHandler(videoElement, "loadedmetadata", () => collectMetadata());
+    addHandler(videoElement, "playing", () => collectMetadata());
+    addHandler(videoElement, "resize", () => collectMetadata());
 
-    // For HLS.js: also listen to LEVEL_SWITCHED for quality level data
+    // Library-specific event listeners for richer metadata
+    type LibCleanup = () => void;
+    const libCleanups: LibCleanup[] = [];
+
+    // HLS.js: listen to LEVEL_SWITCHED for quality level data
     const hls = hlsInstanceRef.current;
     if (hls) {
       const hlsHandler = () => collectMetadata();
-      // hls.js uses its own event system with strict enum types — bypass via untyped cast
       const hlsAny = hls as unknown as {
         on(event: string, handler: () => void): void;
         off(event: string, handler: () => void): void;
       };
       hlsAny.on("hlsLevelSwitched", hlsHandler);
       hlsAny.on("hlsManifestParsed", hlsHandler);
-      metadataCleanupRef.current = () => {
-        for (const h of handlers) h.target.removeEventListener(h.event, h.handler);
+      libCleanups.push(() => {
         try {
           hlsAny.off("hlsLevelSwitched", hlsHandler);
           hlsAny.off("hlsManifestParsed", hlsHandler);
         } catch {}
-      };
-    } else {
-      metadataCleanupRef.current = () => {
-        for (const h of handlers) h.target.removeEventListener(h.event, h.handler);
-      };
+      });
     }
+
+    // mpegts.js: listen to MEDIA_INFO and STATISTICS_INFO for codec/fps/bitrate
+    const mpegts = mpegtsPlayerRef.current;
+    if (mpegts && "on" in mpegts) {
+      const mpegtsHandler = () => collectMetadata();
+      const mpegtsAny = mpegts as unknown as {
+        on(event: string, handler: () => void): void;
+        off(event: string, handler: () => void): void;
+      };
+      // mpegts.js event names from PlayerEvents
+      mpegtsAny.on("media_info", mpegtsHandler);
+      mpegtsAny.on("statistics_info", mpegtsHandler);
+      libCleanups.push(() => {
+        try {
+          mpegtsAny.off("media_info", mpegtsHandler);
+          mpegtsAny.off("statistics_info", mpegtsHandler);
+        } catch {}
+      });
+    }
+
+    metadataCleanupRef.current = () => {
+      for (const h of handlers) h.target.removeEventListener(h.event, h.handler);
+      for (const fn of libCleanups) fn();
+    };
 
     // Collect immediately in case metadata is already available
     collectMetadata();

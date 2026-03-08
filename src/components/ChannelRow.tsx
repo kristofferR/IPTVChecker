@@ -165,19 +165,19 @@ function ChannelRowImpl({
       case "resolution":
         return (
           <span className="text-text-secondary tabular-nums">
-            {isAlive ? (result.resolution ?? "—") : "—"}
+            {result.resolution ?? "—"}
           </span>
         );
       case "codec":
         return (
           <span className="text-text-secondary">
-            {isAlive ? (result.codec ?? "—") : "—"}
+            {result.codec ?? "—"}
           </span>
         );
       case "fps":
         return (
           <span className="text-text-secondary tabular-nums">
-            {isAlive && result.fps ? result.fps : "—"}
+            {result.fps ? result.fps : "—"}
           </span>
         );
       case "latency": {
@@ -193,13 +193,13 @@ function ChannelRowImpl({
       case "bitrate":
         return (
           <span className="text-text-secondary tabular-nums">
-            {isAlive && result.video_bitrate ? result.video_bitrate : "—"}
+            {result.video_bitrate ? result.video_bitrate : "—"}
           </span>
         );
       case "audio":
         return (
           <span className="text-text-secondary tabular-nums">
-            {isAlive && result.audio_bitrate
+            {result.audio_bitrate
               ? `${result.audio_bitrate} kbps`
               : "—"}
           </span>
