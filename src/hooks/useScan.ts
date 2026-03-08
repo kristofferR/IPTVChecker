@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type {
   Channel,
@@ -17,7 +17,6 @@ import {
   toPendingChannelResult,
 } from "../lib/channelResults";
 import { findDuplicateChannelIndices } from "../lib/duplicates";
-import type { ScanState } from "../lib/scanState";
 import {
   pendingScanErrorMessageForRun,
   runScopedScanErrorMessage,
@@ -27,17 +26,10 @@ import {
   isRunScopedEventForActiveRun,
   type ScanUiMetrics,
 } from "./useScan.helpers";
+import { useAppStore } from "../store";
+import { EMPTY_TELEMETRY } from "../store/slices/scanSlice";
 
 export type { ScanState } from "../lib/scanState";
-interface ScanTelemetry {
-  throughputChannelsPerSecond: number | null;
-  etaSeconds: number | null;
-}
-
-const EMPTY_TELEMETRY: ScanTelemetry = {
-  throughputChannelsPerSecond: null,
-  etaSeconds: null,
-};
 
 const EMPTY_UI_METRICS: ScanUiMetrics = {
   presentCount: 0,
@@ -95,19 +87,20 @@ function buildFlatResultsAndMetrics(
 }
 
 export function useScan() {
-  const [results, setResults] = useState<(ChannelResult | null)[]>([]);
-  const [flatResults, setFlatResults] = useState<ChannelResult[]>([]);
-  const [progress, setProgress] = useState<ScanProgress | null>(null);
-  const [summary, setSummary] = useState<ScanSummary | null>(null);
-  const [scanState, setScanState] = useState<ScanState>("idle");
-  const [error, setError] = useState<string | null>(null);
-  const [telemetry, setTelemetry] = useState<ScanTelemetry>(EMPTY_TELEMETRY);
-  const [uiMetrics, setUiMetrics] = useState<ScanUiMetrics>(EMPTY_UI_METRICS);
-  const [duplicateIndices, setDuplicateIndices] = useState<Set<number>>(
-    () => new Set(),
-  );
-  const [screenshotsPaused, setScreenshotsPaused] = useState(false);
-  const [networkPaused, setNetworkPaused] = useState(false);
+  // Read state from store (reactive)
+  const {
+    results, setResults,
+    flatResults, setFlatResults,
+    uiMetrics, setUiMetrics,
+    duplicateIndices, setDuplicateIndices,
+    progress, setProgress,
+    summary, setSummary,
+    scanState, setScanState,
+    scanError, setScanError,
+    telemetry, setTelemetry,
+    screenshotsPaused, setScreenshotsPaused,
+    networkPaused, setNetworkPaused,
+  } = useAppStore();
 
   // Batch incoming results with requestAnimationFrame
   const pendingResults = useRef<ChannelResult[]>([]);
@@ -261,7 +254,7 @@ export function useScan() {
   }, []);
 
   const applyScanError = useCallback((message: string) => {
-    setError(message);
+    setScanError(message);
     setScanState("idle");
     setTelemetry(EMPTY_TELEMETRY);
     activeRunId.current = null;
@@ -524,7 +517,7 @@ export function useScan() {
         drm: 0,
       });
       setSummary(null);
-      setError(null);
+      setScanError(null);
       setScanState("scanning");
       setTelemetry(EMPTY_TELEMETRY);
       setScreenshotsPaused(false);
@@ -559,7 +552,7 @@ export function useScan() {
       } catch (err) {
         logger.error("[useScan] startScan IPC error:", err);
         pendingScanError.current = null;
-        setError(String(err));
+        setScanError(String(err));
         setProgress(null);
         setScanState("idle");
         setTelemetry(EMPTY_TELEMETRY);
@@ -633,7 +626,7 @@ export function useScan() {
       setDuplicateIndices(duplicates);
       setProgress(null);
       setSummary(null);
-      setError(null);
+      setScanError(null);
       setScanState("idle");
       setTelemetry(EMPTY_TELEMETRY);
       setScreenshotsPaused(false);
@@ -671,7 +664,7 @@ export function useScan() {
     progress,
     summary,
     scanState,
-    error,
+    error: scanError,
     telemetry,
     screenshotsPaused,
     networkPaused,
