@@ -13,6 +13,9 @@ export default defineConfig(async () => ({
     }),
     tailwindcss(),
   ],
+  optimizeDeps: {
+    include: ["hls.js", "mpegts.js", "lucide-react"],
+  },
   clearScreen: false,
   server: {
     port: 1420,
