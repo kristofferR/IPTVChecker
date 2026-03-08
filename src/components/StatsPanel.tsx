@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from "react";
+import { memo, startTransition, type ReactNode } from "react";
 import {
   SFCheckmarkCircleFill,
   SFXmarkCircleFill,
@@ -12,10 +12,6 @@ import {
 } from "./SFSymbols";
 import { useAppStore } from "../store";
 
-interface StatsPanelProps {
-  onStatusChange: (value: string) => void;
-  onScoreClick?: () => void;
-}
 
 function Pill({
   icon,
@@ -81,10 +77,7 @@ function Pill({
 
 const iconSize = "w-3 h-3";
 
-export const StatsPanel = memo(function StatsPanel({
-  onStatusChange,
-  onScoreClick,
-}: StatsPanelProps) {
+export const StatsPanel = memo(function StatsPanel() {
   const progress = useAppStore((s) => s.progress);
   const summary = useAppStore((s) => s.summary);
   const totalChannels = useAppStore(
@@ -95,6 +88,8 @@ export const StatsPanel = memo(function StatsPanel({
   const mislabeledCount = useAppStore((s) => s.uiMetrics.mislabeledCount);
   const duplicateCount = useAppStore((s) => s.duplicateIndices.size);
   const statusFilter = useAppStore((s) => s.statusFilter);
+  const setStatusFilter = useAppStore((s) => s.setStatusFilter);
+  const toggleReportPanel = useAppStore((s) => s.toggleReportPanel);
   const stats = summary ?? progress;
   const effectiveLowFpsCount = summary?.low_framerate ?? lowFpsCount;
   const effectiveMislabeledCount = summary?.mislabeled ?? mislabeledCount;
@@ -104,8 +99,12 @@ export const StatsPanel = memo(function StatsPanel({
     effectiveMislabeledCount > 0 ||
     duplicateCount > 0;
 
+  function handleStatusChange(value: string) {
+    startTransition(() => setStatusFilter(value));
+  }
+
   function toggleFilter(value: string) {
-    onStatusChange(statusFilter === value ? "all" : value);
+    handleStatusChange(statusFilter === value ? "all" : value);
   }
 
   return (
@@ -115,7 +114,7 @@ export const StatsPanel = memo(function StatsPanel({
         label={`${totalChannels} total`}
         color="neutral"
         active={statusFilter === "all"}
-        onClick={() => onStatusChange("all")}
+        onClick={() => handleStatusChange("all")}
       />
       {stats && (
         <>
@@ -165,7 +164,7 @@ export const StatsPanel = memo(function StatsPanel({
           icon={null}
           label={`Score ${summary.playlist_score.overall.toFixed(1)}/10`}
           color="blue"
-          onClick={onScoreClick}
+          onClick={toggleReportPanel}
         />
       )}
       {showRightStatus && (

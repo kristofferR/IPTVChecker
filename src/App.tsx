@@ -1,7 +1,6 @@
 import {
   lazy,
   Profiler,
-  startTransition,
   Suspense,
   useCallback,
   useDeferredValue,
@@ -282,7 +281,7 @@ export default function App() {
     // UI
     platform, setPlatform, isMac,
     sidebarHidden, setSidebarHidden, sidebarWidth, setSidebarWidth,
-    showReportPanel, setShowReportPanel, toggleReportPanel,
+    showReportPanel, setShowReportPanel,
     reportSidebarWidth, setReportSidebarWidth,
     lightboxOpen, setLightboxOpen, toggleLightboxOpen,
     showKeyboardShortcuts, setShowKeyboardShortcuts,
@@ -1735,11 +1734,6 @@ export default function App() {
     [completedResults.length, filteredExportResults.length, selectedChannelIndices.length],
   );
 
-  const handleStatusFilterChange = useCallback((value: string) => {
-    startTransition(() => {
-      setStatusFilter(value);
-    });
-  }, []);
 
   const handleTableProfilerRender = useCallback<ProfilerOnRenderCallback>(
     (id, phase, actualDuration, baseDuration) => {
@@ -2152,10 +2146,7 @@ export default function App() {
         )}
       </div>
 
-      <StatsPanel
-        onStatusChange={handleStatusFilterChange}
-        onScoreClick={() => toggleReportPanel()}
-      />
+      <StatsPanel />
       <ProgressBar />
       </div>
       </div>
