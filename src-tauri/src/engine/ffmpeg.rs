@@ -506,7 +506,7 @@ fn parse_probe_snapshot(stdout: &str) -> Result<ProbeSnapshot, serde_json::Error
         let codec = stream
             .codec_name
             .as_ref()
-            .map(|value| value.to_uppercase())
+            .map(|value| normalize_codec_name(value))
             .unwrap_or_else(|| "Unknown".to_string());
         let width = stream.width;
         let height = stream.height;
@@ -524,7 +524,7 @@ fn parse_probe_snapshot(stdout: &str) -> Result<ProbeSnapshot, serde_json::Error
         codec: stream
             .codec_name
             .as_ref()
-            .map(|value| value.to_uppercase())
+            .map(|value| normalize_codec_name(value))
             .unwrap_or_else(|| "Unknown".to_string()),
         bitrate_kbps: stream
             .bit_rate
@@ -539,6 +539,11 @@ fn parse_probe_snapshot(stdout: &str) -> Result<ProbeSnapshot, serde_json::Error
         audio_info,
         ffprobe_output: truncate_ffprobe_output(stdout),
     })
+}
+
+fn normalize_codec_name(raw: &str) -> String {
+    let upper = raw.to_uppercase();
+    upper.strip_suffix("VIDEO").unwrap_or(&upper).to_string()
 }
 
 fn parse_ffprobe_fps(raw: &str) -> Option<u32> {
@@ -623,7 +628,7 @@ pub async fn get_stream_info(
     let codec = best
         .as_ref()
         .and_then(|stream| stream.codec_name.as_ref())
-        .map(|value| value.to_uppercase())
+        .map(|value| normalize_codec_name(value))
         .unwrap_or_else(|| "Unknown".to_string());
 
     let width = best.as_ref().and_then(|stream| stream.width);
@@ -674,7 +679,7 @@ pub async fn get_audio_info(
 
     for line in stdout.lines() {
         if let Some(val) = line.strip_prefix("codec_name=") {
-            codec = val.to_uppercase();
+            codec = normalize_codec_name(val);
         } else if let Some(val) = line.strip_prefix("bit_rate=") {
             bitrate_kbps = val.parse::<u64>().ok().map(|b| (b / 1000) as u32);
         }

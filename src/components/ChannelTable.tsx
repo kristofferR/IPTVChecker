@@ -254,15 +254,51 @@ export function ChannelTable({
     [columnOrder],
   );
 
+  const SCROLLBAR_ALLOWANCE = 15;
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  useEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const effectiveNameWidth = useMemo(() => {
+    if (!columnOrder.includes("name") || containerWidth === 0) {
+      return columnWidths.name;
+    }
+    const sumOther = columns.reduce(
+      (sum, col) => sum + (col.key === "name" ? 0 : columnWidths[col.key]),
+      0,
+    );
+    const autoWidth = containerWidth - SCROLLBAR_ALLOWANCE - sumOther;
+    return Math.max(columnWidths.name, autoWidth);
+  }, [columns, columnOrder, columnWidths, containerWidth]);
+
   const gridTemplateColumns = useMemo(
-    () => columns.map((column) => `${columnWidths[column.key]}px`).join(" "),
-    [columns, columnWidths],
+    () =>
+      columns
+        .map((column) =>
+          `${column.key === "name" ? effectiveNameWidth : columnWidths[column.key]}px`,
+        )
+        .join(" "),
+    [columns, columnWidths, effectiveNameWidth],
   );
 
   const tableWidth = useMemo(
     () =>
-      columns.reduce((sum, column) => sum + columnWidths[column.key], 0),
-    [columns, columnWidths],
+      columns.reduce(
+        (sum, column) =>
+          sum + (column.key === "name" ? effectiveNameWidth : columnWidths[column.key]),
+        0,
+      ),
+    [columns, columnWidths, effectiveNameWidth],
   );
 
   const filteredResults = useMemo(
