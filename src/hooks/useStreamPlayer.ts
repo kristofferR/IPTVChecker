@@ -135,6 +135,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         if (level.bitrate) {
           const kbps = Math.round(level.bitrate / 1000);
           meta.videoBitrate = kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbps` : `${kbps} kbps`;
+        } else if (hls.bandwidthEstimate && Number.isFinite(hls.bandwidthEstimate)) {
+          const kbps = Math.round(hls.bandwidthEstimate / 1000);
+          meta.videoBitrate = kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbps` : `${kbps} kbps`;
         }
         if ((level as { frameRate?: number }).frameRate) {
           meta.fps = Math.round((level as { frameRate: number }).frameRate);
@@ -214,10 +217,12 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       };
       hlsAny.on("hlsLevelSwitched", hlsHandler);
       hlsAny.on("hlsManifestParsed", hlsHandler);
+      hlsAny.on("hlsFragLoaded", hlsHandler);
       libCleanups.push(() => {
         try {
           hlsAny.off("hlsLevelSwitched", hlsHandler);
           hlsAny.off("hlsManifestParsed", hlsHandler);
+          hlsAny.off("hlsFragLoaded", hlsHandler);
         } catch {}
       });
     }
@@ -459,23 +464,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         onPlaybackFailedRef.current?.(currentResult);
       }, LOADING_TIMEOUT_MS);
 
-      // 1. Try native playback first
-      const nativeOk = await tryNativePlayback(url, abortController.signal);
-      if (!isCurrentPlayback()) {
-        return;
-      }
-      if (nativeOk) {
-        clearLoadingTimer();
-        try { await videoElement.play(); } catch {}
-        if (!isCurrentPlayback()) {
-          return;
-        }
-        setPlayerState("playing");
-        setupMetadataListeners();
-        return;
-      }
-
-      // 2. Try hls.js for HLS or unknown streams
+      // 1. Try hls.js first for HLS/unknown streams — provides rich metadata
+      //    (codec, bitrate, fps) that native WebKit HLS playback does not expose.
       if (streamType === "hls" || streamType === "unknown") {
         const hlsOk = await tryHlsPlayback(url, abortController.signal);
         if (!isCurrentPlayback()) {
@@ -493,7 +483,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       }
 
-      // 3. Try mpegts.js for MPEG-TS or unknown streams
+      // 2. Try mpegts.js for MPEG-TS or unknown streams
       if (streamType === "mpegts" || streamType === "unknown") {
         const mpegtsOk = await tryMpegtsPlayback(url, abortController.signal);
         if (!isCurrentPlayback()) {
@@ -509,6 +499,22 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           setupMetadataListeners();
           return;
         }
+      }
+
+      // 3. Native playback fallback — handles formats the libraries can't
+      const nativeOk = await tryNativePlayback(url, abortController.signal);
+      if (!isCurrentPlayback()) {
+        return;
+      }
+      if (nativeOk) {
+        clearLoadingTimer();
+        try { await videoElement.play(); } catch {}
+        if (!isCurrentPlayback()) {
+          return;
+        }
+        setPlayerState("playing");
+        setupMetadataListeners();
+        return;
       }
 
       // All methods failed — fall back to scanning
