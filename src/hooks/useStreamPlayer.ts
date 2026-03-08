@@ -1,8 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChannelResult } from "../lib/types";
+import { normalizeCodecName, resolveResolutionLabel } from "../lib/format";
 
 type PlayerState = "idle" | "loading" | "playing" | "error";
 type StreamType = "hls" | "mpegts" | "unknown";
+
+export interface StreamMetadata {
+  width: number | null;
+  height: number | null;
+  resolution: string | null;
+  codec: string | null;
+  fps: number | null;
+  videoBitrate: string | null;
+  audioCodec: string | null;
+  audioBitrate: string | null;
+  audioOnly: boolean;
+}
 
 export interface UseStreamPlayerReturn {
   playerState: PlayerState;
@@ -12,6 +25,7 @@ export interface UseStreamPlayerReturn {
   isPaused: boolean;
   activeChannelIndex: number | null;
   videoElement: HTMLVideoElement;
+  streamMetadata: StreamMetadata | null;
   play: (result: ChannelResult) => void;
   stop: () => void;
   togglePause: () => void;
@@ -77,11 +91,13 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const [muted, setMuted] = useState(readStoredMuted);
   const [isPaused, setIsPaused] = useState(false);
   const [activeChannelIndex, setActiveChannelIndex] = useState<number | null>(null);
+  const [streamMetadata, setStreamMetadata] = useState<StreamMetadata | null>(null);
 
   const hlsInstanceRef = useRef<import("hls.js").default | null>(null);
   const mpegtsPlayerRef = useRef<{ destroy(): void; attachMediaElement(el: HTMLMediaElement): void; load(): void } | null>(null);
   const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playbackAbortRef = useRef<AbortController | null>(null);
+  const metadataCleanupRef = useRef<(() => void) | null>(null);
 
   const clearLoadingTimer = useCallback(() => {
     if (loadingTimerRef.current) {
@@ -90,6 +106,113 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     }
   }, []);
 
+  const cleanupMetadataListeners = useCallback(() => {
+    metadataCleanupRef.current?.();
+    metadataCleanupRef.current = null;
+  }, []);
+
+  const collectMetadata = useCallback(() => {
+    const meta: StreamMetadata = {
+      width: null, height: null, resolution: null,
+      codec: null, fps: null, videoBitrate: null,
+      audioCodec: null, audioBitrate: null, audioOnly: false,
+    };
+
+    // 1. HLS.js — richest data
+    const hls = hlsInstanceRef.current;
+    if (hls) {
+      const level = hls.levels?.[hls.currentLevel];
+      if (level) {
+        if (level.width && level.height) {
+          meta.width = level.width;
+          meta.height = level.height;
+          meta.resolution = resolveResolutionLabel(level.width, level.height);
+        }
+        if (level.videoCodec) meta.codec = normalizeCodecName(level.videoCodec);
+        if (level.audioCodec) meta.audioCodec = normalizeCodecName(level.audioCodec);
+        if (level.bitrate) {
+          const kbps = Math.round(level.bitrate / 1000);
+          meta.videoBitrate = kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbps` : `${kbps} kbps`;
+        }
+        if ((level as { frameRate?: number }).frameRate) {
+          meta.fps = Math.round((level as { frameRate: number }).frameRate);
+        }
+      }
+    }
+
+    // 2. mpegts.js
+    const mpegtsPlayer = mpegtsPlayerRef.current;
+    if (mpegtsPlayer && "mediaInfo" in mpegtsPlayer) {
+      const info = (mpegtsPlayer as { mediaInfo?: {
+        videoCodec?: string; audioCodec?: string;
+        width?: number; height?: number;
+        hasVideo?: boolean; hasAudio?: boolean;
+      } }).mediaInfo;
+      if (info) {
+        if (!meta.width && info.width && info.height) {
+          meta.width = info.width;
+          meta.height = info.height;
+          meta.resolution = resolveResolutionLabel(info.width, info.height);
+        }
+        if (!meta.codec && info.videoCodec) meta.codec = normalizeCodecName(info.videoCodec);
+        if (!meta.audioCodec && info.audioCodec) meta.audioCodec = normalizeCodecName(info.audioCodec);
+        if (info.hasAudio && !info.hasVideo) meta.audioOnly = true;
+      }
+    }
+
+    // 3. HTMLVideoElement fallback
+    if (!meta.width && videoElement.videoWidth && videoElement.videoHeight) {
+      meta.width = videoElement.videoWidth;
+      meta.height = videoElement.videoHeight;
+      meta.resolution = resolveResolutionLabel(videoElement.videoWidth, videoElement.videoHeight);
+    }
+
+    // Only set if we got at least some data
+    if (meta.width || meta.codec || meta.audioCodec) {
+      setStreamMetadata(meta);
+    }
+  }, [videoElement]);
+
+  const setupMetadataListeners = useCallback(() => {
+    cleanupMetadataListeners();
+
+    const handlers: Array<{ target: EventTarget; event: string; handler: EventListener }> = [];
+    const addHandler = (target: EventTarget, event: string, handler: EventListener) => {
+      target.addEventListener(event, handler);
+      handlers.push({ target, event, handler });
+    };
+
+    // Listen for loadedmetadata on the video element
+    addHandler(videoElement, "loadedmetadata", () => collectMetadata());
+
+    // For HLS.js: also listen to LEVEL_SWITCHED for quality level data
+    const hls = hlsInstanceRef.current;
+    if (hls) {
+      const hlsHandler = () => collectMetadata();
+      // hls.js uses its own event system with strict enum types — bypass via untyped cast
+      const hlsAny = hls as unknown as {
+        on(event: string, handler: () => void): void;
+        off(event: string, handler: () => void): void;
+      };
+      hlsAny.on("hlsLevelSwitched", hlsHandler);
+      hlsAny.on("hlsManifestParsed", hlsHandler);
+      metadataCleanupRef.current = () => {
+        for (const h of handlers) h.target.removeEventListener(h.event, h.handler);
+        try {
+          hlsAny.off("hlsLevelSwitched", hlsHandler);
+          hlsAny.off("hlsManifestParsed", hlsHandler);
+        } catch {}
+      };
+    } else {
+      metadataCleanupRef.current = () => {
+        for (const h of handlers) h.target.removeEventListener(h.event, h.handler);
+      };
+    }
+
+    // Collect immediately in case metadata is already available
+    collectMetadata();
+  }, [videoElement, collectMetadata, cleanupMetadataListeners]);
+
   const cleanup = useCallback(() => {
     const abortController = playbackAbortRef.current;
     playbackAbortRef.current = null;
@@ -97,6 +220,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       abortController.abort();
     }
     clearLoadingTimer();
+    cleanupMetadataListeners();
+    setStreamMetadata(null);
     if (hlsInstanceRef.current) {
       hlsInstanceRef.current.destroy();
       hlsInstanceRef.current = null;
@@ -108,7 +233,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     videoElement.pause();
     videoElement.removeAttribute("src");
     videoElement.load();
-  }, [clearLoadingTimer, videoElement]);
+  }, [clearLoadingTimer, cleanupMetadataListeners, videoElement]);
 
   const applyVolume = useCallback(() => {
     videoElement.volume = volume;
@@ -309,6 +434,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           return;
         }
         setPlayerState("playing");
+        setupMetadataListeners();
         return;
       }
 
@@ -325,6 +451,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             return;
           }
           setPlayerState("playing");
+          setupMetadataListeners();
           return;
         }
       }
@@ -342,6 +469,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             return;
           }
           setPlayerState("playing");
+          setupMetadataListeners();
           return;
         }
       }
@@ -358,6 +486,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     [
       cleanup,
       clearLoadingTimer,
+      setupMetadataListeners,
       tryNativePlayback,
       tryHlsPlayback,
       tryMpegtsPlayback,
@@ -400,6 +529,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     isPaused,
     activeChannelIndex,
     videoElement,
+    streamMetadata,
     play,
     stop,
     togglePause,

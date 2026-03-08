@@ -1616,6 +1616,42 @@ export default function App() {
     streamPlayer.play(channel);
   }, [pendingPlaybackChannel, streamPlayer]);
 
+  // Merge player-derived metadata into ChannelResult for unscanned channels
+  const lastMergedMetaRef = useRef<{ index: number; meta: typeof streamPlayer.streamMetadata } | null>(null);
+  useEffect(() => {
+    const meta = streamPlayer.streamMetadata;
+    const idx = streamPlayer.activeChannelIndex;
+    if (!meta || idx === null) return;
+
+    // Prevent infinite re-trigger: skip if we already merged this exact data
+    const last = lastMergedMetaRef.current;
+    if (last && last.index === idx && last.meta === meta) return;
+    lastMergedMetaRef.current = { index: idx, meta };
+
+    const existing = results[idx];
+    if (!existing) return;
+
+    let changed = false;
+    const updated = { ...existing };
+
+    if (meta.width != null && existing.width == null) { updated.width = meta.width; changed = true; }
+    if (meta.height != null && existing.height == null) { updated.height = meta.height; changed = true; }
+    if (meta.resolution && !existing.resolution) { updated.resolution = meta.resolution; changed = true; }
+    if (meta.codec && !existing.codec) { updated.codec = meta.codec; changed = true; }
+    if (meta.fps != null && existing.fps == null) { updated.fps = meta.fps; changed = true; }
+    if (meta.videoBitrate && !existing.video_bitrate) { updated.video_bitrate = meta.videoBitrate; changed = true; }
+    if (meta.audioCodec && !existing.audio_codec) { updated.audio_codec = meta.audioCodec; changed = true; }
+    if (meta.audioBitrate && !existing.audio_bitrate) { updated.audio_bitrate = meta.audioBitrate; changed = true; }
+
+    if (changed) {
+      updateResult(updated);
+      // Also update selectedChannel if it's the same index
+      if (selectedChannel?.index === idx) {
+        setSelectedChannel(updated);
+      }
+    }
+  }, [streamPlayer.streamMetadata, streamPlayer.activeChannelIndex, results, updateResult, selectedChannel]);
+
   const completedResults = flatResults;
   const appSearchTextCacheRef = useRef<SearchTextCache>(new WeakMap());
   handleToggleSidebarRef.current = () => {

@@ -400,7 +400,7 @@ export function ThumbnailPanel({
           <span className="text-text-tertiary">Group</span>
           <p className="font-medium text-[12px]">{result.group}</p>
         </div>
-        {result.status === "alive" && (
+        {(result.status === "alive" || result.resolution || result.codec) && (
           <>
             <div>
               <span className="text-text-tertiary">Video</span>

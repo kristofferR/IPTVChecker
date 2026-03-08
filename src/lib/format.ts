@@ -123,3 +123,38 @@ export function formatAudioInfo(result: ChannelResult): string {
   }
   return "—";
 }
+
+export function resolveResolutionLabel(width: number, height: number): string {
+  if (width >= 3840 && height >= 2160) return "4K";
+  if (width >= 1920 && height >= 1080) return "1080p";
+  if (width >= 1280 && height >= 720) return "720p";
+  if (width >= 854 && height >= 480) return "480p";
+  return "SD";
+}
+
+const CODEC_MAP: [RegExp, string][] = [
+  [/^avc1/i, "H264"],
+  [/^h\.?264$/i, "H264"],
+  [/^hvc1/i, "HEVC"],
+  [/^hev/i, "HEVC"],
+  [/^hevc$/i, "HEVC"],
+  [/^vp0?9/i, "VP9"],
+  [/^vp0?8/i, "VP8"],
+  [/^av01/i, "AV1"],
+  [/^mp4a/i, "AAC"],
+  [/^aac$/i, "AAC"],
+  [/^opus$/i, "Opus"],
+  [/^mp3$/i, "MP3"],
+  [/^flac$/i, "FLAC"],
+  [/^vorbis$/i, "Vorbis"],
+  [/^ac-?3/i, "AC3"],
+  [/^ec-?3/i, "EAC3"],
+  [/^e-?ac-?3/i, "EAC3"],
+];
+
+export function normalizeCodecName(raw: string): string {
+  for (const [pattern, name] of CODEC_MAP) {
+    if (pattern.test(raw)) return name;
+  }
+  return raw.toUpperCase();
+}
