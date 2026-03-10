@@ -24,12 +24,6 @@
         "visible": false
       }
     ],
-    "trayIcon": {
-      "id": "main",
-      "iconPath": "icons/32x32.png",
-      "showMenuOnLeftClick": false,
-      "tooltip": "IPTV Checker"
-    },
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost http://localhost:* ws://localhost:* https://api.github.com https: http:; img-src 'self' asset: http://asset.localhost data: blob: https: http:; media-src 'self' https: http: blob:; font-src 'self' data:; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self';"
     }

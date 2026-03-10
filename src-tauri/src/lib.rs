@@ -621,7 +621,7 @@ pub fn run() {
                 schedule_macos_system_appearance_patch(app.handle().clone(), "main".to_string());
             }
 
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(target_os = "linux")]
             {
                 use tauri::menu::{MenuBuilder, MenuItemBuilder};
                 use tauri::tray::TrayIconBuilder;
@@ -728,6 +728,12 @@ pub fn run() {
                 return;
             }
             let window = webview.window();
+
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            if window.label() == "settings" {
+                let _ = window.remove_menu();
+            }
+
             if matches!(window.is_visible(), Ok(false)) {
                 let _ = window.unminimize();
                 let _ = window.show();
