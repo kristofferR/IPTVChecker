@@ -1426,6 +1426,11 @@ async fn execute_scan_run(
     // Network connectivity tracking — consecutive network-level failures trigger a check
     let consecutive_net_failures = Arc::new(std::sync::atomic::AtomicU32::new(0));
 
+    // Adaptive concurrency — track pressure signals and successes to throttle dispatch
+    let timeout_pressure = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let adaptive_success_count = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let adaptive_throttle_engaged = Arc::new(AtomicBool::new(false));
+
     let mut handles = Vec::new();
 
     for channel in channels {
@@ -1476,6 +1481,68 @@ async fn execute_scan_run(
             consecutive_net_failures.store(0, Ordering::Relaxed);
         }
 
+        // Adaptive concurrency throttle — slow down dispatch when servers show pressure
+        {
+            let pressure = timeout_pressure.load(Ordering::Relaxed);
+            let successes = adaptive_success_count.load(Ordering::Relaxed);
+            let total_so_far = pressure + successes;
+            if total_so_far >= 10 {
+                let pressure_ratio = pressure as f64 / total_so_far as f64;
+                let delay_ms = if pressure_ratio > 0.5 {
+                    1000u64
+                } else if pressure_ratio > 0.3 {
+                    300
+                } else if pressure_ratio > 0.15 {
+                    50
+                } else {
+                    0
+                };
+
+                if delay_ms > 0 {
+                    if !adaptive_throttle_engaged.swap(true, Ordering::Relaxed) {
+                        log::info!(
+                            "Adaptive throttle engaged: pressure_ratio={:.2} ({}/{} channels), delay={}ms",
+                            pressure_ratio, pressure, total_so_far, delay_ms
+                        );
+                        let _ = app.emit(
+                            "scan://adaptive-throttle",
+                            ScanEvent {
+                                run_id: run_id.clone(),
+                                payload: serde_json::json!({
+                                    "engaged": true,
+                                    "pressure_ratio": pressure_ratio,
+                                    "delay_ms": delay_ms,
+                                }),
+                            },
+                        );
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                } else if adaptive_throttle_engaged.swap(false, Ordering::Relaxed) {
+                    log::info!(
+                        "Adaptive throttle disengaged: pressure_ratio={:.2}",
+                        pressure_ratio
+                    );
+                    let _ = app.emit(
+                        "scan://adaptive-throttle",
+                        ScanEvent {
+                            run_id: run_id.clone(),
+                            payload: serde_json::json!({
+                                "engaged": false,
+                                "pressure_ratio": pressure_ratio,
+                                "delay_ms": 0,
+                            }),
+                        },
+                    );
+                }
+
+                // Decay pressure counters periodically to make the system responsive to changes
+                if total_so_far > 100 {
+                    timeout_pressure.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v / 2)).ok();
+                    adaptive_success_count.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v / 2)).ok();
+                }
+            }
+        }
+
         let permit = semaphore.clone().acquire_owned().await;
         let permit = match permit {
             Ok(permit) => permit,
@@ -1514,6 +1581,8 @@ async fn execute_scan_run(
         let using_custom_dir = using_custom_screenshots_dir;
         let low_space_threshold_gb = low_space_threshold_gb;
         let consecutive_net_failures = Arc::clone(&consecutive_net_failures);
+        let timeout_pressure = Arc::clone(&timeout_pressure);
+        let adaptive_success_count = Arc::clone(&adaptive_success_count);
 
         let handle = tokio::spawn(async move {
             let _permit = permit;
@@ -1671,6 +1740,24 @@ async fn execute_scan_run(
                 }
             } else {
                 consecutive_net_failures.store(0, Ordering::Relaxed);
+            }
+
+            // Adaptive concurrency — track pressure signals
+            let is_pressure_signal = if shared.status == ChannelStatus::Dead {
+                // Timeout or rate limit errors are pressure signals
+                shared.error_reason.as_deref().map_or(false, |reason| {
+                    reason == "Timeout" || reason.starts_with("HTTP 429")
+                })
+            } else {
+                false
+            };
+            // Retries indicate the server is under strain even if the channel eventually succeeded
+            let had_retries = shared.retry_count.map_or(false, |count| count > 0);
+
+            if is_pressure_signal || had_retries {
+                timeout_pressure.fetch_add(1, Ordering::Relaxed);
+            } else {
+                adaptive_success_count.fetch_add(1, Ordering::Relaxed);
             }
 
             if timing.check_ms > 0.0 {
