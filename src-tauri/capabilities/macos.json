@@ -1,9 +1,10 @@
 {
   "identifier": "macos-only",
-  "description": "macOS-specific permissions for haptic feedback.",
+  "description": "macOS-specific permissions for haptic feedback and liquid glass rendering.",
   "windows": ["main*"],
   "platforms": ["macOS"],
   "permissions": [
-    "macos-haptics:default"
+    "macos-haptics:default",
+    "liquid-glass:default"
   ]
 }

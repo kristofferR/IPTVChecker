@@ -15,6 +15,8 @@ const MAX_FFPROBE_OUTPUT_CHARS: usize = 16_000;
 const PNG_SIGNATURE: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
 const FFPROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 const FFMPEG_BITRATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 // Compile-time target triple for resolving sidecar binary paths.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -58,6 +60,15 @@ fn resolve_binary(app: &AppHandle, name: &str) -> String {
 
     // Fall back to system PATH
     name.to_string()
+}
+
+fn configure_background_process(command: &mut tokio::process::Command) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+
+        command.as_std_mut().creation_flags(CREATE_NO_WINDOW);
+    }
 }
 
 fn stderr_excerpt(stderr: &str) -> String {
@@ -256,7 +267,10 @@ async fn run_tool_command(
 
     let resolved_bin = resolve_binary(app, name);
 
-    let mut child = tokio::process::Command::new(&resolved_bin)
+    let mut command = tokio::process::Command::new(&resolved_bin);
+    configure_background_process(&mut command);
+
+    let mut child = command
         .args(args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -926,7 +940,10 @@ pub async fn profile_bitrate(
 
     let resolved_bin = resolve_binary(app, "ffmpeg");
 
-    let mut child = tokio::process::Command::new(&resolved_bin)
+    let mut command = tokio::process::Command::new(&resolved_bin);
+    configure_background_process(&mut command);
+
+    let mut child = command
         .args([
             "-v",
             "verbose",

@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Least-privilege capability for primary and spawned app windows (`main*`). Granted permissions are limited to: core IPC defaults for command invocation, dialog open/save for playlist and export pickers, event listen/unlisten for backend and menu events, start-dragging for the custom toolbar titlebar behavior, OS info for platform detection, native notification APIs, and liquid glass rendering.",
+  "description": "Least-privilege capability for primary and spawned app windows (`main*`). Granted permissions are limited to: core IPC defaults for command invocation, dialog open/save for playlist and export pickers, event listen/unlisten for backend and menu events, start-dragging for the custom toolbar titlebar behavior, OS info for platform detection, and native notification APIs.",
   "windows": ["main*", "settings"],
   "permissions": [
     "core:default",
@@ -19,7 +19,6 @@
     "core:window:allow-is-fullscreen",
     "os:default",
     "notification:default",
-    "liquid-glass:default",
     "log:default"
   ]
 }

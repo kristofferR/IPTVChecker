@@ -8,7 +8,7 @@ default-run = "iptv-checker"
 
 [lib]
 name = "iptv_checker_lib"
-crate-type = ["lib", "cdylib", "staticlib"]
+crate-type = ["lib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -30,7 +30,6 @@ rand = "0.10"
 tokio-util = { version = "0.7", features = ["rt"] }
 log = "0.4"
 tauri-plugin-log = "2"
-tauri-plugin-liquid-glass = "0.1"
 tauri-plugin-os = "2"
 base64 = "0.22.1"
 sha2 = "0.10"
@@ -39,6 +38,7 @@ tauri-plugin-mcp = { git = "https://github.com/P3GLEG/tauri-plugin-mcp", feature
 fs2 = "0.4.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+tauri-plugin-liquid-glass = "0.1"
 tauri-plugin-macos-haptics = "1.0.0"
 objc2 = "0.6.4"
 core-foundation = "0.10"
