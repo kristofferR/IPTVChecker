@@ -30,8 +30,8 @@ describe("tableColumns helpers", () => {
       }),
     );
 
-    expect(widths.status).toBe(48);
+    expect(widths.status).toBe(32);
     expect(widths.name).toBe(420);
-    expect(widths.codec).toBe(96);
+    expect(widths.codec).toBe(66);
   });
 });
