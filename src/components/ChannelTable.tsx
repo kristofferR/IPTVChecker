@@ -252,18 +252,22 @@ export function ChannelTable({
     [columnOrder],
   );
 
-  const SCROLLBAR_ALLOWANCE = 15;
   const [containerWidth, setContainerWidth] = useState(0);
   const [containerHeight, setContainerHeight] = useState(0);
 
   useEffect(() => {
     const el = parentRef.current;
     if (!el) return;
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setContainerWidth(entry.contentRect.width);
-        setContainerHeight(entry.contentRect.height);
-      }
+
+    const updateContainerSize = () => {
+      setContainerWidth(el.clientWidth);
+      setContainerHeight(el.clientHeight);
+    };
+
+    updateContainerSize();
+
+    const ro = new ResizeObserver(() => {
+      updateContainerSize();
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -277,7 +281,7 @@ export function ChannelTable({
       (sum, col) => sum + (col.key === "name" ? 0 : columnWidths[col.key]),
       0,
     );
-    const autoWidth = containerWidth - SCROLLBAR_ALLOWANCE - sumOther;
+    const autoWidth = containerWidth - sumOther;
     return Math.max(columnWidths.name, autoWidth);
   }, [columns, columnOrder, columnWidths, containerWidth]);
 
