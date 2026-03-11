@@ -30,7 +30,7 @@ pub struct StalkerOpenRequest {
 const PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const PLAYLIST_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 const PLAYLIST_DOWNLOAD_MAX_BYTES: u64 = 200 * 1024 * 1024;
-const PLAYLIST_DOWNLOAD_USER_AGENT: &str = "VLC/3.0.23 LibVLC/3.0.23";
+const PLAYLIST_DOWNLOAD_USER_AGENT: &str = "TiviMate/5.1.6 (Android 12)";
 const XTREAM_PLAYER_API_TIMEOUT: Duration = Duration::from_secs(8);
 const STALKER_API_TIMEOUT: Duration = Duration::from_secs(12);
 const STALKER_USER_AGENT: &str =

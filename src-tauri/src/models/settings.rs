@@ -189,7 +189,7 @@ impl Default for AppSettings {
             concurrency: 1,
             retries: 1,
             retry_backoff: RetryBackoff::None,
-            user_agent: "VLC/3.0.23 LibVLC/3.0.23".to_string(),
+            user_agent: "TiviMate/5.1.6 (Android 12)".to_string(),
             skip_screenshots: false,
             profile_bitrate: false,
             ffprobe_timeout_secs: DEFAULT_FFPROBE_TIMEOUT_SECS,

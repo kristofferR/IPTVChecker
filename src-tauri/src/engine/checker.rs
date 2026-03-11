@@ -1080,7 +1080,7 @@ pub async fn check_channel_status_with_debug(
     headers.insert(
         USER_AGENT,
         HeaderValue::from_str(user_agent)
-            .unwrap_or_else(|_| HeaderValue::from_static("VLC/3.0.14 LibVLC/3.0.14")),
+            .unwrap_or_else(|_| HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")),
     );
 
     log::info!("Checking channel: {}", url);

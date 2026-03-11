@@ -134,7 +134,7 @@ pub async fn test_with_proxy(url: &str, proxy: &str, timeout: f64, retries: u32)
     let mut headers = HeaderMap::new();
     headers.insert(
         USER_AGENT,
-        HeaderValue::from_static("VLC/3.0.14 LibVLC/3.0.14"),
+        HeaderValue::from_static("TiviMate/5.1.6 (Android 12)"),
     );
 
     let stream_extensions = [".ts", ".m2ts", ".m4s", ".mp4", ".aac", ".m3u8"];
