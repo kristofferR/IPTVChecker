@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Cpu, KeyRound, Link2, Server, X, Loader2 } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
 import type {
   StalkerOpenRequest,
   XtreamOpenRequest,
@@ -51,6 +52,22 @@ function ServerTestModal({
   const [testReport, setTestReport] = useState<XtreamServerTestReport | null>(null);
   const [testRunning, setTestRunning] = useState(false);
   const [testError, setTestError] = useState<string | null>(null);
+  const [testProgress, setTestProgress] = useState<string | null>(null);
+  const testRunningRef = useRef(false);
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    listen<string>("scan://server-test-progress", (event) => {
+      if (testRunningRef.current) {
+        setTestProgress(event.payload);
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -74,7 +91,9 @@ function ServerTestModal({
     }
     setTestError(null);
     setTestReport(null);
+    setTestProgress(null);
     setTestRunning(true);
+    testRunningRef.current = true;
     try {
       const report = await testXtreamServers(lines, username, password);
       setTestReport(report);
@@ -82,6 +101,8 @@ function ServerTestModal({
       setTestError(error instanceof Error ? error.message : String(error));
     } finally {
       setTestRunning(false);
+      testRunningRef.current = false;
+      setTestProgress(null);
     }
   };
 
@@ -140,7 +161,7 @@ function ServerTestModal({
 
             {testRunning && (
               <span className="text-[12px] text-text-tertiary">
-                Discovering channels and probing servers...
+                {testProgress || "Starting..."}
               </span>
             )}
           </div>

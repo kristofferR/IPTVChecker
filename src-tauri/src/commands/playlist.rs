@@ -10,7 +10,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::net::IpAddr;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
@@ -1753,8 +1753,11 @@ pub async fn open_playlist_xtream(
 
 const SERVER_TEST_FFPROBE_TIMEOUT: Duration = Duration::from_secs(8);
 const SERVER_TEST_STREAM_TIMEOUT: Duration = Duration::from_secs(10);
-const SERVER_TEST_MAX_CHANNEL_CANDIDATES: usize = 50;
-const SERVER_TEST_TARGET_WORKING_CHANNELS: usize = 5;
+const SERVER_TEST_DISCOVERY_HTTP_TIMEOUT: Duration = Duration::from_secs(4);
+const SERVER_TEST_MAX_CHANNEL_CANDIDATES: usize = 15;
+const SERVER_TEST_TARGET_WORKING_CHANNELS: usize = 3;
+const SERVER_TEST_MAX_SCREENSHOTS: usize = 1;
+const SERVER_TEST_PROBE_CHANNELS: usize = 2;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct XtreamChannelProbe {
@@ -1787,6 +1790,10 @@ pub struct XtreamServerTestReport {
     pub channels_probed: u32,
 }
 
+fn emit_server_test_progress(app: &tauri::AppHandle, message: &str) {
+    let _ = app.emit("scan://server-test-progress", message.to_string());
+}
+
 fn build_xtream_stream_url(server: &Url, username: &str, password: &str, stream_id: &str) -> String {
     let mut base = server.clone();
     let mut path = base.path().trim_end_matches('/').to_string();
@@ -1813,38 +1820,60 @@ async fn fetch_xtream_stream_ids(
         .build()
         .map_err(|e| AppError::Other(format!("Failed to build HTTP client: {}", e)))?;
 
-    let response = client
-        .get(streams_url)
-        .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
-        .send()
-        .await
-        .map_err(|e| AppError::Other(format!("Failed to fetch live streams: {}", e)))?;
+    // Retry once on body-read failures (chunked transfer can drop mid-stream)
+    let mut last_error = None;
+    for attempt in 0..2 {
+        if attempt > 0 {
+            log::info!("Retrying live streams fetch (attempt {})", attempt + 1);
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
 
-    if !response.status().is_success() {
-        return Err(AppError::Other(format!(
-            "Live streams API returned HTTP {}",
-            response.status()
-        )));
+        let response = match client
+            .get(streams_url.clone())
+            .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
+            .send()
+            .await
+        {
+            Ok(resp) => resp,
+            Err(e) => {
+                last_error = Some(format!("Failed to fetch live streams: {}", e));
+                continue;
+            }
+        };
+
+        if !response.status().is_success() {
+            return Err(AppError::Other(format!(
+                "Live streams API returned HTTP {}",
+                response.status()
+            )));
+        }
+
+        let bytes = match response.bytes().await {
+            Ok(b) => b,
+            Err(e) => {
+                last_error = Some(format!("Failed to read live streams response: {}", e));
+                continue;
+            }
+        };
+
+        let streams: Vec<serde_json::Value> = serde_json::from_slice(&bytes)
+            .map_err(|e| AppError::Parse(format!("Failed to parse live streams JSON: {}", e)))?;
+
+        let ids: Vec<String> = streams
+            .iter()
+            .filter_map(|entry| match entry.get("stream_id") {
+                Some(serde_json::Value::Number(n)) => Some(n.to_string()),
+                Some(serde_json::Value::String(s)) => Some(s.clone()),
+                _ => None,
+            })
+            .collect();
+
+        return Ok(ids);
     }
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| AppError::Other(format!("Failed to read live streams response: {}", e)))?;
-
-    let streams: Vec<serde_json::Value> = serde_json::from_slice(&bytes)
-        .map_err(|e| AppError::Parse(format!("Failed to parse live streams JSON: {}", e)))?;
-
-    let ids: Vec<String> = streams
-        .iter()
-        .filter_map(|entry| match entry.get("stream_id") {
-            Some(serde_json::Value::Number(n)) => Some(n.to_string()),
-            Some(serde_json::Value::String(s)) => Some(s.clone()),
-            _ => None,
-        })
-        .collect();
-
-    Ok(ids)
+    Err(AppError::Other(
+        last_error.unwrap_or_else(|| "Failed to fetch live streams".to_string()),
+    ))
 }
 
 async fn discover_working_channels(
@@ -1855,6 +1884,7 @@ async fn discover_working_channels(
 ) -> Result<Vec<String>, AppError> {
     use crate::engine::checker::is_placeholder_url;
 
+    emit_server_test_progress(app, "Fetching channel list...");
     let mut ids = fetch_xtream_stream_ids(server, username, password).await?;
     if ids.is_empty() {
         return Err(AppError::Other(
@@ -1864,57 +1894,50 @@ async fn discover_working_channels(
 
     ids.shuffle(&mut rand::rng());
 
-    let cancel = CancellationToken::new();
-    let http_client = reqwest::Client::builder()
+    let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
         .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
-        .timeout(SERVER_TEST_STREAM_TIMEOUT)
+        .timeout(SERVER_TEST_DISCOVERY_HTTP_TIMEOUT)
         .danger_accept_invalid_certs(true)
         .build()
-        .ok();
+        .map_err(|e| AppError::Other(format!("Failed to build HTTP client: {}", e)))?;
 
     let mut working = Vec::new();
     let limit = ids.len().min(SERVER_TEST_MAX_CHANNEL_CANDIDATES);
 
-    for stream_id in ids.iter().take(limit) {
+    for (i, stream_id) in ids.iter().take(limit).enumerate() {
+        emit_server_test_progress(
+            app,
+            &format!(
+                "Discovering channels ({}/{})... found {}",
+                i + 1,
+                limit,
+                working.len()
+            ),
+        );
+
         let stream_url = build_xtream_stream_url(server, username, password, stream_id);
 
-        // Check for placeholder via HTTP redirect before running ffprobe
-        if let Some(ref client) = http_client {
-            match client
-                .get(&stream_url)
-                .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
-                .send()
-                .await
-            {
-                Ok(resp) => {
-                    let final_url = resp.url().to_string();
-                    if is_placeholder_url(&final_url) {
-                        log::debug!("Skipping placeholder channel {}: {}", stream_id, final_url);
-                        continue;
-                    }
-                }
-                Err(_) => continue,
-            }
-        }
-
-        match ffmpeg::collect_probe_snapshot_with_timeout(
-            app,
-            &stream_url,
-            &cancel,
-            Some(SERVER_TEST_FFPROBE_TIMEOUT),
-        )
-        .await
+        // HTTP-only check: verify the stream responds with 200 and isn't a placeholder.
+        // No ffprobe here — quality probing happens per-server in Phase 3.
+        match client
+            .get(&stream_url)
+            .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
+            .send()
+            .await
         {
-            Ok(snapshot) => {
-                if snapshot.video_info.is_some() {
-                    working.push(stream_id.clone());
-                    if working.len() >= SERVER_TEST_TARGET_WORKING_CHANNELS {
-                        break;
-                    }
+            Ok(resp) if resp.status().is_success() => {
+                let final_url = resp.url().to_string();
+                if is_placeholder_url(&final_url) {
+                    log::debug!("Skipping placeholder channel {}: {}", stream_id, final_url);
+                    continue;
+                }
+                working.push(stream_id.clone());
+                if working.len() >= SERVER_TEST_TARGET_WORKING_CHANNELS {
+                    break;
                 }
             }
-            Err(_) => continue,
+            _ => continue,
         }
     }
 
@@ -1968,6 +1991,7 @@ async fn probe_server_channels(
 
     let server_host = server.host_str().unwrap_or("unknown");
     let mut probes = Vec::new();
+    let mut screenshots_taken: usize = 0;
 
     for stream_id in stream_ids {
         let stream_url = build_xtream_stream_url(server, username, password, stream_id);
@@ -2013,24 +2037,31 @@ async fn probe_server_channels(
                 Err(_) => (None, None, None),
             };
 
-        // Capture screenshot
-        let file_name = format!("{}-{}", server_host, stream_id);
-        let screenshot = match ffmpeg::capture_screenshot(
-            app,
-            &stream_url,
-            &screenshot_dir.to_string_lossy(),
-            &file_name,
-            PLAYLIST_DOWNLOAD_USER_AGENT,
-            crate::models::settings::ScreenshotFormat::Webp,
-            &cancel,
-        )
-        .await
-        {
-            Ok(path) => read_file_as_base64_data_uri(std::path::Path::new(&path)),
-            Err(e) => {
-                log::debug!("Screenshot failed for {} on {}: {}", stream_id, server_host, e);
-                None
+        // Capture screenshot (limited to avoid excessive time)
+        let screenshot = if screenshots_taken < SERVER_TEST_MAX_SCREENSHOTS {
+            let file_name = format!("{}-{}", server_host, stream_id);
+            match ffmpeg::capture_screenshot(
+                app,
+                &stream_url,
+                &screenshot_dir.to_string_lossy(),
+                &file_name,
+                PLAYLIST_DOWNLOAD_USER_AGENT,
+                crate::models::settings::ScreenshotFormat::Webp,
+                &cancel,
+            )
+            .await
+            {
+                Ok(path) => {
+                    screenshots_taken += 1;
+                    read_file_as_base64_data_uri(std::path::Path::new(&path))
+                }
+                Err(e) => {
+                    log::debug!("Screenshot failed for {} on {}: {}", stream_id, server_host, e);
+                    None
+                }
             }
+        } else {
+            None
         };
 
         probes.push(XtreamChannelProbe {
@@ -2153,6 +2184,15 @@ pub async fn test_xtream_servers(
         return Err(AppError::Parse("No servers provided".to_string()));
     }
 
+    test_xtream_servers_inner(&app, servers, username, password).await
+}
+
+async fn test_xtream_servers_inner(
+    app: &tauri::AppHandle,
+    servers: Vec<String>,
+    username: String,
+    password: String,
+) -> Result<XtreamServerTestReport, AppError> {
     // Normalize all servers
     let normalized: Vec<(String, Url)> = servers
         .iter()
@@ -2163,6 +2203,11 @@ pub async fn test_xtream_servers(
         .collect::<Result<Vec<_>, AppError>>()?;
 
     // Phase 1: API test (parallel)
+    emit_server_test_progress(
+        app,
+        &format!("Testing API on {} servers...", normalized.len()),
+    );
+
     let api_futures: Vec<_> = normalized
         .iter()
         .map(|(raw, url)| {
@@ -2180,42 +2225,78 @@ pub async fn test_xtream_servers(
 
     let api_results = futures::future::join_all(api_futures).await;
 
-    // Phase 2: Discover working channels from the first successful server
-    let first_successful = api_results
+    let successful_count = api_results
         .iter()
-        .find(|(_, _, _, _, _, error)| error.is_none());
+        .filter(|(_, _, _, _, _, error)| error.is_none())
+        .count();
 
-    let first_server = match first_successful {
-        Some((_, url, ..)) => url.clone(),
+    emit_server_test_progress(
+        app,
+        &format!(
+            "{} of {} servers responded",
+            successful_count,
+            api_results.len()
+        ),
+    );
+
+    // Phase 2: Discover working channels — try each successful server until one works.
+    // Some servers pass the basic API check but fail on the larger get_live_streams request.
+    let successful_servers: Vec<Url> = api_results
+        .iter()
+        .filter(|(_, _, _, _, _, error)| error.is_none())
+        .map(|(_, url, ..)| url.clone())
+        .collect();
+
+    if successful_servers.is_empty() {
+        let results: Vec<XtreamServerTestResult> = api_results
+            .into_iter()
+            .map(|(raw, _, api_latency, status, max_conn, error)| {
+                XtreamServerTestResult {
+                    server: raw,
+                    success: false,
+                    api_latency_ms: api_latency,
+                    avg_stream_latency_ms: None,
+                    resolved_host: None,
+                    channel_probes: Vec::new(),
+                    error,
+                    account_status: status,
+                    max_connections: max_conn,
+                }
+            })
+            .collect();
+
+        return Ok(XtreamServerTestReport {
+            results,
+            same_cdn: false,
+            channels_probed: 0,
+        });
+    }
+
+    let mut working_channels = None;
+    for server in &successful_servers {
+        match discover_working_channels(app, server, &username, &password).await {
+            Ok(channels) => {
+                working_channels = Some(channels);
+                break;
+            }
+            Err(e) => {
+                log::warn!(
+                    "Channel discovery failed on {}: {}, trying next server",
+                    server,
+                    e
+                );
+            }
+        }
+    }
+
+    let working_channels = match working_channels {
+        Some(channels) => channels,
         None => {
-            // All failed — return results with errors
-            let results: Vec<XtreamServerTestResult> = api_results
-                .into_iter()
-                .map(|(raw, _, api_latency, status, max_conn, error)| {
-                    XtreamServerTestResult {
-                        server: raw,
-                        success: false,
-                        api_latency_ms: api_latency,
-                        avg_stream_latency_ms: None,
-                        resolved_host: None,
-                        channel_probes: Vec::new(),
-                        error,
-                        account_status: status,
-                        max_connections: max_conn,
-                    }
-                })
-                .collect();
-
-            return Ok(XtreamServerTestReport {
-                results,
-                same_cdn: false,
-                channels_probed: 0,
-            });
+            return Err(AppError::Other(
+                "Could not discover working channels from any server".to_string(),
+            ));
         }
     };
-
-    let working_channels =
-        discover_working_channels(&app, &first_server, &username, &password).await?;
     let channels_probed = working_channels.len() as u32;
 
     // Create temp dir for screenshots
@@ -2229,13 +2310,25 @@ pub async fn test_xtream_servers(
     let _ = std::fs::create_dir_all(&screenshot_dir);
 
     // Phase 3: Probe all servers (parallel across servers, sequential per server)
+    emit_server_test_progress(
+        app,
+        &format!(
+            "Probing {} channels across {} servers...",
+            channels_probed, successful_count
+        ),
+    );
+
     let probe_futures: Vec<_> = api_results
         .into_iter()
         .map(|(raw, url, api_latency, status, max_conn, api_error)| {
             let app = app.clone();
             let u = username.clone();
             let p = password.clone();
-            let channels = working_channels.clone();
+            let channels: Vec<String> = working_channels
+                .iter()
+                .take(SERVER_TEST_PROBE_CHANNELS)
+                .cloned()
+                .collect();
             let ss_dir = screenshot_dir.clone();
             async move {
                 if api_error.is_some() {
