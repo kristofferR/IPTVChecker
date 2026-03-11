@@ -116,12 +116,12 @@ fn build_label(kind: &RecentPlaylistKind, value: &str) -> String {
         RecentPlaylistKind::Xtream => parse_xtream_recent_value(value)
             .map(|source| {
                 format!(
-                    "Xtream: {} ({})",
+                    "{} ({})",
                     xtream_host_label(&source.server),
                     source.username
                 )
             })
-            .unwrap_or_else(|| "Xtream: Invalid Source".to_string()),
+            .unwrap_or_else(|| "Invalid Source".to_string()),
     }
 }
 
@@ -460,6 +460,6 @@ mod tests {
             &RecentPlaylistKind::Xtream,
             "{\"server\":\"https://demo.example.com:8080\",\"username\":\"bob\"}",
         );
-        assert_eq!(label, "Xtream: demo.example.com:8080 (bob)");
+        assert_eq!(label, "demo.example.com:8080 (bob)");
     }
 }
