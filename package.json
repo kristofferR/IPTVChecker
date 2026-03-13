@@ -37,15 +37,16 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@rolldown/plugin-babel": "^0.2.1",
     "@tailwindcss/vite": "^4",
     "@tauri-apps/cli": "^2.10.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@typescript/native-preview": "7.0.0-dev.20260305.1",
-    "@vitejs/plugin-react": "^5",
+    "@vitejs/plugin-react": "^6.0.1",
     "babel-plugin-react-compiler": "1.0.0",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vite": "^7"
+    "vite": "^8.0.0"
   }
 }
