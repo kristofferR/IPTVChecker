@@ -116,9 +116,9 @@ const UPDATE_CACHE_KEY = "updates:last-available-release";
 const START_SCREEN_RECENT_LIMIT = 5;
 const TABLE_PROFILER_ROW_LIMIT = 50_000;
 const GITHUB_LATEST_RELEASE_API =
-  "https://api.github.com/repos/kristofferR/IPTVChecker-GUI/releases/latest";
+  "https://api.github.com/repos/kristofferR/IPTVChecker/releases/latest";
 const GITHUB_RELEASES_PAGE =
-  "https://github.com/kristofferR/IPTVChecker-GUI/releases";
+  "https://github.com/kristofferR/IPTVChecker/releases";
 
 function normalizeVersion(version: string): string {
   return version.trim().replace(/^v/i, "");
