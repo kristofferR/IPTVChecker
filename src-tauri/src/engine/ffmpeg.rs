@@ -42,19 +42,31 @@ fn resolve_binary(app: &AppHandle, name: &str) -> String {
         ""
     };
 
-    if let Ok(dir) = app.path().resource_dir() {
-        // Production builds: binary has platform triple suffix
-        let sidecar_name = format!("{name}-{TARGET_TRIPLE}{ext}");
-        let path = dir.join(&sidecar_name);
-        if path.exists() {
-            return path.to_string_lossy().to_string();
-        }
+    let candidates = [
+        format!("{name}-{TARGET_TRIPLE}{ext}"),
+        format!("{name}{ext}"),
+    ];
 
-        // Dev builds: Tauri copies external binaries without the triple suffix
-        let dev_name = format!("{name}{ext}");
-        let path = dir.join(&dev_name);
-        if path.exists() {
-            return path.to_string_lossy().to_string();
+    // Check the executable's own directory first (macOS bundles externalBin
+    // into Contents/MacOS/, alongside the main binary).
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            for candidate in &candidates {
+                let path = dir.join(candidate);
+                if path.exists() {
+                    return path.to_string_lossy().to_string();
+                }
+            }
+        }
+    }
+
+    // Also check the Tauri resource directory.
+    if let Ok(dir) = app.path().resource_dir() {
+        for candidate in &candidates {
+            let path = dir.join(candidate);
+            if path.exists() {
+                return path.to_string_lossy().to_string();
+            }
         }
     }
 
