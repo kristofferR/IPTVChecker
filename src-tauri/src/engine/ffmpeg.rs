@@ -74,12 +74,12 @@ fn resolve_binary(app: &AppHandle, name: &str) -> String {
     name.to_string()
 }
 
-fn configure_background_process(command: &mut tokio::process::Command) {
+fn configure_background_process(_command: &mut tokio::process::Command) {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
 
-        command.as_std_mut().creation_flags(CREATE_NO_WINDOW);
+        _command.as_std_mut().creation_flags(CREATE_NO_WINDOW);
     }
 }
 
