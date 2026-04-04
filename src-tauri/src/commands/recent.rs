@@ -125,14 +125,27 @@ fn build_label(kind: &RecentPlaylistKind, value: &str) -> String {
     }
 }
 
+fn default_recent_playlists() -> Vec<RecentPlaylistEntry> {
+    vec![RecentPlaylistEntry {
+        kind: RecentPlaylistKind::Url,
+        value: "https://iptv-org.github.io/iptv/categories/news.m3u".to_string(),
+        label: "iptv-org — News channels".to_string(),
+    }]
+}
+
 fn load_recent_playlists(app: &tauri::AppHandle) -> Vec<RecentPlaylistEntry> {
     let Ok(store) = app.store("settings.json") else {
-        return Vec::new();
+        return default_recent_playlists();
     };
     let Some(value) = store.get(RECENT_STORE_KEY) else {
-        return Vec::new();
+        return default_recent_playlists();
     };
-    serde_json::from_value::<Vec<RecentPlaylistEntry>>(value).unwrap_or_default()
+    let entries =
+        serde_json::from_value::<Vec<RecentPlaylistEntry>>(value).unwrap_or_default();
+    if entries.is_empty() {
+        return default_recent_playlists();
+    }
+    entries
 }
 
 fn save_recent_playlists(app: &tauri::AppHandle, entries: &[RecentPlaylistEntry]) {

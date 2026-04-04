@@ -15,7 +15,7 @@
 
 ### Load any playlist
 
-Open M3U files from disk or URL, connect to Xtream Codes or Stalker portal accounts, or batch-load an entire folder of playlists.
+Open M3U files from disk or URL, connect to Xtream Codes or Stalker portal accounts, or batch-load an entire folder of playlists. A sample playlist from [iptv-org](https://github.com/iptv-org/iptv) is included to get started immediately.
 
 ### See what's actually working
 
