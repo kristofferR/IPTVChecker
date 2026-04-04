@@ -9,6 +9,10 @@
   Built with Tauri v2 — runs on macOS, Windows, and Linux.
 </p>
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="IPTV Checker screenshot" width="720">
+</p>
+
 ---
 
 ## Features
