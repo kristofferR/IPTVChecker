@@ -738,14 +738,14 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         })
-        .on_window_event(|window, event| {
+        .on_window_event(|_window, _event| {
             #[cfg(target_os = "macos")]
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+            if let tauri::WindowEvent::CloseRequested { .. } = _event {
                 if !APP_IS_QUITTING.load(Ordering::Relaxed) {
                     if let Some(target_window) =
-                        window.app_handle().get_webview_window(window.label())
+                        _window.app_handle().get_webview_window(_window.label())
                     {
-                        if let Err(error) = window.app_handle().liquid_glass().set_effect(
+                        if let Err(error) = _window.app_handle().liquid_glass().set_effect(
                             &target_window,
                             LiquidGlassConfig {
                                 enabled: false,
@@ -761,9 +761,9 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
+        .run(|_app, _event| {
             #[cfg(target_os = "macos")]
-            match event {
+            match _event {
                 tauri::RunEvent::MenuEvent(menu_event) => {
                     let event_id = menu_event.id().as_ref();
                     if event_id.contains("quit") {
@@ -788,13 +788,13 @@ pub fn run() {
                         return;
                     }
 
-                    if let Some(main_window) = app.get_webview_window("main") {
+                    if let Some(main_window) = _app.get_webview_window("main") {
                         let _ = main_window.unminimize();
                         let _ = main_window.show();
                         let _ = main_window.set_focus();
-                        schedule_macos_system_appearance_patch(app.clone(), "main".to_string());
+                        schedule_macos_system_appearance_patch(_app.clone(), "main".to_string());
                     } else {
-                        create_fresh_main_window(app);
+                        create_fresh_main_window(_app);
                     }
                 }
                 _ => {}
