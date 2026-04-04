@@ -83,3 +83,24 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
+
+      - name: Create Windows portable zip
+        if: startsWith(matrix.target, 'x86_64-pc-windows') || startsWith(matrix.target, 'aarch64-pc-windows')
+        shell: pwsh
+        run: |
+          $arch = if ("${{ matrix.target }}" -match "aarch64") { "arm64" } else { "x64" }
+          $version = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          $zipName = "IPTV.Checker_${version}_${arch}_portable.zip"
+          $staging = "portable-staging"
+          New-Item -ItemType Directory -Path $staging
+          Copy-Item "src-tauri/target/${{ matrix.target }}/release/iptv-checker.exe" "$staging/IPTV Checker.exe"
+          Copy-Item "src-tauri/binaries/ffmpeg-${{ matrix.target }}.exe" "$staging/ffmpeg.exe"
+          Copy-Item "src-tauri/binaries/ffprobe-${{ matrix.target }}.exe" "$staging/ffprobe.exe"
+          Compress-Archive -Path "$staging/*" -DestinationPath $zipName
+          echo "PORTABLE_ZIP=$zipName" >> $env:GITHUB_ENV
+
+      - name: Upload Windows portable zip
+        if: startsWith(matrix.target, 'x86_64-pc-windows') || startsWith(matrix.target, 'aarch64-pc-windows')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" "${{ env.PORTABLE_ZIP }}" --clobber
