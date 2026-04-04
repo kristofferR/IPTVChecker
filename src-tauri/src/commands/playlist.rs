@@ -256,6 +256,25 @@ fn source_cache_file_name(source_key: &str) -> String {
     format!("{}.m3u8", hash_source_key(source_key))
 }
 
+/// Derive a human-friendly playlist name from a URL.
+/// Prefers the filename from the path (e.g. "news.m3u"), falling back to the
+/// hostname (e.g. "iptv-org.github.io").
+fn friendly_name_from_url(url: &Url) -> String {
+    if let Some(segments) = url.path_segments() {
+        if let Some(last) = segments.filter(|s| !s.is_empty()).last() {
+            // Use the segment if it looks like a real name (has extension,
+            // is short, or isn't a pure hex hash).
+            if last.contains('.')
+                || last.len() < 40
+                || !last.chars().all(|c| c.is_ascii_hexdigit())
+            {
+                return last.to_string();
+            }
+        }
+    }
+    url.host_str().unwrap_or("Playlist").to_string()
+}
+
 fn app_data_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, AppError> {
     app.path().app_data_dir().map_err(|error| {
         AppError::Other(format!("Failed to resolve app data directory: {}", error))
@@ -1681,6 +1700,7 @@ pub(crate) async fn open_playlist_url_from_data_dir(
         download_playlist_to_cache_in_data_dir(data_dir, &source_key, &parsed, "playlist URL")
             .await?;
     let mut preview = parser::parse_playlist(&cached_path, &group_filter, &channel_search)?;
+    preview.file_name = friendly_name_from_url(&parsed);
     preview.source_identity = Some(format!("url:{}", normalized_identity));
     populate_server_location(&mut preview).await;
     Ok(preview)
@@ -1740,6 +1760,10 @@ pub async fn open_playlist_xtream(
     };
 
     let mut preview = parser::parse_playlist(&cached_path, &group_filter, &channel_search)?;
+    let server_host = server
+        .host_str()
+        .unwrap_or("Xtream");
+    preview.file_name = format!("{} ({})", server_host, username);
     preview.source_identity = Some(source_key);
     preview.xtream_max_connections = xtream_account_info
         .as_ref()
