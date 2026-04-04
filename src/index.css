@@ -512,6 +512,8 @@ body {
 [data-platform="macos"] .glass-material {
   -apple-visual-effect: -apple-system-glass-material;
   background: transparent !important;
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
 }
 
 @media (prefers-color-scheme: dark) {
