@@ -5,7 +5,7 @@
 <h1 align="center">IPTV Checker</h1>
 
 <p align="center">
-  A fast, native desktop app for validating IPTV playlists.<br>
+  A fast desktop app for validating IPTV playlists.<br>
   Built with Tauri v2 — runs on macOS, Windows, and Linux.
 </p>
 
@@ -35,9 +35,9 @@ Click any channel to see its thumbnail, or open the lightbox to browse screensho
 
 Export results as CSV, M3U (alive only, split by group, or renamed), or a full JSON scan log. Export everything, just alive channels, or your current selection.
 
-### Feels native
+### Lightweight and fast
 
-Liquid Glass vibrancy on macOS, native menus on every platform, keyboard shortcuts, dark/light/system theme, and desktop notifications when scans finish. Handles playlists with thousands of channels without breaking a sweat.
+Liquid Glass vibrancy on macOS, platform menus, keyboard shortcuts, dark/light/system theme, and desktop notifications when scans finish. Handles playlists with thousands of channels without breaking a sweat.
 
 ## Prerequisites
 
