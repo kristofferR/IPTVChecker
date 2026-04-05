@@ -31,13 +31,20 @@ Supports HTTP/HLS, RTSP, and RTMP streams. Route checks through a proxy if neede
 
 ### Browse, filter, and export
 
-Click any channel to see its thumbnail, or open the lightbox to browse screenshots with arrow keys. Filter by group, status, or regex search. Double-click a channel to play it in VLC, IINA, or whatever you have installed.
+Click any channel to see its thumbnail, preview it in the built-in player, or open the lightbox to browse screenshots with the arrow keys. Filter by group, status, or regex search. Double-click a channel to play it in VLC, IINA, or whatever you have installed.
 
 Export results as CSV, M3U (alive only, split by group, or renamed), or a full JSON scan log. Export everything, just alive channels, or your current selection.
 
 ### Lightweight and fast
 
 Liquid Glass vibrancy on macOS, platform menus, keyboard shortcuts, dark/light/system theme, and desktop notifications when scans finish. Handles playlists with thousands of channels without breaking a sweat.
+
+## Keyboard Shortcuts
+
+- `Arrow Up / Down` moves the channel selection so you can step through results quickly.
+- `Space` opens or closes the screenshot lightbox for the selected channel.
+- `S` starts a scan when idle, or stops the current scan.
+- `Cmd/Ctrl + /` opens the full shortcuts dialog in the app.
 
 ## Install
 

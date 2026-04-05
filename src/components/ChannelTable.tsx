@@ -22,7 +22,7 @@ import { getChannelErrorReason } from "../lib/channelResults";
 import { statusLabel } from "../lib/format";
 import { measureUiPerf } from "../lib/perf";
 import { isScanActive } from "../lib/scanState";
-import { isPrimaryModifierPressed } from "../lib/shortcuts";
+import { isInputLikeTarget, isPrimaryModifierPressed } from "../lib/shortcuts";
 import { channelRowHeightPixels } from "../lib/channelLogoSize";
 import { detectChannelProtocol } from "../lib/streamProtocol";
 import { useAppStore } from "../store";
@@ -93,17 +93,6 @@ function columnOrderMatchesDefaults(
 function columnWidthsMatchDefaults(widths: Record<ColumnKey, number>): boolean {
   return DEFAULT_COLUMN_ORDER.every(
     (key) => widths[key] === DEFAULT_COLUMN_WIDTHS[key],
-  );
-}
-
-function isInputLikeTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName.toLowerCase();
-  return (
-    tag === "input" ||
-    tag === "textarea" ||
-    tag === "select" ||
-    target.isContentEditable
   );
 }
 

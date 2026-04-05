@@ -26,6 +26,7 @@ function buildSections(modifierLabel: string): ShortcutSection[] {
       title: "Table Navigation",
       entries: [
         { keys: "Arrow Up / Down", action: "Move row focus and selection" },
+        { keys: "Space", action: "Open or close the screenshot lightbox" },
         { keys: "Double-click", action: "Open selected channel in player" },
       ],
     },
@@ -41,7 +42,7 @@ function buildSections(modifierLabel: string): ShortcutSection[] {
     {
       title: "Scan & Playback",
       entries: [
-        { keys: "Scan menu", action: "Start or stop scan" },
+        { keys: "S", action: "Start or stop scan" },
         { keys: "Context menu", action: "Scan selected channels" },
         { keys: "Double-click row", action: "Open in default player" },
       ],

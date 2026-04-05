@@ -66,7 +66,7 @@ import { logger } from "./lib/logger";
 import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/haptics";
 import { toPendingChannelResult } from "./lib/channelResults";
 import { isScanActive } from "./lib/scanState";
-import { isPrimaryModifierPressed } from "./lib/shortcuts";
+import { isInputLikeTarget, isPrimaryModifierPressed } from "./lib/shortcuts";
 import { recordUiPerf, startLongTaskObserver, uiPerfEnabled } from "./lib/perf";
 import { shouldAutoRevealReportPanel } from "./lib/playlistReportVisibility";
 
@@ -1370,13 +1370,15 @@ export default function App() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const inputLikeTarget = isInputLikeTarget(e.target);
       const hasPrimaryModifier = isPrimaryModifierPressed(e, isMac) && !e.altKey;
+      const lowerKey = e.key.toLowerCase();
 
-      if (hasPrimaryModifier && !e.shiftKey && e.key.toLowerCase() === "o") {
+      if (hasPrimaryModifier && !e.shiftKey && lowerKey === "o") {
         e.preventDefault();
         handleOpenShortcutRef.current();
       }
-      if (hasPrimaryModifier && !e.shiftKey && e.key.toLowerCase() === "f") {
+      if (hasPrimaryModifier && !e.shiftKey && lowerKey === "f") {
         e.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
@@ -1389,9 +1391,31 @@ export default function App() {
         e.preventDefault();
         getStore().setShowKeyboardShortcuts(true);
       }
-      if (e.key === " " && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
-        const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-        if (tag === "input" || tag === "textarea" || tag === "select" || (e.target as HTMLElement)?.isContentEditable) return;
+      if (
+        !e.repeat &&
+        !inputLikeTarget &&
+        !hasPrimaryModifier &&
+        !e.shiftKey &&
+        !e.altKey &&
+        lowerKey === "s"
+      ) {
+        e.preventDefault();
+        if (isScanActive(getStore().scanState)) {
+          void cancelRef.current();
+        } else {
+          void handleStartScanRef.current();
+        }
+        return;
+      }
+      if (
+        !e.repeat &&
+        e.key === " " &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.shiftKey &&
+        !e.altKey
+      ) {
+        if (inputLikeTarget) return;
         e.preventDefault();
         getStore().toggleLightboxOpen();
       }
