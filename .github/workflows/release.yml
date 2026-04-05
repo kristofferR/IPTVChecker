@@ -32,6 +32,9 @@ jobs:
             target: aarch64-pc-windows-msvc
 
     runs-on: ${{ matrix.os }}
+    env:
+      ASSET_PLATFORM: ${{ contains(matrix.target, 'apple-darwin') && 'mac' || contains(matrix.target, 'windows') && 'win' || 'lin' }}
+      ASSET_ARCH: ${{ startsWith(matrix.target, 'aarch64') && 'arm' || 'x64' }}
 
     steps:
       - name: Checkout
@@ -85,15 +88,17 @@ jobs:
           releaseName: "IPTV Checker ${{ github.ref_name }}"
           releaseDraft: true
           prerelease: false
+          # Keep these aliases stable: kristofferR/homebrew-tap builds asset URLs from them.
+          releaseAssetNamePattern: "IPTV.Checker_[version]_${{ env.ASSET_PLATFORM }}_${{ env.ASSET_ARCH }}[_setup][ext]"
           args: --target ${{ matrix.target }}
 
       - name: Create Windows portable zip
         if: startsWith(matrix.target, 'x86_64-pc-windows') || startsWith(matrix.target, 'aarch64-pc-windows')
         shell: pwsh
         run: |
-          $arch = if ("${{ matrix.target }}" -match "aarch64") { "arm64" } else { "x64" }
+          $arch = if ("${{ matrix.target }}" -match "aarch64") { "arm" } else { "x64" }
           $version = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
-          $zipName = "IPTV.Checker_${version}_${arch}_portable.zip"
+          $zipName = "IPTV.Checker_${version}_win_${arch}_portable.zip"
           $staging = "portable-staging"
           New-Item -ItemType Directory -Path $staging
           Copy-Item "src-tauri/target/${{ matrix.target }}/release/iptv-checker.exe" "$staging/IPTV Checker.exe"

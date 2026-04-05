@@ -50,6 +50,10 @@ Liquid Glass vibrancy on macOS, platform menus, keyboard shortcuts, dark/light/s
 
 ### Homebrew (macOS and Linux)
 
+Tap repo: [kristofferR/homebrew-tap](https://github.com/kristofferR/homebrew-tap)
+
+Homebrew currently consumes the macOS `.app.tar.gz` asset and Linux `.AppImage` asset from GitHub releases, so those release names need to stay stable.
+
 ```bash
 brew tap kristofferR/tap
 brew install iptv-checker
@@ -62,8 +66,8 @@ Download the latest release from the [Releases](https://github.com/kristofferR/I
 | Platform | Architecture | Files |
 |----------|-------------|-------|
 | macOS | Apple Silicon / Intel | `.dmg` |
-| Windows | x64 / ARM64 | `.exe` installer or portable `.zip` |
-| Linux | x64 / ARM64 | `.AppImage`, `.deb`, `.rpm` |
+| Windows | x64 / ARM | `.exe` installer or portable `.zip` |
+| Linux | x64 / ARM | `.AppImage`, `.deb`, `.rpm` |
 
 ## Building from source
 
