@@ -48,15 +48,28 @@ Liquid Glass vibrancy on macOS, platform menus, keyboard shortcuts, dark/light/s
 
 ## Install
 
-### Homebrew (macOS and Linux)
+### Homebrew
 
 Tap repo: [kristofferR/homebrew-tap](https://github.com/kristofferR/homebrew-tap)
 
-Homebrew currently consumes the macOS `.app.tar.gz` asset and Linux `.AppImage` asset from GitHub releases, so those release names need to stay stable.
+macOS installs as a Homebrew cask into `/Applications`.
 
 ```bash
 brew tap kristofferR/tap
 brew install iptv-checker
+```
+
+If `IPTV Checker.app` is already in `/Applications`, use:
+
+```bash
+brew install --adopt iptv-checker
+```
+
+Linux via Homebrew uses a separate formula:
+
+```bash
+brew tap kristofferR/tap
+brew install iptv-checker-linux
 ```
 
 ### All platforms
