@@ -41,11 +41,11 @@ Liquid Glass vibrancy on macOS, platform menus, keyboard shortcuts, dark/light/s
 
 ## Install
 
-### macOS (Homebrew)
+### Homebrew (macOS and Linux)
 
 ```bash
 brew tap kristofferR/tap
-brew install --cask iptv-checker
+brew install iptv-checker
 ```
 
 ### All platforms
