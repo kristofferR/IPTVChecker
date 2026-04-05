@@ -39,7 +39,28 @@ Export results as CSV, M3U (alive only, split by group, or renamed), or a full J
 
 Liquid Glass vibrancy on macOS, platform menus, keyboard shortcuts, dark/light/system theme, and desktop notifications when scans finish. Handles playlists with thousands of channels without breaking a sweat.
 
-## Prerequisites
+## Install
+
+### macOS (Homebrew)
+
+```bash
+brew tap kristofferR/tap
+brew install --cask iptv-checker
+```
+
+### All platforms
+
+Download the latest release from the [Releases](https://github.com/kristofferR/IPTVChecker/releases/latest) page.
+
+| Platform | Architecture | Files |
+|----------|-------------|-------|
+| macOS | Apple Silicon / Intel | `.dmg` |
+| Windows | x64 / ARM64 | `.exe` installer or portable `.zip` |
+| Linux | x64 / ARM64 | `.AppImage`, `.deb`, `.rpm` |
+
+## Building from source
+
+### Prerequisites
 
 - [Rust](https://rustup.rs/) (latest stable)
 - [Bun](https://bun.sh/) (JavaScript runtime and package manager)
