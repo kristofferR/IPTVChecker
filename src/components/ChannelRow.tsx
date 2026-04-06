@@ -67,7 +67,7 @@ function ChannelRowImpl({
   const logoSizePx = useMemo(() => channelLogoPixels(channelLogoSize), [channelLogoSize]);
   const rowHeightPx = useMemo(() => channelRowHeightPixels(channelLogoSize), [channelLogoSize]);
   const kindIconSizePx = useMemo(
-    () => Math.max(14, Math.round(logoSizePx * 0.78)),
+    () => Math.max(12, Math.round(logoSizePx * 0.68)),
     [logoSizePx],
   );
   const errorReason = getChannelErrorReason(result);
@@ -116,13 +116,15 @@ function ChannelRowImpl({
       case "name": {
         const ChannelKindIcon = result.audio_only ? Radio : Tv;
         const kindLabel = result.audio_only ? "Audio-only stream" : "Video stream";
+        const logoFrameClass =
+          "grid shrink-0 place-items-center rounded-sm ring-1 ring-border-subtle bg-panel-subtle";
         return (
           <span className="inline-flex min-w-0 items-center gap-1.5 px-2 font-medium">
             {logoUrl && !logoLoadFailed && logoStatus === "ready" ? (
               <img
                 src={logoUrl}
                 alt={`${result.name} logo`}
-                className="shrink-0 rounded-sm object-contain ring-1 ring-border-subtle bg-panel-subtle"
+                className={`${logoFrameClass} object-contain`}
                 style={{ width: `${logoSizePx}px`, height: `${logoSizePx}px` }}
                 loading="lazy"
                 decoding="async"
@@ -133,11 +135,12 @@ function ChannelRowImpl({
               />
             ) : (
               <span
-                className={`shrink-0 ${
+                className={`${logoFrameClass} ${
                   result.audio_only ? "text-cyan-400" : "text-text-tertiary"
                 }`}
                 aria-label={kindLabel}
                 title={kindLabel}
+                style={{ width: `${logoSizePx}px`, height: `${logoSizePx}px` }}
               >
                 <ChannelKindIcon size={kindIconSizePx} aria-hidden="true" />
               </span>
