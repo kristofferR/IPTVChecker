@@ -1,9 +1,9 @@
+use crate::engine::search_pattern::ChannelSearchPattern;
 use crate::engine::{ffmpeg, parser};
 use crate::error::AppError;
 use crate::models::channel::{Channel, ContentType};
 use crate::models::playlist::{PlaylistPreview, XtreamAccountInfo};
 use rand::seq::SliceRandom;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -1455,15 +1455,6 @@ async fn fetch_stalker_channels(
     )))
 }
 
-fn compile_search_pattern(channel_search: &Option<String>) -> Result<Option<Regex>, AppError> {
-    if let Some(search) = channel_search.as_ref() {
-        return Ok(Some(Regex::new(&format!("(?i){}", search)).map_err(
-            |error| AppError::Parse(format!("Invalid regex '{}': {}", search, error)),
-        )?));
-    }
-    Ok(None)
-}
-
 fn content_type_totals(channels: &[Channel]) -> (usize, usize, usize) {
     let mut live = 0usize;
     let mut movie = 0usize;
@@ -1488,7 +1479,7 @@ fn build_stalker_preview(
     group_filter: &Option<String>,
     channel_search: &Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
-    let pattern = compile_search_pattern(channel_search)?;
+    let pattern = ChannelSearchPattern::compile(channel_search)?;
     let mut groups = BTreeSet::<String>::new();
     let mut channels = Vec::<Channel>::new();
     let mut source_index = 0usize;
@@ -1527,7 +1518,7 @@ fn build_stalker_preview(
             true
         };
         let include_search = if let Some(ref regex) = pattern {
-            regex.is_match(&raw_name)
+            regex.is_match(&raw_name)?
         } else {
             true
         };
@@ -2685,6 +2676,45 @@ mod tests {
             .source_identity
             .expect("source identity should exist")
             .starts_with("stalker:"));
+    }
+
+    #[test]
+    fn build_stalker_preview_supports_negative_lookahead_search() {
+        let portal = normalize_stalker_portal("https://demo.example.com:8080/c")
+            .expect("portal URL should normalize");
+        let channels_payload = vec![
+            serde_json::json!({
+                "id": 10,
+                "name": "News HD",
+                "cmd": "ffmpeg http://streams.example.com/news.m3u8",
+                "tv_genre_title": "News"
+            }),
+            serde_json::json!({
+                "id": 11,
+                "name": "Friday Event",
+                "cmd": "http://streams.example.com/event.m3u8",
+                "tv_genre_title": "Sports"
+            }),
+            serde_json::json!({
+                "id": 12,
+                "name": "Sports PPV",
+                "cmd": "http://streams.example.com/ppv.m3u8",
+                "tv_genre_title": "Sports"
+            }),
+        ];
+
+        let preview = build_stalker_preview(
+            &portal,
+            "00:1A:79:12:34:56",
+            channels_payload,
+            &std::collections::HashMap::new(),
+            &None,
+            &Some("^(?!.*(event|ppv))".to_string()),
+        )
+        .expect("preview should build");
+
+        assert_eq!(preview.total_channels, 1);
+        assert_eq!(preview.channels[0].name, "News HD");
     }
 
     #[test]

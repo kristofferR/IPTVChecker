@@ -330,7 +330,7 @@ pub fn run() {
                 .accelerator("Cmd+Shift+R")
                 .build(app)?;
         let toggle_prescan_item =
-            MenuItemBuilder::with_id("menu.view.toggle_prescan_filter", "Show Pre-scan Filter")
+            MenuItemBuilder::with_id("menu.view.toggle_prescan_filter", "Show Source Filter")
                 .accelerator("Cmd+Shift+F")
                 .build(app)?;
         let clear_filters_item =
@@ -450,7 +450,7 @@ pub fn run() {
                 .accelerator("Ctrl+Shift+R")
                 .build(app)?;
         let toggle_prescan_item =
-            MenuItemBuilder::with_id("menu.view.toggle_prescan_filter", "Show Pre-scan Filter")
+            MenuItemBuilder::with_id("menu.view.toggle_prescan_filter", "Show Source Filter")
                 .accelerator("Ctrl+Shift+F")
                 .build(app)?;
         let clear_filters_item =

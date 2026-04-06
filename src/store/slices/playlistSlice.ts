@@ -6,9 +6,13 @@ export const createPlaylistSlice: StateCreator<AppStore, [], [], PlaylistSlice> 
   playlistLoading: false,
   playlistOpenError: null,
   recentPlaylists: [],
+  currentSourceDescriptor: null,
+  lastAppliedSourceFilter: "",
 
   setPlaylist: (playlist) => set({ playlist }),
   setPlaylistLoading: (playlistLoading) => set({ playlistLoading }),
   setPlaylistOpenError: (playlistOpenError) => set({ playlistOpenError }),
   setRecentPlaylists: (recentPlaylists) => set({ recentPlaylists }),
+  setCurrentSourceDescriptor: (currentSourceDescriptor) => set({ currentSourceDescriptor }),
+  setLastAppliedSourceFilter: (lastAppliedSourceFilter) => set({ lastAppliedSourceFilter }),
 });

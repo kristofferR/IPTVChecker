@@ -208,7 +208,7 @@ export const Toolbar = memo(function Toolbar({
   const useWindowDragRegion = platform !== "linux";
   const scanBlockedReason = useMemo(() => {
     const err = validateRegex(channelSearch);
-    return err ? `Invalid pre-scan regex: ${err}` : null;
+    return err ? `Invalid source filter regex: ${err}` : null;
   }, [channelSearch]);
 
   const isMac = platform === "macos";

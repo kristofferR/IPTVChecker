@@ -613,9 +613,9 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
               <section className={blockClass}>
                 <div className={rowClass}>
                   <div>
-                    <p className="text-[13px] font-medium">Show pre-scan filter bar</p>
+                    <p className="text-[13px] font-medium">Show source filter bar</p>
                     <p className="text-[11px] text-text-tertiary mt-0.5">
-                      Display the regex filter bar before scanning.
+                      Display the regex source filter bar above the table.
                     </p>
                   </div>
                   <Switch
@@ -623,7 +623,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     onChange={(checked) =>
                       updateSetting("show_prescan_filter", checked, { immediate: true })
                     }
-                    ariaLabel="Show pre-scan filter bar"
+                    ariaLabel="Show source filter bar"
                   />
                 </div>
 

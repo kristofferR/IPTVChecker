@@ -22,8 +22,10 @@ import {
 } from "@tauri-apps/plugin-notification";
 import type {
   ChannelResult,
+  CurrentSourceDescriptor,
   RecentPlaylistEntry,
   ScanConfig,
+  PlaylistPreview,
   StalkerOpenRequest,
   XtreamOpenRequest,
   XtreamRecentSource,
@@ -69,6 +71,11 @@ import { isScanActive } from "./lib/scanState";
 import { isInputLikeTarget, isPrimaryModifierPressed } from "./lib/shortcuts";
 import { recordUiPerf, startLongTaskObserver, uiPerfEnabled } from "./lib/perf";
 import { shouldAutoRevealReportPanel } from "./lib/playlistReportVisibility";
+import {
+  hasDirtySourceFilter,
+  normalizeSourceFilter,
+  resolvePreservedGroupFilter,
+} from "./lib/sourceFilter";
 
 function errorToString(err: unknown): string {
   if (typeof err === "string") {
@@ -98,6 +105,19 @@ function formatPlaylistOpenError(err: unknown): string {
     : `Failed to open playlist: ${raw}`;
 }
 
+function formatSourceReloadError(err: unknown): string {
+  const raw = errorToString(err).replace(/^error:\s*/i, "").trim();
+  const normalized = raw.replace(/^failed to open playlist:\s*/i, "").trim();
+
+  if (!normalized || normalized === "[object Object]") {
+    return "Failed to reload source. Please verify the source settings and filter.";
+  }
+
+  return raw.toLowerCase().startsWith("failed to reload source")
+    ? raw
+    : `Failed to reload source: ${normalized}`;
+}
+
 function validateRegexPattern(pattern: string): string | null {
   const trimmed = pattern.trim();
   if (!trimmed) return null;
@@ -119,6 +139,18 @@ const GITHUB_LATEST_RELEASE_API =
   "https://api.github.com/repos/kristofferR/IPTVChecker/releases/latest";
 const GITHUB_RELEASES_PAGE =
   "https://github.com/kristofferR/IPTVChecker/releases";
+
+type SourceLoadMode = "freshOpen" | "reapplySourceFilter";
+
+type LoadAndCommitSourceResult =
+  | {
+      ok: true;
+      preview: PlaylistPreview;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
 
 function normalizeVersion(version: string): string {
   return version.trim().replace(/^v/i, "");
@@ -915,48 +947,166 @@ export default function App() {
     };
   }, [checkForUpdates]);
 
-  const openPlaylistPath = useCallback(async (selectedPath: string) => {
-    getStore().setPlaylistOpenError(null);
-    getStore().setPlaylistLoading(true);
-    try {
-      const searchTrimmed = channelSearch.trim() || undefined;
-      logger.debug(
-        `[App] Opening playlist: ${selectedPath}, channelSearch: "${searchTrimmed ?? ""}"`,
-      );
-      const preview = await openPlaylist(selectedPath, undefined, searchTrimmed);
-      logger.debug(
-        `[App] Playlist loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
-        preview.groups,
-      );
-      getStore().setPlaylist(preview);
-      initFromPlaylist(preview.channels);
-      getStore().setSearch("");
-      getStore().setGroupFilter("all");
-      getStore().setStatusFilter("all");
-      getStore().setPlaylistOpenError(null);
-      getStore().setSelectedChannel(null);
-      getStore().setSelectedChannelIndices([]);
-      getStore().setPendingPlaybackChannel(null);
-      getStore().setShowHistory(false);
-      try {
-        const entries = await addRecentPlaylist("file", selectedPath);
-        getStore().setRecentPlaylists(entries);
-      } catch {
-        // Ignore recent-list update failures.
+  const commitLoadedPlaylist = useCallback(
+    async (
+      preview: PlaylistPreview,
+      descriptor: CurrentSourceDescriptor,
+      mode: SourceLoadMode,
+      appliedSourceFilter: string,
+    ) => {
+      const state = getStore();
+      state.setPlaylist(preview);
+      state.setCurrentSourceDescriptor(descriptor);
+      state.setLastAppliedSourceFilter(appliedSourceFilter);
+      state.setPlaylistOpenError(null);
+
+      if (mode === "freshOpen") {
+        state.setSearch("");
+        state.setGroupFilter("all");
+        state.setStatusFilter("all");
+        state.setShowHistory(false);
+      } else {
+        state.setGroupFilter(
+          resolvePreservedGroupFilter(state.groupFilter, preview.groups),
+        );
       }
-    } catch (err) {
-      logger.error("[App] Failed to open playlist", err);
-      getStore().setPlaylistOpenError(formatPlaylistOpenError(err));
-      // Keep app interaction predictable after a failed open attempt.
-      getStore().setSelectedChannel(null);
-      getStore().setSelectedChannelIndices([]);
-      getStore().setPendingPlaybackChannel(null);
-      getStore().setShowHistory(false);
-      void refreshRecentPlaylists();
-    } finally {
-      getStore().setPlaylistLoading(false);
+
+      state.setSelectedChannel(null);
+      state.setSelectedChannelIndices([]);
+      state.setPendingPlaybackChannel(null);
+
+      await initFromPlaylist(preview.channels);
+    },
+    [initFromPlaylist],
+  );
+
+  const loadSourcePreview = useCallback(
+    async (
+      descriptor: CurrentSourceDescriptor,
+      normalizedSourceFilter: string,
+    ): Promise<PlaylistPreview> => {
+      const channelSearch = normalizedSourceFilter || undefined;
+
+      switch (descriptor.kind) {
+        case "path":
+          return openPlaylist(descriptor.path, undefined, channelSearch);
+        case "url":
+          return openPlaylistUrl(descriptor.url, undefined, channelSearch);
+        case "xtream":
+          return openPlaylistXtream(
+            {
+              server: descriptor.server,
+              username: descriptor.username,
+              password: descriptor.password,
+            },
+            undefined,
+            channelSearch,
+          );
+        case "stalker":
+          return openPlaylistStalker(
+            {
+              portal: descriptor.portal,
+              mac: descriptor.mac,
+            },
+            undefined,
+            channelSearch,
+          );
+      }
+    },
+    [],
+  );
+
+  const loadAndCommitSource = useCallback(
+    async (
+      descriptor: CurrentSourceDescriptor,
+      mode: SourceLoadMode,
+    ): Promise<LoadAndCommitSourceResult> => {
+      const normalizedSourceFilter = normalizeSourceFilter(channelSearch);
+      const sourceLabel = (() => {
+        switch (descriptor.kind) {
+          case "path":
+            return `path=${descriptor.path}`;
+          case "url":
+            return `url=${descriptor.url}`;
+          case "xtream":
+            return `xtream server=${descriptor.server}, username=${descriptor.username}`;
+          case "stalker":
+            return `stalker portal=${descriptor.portal}, mac=${descriptor.mac}`;
+        }
+      })();
+      const loadingAction =
+        mode === "reapplySourceFilter"
+          ? "Reloading source with source filter"
+          : "Opening source";
+
+      getStore().setPlaylistOpenError(null);
+      getStore().setPlaylistLoading(true);
+
+      try {
+        logger.debug(
+          `[App] ${loadingAction}: ${sourceLabel}, channelSearch="${normalizedSourceFilter}"`,
+        );
+        const preview = await loadSourcePreview(descriptor, normalizedSourceFilter);
+        logger.debug(
+          `[App] Source loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
+          preview.groups,
+        );
+        await commitLoadedPlaylist(
+          preview,
+          descriptor,
+          mode,
+          normalizedSourceFilter,
+        );
+        return { ok: true, preview };
+      } catch (err) {
+        logger.error(
+          mode === "reapplySourceFilter"
+            ? "[App] Failed to reload source with source filter"
+            : "[App] Failed to open source",
+          err,
+        );
+        const message =
+          mode === "reapplySourceFilter"
+            ? formatSourceReloadError(err)
+            : formatPlaylistOpenError(err);
+        getStore().setPlaylistOpenError(message);
+
+        if (mode === "freshOpen") {
+          // Keep app interaction predictable after a failed fresh open attempt.
+          getStore().setSelectedChannel(null);
+          getStore().setSelectedChannelIndices([]);
+          getStore().setPendingPlaybackChannel(null);
+          getStore().setShowHistory(false);
+          void refreshRecentPlaylists();
+        }
+
+        return { ok: false, error: message };
+      } finally {
+        getStore().setPlaylistLoading(false);
+      }
+    },
+    [channelSearch, commitLoadedPlaylist, loadSourcePreview, refreshRecentPlaylists],
+  );
+
+  const openPlaylistPath = useCallback(async (selectedPath: string) => {
+    const result = await loadAndCommitSource(
+      {
+        kind: "path",
+        path: selectedPath,
+      },
+      "freshOpen",
+    );
+    if (!result.ok) {
+      return;
     }
-  }, [initFromPlaylist, channelSearch, refreshRecentPlaylists]);
+
+    try {
+      const entries = await addRecentPlaylist("file", selectedPath);
+      getStore().setRecentPlaylists(entries);
+    } catch {
+      // Ignore recent-list update failures.
+    }
+  }, [loadAndCommitSource]);
 
   const handleOpen = useCallback(async () => {
     const path = await open({
@@ -988,155 +1138,129 @@ export default function App() {
   }, [openPlaylistPath]);
 
   const openPlaylistUrlValue = useCallback(async (url: string): Promise<string | true> => {
-    getStore().setPlaylistOpenError(null);
-    getStore().setPlaylistLoading(true);
+    const result = await loadAndCommitSource(
+      {
+        kind: "url",
+        url,
+      },
+      "freshOpen",
+    );
+    if (!result.ok) {
+      return result.error;
+    }
+
     try {
-      const searchTrimmed = channelSearch.trim() || undefined;
-      logger.debug(
-        `[App] Opening playlist URL: ${url}, channelSearch: "${searchTrimmed ?? ""}"`,
+      const entries = await addRecentPlaylist("url", url);
+      getStore().setRecentPlaylists(entries);
+    } catch {
+      // Ignore recent-list update failures.
+    }
+
+    return true;
+  }, [loadAndCommitSource]);
+
+  const openPlaylistXtreamValue = useCallback(
+    async (source: XtreamOpenRequest, savePassword?: boolean): Promise<string | true> => {
+      const result = await loadAndCommitSource(
+        {
+          kind: "xtream",
+          server: source.server,
+          username: source.username,
+          password: source.password,
+        },
+        "freshOpen",
       );
-      const preview = await openPlaylistUrl(url, undefined, searchTrimmed);
-      logger.debug(
-        `[App] Playlist URL loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
-        preview.groups,
-      );
-      getStore().setPlaylist(preview);
-      initFromPlaylist(preview.channels);
-      getStore().setSearch("");
-      getStore().setGroupFilter("all");
-      getStore().setStatusFilter("all");
-      getStore().setPlaylistOpenError(null);
-      getStore().setSelectedChannel(null);
-      getStore().setSelectedChannelIndices([]);
-      getStore().setPendingPlaybackChannel(null);
-      getStore().setShowHistory(false);
+      if (!result.ok) {
+        return result.error;
+      }
+
+      if (
+        typeof result.preview.xtream_max_connections === "number" &&
+        Number.isFinite(result.preview.xtream_max_connections) &&
+        result.preview.xtream_max_connections > 0
+      ) {
+        const effectiveConcurrency = Math.max(
+          1,
+          Math.min(20, Math.round(result.preview.xtream_max_connections)),
+        );
+        getStore().setMenuInfo(
+          `Xtream max connections detected: ${result.preview.xtream_max_connections}. Scan concurrency will use ${effectiveConcurrency}.`,
+        );
+      }
+
       try {
-        const entries = await addRecentPlaylist("url", url);
+        const entries = await addRecentPlaylist(
+          "xtream",
+          serializeXtreamRecent({
+            server: source.server,
+            username: source.username,
+            password: savePassword ? source.password : undefined,
+          }),
+        );
         getStore().setRecentPlaylists(entries);
       } catch {
         // Ignore recent-list update failures.
       }
-      return true;
-    } catch (err) {
-      logger.error("[App] Failed to open playlist URL", err);
-      const message = formatPlaylistOpenError(err);
-      getStore().setSelectedChannel(null);
-      getStore().setSelectedChannelIndices([]);
-      getStore().setPendingPlaybackChannel(null);
-      getStore().setShowHistory(false);
-      void refreshRecentPlaylists();
-      return message;
-    } finally {
-      getStore().setPlaylistLoading(false);
-    }
-  }, [channelSearch, initFromPlaylist, refreshRecentPlaylists]);
 
-  const openPlaylistXtreamValue = useCallback(
-    async (source: XtreamOpenRequest, savePassword?: boolean): Promise<string | true> => {
-      getStore().setPlaylistOpenError(null);
-      getStore().setPlaylistLoading(true);
-      try {
-        const searchTrimmed = channelSearch.trim() || undefined;
-        logger.debug(
-          `[App] Opening Xtream playlist: server=${source.server}, username=${source.username}, channelSearch="${searchTrimmed ?? ""}"`,
-        );
-        const preview = await openPlaylistXtream(source, undefined, searchTrimmed);
-        logger.debug(
-          `[App] Xtream playlist loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
-          preview.groups,
-        );
-        if (
-          typeof preview.xtream_max_connections === "number" &&
-          Number.isFinite(preview.xtream_max_connections) &&
-          preview.xtream_max_connections > 0
-        ) {
-          const effectiveConcurrency = Math.max(
-            1,
-            Math.min(20, Math.round(preview.xtream_max_connections)),
-          );
-          getStore().setMenuInfo(
-            `Xtream max connections detected: ${preview.xtream_max_connections}. Scan concurrency will use ${effectiveConcurrency}.`,
-          );
-        }
-        getStore().setPlaylist(preview);
-        initFromPlaylist(preview.channels);
-        getStore().setSearch("");
-        getStore().setGroupFilter("all");
-        getStore().setStatusFilter("all");
-        getStore().setPlaylistOpenError(null);
-        getStore().setSelectedChannel(null);
-        getStore().setSelectedChannelIndices([]);
-        getStore().setPendingPlaybackChannel(null);
-        getStore().setShowHistory(false);
-        try {
-          const entries = await addRecentPlaylist(
-            "xtream",
-            serializeXtreamRecent({
-              server: source.server,
-              username: source.username,
-              password: savePassword ? source.password : undefined,
-            }),
-          );
-          getStore().setRecentPlaylists(entries);
-        } catch {
-          // Ignore recent-list update failures.
-        }
-        return true;
-      } catch (err) {
-        logger.error("[App] Failed to open Xtream playlist", err);
-        const message = formatPlaylistOpenError(err);
-        getStore().setSelectedChannel(null);
-        getStore().setSelectedChannelIndices([]);
-        getStore().setPendingPlaybackChannel(null);
-        getStore().setShowHistory(false);
-        void refreshRecentPlaylists();
-        return message;
-      } finally {
-        getStore().setPlaylistLoading(false);
-      }
+      return true;
     },
-    [channelSearch, initFromPlaylist, refreshRecentPlaylists],
+    [loadAndCommitSource],
   );
 
   const openPlaylistStalkerValue = useCallback(
     async (source: StalkerOpenRequest): Promise<string | true> => {
-      getStore().setPlaylistOpenError(null);
-      getStore().setPlaylistLoading(true);
-      try {
-        const searchTrimmed = channelSearch.trim() || undefined;
-        logger.debug(
-          `[App] Opening Stalker playlist: portal=${source.portal}, mac=${source.mac}, channelSearch="${searchTrimmed ?? ""}"`,
-        );
-        const preview = await openPlaylistStalker(source, undefined, searchTrimmed);
-        logger.debug(
-          `[App] Stalker playlist loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
-          preview.groups,
-        );
-        getStore().setPlaylist(preview);
-        initFromPlaylist(preview.channels);
-        getStore().setSearch("");
-        getStore().setGroupFilter("all");
-        getStore().setStatusFilter("all");
-        getStore().setPlaylistOpenError(null);
-        getStore().setSelectedChannel(null);
-        getStore().setSelectedChannelIndices([]);
-        getStore().setPendingPlaybackChannel(null);
-        getStore().setShowHistory(false);
-        return true;
-      } catch (err) {
-        logger.error("[App] Failed to open Stalker playlist", err);
-        const message = formatPlaylistOpenError(err);
-        getStore().setSelectedChannel(null);
-        getStore().setSelectedChannelIndices([]);
-        getStore().setPendingPlaybackChannel(null);
-        getStore().setShowHistory(false);
-        return message;
-      } finally {
-        getStore().setPlaylistLoading(false);
-      }
+      const result = await loadAndCommitSource(
+        {
+          kind: "stalker",
+          portal: source.portal,
+          mac: source.mac,
+        },
+        "freshOpen",
+      );
+      return result.ok ? true : result.error;
     },
-    [channelSearch, initFromPlaylist],
+    [loadAndCommitSource],
   );
+
+  const ensureSourceFilterApplied = useCallback(async () => {
+    const state = getStore();
+    if (
+      !hasDirtySourceFilter(
+        state.channelSearch,
+        state.lastAppliedSourceFilter,
+        state.currentSourceDescriptor,
+      )
+    ) {
+      return { ok: true, reapplied: false };
+    }
+
+    if (!state.currentSourceDescriptor) {
+      return { ok: true, reapplied: false };
+    }
+
+    const result = await loadAndCommitSource(
+      state.currentSourceDescriptor,
+      "reapplySourceFilter",
+    );
+    return { ok: result.ok, reapplied: result.ok };
+  }, [loadAndCommitSource]);
+
+  const handleApplySourceFilter = useCallback(() => {
+    const state = getStore();
+    if (!state.currentSourceDescriptor) {
+      return;
+    }
+    if (
+      !hasDirtySourceFilter(
+        state.channelSearch,
+        state.lastAppliedSourceFilter,
+        state.currentSourceDescriptor,
+      )
+    ) {
+      return;
+    }
+    void loadAndCommitSource(state.currentSourceDescriptor, "reapplySourceFilter");
+  }, [loadAndCommitSource]);
 
   const openSourceDialog = useCallback((state: OpenSourceDialogState) => {
     getStore().setOpenSourceDialogState(state);
@@ -1465,16 +1589,28 @@ export default function App() {
 
   const startScanWithSelection = useCallback(async (selection: number[]) => {
     const state = getStore();
-    const currentPlaylist = state.playlist;
-    const currentChannelSearch = state.channelSearch;
-    const currentGroupFilter = state.groupFilter;
-    const currentSettings = state.settings;
-    const currentChannelSearchError = validateRegexPattern(currentChannelSearch);
+    const currentChannelSearchError = validateRegexPattern(state.channelSearch);
 
     if (currentChannelSearchError) {
-      state.setScanInputError(`Invalid pre-scan regex: ${currentChannelSearchError}`);
+      state.setScanInputError(
+        `Invalid source filter regex: ${currentChannelSearchError}`,
+      );
       return false;
     }
+
+    const applyResult = await ensureSourceFilterApplied();
+    if (!applyResult.ok) {
+      return false;
+    }
+
+    const refreshedState = getStore();
+    const currentPlaylist = refreshedState.playlist;
+    const currentChannelSearch = normalizeSourceFilter(
+      refreshedState.channelSearch,
+    );
+    const currentGroupFilter = refreshedState.groupFilter;
+    const currentSettings = refreshedState.settings;
+    const effectiveSelection = applyResult.reapplied ? [] : selection;
 
     if (!currentPlaylist) return false;
 
@@ -1482,8 +1618,8 @@ export default function App() {
       file_path: currentPlaylist.file_path,
       source_identity: currentPlaylist.source_identity ?? null,
       group_filter: currentGroupFilter !== "all" ? currentGroupFilter : null,
-      channel_search: currentChannelSearch.trim() || null,
-      selected_indices: selection.length > 0 ? selection : null,
+      channel_search: currentChannelSearch || null,
+      selected_indices: effectiveSelection.length > 0 ? effectiveSelection : null,
       timeout: currentSettings.timeout,
       extended_timeout: currentSettings.extended_timeout,
       concurrency:
@@ -1508,9 +1644,9 @@ export default function App() {
       },
     };
 
-    await start(config, currentPlaylist.total_channels, selection);
+    await start(config, currentPlaylist.total_channels, effectiveSelection);
     return true;
-  }, [start]);
+  }, [ensureSourceFilterApplied, start]);
 
   const handleStartScan = useCallback(async () => {
     const started = await startScanWithSelection(getStore().selectedChannelIndices);
@@ -1909,6 +2045,19 @@ export default function App() {
     return () => observer.disconnect();
   }, []);
 
+  const tableChromeStyle = isMac
+    ? {
+        marginLeft:
+          liveSelectedChannel && !sidebarHidden
+            ? `${sidebarWidth}px`
+            : undefined,
+        marginRight:
+          playlist && showReportPanel
+            ? `${reportSidebarWidth}px`
+            : undefined,
+      }
+    : undefined;
+
   return (
     <div className="flex flex-col h-screen bg-surface">
       <ScanRuntimeEffects
@@ -1931,19 +2080,10 @@ export default function App() {
         searchInputRef={searchInputRef}
       />
       {isMac && playlist && (
-        <div
-          ref={headerPortalRef}
-          style={{
-            marginLeft:
-              liveSelectedChannel && !sidebarHidden
-                ? `${sidebarWidth}px`
-                : undefined,
-            marginRight:
-              playlist && showReportPanel
-                ? `${reportSidebarWidth}px`
-                : undefined,
-          }}
-        />
+        <div className="flex flex-col" style={tableChromeStyle}>
+          <div ref={headerPortalRef} />
+          <FilterBar onApply={handleApplySourceFilter} variant="chrome" />
+        </div>
       )}
       </div>
 
@@ -2049,33 +2189,32 @@ export default function App() {
         </div>
       )}
 
-      <FilterBar />
-
       <div className="flex flex-col flex-1 min-h-0">
-      <div className="flex flex-1 min-h-0 bg-content">
-        {liveSelectedChannel && !sidebarHidden && (
-          <SelectedChannelSidebar
-            sidebarWidth={sidebarWidth}
-            onResizeStart={handleSidebarDragStart}
-            streamPlayer={streamPlayer}
-            onPlayChannel={handlePlayInApp}
-            onScanChannel={handleScanSelected}
-            onStopPlayer={handleStopPlayer}
-            onOpenExternal={handleOpenExternal}
-            onPip={handlePip}
-          />
-        )}
-        <div className="flex flex-col flex-1 min-w-0">
-          {playlist ? (
-            tableProfilerEnabled ? (
-              <Profiler id="ChannelTable" onRender={handleTableProfilerRender}>
-                {channelTableElement}
-              </Profiler>
+        <div className="flex flex-1 min-h-0 bg-content">
+          {liveSelectedChannel && !sidebarHidden && (
+            <SelectedChannelSidebar
+              sidebarWidth={sidebarWidth}
+              onResizeStart={handleSidebarDragStart}
+              streamPlayer={streamPlayer}
+              onPlayChannel={handlePlayInApp}
+              onScanChannel={handleScanSelected}
+              onStopPlayer={handleStopPlayer}
+              onOpenExternal={handleOpenExternal}
+              onPip={handlePip}
+            />
+          )}
+          <div className="flex flex-col flex-1 min-w-0">
+            {!isMac && <FilterBar onApply={handleApplySourceFilter} />}
+            {playlist ? (
+              tableProfilerEnabled ? (
+                <Profiler id="ChannelTable" onRender={handleTableProfilerRender}>
+                  {channelTableElement}
+                </Profiler>
+              ) : (
+                channelTableElement
+              )
             ) : (
-              channelTableElement
-            )
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-text-tertiary">
+              <div className="flex-1 flex items-center justify-center text-text-tertiary">
               <div className="text-center px-4">
                 {playlistLoading ? (
                   <>

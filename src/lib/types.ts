@@ -99,6 +99,22 @@ export interface StalkerOpenRequest {
   mac: string;
 }
 
+export type CurrentSourceDescriptor =
+  | {
+      kind: "path";
+      path: string;
+    }
+  | {
+      kind: "url";
+      url: string;
+    }
+  | ({
+      kind: "xtream";
+    } & XtreamOpenRequest)
+  | ({
+      kind: "stalker";
+    } & StalkerOpenRequest);
+
 export interface XtreamRecentSource {
   server: string;
   username: string;

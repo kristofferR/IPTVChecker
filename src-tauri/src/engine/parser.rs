@@ -1,8 +1,8 @@
-use regex::Regex;
 use std::collections::BTreeSet;
 use std::io::BufRead;
 use std::path::Path;
 
+use crate::engine::search_pattern::ChannelSearchPattern;
 use crate::error::AppError;
 use crate::models::channel::{Channel, ContentType};
 use crate::models::playlist::PlaylistPreview;
@@ -325,34 +325,33 @@ pub fn get_channel_id(url: &str) -> String {
 }
 
 /// Check if an #EXTINF line matches the group filter and channel name pattern.
-fn is_line_needed(line: &str, group_filter: &Option<String>, pattern: &Option<Regex>) -> bool {
+fn is_line_needed(
+    line: &str,
+    group_filter: &Option<String>,
+    pattern: &Option<ChannelSearchPattern>,
+) -> Result<bool, AppError> {
     if !line.starts_with("#EXTINF") {
-        return false;
+        return Ok(false);
     }
     if let Some(ref group) = group_filter {
         let group_name = get_group_name(line);
         if group_name.trim().to_lowercase() != group.trim().to_lowercase() {
-            return false;
+            return Ok(false);
         }
     }
     if let Some(ref pat) = pattern {
         let channel_name = get_channel_name(line);
-        if !pat.is_match(&channel_name) {
-            return false;
+        if !pat.is_match(&channel_name)? {
+            return Ok(false);
         }
     }
-    true
+    Ok(true)
 }
 
 fn compile_channel_search_pattern(
     channel_search: &Option<String>,
-) -> Result<Option<Regex>, AppError> {
-    if let Some(search) = channel_search.as_ref() {
-        return Ok(Some(Regex::new(&format!("(?i){}", search)).map_err(
-            |e| AppError::Parse(format!("Invalid regex '{}': {}", search, e)),
-        )?));
-    }
-    Ok(None)
+) -> Result<Option<ChannelSearchPattern>, AppError> {
+    ChannelSearchPattern::compile(channel_search)
 }
 
 fn content_type_totals(channels: &[Channel]) -> (usize, usize, usize) {
@@ -376,7 +375,7 @@ fn parse_playlist_reader<R: BufRead>(
     file_path: &str,
     playlist_name: String,
     group_filter: &Option<String>,
-    pattern: &Option<Regex>,
+    pattern: &Option<ChannelSearchPattern>,
 ) -> Result<PlaylistPreview, AppError> {
     let mut channels = Vec::new();
     let mut groups = BTreeSet::new();
@@ -402,7 +401,7 @@ fn parse_playlist_reader<R: BufRead>(
             // Always collect groups for the filter dropdown, even for skipped channels.
             groups.insert(get_group_name(&line));
 
-            if is_line_needed(&line, group_filter, pattern) {
+            if is_line_needed(&line, group_filter, pattern)? {
                 pending_extinf = Some(line);
             }
             continue;
@@ -544,7 +543,7 @@ fn parse_playlist_directory(
             };
 
             let include_search = if let Some(ref pat) = pattern {
-                pat.is_match(&channel.name)
+                pat.is_match(&channel.name)?
             } else {
                 true
             };
@@ -918,6 +917,18 @@ http://example.com/beta.m3u8
         assert_eq!(parsed.total_channels, 2);
         assert_eq!(parsed.channels[0].language.as_deref(), Some("FR"));
         assert_eq!(parsed.channels[1].language.as_deref(), Some("EN"));
+    }
+
+    #[test]
+    fn test_parse_m3u_supports_negative_lookahead_channel_search() {
+        let payload = b"#EXTM3U\n#EXTINF:-1 group-title=\"Sports\",News Hour\nhttp://example.com/news.m3u8\n#EXTINF:-1 group-title=\"Sports\",Friday Event\nhttp://example.com/event.m3u8\n#EXTINF:-1 group-title=\"Sports\",PPV Main Event\nhttp://example.com/ppv.m3u8\n";
+        let channel_search = Some("^(?!.*(event|ppv))".to_string());
+
+        let parsed = parse_m3u(payload, "lookahead.m3u8", &None, &channel_search)
+            .expect("negative lookahead search should succeed");
+
+        assert_eq!(parsed.total_channels, 1);
+        assert_eq!(parsed.channels[0].name, "News Hour");
     }
 
     #[test]
