@@ -89,7 +89,7 @@ jobs:
           releaseDraft: true
           prerelease: false
           # Keep these aliases stable: kristofferR/homebrew-tap builds asset URLs from them.
-          releaseAssetNamePattern: "IPTV.Checker_[version]_${{ env.ASSET_PLATFORM }}_${{ env.ASSET_ARCH }}[_setup][ext]"
+          assetNamePattern: "IPTV.Checker_[version]_${{ env.ASSET_PLATFORM }}_${{ env.ASSET_ARCH }}[_setup][ext]"
           args: --target ${{ matrix.target }}
 
       - name: Create Windows portable zip
