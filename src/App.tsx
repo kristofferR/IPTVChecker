@@ -72,9 +72,11 @@ import { isInputLikeTarget, isPrimaryModifierPressed } from "./lib/shortcuts";
 import { recordUiPerf, startLongTaskObserver, uiPerfEnabled } from "./lib/perf";
 import { shouldAutoRevealReportPanel } from "./lib/playlistReportVisibility";
 import {
+  applySourceFilterToPreview,
   hasDirtySourceFilter,
   normalizeSourceFilter,
   resolvePreservedGroupFilter,
+  validateSourceFilterPattern,
 } from "./lib/sourceFilter";
 
 function errorToString(err: unknown): string {
@@ -116,17 +118,6 @@ function formatSourceReloadError(err: unknown): string {
   return raw.toLowerCase().startsWith("failed to reload source")
     ? raw
     : `Failed to reload source: ${normalized}`;
-}
-
-function validateRegexPattern(pattern: string): string | null {
-  const trimmed = pattern.trim();
-  if (!trimmed) return null;
-  try {
-    new RegExp(trimmed);
-    return null;
-  } catch (err) {
-    return errorToString(err);
-  }
 }
 
 const UPDATE_CHECK_COOLDOWN_MS = 24 * 60 * 60 * 1000;
@@ -718,7 +709,7 @@ export default function App() {
     updateResult,
   } = useScan();
   const channelSearchError = useMemo(
-    () => validateRegexPattern(channelSearch),
+    () => validateSourceFilterPattern(channelSearch),
     [channelSearch],
   );
   const reportAutoRevealBlockedRef = useRef(false);
@@ -950,12 +941,14 @@ export default function App() {
   const commitLoadedPlaylist = useCallback(
     async (
       preview: PlaylistPreview,
+      cachedPreview: PlaylistPreview,
       descriptor: CurrentSourceDescriptor,
       mode: SourceLoadMode,
       appliedSourceFilter: string,
     ) => {
       const state = getStore();
       state.setPlaylist(preview);
+      state.setCachedSourcePreview(cachedPreview);
       state.setCurrentSourceDescriptor(descriptor);
       state.setLastAppliedSourceFilter(appliedSourceFilter);
       state.setPlaylistOpenError(null);
@@ -980,18 +973,13 @@ export default function App() {
     [initFromPlaylist],
   );
 
-  const loadSourcePreview = useCallback(
-    async (
-      descriptor: CurrentSourceDescriptor,
-      normalizedSourceFilter: string,
-    ): Promise<PlaylistPreview> => {
-      const channelSearch = normalizedSourceFilter || undefined;
-
+  const loadFullSourcePreview = useCallback(
+    async (descriptor: CurrentSourceDescriptor): Promise<PlaylistPreview> => {
       switch (descriptor.kind) {
         case "path":
-          return openPlaylist(descriptor.path, undefined, channelSearch);
+          return openPlaylist(descriptor.path, undefined, undefined);
         case "url":
-          return openPlaylistUrl(descriptor.url, undefined, channelSearch);
+          return openPlaylistUrl(descriptor.url, undefined, undefined);
         case "xtream":
           return openPlaylistXtream(
             {
@@ -1000,7 +988,7 @@ export default function App() {
               password: descriptor.password,
             },
             undefined,
-            channelSearch,
+            undefined,
           );
         case "stalker":
           return openPlaylistStalker(
@@ -1009,7 +997,7 @@ export default function App() {
               mac: descriptor.mac,
             },
             undefined,
-            channelSearch,
+            undefined,
           );
       }
     },
@@ -1022,6 +1010,18 @@ export default function App() {
       mode: SourceLoadMode,
     ): Promise<LoadAndCommitSourceResult> => {
       const normalizedSourceFilter = normalizeSourceFilter(channelSearch);
+      const currentSourceFilterError = validateSourceFilterPattern(
+        normalizedSourceFilter,
+      );
+      if (currentSourceFilterError) {
+        const error =
+          mode === "reapplySourceFilter"
+            ? formatSourceReloadError(currentSourceFilterError)
+            : formatPlaylistOpenError(currentSourceFilterError);
+        getStore().setPlaylistOpenError(error);
+        return { ok: false, error };
+      }
+
       const sourceLabel = (() => {
         switch (descriptor.kind) {
           case "path":
@@ -1043,16 +1043,34 @@ export default function App() {
       getStore().setPlaylistLoading(true);
 
       try {
-        logger.debug(
-          `[App] ${loadingAction}: ${sourceLabel}, channelSearch="${normalizedSourceFilter}"`,
-        );
-        const preview = await loadSourcePreview(descriptor, normalizedSourceFilter);
-        logger.debug(
-          `[App] Source loaded: ${preview.file_name}, channels=${preview.total_channels}, groups=${preview.groups.length}`,
-          preview.groups,
+        const state = getStore();
+        const canReuseCachedPreview =
+          mode === "reapplySourceFilter" && state.cachedSourcePreview != null;
+
+        const cachedPreview = canReuseCachedPreview
+          ? state.cachedSourcePreview!
+          : await loadFullSourcePreview(descriptor);
+        if (!canReuseCachedPreview) {
+          logger.debug(
+            `[App] ${loadingAction}: ${sourceLabel}, channelSearch="${normalizedSourceFilter}"`,
+          );
+          logger.debug(
+            `[App] Source loaded: ${cachedPreview.file_name}, channels=${cachedPreview.total_channels}, groups=${cachedPreview.groups.length}`,
+            cachedPreview.groups,
+          );
+        } else {
+          logger.debug(
+            `[App] ${loadingAction} from cached preview: ${sourceLabel}, channelSearch="${normalizedSourceFilter}", cachedChannels=${cachedPreview.total_channels}`,
+          );
+        }
+
+        const preview = applySourceFilterToPreview(
+          cachedPreview,
+          normalizedSourceFilter,
         );
         await commitLoadedPlaylist(
           preview,
+          cachedPreview,
           descriptor,
           mode,
           normalizedSourceFilter,
@@ -1085,7 +1103,7 @@ export default function App() {
         getStore().setPlaylistLoading(false);
       }
     },
-    [channelSearch, commitLoadedPlaylist, loadSourcePreview, refreshRecentPlaylists],
+    [channelSearch, commitLoadedPlaylist, loadFullSourcePreview, refreshRecentPlaylists],
   );
 
   const openPlaylistPath = useCallback(async (selectedPath: string) => {
@@ -1589,7 +1607,9 @@ export default function App() {
 
   const startScanWithSelection = useCallback(async (selection: number[]) => {
     const state = getStore();
-    const currentChannelSearchError = validateRegexPattern(state.channelSearch);
+    const currentChannelSearchError = validateSourceFilterPattern(
+      state.channelSearch,
+    );
 
     if (currentChannelSearchError) {
       state.setScanInputError(

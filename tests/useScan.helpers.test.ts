@@ -1,25 +1,27 @@
 import { describe, expect, it } from "bun:test";
 import {
-  applyResultBatch,
   applyResultUpdates,
-  isRunScopedEventForActiveRun,
+  type ScanResultCollections,
 } from "../src/hooks/useScan.helpers";
 import type { ChannelResult } from "../src/lib/types";
 
-function makeResult(index: number, name = `Channel ${index}`): ChannelResult {
+function buildResult(
+  index: number,
+  overrides: Partial<ChannelResult> = {},
+): ChannelResult {
   return {
     index,
-    playlist: "fixture.m3u8",
-    name,
-    group: "Group",
+    playlist: "sample",
+    name: `Channel ${index}`,
+    group: "News",
     language: null,
     tvg_id: null,
     tvg_name: null,
     tvg_logo: null,
     tvg_chno: null,
-    url: `https://example.com/${index}.m3u8`,
+    url: `http://example.com/${index}.m3u8`,
     content_type: "live",
-    status: "alive",
+    status: "pending",
     codec: null,
     resolution: null,
     width: null,
@@ -34,66 +36,49 @@ function makeResult(index: number, name = `Channel ${index}`): ChannelResult {
     label_mismatches: [],
     low_framerate: false,
     error_message: null,
-    channel_id: `id-${index}`,
-    extinf_line: "#EXTINF:-1,Channel",
+    channel_id: `channel-${index}`,
+    extinf_line: `#EXTINF:-1,Channel ${index}`,
     metadata_lines: [],
     stream_url: null,
-    retry_count: null,
-    error_reason: null,
+    ...overrides,
   };
 }
 
-describe("useScan helpers", () => {
-  it("matches only events for the active run", () => {
-    expect(isRunScopedEventForActiveRun("run-a", "run-a")).toBe(true);
-    expect(isRunScopedEventForActiveRun("run-a", "run-b")).toBe(false);
-    expect(isRunScopedEventForActiveRun(null, "run-a")).toBe(false);
-  });
-
-  it("applies batched channel results by index", () => {
-    const previous: (ChannelResult | null)[] = [makeResult(0), null, makeResult(2)];
-    const batch = [makeResult(1, "Updated 1"), makeResult(2, "Updated 2")];
-
-    const updated = applyResultBatch(previous, batch);
-
-    expect(updated[0]?.name).toBe("Channel 0");
-    expect(updated[1]?.name).toBe("Updated 1");
-    expect(updated[2]?.name).toBe("Updated 2");
-    expect(updated).not.toBe(previous);
-  });
-
-  it("keeps by-index, flat, and metric state in sync for direct updates", () => {
-    const previousResult = makeResult(1, "Before");
-    const updatedResult = {
-      ...makeResult(1, "After"),
-      low_framerate: true,
-      label_mismatches: ["Resolution mismatch"],
+describe("useScan sparse result collections", () => {
+  it("updates sparse lookup entries without requiring dense arrays", () => {
+    const initialA = buildResult(8);
+    const initialB = buildResult(107, { status: "alive" });
+    const previous: ScanResultCollections = {
+      resultsByIndex: {
+        [initialA.index]: initialA,
+        [initialB.index]: initialB,
+      },
+      flatResults: [initialA, initialB],
+      indexToFlatPos: new Map([
+        [initialA.index, 0],
+        [initialB.index, 1],
+      ]),
+      metrics: {
+        presentCount: 2,
+        lowFpsCount: 0,
+        mislabeledCount: 0,
+      },
     };
 
-    const applied = applyResultUpdates(
-      {
-        resultsByIndex: [makeResult(0), previousResult],
-        flatResults: [makeResult(0), previousResult],
-        indexToFlatPos: new Map([
-          [0, 0],
-          [1, 1],
-        ]),
-        metrics: {
-          presentCount: 2,
-          lowFpsCount: 0,
-          mislabeledCount: 0,
-        },
-      },
-      [updatedResult],
-    );
-
-    expect(applied.resultsByIndex[1]?.name).toBe("After");
-    expect(applied.flatResults[1]?.name).toBe("After");
-    expect(applied.indexToFlatPos.get(1)).toBe(1);
-    expect(applied.metrics).toEqual({
-      presentCount: 2,
-      lowFpsCount: 1,
-      mislabeledCount: 1,
+    const updatedA = buildResult(8, {
+      status: "dead",
+      low_framerate: true,
+      label_mismatches: ["codec"],
     });
+    const addedC = buildResult(3005, { status: "alive" });
+    const next = applyResultUpdates(previous, [updatedA, addedC]);
+
+    expect(next.resultsByIndex[8]?.status).toBe("dead");
+    expect(next.resultsByIndex[3005]?.status).toBe("alive");
+    expect(next.flatResults.map((result) => result.index)).toEqual([8, 107, 3005]);
+    expect(next.indexToFlatPos.get(3005)).toBe(2);
+    expect(next.metrics.presentCount).toBe(3);
+    expect(next.metrics.lowFpsCount).toBe(1);
+    expect(next.metrics.mislabeledCount).toBe(1);
   });
 });

@@ -1,19 +1,11 @@
 import { CircleHelp, Filter } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isScanActive } from "../lib/scanState";
-import { hasDirtySourceFilter } from "../lib/sourceFilter";
+import {
+  hasDirtySourceFilter,
+  validateSourceFilterPattern,
+} from "../lib/sourceFilter";
 import { useAppStore } from "../store";
-
-function validateRegex(pattern: string): string | null {
-  const trimmed = pattern.trim();
-  if (!trimmed) return null;
-  try {
-    new RegExp(trimmed);
-    return null;
-  } catch (err) {
-    return err instanceof Error ? err.message : String(err);
-  }
-}
 
 interface FilterBarProps {
   onApply: () => void;
@@ -33,7 +25,7 @@ export function FilterBar({
   const currentSourceDescriptor = useAppStore((s) => s.currentSourceDescriptor);
   const lastAppliedSourceFilter = useAppStore((s) => s.lastAppliedSourceFilter);
   const channelSearchError = useMemo(
-    () => validateRegex(channelSearch),
+    () => validateSourceFilterPattern(channelSearch),
     [channelSearch],
   );
   const isScanning = isScanActive(scanState);

@@ -28,6 +28,7 @@ import {
 } from "./useScan.helpers";
 import { useAppStore } from "../store";
 import { EMPTY_TELEMETRY } from "../store/slices/scanSlice";
+import type { ScanResultLookup } from "../store/types";
 
 export type { ScanState } from "../lib/scanState";
 
@@ -52,19 +53,21 @@ interface RunClockState {
 }
 
 function buildFlatResultsAndMetrics(
-  source: (ChannelResult | null)[],
+  source: ChannelResult[],
 ): {
+  resultsByIndex: ScanResultLookup;
   flatResults: ChannelResult[];
   indexToFlatPos: Map<number, number>;
   metrics: ScanUiMetrics;
 } {
+  const resultsByIndex: ScanResultLookup = {};
   const flatResults: ChannelResult[] = [];
   const indexToFlatPos = new Map<number, number>();
   let lowFpsCount = 0;
   let mislabeledCount = 0;
 
   for (const result of source) {
-    if (!result) continue;
+    resultsByIndex[result.index] = result;
     indexToFlatPos.set(result.index, flatResults.length);
     flatResults.push(result);
     if (result.low_framerate) {
@@ -76,6 +79,7 @@ function buildFlatResultsAndMetrics(
   }
 
   return {
+    resultsByIndex,
     flatResults,
     indexToFlatPos,
     metrics: {
@@ -93,7 +97,7 @@ const getStore = () => useAppStore.getState();
 export function useScan() {
   // Batch incoming results with requestAnimationFrame
   const pendingResults = useRef<ChannelResult[]>([]);
-  const resultsRef = useRef<(ChannelResult | null)[]>([]);
+  const resultsRef = useRef<ScanResultLookup>({});
   const flatResultsRef = useRef<ChannelResult[]>([]);
   const indexToFlatPosRef = useRef<Map<number, number>>(new Map());
   const uiMetricsRef = useRef<ScanUiMetrics>(EMPTY_UI_METRICS);
@@ -116,7 +120,7 @@ export function useScan() {
 
   const commitCollections = useCallback(
     (next: {
-      resultsByIndex: (ChannelResult | null)[];
+      resultsByIndex: ScanResultLookup;
       flatResults: ChannelResult[];
       indexToFlatPos: Map<number, number>;
       metrics: ScanUiMetrics;
@@ -152,7 +156,7 @@ export function useScan() {
       commitCollections(next);
 
       logger.debug(
-        `[useScan] flush: batch=${batch.length}, total array=${next.resultsByIndex.length}, non-null=${next.metrics.presentCount}`,
+        `[useScan] flush: batch=${batch.length}, tracked=${next.metrics.presentCount}, non-null=${next.metrics.presentCount}`,
       );
     }
     rafId.current = null;
@@ -494,25 +498,14 @@ export function useScan() {
         selectedIndices.length > 0 ? selectedIndices.length : totalChannels;
 
       // Reset existing results back to pending status for channels being scanned.
-      const previous = resultsRef.current;
-      const targetLength = previous.length > 0 ? previous.length : totalChannels;
-      const updated = new Array<ChannelResult | null>(targetLength).fill(null);
-
-      if (targetLength > 0 && previous.some((r) => r != null)) {
-        for (let i = 0; i < targetLength; i += 1) {
-          const existing = previous[i] ?? null;
-          if (!existing) continue;
-
-          updated[i] =
-            selectedSet && !selectedSet.has(existing.index)
-              ? existing
-              : resetChannelResultForRescan(existing);
-        }
-      }
-
+      const updated = flatResultsRef.current.map((existing) =>
+        selectedSet && !selectedSet.has(existing.index)
+          ? existing
+          : resetChannelResultForRescan(existing),
+      );
       const rebuilt = buildFlatResultsAndMetrics(updated);
       commitCollections({
-        resultsByIndex: updated,
+        resultsByIndex: rebuilt.resultsByIndex,
         flatResults: rebuilt.flatResults,
         indexToFlatPos: rebuilt.indexToFlatPos,
         metrics: rebuilt.metrics,
@@ -621,20 +614,13 @@ export function useScan() {
       // Cancel any running scan and reset backend state
       await resetScan().catch(() => {});
 
-      const maxIndex = channels.reduce(
-        (max, channel) => Math.max(max, channel.index),
-        -1,
-      );
-      const pending = new Array<ChannelResult | null>(maxIndex + 1).fill(null);
-      for (const ch of channels) {
-        pending[ch.index] = toPendingChannelResult(ch);
-      }
+      const pending = channels.map((channel) => toPendingChannelResult(channel));
       const rebuilt = buildFlatResultsAndMetrics(pending);
       const duplicates = findDuplicateChannelIndices(pending);
 
       logger.debug(`[useScan] initFromPlaylist: ${pending.length} channels`);
       commitCollections({
-        resultsByIndex: pending,
+        resultsByIndex: rebuilt.resultsByIndex,
         flatResults: rebuilt.flatResults,
         indexToFlatPos: rebuilt.indexToFlatPos,
         metrics: rebuilt.metrics,

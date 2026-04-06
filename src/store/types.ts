@@ -20,6 +20,7 @@ import type { ScanUiMetrics } from "../hooks/useScan.helpers";
 
 export interface PlaylistSlice {
   playlist: PlaylistPreview | null;
+  cachedSourcePreview: PlaylistPreview | null;
   playlistLoading: boolean;
   playlistOpenError: string | null;
   recentPlaylists: RecentPlaylistEntry[];
@@ -27,6 +28,7 @@ export interface PlaylistSlice {
   lastAppliedSourceFilter: string;
 
   setPlaylist: (playlist: PlaylistPreview | null) => void;
+  setCachedSourcePreview: (preview: PlaylistPreview | null) => void;
   setPlaylistLoading: (loading: boolean) => void;
   setPlaylistOpenError: (error: string | null) => void;
   setRecentPlaylists: (entries: RecentPlaylistEntry[]) => void;
@@ -43,8 +45,10 @@ export interface ScanTelemetry {
   etaSeconds: number | null;
 }
 
+export type ScanResultLookup = Record<number, ChannelResult | undefined>;
+
 export interface ScanCollectionsUpdate {
-  results: (ChannelResult | null)[];
+  results: ScanResultLookup;
   flatResults: ChannelResult[];
   uiMetrics: ScanUiMetrics;
 }
@@ -61,7 +65,7 @@ export interface ScanRuntimeUpdate {
 }
 
 export interface ScanSlice {
-  results: (ChannelResult | null)[];
+  results: ScanResultLookup;
   flatResults: ChannelResult[];
   uiMetrics: ScanUiMetrics;
   duplicateIndices: Set<number>;
@@ -73,7 +77,7 @@ export interface ScanSlice {
   screenshotsPaused: boolean;
   networkPaused: boolean;
 
-  setResults: (results: (ChannelResult | null)[]) => void;
+  setResults: (results: ScanResultLookup) => void;
   setFlatResults: (results: ChannelResult[]) => void;
   setUiMetrics: (metrics: ScanUiMetrics) => void;
   setDuplicateIndices: (indices: Set<number>) => void;

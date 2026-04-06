@@ -1,4 +1,5 @@
 import type { ChannelResult } from "../lib/types";
+import type { ScanResultLookup } from "../store/types";
 
 export interface ScanUiMetrics {
   presentCount: number;
@@ -7,7 +8,7 @@ export interface ScanUiMetrics {
 }
 
 export interface ScanResultCollections {
-  resultsByIndex: (ChannelResult | null)[];
+  resultsByIndex: ScanResultLookup;
   flatResults: ChannelResult[];
   indexToFlatPos: Map<number, number>;
   metrics: ScanUiMetrics;
@@ -21,10 +22,10 @@ export function isRunScopedEventForActiveRun(
 }
 
 export function applyResultBatch(
-  previous: (ChannelResult | null)[],
+  previous: ScanResultLookup,
   batch: ChannelResult[],
-): (ChannelResult | null)[] {
-  const updated = [...previous];
+): ScanResultLookup {
+  const updated = { ...previous };
   for (const result of batch) {
     updated[result.index] = result;
   }
@@ -39,7 +40,7 @@ export function applyResultUpdates(
     return previous;
   }
 
-  const resultsByIndex = [...previous.resultsByIndex];
+  const resultsByIndex = { ...previous.resultsByIndex };
   let flatResults = previous.flatResults;
   let indexToFlatPos = previous.indexToFlatPos;
   let presentCount = previous.metrics.presentCount;

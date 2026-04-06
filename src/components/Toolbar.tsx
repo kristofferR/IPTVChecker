@@ -39,19 +39,9 @@ import {
   type SearchTextCache,
 } from "../lib/filters";
 import { measureUiPerf } from "../lib/perf";
+import { validateSourceFilterPattern } from "../lib/sourceFilter";
 import { ExportMenu } from "./ExportMenu";
 import { useAppStore } from "../store";
-
-function validateRegex(pattern: string): string | null {
-  const trimmed = pattern.trim();
-  if (!trimmed) return null;
-  try {
-    new RegExp(trimmed);
-    return null;
-  } catch (err) {
-    return err instanceof Error ? err.message : String(err);
-  }
-}
 
 interface ToolbarProps {
   onOpen: () => void;
@@ -207,7 +197,7 @@ export const Toolbar = memo(function Toolbar({
   // --- Derived values ---
   const useWindowDragRegion = platform !== "linux";
   const scanBlockedReason = useMemo(() => {
-    const err = validateRegex(channelSearch);
+    const err = validateSourceFilterPattern(channelSearch);
     return err ? `Invalid source filter regex: ${err}` : null;
   }, [channelSearch]);
 

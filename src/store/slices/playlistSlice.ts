@@ -3,6 +3,7 @@ import type { AppStore, PlaylistSlice } from "../types";
 
 export const createPlaylistSlice: StateCreator<AppStore, [], [], PlaylistSlice> = (set) => ({
   playlist: null,
+  cachedSourcePreview: null,
   playlistLoading: false,
   playlistOpenError: null,
   recentPlaylists: [],
@@ -10,6 +11,7 @@ export const createPlaylistSlice: StateCreator<AppStore, [], [], PlaylistSlice> 
   lastAppliedSourceFilter: "",
 
   setPlaylist: (playlist) => set({ playlist }),
+  setCachedSourcePreview: (cachedSourcePreview) => set({ cachedSourcePreview }),
   setPlaylistLoading: (playlistLoading) => set({ playlistLoading }),
   setPlaylistOpenError: (playlistOpenError) => set({ playlistOpenError }),
   setRecentPlaylists: (recentPlaylists) => set({ recentPlaylists }),

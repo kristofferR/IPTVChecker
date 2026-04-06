@@ -65,14 +65,12 @@ function canonicalizeUrl(url: string): string {
 }
 
 export function findDuplicateChannelIndices(
-  results: (ChannelResult | null)[],
+  results: Iterable<ChannelResult>,
 ): Set<number> {
   const firstByUrl = new Map<string, number>();
   const duplicates = new Set<number>();
 
   for (const result of results) {
-    if (!result) continue;
-
     const key = canonicalizeUrl(result.url);
     if (!key) continue;
 

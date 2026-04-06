@@ -264,9 +264,7 @@ fn friendly_name_from_url(url: &Url) -> String {
         if let Some(last) = segments.filter(|s| !s.is_empty()).last() {
             // Use the segment if it looks like a real name (has extension,
             // is short, or isn't a pure hex hash).
-            if last.contains('.')
-                || last.len() < 40
-                || !last.chars().all(|c| c.is_ascii_hexdigit())
+            if last.contains('.') || last.len() < 40 || !last.chars().all(|c| c.is_ascii_hexdigit())
             {
                 return last.to_string();
             }
@@ -751,15 +749,13 @@ async fn fetch_xtream_json_array(
         .send()
         .await
     {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.bytes().await {
-                Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
-                Err(e) => {
-                    log::warn!("Failed to read Xtream {} response: {}", label, e);
-                    Vec::new()
-                }
+        Ok(resp) if resp.status().is_success() => match resp.bytes().await {
+            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+            Err(e) => {
+                log::warn!("Failed to read Xtream {} response: {}", label, e);
+                Vec::new()
             }
-        }
+        },
         Ok(resp) => {
             log::warn!("Xtream {} API returned HTTP {}", label, resp.status());
             Vec::new()
@@ -823,10 +819,12 @@ fn append_xtream_streams_to_m3u(
             .unwrap_or("");
         let group = entry
             .get("category_id")
-            .and_then(|v| v.as_str().or_else(|| {
-                // Some servers return category_id as a number
-                None
-            }))
+            .and_then(|v| {
+                v.as_str().or_else(|| {
+                    // Some servers return category_id as a number
+                    None
+                })
+            })
             .and_then(|id| cat_map.get(id))
             .map(|s| s.as_str())
             .unwrap_or("");
@@ -834,9 +832,10 @@ fn append_xtream_streams_to_m3u(
         // Also try category_id as number
         let group = if group.is_empty() {
             match entry.get("category_id") {
-                Some(serde_json::Value::Number(n)) => {
-                    cat_map.get(&n.to_string()).map(|s| s.as_str()).unwrap_or("")
-                }
+                Some(serde_json::Value::Number(n)) => cat_map
+                    .get(&n.to_string())
+                    .map(|s| s.as_str())
+                    .unwrap_or(""),
                 _ => "",
             }
         } else {
@@ -881,8 +880,7 @@ async fn fetch_xtream_playlist_via_json_api(
         build_xtream_player_api_action_url(server, username, password, "get_vod_streams");
     let series_cats_url =
         build_xtream_player_api_action_url(server, username, password, "get_series_categories");
-    let series_url =
-        build_xtream_player_api_action_url(server, username, password, "get_series");
+    let series_url = build_xtream_player_api_action_url(server, username, password, "get_series");
 
     let (live_cats, live_streams, vod_cats, vod_streams, series_cats, series_list) = tokio::join!(
         fetch_xtream_json_array(&client, live_cats_url, "live categories"),
@@ -970,10 +968,7 @@ async fn fetch_xtream_playlist_via_json_api(
             Some(serde_json::Value::String(s)) => s.clone(),
             _ => continue,
         };
-        let tvg_logo = entry
-            .get("cover")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let tvg_logo = entry.get("cover").and_then(|v| v.as_str()).unwrap_or("");
         let group = entry
             .get("category_id")
             .and_then(|v| match v {
@@ -1751,9 +1746,7 @@ pub async fn open_playlist_xtream(
     };
 
     let mut preview = parser::parse_playlist(&cached_path, &group_filter, &channel_search)?;
-    let server_host = server
-        .host_str()
-        .unwrap_or("Xtream");
+    let server_host = server.host_str().unwrap_or("Xtream");
     preview.file_name = format!("{} ({})", server_host, username);
     preview.source_identity = Some(source_key);
     preview.xtream_max_connections = xtream_account_info
@@ -1771,7 +1764,7 @@ const SERVER_TEST_STREAM_TIMEOUT: Duration = Duration::from_secs(10);
 const SERVER_TEST_DISCOVERY_HTTP_TIMEOUT: Duration = Duration::from_secs(4);
 const SERVER_TEST_MAX_CHANNEL_CANDIDATES: usize = 15;
 const SERVER_TEST_TARGET_WORKING_CHANNELS: usize = 3;
-const SERVER_TEST_MAX_SCREENSHOTS: usize = 1;
+const SERVER_TEST_MAX_SCREENSHOTS: usize = 2;
 const SERVER_TEST_PROBE_CHANNELS: usize = 2;
 
 #[derive(Debug, Clone, Serialize)]
@@ -1809,7 +1802,12 @@ fn emit_server_test_progress(app: &tauri::AppHandle, message: &str) {
     let _ = app.emit("scan://server-test-progress", message.to_string());
 }
 
-fn build_xtream_stream_url(server: &Url, username: &str, password: &str, stream_id: &str) -> String {
+fn build_xtream_stream_url(
+    server: &Url,
+    username: &str,
+    password: &str,
+    stream_id: &str,
+) -> String {
     let mut base = server.clone();
     let mut path = base.path().trim_end_matches('/').to_string();
     path.push_str(&format!("/live/{}/{}/{}.ts", username, password, stream_id));
@@ -1874,21 +1872,37 @@ async fn fetch_xtream_stream_ids(
         let streams: Vec<serde_json::Value> = serde_json::from_slice(&bytes)
             .map_err(|e| AppError::Parse(format!("Failed to parse live streams JSON: {}", e)))?;
 
-        let ids: Vec<String> = streams
-            .iter()
-            .filter_map(|entry| match entry.get("stream_id") {
-                Some(serde_json::Value::Number(n)) => Some(n.to_string()),
-                Some(serde_json::Value::String(s)) => Some(s.clone()),
-                _ => None,
-            })
-            .collect();
+        // Partition into channels with icons (more likely real video) vs without
+        let mut with_icon = Vec::new();
+        let mut without_icon = Vec::new();
+        for entry in &streams {
+            let id = match entry.get("stream_id") {
+                Some(serde_json::Value::Number(n)) => n.to_string(),
+                Some(serde_json::Value::String(s)) => s.clone(),
+                _ => continue,
+            };
+            let has_icon = entry
+                .get("stream_icon")
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| !s.is_empty());
+            if has_icon {
+                with_icon.push(id);
+            } else {
+                without_icon.push(id);
+            }
+        }
+        // Shuffle each group, then prioritize channels with icons
+        with_icon.shuffle(&mut rand::rng());
+        without_icon.shuffle(&mut rand::rng());
+        let mut ids = with_icon;
+        ids.extend(without_icon);
 
         return Ok(ids);
     }
 
-    Err(AppError::Other(
-        last_error.unwrap_or_else(|| "Failed to fetch live streams".to_string()),
-    ))
+    Err(AppError::Other(last_error.unwrap_or_else(|| {
+        "Failed to fetch live streams".to_string()
+    })))
 }
 
 async fn discover_working_channels(
@@ -1900,14 +1914,14 @@ async fn discover_working_channels(
     use crate::engine::checker::is_placeholder_url;
 
     emit_server_test_progress(app, "Fetching channel list...");
-    let mut ids = fetch_xtream_stream_ids(server, username, password).await?;
+    let ids = fetch_xtream_stream_ids(server, username, password).await?;
     if ids.is_empty() {
         return Err(AppError::Other(
             "Server returned no live streams".to_string(),
         ));
     }
 
-    ids.shuffle(&mut rand::rng());
+    // ids are pre-shuffled with icon-having channels first (more likely real video)
 
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
@@ -2029,28 +2043,23 @@ async fn probe_server_channels(
         };
 
         // Run ffprobe for codec/resolution/FPS
-        let (codec, resolution, fps) =
-            match ffmpeg::collect_probe_snapshot_with_timeout(
-                app,
-                &stream_url,
-                &cancel,
-                Some(SERVER_TEST_FFPROBE_TIMEOUT),
-            )
-            .await
-            {
-                Ok(snapshot) => {
-                    if let Some(video) = snapshot.video_info {
-                        (
-                            Some(video.codec),
-                            Some(video.resolution),
-                            video.fps,
-                        )
-                    } else {
-                        (None, None, None)
-                    }
+        let (codec, resolution, fps) = match ffmpeg::collect_probe_snapshot_with_timeout(
+            app,
+            &stream_url,
+            &cancel,
+            Some(SERVER_TEST_FFPROBE_TIMEOUT),
+        )
+        .await
+        {
+            Ok(snapshot) => {
+                if let Some(video) = snapshot.video_info {
+                    (Some(video.codec), Some(video.resolution), video.fps)
+                } else {
+                    (None, None, None)
                 }
-                Err(_) => (None, None, None),
-            };
+            }
+            Err(_) => (None, None, None),
+        };
 
         // Capture screenshot (limited to avoid excessive time)
         let screenshot = if screenshots_taken < SERVER_TEST_MAX_SCREENSHOTS {
@@ -2071,7 +2080,12 @@ async fn probe_server_channels(
                     read_file_as_base64_data_uri(std::path::Path::new(&path))
                 }
                 Err(e) => {
-                    log::debug!("Screenshot failed for {} on {}: {}", stream_id, server_host, e);
+                    log::debug!(
+                        "Screenshot failed for {} on {}: {}",
+                        stream_id,
+                        server_host,
+                        e
+                    );
                     None
                 }
             }
@@ -2133,12 +2147,8 @@ async fn test_single_server_api(
             let (status, max_conn) = bytes
                 .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
                 .and_then(|payload| {
-                    extract_xtream_account_info(&payload).map(|info| {
-                        (
-                            info.status.clone(),
-                            info.max_connections,
-                        )
-                    })
+                    extract_xtream_account_info(&payload)
+                        .map(|info| (info.status.clone(), info.max_connections))
                 })
                 .unwrap_or((None, None));
             (Some(latency), status, max_conn, None)
@@ -2148,7 +2158,9 @@ async fn test_single_server_api(
 }
 
 fn extract_host_from_url(url_str: &str) -> Option<String> {
-    Url::parse(url_str).ok().and_then(|u| u.host_str().map(|h| h.to_ascii_lowercase()))
+    Url::parse(url_str)
+        .ok()
+        .and_then(|u| u.host_str().map(|h| h.to_ascii_lowercase()))
 }
 
 fn most_common_resolved_host(probes: &[XtreamChannelProbe]) -> Option<String> {
@@ -2265,8 +2277,8 @@ async fn test_xtream_servers_inner(
     if successful_servers.is_empty() {
         let results: Vec<XtreamServerTestResult> = api_results
             .into_iter()
-            .map(|(raw, _, api_latency, status, max_conn, error)| {
-                XtreamServerTestResult {
+            .map(
+                |(raw, _, api_latency, status, max_conn, error)| XtreamServerTestResult {
                     server: raw,
                     success: false,
                     api_latency_ms: api_latency,
@@ -2276,8 +2288,8 @@ async fn test_xtream_servers_inner(
                     error,
                     account_status: status,
                     max_connections: max_conn,
-                }
-            })
+                },
+            )
             .collect();
 
         return Ok(XtreamServerTestReport {
@@ -2361,10 +2373,7 @@ async fn test_xtream_servers_inner(
                 }
 
                 let probes = probe_server_channels(&app, &url, &u, &p, &channels, &ss_dir).await;
-                let latencies: Vec<u64> = probes
-                    .iter()
-                    .filter_map(|p| p.latency_ms)
-                    .collect();
+                let latencies: Vec<u64> = probes.iter().filter_map(|p| p.latency_ms).collect();
                 let avg_latency = if latencies.is_empty() {
                     None
                 } else {
