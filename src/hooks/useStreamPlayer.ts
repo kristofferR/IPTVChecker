@@ -3,7 +3,7 @@ import type { ChannelResult } from "../lib/types";
 import { normalizeCodecName, resolveResolutionLabel } from "../lib/format";
 
 type PlayerState = "idle" | "loading" | "playing" | "error";
-type StreamType = "hls" | "mpegts" | "unknown";
+export type StreamType = "hls" | "mpegts" | "unknown";
 
 export interface StreamMetadata {
   width: number | null;
@@ -33,11 +33,33 @@ export interface UseStreamPlayerReturn {
   toggleMute: () => void;
 }
 
-function classifyStream(url: string): StreamType {
+function stripUrlDecorations(url: string): string {
+  return url.toLowerCase().split("#", 1)[0]?.split("?", 1)[0] ?? url.toLowerCase();
+}
+
+export function classifyStream(url: string): StreamType {
   const lower = url.toLowerCase();
-  if (lower.includes(".m3u8") || lower.includes("/hls/")) return "hls";
-  if (lower.endsWith(".ts") || (lower.includes("/live/") && !lower.includes(".m3u8"))) return "mpegts";
+  const clean = stripUrlDecorations(url);
+  if (lower.includes(".m3u8") || clean.endsWith(".m3u8") || lower.includes("/hls/")) return "hls";
+  if (
+    clean.endsWith(".ts") ||
+    clean.endsWith(".m2ts") ||
+    clean.endsWith(".mpegts") ||
+    clean.endsWith(".m4s") ||
+    (lower.includes("/live/") && !lower.includes(".m3u8"))
+  ) {
+    return "mpegts";
+  }
   return "unknown";
+}
+
+export function supportsNativeHlsPlayback(
+  mediaElement: Pick<HTMLMediaElement, "canPlayType">,
+): boolean {
+  return [
+    "application/vnd.apple.mpegurl",
+    "application/x-mpegurl",
+  ].some((mimeType) => mediaElement.canPlayType(mimeType) !== "");
 }
 
 function readStoredVolume(): number {
@@ -346,8 +368,16 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         const finish = (value: boolean) => {
           if (settled) return;
           settled = true;
+          videoElement.removeEventListener("canplay", onCanPlay);
+          videoElement.removeEventListener("error", onVideoError);
           signal.removeEventListener("abort", onAbort);
           resolve(value);
+        };
+        const destroyPlayer = () => {
+          hls.destroy();
+          if (hlsInstanceRef.current === hls) {
+            hlsInstanceRef.current = null;
+          }
         };
         const hls = new Hls({
           maxBufferLength: 30,
@@ -355,23 +385,23 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         });
         hlsInstanceRef.current = hls;
 
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          finish(true);
-        });
+        const onCanPlay = () => finish(true);
+        const onVideoError = () => {
+          destroyPlayer();
+          finish(false);
+        };
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data.fatal) {
-            hls.destroy();
-            hlsInstanceRef.current = null;
+            destroyPlayer();
             finish(false);
           }
         });
         const onAbort = () => {
-          hls.destroy();
-          if (hlsInstanceRef.current === hls) {
-            hlsInstanceRef.current = null;
-          }
+          destroyPlayer();
           finish(false);
         };
+        videoElement.addEventListener("canplay", onCanPlay, { once: true });
+        videoElement.addEventListener("error", onVideoError, { once: true });
         signal.addEventListener("abort", onAbort, { once: true });
 
         hls.loadSource(url);
@@ -452,6 +482,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       // the top-level playlist entry point.
       const url = result.url;
       const streamType = classifyStream(url);
+      const preferNativeHls = streamType === "hls" && supportsNativeHlsPlayback(videoElement);
+      let nativeAttempted = false;
 
       const currentResult = result;
       loadingTimerRef.current = setTimeout(() => {
@@ -464,8 +496,28 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         onPlaybackFailedRef.current?.(currentResult);
       }, LOADING_TIMEOUT_MS);
 
+      if (preferNativeHls) {
+        nativeAttempted = true;
+        const nativeOk = await tryNativePlayback(url, abortController.signal);
+        if (!isCurrentPlayback()) {
+          return;
+        }
+        if (nativeOk) {
+          clearLoadingTimer();
+          try { await videoElement.play(); } catch {}
+          if (!isCurrentPlayback()) {
+            return;
+          }
+          setPlayerState("playing");
+          setupMetadataListeners();
+          return;
+        }
+      }
+
       // 1. Try hls.js first for HLS/unknown streams — provides rich metadata
       //    (codec, bitrate, fps) that native WebKit HLS playback does not expose.
+      //    Native HLS gets first shot above when the webview advertises support
+      //    because it is more tolerant of real-world IPTV streams on Apple platforms.
       if (streamType === "hls" || streamType === "unknown") {
         const hlsOk = await tryHlsPlayback(url, abortController.signal);
         if (!isCurrentPlayback()) {
@@ -502,19 +554,21 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       }
 
       // 3. Native playback fallback — handles formats the libraries can't
-      const nativeOk = await tryNativePlayback(url, abortController.signal);
-      if (!isCurrentPlayback()) {
-        return;
-      }
-      if (nativeOk) {
-        clearLoadingTimer();
-        try { await videoElement.play(); } catch {}
+      if (!nativeAttempted) {
+        const nativeOk = await tryNativePlayback(url, abortController.signal);
         if (!isCurrentPlayback()) {
           return;
         }
-        setPlayerState("playing");
-        setupMetadataListeners();
-        return;
+        if (nativeOk) {
+          clearLoadingTimer();
+          try { await videoElement.play(); } catch {}
+          if (!isCurrentPlayback()) {
+            return;
+          }
+          setPlayerState("playing");
+          setupMetadataListeners();
+          return;
+        }
       }
 
       // All methods failed — fall back to scanning
