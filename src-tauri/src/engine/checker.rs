@@ -18,7 +18,7 @@ const MAX_PLAYLIST_DEPTH: u32 = 4;
 const MAX_REDIRECT_DEPTH: u32 = 10;
 /// HTTP status codes indicating potential geoblocking.
 const GEOBLOCK_STATUSES: &[u16] = &[403, 451, 426];
-const SECONDARY_GEOBLOCK_STATUSES: &[u16] = &[401, 423, 451];
+const SECONDARY_GEOBLOCK_STATUSES: &[u16] = &[423, 451];
 /// HTTP status codes that are typically transient and should be retried.
 const RETRYABLE_HTTP_STATUSES: &[u16] = &[408, 425, 429, 500, 502, 503, 504];
 const FFPROBE_LIVENESS_SCHEMES: &[&str] = &["rtsp", "rtsps", "rtmp", "rtmps"];
