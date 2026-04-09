@@ -976,6 +976,11 @@ pub async fn profile_bitrate(
 
     let resolved_bin = resolve_binary(app, "ffmpeg");
 
+    // Leave at least 15s of headroom within the timeout for connection
+    // setup and graceful shutdown. Minimum streaming duration is 3s.
+    let stream_secs = (timeout_duration.as_secs_f64() - 15.0).clamp(3.0, 10.0);
+    let stream_secs_str = format!("{:.0}", stream_secs);
+
     let mut command = tokio::process::Command::new(&resolved_bin);
     configure_background_process(&mut command);
 
@@ -988,7 +993,7 @@ pub async fn profile_bitrate(
             "-i",
             url,
             "-t",
-            "10",
+            &stream_secs_str,
             "-f",
             "null",
             "-",
@@ -1059,7 +1064,7 @@ pub async fn profile_bitrate(
         return Ok("N/A".to_string());
     }
 
-    let bitrate_kbps = (total_bytes * 8) / 1000 / 10;
+    let bitrate_kbps = (total_bytes * 8) / 1000 / (stream_secs as u64);
     Ok(format!("{} kbps", bitrate_kbps))
 }
 
