@@ -15,6 +15,7 @@ const MAX_FFPROBE_OUTPUT_CHARS: usize = 16_000;
 const PNG_SIGNATURE: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
 const FFPROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 const FFMPEG_BITRATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const GRACEFUL_KILL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -31,6 +32,30 @@ const TARGET_TRIPLE: &str = "aarch64-unknown-linux-gnu";
 const TARGET_TRIPLE: &str = "x86_64-pc-windows-msvc";
 #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
 const TARGET_TRIPLE: &str = "aarch64-pc-windows-msvc";
+
+/// Send SIGTERM (Unix) and wait up to `grace` for the process to exit.
+/// Falls back to SIGKILL if the grace period expires or on Windows.
+async fn graceful_kill(child: &mut tokio::process::Child, grace: std::time::Duration) {
+    #[cfg(unix)]
+    {
+        if let Some(pid) = child.id() {
+            // SAFETY: pid is valid — the child has not been waited yet.
+            unsafe {
+                libc::kill(pid as libc::pid_t, libc::SIGTERM);
+            }
+            match tokio::time::timeout(grace, child.wait()).await {
+                Ok(_) => return,
+                Err(_) => {
+                    log::debug!(
+                        "ffmpeg pid {pid} did not exit within {grace:?} after SIGTERM, sending SIGKILL"
+                    );
+                }
+            }
+        }
+    }
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+}
 
 /// Resolve the path to an executable, preferring the bundled sidecar binary
 /// over the system PATH. This bypasses the Tauri shell plugin which can
@@ -324,8 +349,7 @@ async fn run_tool_command(
                 return Err(AppError::Cancelled);
             }
             _ = tokio::time::sleep(timeout_duration) => {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
+                graceful_kill(&mut child, GRACEFUL_KILL_TIMEOUT).await;
 
                 let stderr_buf = stderr_reader.await.unwrap_or_default();
                 stdout_reader.abort();
@@ -952,6 +976,11 @@ pub async fn profile_bitrate(
 
     let resolved_bin = resolve_binary(app, "ffmpeg");
 
+    // Leave at least 15s of headroom within the timeout for connection
+    // setup and graceful shutdown. Minimum streaming duration is 3s.
+    let sample_secs = (timeout_duration.as_secs().saturating_sub(15)).clamp(3, 10);
+    let sample_secs_str = sample_secs.to_string();
+
     let mut command = tokio::process::Command::new(&resolved_bin);
     configure_background_process(&mut command);
 
@@ -964,7 +993,7 @@ pub async fn profile_bitrate(
             "-i",
             url,
             "-t",
-            "10",
+            &sample_secs_str,
             "-f",
             "null",
             "-",
@@ -980,9 +1009,29 @@ pub async fn profile_bitrate(
     let stderr_pipe = child.stderr.take();
     let stderr_reader = tokio::spawn(async move {
         use tokio::io::AsyncReadExt;
+        const MAX_RETAIN_BYTES: usize = 1_024 * 1_024; // 1 MB
         let mut buf = Vec::new();
         if let Some(mut pipe) = stderr_pipe {
-            let _ = pipe.read_to_end(&mut buf).await;
+            // Drain stderr fully to prevent the child from blocking on a full
+            // pipe. Keep the *tail* (last MAX_RETAIN_BYTES) since the
+            // Statistics line we parse is written near process exit.
+            let mut chunk = [0u8; 8192];
+            loop {
+                match pipe.read(&mut chunk).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        buf.extend_from_slice(&chunk[..n]);
+                        if buf.len() > MAX_RETAIN_BYTES * 2 {
+                            let start = buf.len() - MAX_RETAIN_BYTES;
+                            buf.drain(..start);
+                        }
+                    }
+                }
+            }
+            if buf.len() > MAX_RETAIN_BYTES {
+                let start = buf.len() - MAX_RETAIN_BYTES;
+                buf.drain(..start);
+            }
         }
         buf
     });
@@ -996,8 +1045,7 @@ pub async fn profile_bitrate(
             return Err(AppError::Cancelled);
         }
         _ = tokio::time::sleep(timeout_duration) => {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+            graceful_kill(&mut child, GRACEFUL_KILL_TIMEOUT).await;
             true
         }
         _status = child.wait() => {
@@ -1024,19 +1072,40 @@ pub async fn profile_bitrate(
         }
     }
 
-    if timed_out && total_bytes == 0 {
-        return Err(AppError::Other(format!(
-            "ffmpeg bitrate profiling timed out after {:.0}s (binary: {})",
-            timeout_duration.as_secs_f64(),
-            resolved_bin,
-        )));
+    // Fallback: regex scan for "<digits> bytes read" anywhere in stderr.
+    // Handles format variations across ffmpeg versions.
+    if total_bytes == 0 {
+        let re = regex::Regex::new(r"(\d+)\s+bytes\s+read").unwrap();
+        if let Some(caps) = re.captures(&stderr) {
+            if let Ok(bytes) = caps[1].parse::<u64>() {
+                total_bytes = bytes;
+            }
+        }
     }
 
     if total_bytes == 0 {
+        let tail: String = stderr
+            .lines()
+            .rev()
+            .take(5)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join(" | ");
+        if timed_out {
+            log::warn!("Bitrate profiling timed out after {:.0}s with no Statistics line. stderr tail: {tail}", timeout_duration.as_secs_f64());
+            return Err(AppError::Other(format!(
+                "ffmpeg bitrate profiling timed out after {:.0}s (binary: {})",
+                timeout_duration.as_secs_f64(),
+                resolved_bin,
+            )));
+        }
+        log::warn!("Bitrate profiling completed but no bytes-read data found in stderr. stderr tail: {tail}");
         return Ok("N/A".to_string());
     }
 
-    let bitrate_kbps = (total_bytes * 8) / 1000 / 10;
+    let bitrate_kbps = (total_bytes * 8) / 1000 / sample_secs;
     Ok(format!("{} kbps", bitrate_kbps))
 }
 

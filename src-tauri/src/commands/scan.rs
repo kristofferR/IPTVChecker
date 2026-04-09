@@ -275,12 +275,12 @@ async fn compute_shared_url_result(
         return Ok((shared, timing));
     }
     let diagnostics_started_at = Instant::now();
-    let _diagnostics_permit = diagnostics_semaphore.clone().acquire_owned().await.ok();
+    let diagnostics_permit = diagnostics_semaphore.clone().acquire_owned().await.ok();
     let ffprobe_timeout_duration =
         std::time::Duration::from_secs_f64(ffprobe_timeout_secs.clamp(1.0, 300.0));
 
     // Run ffprobe and screenshot capture in parallel — they are independent.
-    // Bitrate profiling runs alongside screenshot after ffprobe starts.
+    // Bitrate profiling runs sequentially after both complete.
     let want_screenshot = !skip_screenshots && ffmpeg_ok && screenshots_dir.is_some();
 
     let ffprobe_fut = async {
@@ -343,8 +343,13 @@ async fn compute_shared_url_result(
         shared.screenshot_path = Some(path);
     }
 
+    // Release the diagnostics permit before bitrate profiling. ffprobe and
+    // screenshot are done; holding the permit during the long bitrate sample
+    // (~30s) starves other channels' diagnostics.
+    drop(diagnostics_permit);
+
     if ffprobe_ok && !cancel.is_cancelled() && profile_bitrate_flag && ffmpeg_ok {
-        if let Ok(bitrate) = ffmpeg::profile_bitrate(
+        match ffmpeg::profile_bitrate(
             app,
             &target_url,
             user_agent,
@@ -353,7 +358,13 @@ async fn compute_shared_url_result(
         )
         .await
         {
-            shared.video_bitrate = Some(bitrate);
+            Ok(bitrate) => {
+                shared.video_bitrate = Some(bitrate);
+            }
+            Err(AppError::Cancelled) => {}
+            Err(err) => {
+                log::warn!("Bitrate profiling failed for {target_url}: {err}");
+            }
         }
     }
     timing.diagnostics_ms = diagnostics_started_at.elapsed().as_secs_f64() * 1000.0;
@@ -1847,8 +1858,17 @@ async fn execute_scan_run(
     drop(tx);
     drop(checkpoint_tx);
 
+    let mut panicked_workers = 0u32;
     for handle in handles {
-        let _ = handle.await;
+        if let Err(err) = handle.await {
+            panicked_workers += 1;
+            log::error!("Scan worker task failed: {err}");
+        }
+    }
+    if panicked_workers > 0 {
+        log::error!(
+            "{panicked_workers} scan worker(s) panicked — those channels are missing from results"
+        );
     }
 
     let event_result = event_task.await;
