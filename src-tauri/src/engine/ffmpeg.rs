@@ -15,6 +15,7 @@ const MAX_FFPROBE_OUTPUT_CHARS: usize = 16_000;
 const PNG_SIGNATURE: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
 const FFPROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 const FFMPEG_BITRATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const GRACEFUL_KILL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -31,6 +32,30 @@ const TARGET_TRIPLE: &str = "aarch64-unknown-linux-gnu";
 const TARGET_TRIPLE: &str = "x86_64-pc-windows-msvc";
 #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
 const TARGET_TRIPLE: &str = "aarch64-pc-windows-msvc";
+
+/// Send SIGTERM (Unix) and wait up to `grace` for the process to exit.
+/// Falls back to SIGKILL if the grace period expires or on Windows.
+async fn graceful_kill(child: &mut tokio::process::Child, grace: std::time::Duration) {
+    #[cfg(unix)]
+    {
+        if let Some(pid) = child.id() {
+            // SAFETY: pid is valid — the child has not been waited yet.
+            unsafe {
+                libc::kill(pid as libc::pid_t, libc::SIGTERM);
+            }
+            match tokio::time::timeout(grace, child.wait()).await {
+                Ok(_) => return,
+                Err(_) => {
+                    log::debug!(
+                        "ffmpeg pid {pid} did not exit within {grace:?} after SIGTERM, sending SIGKILL"
+                    );
+                }
+            }
+        }
+    }
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+}
 
 /// Resolve the path to an executable, preferring the bundled sidecar binary
 /// over the system PATH. This bypasses the Tauri shell plugin which can
@@ -324,8 +349,7 @@ async fn run_tool_command(
                 return Err(AppError::Cancelled);
             }
             _ = tokio::time::sleep(timeout_duration) => {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
+                graceful_kill(&mut child, GRACEFUL_KILL_TIMEOUT).await;
 
                 let stderr_buf = stderr_reader.await.unwrap_or_default();
                 stdout_reader.abort();
@@ -996,8 +1020,7 @@ pub async fn profile_bitrate(
             return Err(AppError::Cancelled);
         }
         _ = tokio::time::sleep(timeout_duration) => {
-            let _ = child.kill().await;
-            let _ = child.wait().await;
+            graceful_kill(&mut child, GRACEFUL_KILL_TIMEOUT).await;
             true
         }
         _status = child.wait() => {
