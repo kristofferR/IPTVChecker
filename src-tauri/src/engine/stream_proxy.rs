@@ -334,6 +334,7 @@ async fn get_or_create_proxy_client(
         .danger_accept_invalid_certs(accept_invalid_certs)
         .cookie_store(true)
         .redirect(reqwest::redirect::Policy::limited(10))
+        .pool_max_idle_per_host(0)
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
