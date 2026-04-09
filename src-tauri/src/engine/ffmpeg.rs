@@ -1013,18 +1013,24 @@ pub async fn profile_bitrate(
         let mut buf = Vec::new();
         if let Some(mut pipe) = stderr_pipe {
             // Drain stderr fully to prevent the child from blocking on a full
-            // pipe, but only retain up to MAX_RETAIN_BYTES for parsing.
+            // pipe. Keep the *tail* (last MAX_RETAIN_BYTES) since the
+            // Statistics line we parse is written near process exit.
             let mut chunk = [0u8; 8192];
             loop {
                 match pipe.read(&mut chunk).await {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
-                        let remaining = MAX_RETAIN_BYTES.saturating_sub(buf.len());
-                        if remaining > 0 {
-                            buf.extend_from_slice(&chunk[..n.min(remaining)]);
+                        buf.extend_from_slice(&chunk[..n]);
+                        if buf.len() > MAX_RETAIN_BYTES * 2 {
+                            let start = buf.len() - MAX_RETAIN_BYTES;
+                            buf.drain(..start);
                         }
                     }
                 }
+            }
+            if buf.len() > MAX_RETAIN_BYTES {
+                let start = buf.len() - MAX_RETAIN_BYTES;
+                buf.drain(..start);
             }
         }
         buf
