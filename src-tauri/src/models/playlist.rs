@@ -26,6 +26,8 @@ pub struct PlaylistPreview {
     #[serde(default)]
     pub server_location: Option<String>,
     #[serde(default)]
+    pub single_provider: bool,
+    #[serde(default)]
     pub xtream_max_connections: Option<u32>,
     #[serde(default)]
     pub xtream_account_info: Option<XtreamAccountInfo>,

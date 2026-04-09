@@ -1919,7 +1919,7 @@ export default function App() {
 
   const handlePlayInApp = useCallback(
     (result: ChannelResult) => {
-      if (isScanActive(getStore().scanState)) {
+      if (isScanActive(getStore().scanState) && getStore().playlist?.single_provider) {
         getStore().setPendingPlaybackChannel(result);
         return;
       }
