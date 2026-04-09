@@ -1056,7 +1056,9 @@ pub async fn profile_bitrate(
     let stderr_buf = stderr_reader.await.unwrap_or_default();
     let stderr = String::from_utf8_lossy(&stderr_buf);
 
-    // Parse the Statistics line regardless of exit code.
+    // Parse Statistics lines regardless of exit code. For HLS streams, ffmpeg
+    // opens many HTTP connections (playlist + segments), each printing its own
+    // "Statistics: N bytes read" line. Sum all of them to get total bytes.
     let mut total_bytes: u64 = 0;
 
     for line in stderr.lines() {
@@ -1064,8 +1066,7 @@ pub async fn profile_bitrate(
             if let Some(parts) = line.split("bytes read").next() {
                 if let Some(size_str) = parts.split_whitespace().last() {
                     if let Ok(bytes) = size_str.parse::<u64>() {
-                        total_bytes = bytes;
-                        break;
+                        total_bytes = total_bytes.saturating_add(bytes);
                     }
                 }
             }
@@ -1073,12 +1074,12 @@ pub async fn profile_bitrate(
     }
 
     // Fallback: regex scan for "<digits> bytes read" anywhere in stderr.
-    // Handles format variations across ffmpeg versions.
+    // Handles format variations across ffmpeg versions. Sum all matches.
     if total_bytes == 0 {
         let re = regex::Regex::new(r"(\d+)\s+bytes\s+read").unwrap();
-        if let Some(caps) = re.captures(&stderr) {
+        for caps in re.captures_iter(&stderr) {
             if let Ok(bytes) = caps[1].parse::<u64>() {
-                total_bytes = bytes;
+                total_bytes = total_bytes.saturating_add(bytes);
             }
         }
     }
