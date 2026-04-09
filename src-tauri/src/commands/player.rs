@@ -1,11 +1,14 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
+use tauri::Manager;
 
 use crate::error::AppError;
+use crate::state::AppState;
 
 static NEXT_TEMP_PLAYLIST_ID: AtomicU64 = AtomicU64::new(0);
 const TEMP_PLAYLIST_PREFIX: &str = "iptv-checker-single-channel-";
@@ -175,6 +178,14 @@ pub async fn open_channel_in_player(channel: PlayerChannel) -> Result<(), AppErr
             Err(error)
         }
     }
+}
+
+#[tauri::command]
+pub fn get_streaming_proxy_port(app: tauri::AppHandle) -> u16 {
+    let state = app.state::<Arc<AppState>>();
+    state
+        .streaming_proxy_port
+        .load(Ordering::Relaxed)
 }
 
 #[cfg(test)]

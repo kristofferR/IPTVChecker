@@ -3,6 +3,7 @@ import type { ChannelResult } from "../lib/types";
 import { normalizeCodecName, resolveResolutionLabel } from "../lib/format";
 import { logger } from "../lib/logger";
 import { toProxyUrl } from "../lib/proxyUrl";
+import { getStreamingProxyPort } from "../lib/tauri";
 
 type PlayerState = "idle" | "loading" | "playing" | "error";
 export type StreamType = "hls" | "mpegts" | "unknown";
@@ -53,6 +54,22 @@ export function classifyStream(url: string): StreamType {
     return "mpegts";
   }
   return "unknown";
+}
+
+/**
+ * Try to convert an Xtream MPEG-TS URL to HLS format.
+ * Xtream pattern: http://host:port/username/password/stream_id
+ * HLS variant:    http://host:port/live/username/password/stream_id.m3u8
+ */
+function tryConvertToXtreamHls(url: string): string | null {
+  const match = url.match(/^(https?:\/\/[^/]+)\/([^/]+)\/([^/]+)\/(\d+)$/);
+  if (!match) return null;
+  const [, origin, user, pass, id] = match;
+  return `${origin}/live/${user}/${pass}/${id}.m3u8`;
+}
+
+function toStreamingProxyUrl(url: string, port: number): string {
+  return `http://127.0.0.1:${port}/stream?url=${encodeURIComponent(url)}`;
 }
 
 export function supportsNativeHlsPlayback(
@@ -571,11 +588,13 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       //    Native HLS gets first shot above when the webview advertises support
       //    because it is more tolerant of real-world IPTV streams on Apple platforms.
       if (streamType === "hls" || streamType === "unknown") {
+        logger.info("[Player] Trying hls.js via proxy for", result.name);
         const hlsOk = await tryHlsPlayback(url, abortController.signal);
         if (!isCurrentPlayback()) {
           return;
         }
         if (hlsOk) {
+          logger.info("[Player] Playing via hls.js proxy:", result.name);
           clearLoadingTimer();
           try { await videoElement.play(); } catch {}
           if (!isCurrentPlayback()) {
@@ -587,9 +606,45 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       }
 
-      // 2. Try mpegts.js for MPEG-TS or unknown streams
+      // 2. For non-HLS streams, try Xtream HLS conversion first
+      if (streamType !== "hls") {
+        const xtreamHlsUrl = tryConvertToXtreamHls(url);
+        if (xtreamHlsUrl) {
+          logger.info("[Player] Trying Xtream HLS conversion:", url, "→", xtreamHlsUrl);
+          const hlsOk = await tryHlsPlayback(xtreamHlsUrl, abortController.signal);
+          if (!isCurrentPlayback()) {
+            return;
+          }
+          if (hlsOk) {
+            logger.info("[Player] Playing via Xtream HLS conversion:", result.name);
+            clearLoadingTimer();
+            try { await videoElement.play(); } catch {}
+            if (!isCurrentPlayback()) {
+              return;
+            }
+            setPlayerState("playing");
+            setupMetadataListeners();
+            return;
+          }
+          logger.info("[Player] Xtream HLS conversion failed, trying streaming proxy");
+        }
+      }
+
+      // 3. Try mpegts.js via localhost streaming proxy for MPEG-TS or unknown streams
       if (streamType === "mpegts" || streamType === "unknown") {
-        const mpegtsOk = await tryMpegtsPlayback(url, abortController.signal);
+        let proxyPort = 0;
+        try {
+          proxyPort = await getStreamingProxyPort();
+        } catch {
+          logger.warn("[Player] Could not get streaming proxy port");
+        }
+        const playbackUrl = proxyPort > 0 ? toStreamingProxyUrl(url, proxyPort) : url;
+        if (proxyPort > 0) {
+          logger.info("[Player] Trying mpegts.js via streaming proxy for", result.name);
+        } else {
+          logger.info("[Player] Trying mpegts.js (raw URL) for", result.name);
+        }
+        const mpegtsOk = await tryMpegtsPlayback(playbackUrl, abortController.signal);
         if (!isCurrentPlayback()) {
           return;
         }

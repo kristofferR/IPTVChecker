@@ -342,6 +342,163 @@ async fn get_or_create_proxy_client(
     client
 }
 
+// ---------------------------------------------------------------------------
+// Localhost streaming proxy for MPEG-TS and other infinite-body streams.
+// The Tauri URI scheme proxy buffers the full response, which fails for live
+// streams. This lightweight TCP server streams bytes through without buffering.
+// ---------------------------------------------------------------------------
+
+/// Start a localhost HTTP proxy that streams upstream responses.
+/// Returns the port the server is listening on.
+pub async fn start_streaming_proxy() -> std::io::Result<u16> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let port = listener.local_addr()?.port();
+    log::info!("[StreamProxy] Localhost streaming proxy started on port {}", port);
+
+    tokio::spawn(async move {
+        loop {
+            let (mut socket, _addr) = match listener.accept().await {
+                Ok(conn) => conn,
+                Err(err) => {
+                    log::warn!("[StreamProxy] Accept error: {}", err);
+                    continue;
+                }
+            };
+
+            tokio::spawn(async move {
+                // Read the HTTP request line to extract the URL
+                let mut buf = vec![0u8; 8192];
+                let n = match socket.read(&mut buf).await {
+                    Ok(0) => return,
+                    Ok(n) => n,
+                    Err(_) => return,
+                };
+                let request_str = String::from_utf8_lossy(&buf[..n]);
+
+                // Parse GET /stream?url=ENCODED_URL HTTP/1.1
+                let url = match parse_stream_request(&request_str) {
+                    Some(url) => url,
+                    None => {
+                        let response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
+                        let _ = socket.write_all(response.as_bytes()).await;
+                        return;
+                    }
+                };
+
+                log::info!("[StreamProxy] Streaming {}", redact_url(&url));
+
+                // Fetch upstream with streaming body
+                let client = reqwest::Client::builder()
+                    .redirect(reqwest::redirect::Policy::limited(10))
+                    .pool_max_idle_per_host(0)
+                    .build()
+                    .unwrap_or_default();
+
+                let response = match client
+                    .get(&url)
+                    .header(USER_AGENT, "TiviMate/5.1.6 (Android 12)")
+                    .send()
+                    .await
+                {
+                    Ok(resp) => resp,
+                    Err(err) => {
+                        log::warn!("[StreamProxy] Upstream request failed for {}: {}", redact_url(&url), err);
+                        let body = format!("Upstream request failed: {}", err);
+                        let response = format!(
+                            "HTTP/1.1 502 Bad Gateway\r\nContent-Length: {}\r\n\r\n{}",
+                            body.len(),
+                            body
+                        );
+                        let _ = socket.write_all(response.as_bytes()).await;
+                        return;
+                    }
+                };
+
+                let status = response.status().as_u16();
+                let content_type = response
+                    .headers()
+                    .get(CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("application/octet-stream")
+                    .to_string();
+
+                // Write HTTP response headers
+                let header = format!(
+                    "HTTP/1.1 {} OK\r\n\
+                     Content-Type: {}\r\n\
+                     Access-Control-Allow-Origin: *\r\n\
+                     Transfer-Encoding: chunked\r\n\
+                     Cache-Control: no-cache\r\n\
+                     Connection: close\r\n\
+                     \r\n",
+                    status, content_type
+                );
+                if socket.write_all(header.as_bytes()).await.is_err() {
+                    return;
+                }
+
+                // Stream body chunks
+                use futures::StreamExt;
+                let mut stream = response.bytes_stream();
+                while let Some(chunk_result) = stream.next().await {
+                    match chunk_result {
+                        Ok(chunk) => {
+                            // Write chunked transfer encoding
+                            let size_line = format!("{:x}\r\n", chunk.len());
+                            if socket.write_all(size_line.as_bytes()).await.is_err() {
+                                break;
+                            }
+                            if socket.write_all(&chunk).await.is_err() {
+                                break;
+                            }
+                            if socket.write_all(b"\r\n").await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(err) => {
+                            log::debug!("[StreamProxy] Stream read error for {}: {}", redact_url(&url), err);
+                            break;
+                        }
+                    }
+                }
+
+                // Send final chunk
+                let _ = socket.write_all(b"0\r\n\r\n").await;
+                log::debug!("[StreamProxy] Stream ended for {}", redact_url(&url));
+            });
+        }
+    });
+
+    Ok(port)
+}
+
+fn parse_stream_request(request: &str) -> Option<String> {
+    let first_line = request.lines().next()?;
+    // GET /stream?url=ENCODED HTTP/1.1
+    let path = first_line.split_whitespace().nth(1)?;
+    let encoded = path.strip_prefix("/stream?url=")?;
+    // Simple percent-decoding
+    let mut decoded = String::new();
+    let mut chars = encoded.bytes();
+    while let Some(b) = chars.next() {
+        if b == b'%' {
+            let h = chars.next()?;
+            let l = chars.next()?;
+            let hex = format!("{}{}", h as char, l as char);
+            let byte = u8::from_str_radix(&hex, 16).ok()?;
+            decoded.push(byte as char);
+        } else if b == b'+' {
+            decoded.push(' ');
+        } else {
+            decoded.push(b as char);
+        }
+    }
+    Some(decoded)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

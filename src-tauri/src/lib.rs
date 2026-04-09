@@ -609,6 +609,23 @@ pub fn run() {
 
             commands::recent::refresh_recent_menu(&app.handle());
 
+            // Start the localhost streaming proxy for MPEG-TS playback
+            {
+                let state = app.state::<Arc<AppState>>().inner().clone();
+                tauri::async_runtime::spawn(async move {
+                    match engine::stream_proxy::start_streaming_proxy().await {
+                        Ok(port) => {
+                            state
+                                .streaming_proxy_port
+                                .store(port, Ordering::Relaxed);
+                        }
+                        Err(error) => {
+                            log::error!("Failed to start streaming proxy: {}", error);
+                        }
+                    }
+                });
+            }
+
             // Background cleanup: evict old screenshot dirs per retention policy
             {
                 let handle = app.handle().clone();
@@ -719,6 +736,7 @@ pub fn run() {
             commands::playlist::open_playlist_xtream,
             commands::playlist::open_playlist_stalker,
             commands::player::open_channel_in_player,
+            commands::player::get_streaming_proxy_port,
             commands::scan::start_scan,
             commands::scan::pause_scan,
             commands::scan::resume_scan,
