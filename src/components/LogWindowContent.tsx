@@ -150,11 +150,13 @@ export function LogWindowContent() {
   });
 
   // Auto-scroll when new entries arrive
+  const lastFilteredEntryId = filteredEntries[filteredEntries.length - 1]?.id ?? null;
+
   useEffect(() => {
     if (autoScrollRef.current && filteredEntries.length > 0) {
       virtualizer.scrollToIndex(filteredEntries.length - 1, { align: "end" });
     }
-  }, [filteredEntries.length, virtualizer]);
+  }, [lastFilteredEntryId, filteredEntries.length, virtualizer]);
 
   const handleScroll = useCallback(() => {
     const el = scrollContainerRef.current;

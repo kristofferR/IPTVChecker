@@ -274,7 +274,9 @@ pub async fn handle_proxy_request(
     };
 
     // Rewrite M3U8 manifests so internal URLs also go through the proxy
-    let body = if is_m3u8_response(&content_type, &final_url) {
+    let looks_like_m3u8 = is_m3u8_response(&content_type, &final_url)
+        || body.starts_with(b"#EXTM3U");
+    let body = if looks_like_m3u8 {
         let manifest = String::from_utf8_lossy(&body);
         rewrite_m3u8_manifest(&manifest, &final_url).into_bytes()
     } else {
@@ -387,6 +389,13 @@ pub async fn start_streaming_proxy() -> std::io::Result<u16> {
                         return;
                     }
                 };
+
+                if !is_safe_upstream_url(&url) {
+                    log::warn!("[StreamProxy] Blocked request to private/local target");
+                    let response = "HTTP/1.1 403 Forbidden\r\nContent-Length: 22\r\n\r\nTarget URL not allowed";
+                    let _ = socket.write_all(response.as_bytes()).await;
+                    return;
+                }
 
                 log::info!("[StreamProxy] Streaming {}", redact_url(&url));
 

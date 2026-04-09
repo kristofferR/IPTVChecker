@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
@@ -18,6 +19,32 @@ const FFMPEG_BITRATE_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 const GRACEFUL_KILL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+// Cached compiled regexes for parse_ffmpeg_stderr / parse_bytes_read / profile_bitrate.
+static VIDEO_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"Stream #\d+:\d+.*?: Video: (\w+)").unwrap()
+});
+static RESOLUTION_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(\d{2,5})x(\d{2,5})").unwrap()
+});
+static FPS_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(\d+(?:\.\d+)?)\s+fps").unwrap()
+});
+static TBR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(\d+(?:\.\d+)?)\s+tbr").unwrap()
+});
+static AUDIO_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"Stream #\d+:\d+.*?: Audio: (\w+)").unwrap()
+});
+static AUDIO_BITRATE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(\d+)\s+kb/s").unwrap()
+});
+static FORMAT_BR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"bitrate:\s*(\d+)\s*kb/s").unwrap()
+});
+static BYTES_READ_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(\d+)\s+bytes\s+read").unwrap()
+});
 
 // Compile-time target triple for resolving sidecar binary paths.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -938,8 +965,7 @@ pub async fn profile_bitrate(
     // Fallback: regex scan for "<digits> bytes read" anywhere in stderr.
     // Handles format variations across ffmpeg versions. Sum all matches.
     if total_bytes == 0 {
-        let re = regex::Regex::new(r"(\d+)\s+bytes\s+read").unwrap();
-        for caps in re.captures_iter(&stderr) {
+        for caps in BYTES_READ_RE.captures_iter(&stderr) {
             if let Ok(bytes) = caps[1].parse::<u64>() {
                 total_bytes = total_bytes.saturating_add(bytes);
             }
@@ -998,27 +1024,13 @@ fn parse_ffmpeg_stderr(stderr: &str) -> (StreamTrackPresence, Option<VideoInfo>,
     let mut audio_info: Option<AudioInfo> = None;
     let mut format_bitrate_kbps: Option<u32> = None;
 
-    let video_re = regex::Regex::new(
-        r"Stream #\d+:\d+.*?: Video: (\w+)"
-    ).unwrap();
-    let resolution_re = regex::Regex::new(r"(\d{2,5})x(\d{2,5})").unwrap();
-    let fps_re = regex::Regex::new(r"(\d+(?:\.\d+)?)\s+fps").unwrap();
-    let tbr_re = regex::Regex::new(r"(\d+(?:\.\d+)?)\s+tbr").unwrap();
-
-    let audio_re = regex::Regex::new(
-        r"Stream #\d+:\d+.*?: Audio: (\w+)"
-    ).unwrap();
-    let audio_bitrate_re = regex::Regex::new(r"(\d+)\s+kb/s").unwrap();
-
-    let format_br_re = regex::Regex::new(r"bitrate:\s*(\d+)\s*kb/s").unwrap();
-
     for line in stderr.lines() {
         // Video stream
-        if let Some(caps) = video_re.captures(line) {
+        if let Some(caps) = VIDEO_RE.captures(line) {
             presence.has_video = true;
             let codec = caps[1].to_string();
 
-            let (w, h) = resolution_re.captures(line)
+            let (w, h) = RESOLUTION_RE.captures(line)
                 .map(|c| {
                     let w = c[1].parse::<u32>().ok();
                     let h = c[2].parse::<u32>().ok();
@@ -1026,8 +1038,8 @@ fn parse_ffmpeg_stderr(stderr: &str) -> (StreamTrackPresence, Option<VideoInfo>,
                 })
                 .unwrap_or((None, None));
 
-            let fps = fps_re.captures(line)
-                .or_else(|| tbr_re.captures(line))
+            let fps = FPS_RE.captures(line)
+                .or_else(|| TBR_RE.captures(line))
                 .and_then(|c| c[1].parse::<f64>().ok())
                 .map(|f| f.round() as u32)
                 .filter(|&f| f > 0 && f <= 240);
@@ -1046,10 +1058,10 @@ fn parse_ffmpeg_stderr(stderr: &str) -> (StreamTrackPresence, Option<VideoInfo>,
 
         // Audio stream (take first)
         if audio_info.is_none() {
-            if let Some(caps) = audio_re.captures(line) {
+            if let Some(caps) = AUDIO_RE.captures(line) {
                 presence.has_audio = true;
                 let codec = caps[1].to_string();
-                let bitrate_kbps = audio_bitrate_re.captures(line)
+                let bitrate_kbps = AUDIO_BITRATE_RE.captures(line)
                     .and_then(|c| c[1].parse::<u32>().ok());
                 audio_info = Some(AudioInfo { codec: normalize_codec_name(&codec), bitrate_kbps });
                 continue;
@@ -1060,7 +1072,7 @@ fn parse_ffmpeg_stderr(stderr: &str) -> (StreamTrackPresence, Option<VideoInfo>,
 
         // Format-level bitrate from Duration line
         if format_bitrate_kbps.is_none() && line.contains("Duration:") {
-            format_bitrate_kbps = format_br_re.captures(line)
+            format_bitrate_kbps = FORMAT_BR_RE.captures(line)
                 .and_then(|c| c[1].parse::<u32>().ok());
         }
     }
@@ -1097,8 +1109,7 @@ fn parse_bytes_read(stderr: &str, sample_secs: u64) -> Option<u64> {
 
     // Fallback: regex scan for "<digits> bytes read" anywhere
     if total_bytes == 0 {
-        let re = regex::Regex::new(r"(\d+)\s+bytes\s+read").unwrap();
-        for caps in re.captures_iter(stderr) {
+        for caps in BYTES_READ_RE.captures_iter(stderr) {
             if let Ok(bytes) = caps[1].parse::<u64>() {
                 total_bytes = total_bytes.saturating_add(bytes);
             }

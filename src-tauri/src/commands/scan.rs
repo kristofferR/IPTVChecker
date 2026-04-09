@@ -1112,22 +1112,10 @@ async fn execute_scan_run(
     );
 
     let preview = parse_playlist_with_cache(&app, &state, &config, &run_id).await?;
-    let single_provider = if preview.single_provider {
-        true
-    } else {
-        // The cached preview from parse_playlist may not have single_provider
-        // set (it's populated separately during playlist open). Recompute.
-        crate::commands::playlist::is_single_provider_check(&preview.channels)
-    };
+    let preview_single_provider = preview.single_provider;
     let mut channels = preview.channels;
     filter_channels_by_selection(&mut channels, &config.selected_indices);
     let total = channels.len();
-    log::info!(
-        "Scan {}: {} channels to check (single_provider: {})",
-        run_id,
-        total,
-        single_provider
-    );
 
     if total == 0 {
         let summary = ScanSummary {
@@ -1248,6 +1236,21 @@ async fn execute_scan_run(
     )
     .await;
 
+    // Compute single_provider from the filtered (and resume-pruned) channel set.
+    let single_provider = if preview_single_provider {
+        true
+    } else {
+        // The cached preview from parse_playlist may not have single_provider
+        // set (it's populated separately during playlist open). Recompute.
+        crate::commands::playlist::is_single_provider_check(&channels)
+    };
+    log::info!(
+        "Scan {}: {} channels to check (single_provider: {})",
+        run_id,
+        total,
+        single_provider
+    );
+
     // Load proxies if configured
     let proxy_list = if config.test_geoblock {
         if let Some(ref proxy_file) = config.proxy_file {
@@ -1367,7 +1370,11 @@ async fn execute_scan_run(
         builder.build().unwrap_or_default()
     });
     let semaphore = Arc::new(Semaphore::new(config.concurrency as usize));
-    let diagnostics_limit = usize::max(1, usize::min(config.concurrency as usize, 4));
+    let diagnostics_limit = if single_provider {
+        1
+    } else {
+        usize::max(1, usize::min(config.concurrency as usize, 4))
+    };
     let diagnostics_semaphore = Arc::new(Semaphore::new(diagnostics_limit));
     let (low_fps_threshold_setting, screenshot_format_setting) = {
         let settings = state.settings.lock().await;

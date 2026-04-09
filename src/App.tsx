@@ -1947,8 +1947,8 @@ export default function App() {
         url: result.url,
       });
     } catch (err) {
-      logger.error("[Player] Failed to open channel in external player:", String(err));
-      getStore().setPlaybackError(String(err));
+      logger.error("[Player] Failed to open channel in external player:", errorToString(err));
+      getStore().setPlaybackError(errorToString(err));
     }
   }, []);
 
