@@ -3,7 +3,7 @@ use base64::Engine;
 use reqwest::header::{HeaderValue, CONTENT_TYPE, RANGE, USER_AGENT};
 use std::sync::Arc;
 use tauri::Manager;
-use url::Url;
+use url::{Host, Url};
 
 use crate::state::AppState;
 
@@ -136,7 +136,7 @@ fn rewrite_tag_uri(line: &str, base: &Url) -> String {
 }
 
 /// Redact query parameters and userinfo from a URL for safe logging.
-fn redact_url(url: &str) -> String {
+pub(crate) fn redact_url(url: &str) -> String {
     match Url::parse(url) {
         Ok(mut parsed) => {
             if parsed.query().is_some() {
@@ -152,8 +152,48 @@ fn redact_url(url: &str) -> String {
     }
 }
 
+fn reqwest_error_kind(err: &reqwest::Error) -> &'static str {
+    if err.is_timeout() {
+        "timeout"
+    } else if err.is_connect() {
+        "connect"
+    } else if err.is_body() {
+        "body"
+    } else if err.is_request() {
+        "request"
+    } else {
+        "other"
+    }
+}
+
+fn is_blocked_ipv4(ip: std::net::Ipv4Addr) -> bool {
+    ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || ip.is_unspecified()
+        || ip.is_broadcast()
+        || ip.is_multicast()
+}
+
+fn is_blocked_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => is_blocked_ipv4(v4),
+        std::net::IpAddr::V6(v6) => {
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return is_blocked_ipv4(mapped);
+            }
+
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local()
+                || v6.is_multicast()
+        }
+    }
+}
+
 /// Reject URLs targeting localhost, private networks, or metadata endpoints.
-fn is_safe_upstream_url(url: &str) -> bool {
+async fn is_safe_upstream_url(url: &str) -> bool {
     let parsed = match Url::parse(url) {
         Ok(u) => u,
         Err(_) => return false,
@@ -164,36 +204,27 @@ fn is_safe_upstream_url(url: &str) -> bool {
         return false;
     }
 
-    let host = match parsed.host_str() {
-        Some(h) => h.to_lowercase(),
+    let host = match parsed.host() {
+        Some(h) => h,
         None => return false,
     };
 
-    // Block localhost and loopback
-    if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]" || host == "0.0.0.0" {
-        return false;
-    }
+    match host {
+        Host::Domain(domain) => {
+            if domain.eq_ignore_ascii_case("localhost") {
+                return false;
+            }
 
-    // Block link-local and cloud metadata
-    if host == "169.254.169.254" || host.starts_with("169.254.") {
-        return false;
-    }
-
-    // Block private RFC1918 ranges
-    if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
-        if ip.is_loopback() || ip.is_unspecified() {
-            return false;
+            let port = parsed.port_or_known_default().unwrap_or(80);
+            let Ok(socket_addrs) = tokio::net::lookup_host((domain, port)).await else {
+                return false;
+            };
+            let resolved_ips = socket_addrs.map(|addr| addr.ip()).collect::<Vec<_>>();
+            !resolved_ips.is_empty() && resolved_ips.into_iter().all(|ip| !is_blocked_ip(ip))
         }
-        let octets = ip.octets();
-        // 10.0.0.0/8
-        if octets[0] == 10 { return false; }
-        // 172.16.0.0/12
-        if octets[0] == 172 && (16..=31).contains(&octets[1]) { return false; }
-        // 192.168.0.0/16
-        if octets[0] == 192 && octets[1] == 168 { return false; }
+        Host::Ipv4(ip) => !is_blocked_ip(std::net::IpAddr::V4(ip)),
+        Host::Ipv6(ip) => !is_blocked_ip(std::net::IpAddr::V6(ip)),
     }
-
-    true
 }
 
 /// Handle an incoming proxy request: decode the URL, fetch upstream, return response.
@@ -207,12 +238,12 @@ pub async fn handle_proxy_request(
     let original_url = match decode_proxy_url(encoded) {
         Some(url) => url,
         None => {
-            log::warn!("Stream proxy: failed to decode URL from path: {}", path);
+            log::warn!("Stream proxy: failed to decode URL from request path");
             return error_response(400, "Invalid proxy URL encoding");
         }
     };
 
-    if !is_safe_upstream_url(&original_url) {
+    if !is_safe_upstream_url(&original_url).await {
         log::warn!("Stream proxy: blocked request to private/local target");
         return error_response(403, "Target URL not allowed");
     }
@@ -247,7 +278,11 @@ pub async fn handle_proxy_request(
     let upstream_response = match req_builder.send().await {
         Ok(resp) => resp,
         Err(err) => {
-            log::warn!("Stream proxy: upstream request failed for {}: {}", redact_url(&original_url), err);
+            log::warn!(
+                "Stream proxy: upstream request failed for {} ({})",
+                redact_url(&original_url),
+                reqwest_error_kind(&err)
+            );
             if err.is_timeout() {
                 return error_response(504, "Upstream request timed out");
             }
@@ -267,8 +302,11 @@ pub async fn handle_proxy_request(
 
     let body = match upstream_response.bytes().await {
         Ok(bytes) => bytes.to_vec(),
-        Err(err) => {
-            log::warn!("Stream proxy: failed to read upstream body for {}: {}", redact_url(&original_url), err);
+        Err(_) => {
+            log::warn!(
+                "Stream proxy: failed to read upstream body for {}",
+                redact_url(&original_url)
+            );
             return error_response(502, "Failed to read upstream response");
         }
     };
@@ -391,7 +429,7 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     }
                 };
 
-                if !is_safe_upstream_url(&url) {
+                if !is_safe_upstream_url(&url).await {
                     log::warn!("[StreamProxy] Blocked request to private/local target");
                     let response = "HTTP/1.1 403 Forbidden\r\nContent-Length: 22\r\n\r\nTarget URL not allowed";
                     let _ = socket.write_all(response.as_bytes()).await;
@@ -419,15 +457,24 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                         HeaderValue::from_str(&user_agent)
                             .unwrap_or_else(|_| HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")),
                     )
+                    .timeout(PROXY_TIMEOUT)
                     .send()
                     .await
                 {
                     Ok(resp) => resp,
                     Err(err) => {
-                        log::warn!("[StreamProxy] Upstream request failed for {}: {}", redact_url(&url), err);
-                        let body = format!("Upstream request failed: {}", err);
+                        log::warn!(
+                            "[StreamProxy] Upstream request failed for {} ({})",
+                            redact_url(&url),
+                            reqwest_error_kind(&err)
+                        );
+                        let (status_line, body) = if err.is_timeout() {
+                            ("HTTP/1.1 504 Gateway Timeout", "Upstream request timed out")
+                        } else {
+                            ("HTTP/1.1 502 Bad Gateway", "Upstream request failed")
+                        };
                         let response = format!(
-                            "HTTP/1.1 502 Bad Gateway\r\nContent-Length: {}\r\n\r\n{}",
+                            "{status_line}\r\nContent-Length: {}\r\n\r\n{}",
                             body.len(),
                             body
                         );
@@ -436,7 +483,7 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     }
                 };
 
-                let status = response.status().as_u16();
+                let status = response.status();
                 let content_type = response
                     .headers()
                     .get(CONTENT_TYPE)
@@ -445,15 +492,18 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     .to_string();
 
                 // Write HTTP response headers
+                let status_line = match status.canonical_reason() {
+                    Some(reason) => format!("HTTP/1.1 {} {}\r\n", status.as_u16(), reason),
+                    None => format!("HTTP/1.1 {}\r\n", status.as_u16()),
+                };
                 let header = format!(
-                    "HTTP/1.1 {} OK\r\n\
-                     Content-Type: {}\r\n\
+                    "{}Content-Type: {}\r\n\
                      Access-Control-Allow-Origin: *\r\n\
                      Transfer-Encoding: chunked\r\n\
                      Cache-Control: no-cache\r\n\
                      Connection: close\r\n\
                      \r\n",
-                    status, content_type
+                    status_line, content_type
                 );
                 if socket.write_all(header.as_bytes()).await.is_err() {
                     return;
@@ -498,24 +548,9 @@ fn parse_stream_request(request: &str) -> Option<String> {
     let first_line = request.lines().next()?;
     // GET /stream?url=ENCODED HTTP/1.1
     let path = first_line.split_whitespace().nth(1)?;
-    let encoded = path.strip_prefix("/stream?url=")?;
-    // Simple percent-decoding
-    let mut decoded = String::new();
-    let mut chars = encoded.bytes();
-    while let Some(b) = chars.next() {
-        if b == b'%' {
-            let h = chars.next()?;
-            let l = chars.next()?;
-            let hex = format!("{}{}", h as char, l as char);
-            let byte = u8::from_str_radix(&hex, 16).ok()?;
-            decoded.push(byte as char);
-        } else if b == b'+' {
-            decoded.push(' ');
-        } else {
-            decoded.push(b as char);
-        }
-    }
-    Some(decoded)
+    let url = Url::parse(&format!("http://localhost{path}")).ok()?;
+    url.query_pairs()
+        .find_map(|(key, value)| (key == "url").then(|| value.into_owned()))
 }
 
 #[cfg(test)]
@@ -658,5 +693,32 @@ segment.ts
         assert!(is_m3u8_response("application/octet-stream", "http://example.com/live.m3u8"));
         assert!(is_m3u8_response("text/plain", "http://example.com/live.m3u8?token=abc"));
         assert!(!is_m3u8_response("text/plain", "http://example.com/segment.ts"));
+    }
+
+    #[test]
+    fn parse_stream_request_decodes_percent_encoded_utf8() {
+        let request =
+            "GET /stream?url=https%3A%2F%2Fexample.com%2Fstr%C3%B8m%3Ftoken%3Dabc%2B123 HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert_eq!(
+            parse_stream_request(request).as_deref(),
+            Some("https://example.com/strøm?token=abc+123")
+        );
+    }
+
+    #[tokio::test]
+    async fn is_safe_upstream_blocks_private_ranges_and_ipv6() {
+        assert!(!is_safe_upstream_url("http://localhost/").await);
+        assert!(!is_safe_upstream_url("http://127.0.0.1/").await);
+        assert!(!is_safe_upstream_url("http://10.0.0.1/").await);
+        assert!(!is_safe_upstream_url("http://172.16.0.1/").await);
+        assert!(!is_safe_upstream_url("http://192.168.1.1/").await);
+        assert!(!is_safe_upstream_url("http://169.254.169.254/").await);
+        assert!(!is_safe_upstream_url("http://[::1]/").await);
+        assert!(!is_safe_upstream_url("http://[fe80::1]/").await);
+        assert!(!is_safe_upstream_url("http://[fc00::1]/").await);
+        assert!(!is_safe_upstream_url("http://[::ffff:127.0.0.1]/").await);
+        assert!(!is_safe_upstream_url("http://[::ffff:10.0.0.1]/").await);
+        assert!(is_safe_upstream_url("http://8.8.8.8/").await);
+        assert!(is_safe_upstream_url("http://[2606:4700:4700::1111]/").await);
     }
 }

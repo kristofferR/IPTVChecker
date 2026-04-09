@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::commands::history;
 use crate::commands::settings;
-use crate::engine::{checker, connectivity, disk, ffmpeg, parser, proxy, resume};
+use crate::engine::{checker, connectivity, disk, ffmpeg, parser, proxy, resume, stream_proxy};
 use crate::error::AppError;
 use crate::models::settings::ScreenshotFormat;
 use crate::models::backend_perf::BackendPerfSample;
@@ -27,6 +27,7 @@ const PROGRESS_EMIT_INTERVAL_MS: u64 = 50;
 const CHECKPOINT_FLUSH_INTERVAL_MS: u64 = 250;
 const CHECKPOINT_FLUSH_MAX_BATCH: usize = 128;
 const RESULT_BATCH_MAX_ITEMS: usize = 64;
+const MIN_SCREENSHOT_DIAGNOSTIC_TIMEOUT_SECS: f64 = 15.0;
 
 #[derive(Debug, Clone)]
 struct SharedUrlResult {
@@ -251,6 +252,7 @@ async fn compute_shared_url_result(
     }
 
     let target_url = stream_url.as_deref().unwrap_or(channel_url).to_string();
+    let redacted_target_url = stream_proxy::redact_url(&target_url);
     let mut shared = SharedUrlResult {
         status: status.clone(),
         drm_system,
@@ -289,6 +291,8 @@ async fn compute_shared_url_result(
         // Avoids 5XX rejections from single-connection IPTV servers.
         let diag_timeout = if profile_bitrate_flag {
             ffmpeg_bitrate_timeout_secs
+        } else if want_screenshot {
+            ffprobe_timeout_secs.max(MIN_SCREENSHOT_DIAGNOSTIC_TIMEOUT_SECS)
         } else {
             ffprobe_timeout_secs
         };
@@ -359,7 +363,7 @@ async fn compute_shared_url_result(
                 return Err(AppError::Cancelled);
             }
             Err(err) => {
-                log::warn!("Combined diagnostics failed for {target_url}: {err}");
+                log::warn!("Combined diagnostics failed for {}: {}", redacted_target_url, err);
             }
         }
         drop(diagnostics_permit);
@@ -449,14 +453,14 @@ async fn compute_shared_url_result(
                 }
                 Err(AppError::Cancelled) => {}
                 Err(err) => {
-                    log::warn!("Bitrate profiling failed for {target_url}: {err}");
+                    log::warn!("Bitrate profiling failed for {}: {}", redacted_target_url, err);
                 }
             }
         }
     }
 
     // Fallback: use format-level bitrate when video_bitrate is missing or N/A.
-    if matches!(shared.video_bitrate.as_deref(), None | Some("N/A")) {
+    if profile_bitrate_flag && matches!(shared.video_bitrate.as_deref(), None | Some("N/A")) {
         if let Some(fmt_kbps) = format_bitrate_kbps {
             let audio_kbps = shared
                 .audio_bitrate

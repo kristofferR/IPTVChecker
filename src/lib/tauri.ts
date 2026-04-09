@@ -143,7 +143,7 @@ export async function saveScanPreset(
   config: ScanPresetConfig,
   setAsDefault = false,
 ): Promise<ScanPresetCollection> {
-  return invoke("save_scan_preset", { name, config, setAsDefault });
+  return invoke("save_scan_preset", { name, config, set_as_default: setAsDefault });
 }
 
 export async function renameScanPreset(

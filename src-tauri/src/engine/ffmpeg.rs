@@ -6,6 +6,7 @@ use serde::Deserialize;
 use tauri::{AppHandle, Manager};
 use tokio_util::sync::CancellationToken;
 
+use crate::engine::stream_proxy::redact_url;
 use crate::error::AppError;
 use crate::models::settings::ScreenshotFormat;
 
@@ -141,11 +142,28 @@ fn stderr_excerpt(stderr: &str) -> String {
         return "no stderr output".to_string();
     }
 
-    let mut excerpt: String = trimmed.chars().take(MAX_STDERR_EXCERPT_CHARS).collect();
+    let sanitized = trimmed
+        .lines()
+        .map(sanitize_ffmpeg_stderr_line)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut excerpt: String = sanitized.chars().take(MAX_STDERR_EXCERPT_CHARS).collect();
     if trimmed.chars().count() > MAX_STDERR_EXCERPT_CHARS {
         excerpt.push_str("...");
     }
     excerpt
+}
+
+fn sanitize_ffmpeg_stderr_line(line: &str) -> String {
+    if line.contains("Input #") {
+        if let Some((prefix, remainder)) = line.split_once(" from '") {
+            if let Some((url, suffix)) = remainder.split_once('\'') {
+                return format!("{prefix} from '{}'{suffix}", redact_url(url));
+            }
+        }
+        return "Input #<REDACTED> from '<REDACTED_URL>'".to_string();
+    }
+    line.to_string()
 }
 
 fn trim_windows_unsafe_edges(value: &str) -> String {
@@ -977,6 +995,7 @@ pub async fn profile_bitrate(
             .lines()
             .rev()
             .take(5)
+            .map(sanitize_ffmpeg_stderr_line)
             .collect::<Vec<_>>()
             .into_iter()
             .rev()
@@ -1266,7 +1285,16 @@ pub async fn run_combined_diagnostics(
         if kbps.is_none() && !timed_out {
             log::warn!(
                 "Combined diagnostics: no bytes-read data in stderr. stderr tail: {}",
-                stderr.lines().rev().take(3).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" | ")
+                stderr
+                    .lines()
+                    .rev()
+                    .take(3)
+                    .map(sanitize_ffmpeg_stderr_line)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .join(" | ")
             );
         }
         kbps
@@ -1297,6 +1325,7 @@ pub async fn run_combined_diagnostics(
     let diagnostics_output = {
         let relevant: String = stderr
             .lines()
+            .map(sanitize_ffmpeg_stderr_line)
             .filter(|l| {
                 l.contains("Stream #")
                     || l.contains("Duration:")
