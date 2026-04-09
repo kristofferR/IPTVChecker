@@ -759,6 +759,13 @@ pub fn run() {
                 }
             }
         })
+        .register_asynchronous_uri_scheme_protocol("streamproxy", |ctx, request, responder| {
+            let app_handle = ctx.app_handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let response = engine::stream_proxy::handle_proxy_request(&app_handle, request).await;
+                responder.respond(response);
+            });
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app, _event| {

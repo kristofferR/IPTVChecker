@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChannelResult } from "../lib/types";
 import { normalizeCodecName, resolveResolutionLabel } from "../lib/format";
+import { toProxyUrl } from "../lib/proxyUrl";
 
 type PlayerState = "idle" | "loading" | "playing" | "error";
 export type StreamType = "hls" | "mpegts" | "unknown";
@@ -113,6 +114,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const [muted, setMuted] = useState(readStoredMuted);
   const [isPaused, setIsPaused] = useState(false);
   const [activeChannelIndex, setActiveChannelIndex] = useState<number | null>(null);
+  const lastErrorRef = useRef<string | null>(null);
   const [streamMetadata, setStreamMetadata] = useState<StreamMetadata | null>(null);
 
   const hlsInstanceRef = useRef<import("hls.js").default | null>(null);
@@ -339,6 +341,17 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           finish(true);
         };
         const onError = () => {
+          const mediaErr = videoElement.error;
+          if (mediaErr) {
+            const codeMap: Record<number, string> = {
+              1: "Playback aborted",
+              2: "Network error",
+              3: "Decode error",
+              4: "Format not supported",
+            };
+            lastErrorRef.current =
+              codeMap[mediaErr.code] ?? mediaErr.message ?? "Unknown media error";
+          }
           videoElement.removeAttribute("src");
           videoElement.load();
           finish(false);
@@ -392,6 +405,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         };
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data.fatal) {
+            lastErrorRef.current = `${data.type}: ${data.details}`;
             destroyPlayer();
             finish(false);
           }
@@ -404,7 +418,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         videoElement.addEventListener("error", onVideoError, { once: true });
         signal.addEventListener("abort", onAbort, { once: true });
 
-        hls.loadSource(url);
+        hls.loadSource(toProxyUrl(url));
         hls.attachMedia(videoElement);
         applyVolume();
       });
@@ -439,6 +453,17 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           finish(true);
         };
         const onError = () => {
+          const mediaErr = videoElement.error;
+          if (mediaErr) {
+            const codeMap: Record<number, string> = {
+              1: "Playback aborted",
+              2: "Network error",
+              3: "Decode error",
+              4: "Format not supported",
+            };
+            lastErrorRef.current =
+              codeMap[mediaErr.code] ?? mediaErr.message ?? "Unknown media error";
+          }
           player.destroy();
           mpegtsPlayerRef.current = null;
           finish(false);
@@ -476,6 +501,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       setErrorMessage(null);
       setIsPaused(false);
       setActiveChannelIndex(result.index);
+      lastErrorRef.current = null;
 
       // Always use the original URL for playback — stream_url may be a resolved
       // segment URL (e.g. a .ts segment from HLS manifest traversal) rather than
@@ -491,8 +517,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           return;
         }
         cleanup();
-        setPlayerState("idle");
-        setActiveChannelIndex(null);
+        setPlayerState("error");
+        setErrorMessage("Connection timed out");
         onPlaybackFailedRef.current?.(currentResult);
       }, LOADING_TIMEOUT_MS);
 
@@ -571,13 +597,13 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       }
 
-      // All methods failed — fall back to scanning
+      // All methods failed
       clearLoadingTimer();
       if (!isCurrentPlayback()) {
         return;
       }
-      setPlayerState("idle");
-      setActiveChannelIndex(null);
+      setPlayerState("error");
+      setErrorMessage(lastErrorRef.current ?? "Unable to play stream");
       onPlaybackFailedRef.current?.(result);
     },
     [
