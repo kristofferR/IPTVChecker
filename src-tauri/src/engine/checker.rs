@@ -520,6 +520,7 @@ async fn verify(
     client: &reqwest::Client,
     target_url: &str,
     timeout_secs: f64,
+    deadline: Instant,
     playlist_depth: u32,
     redirect_depth: u32,
     visited: &mut HashSet<String>,
@@ -539,6 +540,16 @@ async fn verify(
             reason: Some("Redirect loop".to_string()),
         };
     }
+
+    // Use the shorter of per-request timeout and remaining deadline budget.
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return VerifyResult::Dead {
+            latency_ms: root_latency_ms,
+            reason: Some("Timeout".to_string()),
+        };
+    }
+    let effective_timeout = Duration::from_secs_f64(timeout_secs).min(remaining);
 
     let normalized = target_url
         .split('#')
@@ -564,7 +575,7 @@ async fn verify(
     let request = client
         .get(target_url)
         .headers(headers.clone())
-        .timeout(Duration::from_secs_f64(timeout_secs));
+        .timeout(effective_timeout);
 
     let request_started_at = Instant::now();
     let resp = match request.send().await {
@@ -624,6 +635,7 @@ async fn verify(
             client,
             &next_url,
             timeout_secs,
+            deadline,
             playlist_depth,
             redirect_depth + 1,
             visited,
@@ -681,6 +693,7 @@ async fn verify(
                 client,
                 &next_url,
                 timeout_secs,
+                deadline,
                 playlist_depth + 1,
                 redirect_depth,
                 visited,
@@ -1125,10 +1138,15 @@ pub async fn check_channel_status_with_debug(
                 );
                 let mut metrics = VerifyMetrics::default();
                 let mut visited = HashSet::new();
+                // Bound total verify time: redirects and playlist hops share
+                // a single deadline instead of each getting a fresh timeout.
+                // Allow up to 3x the per-request timeout for the entire chain.
+                let deadline = Instant::now() + Duration::from_secs_f64(current_timeout * 3.0);
                 let result = verify(
                     &client,
                     &url,
                     current_timeout,
+                    deadline,
                     0,
                     0,
                     &mut visited,
