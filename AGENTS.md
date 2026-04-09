@@ -52,6 +52,17 @@ lib/        — Types, Tauri invoke wrappers, formatting helpers, sort/filter lo
 
 **IMPORTANT:** Before launching `bun tauri dev` after Rust code changes, always run `cargo clean -p iptv-checker && cargo build` in `src-tauri/` first to ensure a fresh binary. The dev server's file watcher does not always trigger a rebuild, leading to stale cached binaries.
 
+## Releases
+
+To create a new release:
+1. Bump version in all three files: `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, `package.json`
+2. Run `cargo check` in `src-tauri/` to update `Cargo.lock`
+3. Commit: `Bump version to X.Y.Z`
+4. Tag: `git tag vX.Y.Z`
+5. Push: `git push && git push --tags`
+6. Create release: `gh release create vX.Y.Z --title "vX.Y.Z — Title" --notes "changelog..."`
+7. The `release.yml` GitHub Actions workflow automatically triggers on `v*` tags and builds platform binaries (macOS arm64/x64, Linux x64/arm64, Windows x64/arm64) that are uploaded as release assets
+
 ## Disk Usage
 
 The Rust/Tauri build cache (`src-tauri/target/`) can grow to 20-30 GB. Clean it periodically:
