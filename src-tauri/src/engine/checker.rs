@@ -18,7 +18,7 @@ const MAX_PLAYLIST_DEPTH: u32 = 4;
 const MAX_REDIRECT_DEPTH: u32 = 10;
 /// HTTP status codes indicating potential geoblocking.
 const GEOBLOCK_STATUSES: &[u16] = &[403, 451, 426];
-const SECONDARY_GEOBLOCK_STATUSES: &[u16] = &[401, 423, 451];
+const SECONDARY_GEOBLOCK_STATUSES: &[u16] = &[423];
 /// HTTP status codes that are typically transient and should be retried.
 const RETRYABLE_HTTP_STATUSES: &[u16] = &[408, 425, 429, 500, 502, 503, 504];
 const FFPROBE_LIVENESS_SCHEMES: &[&str] = &["rtsp", "rtsps", "rtmp", "rtmps"];
@@ -452,7 +452,6 @@ async fn read_stream(
 
     let mut bytes_read: u64 = 0;
     let mut observed_latency_ms = latency_ms;
-    let mut stable = true;
     let mut stream = response.bytes_stream();
 
     while let Some(chunk_result) = stream.next().await {
@@ -478,17 +477,12 @@ async fn read_stream(
                     };
                 }
             }
-            Err(_) => {
-                stable = false;
-                break;
+            Err(err) => {
+                return VerifyResult::Retry {
+                    reason: Some(format!("Stream read interrupted: {err}")),
+                };
             }
         }
-    }
-
-    if !stable {
-        return VerifyResult::Retry {
-            reason: Some("Stream read interrupted".to_string()),
-        };
     }
 
     // Fallback threshold logic
@@ -520,6 +514,7 @@ async fn verify(
     client: &reqwest::Client,
     target_url: &str,
     timeout_secs: f64,
+    deadline: Instant,
     playlist_depth: u32,
     redirect_depth: u32,
     visited: &mut HashSet<String>,
@@ -539,6 +534,16 @@ async fn verify(
             reason: Some("Redirect loop".to_string()),
         };
     }
+
+    // Use the shorter of per-request timeout and remaining deadline budget.
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return VerifyResult::Dead {
+            latency_ms: root_latency_ms,
+            reason: Some("Timeout".to_string()),
+        };
+    }
+    let effective_timeout = Duration::from_secs_f64(timeout_secs).min(remaining);
 
     let normalized = target_url
         .split('#')
@@ -564,7 +569,7 @@ async fn verify(
     let request = client
         .get(target_url)
         .headers(headers.clone())
-        .timeout(Duration::from_secs_f64(timeout_secs));
+        .timeout(effective_timeout);
 
     let request_started_at = Instant::now();
     let resp = match request.send().await {
@@ -624,6 +629,7 @@ async fn verify(
             client,
             &next_url,
             timeout_secs,
+            deadline,
             playlist_depth,
             redirect_depth + 1,
             visited,
@@ -681,6 +687,7 @@ async fn verify(
                 client,
                 &next_url,
                 timeout_secs,
+                deadline,
                 playlist_depth + 1,
                 redirect_depth,
                 visited,
@@ -1125,10 +1132,15 @@ pub async fn check_channel_status_with_debug(
                 );
                 let mut metrics = VerifyMetrics::default();
                 let mut visited = HashSet::new();
+                // Bound total verify time: redirects and playlist hops share
+                // a single deadline instead of each getting a fresh timeout.
+                // Allow up to 3x the per-request timeout for the entire chain.
+                let deadline = Instant::now() + Duration::from_secs_f64(current_timeout * 3.0);
                 let result = verify(
                     &client,
                     &url,
                     current_timeout,
+                    deadline,
                     0,
                     0,
                     &mut visited,
@@ -1643,7 +1655,7 @@ encrypted.ts
 
     #[test]
     fn test_geoblock_status_classification() {
-        for status in [401u16, 403, 423, 426, 451] {
+        for status in [403u16, 423, 426, 451] {
             assert_eq!(
                 classify_non_ok_status(status, Some(321)),
                 VerifyResult::Geoblocked {
@@ -1652,6 +1664,14 @@ encrypted.ts
                 }
             );
         }
+        // 401 (Unauthorized) should be Dead, not Geoblocked
+        assert_eq!(
+            classify_non_ok_status(401, Some(321)),
+            VerifyResult::Dead {
+                latency_ms: Some(321),
+                reason: Some("HTTP 401".to_string()),
+            }
+        );
     }
 
     #[test]

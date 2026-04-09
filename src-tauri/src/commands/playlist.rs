@@ -108,7 +108,13 @@ async fn resolve_host_ip(host: &str) -> Option<IpAddr> {
     }
 
     let mut fallback: Option<IpAddr> = None;
-    let addresses = tokio::net::lookup_host((host, 0)).await.ok()?;
+    let addresses = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::net::lookup_host((host, 0)),
+    )
+    .await
+    .ok()?
+    .ok()?;
     for socket_address in addresses {
         let ip = socket_address.ip();
         if is_routable_ip(&ip) {
@@ -750,7 +756,10 @@ async fn fetch_xtream_json_array(
         .await
     {
         Ok(resp) if resp.status().is_success() => match resp.bytes().await {
-            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+                log::warn!("Failed to parse Xtream {} JSON response: {}", label, e);
+                Vec::new()
+            }),
             Err(e) => {
                 log::warn!("Failed to read Xtream {} response: {}", label, e);
                 Vec::new()
