@@ -60,8 +60,8 @@ To create a new release:
 3. Commit: `Bump version to X.Y.Z`
 4. Tag: `git tag vX.Y.Z`
 5. Push: `git push && git push --tags`
-6. Create release: `gh release create vX.Y.Z --title "vX.Y.Z — Title" --notes "changelog..."`
-7. The `release.yml` GitHub Actions workflow automatically triggers on `v*` tags and builds platform binaries (macOS arm64/x64, Linux x64/arm64, Windows x64/arm64) that are uploaded as release assets
+6. Create **draft** release: `gh release create vX.Y.Z --draft --title "vX.Y.Z — Title" --notes "changelog..."`
+7. The `release.yml` workflow builds platform binaries and uploads them to the draft. After all builds complete, a `publish` job automatically removes the draft flag — the release only becomes public once all assets are attached.
 
 ## Disk Usage
 
