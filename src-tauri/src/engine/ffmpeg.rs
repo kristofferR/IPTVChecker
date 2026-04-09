@@ -1009,9 +1009,10 @@ pub async fn profile_bitrate(
     let stderr_pipe = child.stderr.take();
     let stderr_reader = tokio::spawn(async move {
         use tokio::io::AsyncReadExt;
+        const MAX_STDERR_BYTES: usize = 1_024 * 1_024; // 1 MB
         let mut buf = Vec::new();
         if let Some(mut pipe) = stderr_pipe {
-            let _ = pipe.read_to_end(&mut buf).await;
+            let _ = (&mut pipe).take(MAX_STDERR_BYTES as u64).read_to_end(&mut buf).await;
         }
         buf
     });
