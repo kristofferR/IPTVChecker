@@ -551,7 +551,6 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       const url = result.url;
       const streamType = classifyStream(url);
       const preferNativeHls = streamType === "hls" && supportsNativeHlsPlayback(videoElement);
-      let nativeAttempted = false;
 
       const currentResult = result;
       loadingTimerRef.current = setTimeout(() => {
@@ -567,7 +566,6 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       }, LOADING_TIMEOUT_MS);
 
       if (preferNativeHls) {
-        nativeAttempted = true;
         const nativeOk = await tryNativePlayback(url, abortController.signal, NATIVE_HLS_TIMEOUT_MS);
         if (!isCurrentPlayback()) {
           return;
@@ -659,22 +657,21 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       }
 
-      // 3. Native playback fallback — handles formats the libraries can't
-      if (!nativeAttempted) {
-        const nativeOk = await tryNativePlayback(url, abortController.signal);
+      // 4. Final native playback fallback — handles formats the libraries can't
+      // and gives slow-starting native HLS one untimed retry after the short probe.
+      const nativeOk = await tryNativePlayback(url, abortController.signal);
+      if (!isCurrentPlayback()) {
+        return;
+      }
+      if (nativeOk) {
+        clearLoadingTimer();
+        try { await videoElement.play(); } catch {}
         if (!isCurrentPlayback()) {
           return;
         }
-        if (nativeOk) {
-          clearLoadingTimer();
-          try { await videoElement.play(); } catch {}
-          if (!isCurrentPlayback()) {
-            return;
-          }
-          setPlayerState("playing");
-          setupMetadataListeners();
-          return;
-        }
+        setPlayerState("playing");
+        setupMetadataListeners();
+        return;
       }
 
       // All methods failed

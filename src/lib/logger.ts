@@ -39,8 +39,14 @@ function shouldLog(level: Exclude<LogLevel, "silent">): boolean {
   return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[ACTIVE_LOG_LEVEL];
 }
 
-// Bridge frontend console.* calls to the Rust log plugin → terminal output
-attachConsole();
+function hasTauriWindow(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+// Mirror plugin logs into the frontend console when running inside Tauri.
+if (hasTauriWindow()) {
+  void attachConsole().catch(() => {});
+}
 
 function formatArg(arg: unknown): string {
   if (typeof arg === "string") return arg;
@@ -56,34 +62,56 @@ function formatArgs(args: unknown[]): string {
   return args.map(formatArg).join(" ");
 }
 
+function forwardToTauri(
+  method: (message: string) => Promise<void>,
+  message: string,
+): void {
+  if (!hasTauriWindow()) {
+    return;
+  }
+  void method(message).catch(() => {});
+}
+
 export const logger = {
   level: ACTIVE_LOG_LEVEL,
   debug(...args: unknown[]) {
     if (shouldLog("debug")) {
       const msg = formatArgs(args);
-      console.debug(msg);
-      void tauriDebug(msg);
+      if (hasTauriWindow()) {
+        forwardToTauri(tauriDebug, msg);
+      } else {
+        console.debug(msg);
+      }
     }
   },
   info(...args: unknown[]) {
     if (shouldLog("info")) {
       const msg = formatArgs(args);
-      console.info(msg);
-      void tauriInfo(msg);
+      if (hasTauriWindow()) {
+        forwardToTauri(tauriInfo, msg);
+      } else {
+        console.info(msg);
+      }
     }
   },
   warn(...args: unknown[]) {
     if (shouldLog("warn")) {
       const msg = formatArgs(args);
-      console.warn(msg);
-      void tauriWarn(msg);
+      if (hasTauriWindow()) {
+        forwardToTauri(tauriWarn, msg);
+      } else {
+        console.warn(msg);
+      }
     }
   },
   error(...args: unknown[]) {
     if (shouldLog("error")) {
       const msg = formatArgs(args);
-      console.error(msg);
-      void tauriError(msg);
+      if (hasTauriWindow()) {
+        forwardToTauri(tauriError, msg);
+      } else {
+        console.error(msg);
+      }
     }
   },
 };

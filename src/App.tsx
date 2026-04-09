@@ -120,6 +120,12 @@ function formatSourceReloadError(err: unknown): string {
     : `Failed to reload source: ${normalized}`;
 }
 
+async function restoreAndFocusWindow(window: WebviewWindow): Promise<void> {
+  await window.unminimize().catch(() => {});
+  await window.show().catch(() => {});
+  await window.setFocus();
+}
+
 const UPDATE_CHECK_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const OS_PROGRESS_UPDATE_INTERVAL_MS = 2000;
 const UPDATE_LAST_CHECK_KEY = "updates:last-check-epoch-ms";
@@ -1863,7 +1869,7 @@ export default function App() {
   const handleOpenSettings = useCallback(async () => {
     const existing = await WebviewWindow.getByLabel("settings");
     if (existing) {
-      await existing.setFocus();
+      await restoreAndFocusWindow(existing);
       return;
     }
     const devUrl = "http://localhost:1420";
@@ -1890,7 +1896,7 @@ export default function App() {
   const handleOpenLog = useCallback(async () => {
     const existing = await WebviewWindow.getByLabel("log");
     if (existing) {
-      await existing.setFocus();
+      await restoreAndFocusWindow(existing);
       return;
     }
     const devUrl = "http://localhost:1420";
