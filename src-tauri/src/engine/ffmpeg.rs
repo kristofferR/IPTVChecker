@@ -1053,6 +1053,17 @@ pub async fn profile_bitrate(
         }
     }
 
+    // Fallback: regex scan for "<digits> bytes read" anywhere in stderr.
+    // Handles format variations across ffmpeg versions.
+    if total_bytes == 0 {
+        let re = regex::Regex::new(r"(\d+)\s+bytes\s+read").unwrap();
+        if let Some(caps) = re.captures(&stderr) {
+            if let Ok(bytes) = caps[1].parse::<u64>() {
+                total_bytes = bytes;
+            }
+        }
+    }
+
     if timed_out && total_bytes == 0 {
         return Err(AppError::Other(format!(
             "ffmpeg bitrate profiling timed out after {:.0}s (binary: {})",
