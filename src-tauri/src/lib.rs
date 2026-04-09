@@ -235,7 +235,7 @@ pub fn run() {
                 .target(
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout).filter(
                         |metadata| {
-                            metadata.level() >= log::Level::Debug
+                            metadata.level() <= log::Level::Debug
                                 && (metadata.level() as usize)
                                     <= STDOUT_LOG_LEVEL.load(Ordering::Relaxed)
                         },
@@ -243,7 +243,7 @@ pub fn run() {
                 )
                 .target(
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview)
-                        .filter(|metadata| metadata.level() >= log::Level::Debug),
+                        .filter(|metadata| metadata.level() <= log::Level::Debug),
                 )
                 .build(),
         )
