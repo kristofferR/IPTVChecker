@@ -1112,11 +1112,22 @@ async fn execute_scan_run(
     );
 
     let preview = parse_playlist_with_cache(&app, &state, &config, &run_id).await?;
-    let single_provider = preview.single_provider;
+    let single_provider = if preview.single_provider {
+        true
+    } else {
+        // The cached preview from parse_playlist may not have single_provider
+        // set (it's populated separately during playlist open). Recompute.
+        crate::commands::playlist::is_single_provider_check(&preview.channels)
+    };
     let mut channels = preview.channels;
     filter_channels_by_selection(&mut channels, &config.selected_indices);
     let total = channels.len();
-    log::info!("Scan {}: {} channels to check", run_id, total);
+    log::info!(
+        "Scan {}: {} channels to check (single_provider: {})",
+        run_id,
+        total,
+        single_provider
+    );
 
     if total == 0 {
         let summary = ScanSummary {
@@ -1342,14 +1353,19 @@ async fn execute_scan_run(
         None
     };
 
-    let client = Arc::new(
-        reqwest::Client::builder()
+    let client = Arc::new({
+        let mut builder = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(5))
             .danger_accept_invalid_certs(config.accept_invalid_certs)
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .unwrap_or_default(),
-    );
+            .redirect(reqwest::redirect::Policy::none());
+        if single_provider {
+            // Single-provider IPTV servers enforce connection limits.
+            // Disable connection pooling so the checker's HTTP connection
+            // is closed before the combined ffmpeg diagnostics connect.
+            builder = builder.pool_max_idle_per_host(0);
+        }
+        builder.build().unwrap_or_default()
+    });
     let semaphore = Arc::new(Semaphore::new(config.concurrency as usize));
     let diagnostics_limit = usize::max(1, usize::min(config.concurrency as usize, 4));
     let diagnostics_semaphore = Arc::new(Semaphore::new(diagnostics_limit));
