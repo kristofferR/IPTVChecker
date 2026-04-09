@@ -978,8 +978,8 @@ pub async fn profile_bitrate(
 
     // Leave at least 15s of headroom within the timeout for connection
     // setup and graceful shutdown. Minimum streaming duration is 3s.
-    let stream_secs = (timeout_duration.as_secs_f64() - 15.0).clamp(3.0, 10.0);
-    let stream_secs_str = format!("{:.0}", stream_secs);
+    let sample_secs = (timeout_duration.as_secs().saturating_sub(15)).clamp(3, 10);
+    let sample_secs_str = sample_secs.to_string();
 
     let mut command = tokio::process::Command::new(&resolved_bin);
     configure_background_process(&mut command);
@@ -993,7 +993,7 @@ pub async fn profile_bitrate(
             "-i",
             url,
             "-t",
-            &stream_secs_str,
+            &sample_secs_str,
             "-f",
             "null",
             "-",
@@ -1009,10 +1009,23 @@ pub async fn profile_bitrate(
     let stderr_pipe = child.stderr.take();
     let stderr_reader = tokio::spawn(async move {
         use tokio::io::AsyncReadExt;
-        const MAX_STDERR_BYTES: usize = 1_024 * 1_024; // 1 MB
+        const MAX_RETAIN_BYTES: usize = 1_024 * 1_024; // 1 MB
         let mut buf = Vec::new();
         if let Some(mut pipe) = stderr_pipe {
-            let _ = (&mut pipe).take(MAX_STDERR_BYTES as u64).read_to_end(&mut buf).await;
+            // Drain stderr fully to prevent the child from blocking on a full
+            // pipe, but only retain up to MAX_RETAIN_BYTES for parsing.
+            let mut chunk = [0u8; 8192];
+            loop {
+                match pipe.read(&mut chunk).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        let remaining = MAX_RETAIN_BYTES.saturating_sub(buf.len());
+                        if remaining > 0 {
+                            buf.extend_from_slice(&chunk[..n.min(remaining)]);
+                        }
+                    }
+                }
+            }
         }
         buf
     });
@@ -1086,7 +1099,7 @@ pub async fn profile_bitrate(
         return Ok("N/A".to_string());
     }
 
-    let bitrate_kbps = (total_bytes * 8) / 1000 / (stream_secs as u64);
+    let bitrate_kbps = (total_bytes * 8) / 1000 / sample_secs;
     Ok(format!("{} kbps", bitrate_kbps))
 }
 

@@ -1858,10 +1858,17 @@ async fn execute_scan_run(
     drop(tx);
     drop(checkpoint_tx);
 
+    let mut panicked_workers = 0u32;
     for handle in handles {
         if let Err(err) = handle.await {
+            panicked_workers += 1;
             log::error!("Scan worker task failed: {err}");
         }
+    }
+    if panicked_workers > 0 {
+        log::error!(
+            "{panicked_workers} scan worker(s) panicked — those channels are missing from results"
+        );
     }
 
     let event_result = event_task.await;
