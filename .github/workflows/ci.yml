@@ -165,6 +165,11 @@ jobs:
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
 
+      - name: Download ffmpeg binaries
+        run: |
+          TARGET="$(rustc -vV | sed -n 's/^host: //p')"
+          bash scripts/download-ffmpeg.sh "$TARGET"
+
       - name: Fuzz parse_m3u (20s)
         working-directory: src-tauri
         run: cargo +nightly fuzz run parse_m3u --sanitizer none -- -max_total_time=20

@@ -60,6 +60,8 @@ impl Default for WindowScanState {
 
 pub struct AppState {
     pub settings: Mutex<AppSettings>,
+    pub proxy_client: Mutex<Option<(reqwest::Client, bool)>>,
+    pub streaming_proxy_port: std::sync::atomic::AtomicU16,
     window_scan_states: Mutex<HashMap<String, WindowScanState>>,
     backend_perf_samples: Mutex<VecDeque<BackendPerfSample>>,
     playlist_preview_cache: Mutex<HashMap<String, CachedPlaylistPreview>>,
@@ -69,6 +71,8 @@ impl AppState {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             settings: Mutex::new(AppSettings::default()),
+            proxy_client: Mutex::new(None),
+            streaming_proxy_port: std::sync::atomic::AtomicU16::new(0),
             window_scan_states: Mutex::new(HashMap::new()),
             backend_perf_samples: Mutex::new(VecDeque::new()),
             playlist_preview_cache: Mutex::new(HashMap::new()),

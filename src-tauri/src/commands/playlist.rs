@@ -91,6 +91,10 @@ fn dominant_channel_host(channels: &[Channel]) -> Option<String> {
 }
 
 /// Returns `true` when ≥90% of parseable channel URLs share the same hostname.
+pub(crate) fn is_single_provider_check(channels: &[Channel]) -> bool {
+    is_single_provider(channels)
+}
+
 fn is_single_provider(channels: &[Channel]) -> bool {
     let counts = channel_host_counts(channels);
     let total: usize = counts.values().sum();

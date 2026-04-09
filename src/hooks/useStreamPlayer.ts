@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChannelResult } from "../lib/types";
 import { normalizeCodecName, resolveResolutionLabel } from "../lib/format";
+import { logger } from "../lib/logger";
+import { toProxyUrl } from "../lib/proxyUrl";
+import { getStreamingProxyPort } from "../lib/tauri";
 
 type PlayerState = "idle" | "loading" | "playing" | "error";
 export type StreamType = "hls" | "mpegts" | "unknown";
@@ -53,6 +56,22 @@ export function classifyStream(url: string): StreamType {
   return "unknown";
 }
 
+/**
+ * Try to convert an Xtream MPEG-TS URL to HLS format.
+ * Xtream pattern: http://host:port/username/password/stream_id
+ * HLS variant:    http://host:port/live/username/password/stream_id.m3u8
+ */
+function tryConvertToXtreamHls(url: string): string | null {
+  const match = url.match(/^(https?:\/\/[^/]+)\/([^/]+)\/([^/]+)\/(\d+)$/);
+  if (!match) return null;
+  const [, origin, user, pass, id] = match;
+  return `${origin}/live/${user}/${pass}/${id}.m3u8`;
+}
+
+function toStreamingProxyUrl(url: string, port: number): string {
+  return `http://127.0.0.1:${port}/stream?url=${encodeURIComponent(url)}`;
+}
+
 export function supportsNativeHlsPlayback(
   mediaElement: Pick<HTMLMediaElement, "canPlayType">,
 ): boolean {
@@ -92,6 +111,7 @@ function createVideoElement(): HTMLVideoElement {
 }
 
 const LOADING_TIMEOUT_MS = 15_000;
+const NATIVE_HLS_TIMEOUT_MS = 4_000;
 
 interface UseStreamPlayerOptions {
   onPlaybackFailed?: (result: ChannelResult) => void;
@@ -113,6 +133,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const [muted, setMuted] = useState(readStoredMuted);
   const [isPaused, setIsPaused] = useState(false);
   const [activeChannelIndex, setActiveChannelIndex] = useState<number | null>(null);
+  const lastErrorRef = useRef<string | null>(null);
   const [streamMetadata, setStreamMetadata] = useState<StreamMetadata | null>(null);
 
   const hlsInstanceRef = useRef<import("hls.js").default | null>(null);
@@ -319,7 +340,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   useEffect(() => cleanup, [cleanup]);
 
   const tryNativePlayback = useCallback(
-    (url: string, signal: AbortSignal): Promise<boolean> => {
+    (url: string, signal: AbortSignal, timeoutMs?: number): Promise<boolean> => {
       return new Promise((resolve) => {
         if (signal.aborted) {
           resolve(false);
@@ -327,9 +348,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
 
         let settled = false;
+        let timer: ReturnType<typeof setTimeout> | null = null;
         const finish = (value: boolean) => {
           if (settled) return;
           settled = true;
+          if (timer) clearTimeout(timer);
           videoElement.removeEventListener("canplay", onCanPlay);
           videoElement.removeEventListener("error", onError);
           signal.removeEventListener("abort", onAbort);
@@ -339,13 +362,34 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           finish(true);
         };
         const onError = () => {
+          const mediaErr = videoElement.error;
+          if (mediaErr) {
+            const codeMap: Record<number, string> = {
+              1: "Playback aborted",
+              2: "Network error",
+              3: "Decode error",
+              4: "Format not supported",
+            };
+            lastErrorRef.current =
+              codeMap[mediaErr.code] ?? mediaErr.message ?? "Unknown media error";
+          }
           videoElement.removeAttribute("src");
           videoElement.load();
           finish(false);
         };
         const onAbort = () => {
+          videoElement.removeAttribute("src");
+          videoElement.load();
           finish(false);
         };
+
+        if (timeoutMs != null) {
+          timer = setTimeout(() => {
+            videoElement.removeAttribute("src");
+            videoElement.load();
+            finish(false);
+          }, timeoutMs);
+        }
 
         videoElement.addEventListener("canplay", onCanPlay, { once: true });
         videoElement.addEventListener("error", onError, { once: true });
@@ -387,11 +431,23 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
         const onCanPlay = () => finish(true);
         const onVideoError = () => {
+          const mediaErr = videoElement.error;
+          if (mediaErr) {
+            const codeMap: Record<number, string> = {
+              1: "Playback aborted",
+              2: "Network error",
+              3: "Decode error",
+              4: "Format not supported",
+            };
+            lastErrorRef.current =
+              codeMap[mediaErr.code] ?? mediaErr.message ?? "Unknown media error";
+          }
           destroyPlayer();
           finish(false);
         };
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data.fatal) {
+            lastErrorRef.current = `${data.type}: ${data.details}`;
             destroyPlayer();
             finish(false);
           }
@@ -404,7 +460,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         videoElement.addEventListener("error", onVideoError, { once: true });
         signal.addEventListener("abort", onAbort, { once: true });
 
-        hls.loadSource(url);
+        hls.loadSource(toProxyUrl(url));
         hls.attachMedia(videoElement);
         applyVolume();
       });
@@ -439,6 +495,17 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           finish(true);
         };
         const onError = () => {
+          const mediaErr = videoElement.error;
+          if (mediaErr) {
+            const codeMap: Record<number, string> = {
+              1: "Playback aborted",
+              2: "Network error",
+              3: "Decode error",
+              4: "Format not supported",
+            };
+            lastErrorRef.current =
+              codeMap[mediaErr.code] ?? mediaErr.message ?? "Unknown media error";
+          }
           player.destroy();
           mpegtsPlayerRef.current = null;
           finish(false);
@@ -476,6 +543,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       setErrorMessage(null);
       setIsPaused(false);
       setActiveChannelIndex(result.index);
+      lastErrorRef.current = null;
 
       // Always use the original URL for playback — stream_url may be a resolved
       // segment URL (e.g. a .ts segment from HLS manifest traversal) rather than
@@ -483,7 +551,6 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       const url = result.url;
       const streamType = classifyStream(url);
       const preferNativeHls = streamType === "hls" && supportsNativeHlsPlayback(videoElement);
-      let nativeAttempted = false;
 
       const currentResult = result;
       loadingTimerRef.current = setTimeout(() => {
@@ -491,14 +558,15 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           return;
         }
         cleanup();
-        setPlayerState("idle");
+        logger.warn("[Player] Connection timed out for channel", currentResult.name);
+        setPlayerState("error");
+        setErrorMessage("Connection timed out");
         setActiveChannelIndex(null);
         onPlaybackFailedRef.current?.(currentResult);
       }, LOADING_TIMEOUT_MS);
 
       if (preferNativeHls) {
-        nativeAttempted = true;
-        const nativeOk = await tryNativePlayback(url, abortController.signal);
+        const nativeOk = await tryNativePlayback(url, abortController.signal, NATIVE_HLS_TIMEOUT_MS);
         if (!isCurrentPlayback()) {
           return;
         }
@@ -514,16 +582,15 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       }
 
-      // 1. Try hls.js first for HLS/unknown streams — provides rich metadata
-      //    (codec, bitrate, fps) that native WebKit HLS playback does not expose.
-      //    Native HLS gets first shot above when the webview advertises support
-      //    because it is more tolerant of real-world IPTV streams on Apple platforms.
-      if (streamType === "hls" || streamType === "unknown") {
+      // 1. For HLS streams, try hls.js directly with proxy
+      if (streamType === "hls") {
+        logger.info("[Player] Trying hls.js via proxy for", result.name);
         const hlsOk = await tryHlsPlayback(url, abortController.signal);
         if (!isCurrentPlayback()) {
           return;
         }
         if (hlsOk) {
+          logger.info("[Player] Playing via hls.js proxy:", result.name);
           clearLoadingTimer();
           try { await videoElement.play(); } catch {}
           if (!isCurrentPlayback()) {
@@ -535,9 +602,46 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       }
 
-      // 2. Try mpegts.js for MPEG-TS or unknown streams
+      // 2. For non-HLS streams, try Xtream HLS conversion first (most reliable
+      //    for single-provider Xtream playlists — avoids infinite MPEG-TS buffering)
+      if (streamType !== "hls") {
+        const xtreamHlsUrl = tryConvertToXtreamHls(url);
+        if (xtreamHlsUrl) {
+          logger.info("[Player] Trying Xtream HLS conversion for", result.name);
+          const hlsOk = await tryHlsPlayback(xtreamHlsUrl, abortController.signal);
+          if (!isCurrentPlayback()) {
+            return;
+          }
+          if (hlsOk) {
+            logger.info("[Player] Playing via Xtream HLS conversion:", result.name);
+            clearLoadingTimer();
+            try { await videoElement.play(); } catch {}
+            if (!isCurrentPlayback()) {
+              return;
+            }
+            setPlayerState("playing");
+            setupMetadataListeners();
+            return;
+          }
+          logger.info("[Player] Xtream HLS conversion failed, trying streaming proxy");
+        }
+      }
+
+      // 3. Try mpegts.js via localhost streaming proxy for MPEG-TS or unknown streams
       if (streamType === "mpegts" || streamType === "unknown") {
-        const mpegtsOk = await tryMpegtsPlayback(url, abortController.signal);
+        let proxyPort = 0;
+        try {
+          proxyPort = await getStreamingProxyPort();
+        } catch {
+          logger.warn("[Player] Could not get streaming proxy port");
+        }
+        const playbackUrl = proxyPort > 0 ? toStreamingProxyUrl(url, proxyPort) : url;
+        if (proxyPort > 0) {
+          logger.info("[Player] Trying mpegts.js via streaming proxy for", result.name);
+        } else {
+          logger.info("[Player] Trying mpegts.js (raw URL) for", result.name);
+        }
+        const mpegtsOk = await tryMpegtsPlayback(playbackUrl, abortController.signal);
         if (!isCurrentPlayback()) {
           return;
         }
@@ -553,30 +657,32 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       }
 
-      // 3. Native playback fallback — handles formats the libraries can't
-      if (!nativeAttempted) {
-        const nativeOk = await tryNativePlayback(url, abortController.signal);
+      // 4. Final native playback fallback — handles formats the libraries can't
+      // and gives slow-starting native HLS one untimed retry after the short probe.
+      const nativeOk = await tryNativePlayback(url, abortController.signal);
+      if (!isCurrentPlayback()) {
+        return;
+      }
+      if (nativeOk) {
+        clearLoadingTimer();
+        try { await videoElement.play(); } catch {}
         if (!isCurrentPlayback()) {
           return;
         }
-        if (nativeOk) {
-          clearLoadingTimer();
-          try { await videoElement.play(); } catch {}
-          if (!isCurrentPlayback()) {
-            return;
-          }
-          setPlayerState("playing");
-          setupMetadataListeners();
-          return;
-        }
+        setPlayerState("playing");
+        setupMetadataListeners();
+        return;
       }
 
-      // All methods failed — fall back to scanning
+      // All methods failed
       clearLoadingTimer();
       if (!isCurrentPlayback()) {
         return;
       }
-      setPlayerState("idle");
+      const reason = lastErrorRef.current ?? "Unable to play stream";
+      logger.error("[Player] Playback failed for channel", result.name, "-", reason);
+      setPlayerState("error");
+      setErrorMessage(reason);
       setActiveChannelIndex(null);
       onPlaybackFailedRef.current?.(result);
     },

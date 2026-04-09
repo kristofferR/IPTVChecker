@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { LogWindow } from "./LogWindow";
 import { SettingsWindow } from "./SettingsWindow";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./index.css";
@@ -20,13 +21,20 @@ const platformHint = navigator.platform.toUpperCase().includes("MAC")
 document.documentElement.dataset.platform = platformHint;
 document.documentElement.dataset.theme = "system";
 
-const isSettingsWindow =
-  new URLSearchParams(window.location.search).get("window") === "settings";
+const windowParam = new URLSearchParams(window.location.search).get("window");
+const isSettingsWindow = windowParam === "settings";
+const isLogWindow = windowParam === "log";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary>
-      {isSettingsWindow ? <SettingsWindow /> : <App />}
+      {isLogWindow ? (
+        <LogWindow />
+      ) : isSettingsWindow ? (
+        <SettingsWindow />
+      ) : (
+        <App />
+      )}
     </ErrorBoundary>
   </StrictMode>,
 );

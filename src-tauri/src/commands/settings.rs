@@ -726,7 +726,10 @@ pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Re
 
     let state = app.state::<Arc<AppState>>();
     let mut current = state.settings.lock().await;
-    log::set_max_level(settings.level_filter());
+    crate::STDOUT_LOG_LEVEL.store(
+        settings.level_filter() as usize,
+        std::sync::atomic::Ordering::Relaxed,
+    );
     *current = settings.clone();
 
     // Persist to store
