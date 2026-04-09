@@ -6,3 +6,4 @@ pub mod parser;
 pub mod proxy;
 pub mod resume;
 pub mod search_pattern;
+pub mod stream_proxy;

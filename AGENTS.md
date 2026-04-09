@@ -50,6 +50,8 @@ lib/        — Types, Tauri invoke wrappers, formatting helpers, sort/filter lo
 - `cd src-tauri && cargo test` — run Rust tests
 - `bun run typecheck` — TypeScript type checking via tsgo
 
+**IMPORTANT:** Before launching `bun tauri dev` after Rust code changes, always run `cargo clean -p iptv-checker && cargo build` in `src-tauri/` first to ensure a fresh binary. The dev server's file watcher does not always trigger a rebuild, leading to stale cached binaries.
+
 ## Disk Usage
 
 The Rust/Tauri build cache (`src-tauri/target/`) can grow to 20-30 GB. Clean it periodically:

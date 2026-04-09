@@ -12,6 +12,11 @@ use std::sync::Arc;
 use state::AppState;
 use tauri::webview::PageLoadEvent;
 use tauri::{Emitter, Manager};
+
+/// Stdout log level, dynamically updated from user settings.
+/// The global `log::max_level()` stays at Trace so the Webview target
+/// always receives all events (the Log window does its own filtering).
+pub(crate) static STDOUT_LOG_LEVEL: AtomicUsize = AtomicUsize::new(log::LevelFilter::Error as usize);
 #[cfg(target_os = "macos")]
 use tauri_plugin_liquid_glass::{LiquidGlassConfig, LiquidGlassExt};
 use tauri_plugin_store::StoreExt;
@@ -226,13 +231,20 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(
             tauri_plugin_log::Builder::new()
-                .level(log::LevelFilter::Trace)
-                .target(tauri_plugin_log::Target::new(
-                    tauri_plugin_log::TargetKind::Stdout,
-                ))
-                .target(tauri_plugin_log::Target::new(
-                    tauri_plugin_log::TargetKind::Webview,
-                ))
+                .level(log::LevelFilter::Debug)
+                .target(
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout).filter(
+                        |metadata| {
+                            metadata.level() <= log::Level::Debug
+                                && (metadata.level() as usize)
+                                    <= STDOUT_LOG_LEVEL.load(Ordering::Relaxed)
+                        },
+                    ),
+                )
+                .target(
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview)
+                        .filter(|metadata| metadata.level() <= log::Level::Debug),
+                )
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
@@ -338,12 +350,19 @@ pub fn run() {
                 .accelerator("Cmd+Shift+X")
                 .build(app)?;
 
+        let log_window_item =
+            MenuItemBuilder::with_id("menu.view.log_window", "Log")
+                .accelerator("Alt+Cmd+L")
+                .build(app)?;
+
         let view_menu = SubmenuBuilder::new(app, "View")
             .item(&toggle_sidebar_item)
             .item(&toggle_report_item)
             .item(&toggle_prescan_item)
             .item(&clear_filters_item)
             .text("menu.view.history", "Scan History")
+            .separator()
+            .item(&log_window_item)
             .build()?;
 
         let start_scan_item = MenuItemBuilder::with_id("menu.scan.start", "Start Scan")
@@ -458,12 +477,19 @@ pub fn run() {
                 .accelerator("Ctrl+Shift+X")
                 .build(app)?;
 
+        let log_window_item =
+            MenuItemBuilder::with_id("menu.view.log_window", "Log")
+                .accelerator("Ctrl+Alt+L")
+                .build(app)?;
+
         let view_menu = SubmenuBuilder::new(app, "View")
             .item(&toggle_sidebar_item)
             .item(&toggle_report_item)
             .item(&toggle_prescan_item)
             .item(&clear_filters_item)
             .text("menu.view.history", "Scan History")
+            .separator()
+            .item(&log_window_item)
             .build()?;
 
         let start_scan_item = MenuItemBuilder::with_id("menu.scan.start", "Start Scan")
@@ -537,6 +563,7 @@ pub fn run() {
             "menu.view.toggle_prescan_filter" => Some("menu://toggle-prescan-filter"),
             "menu.view.clear_filters" => Some("menu://clear-filters"),
             "menu.view.history" => Some("menu://open-history"),
+            "menu.view.log_window" => Some("menu://open-log"),
             "menu.scan.start" => Some("menu://start-scan"),
             "menu.scan.pause" => Some("menu://pause-scan"),
             "menu.scan.resume" => Some("menu://resume-scan"),
@@ -562,7 +589,8 @@ pub fn run() {
                         serde_json::from_value::<models::settings::AppSettings>(value)
                     {
                         let state = app.state::<Arc<AppState>>();
-                        log::set_max_level(persisted.level_filter());
+                        STDOUT_LOG_LEVEL
+                            .store(persisted.level_filter() as usize, Ordering::Relaxed);
                         *state.settings.blocking_lock() = persisted;
                     }
                 }
@@ -580,6 +608,30 @@ pub fn run() {
             }
 
             commands::recent::refresh_recent_menu(&app.handle());
+
+            // Start the localhost streaming proxy for MPEG-TS playback.
+            // Use a oneshot channel so we block until the port is known,
+            // preventing a race where the user clicks Play before the proxy
+            // is ready (get_streaming_proxy_port would return 0).
+            {
+                let state = app.state::<Arc<AppState>>().inner().clone();
+                let (port_tx, port_rx) = tokio::sync::oneshot::channel();
+                let handle_for_proxy = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    match engine::stream_proxy::start_streaming_proxy(handle_for_proxy).await {
+                        Ok(port) => { let _ = port_tx.send(port); }
+                        Err(error) => {
+                            log::error!("Failed to start streaming proxy: {}", error);
+                            let _ = port_tx.send(0);
+                        }
+                    }
+                });
+                if let Ok(port) = port_rx.blocking_recv() {
+                    if port > 0 {
+                        state.streaming_proxy_port.store(port, Ordering::Relaxed);
+                    }
+                }
+            }
 
             // Background cleanup: evict old screenshot dirs per retention policy
             {
@@ -691,6 +743,7 @@ pub fn run() {
             commands::playlist::open_playlist_xtream,
             commands::playlist::open_playlist_stalker,
             commands::player::open_channel_in_player,
+            commands::player::get_streaming_proxy_port,
             commands::scan::start_scan,
             commands::scan::pause_scan,
             commands::scan::resume_scan,
@@ -728,7 +781,7 @@ pub fn run() {
             let window = webview.window();
 
             #[cfg(any(target_os = "windows", target_os = "linux"))]
-            if window.label() == "settings" {
+            if window.label() == "settings" || window.label() == "log" {
                 let _ = window.remove_menu();
             }
 
@@ -758,6 +811,13 @@ pub fn run() {
                     WINDOW_CLOSED_BY_USER.store(true, Ordering::Relaxed);
                 }
             }
+        })
+        .register_asynchronous_uri_scheme_protocol("streamproxy", |ctx, request, responder| {
+            let app_handle = ctx.app_handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let response = engine::stream_proxy::handle_proxy_request(&app_handle, request).await;
+                responder.respond(response);
+            });
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

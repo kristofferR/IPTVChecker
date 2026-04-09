@@ -832,7 +832,7 @@ pub async fn check_channel_status_with_ffprobe_debug(
                 ttfb_ms: None,
                 final_verdict: "Dead".to_string(),
                 final_reason: Some(reason.clone()),
-                ffprobe_output: None,
+                diagnostics_output: None,
                 attempts: vec![ChannelAttemptDebugLog {
                     attempt: 1,
                     timeout_secs: timeout,
@@ -1048,7 +1048,7 @@ pub async fn check_channel_status_with_ffprobe_debug(
             ttfb_ms,
             final_verdict: final_outcome.status,
             final_reason: final_outcome.last_error_reason,
-            ffprobe_output: final_outcome.ffprobe_output,
+            diagnostics_output: final_outcome.ffprobe_output,
             attempts: final_outcome.attempts,
         },
     })
@@ -1352,7 +1352,7 @@ pub async fn check_channel_status_with_debug(
             ttfb_ms,
             final_verdict: final_outcome.status,
             final_reason: final_outcome.last_error_reason,
-            ffprobe_output: None,
+            diagnostics_output: None,
             attempts: final_outcome.attempts,
         },
     })

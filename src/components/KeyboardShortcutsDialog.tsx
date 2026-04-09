@@ -19,6 +19,7 @@ function buildSections(modifierLabel: string): ShortcutSection[] {
         { keys: `${modifierLabel} + O`, action: "Open playlist" },
         { keys: `${modifierLabel} + ,`, action: "Open settings" },
         { keys: `${modifierLabel} + /`, action: "Open this shortcuts dialog" },
+        { keys: `Alt + ${modifierLabel} + L`, action: "Open log window" },
         { keys: "Escape", action: "Close open dialogs and overlays" },
       ],
     },
