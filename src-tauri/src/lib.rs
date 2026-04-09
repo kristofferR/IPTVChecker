@@ -12,6 +12,11 @@ use std::sync::Arc;
 use state::AppState;
 use tauri::webview::PageLoadEvent;
 use tauri::{Emitter, Manager};
+
+/// Stdout log level, dynamically updated from user settings.
+/// The global `log::max_level()` stays at Trace so the Webview target
+/// always receives all events (the Log window does its own filtering).
+pub(crate) static STDOUT_LOG_LEVEL: AtomicUsize = AtomicUsize::new(log::LevelFilter::Error as usize);
 #[cfg(target_os = "macos")]
 use tauri_plugin_liquid_glass::{LiquidGlassConfig, LiquidGlassExt};
 use tauri_plugin_store::StoreExt;
@@ -227,9 +232,14 @@ pub fn run() {
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Trace)
-                .target(tauri_plugin_log::Target::new(
-                    tauri_plugin_log::TargetKind::Stdout,
-                ))
+                .target(
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout).filter(
+                        |metadata| {
+                            (metadata.level() as usize)
+                                <= STDOUT_LOG_LEVEL.load(Ordering::Relaxed)
+                        },
+                    ),
+                )
                 .target(tauri_plugin_log::Target::new(
                     tauri_plugin_log::TargetKind::Webview,
                 ))
@@ -577,7 +587,8 @@ pub fn run() {
                         serde_json::from_value::<models::settings::AppSettings>(value)
                     {
                         let state = app.state::<Arc<AppState>>();
-                        log::set_max_level(persisted.level_filter());
+                        STDOUT_LOG_LEVEL
+                            .store(persisted.level_filter() as usize, Ordering::Relaxed);
                         *state.settings.blocking_lock() = persisted;
                     }
                 }

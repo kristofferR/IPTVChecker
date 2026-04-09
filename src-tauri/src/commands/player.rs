@@ -159,13 +159,18 @@ pub async fn open_channel_in_player(channel: PlayerChannel) -> Result<(), AppErr
     let temp_dir = std::env::temp_dir();
     cleanup_stale_temp_playlists_in_dir(&temp_dir, STALE_TEMP_PLAYLIST_MAX_AGE, SystemTime::now());
 
-    let temp_path = write_unique_temp_playlist(&content)?;
+    let temp_path = write_unique_temp_playlist(&content).map_err(|error| {
+        log::error!("Failed to write temp playlist for external player: {error}");
+        error
+    })?;
     match open_with_system_default(&temp_path) {
         Ok(()) => {
+            log::info!("Opened channel in external player");
             let _ = spawn_temp_playlist_cleanup(temp_path, TEMP_PLAYLIST_DELETE_DELAY);
             Ok(())
         }
         Err(error) => {
+            log::error!("Failed to open channel in external player: {error}");
             let _ = std::fs::remove_file(temp_path);
             Err(error)
         }

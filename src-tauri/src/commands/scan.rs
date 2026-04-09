@@ -1161,6 +1161,7 @@ async fn execute_scan_run(
                     Some(proxy_list)
                 }
                 Err(error) => {
+                    log::error!("Failed to load proxy file '{}': {}", proxy_file, error);
                     return Err(AppError::Other(format!(
                         "Failed to load proxy file '{}': {}",
                         proxy_file, error
@@ -1897,6 +1898,7 @@ async fn execute_scan_run(
     let completed_scan = match event_result {
         Ok(data) => data,
         Err(error) => {
+            log::error!("Scan failed while dispatching progress events: {}", error);
             cleanup_resume_files(&log_file, &checkpoint_file);
             return Err(AppError::Other(format!(
                 "Scan failed while dispatching progress events: {}",

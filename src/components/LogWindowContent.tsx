@@ -76,7 +76,7 @@ export function LogWindowContent() {
   const [searchText, setSearchText] = useState("");
 
   const bufferRef = useRef<LogEntry[]>([]);
-  const rafRef = useRef<number | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -94,9 +94,9 @@ export function LogWindowContent() {
         level,
         message,
       });
-      if (rafRef.current === null) {
-        rafRef.current = requestAnimationFrame(() => {
-          rafRef.current = null;
+      if (timerRef.current === null) {
+        timerRef.current = setTimeout(() => {
+          timerRef.current = null;
           const batch = bufferRef.current;
           bufferRef.current = [];
           if (batch.length === 0) return;
@@ -106,7 +106,7 @@ export function LogWindowContent() {
               : [...prev, ...batch];
             return combined;
           });
-        });
+        }, 32);
       }
     }).then((fn) => {
       if (cancelled) {
@@ -119,9 +119,9 @@ export function LogWindowContent() {
     return () => {
       cancelled = true;
       unlisten?.();
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
       }
     };
   }, []);

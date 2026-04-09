@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChannelResult } from "../lib/types";
 import { normalizeCodecName, resolveResolutionLabel } from "../lib/format";
+import { logger } from "../lib/logger";
 import { toProxyUrl } from "../lib/proxyUrl";
 
 type PlayerState = "idle" | "loading" | "playing" | "error";
@@ -541,6 +542,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           return;
         }
         cleanup();
+        logger.warn("[Player] Connection timed out for channel", currentResult.name);
         setPlayerState("error");
         setErrorMessage("Connection timed out");
         onPlaybackFailedRef.current?.(currentResult);
@@ -626,8 +628,10 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       if (!isCurrentPlayback()) {
         return;
       }
+      const reason = lastErrorRef.current ?? "Unable to play stream";
+      logger.error("[Player] Playback failed for channel", result.name, "-", reason);
       setPlayerState("error");
-      setErrorMessage(lastErrorRef.current ?? "Unable to play stream");
+      setErrorMessage(reason);
       onPlaybackFailedRef.current?.(result);
     },
     [
