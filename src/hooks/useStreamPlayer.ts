@@ -562,6 +562,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         logger.warn("[Player] Connection timed out for channel", currentResult.name);
         setPlayerState("error");
         setErrorMessage("Connection timed out");
+        setActiveChannelIndex(null);
         onPlaybackFailedRef.current?.(currentResult);
       }, LOADING_TIMEOUT_MS);
 
@@ -685,6 +686,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       logger.error("[Player] Playback failed for channel", result.name, "-", reason);
       setPlayerState("error");
       setErrorMessage(reason);
+      setActiveChannelIndex(null);
       onPlaybackFailedRef.current?.(result);
     },
     [
