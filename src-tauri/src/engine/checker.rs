@@ -1661,7 +1661,7 @@ encrypted.ts
 
     #[test]
     fn test_geoblock_status_classification() {
-        for status in [401u16, 403, 423, 426, 451] {
+        for status in [403u16, 423, 426, 451] {
             assert_eq!(
                 classify_non_ok_status(status, Some(321)),
                 VerifyResult::Geoblocked {
@@ -1670,6 +1670,14 @@ encrypted.ts
                 }
             );
         }
+        // 401 (Unauthorized) should be Dead, not Geoblocked
+        assert_eq!(
+            classify_non_ok_status(401, Some(321)),
+            VerifyResult::Dead {
+                latency_ms: Some(321),
+                reason: Some("HTTP 401".to_string()),
+            }
+        );
     }
 
     #[test]
