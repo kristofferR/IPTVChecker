@@ -42,8 +42,18 @@ function shouldLog(level: Exclude<LogLevel, "silent">): boolean {
 // Bridge frontend console.* calls to the Rust log plugin → terminal output
 attachConsole();
 
+function formatArg(arg: unknown): string {
+  if (typeof arg === "string") return arg;
+  if (arg instanceof Error) return arg.stack ?? arg.message;
+  try {
+    return JSON.stringify(arg);
+  } catch {
+    return String(arg);
+  }
+}
+
 function formatArgs(args: unknown[]): string {
-  return args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
+  return args.map(formatArg).join(" ");
 }
 
 export const logger = {

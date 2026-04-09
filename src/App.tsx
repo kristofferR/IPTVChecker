@@ -1041,7 +1041,8 @@ export default function App() {
 
       getStore().setPlaylistOpenError(null);
       getStore().setPlaylistLoading(true);
-      logger.info(`[App] ${loadingAction}: ${sourceLabel}`);
+      const safeLabel = sourceLabel.replace(/username=\S+/g, "username=***").replace(/password=\S+/g, "password=***");
+      logger.info(`[App] ${loadingAction}: ${safeLabel}`);
 
       try {
         const state = getStore();

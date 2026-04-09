@@ -609,7 +609,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       if (streamType !== "hls") {
         const xtreamHlsUrl = tryConvertToXtreamHls(url);
         if (xtreamHlsUrl) {
-          logger.info("[Player] Trying Xtream HLS conversion:", xtreamHlsUrl);
+          logger.info("[Player] Trying Xtream HLS conversion for", result.name);
           const hlsOk = await tryHlsPlayback(xtreamHlsUrl, abortController.signal);
           if (!isCurrentPlayback()) {
             return;

@@ -352,7 +352,7 @@ async fn get_or_create_proxy_client(
 
 /// Start a localhost HTTP proxy that streams upstream responses.
 /// Returns the port the server is listening on.
-pub async fn start_streaming_proxy() -> std::io::Result<u16> {
+pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
@@ -370,6 +370,7 @@ pub async fn start_streaming_proxy() -> std::io::Result<u16> {
                 }
             };
 
+            let app_handle = app.clone();
             tokio::spawn(async move {
                 // Read the HTTP request line to extract the URL
                 let mut buf = vec![0u8; 8192];
@@ -399,16 +400,25 @@ pub async fn start_streaming_proxy() -> std::io::Result<u16> {
 
                 log::info!("[StreamProxy] Streaming {}", redact_url(&url));
 
-                // Fetch upstream with streaming body
-                let client = reqwest::Client::builder()
-                    .redirect(reqwest::redirect::Policy::limited(10))
-                    .pool_max_idle_per_host(0)
-                    .build()
-                    .unwrap_or_default();
+                // Fetch upstream with streaming body using settings-aware client
+                let state = app_handle.state::<Arc<AppState>>();
+                let (user_agent, accept_invalid_certs) = {
+                    let settings = state.settings.lock().await;
+                    (
+                        settings.user_agent.clone(),
+                        settings.accept_invalid_certs,
+                    )
+                };
+
+                let client = get_or_create_proxy_client(state.inner(), accept_invalid_certs).await;
 
                 let response = match client
                     .get(&url)
-                    .header(USER_AGENT, "TiviMate/5.1.6 (Android 12)")
+                    .header(
+                        USER_AGENT,
+                        HeaderValue::from_str(&user_agent)
+                            .unwrap_or_else(|_| HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")),
+                    )
                     .send()
                     .await
                 {

@@ -609,21 +609,28 @@ pub fn run() {
 
             commands::recent::refresh_recent_menu(&app.handle());
 
-            // Start the localhost streaming proxy for MPEG-TS playback
+            // Start the localhost streaming proxy for MPEG-TS playback.
+            // Use a oneshot channel so we block until the port is known,
+            // preventing a race where the user clicks Play before the proxy
+            // is ready (get_streaming_proxy_port would return 0).
             {
                 let state = app.state::<Arc<AppState>>().inner().clone();
+                let (port_tx, port_rx) = tokio::sync::oneshot::channel();
+                let handle_for_proxy = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    match engine::stream_proxy::start_streaming_proxy().await {
-                        Ok(port) => {
-                            state
-                                .streaming_proxy_port
-                                .store(port, Ordering::Relaxed);
-                        }
+                    match engine::stream_proxy::start_streaming_proxy(handle_for_proxy).await {
+                        Ok(port) => { let _ = port_tx.send(port); }
                         Err(error) => {
                             log::error!("Failed to start streaming proxy: {}", error);
+                            let _ = port_tx.send(0);
                         }
                     }
                 });
+                if let Ok(port) = port_rx.blocking_recv() {
+                    if port > 0 {
+                        state.streaming_proxy_port.store(port, Ordering::Relaxed);
+                    }
+                }
             }
 
             // Background cleanup: evict old screenshot dirs per retention policy
