@@ -383,6 +383,7 @@ fn parse_playlist_reader<R: BufRead>(
     let mut pending_channel = false;
     let mut pending_extinf: Option<String> = None;
     let mut pending_metadata: Vec<String> = Vec::new();
+    let mut orphaned_extinf = 0u32;
 
     for raw_line in reader.split(b'\n') {
         let raw_line = raw_line.map_err(AppError::Io)?;
@@ -394,6 +395,9 @@ fn parse_playlist_reader<R: BufRead>(
 
         if line.starts_with("#EXTINF") {
             // A new EXTINF supersedes any pending entry that never got a stream URL.
+            if pending_channel && pending_extinf.is_some() {
+                orphaned_extinf += 1;
+            }
             pending_channel = true;
             pending_extinf = None;
             pending_metadata.clear();
@@ -443,6 +447,15 @@ fn parse_playlist_reader<R: BufRead>(
         }
     }
 
+    if pending_channel && pending_extinf.is_some() {
+        orphaned_extinf += 1;
+    }
+    if orphaned_extinf > 0 {
+        log::warn!(
+            "{}: {orphaned_extinf} EXTINF entry/entries had no stream URL and were skipped",
+            file_path
+        );
+    }
     log::info!(
         "Parsed {} channels in {} groups",
         channels.len(),
