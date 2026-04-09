@@ -93,6 +93,7 @@ function createVideoElement(): HTMLVideoElement {
 }
 
 const LOADING_TIMEOUT_MS = 15_000;
+const NATIVE_HLS_TIMEOUT_MS = 4_000;
 
 interface UseStreamPlayerOptions {
   onPlaybackFailed?: (result: ChannelResult) => void;
@@ -321,7 +322,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   useEffect(() => cleanup, [cleanup]);
 
   const tryNativePlayback = useCallback(
-    (url: string, signal: AbortSignal): Promise<boolean> => {
+    (url: string, signal: AbortSignal, timeoutMs?: number): Promise<boolean> => {
       return new Promise((resolve) => {
         if (signal.aborted) {
           resolve(false);
@@ -329,9 +330,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
 
         let settled = false;
+        let timer: ReturnType<typeof setTimeout> | null = null;
         const finish = (value: boolean) => {
           if (settled) return;
           settled = true;
+          if (timer) clearTimeout(timer);
           videoElement.removeEventListener("canplay", onCanPlay);
           videoElement.removeEventListener("error", onError);
           signal.removeEventListener("abort", onAbort);
@@ -357,8 +360,18 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           finish(false);
         };
         const onAbort = () => {
+          videoElement.removeAttribute("src");
+          videoElement.load();
           finish(false);
         };
+
+        if (timeoutMs != null) {
+          timer = setTimeout(() => {
+            videoElement.removeAttribute("src");
+            videoElement.load();
+            finish(false);
+          }, timeoutMs);
+        }
 
         videoElement.addEventListener("canplay", onCanPlay, { once: true });
         videoElement.addEventListener("error", onError, { once: true });
@@ -524,7 +537,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
       if (preferNativeHls) {
         nativeAttempted = true;
-        const nativeOk = await tryNativePlayback(url, abortController.signal);
+        const nativeOk = await tryNativePlayback(url, abortController.signal, NATIVE_HLS_TIMEOUT_MS);
         if (!isCurrentPlayback()) {
           return;
         }

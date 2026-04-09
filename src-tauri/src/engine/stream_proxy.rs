@@ -135,6 +135,23 @@ fn rewrite_tag_uri(line: &str, base: &Url) -> String {
     result
 }
 
+/// Redact query parameters and userinfo from a URL for safe logging.
+fn redact_url(url: &str) -> String {
+    match Url::parse(url) {
+        Ok(mut parsed) => {
+            if parsed.query().is_some() {
+                parsed.set_query(Some("***"));
+            }
+            if !parsed.username().is_empty() || parsed.password().is_some() {
+                let _ = parsed.set_username("***");
+                let _ = parsed.set_password(None);
+            }
+            parsed.to_string()
+        }
+        Err(_) => "invalid-url".to_string(),
+    }
+}
+
 /// Handle an incoming proxy request: decode the URL, fetch upstream, return response.
 pub async fn handle_proxy_request(
     app: &tauri::AppHandle,
@@ -151,7 +168,7 @@ pub async fn handle_proxy_request(
         }
     };
 
-    log::debug!("Stream proxy: fetching {}", original_url);
+    log::debug!("Stream proxy: fetching {}", redact_url(&original_url));
 
     let state = app.state::<Arc<AppState>>();
     let (user_agent, accept_invalid_certs) = {
@@ -181,11 +198,11 @@ pub async fn handle_proxy_request(
     let upstream_response = match req_builder.send().await {
         Ok(resp) => resp,
         Err(err) => {
-            log::warn!("Stream proxy: upstream request failed for {}: {}", original_url, err);
+            log::warn!("Stream proxy: upstream request failed for {}: {}", redact_url(&original_url), err);
             if err.is_timeout() {
-                return error_response(504, &format!("Upstream timeout: {err}"));
+                return error_response(504, "Upstream request timed out");
             }
-            return error_response(502, &format!("Upstream error: {err}"));
+            return error_response(502, "Upstream request failed");
         }
     };
 
@@ -202,8 +219,8 @@ pub async fn handle_proxy_request(
     let body = match upstream_response.bytes().await {
         Ok(bytes) => bytes.to_vec(),
         Err(err) => {
-            log::warn!("Stream proxy: failed to read upstream body for {}: {}", original_url, err);
-            return error_response(502, &format!("Failed to read upstream response: {err}"));
+            log::warn!("Stream proxy: failed to read upstream body for {}: {}", redact_url(&original_url), err);
+            return error_response(502, "Failed to read upstream response");
         }
     };
 
