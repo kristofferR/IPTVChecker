@@ -121,3 +121,110 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release edit "${{ github.ref_name }}" --draft=false --repo ${{ github.repository }}
+
+      - name: Update Homebrew tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "HOMEBREW_TAP_TOKEN not configured, skipping tap update"
+            exit 0
+          fi
+
+          VERSION="${GITHUB_REF_NAME#v}"
+          REPO="kristofferR/IPTVChecker"
+          TAP_REPO="kristofferR/homebrew-tap"
+
+          # Download assets and compute SHA256 hashes
+          for asset in \
+            "IPTV.Checker_${VERSION}_mac_arm.dmg" \
+            "IPTV.Checker_${VERSION}_mac_x64.dmg" \
+            "IPTV.Checker_${VERSION}_lin_arm.AppImage" \
+            "IPTV.Checker_${VERSION}_lin_x64.AppImage"; do
+            gh release download "$GITHUB_REF_NAME" --repo "$REPO" --pattern "$asset" --dir /tmp/assets || true
+          done
+
+          SHA_MAC_ARM=$(sha256sum "/tmp/assets/IPTV.Checker_${VERSION}_mac_arm.dmg" 2>/dev/null | cut -d' ' -f1 || echo "FIXME")
+          SHA_MAC_X64=$(sha256sum "/tmp/assets/IPTV.Checker_${VERSION}_mac_x64.dmg" 2>/dev/null | cut -d' ' -f1 || echo "FIXME")
+          SHA_LIN_ARM=$(sha256sum "/tmp/assets/IPTV.Checker_${VERSION}_lin_arm.AppImage" 2>/dev/null | cut -d' ' -f1 || echo "FIXME")
+          SHA_LIN_X64=$(sha256sum "/tmp/assets/IPTV.Checker_${VERSION}_lin_x64.AppImage" 2>/dev/null | cut -d' ' -f1 || echo "FIXME")
+
+          # Generate updated cask formula
+          cat > /tmp/iptv-checker.rb << CASK_EOF
+          cask "iptv-checker" do
+            version "${VERSION}"
+
+            on_macos do
+              on_arm do
+                sha256 "${SHA_MAC_ARM}"
+
+                url "https://github.com/${REPO}/releases/download/v#{version}/IPTV.Checker_#{version}_mac_arm.dmg",
+                    verified: "github.com/${REPO}/"
+              end
+
+              on_intel do
+                sha256 "${SHA_MAC_X64}"
+
+                url "https://github.com/${REPO}/releases/download/v#{version}/IPTV.Checker_#{version}_mac_x64.dmg",
+                    verified: "github.com/${REPO}/"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                sha256 "${SHA_LIN_ARM}"
+
+                url "https://github.com/${REPO}/releases/download/v#{version}/IPTV.Checker_#{version}_lin_arm.AppImage",
+                    verified: "github.com/${REPO}/"
+              end
+
+              on_intel do
+                sha256 "${SHA_LIN_X64}"
+
+                url "https://github.com/${REPO}/releases/download/v#{version}/IPTV.Checker_#{version}_lin_x64.AppImage",
+                    verified: "github.com/${REPO}/"
+              end
+
+              container type: :naked
+            end
+
+            name "IPTV Checker"
+            desc "Validate IPTV playlists and inspect stream health"
+            homepage "https://github.com/${REPO}"
+
+            preflight do
+              old_app = Pathname.new("/Applications/IPTV Checker.app")
+              next unless old_app.symlink?
+
+              target = old_app.readlink.to_s
+              old_app.delete if target.include?("/opt/homebrew/opt/iptv-checker/") || target.include?("/usr/local/opt/iptv-checker/")
+            end
+
+            on_macos do
+              app "IPTV Checker.app"
+            end
+
+            on_linux do
+              on_arm do
+                binary "IPTV.Checker_#{version}_lin_arm.AppImage", target: "iptv-checker"
+              end
+
+              on_intel do
+                binary "IPTV.Checker_#{version}_lin_x64.AppImage", target: "iptv-checker"
+              end
+            end
+          end
+          CASK_EOF
+
+          # Remove leading whitespace from heredoc
+          sed -i 's/^          //' /tmp/iptv-checker.rb
+
+          # Push to homebrew-tap repo
+          CONTENT=$(base64 -w 0 /tmp/iptv-checker.rb)
+          EXISTING_SHA=$(gh api "repos/${TAP_REPO}/contents/Casks/iptv-checker.rb" --jq '.sha' 2>/dev/null || echo "")
+
+          gh api --method PUT "repos/${TAP_REPO}/contents/Casks/iptv-checker.rb" \
+            -f message="Update IPTV Checker to ${VERSION}" \
+            -f content="$CONTENT" \
+            -f sha="$EXISTING_SHA" \
+            -f branch="main"
