@@ -756,7 +756,10 @@ async fn fetch_xtream_json_array(
         .await
     {
         Ok(resp) if resp.status().is_success() => match resp.bytes().await {
-            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+                log::warn!("Failed to parse Xtream {} JSON response: {}", label, e);
+                Vec::new()
+            }),
             Err(e) => {
                 log::warn!("Failed to read Xtream {} response: {}", label, e);
                 Vec::new()
