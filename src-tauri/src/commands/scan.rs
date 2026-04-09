@@ -1859,7 +1859,9 @@ async fn execute_scan_run(
     drop(checkpoint_tx);
 
     for handle in handles {
-        let _ = handle.await;
+        if let Err(err) = handle.await {
+            log::error!("Scan worker task failed: {err}");
+        }
     }
 
     let event_result = event_task.await;
