@@ -1,4 +1,10 @@
-import { attachConsole } from "@tauri-apps/plugin-log";
+import {
+  attachConsole,
+  debug as tauriDebug,
+  info as tauriInfo,
+  warn as tauriWarn,
+  error as tauriError,
+} from "@tauri-apps/plugin-log";
 
 export type LogLevel = "debug" | "info" | "warn" | "error" | "silent";
 
@@ -36,26 +42,38 @@ function shouldLog(level: Exclude<LogLevel, "silent">): boolean {
 // Bridge frontend console.* calls to the Rust log plugin → terminal output
 attachConsole();
 
+function formatArgs(args: unknown[]): string {
+  return args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
+}
+
 export const logger = {
   level: ACTIVE_LOG_LEVEL,
   debug(...args: unknown[]) {
     if (shouldLog("debug")) {
-      console.debug(...args);
+      const msg = formatArgs(args);
+      console.debug(msg);
+      void tauriDebug(msg);
     }
   },
   info(...args: unknown[]) {
     if (shouldLog("info")) {
-      console.info(...args);
+      const msg = formatArgs(args);
+      console.info(msg);
+      void tauriInfo(msg);
     }
   },
   warn(...args: unknown[]) {
     if (shouldLog("warn")) {
-      console.warn(...args);
+      const msg = formatArgs(args);
+      console.warn(msg);
+      void tauriWarn(msg);
     }
   },
   error(...args: unknown[]) {
     if (shouldLog("error")) {
-      console.error(...args);
+      const msg = formatArgs(args);
+      console.error(msg);
+      void tauriError(msg);
     }
   },
 };

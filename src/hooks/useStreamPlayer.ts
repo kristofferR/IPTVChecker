@@ -583,11 +583,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       }
 
-      // 1. Try hls.js first for HLS/unknown streams — provides rich metadata
-      //    (codec, bitrate, fps) that native WebKit HLS playback does not expose.
-      //    Native HLS gets first shot above when the webview advertises support
-      //    because it is more tolerant of real-world IPTV streams on Apple platforms.
-      if (streamType === "hls" || streamType === "unknown") {
+      // 1. For HLS streams, try hls.js directly with proxy
+      if (streamType === "hls") {
         logger.info("[Player] Trying hls.js via proxy for", result.name);
         const hlsOk = await tryHlsPlayback(url, abortController.signal);
         if (!isCurrentPlayback()) {
@@ -606,11 +603,12 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       }
 
-      // 2. For non-HLS streams, try Xtream HLS conversion first
+      // 2. For non-HLS streams, try Xtream HLS conversion first (most reliable
+      //    for single-provider Xtream playlists — avoids infinite MPEG-TS buffering)
       if (streamType !== "hls") {
         const xtreamHlsUrl = tryConvertToXtreamHls(url);
         if (xtreamHlsUrl) {
-          logger.info("[Player] Trying Xtream HLS conversion:", url, "→", xtreamHlsUrl);
+          logger.info("[Player] Trying Xtream HLS conversion:", xtreamHlsUrl);
           const hlsOk = await tryHlsPlayback(xtreamHlsUrl, abortController.signal);
           if (!isCurrentPlayback()) {
             return;
