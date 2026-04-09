@@ -413,6 +413,17 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
         const onCanPlay = () => finish(true);
         const onVideoError = () => {
+          const mediaErr = videoElement.error;
+          if (mediaErr) {
+            const codeMap: Record<number, string> = {
+              1: "Playback aborted",
+              2: "Network error",
+              3: "Decode error",
+              4: "Format not supported",
+            };
+            lastErrorRef.current =
+              codeMap[mediaErr.code] ?? mediaErr.message ?? "Unknown media error";
+          }
           destroyPlayer();
           finish(false);
         };

@@ -152,6 +152,50 @@ fn redact_url(url: &str) -> String {
     }
 }
 
+/// Reject URLs targeting localhost, private networks, or metadata endpoints.
+fn is_safe_upstream_url(url: &str) -> bool {
+    let parsed = match Url::parse(url) {
+        Ok(u) => u,
+        Err(_) => return false,
+    };
+
+    let scheme = parsed.scheme().to_lowercase();
+    if scheme != "http" && scheme != "https" {
+        return false;
+    }
+
+    let host = match parsed.host_str() {
+        Some(h) => h.to_lowercase(),
+        None => return false,
+    };
+
+    // Block localhost and loopback
+    if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "[::1]" || host == "0.0.0.0" {
+        return false;
+    }
+
+    // Block link-local and cloud metadata
+    if host == "169.254.169.254" || host.starts_with("169.254.") {
+        return false;
+    }
+
+    // Block private RFC1918 ranges
+    if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
+        if ip.is_loopback() || ip.is_unspecified() {
+            return false;
+        }
+        let octets = ip.octets();
+        // 10.0.0.0/8
+        if octets[0] == 10 { return false; }
+        // 172.16.0.0/12
+        if octets[0] == 172 && (16..=31).contains(&octets[1]) { return false; }
+        // 192.168.0.0/16
+        if octets[0] == 192 && octets[1] == 168 { return false; }
+    }
+
+    true
+}
+
 /// Handle an incoming proxy request: decode the URL, fetch upstream, return response.
 pub async fn handle_proxy_request(
     app: &tauri::AppHandle,
@@ -167,6 +211,11 @@ pub async fn handle_proxy_request(
             return error_response(400, "Invalid proxy URL encoding");
         }
     };
+
+    if !is_safe_upstream_url(&original_url) {
+        log::warn!("Stream proxy: blocked request to private/local target");
+        return error_response(403, "Target URL not allowed");
+    }
 
     log::debug!("Stream proxy: fetching {}", redact_url(&original_url));
 

@@ -372,7 +372,7 @@ async fn compute_shared_url_result(
 
     // Fallback: use ffprobe format-level bitrate when profile_bitrate returned
     // N/A or failed. Subtract audio bitrate for a closer video-only estimate.
-    if matches!(shared.video_bitrate.as_deref(), None | Some("N/A")) {
+    if profile_bitrate_flag && matches!(shared.video_bitrate.as_deref(), None | Some("N/A")) {
         if let Some(fmt_kbps) = format_bitrate_kbps {
             let audio_kbps = shared
                 .audio_bitrate
