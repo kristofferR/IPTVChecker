@@ -1509,6 +1509,7 @@ export default function App() {
   }, [handleOpen]);
 
   const handleOpenSettingsRef = useRef<() => void>(() => {});
+  const handleOpenLogRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1532,6 +1533,10 @@ export default function App() {
       if (hasPrimaryModifier && (e.key === "/" || e.code === "Slash")) {
         e.preventDefault();
         getStore().setShowKeyboardShortcuts(true);
+      }
+      if (e.altKey && isPrimaryModifierPressed(e, isMac) && lowerKey === "l") {
+        e.preventDefault();
+        handleOpenLogRef.current();
       }
       if (
         !e.repeat &&
@@ -1765,6 +1770,7 @@ export default function App() {
         listen("menu://resume-scan", () => void resumeRef.current()),
         listen("menu://stop-scan", () => void cancelRef.current()),
         listen("menu://open-settings", () => handleOpenSettingsRef.current()),
+        listen("menu://open-log", () => handleOpenLogRef.current()),
         listen("menu://check-updates", () => void checkForUpdatesRef.current(true)),
         listen("menu://keyboard-shortcuts", () => getStore().setShowKeyboardShortcuts(true)),
       ]);
@@ -1878,6 +1884,33 @@ export default function App() {
   useEffect(() => {
     handleOpenSettingsRef.current = handleOpenSettings;
   }, [handleOpenSettings]);
+
+  const handleOpenLog = useCallback(async () => {
+    const existing = await WebviewWindow.getByLabel("log");
+    if (existing) {
+      await existing.setFocus();
+      return;
+    }
+    const devUrl = "http://localhost:1420";
+    const baseUrl = import.meta.env.DEV ? devUrl : window.location.origin;
+    new WebviewWindow("log", {
+      url: `${baseUrl}?window=log`,
+      title: "Log",
+      width: 900,
+      height: 600,
+      minWidth: 500,
+      minHeight: 300,
+      resizable: true,
+      minimizable: true,
+      maximizable: true,
+      center: true,
+      hiddenTitle: true,
+      titleBarStyle: "overlay",
+    });
+  }, []);
+  useEffect(() => {
+    handleOpenLogRef.current = handleOpenLog;
+  }, [handleOpenLog]);
 
   const markManualReportVisibility = useCallback((nextVisible: boolean) => {
     reportWasAutoShownRef.current = false;

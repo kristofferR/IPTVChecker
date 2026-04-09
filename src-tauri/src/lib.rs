@@ -338,12 +338,19 @@ pub fn run() {
                 .accelerator("Cmd+Shift+X")
                 .build(app)?;
 
+        let log_window_item =
+            MenuItemBuilder::with_id("menu.view.log_window", "Log")
+                .accelerator("Alt+Cmd+L")
+                .build(app)?;
+
         let view_menu = SubmenuBuilder::new(app, "View")
             .item(&toggle_sidebar_item)
             .item(&toggle_report_item)
             .item(&toggle_prescan_item)
             .item(&clear_filters_item)
             .text("menu.view.history", "Scan History")
+            .separator()
+            .item(&log_window_item)
             .build()?;
 
         let start_scan_item = MenuItemBuilder::with_id("menu.scan.start", "Start Scan")
@@ -458,12 +465,19 @@ pub fn run() {
                 .accelerator("Ctrl+Shift+X")
                 .build(app)?;
 
+        let log_window_item =
+            MenuItemBuilder::with_id("menu.view.log_window", "Log")
+                .accelerator("Ctrl+Alt+L")
+                .build(app)?;
+
         let view_menu = SubmenuBuilder::new(app, "View")
             .item(&toggle_sidebar_item)
             .item(&toggle_report_item)
             .item(&toggle_prescan_item)
             .item(&clear_filters_item)
             .text("menu.view.history", "Scan History")
+            .separator()
+            .item(&log_window_item)
             .build()?;
 
         let start_scan_item = MenuItemBuilder::with_id("menu.scan.start", "Start Scan")
@@ -537,6 +551,7 @@ pub fn run() {
             "menu.view.toggle_prescan_filter" => Some("menu://toggle-prescan-filter"),
             "menu.view.clear_filters" => Some("menu://clear-filters"),
             "menu.view.history" => Some("menu://open-history"),
+            "menu.view.log_window" => Some("menu://open-log"),
             "menu.scan.start" => Some("menu://start-scan"),
             "menu.scan.pause" => Some("menu://pause-scan"),
             "menu.scan.resume" => Some("menu://resume-scan"),
@@ -728,7 +743,7 @@ pub fn run() {
             let window = webview.window();
 
             #[cfg(any(target_os = "windows", target_os = "linux"))]
-            if window.label() == "settings" {
+            if window.label() == "settings" || window.label() == "log" {
                 let _ = window.remove_menu();
             }
 
