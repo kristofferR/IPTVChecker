@@ -126,18 +126,32 @@ pub fn load_checkpoint_results(checkpoint_file: &str) -> Vec<ChannelResult> {
 
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
-        Err(_) => return Vec::new(),
+        Err(err) => {
+            log::warn!("Failed to read checkpoint file {checkpoint_file}: {err}");
+            return Vec::new();
+        }
     };
 
     let mut by_index: BTreeMap<usize, ChannelResult> = BTreeMap::new();
+    let mut malformed = 0u32;
     for line in content.lines() {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
-        if let Ok(result) = serde_json::from_str::<ChannelResult>(line) {
-            by_index.insert(result.index, result);
+        match serde_json::from_str::<ChannelResult>(line) {
+            Ok(result) => {
+                by_index.insert(result.index, result);
+            }
+            Err(_) => {
+                malformed += 1;
+            }
         }
+    }
+    if malformed > 0 {
+        log::warn!(
+            "Checkpoint {checkpoint_file}: skipped {malformed} malformed JSON line(s)"
+        );
     }
 
     by_index.into_values().collect()
