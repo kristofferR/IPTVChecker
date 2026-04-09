@@ -28,7 +28,8 @@ pub struct ChannelDebugLog {
     pub ttfb_ms: Option<u64>,
     pub final_verdict: String,
     pub final_reason: Option<String>,
-    pub ffprobe_output: Option<String>,
+    #[serde(alias = "ffprobe_output")]
+    pub diagnostics_output: Option<String>,
     pub attempts: Vec<ChannelAttemptDebugLog>,
 }
 
