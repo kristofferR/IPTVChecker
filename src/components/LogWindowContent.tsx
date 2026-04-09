@@ -44,7 +44,6 @@ const LEVEL_META: Record<
 };
 
 const ALL_LEVELS: LogLevel[] = [
-  LogLevel.Trace,
   LogLevel.Debug,
   LogLevel.Info,
   LogLevel.Warn,
@@ -136,11 +135,18 @@ export function LogWindowContent() {
     });
   }, [entries, levelFilter, searchLower]);
 
+  const getItemKey = useCallback(
+    (index: number) => filteredEntries[index]?.id ?? index,
+    [filteredEntries],
+  );
+
   const virtualizer = useVirtualizer({
     count: filteredEntries.length,
     getScrollElement: () => scrollContainerRef.current,
-    estimateSize: () => 24,
+    estimateSize: () => 22,
     overscan: 50,
+    getItemKey,
+    measureElement: (el) => el.getBoundingClientRect().height,
   });
 
   // Auto-scroll when new entries arrive
@@ -270,6 +276,8 @@ export function LogWindowContent() {
             return (
               <div
                 key={entry.id}
+                ref={virtualizer.measureElement}
+                data-index={virtualRow.index}
                 style={{
                   position: "absolute",
                   top: 0,

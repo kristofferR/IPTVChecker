@@ -432,6 +432,7 @@ pub struct VideoInfo {
     pub height: Option<u32>,
     pub fps: Option<u32>,
     pub resolution: String,
+    pub bitrate_kbps: Option<u32>,
 }
 
 /// Audio stream info from ffprobe.
@@ -442,21 +443,8 @@ pub struct AudioInfo {
 }
 
 #[derive(Debug, Deserialize)]
-struct FfprobeOutput {
-    streams: Vec<FfprobeVideoStream>,
-}
-
-#[derive(Debug, Deserialize)]
 struct FfprobeTrackOutput {
     streams: Vec<FfprobeTrackStream>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct FfprobeVideoStream {
-    codec_name: Option<String>,
-    width: Option<u32>,
-    height: Option<u32>,
-    r_frame_rate: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -568,12 +556,18 @@ fn parse_probe_snapshot(stdout: &str) -> Result<ProbeSnapshot, serde_json::Error
         let width = stream.width;
         let height = stream.height;
         let fps = stream.r_frame_rate.as_deref().and_then(parse_ffprobe_fps);
+        let bitrate_kbps = stream
+            .bit_rate
+            .as_deref()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(|bits| (bits / 1000) as u32);
         VideoInfo {
             codec,
             width,
             height,
             fps,
             resolution: resolution_label(width, height),
+            bitrate_kbps,
         }
     });
 
@@ -643,152 +637,6 @@ fn resolution_label(width: Option<u32>, height: Option<u32>) -> String {
         (Some(_), Some(_)) => "SD".to_string(),
         _ => "Unknown".to_string(),
     }
-}
-
-/// Get video stream info via ffprobe sidecar.
-pub async fn get_stream_info(
-    app: &AppHandle,
-    url: &str,
-    cancel: &CancellationToken,
-) -> Result<VideoInfo, AppError> {
-    log::debug!("Getting stream info for: {}", url);
-    let (stdout, stderr) = run_tool_command(
-        app,
-        "ffprobe",
-        &[
-            "-v",
-            "error",
-            "-analyzeduration",
-            "15000000",
-            "-probesize",
-            "15000000",
-            "-select_streams",
-            "v",
-            "-show_entries",
-            "stream=codec_name,width,height,r_frame_rate",
-            "-of",
-            "json",
-            url,
-        ],
-        cancel,
-        Some(FFPROBE_TIMEOUT),
-    )
-    .await?;
-
-    let parsed: FfprobeOutput = serde_json::from_str(&stdout).map_err(|err| {
-        AppError::Other(format!(
-            "Failed to parse ffprobe stream info: {} ({})",
-            err,
-            stderr_excerpt(&stderr)
-        ))
-    })?;
-
-    let best = parsed
-        .streams
-        .iter()
-        .max_by_key(|stream| stream.width.unwrap_or(0) as u64 * stream.height.unwrap_or(0) as u64)
-        .cloned();
-
-    let codec = best
-        .as_ref()
-        .and_then(|stream| stream.codec_name.as_ref())
-        .map(|value| normalize_codec_name(value))
-        .unwrap_or_else(|| "Unknown".to_string());
-
-    let width = best.as_ref().and_then(|stream| stream.width);
-    let height = best.as_ref().and_then(|stream| stream.height);
-    let fps = best
-        .as_ref()
-        .and_then(|stream| stream.r_frame_rate.as_deref())
-        .and_then(parse_ffprobe_fps);
-
-    let resolution = resolution_label(width, height);
-
-    Ok(VideoInfo {
-        codec,
-        width,
-        height,
-        fps,
-        resolution,
-    })
-}
-
-/// Get audio stream info via ffprobe sidecar.
-pub async fn get_audio_info(
-    app: &AppHandle,
-    url: &str,
-    cancel: &CancellationToken,
-) -> Result<AudioInfo, AppError> {
-    let (stdout, _) = run_tool_command(
-        app,
-        "ffprobe",
-        &[
-            "-v",
-            "error",
-            "-select_streams",
-            "a:0",
-            "-show_entries",
-            "stream=codec_name,bit_rate",
-            "-of",
-            "default=noprint_wrappers=1",
-            url,
-        ],
-        cancel,
-        Some(FFPROBE_TIMEOUT),
-    )
-    .await?;
-
-    let mut codec = String::from("Unknown");
-    let mut bitrate_kbps: Option<u32> = None;
-
-    for line in stdout.lines() {
-        if let Some(val) = line.strip_prefix("codec_name=") {
-            codec = normalize_codec_name(val);
-        } else if let Some(val) = line.strip_prefix("bit_rate=") {
-            bitrate_kbps = val.parse::<u64>().ok().map(|b| (b / 1000) as u32);
-        }
-    }
-
-    Ok(AudioInfo {
-        codec,
-        bitrate_kbps,
-    })
-}
-
-/// Detect whether a stream has audio tracks, video tracks, or both.
-pub async fn get_stream_track_presence(
-    app: &AppHandle,
-    url: &str,
-    cancel: &CancellationToken,
-) -> Result<StreamTrackPresence, AppError> {
-    let (stdout, stderr) = run_tool_command(
-        app,
-        "ffprobe",
-        &[
-            "-v",
-            "error",
-            "-analyzeduration",
-            "15000000",
-            "-probesize",
-            "15000000",
-            "-show_entries",
-            "stream=codec_type",
-            "-of",
-            "json",
-            url,
-        ],
-        cancel,
-        Some(FFPROBE_TIMEOUT),
-    )
-    .await?;
-
-    parse_stream_track_presence(&stdout).map_err(|error| {
-        AppError::Other(format!(
-            "Failed to parse ffprobe stream track presence: {} ({})",
-            error,
-            stderr_excerpt(&stderr)
-        ))
-    })
 }
 
 /// Capture raw ffprobe JSON output for diagnostic export logs.

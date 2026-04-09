@@ -231,18 +231,20 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(
             tauri_plugin_log::Builder::new()
-                .level(log::LevelFilter::Trace)
+                .level(log::LevelFilter::Debug)
                 .target(
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout).filter(
                         |metadata| {
-                            (metadata.level() as usize)
-                                <= STDOUT_LOG_LEVEL.load(Ordering::Relaxed)
+                            metadata.level() >= log::Level::Debug
+                                && (metadata.level() as usize)
+                                    <= STDOUT_LOG_LEVEL.load(Ordering::Relaxed)
                         },
                     ),
                 )
-                .target(tauri_plugin_log::Target::new(
-                    tauri_plugin_log::TargetKind::Webview,
-                ))
+                .target(
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview)
+                        .filter(|metadata| metadata.level() >= log::Level::Debug),
+                )
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())

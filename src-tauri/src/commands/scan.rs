@@ -331,6 +331,9 @@ async fn compute_shared_url_result(
                     .fps
                     .map(|fps| (fps as f64) <= low_fps_threshold)
                     .unwrap_or(false);
+                if let Some(kbps) = info.bitrate_kbps {
+                    shared.video_bitrate = Some(format!("{kbps} kbps"));
+                }
             }
         }
         if let Some(audio) = snapshot.audio_info {
@@ -370,9 +373,9 @@ async fn compute_shared_url_result(
         }
     }
 
-    // Fallback: use ffprobe format-level bitrate when profile_bitrate returned
-    // N/A or failed. Subtract audio bitrate for a closer video-only estimate.
-    if profile_bitrate_flag && matches!(shared.video_bitrate.as_deref(), None | Some("N/A")) {
+    // Fallback: use ffprobe format-level bitrate when video_bitrate is missing
+    // or profiling returned N/A. Subtract audio bitrate for a closer video-only estimate.
+    if matches!(shared.video_bitrate.as_deref(), None | Some("N/A")) {
         if let Some(fmt_kbps) = format_bitrate_kbps {
             let audio_kbps = shared
                 .audio_bitrate
@@ -1810,6 +1813,18 @@ async fn execute_scan_run(
                 )
                 .await;
             }
+
+            log::info!(
+                "[Scan] #{} {} → {} (bitrate: {}, latency: {})",
+                channel.index,
+                channel.name,
+                shared.status,
+                shared.video_bitrate.as_deref().unwrap_or("—"),
+                shared
+                    .latency_ms
+                    .map(|ms| format!("{ms} ms"))
+                    .unwrap_or_else(|| "—".to_string()),
+            );
 
             shared.channel_log.channel_index = channel.index;
             shared.channel_log.channel_name = channel.name.clone();
