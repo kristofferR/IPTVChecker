@@ -972,6 +972,348 @@ pub async fn profile_bitrate(
     Ok(format!("{} kbps", bitrate_kbps))
 }
 
+// ---------------------------------------------------------------------------
+// Combined diagnostics: single-connection ffmpeg for metadata + screenshot + bitrate
+// ---------------------------------------------------------------------------
+
+/// Result of a single combined ffmpeg diagnostics run.
+#[derive(Debug, Clone)]
+pub struct CombinedDiagnostics {
+    pub track_presence: StreamTrackPresence,
+    pub video_info: Option<VideoInfo>,
+    pub audio_info: Option<AudioInfo>,
+    pub format_bitrate_kbps: Option<u32>,
+    pub screenshot_path: Option<String>,
+    pub profiled_bitrate_kbps: Option<u64>,
+    pub diagnostics_output: String,
+}
+
+/// Parse stream metadata from ffmpeg verbose stderr output.
+///
+/// Extracts codec, resolution, fps, audio info, and format bitrate from
+/// `Stream #` and `Duration:` lines that ffmpeg prints with `-v verbose`.
+fn parse_ffmpeg_stderr(stderr: &str) -> (StreamTrackPresence, Option<VideoInfo>, Option<AudioInfo>, Option<u32>) {
+    let mut presence = StreamTrackPresence::default();
+    let mut best_video: Option<(String, Option<u32>, Option<u32>, Option<u32>, u64)> = None; // (codec, w, h, fps, pixels)
+    let mut audio_info: Option<AudioInfo> = None;
+    let mut format_bitrate_kbps: Option<u32> = None;
+
+    let video_re = regex::Regex::new(
+        r"Stream #\d+:\d+.*?: Video: (\w+)"
+    ).unwrap();
+    let resolution_re = regex::Regex::new(r"(\d{2,5})x(\d{2,5})").unwrap();
+    let fps_re = regex::Regex::new(r"(\d+(?:\.\d+)?)\s+fps").unwrap();
+    let tbr_re = regex::Regex::new(r"(\d+(?:\.\d+)?)\s+tbr").unwrap();
+
+    let audio_re = regex::Regex::new(
+        r"Stream #\d+:\d+.*?: Audio: (\w+)"
+    ).unwrap();
+    let audio_bitrate_re = regex::Regex::new(r"(\d+)\s+kb/s").unwrap();
+
+    let format_br_re = regex::Regex::new(r"bitrate:\s*(\d+)\s*kb/s").unwrap();
+
+    for line in stderr.lines() {
+        // Video stream
+        if let Some(caps) = video_re.captures(line) {
+            presence.has_video = true;
+            let codec = caps[1].to_string();
+
+            let (w, h) = resolution_re.captures(line)
+                .map(|c| {
+                    let w = c[1].parse::<u32>().ok();
+                    let h = c[2].parse::<u32>().ok();
+                    (w, h)
+                })
+                .unwrap_or((None, None));
+
+            let fps = fps_re.captures(line)
+                .or_else(|| tbr_re.captures(line))
+                .and_then(|c| c[1].parse::<f64>().ok())
+                .map(|f| f.round() as u32)
+                .filter(|&f| f > 0 && f <= 240);
+
+            let pixels = w.unwrap_or(0) as u64 * h.unwrap_or(0) as u64;
+            let is_better = match &best_video {
+                Some((_, _, _, _, prev_px)) => pixels > *prev_px,
+                None => true,
+            };
+            if is_better {
+                best_video = Some((codec, w, h, fps, pixels));
+            }
+
+            continue;
+        }
+
+        // Audio stream (take first)
+        if audio_info.is_none() {
+            if let Some(caps) = audio_re.captures(line) {
+                presence.has_audio = true;
+                let codec = caps[1].to_string();
+                let bitrate_kbps = audio_bitrate_re.captures(line)
+                    .and_then(|c| c[1].parse::<u32>().ok());
+                audio_info = Some(AudioInfo { codec: normalize_codec_name(&codec), bitrate_kbps });
+                continue;
+            }
+        } else if line.contains("Audio:") && line.contains("Stream #") {
+            presence.has_audio = true;
+        }
+
+        // Format-level bitrate from Duration line
+        if format_bitrate_kbps.is_none() && line.contains("Duration:") {
+            format_bitrate_kbps = format_br_re.captures(line)
+                .and_then(|c| c[1].parse::<u32>().ok());
+        }
+    }
+
+    let video_info = best_video.map(|(codec, w, h, fps, _)| VideoInfo {
+        codec: normalize_codec_name(&codec),
+        width: w,
+        height: h,
+        fps,
+        resolution: resolution_label(w, h),
+        bitrate_kbps: None, // Not available from ffmpeg stderr stream lines
+    });
+
+    (presence, video_info, audio_info, format_bitrate_kbps)
+}
+
+/// Parse total bytes read from ffmpeg verbose Statistics lines.
+/// Returns (total_bytes, sample_seconds).
+fn parse_bytes_read(stderr: &str, sample_secs: u64) -> Option<u64> {
+    let mut total_bytes: u64 = 0;
+
+    // Primary: look for "Statistics: N bytes read" lines
+    for line in stderr.lines() {
+        if line.contains("Statistics:") && line.contains("bytes read") {
+            if let Some(parts) = line.split("bytes read").next() {
+                if let Some(size_str) = parts.split_whitespace().last() {
+                    if let Ok(bytes) = size_str.parse::<u64>() {
+                        total_bytes = total_bytes.saturating_add(bytes);
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: regex scan for "<digits> bytes read" anywhere
+    if total_bytes == 0 {
+        let re = regex::Regex::new(r"(\d+)\s+bytes\s+read").unwrap();
+        for caps in re.captures_iter(stderr) {
+            if let Ok(bytes) = caps[1].parse::<u64>() {
+                total_bytes = total_bytes.saturating_add(bytes);
+            }
+        }
+    }
+
+    if total_bytes == 0 || sample_secs == 0 {
+        return None;
+    }
+    Some((total_bytes * 8) / 1000 / sample_secs)
+}
+
+/// Run all stream diagnostics in a single ffmpeg process.
+///
+/// Depending on `profile_bitrate` and `want_screenshot`, builds one of four
+/// ffmpeg command modes that minimizes connections to the stream server.
+pub async fn run_combined_diagnostics(
+    app: &AppHandle,
+    url: &str,
+    user_agent: &str,
+    output_dir: &str,
+    file_name: &str,
+    screenshot_format: ScreenshotFormat,
+    want_screenshot: bool,
+    profile_bitrate: bool,
+    timeout_secs: f64,
+    cancel: &CancellationToken,
+) -> Result<CombinedDiagnostics, AppError> {
+    if cancel.is_cancelled() {
+        return Err(AppError::Cancelled);
+    }
+
+    let timeout_duration = if timeout_secs.is_finite() {
+        std::time::Duration::from_secs_f64(timeout_secs.clamp(1.0, 600.0))
+    } else if profile_bitrate {
+        FFMPEG_BITRATE_TIMEOUT
+    } else {
+        FFPROBE_TIMEOUT
+    };
+
+    let resolved_bin = resolve_binary(app, "ffmpeg");
+
+    // When profiling, stream for 3–10 seconds to gather bitrate data.
+    let sample_secs = if profile_bitrate {
+        (timeout_duration.as_secs().saturating_sub(15)).clamp(3, 10)
+    } else {
+        0
+    };
+    let sample_secs_str = sample_secs.to_string();
+
+    // Build screenshot output path
+    let screenshot_path = if want_screenshot {
+        Some(unique_screenshot_output_path(
+            Path::new(output_dir),
+            file_name,
+            screenshot_format.extension(),
+        ))
+    } else {
+        None
+    };
+    let screenshot_str = screenshot_path
+        .as_ref()
+        .map(|p| p.to_string_lossy().to_string());
+
+    // Build ffmpeg args
+    let mut args: Vec<&str> = vec!["-v", "verbose", "-user_agent", user_agent, "-i", url];
+
+    // Output 1: screenshot (if wanted)
+    if let Some(ref out) = screenshot_str {
+        args.extend_from_slice(&["-frames:v", "1"]);
+        if screenshot_format == ScreenshotFormat::Webp {
+            args.extend_from_slice(&["-c:v", "libwebp", "-quality", "90", "-pix_fmt", "yuv420p"]);
+        }
+        args.push(out);
+    }
+
+    // Output 2: null sink for bitrate profiling (or just metadata-only decode)
+    if profile_bitrate {
+        args.extend_from_slice(&["-t", &sample_secs_str, "-f", "null", "-"]);
+    } else if screenshot_str.is_none() {
+        // Mode D: no screenshot, no profiling — just decode 1 frame for metadata
+        args.extend_from_slice(&["-frames:v", "1", "-f", "null", "-"]);
+    }
+
+    // Spawn the process
+    let mut command = tokio::process::Command::new(&resolved_bin);
+    configure_background_process(&mut command);
+
+    let mut child = command
+        .args(&args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| {
+            log::warn!("Failed to spawn ffmpeg using '{}': {}", resolved_bin, err);
+            AppError::FfmpegNotAvailable
+        })?;
+
+    // Read stderr in a background task (same tail-buffer pattern as profile_bitrate)
+    let stderr_pipe = child.stderr.take();
+    let stderr_reader = tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+        const MAX_RETAIN_BYTES: usize = 1_024 * 1_024;
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = stderr_pipe {
+            let mut chunk = [0u8; 8192];
+            loop {
+                match pipe.read(&mut chunk).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        buf.extend_from_slice(&chunk[..n]);
+                        if buf.len() > MAX_RETAIN_BYTES * 2 {
+                            let start = buf.len() - MAX_RETAIN_BYTES;
+                            buf.drain(..start);
+                        }
+                    }
+                }
+            }
+            if buf.len() > MAX_RETAIN_BYTES {
+                let start = buf.len() - MAX_RETAIN_BYTES;
+                buf.drain(..start);
+            }
+        }
+        buf
+    });
+
+    // Wait for exit with cancellation and timeout, accepting any exit code
+    let timed_out = tokio::select! {
+        _ = cancel.cancelled() => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            stderr_reader.abort();
+            return Err(AppError::Cancelled);
+        }
+        _ = tokio::time::sleep(timeout_duration) => {
+            graceful_kill(&mut child, GRACEFUL_KILL_TIMEOUT).await;
+            true
+        }
+        _status = child.wait() => {
+            false
+        }
+    };
+
+    let stderr_buf = stderr_reader.await.unwrap_or_default();
+    let stderr = String::from_utf8_lossy(&stderr_buf);
+
+    // Parse stream metadata from verbose output
+    let (track_presence, video_info, audio_info, format_bitrate_kbps) =
+        parse_ffmpeg_stderr(&stderr);
+
+    // Parse bitrate from Statistics lines (if profiling)
+    let profiled_bitrate_kbps = if profile_bitrate {
+        let kbps = parse_bytes_read(&stderr, sample_secs);
+        if kbps.is_none() && !timed_out {
+            log::warn!(
+                "Combined diagnostics: no bytes-read data in stderr. stderr tail: {}",
+                stderr.lines().rev().take(3).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" | ")
+            );
+        }
+        kbps
+    } else {
+        None
+    };
+
+    // Validate screenshot
+    let validated_screenshot = if let Some(ref path) = screenshot_path {
+        if path.exists() {
+            match validate_captured_screenshot(path, screenshot_format) {
+                Ok(()) => Some(path.to_string_lossy().to_string()),
+                Err(error) => {
+                    let _ = std::fs::remove_file(path);
+                    log::warn!("Combined diagnostics: invalid screenshot - {}", error);
+                    None
+                }
+            }
+        } else {
+            log::debug!("Combined diagnostics: screenshot output file missing");
+            None
+        }
+    } else {
+        None
+    };
+
+    // Truncate stderr for debug log
+    let diagnostics_output = {
+        let relevant: String = stderr
+            .lines()
+            .filter(|l| {
+                l.contains("Stream #")
+                    || l.contains("Duration:")
+                    || l.contains("Input #")
+                    || l.contains("Statistics:")
+                    || l.contains("Error")
+            })
+            .take(30)
+            .collect::<Vec<_>>()
+            .join("\n");
+        if relevant.len() > MAX_FFPROBE_OUTPUT_CHARS {
+            relevant.chars().take(MAX_FFPROBE_OUTPUT_CHARS).collect()
+        } else {
+            relevant
+        }
+    };
+
+    Ok(CombinedDiagnostics {
+        track_presence,
+        video_info,
+        audio_info,
+        format_bitrate_kbps,
+        screenshot_path: validated_screenshot,
+        profiled_bitrate_kbps,
+        diagnostics_output,
+    })
+}
+
 /// Check if `word` appears in `haystack` as a standalone word (surrounded by
 /// non-alphanumeric characters or string boundaries).
 fn contains_word(haystack: &str, word: &str) -> bool {
@@ -1078,9 +1420,10 @@ mod tests {
 
     use super::{
         build_screenshot_file_name, check_label_mismatch, contains_word, normalize_superscript,
-        parse_ffprobe_fps, parse_probe_snapshot, parse_stream_track_presence, resolution_label,
-        sanitize_screenshot_stem, screenshot_header_is_valid, unique_screenshot_output_path,
-        validate_captured_screenshot, ScreenshotFormat, MAX_SCREENSHOT_STEM_LEN,
+        parse_bytes_read, parse_ffmpeg_stderr, parse_ffprobe_fps, parse_probe_snapshot,
+        parse_stream_track_presence, resolution_label, sanitize_screenshot_stem,
+        screenshot_header_is_valid, unique_screenshot_output_path, validate_captured_screenshot,
+        ScreenshotFormat, MAX_SCREENSHOT_STEM_LEN,
     };
 
     #[test]
@@ -1292,5 +1635,103 @@ mod tests {
         // "⁴ᴷ" alone should also match
         assert!(check_label_mismatch("Channel ⁴ᴷ", "4K").is_empty());
         assert!(!check_label_mismatch("Channel ⁴ᴷ", "720p").is_empty());
+    }
+
+    #[test]
+    fn parse_ffmpeg_stderr_h264_mpegts() {
+        let stderr = r#"
+Input #0, mpegts, from 'http://example.com/stream':
+  Duration: N/A, start: 28182.486000, bitrate: N/A
+  Stream #0:0[0x100]: Video: h264 (High), yuv420p(tv, bt709, progressive, left), 1920x1080 [SAR 1:1 DAR 16:9], 50 fps, 50 tbr, 90k tbn
+  Stream #0:1[0x101](und): Audio: aac (LC) ([15][0][0][0] / 0x000F), 48000 Hz, stereo, fltp, 127 kb/s
+"#;
+        let (presence, video, audio, fmt_br) = parse_ffmpeg_stderr(stderr);
+        assert!(presence.has_video);
+        assert!(presence.has_audio);
+
+        let v = video.unwrap();
+        assert_eq!(v.codec, "H264");
+        assert_eq!(v.width, Some(1920));
+        assert_eq!(v.height, Some(1080));
+        assert_eq!(v.fps, Some(50));
+        assert_eq!(v.resolution, "1080p");
+
+        let a = audio.unwrap();
+        assert_eq!(a.codec, "AAC");
+        assert_eq!(a.bitrate_kbps, Some(127));
+
+        assert_eq!(fmt_br, None); // "bitrate: N/A"
+    }
+
+    #[test]
+    fn parse_ffmpeg_stderr_hevc_with_format_bitrate() {
+        let stderr = r#"
+Input #0, hls, from 'http://example.com/stream.m3u8':
+  Duration: N/A, start: 0.0, bitrate: 4500 kb/s
+  Stream #0:0: Video: hevc (Main 10), yuv420p10le(tv, bt2020nc), 3840x2160, 25 fps, 25 tbr, 90k tbn
+  Stream #0:1: Audio: ac3, 48000 Hz, 5.1(side), fltp, 448 kb/s
+"#;
+        let (presence, video, audio, fmt_br) = parse_ffmpeg_stderr(stderr);
+        assert!(presence.has_video);
+        assert!(presence.has_audio);
+
+        let v = video.unwrap();
+        assert_eq!(v.codec, "HEVC");
+        assert_eq!(v.width, Some(3840));
+        assert_eq!(v.height, Some(2160));
+        assert_eq!(v.fps, Some(25));
+        assert_eq!(v.resolution, "4K");
+
+        let a = audio.unwrap();
+        assert_eq!(a.codec, "AC3");
+        assert_eq!(a.bitrate_kbps, Some(448));
+
+        assert_eq!(fmt_br, Some(4500));
+    }
+
+    #[test]
+    fn parse_ffmpeg_stderr_audio_only() {
+        let stderr = r#"
+Input #0, mp3, from 'http://example.com/radio':
+  Duration: N/A, start: 0.0, bitrate: 128 kb/s
+  Stream #0:0: Audio: mp3, 44100 Hz, stereo, fltp, 128 kb/s
+"#;
+        let (presence, video, audio, fmt_br) = parse_ffmpeg_stderr(stderr);
+        assert!(!presence.has_video);
+        assert!(presence.has_audio);
+        assert!(video.is_none());
+        assert_eq!(audio.unwrap().codec, "MP3");
+        assert_eq!(fmt_br, Some(128));
+    }
+
+    #[test]
+    fn parse_ffmpeg_stderr_picks_highest_resolution() {
+        let stderr = r#"
+  Stream #0:0: Video: h264, yuv420p, 640x480, 25 fps, 25 tbr
+  Stream #0:1: Video: h264, yuv420p, 1920x1080, 50 fps, 50 tbr
+  Stream #0:2: Audio: aac (LC), 48000 Hz, stereo, fltp, 128 kb/s
+"#;
+        let (_, video, _, _) = parse_ffmpeg_stderr(stderr);
+        let v = video.unwrap();
+        assert_eq!(v.width, Some(1920));
+        assert_eq!(v.height, Some(1080));
+        assert_eq!(v.fps, Some(50));
+    }
+
+    #[test]
+    fn parse_bytes_read_sums_statistics_lines() {
+        let stderr = r#"
+[https @ 0x1] Statistics: 1048576 bytes read, 0 seeks
+[https @ 0x2] Statistics: 2097152 bytes read, 0 seeks
+[https @ 0x3] Statistics: 524288 bytes read, 0 seeks
+"#;
+        // total = 3670016 bytes, 10 seconds => (3670016*8)/1000/10 = 2936 kbps
+        assert_eq!(parse_bytes_read(stderr, 10), Some(2936));
+    }
+
+    #[test]
+    fn parse_bytes_read_returns_none_when_no_data() {
+        let stderr = "Error opening input: Server returned 5XX\n";
+        assert_eq!(parse_bytes_read(stderr, 10), None);
     }
 }

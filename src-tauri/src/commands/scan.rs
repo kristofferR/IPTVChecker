@@ -11,6 +11,7 @@ use crate::commands::history;
 use crate::commands::settings;
 use crate::engine::{checker, connectivity, disk, ffmpeg, parser, proxy, resume};
 use crate::error::AppError;
+use crate::models::settings::ScreenshotFormat;
 use crate::models::backend_perf::BackendPerfSample;
 use crate::models::channel::{Channel, ChannelResult, ChannelStatus};
 use crate::models::playlist::PlaylistPreview;
@@ -119,6 +120,7 @@ async fn compute_shared_url_result(
     screenshot_file_name: &str,
     screenshot_format: crate::models::settings::ScreenshotFormat,
     diagnostics_semaphore: &Arc<Semaphore>,
+    single_connection_mode: bool,
 ) -> Result<(SharedUrlResult, WorkerTiming), AppError> {
     let check_started_at = Instant::now();
     let check_outcome = if checker::uses_ffprobe_liveness(channel_url) {
@@ -279,102 +281,181 @@ async fn compute_shared_url_result(
     let ffprobe_timeout_duration =
         std::time::Duration::from_secs_f64(ffprobe_timeout_secs.clamp(1.0, 300.0));
 
-    // Run ffprobe and screenshot capture in parallel — they are independent.
-    // Bitrate profiling runs sequentially after both complete.
     let want_screenshot = !skip_screenshots && ffmpeg_ok && screenshots_dir.is_some();
-
-    let ffprobe_fut = async {
-        if !ffprobe_ok {
-            return None;
-        }
-        ffmpeg::collect_probe_snapshot_with_timeout(
-            app,
-            &target_url,
-            cancel,
-            Some(ffprobe_timeout_duration),
-        )
-        .await
-        .ok()
-    };
-
-    let screenshot_fut = async {
-        if !want_screenshot || cancel.is_cancelled() {
-            return None;
-        }
-        let dir = screenshots_dir.unwrap();
-        ffmpeg::capture_screenshot(
-            app,
-            &target_url,
-            dir,
-            screenshot_file_name,
-            user_agent,
-            screenshot_format,
-            cancel,
-        )
-        .await
-        .ok()
-    };
-
-    let (probe_result, screenshot_result) = tokio::join!(ffprobe_fut, screenshot_fut);
-
     let mut format_bitrate_kbps: Option<u32> = None;
-    if let Some(snapshot) = probe_result {
-        shared.audio_only = snapshot.track_presence.has_audio && !snapshot.track_presence.has_video;
-        if let Some(info) = snapshot.video_info {
-            if !shared.audio_only {
-                shared.codec = Some(info.codec);
-                shared.resolution = Some(info.resolution.clone());
-                shared.width = info.width;
-                shared.height = info.height;
-                shared.fps = info.fps;
-                shared.low_framerate = info
-                    .fps
-                    .map(|fps| (fps as f64) <= low_fps_threshold)
-                    .unwrap_or(false);
-                if let Some(kbps) = info.bitrate_kbps {
-                    shared.video_bitrate = Some(format!("{kbps} kbps"));
-                }
-            }
-        }
-        if let Some(audio) = snapshot.audio_info {
-            shared.audio_codec = Some(audio.codec);
-            shared.audio_bitrate = audio.bitrate_kbps.map(|b| format!("{}", b));
-        }
-        format_bitrate_kbps = snapshot.format_bitrate_kbps;
-        shared.channel_log.ffprobe_output = Some(snapshot.ffprobe_output);
-    }
 
-    if let Some(path) = screenshot_result {
-        shared.screenshot_path = Some(path);
-    }
-
-    // Release the diagnostics permit before bitrate profiling. ffprobe and
-    // screenshot are done; holding the permit during the long bitrate sample
-    // (~30s) starves other channels' diagnostics.
-    drop(diagnostics_permit);
-
-    if ffprobe_ok && !cancel.is_cancelled() && profile_bitrate_flag && ffmpeg_ok {
-        match ffmpeg::profile_bitrate(
+    if single_connection_mode && ffmpeg_ok {
+        // Single-provider: one ffmpeg process for metadata + screenshot + bitrate.
+        // Avoids 5XX rejections from single-connection IPTV servers.
+        let diag_timeout = if profile_bitrate_flag {
+            ffmpeg_bitrate_timeout_secs
+        } else {
+            ffprobe_timeout_secs
+        };
+        match ffmpeg::run_combined_diagnostics(
             app,
             &target_url,
             user_agent,
-            ffmpeg_bitrate_timeout_secs,
+            screenshots_dir.unwrap_or(&String::new()),
+            screenshot_file_name,
+            screenshot_format,
+            want_screenshot,
+            profile_bitrate_flag,
+            diag_timeout,
             cancel,
         )
         .await
         {
-            Ok(bitrate) => {
-                shared.video_bitrate = Some(bitrate);
+            Ok(diag) => {
+                shared.audio_only =
+                    diag.track_presence.has_audio && !diag.track_presence.has_video;
+                if let Some(info) = diag.video_info {
+                    if !shared.audio_only {
+                        shared.codec = Some(info.codec);
+                        shared.resolution = Some(info.resolution.clone());
+                        shared.width = info.width;
+                        shared.height = info.height;
+                        shared.fps = info.fps;
+                        shared.low_framerate = info
+                            .fps
+                            .map(|fps| (fps as f64) <= low_fps_threshold)
+                            .unwrap_or(false);
+                    }
+                }
+                if let Some(audio) = diag.audio_info {
+                    shared.audio_codec = Some(audio.codec);
+                    shared.audio_bitrate = audio.bitrate_kbps.map(|b| format!("{}", b));
+                }
+                if let Some(kbps) = diag.profiled_bitrate_kbps {
+                    shared.video_bitrate = Some(format!("{kbps} kbps"));
+                }
+                format_bitrate_kbps = diag.format_bitrate_kbps;
+                shared.channel_log.diagnostics_output = Some(diag.diagnostics_output);
+
+                // Screenshot: if combined run got it, use it; otherwise retry PNG
+                if let Some(path) = diag.screenshot_path {
+                    shared.screenshot_path = Some(path);
+                } else if want_screenshot
+                    && screenshot_format == ScreenshotFormat::Webp
+                    && !cancel.is_cancelled()
+                {
+                    if let Ok(path) = ffmpeg::capture_screenshot(
+                        app,
+                        &target_url,
+                        screenshots_dir.unwrap(),
+                        screenshot_file_name,
+                        user_agent,
+                        ScreenshotFormat::Png,
+                        cancel,
+                    )
+                    .await
+                    {
+                        shared.screenshot_path = Some(path);
+                    }
+                }
             }
-            Err(AppError::Cancelled) => {}
+            Err(AppError::Cancelled) => {
+                drop(diagnostics_permit);
+                return Err(AppError::Cancelled);
+            }
             Err(err) => {
-                log::warn!("Bitrate profiling failed for {target_url}: {err}");
+                log::warn!("Combined diagnostics failed for {target_url}: {err}");
+            }
+        }
+        drop(diagnostics_permit);
+    } else {
+        // Mixed-provider or no ffmpeg: parallel ffprobe + screenshot, then bitrate.
+        // Faster when there are no connection limits.
+        let ffprobe_fut = async {
+            if !ffprobe_ok {
+                return None;
+            }
+            ffmpeg::collect_probe_snapshot_with_timeout(
+                app,
+                &target_url,
+                cancel,
+                Some(ffprobe_timeout_duration),
+            )
+            .await
+            .ok()
+        };
+
+        let screenshot_fut = async {
+            if !want_screenshot || cancel.is_cancelled() {
+                return None;
+            }
+            let dir = screenshots_dir.unwrap();
+            ffmpeg::capture_screenshot(
+                app,
+                &target_url,
+                dir,
+                screenshot_file_name,
+                user_agent,
+                screenshot_format,
+                cancel,
+            )
+            .await
+            .ok()
+        };
+
+        let (probe_result, screenshot_result) = tokio::join!(ffprobe_fut, screenshot_fut);
+
+        if let Some(snapshot) = probe_result {
+            shared.audio_only =
+                snapshot.track_presence.has_audio && !snapshot.track_presence.has_video;
+            if let Some(info) = snapshot.video_info {
+                if !shared.audio_only {
+                    shared.codec = Some(info.codec);
+                    shared.resolution = Some(info.resolution.clone());
+                    shared.width = info.width;
+                    shared.height = info.height;
+                    shared.fps = info.fps;
+                    shared.low_framerate = info
+                        .fps
+                        .map(|fps| (fps as f64) <= low_fps_threshold)
+                        .unwrap_or(false);
+                    if let Some(kbps) = info.bitrate_kbps {
+                        shared.video_bitrate = Some(format!("{kbps} kbps"));
+                    }
+                }
+            }
+            if let Some(audio) = snapshot.audio_info {
+                shared.audio_codec = Some(audio.codec);
+                shared.audio_bitrate = audio.bitrate_kbps.map(|b| format!("{}", b));
+            }
+            format_bitrate_kbps = snapshot.format_bitrate_kbps;
+            shared.channel_log.diagnostics_output = Some(snapshot.ffprobe_output);
+        }
+
+        if let Some(path) = screenshot_result {
+            shared.screenshot_path = Some(path);
+        }
+
+        // Release permit before bitrate profiling to avoid starving other channels.
+        drop(diagnostics_permit);
+
+        if ffprobe_ok && !cancel.is_cancelled() && profile_bitrate_flag && ffmpeg_ok {
+            match ffmpeg::profile_bitrate(
+                app,
+                &target_url,
+                user_agent,
+                ffmpeg_bitrate_timeout_secs,
+                cancel,
+            )
+            .await
+            {
+                Ok(bitrate) => {
+                    shared.video_bitrate = Some(bitrate);
+                }
+                Err(AppError::Cancelled) => {}
+                Err(err) => {
+                    log::warn!("Bitrate profiling failed for {target_url}: {err}");
+                }
             }
         }
     }
 
-    // Fallback: use ffprobe format-level bitrate when video_bitrate is missing
-    // or profiling returned N/A. Subtract audio bitrate for a closer video-only estimate.
+    // Fallback: use format-level bitrate when video_bitrate is missing or N/A.
     if matches!(shared.video_bitrate.as_deref(), None | Some("N/A")) {
         if let Some(fmt_kbps) = format_bitrate_kbps {
             let audio_kbps = shared
@@ -1031,6 +1112,7 @@ async fn execute_scan_run(
     );
 
     let preview = parse_playlist_with_cache(&app, &state, &config, &run_id).await?;
+    let single_provider = preview.single_provider;
     let mut channels = preview.channels;
     filter_channels_by_selection(&mut channels, &config.selected_indices);
     let total = channels.len();
@@ -1607,6 +1689,7 @@ async fn execute_scan_run(
         let run_id_for_perf = run_id.clone();
         let shared_url_results = Arc::clone(&shared_url_results);
         let diagnostics_semaphore = Arc::clone(&diagnostics_semaphore);
+        let single_connection_mode = single_provider;
         let screenshots_paused = Arc::clone(&screenshots_paused);
         let screenshots_paused_emitted = Arc::clone(&screenshots_paused_emitted);
         let disk_check_counter = Arc::clone(&disk_check_counter);
@@ -1733,6 +1816,7 @@ async fn execute_scan_run(
                         &screenshot_file_name,
                         screenshot_format,
                         &diagnostics_semaphore,
+                        single_connection_mode,
                     )
                     .await
                 })
