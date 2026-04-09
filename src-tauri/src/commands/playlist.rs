@@ -59,7 +59,7 @@ fn server_location_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
     SERVER_LOCATION_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn dominant_channel_host(channels: &[Channel]) -> Option<String> {
+fn channel_host_counts(channels: &[Channel]) -> HashMap<String, usize> {
     let mut counts = HashMap::<String, usize>::new();
     for channel in channels {
         let Ok(parsed) = Url::parse(channel.url.trim()) else {
@@ -74,13 +74,31 @@ fn dominant_channel_host(channels: &[Channel]) -> Option<String> {
         }
         *counts.entry(normalized).or_insert(0) += 1;
     }
-
     counts
-        .into_iter()
+}
+
+fn dominant_host_from_counts(counts: &HashMap<String, usize>) -> Option<String> {
+    counts
+        .iter()
         .max_by(|(host_a, count_a), (host_b, count_b)| {
             count_a.cmp(count_b).then_with(|| host_b.cmp(host_a))
         })
-        .map(|(host, _)| host)
+        .map(|(host, _)| host.clone())
+}
+
+fn dominant_channel_host(channels: &[Channel]) -> Option<String> {
+    dominant_host_from_counts(&channel_host_counts(channels))
+}
+
+/// Returns `true` when ≥90% of parseable channel URLs share the same hostname.
+fn is_single_provider(channels: &[Channel]) -> bool {
+    let counts = channel_host_counts(channels);
+    let total: usize = counts.values().sum();
+    if total == 0 {
+        return false;
+    }
+    let max = counts.values().max().copied().unwrap_or(0);
+    max * 10 >= total * 9 // equivalent to max/total >= 0.9 without floating point
 }
 
 fn is_routable_ip(ip: &IpAddr) -> bool {
@@ -224,6 +242,10 @@ async fn resolve_playlist_server_location(channels: &[Channel]) -> Option<String
 
 async fn populate_server_location(preview: &mut PlaylistPreview) {
     preview.server_location = resolve_playlist_server_location(&preview.channels).await;
+}
+
+fn populate_single_provider(preview: &mut PlaylistPreview) {
+    preview.single_provider = is_single_provider(&preview.channels);
 }
 
 fn parse_http_url(value: &str, invalid_message: &str) -> Result<Url, AppError> {
@@ -1576,6 +1598,7 @@ fn build_stalker_preview(
             mac.to_ascii_lowercase()
         )),
         server_location: None,
+        single_provider: true,
         xtream_max_connections: None,
         xtream_account_info: None,
         total_channels: channels.len(),
@@ -1644,6 +1667,7 @@ pub async fn open_playlist_stalker(
         }
 
         populate_server_location(&mut preview).await;
+        populate_single_provider(&mut preview);
         return Ok(preview);
     }
 
@@ -1667,6 +1691,7 @@ pub async fn open_playlist(
 ) -> Result<PlaylistPreview, AppError> {
     let mut preview = parser::parse_playlist(&path, &group_filter, &channel_search)?;
     populate_server_location(&mut preview).await;
+    populate_single_provider(&mut preview);
     Ok(preview)
 }
 
@@ -1698,6 +1723,7 @@ pub(crate) async fn open_playlist_url_from_data_dir(
     preview.file_name = friendly_name_from_url(&parsed);
     preview.source_identity = Some(format!("url:{}", normalized_identity));
     populate_server_location(&mut preview).await;
+    populate_single_provider(&mut preview);
     Ok(preview)
 }
 
@@ -1763,6 +1789,7 @@ pub async fn open_playlist_xtream(
         .and_then(|account| account.max_connections);
     preview.xtream_account_info = xtream_account_info;
     populate_server_location(&mut preview).await;
+    populate_single_provider(&mut preview);
     Ok(preview)
 }
 
@@ -2461,6 +2488,7 @@ mod tests {
         build_stalker_endpoint_candidates, build_stalker_preview, build_xtream_download_url,
         build_xtream_player_api_action_url, build_xtream_player_api_url, build_xtream_source_key,
         cleanup_stale_cache_temp_files, dominant_channel_host, download_playlist_bytes,
+        is_single_provider,
         extract_stalker_stream_url, extract_xtream_account_info, extract_xtream_max_connections,
         normalize_stalker_mac, normalize_stalker_portal, normalize_url_identity,
         normalize_xtream_server, parse_ipapi_location, source_cache_file_name,
@@ -2639,6 +2667,116 @@ mod tests {
             dominant_channel_host(&channels),
             Some("one.example.com".to_string())
         );
+    }
+
+    #[test]
+    fn is_single_provider_true_when_all_channels_share_host() {
+        let channel = |index: usize, url: &str| Channel {
+            index,
+            playlist: "fixture.m3u8".to_string(),
+            name: format!("Channel {}", index),
+            group: "Group".to_string(),
+            language: None,
+            tvg_id: None,
+            tvg_name: None,
+            tvg_logo: None,
+            tvg_chno: None,
+            url: url.to_string(),
+            content_type: ContentType::Live,
+            extinf_line: "#EXTINF:-1,Channel".to_string(),
+            metadata_lines: Vec::new(),
+        };
+
+        let channels = vec![
+            channel(0, "https://cdn.example.com/live/1.m3u8"),
+            channel(1, "https://cdn.example.com/live/2.m3u8"),
+            channel(2, "https://cdn.example.com/live/3.m3u8"),
+        ];
+        assert!(is_single_provider(&channels));
+    }
+
+    #[test]
+    fn is_single_provider_true_at_ninety_percent_threshold() {
+        let channel = |index: usize, url: &str| Channel {
+            index,
+            playlist: "fixture.m3u8".to_string(),
+            name: format!("Channel {}", index),
+            group: "Group".to_string(),
+            language: None,
+            tvg_id: None,
+            tvg_name: None,
+            tvg_logo: None,
+            tvg_chno: None,
+            url: url.to_string(),
+            content_type: ContentType::Live,
+            extinf_line: "#EXTINF:-1,Channel".to_string(),
+            metadata_lines: Vec::new(),
+        };
+
+        let mut channels: Vec<Channel> = (0..9)
+            .map(|i| channel(i, &format!("https://cdn.example.com/live/{}.m3u8", i)))
+            .collect();
+        channels.push(channel(9, "https://other.example.com/live/9.m3u8"));
+        // 9/10 = 90% => single provider
+        assert!(is_single_provider(&channels));
+    }
+
+    #[test]
+    fn is_single_provider_false_below_threshold() {
+        let channel = |index: usize, url: &str| Channel {
+            index,
+            playlist: "fixture.m3u8".to_string(),
+            name: format!("Channel {}", index),
+            group: "Group".to_string(),
+            language: None,
+            tvg_id: None,
+            tvg_name: None,
+            tvg_logo: None,
+            tvg_chno: None,
+            url: url.to_string(),
+            content_type: ContentType::Live,
+            extinf_line: "#EXTINF:-1,Channel".to_string(),
+            metadata_lines: Vec::new(),
+        };
+
+        let mut channels: Vec<Channel> = (0..8)
+            .map(|i| channel(i, &format!("https://cdn.example.com/live/{}.m3u8", i)))
+            .collect();
+        channels.push(channel(8, "https://other-a.example.com/live/8.m3u8"));
+        channels.push(channel(9, "https://other-b.example.com/live/9.m3u8"));
+        // 8/10 = 80% < 90% => mixed
+        assert!(!is_single_provider(&channels));
+    }
+
+    #[test]
+    fn is_single_provider_false_for_mixed_playlist() {
+        let channel = |index: usize, url: &str| Channel {
+            index,
+            playlist: "fixture.m3u8".to_string(),
+            name: format!("Channel {}", index),
+            group: "Group".to_string(),
+            language: None,
+            tvg_id: None,
+            tvg_name: None,
+            tvg_logo: None,
+            tvg_chno: None,
+            url: url.to_string(),
+            content_type: ContentType::Live,
+            extinf_line: "#EXTINF:-1,Channel".to_string(),
+            metadata_lines: Vec::new(),
+        };
+
+        let channels = vec![
+            channel(0, "https://cdn-a.example.com/live/1.m3u8"),
+            channel(1, "https://cdn-b.example.com/live/2.m3u8"),
+            channel(2, "https://cdn-c.example.com/live/3.m3u8"),
+        ];
+        assert!(!is_single_provider(&channels));
+    }
+
+    #[test]
+    fn is_single_provider_false_for_empty_channels() {
+        assert!(!is_single_provider(&[]));
     }
 
     #[test]

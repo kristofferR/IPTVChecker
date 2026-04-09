@@ -69,6 +69,7 @@ export interface PlaylistPreview {
   file_name: string;
   source_identity: string | null;
   server_location: string | null;
+  single_provider: boolean;
   xtream_max_connections: number | null;
   xtream_account_info: XtreamAccountInfo | null;
   total_channels: number;

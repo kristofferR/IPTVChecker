@@ -22,6 +22,7 @@ const preview: PlaylistPreview = {
   file_name: "sample.m3u8",
   source_identity: "path:/tmp/sample.m3u8",
   server_location: "SE",
+  single_provider: true,
   xtream_max_connections: null,
   xtream_account_info: null,
   total_channels: 3,
