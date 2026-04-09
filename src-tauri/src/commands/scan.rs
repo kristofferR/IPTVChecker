@@ -275,12 +275,12 @@ async fn compute_shared_url_result(
         return Ok((shared, timing));
     }
     let diagnostics_started_at = Instant::now();
-    let _diagnostics_permit = diagnostics_semaphore.clone().acquire_owned().await.ok();
+    let diagnostics_permit = diagnostics_semaphore.clone().acquire_owned().await.ok();
     let ffprobe_timeout_duration =
         std::time::Duration::from_secs_f64(ffprobe_timeout_secs.clamp(1.0, 300.0));
 
     // Run ffprobe and screenshot capture in parallel — they are independent.
-    // Bitrate profiling runs alongside screenshot after ffprobe starts.
+    // Bitrate profiling runs sequentially after both complete.
     let want_screenshot = !skip_screenshots && ffmpeg_ok && screenshots_dir.is_some();
 
     let ffprobe_fut = async {
@@ -342,6 +342,11 @@ async fn compute_shared_url_result(
     if let Some(path) = screenshot_result {
         shared.screenshot_path = Some(path);
     }
+
+    // Release the diagnostics permit before bitrate profiling. ffprobe and
+    // screenshot are done; holding the permit during the long bitrate sample
+    // (~30s) starves other channels' diagnostics.
+    drop(diagnostics_permit);
 
     if ffprobe_ok && !cancel.is_cancelled() && profile_bitrate_flag && ffmpeg_ok {
         match ffmpeg::profile_bitrate(
