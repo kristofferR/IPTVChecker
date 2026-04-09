@@ -661,7 +661,7 @@ export function ChannelTable({
           emitSelection(selected);
           setSelectionAnchor(result.index);
           onSelectChannel(result);
-          if (isPlaying) onOpenChannel?.(result);
+          if (isPlaying && !isScanActive(scanState)) onOpenChannel?.(result);
         }
 
         virtualizer.scrollToIndex(next, { align: "auto" });
@@ -675,6 +675,7 @@ export function ChannelTable({
       onSelectChannel,
       onOpenChannel,
       isPlaying,
+      scanState,
       virtualizer,
     ],
   );
