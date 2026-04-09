@@ -1064,15 +1064,25 @@ pub async fn profile_bitrate(
         }
     }
 
-    if timed_out && total_bytes == 0 {
-        return Err(AppError::Other(format!(
-            "ffmpeg bitrate profiling timed out after {:.0}s (binary: {})",
-            timeout_duration.as_secs_f64(),
-            resolved_bin,
-        )));
-    }
-
     if total_bytes == 0 {
+        let tail: String = stderr
+            .lines()
+            .rev()
+            .take(5)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join(" | ");
+        if timed_out {
+            log::warn!("Bitrate profiling timed out after {:.0}s with no Statistics line. stderr tail: {tail}", timeout_duration.as_secs_f64());
+            return Err(AppError::Other(format!(
+                "ffmpeg bitrate profiling timed out after {:.0}s (binary: {})",
+                timeout_duration.as_secs_f64(),
+                resolved_bin,
+            )));
+        }
+        log::warn!("Bitrate profiling completed but no bytes-read data found in stderr. stderr tail: {tail}");
         return Ok("N/A".to_string());
     }
 

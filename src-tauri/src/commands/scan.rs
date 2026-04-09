@@ -344,7 +344,7 @@ async fn compute_shared_url_result(
     }
 
     if ffprobe_ok && !cancel.is_cancelled() && profile_bitrate_flag && ffmpeg_ok {
-        if let Ok(bitrate) = ffmpeg::profile_bitrate(
+        match ffmpeg::profile_bitrate(
             app,
             &target_url,
             user_agent,
@@ -353,7 +353,13 @@ async fn compute_shared_url_result(
         )
         .await
         {
-            shared.video_bitrate = Some(bitrate);
+            Ok(bitrate) => {
+                shared.video_bitrate = Some(bitrate);
+            }
+            Err(AppError::Cancelled) => {}
+            Err(err) => {
+                log::warn!("Bitrate profiling failed for {target_url}: {err}");
+            }
         }
     }
     timing.diagnostics_ms = diagnostics_started_at.elapsed().as_secs_f64() * 1000.0;
