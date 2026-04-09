@@ -317,6 +317,7 @@ async fn compute_shared_url_result(
 
     let (probe_result, screenshot_result) = tokio::join!(ffprobe_fut, screenshot_fut);
 
+    let mut format_bitrate_kbps: Option<u32> = None;
     if let Some(snapshot) = probe_result {
         shared.audio_only = snapshot.track_presence.has_audio && !snapshot.track_presence.has_video;
         if let Some(info) = snapshot.video_info {
@@ -336,6 +337,7 @@ async fn compute_shared_url_result(
             shared.audio_codec = Some(audio.codec);
             shared.audio_bitrate = audio.bitrate_kbps.map(|b| format!("{}", b));
         }
+        format_bitrate_kbps = snapshot.format_bitrate_kbps;
         shared.channel_log.ffprobe_output = Some(snapshot.ffprobe_output);
     }
 
@@ -364,6 +366,22 @@ async fn compute_shared_url_result(
             Err(AppError::Cancelled) => {}
             Err(err) => {
                 log::warn!("Bitrate profiling failed for {target_url}: {err}");
+            }
+        }
+    }
+
+    // Fallback: use ffprobe format-level bitrate when profile_bitrate returned
+    // N/A or failed. Subtract audio bitrate for a closer video-only estimate.
+    if matches!(shared.video_bitrate.as_deref(), None | Some("N/A")) {
+        if let Some(fmt_kbps) = format_bitrate_kbps {
+            let audio_kbps = shared
+                .audio_bitrate
+                .as_deref()
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(0);
+            let video_kbps = fmt_kbps.saturating_sub(audio_kbps);
+            if video_kbps > 0 {
+                shared.video_bitrate = Some(format!("{video_kbps} kbps"));
             }
         }
     }

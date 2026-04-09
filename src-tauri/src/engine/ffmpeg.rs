@@ -475,6 +475,7 @@ pub struct ProbeSnapshot {
     pub track_presence: StreamTrackPresence,
     pub video_info: Option<VideoInfo>,
     pub audio_info: Option<AudioInfo>,
+    pub format_bitrate_kbps: Option<u32>,
     pub ffprobe_output: String,
 }
 
@@ -489,8 +490,14 @@ struct FfprobeCombinedStream {
 }
 
 #[derive(Debug, Deserialize)]
+struct FfprobeFormat {
+    bit_rate: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct FfprobeCombinedOutput {
     streams: Vec<FfprobeCombinedStream>,
+    format: Option<FfprobeFormat>,
 }
 
 fn parse_stream_track_presence(stdout: &str) -> Result<StreamTrackPresence, serde_json::Error> {
@@ -583,10 +590,17 @@ fn parse_probe_snapshot(stdout: &str) -> Result<ProbeSnapshot, serde_json::Error
             .map(|bits| (bits / 1000) as u32),
     });
 
+    let format_bitrate_kbps = parsed
+        .format
+        .and_then(|f| f.bit_rate)
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(|bits| (bits / 1000) as u32);
+
     Ok(ProbeSnapshot {
         track_presence: presence,
         video_info,
         audio_info,
+        format_bitrate_kbps,
         ffprobe_output: truncate_ffprobe_output(stdout),
     })
 }
