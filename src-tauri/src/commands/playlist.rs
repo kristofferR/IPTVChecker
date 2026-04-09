@@ -108,7 +108,13 @@ async fn resolve_host_ip(host: &str) -> Option<IpAddr> {
     }
 
     let mut fallback: Option<IpAddr> = None;
-    let addresses = tokio::net::lookup_host((host, 0)).await.ok()?;
+    let addresses = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::net::lookup_host((host, 0)),
+    )
+    .await
+    .ok()?
+    .ok()?;
     for socket_address in addresses {
         let ip = socket_address.ip();
         if is_routable_ip(&ip) {
