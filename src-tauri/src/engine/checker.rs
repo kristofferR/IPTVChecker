@@ -452,7 +452,6 @@ async fn read_stream(
 
     let mut bytes_read: u64 = 0;
     let mut observed_latency_ms = latency_ms;
-    let mut stable = true;
     let mut stream = response.bytes_stream();
 
     while let Some(chunk_result) = stream.next().await {
@@ -478,17 +477,12 @@ async fn read_stream(
                     };
                 }
             }
-            Err(_) => {
-                stable = false;
-                break;
+            Err(err) => {
+                return VerifyResult::Retry {
+                    reason: Some(format!("Stream read interrupted: {err}")),
+                };
             }
         }
-    }
-
-    if !stable {
-        return VerifyResult::Retry {
-            reason: Some("Stream read interrupted".to_string()),
-        };
     }
 
     // Fallback threshold logic
