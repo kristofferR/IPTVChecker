@@ -1486,7 +1486,7 @@ async fn execute_scan_run(
             let pressure = timeout_pressure.load(Ordering::Relaxed);
             let successes = adaptive_success_count.load(Ordering::Relaxed);
             let total_so_far = pressure + successes;
-            if total_so_far >= 10 {
+            if total_so_far >= 25 {
                 let pressure_ratio = pressure as f64 / total_so_far as f64;
                 let delay_ms = if pressure_ratio > 0.5 {
                     1000u64
