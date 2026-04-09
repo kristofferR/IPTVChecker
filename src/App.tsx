@@ -1041,6 +1041,7 @@ export default function App() {
 
       getStore().setPlaylistOpenError(null);
       getStore().setPlaylistLoading(true);
+      logger.info(`[App] ${loadingAction}: ${sourceLabel}`);
 
       try {
         const state = getStore();
