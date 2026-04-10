@@ -9,7 +9,7 @@ import {
   useState,
   type ProfilerOnRenderCallback,
 } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -667,6 +667,7 @@ function resolveSmartConcurrency(
   xtreamMaxConnections: number | null,
 ): number {
   const auto = settingsConcurrency === 0;
+  const clampedSettings = Math.max(1, Math.min(20, Math.round(settingsConcurrency)));
 
   if (
     xtreamMaxConnections != null &&
@@ -674,15 +675,15 @@ function resolveSmartConcurrency(
     xtreamMaxConnections > 0
   ) {
     const xtreamMax = Math.max(1, Math.min(20, Math.round(xtreamMaxConnections)));
-    if (auto) return Math.min(xtreamMax, 10);
-    return Math.min(settingsConcurrency, xtreamMax);
+    if (auto) return xtreamMax;
+    return Math.min(clampedSettings, xtreamMax);
   }
 
   if (auto) {
     return singleProvider ? 1 : 10;
   }
 
-  return settingsConcurrency;
+  return clampedSettings;
 }
 
 export default function App() {
@@ -1821,6 +1822,8 @@ export default function App() {
         for (const off of listeners) off();
       } else {
         unlisten.push(...listeners);
+        // Only declare this window ready after its menu listeners are mounted.
+        void emit("menu-ready", getCurrentWindow().label).catch(() => {});
       }
     };
 

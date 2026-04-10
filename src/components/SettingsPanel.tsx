@@ -901,7 +901,8 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                       className={inputClass}
                     />
                     <p className="text-[11px] text-text-quaternary mt-1">
-                      0 or empty = auto (10 for multi-server, 1 for single-server)
+                      0 or empty = auto (Xtream max for Xtream playlists, 10 for multi-server, 1
+                      for single-server)
                     </p>
                   </div>
 
