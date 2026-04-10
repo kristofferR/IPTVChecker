@@ -2251,6 +2251,22 @@ pub async fn reset_scan(app: AppHandle, window: Window) -> Result<(), AppError> 
     Ok(())
 }
 
+/// Shared HTTP client for quick-check operations. Built once on first use.
+static QUICK_CHECK_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+
+fn get_quick_check_client(accept_invalid_certs: bool) -> reqwest::Client {
+    QUICK_CHECK_CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(5))
+                .danger_accept_invalid_certs(accept_invalid_certs)
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .unwrap_or_default()
+        })
+        .clone()
+}
+
 /// Lightweight single-channel status check that bypasses the scan engine mutex.
 /// Used by the frontend when in-app playback fails — checks whether the stream
 /// is alive or dead and returns the updated result directly.
@@ -2263,12 +2279,7 @@ pub async fn quick_check_channel(
     let settings = state.settings.lock().await.clone();
 
     let cancel_token = CancellationToken::new();
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(5))
-        .danger_accept_invalid_certs(settings.accept_invalid_certs)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .unwrap_or_default();
+    let client = get_quick_check_client(settings.accept_invalid_certs);
 
     let ffprobe_ok = {
         let (_, fp) = ffmpeg::check_availability(&app).await;
