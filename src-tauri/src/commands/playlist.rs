@@ -25,6 +25,9 @@ pub enum PlaylistLoadProgress {
         bytes_downloaded: u64,
         elapsed_secs: f64,
     },
+    Saving {
+        detail: &'static str,
+    },
     Parsing {
         channels_found: usize,
     },
@@ -41,6 +44,9 @@ fn emit_load_progress(app: Option<&AppHandle>, progress: PlaylistLoadProgress) {
             log::info!("[playlist-load] Connecting: {}", detail);
         }
         PlaylistLoadProgress::Downloading { .. } | PlaylistLoadProgress::Parsing { .. } => {}
+        PlaylistLoadProgress::Saving { detail } => {
+            log::info!("[playlist-load] Saving: {}", detail);
+        }
         PlaylistLoadProgress::Processing { detail } => {
             log::info!("[playlist-load] Processing: {}", detail);
         }
@@ -612,6 +618,12 @@ async fn download_playlist_to_cache(
         PlaylistDownloadResult::Updated { bytes, metadata } => (bytes, metadata),
     };
 
+    emit_load_progress(
+        app,
+        PlaylistLoadProgress::Saving {
+            detail: "Cleaning up old cache files",
+        },
+    );
     cleanup_stale_cache_temp_files(&cache_path);
     let tmp_suffix = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -626,9 +638,21 @@ async fn download_playlist_to_cache(
         tmp_suffix
     ));
 
+    emit_load_progress(
+        app,
+        PlaylistLoadProgress::Saving {
+            detail: "Writing to disk",
+        },
+    );
     let persist_result = (|| -> Result<(), AppError> {
         std::fs::write(&tmp_path, &bytes).map_err(AppError::Io)?;
 
+        emit_load_progress(
+            app,
+            PlaylistLoadProgress::Saving {
+                detail: "Finalizing cache entry",
+            },
+        );
         match std::fs::rename(&tmp_path, &cache_path) {
             Ok(()) => {}
             Err(first_error) => {
