@@ -10,9 +10,51 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::net::IpAddr;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use tauri::{Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio_util::sync::CancellationToken;
 use url::Url;
+
+/// Live progress events emitted during playlist loading.
+#[derive(Clone, Serialize)]
+#[serde(tag = "stage")]
+pub enum PlaylistLoadProgress {
+    Connecting {
+        detail: &'static str,
+    },
+    Downloading {
+        bytes_downloaded: u64,
+        elapsed_secs: f64,
+    },
+    Saving {
+        detail: &'static str,
+    },
+    Parsing {
+        channels_found: usize,
+    },
+    Processing {
+        detail: &'static str,
+    },
+}
+
+const PROGRESS_THROTTLE: Duration = Duration::from_millis(100);
+
+fn emit_load_progress(app: Option<&AppHandle>, progress: PlaylistLoadProgress) {
+    match &progress {
+        PlaylistLoadProgress::Connecting { detail } => {
+            log::info!("[playlist-load] Connecting: {}", detail);
+        }
+        PlaylistLoadProgress::Downloading { .. } | PlaylistLoadProgress::Parsing { .. } => {}
+        PlaylistLoadProgress::Saving { detail } => {
+            log::info!("[playlist-load] Saving: {}", detail);
+        }
+        PlaylistLoadProgress::Processing { detail } => {
+            log::info!("[playlist-load] Processing: {}", detail);
+        }
+    }
+    if let Some(app) = app {
+        let _ = app.emit("playlist://load-progress", progress);
+    }
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct XtreamOpenRequest {
@@ -59,20 +101,42 @@ fn server_location_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
     SERVER_LOCATION_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Fast host extraction without full URL parsing.
+/// Handles `http://host:port/path`, `http://user:pass@host/path`, etc.
+fn extract_host_fast(url: &str) -> Option<&str> {
+    let after_scheme = url
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("https://"))
+        .or_else(|| url.strip_prefix("rtsp://"))
+        .or_else(|| url.strip_prefix("rtmp://"))?;
+    // Skip userinfo if present (user:pass@)
+    let after_userinfo = after_scheme
+        .rfind('@')
+        .map(|pos| &after_scheme[pos + 1..])
+        .unwrap_or(after_scheme);
+    let host = if let Some(bracketed) = after_userinfo.strip_prefix('[') {
+        let end = bracketed.find(']')?;
+        &bracketed[..end]
+    } else {
+        // Host ends at first '/', ':', '?', or '#' (port, path, query, or fragment)
+        let end = after_userinfo
+            .find(|c: char| c == '/' || c == ':' || c == '?' || c == '#')
+            .unwrap_or(after_userinfo.len());
+        &after_userinfo[..end]
+    };
+    if host.is_empty() {
+        return None;
+    }
+    Some(host)
+}
+
 fn channel_host_counts(channels: &[Channel]) -> HashMap<String, usize> {
     let mut counts = HashMap::<String, usize>::new();
     for channel in channels {
-        let Ok(parsed) = Url::parse(channel.url.trim()) else {
+        let Some(host) = extract_host_fast(channel.url.trim()) else {
             continue;
         };
-        let Some(host) = parsed.host_str() else {
-            continue;
-        };
-        let normalized = host.trim().to_ascii_lowercase();
-        if normalized.is_empty() {
-            continue;
-        }
-        *counts.entry(normalized).or_insert(0) += 1;
+        *counts.entry(host.to_ascii_lowercase()).or_insert(0) += 1;
     }
     counts
 }
@@ -84,10 +148,6 @@ fn dominant_host_from_counts(counts: &HashMap<String, usize>) -> Option<String> 
             count_a.cmp(count_b).then_with(|| host_b.cmp(host_a))
         })
         .map(|(host, _)| host.clone())
-}
-
-fn dominant_channel_host(channels: &[Channel]) -> Option<String> {
-    dominant_host_from_counts(&channel_host_counts(channels))
 }
 
 /// Returns `true` when ≥90% of parseable channel URLs share the same hostname.
@@ -220,36 +280,49 @@ async fn lookup_ip_location(ip: IpAddr) -> Option<String> {
     parse_ipapi_location(&payload)
 }
 
-async fn resolve_playlist_server_location(channels: &[Channel]) -> Option<String> {
-    let host = dominant_channel_host(channels)?;
-    if host.eq_ignore_ascii_case("localhost") {
-        return None;
+/// Populate both server_location and single_provider in one pass over the
+/// channel URLs, avoiding redundant `Url::parse()` calls on every channel.
+async fn populate_server_metadata(app: Option<&AppHandle>, preview: &mut PlaylistPreview) {
+    emit_load_progress(
+        app,
+        PlaylistLoadProgress::Processing {
+            detail: "Analyzing channel URLs",
+        },
+    );
+    let counts = channel_host_counts(&preview.channels);
+
+    // single_provider
+    let total: usize = counts.values().sum();
+    if total > 0 {
+        let max = counts.values().max().copied().unwrap_or(0);
+        preview.single_provider = max * 10 >= total * 9;
     }
 
-    if let Ok(cache) = server_location_cache().lock() {
-        if let Some(cached) = cache.get(&host) {
-            return cached.clone();
+    // server_location
+    if let Some(host) = dominant_host_from_counts(&counts) {
+        if !host.eq_ignore_ascii_case("localhost") {
+            if let Ok(cache) = server_location_cache().lock() {
+                if let Some(cached) = cache.get(&host) {
+                    preview.server_location = cached.clone();
+                    return;
+                }
+            }
+            emit_load_progress(
+                app,
+                PlaylistLoadProgress::Processing {
+                    detail: "Looking up server location",
+                },
+            );
+            let location = match resolve_host_ip(&host).await {
+                Some(ip) => lookup_ip_location(ip).await,
+                None => None,
+            };
+            if let Ok(mut cache) = server_location_cache().lock() {
+                cache.insert(host, location.clone());
+            }
+            preview.server_location = location;
         }
     }
-
-    let location = match resolve_host_ip(&host).await {
-        Some(ip) => lookup_ip_location(ip).await,
-        None => None,
-    };
-
-    if let Ok(mut cache) = server_location_cache().lock() {
-        cache.insert(host, location.clone());
-    }
-
-    location
-}
-
-async fn populate_server_location(preview: &mut PlaylistPreview) {
-    preview.server_location = resolve_playlist_server_location(&preview.channels).await;
-}
-
-fn populate_single_provider(preview: &mut PlaylistPreview) {
-    preview.single_provider = is_single_provider(&preview.channels);
 }
 
 fn parse_http_url(value: &str, invalid_message: &str) -> Result<Url, AppError> {
@@ -389,6 +462,7 @@ fn map_download_error(
 }
 
 async fn download_playlist_bytes(
+    app: Option<&AppHandle>,
     download_url: &Url,
     error_label: &str,
     connect_timeout: Duration,
@@ -410,6 +484,12 @@ async fn download_playlist_bytes(
                 error_label, error
             ))
         })?;
+    emit_load_progress(
+        app,
+        PlaylistLoadProgress::Connecting {
+            detail: "Initializing HTTP client",
+        },
+    );
     let mut request = client
         .get(download_url.clone())
         .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT);
@@ -421,6 +501,12 @@ async fn download_playlist_bytes(
             request = request.header(reqwest::header::IF_MODIFIED_SINCE, last_modified);
         }
     }
+    emit_load_progress(
+        app,
+        PlaylistLoadProgress::Connecting {
+            detail: "Waiting for server",
+        },
+    );
     let response = request
         .send()
         .await
@@ -450,9 +536,12 @@ async fn download_playlist_bytes(
             .map(str::to_string),
     };
 
+    log::info!("[playlist-load] Download started for {}", error_label);
     let mut bytes = Vec::new();
     let mut total = 0u64;
     let mut stream = response.bytes_stream();
+    let download_start = Instant::now();
+    let mut last_progress = Instant::now() - PROGRESS_THROTTLE;
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result
             .map_err(|error| map_download_error(error, error_label, timeout, "read"))?;
@@ -465,18 +554,44 @@ async fn download_playlist_bytes(
             )));
         }
         bytes.extend_from_slice(&chunk);
+        if last_progress.elapsed() >= PROGRESS_THROTTLE {
+            emit_load_progress(
+                app,
+                PlaylistLoadProgress::Downloading {
+                    bytes_downloaded: total,
+                    elapsed_secs: download_start.elapsed().as_secs_f64(),
+                },
+            );
+            last_progress = Instant::now();
+        }
     }
+    // Final progress emission to ensure the UI shows the complete size.
+    let elapsed = download_start.elapsed().as_secs_f64();
+    emit_load_progress(
+        app,
+        PlaylistLoadProgress::Downloading {
+            bytes_downloaded: total,
+            elapsed_secs: elapsed,
+        },
+    );
+    log::info!(
+        "[playlist-load] Download complete: {:.1} MB in {:.1}s",
+        total as f64 / (1024.0 * 1024.0),
+        elapsed,
+    );
 
     Ok(PlaylistDownloadResult::Updated { bytes, metadata })
 }
 
 async fn download_playlist_to_cache(
+    app: Option<&AppHandle>,
     cache_path: std::path::PathBuf,
     download_url: &Url,
     error_label: &str,
 ) -> Result<String, AppError> {
     let metadata = load_cache_metadata(&cache_path);
     let download = download_playlist_bytes(
+        app,
         download_url,
         error_label,
         PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT,
@@ -492,6 +607,7 @@ async fn download_playlist_to_cache(
                 return Ok(cache_path.to_string_lossy().to_string());
             }
             match download_playlist_bytes(
+                app,
                 download_url,
                 error_label,
                 PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT,
@@ -513,6 +629,12 @@ async fn download_playlist_to_cache(
         PlaylistDownloadResult::Updated { bytes, metadata } => (bytes, metadata),
     };
 
+    emit_load_progress(
+        app,
+        PlaylistLoadProgress::Saving {
+            detail: "Cleaning up old cache files",
+        },
+    );
     cleanup_stale_cache_temp_files(&cache_path);
     let tmp_suffix = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -527,9 +649,21 @@ async fn download_playlist_to_cache(
         tmp_suffix
     ));
 
+    emit_load_progress(
+        app,
+        PlaylistLoadProgress::Saving {
+            detail: "Writing to disk",
+        },
+    );
     let persist_result = (|| -> Result<(), AppError> {
         std::fs::write(&tmp_path, &bytes).map_err(AppError::Io)?;
 
+        emit_load_progress(
+            app,
+            PlaylistLoadProgress::Saving {
+                detail: "Finalizing cache entry",
+            },
+        );
         match std::fs::rename(&tmp_path, &cache_path) {
             Ok(()) => {}
             Err(first_error) => {
@@ -560,13 +694,14 @@ async fn download_playlist_to_cache(
 }
 
 async fn download_playlist_to_cache_in_data_dir(
+    app: Option<&AppHandle>,
     data_dir: &std::path::Path,
     source_key: &str,
     download_url: &Url,
     error_label: &str,
 ) -> Result<String, AppError> {
     let cache_path = remote_playlist_cache_path_from_data_dir(data_dir, source_key)?;
-    download_playlist_to_cache(cache_path, download_url, error_label).await
+    download_playlist_to_cache(app, cache_path, download_url, error_label).await
 }
 
 fn normalize_xtream_server(server: &str) -> Result<Url, AppError> {
@@ -1670,8 +1805,7 @@ pub async fn open_playlist_stalker(
             continue;
         }
 
-        populate_server_location(&mut preview).await;
-        populate_single_provider(&mut preview);
+        populate_server_metadata(None, &mut preview).await;
         return Ok(preview);
     }
 
@@ -1689,13 +1823,31 @@ pub async fn open_playlist_stalker(
 
 #[tauri::command]
 pub async fn open_playlist(
+    app: AppHandle,
     path: String,
     group_filter: Option<String>,
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
-    let mut preview = parser::parse_playlist(&path, &group_filter, &channel_search)?;
-    populate_server_location(&mut preview).await;
-    populate_single_provider(&mut preview);
+    emit_load_progress(
+        Some(&app),
+        PlaylistLoadProgress::Parsing { channels_found: 0 },
+    );
+    let mut preview = {
+        let last_emit = std::cell::Cell::new(Instant::now() - PROGRESS_THROTTLE);
+        let on_progress = |channels_found: usize| {
+            if last_emit.get().elapsed() >= PROGRESS_THROTTLE {
+                emit_load_progress(Some(&app), PlaylistLoadProgress::Parsing { channels_found });
+                last_emit.set(Instant::now());
+            }
+        };
+        parser::parse_playlist_with_progress(
+            &path,
+            &group_filter,
+            &channel_search,
+            Some(&on_progress),
+        )?
+    };
+    populate_server_metadata(Some(&app), &mut preview).await;
     Ok(preview)
 }
 
@@ -1707,10 +1859,11 @@ pub async fn open_playlist_url(
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
     let data_dir = app_data_dir(&app)?;
-    open_playlist_url_from_data_dir(&data_dir, &url, group_filter, channel_search).await
+    open_playlist_url_from_data_dir(Some(&app), &data_dir, &url, group_filter, channel_search).await
 }
 
 pub(crate) async fn open_playlist_url_from_data_dir(
+    app: Option<&AppHandle>,
     data_dir: &std::path::Path,
     url: &str,
     group_filter: Option<String>,
@@ -1721,13 +1874,27 @@ pub(crate) async fn open_playlist_url_from_data_dir(
     let normalized_identity = normalize_url_identity(&parsed);
     let source_key = format!("url:{}", normalized_identity);
     let cached_path =
-        download_playlist_to_cache_in_data_dir(data_dir, &source_key, &parsed, "playlist URL")
+        download_playlist_to_cache_in_data_dir(app, data_dir, &source_key, &parsed, "playlist URL")
             .await?;
-    let mut preview = parser::parse_playlist(&cached_path, &group_filter, &channel_search)?;
+    emit_load_progress(app, PlaylistLoadProgress::Parsing { channels_found: 0 });
+    let mut preview = {
+        let last_emit = std::cell::Cell::new(Instant::now() - PROGRESS_THROTTLE);
+        let on_progress = |channels_found: usize| {
+            if last_emit.get().elapsed() >= PROGRESS_THROTTLE {
+                emit_load_progress(app, PlaylistLoadProgress::Parsing { channels_found });
+                last_emit.set(Instant::now());
+            }
+        };
+        let cb: Option<&dyn Fn(usize)> = if app.is_some() {
+            Some(&on_progress)
+        } else {
+            None
+        };
+        parser::parse_playlist_with_progress(&cached_path, &group_filter, &channel_search, cb)?
+    };
     preview.file_name = friendly_name_from_url(&parsed);
     preview.source_identity = Some(format!("url:{}", normalized_identity));
-    populate_server_location(&mut preview).await;
-    populate_single_provider(&mut preview);
+    populate_server_metadata(app, &mut preview).await;
     Ok(preview)
 }
 
@@ -1762,6 +1929,7 @@ pub async fn open_playlist_xtream(
     let (xtream_account_info, m3u_result) = tokio::join!(
         fetch_xtream_account_info(&server, &username, &password),
         download_playlist_to_cache_in_data_dir(
+            Some(&app),
             &data_dir,
             &source_key,
             &download_url,
@@ -1784,7 +1952,25 @@ pub async fn open_playlist_xtream(
         }
     };
 
-    let mut preview = parser::parse_playlist(&cached_path, &group_filter, &channel_search)?;
+    emit_load_progress(
+        Some(&app),
+        PlaylistLoadProgress::Parsing { channels_found: 0 },
+    );
+    let mut preview = {
+        let last_emit = std::cell::Cell::new(Instant::now() - PROGRESS_THROTTLE);
+        let on_progress = |channels_found: usize| {
+            if last_emit.get().elapsed() >= PROGRESS_THROTTLE {
+                emit_load_progress(Some(&app), PlaylistLoadProgress::Parsing { channels_found });
+                last_emit.set(Instant::now());
+            }
+        };
+        parser::parse_playlist_with_progress(
+            &cached_path,
+            &group_filter,
+            &channel_search,
+            Some(&on_progress),
+        )?
+    };
     let server_host = server.host_str().unwrap_or("Xtream");
     preview.file_name = format!("{} ({})", server_host, username);
     preview.source_identity = Some(source_key);
@@ -1792,8 +1978,7 @@ pub async fn open_playlist_xtream(
         .as_ref()
         .and_then(|account| account.max_connections);
     preview.xtream_account_info = xtream_account_info;
-    populate_server_location(&mut preview).await;
-    populate_single_provider(&mut preview);
+    populate_server_metadata(Some(&app), &mut preview).await;
     Ok(preview)
 }
 
@@ -2491,11 +2676,11 @@ mod tests {
     use super::{
         build_stalker_endpoint_candidates, build_stalker_preview, build_xtream_download_url,
         build_xtream_player_api_action_url, build_xtream_player_api_url, build_xtream_source_key,
-        cleanup_stale_cache_temp_files, dominant_channel_host, download_playlist_bytes,
-        is_single_provider,
+        cleanup_stale_cache_temp_files, download_playlist_bytes, extract_host_fast,
         extract_stalker_stream_url, extract_xtream_account_info, extract_xtream_max_connections,
-        normalize_stalker_mac, normalize_stalker_portal, normalize_url_identity,
-        normalize_xtream_server, parse_ipapi_location, source_cache_file_name,
+        is_single_provider, normalize_stalker_mac, normalize_stalker_portal,
+        normalize_url_identity, normalize_xtream_server, parse_ipapi_location,
+        source_cache_file_name,
     };
     use crate::models::channel::{Channel, ContentType};
     use std::time::Duration;
@@ -2667,10 +2852,25 @@ mod tests {
             channel(2, "https://two.example.com/live/3.m3u8"),
         ];
 
+        let counts = super::channel_host_counts(&channels);
         assert_eq!(
-            dominant_channel_host(&channels),
+            super::dominant_host_from_counts(&counts),
             Some("one.example.com".to_string())
         );
+    }
+
+    #[test]
+    fn extract_host_fast_handles_userinfo_ipv6_and_empty_hosts() {
+        assert_eq!(
+            extract_host_fast("http://user:p@ss@host.example.com/live/1.m3u8"),
+            Some("host.example.com")
+        );
+        assert_eq!(
+            extract_host_fast("http://user:pass@[::1]:8080/path"),
+            Some("::1")
+        );
+        assert_eq!(extract_host_fast("http://"), None);
+        assert_eq!(extract_host_fast("https://?token=abc"), None);
     }
 
     #[test]
@@ -2960,6 +3160,7 @@ mod tests {
         let url = Url::parse(&format!("http://{}/playlist.m3u8", address))
             .expect("test URL should parse");
         let error = download_playlist_bytes(
+            None,
             &url,
             "playlist URL",
             Duration::from_secs(1),
@@ -3007,6 +3208,7 @@ mod tests {
         let url = Url::parse(&format!("http://{}/playlist.m3u8", address))
             .expect("test URL should parse");
         let error = download_playlist_bytes(
+            None,
             &url,
             "playlist URL",
             Duration::from_millis(100),

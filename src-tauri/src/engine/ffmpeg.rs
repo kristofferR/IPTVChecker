@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
@@ -22,30 +22,22 @@ const GRACEFUL_KILL_TIMEOUT: std::time::Duration = std::time::Duration::from_sec
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 // Cached compiled regexes for parse_ffmpeg_stderr / parse_bytes_read / profile_bitrate.
-static VIDEO_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"Stream #\d+:\d+.*?: Video: (\w+)").unwrap()
-});
-static RESOLUTION_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(\d{2,5})x(\d{2,5})").unwrap()
-});
-static FPS_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(\d+(?:\.\d+)?)\s+fps").unwrap()
-});
-static TBR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(\d+(?:\.\d+)?)\s+tbr").unwrap()
-});
-static AUDIO_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"Stream #\d+:\d+.*?: Audio: (\w+)").unwrap()
-});
-static AUDIO_BITRATE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(\d+)\s+kb/s").unwrap()
-});
-static FORMAT_BR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"bitrate:\s*(\d+)\s*kb/s").unwrap()
-});
-static BYTES_READ_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"(\d+)\s+bytes\s+read").unwrap()
-});
+static VIDEO_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"Stream #\d+:\d+.*?: Video: (\w+)").unwrap());
+static RESOLUTION_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(\d{2,5})x(\d{2,5})").unwrap());
+static FPS_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(\d+(?:\.\d+)?)\s+fps").unwrap());
+static TBR_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(\d+(?:\.\d+)?)\s+tbr").unwrap());
+static AUDIO_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"Stream #\d+:\d+.*?: Audio: (\w+)").unwrap());
+static AUDIO_BITRATE_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(\d+)\s+kb/s").unwrap());
+static FORMAT_BR_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"bitrate:\s*(\d+)\s*kb/s").unwrap());
+static BYTES_READ_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(\d+)\s+bytes\s+read").unwrap());
 
 // Compile-time target triple for resolving sidecar binary paths.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -85,10 +77,31 @@ async fn graceful_kill(child: &mut tokio::process::Child, grace: std::time::Dura
     let _ = child.wait().await;
 }
 
-/// Resolve the path to an executable, preferring the bundled sidecar binary
-/// over the system PATH. This bypasses the Tauri shell plugin which can
-/// silently fail for long-running commands.
+/// Cached resolved binary paths — resolved once per session.
+static FFMPEG_PATH: OnceLock<String> = OnceLock::new();
+static FFPROBE_PATH: OnceLock<String> = OnceLock::new();
+
+/// Cached ffmpeg/ffprobe availability — checked once per session.
+static FFTOOLS_AVAILABLE: OnceLock<(bool, bool)> = OnceLock::new();
+
+/// Resolve the path to an executable, preferring the system PATH and falling
+/// back to bundled sidecar binaries. Results are cached per binary name for the
+/// session.
 fn resolve_binary(app: &AppHandle, name: &str) -> String {
+    let cache = match name {
+        "ffmpeg" => Some(&FFMPEG_PATH),
+        "ffprobe" => Some(&FFPROBE_PATH),
+        _ => None,
+    };
+    if let Some(lock) = cache {
+        return lock
+            .get_or_init(|| resolve_binary_uncached(app, name))
+            .clone();
+    }
+    resolve_binary_uncached(app, name)
+}
+
+fn resolve_binary_uncached(app: &AppHandle, name: &str) -> String {
     let ext = if cfg!(target_os = "windows") {
         ".exe"
     } else {
@@ -100,7 +113,11 @@ fn resolve_binary(app: &AppHandle, name: &str) -> String {
         format!("{name}{ext}"),
     ];
 
-    // Check the executable's own directory first (macOS bundles externalBin
+    if let Some(path) = resolve_binary_from_path(name, ext) {
+        return path;
+    }
+
+    // Check the executable's own directory next (macOS bundles externalBin
     // into Contents/MacOS/, alongside the main binary).
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
@@ -123,8 +140,19 @@ fn resolve_binary(app: &AppHandle, name: &str) -> String {
         }
     }
 
-    // Fall back to system PATH
     name.to_string()
+}
+
+fn resolve_binary_from_path(name: &str, ext: &str) -> Option<String> {
+    let path_var = std::env::var_os("PATH")?;
+    let candidate_name = format!("{name}{ext}");
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(&candidate_name);
+        if candidate.is_file() {
+            return Some(candidate.to_string_lossy().to_string());
+        }
+    }
+    None
 }
 
 fn configure_background_process(_command: &mut tokio::process::Command) {
@@ -453,20 +481,26 @@ async fn run_tool_command(
 
 /// Check if ffmpeg and ffprobe sidecars are available.
 pub async fn check_availability(app: &AppHandle) -> (bool, bool) {
+    if let Some(&cached) = FFTOOLS_AVAILABLE.get() {
+        return cached;
+    }
+
     let no_cancel = CancellationToken::new();
     let version_timeout = Some(std::time::Duration::from_secs(5));
-    let ffmpeg_ok = run_tool_command(app, "ffmpeg", &["-version"], &no_cancel, version_timeout)
-        .await
-        .is_ok();
-    let ffprobe_ok = run_tool_command(app, "ffprobe", &["-version"], &no_cancel, version_timeout)
-        .await
-        .is_ok();
+    let (ffmpeg_result, ffprobe_result) = tokio::join!(
+        run_tool_command(app, "ffmpeg", &["-version"], &no_cancel, version_timeout),
+        run_tool_command(app, "ffprobe", &["-version"], &no_cancel, version_timeout),
+    );
+    let result = (ffmpeg_result.is_ok(), ffprobe_result.is_ok());
     log::debug!(
         "ffmpeg available: {}, ffprobe available: {}",
-        ffmpeg_ok,
-        ffprobe_ok
+        result.0,
+        result.1
     );
-    (ffmpeg_ok, ffprobe_ok)
+    if result.0 || result.1 {
+        let _ = FFTOOLS_AVAILABLE.set(result);
+    }
+    result
 }
 
 /// Video stream info from ffprobe.
@@ -1037,7 +1071,14 @@ pub struct CombinedDiagnostics {
 ///
 /// Extracts codec, resolution, fps, audio info, and format bitrate from
 /// `Stream #` and `Duration:` lines that ffmpeg prints with `-v verbose`.
-fn parse_ffmpeg_stderr(stderr: &str) -> (StreamTrackPresence, Option<VideoInfo>, Option<AudioInfo>, Option<u32>) {
+fn parse_ffmpeg_stderr(
+    stderr: &str,
+) -> (
+    StreamTrackPresence,
+    Option<VideoInfo>,
+    Option<AudioInfo>,
+    Option<u32>,
+) {
     let mut presence = StreamTrackPresence::default();
     let mut best_video: Option<(String, Option<u32>, Option<u32>, Option<u32>, u64)> = None; // (codec, w, h, fps, pixels)
     let mut audio_info: Option<AudioInfo> = None;
@@ -1049,7 +1090,8 @@ fn parse_ffmpeg_stderr(stderr: &str) -> (StreamTrackPresence, Option<VideoInfo>,
             presence.has_video = true;
             let codec = caps[1].to_string();
 
-            let (w, h) = RESOLUTION_RE.captures(line)
+            let (w, h) = RESOLUTION_RE
+                .captures(line)
                 .map(|c| {
                     let w = c[1].parse::<u32>().ok();
                     let h = c[2].parse::<u32>().ok();
@@ -1057,7 +1099,8 @@ fn parse_ffmpeg_stderr(stderr: &str) -> (StreamTrackPresence, Option<VideoInfo>,
                 })
                 .unwrap_or((None, None));
 
-            let fps = FPS_RE.captures(line)
+            let fps = FPS_RE
+                .captures(line)
                 .or_else(|| TBR_RE.captures(line))
                 .and_then(|c| c[1].parse::<f64>().ok())
                 .map(|f| f.round() as u32)
@@ -1080,9 +1123,13 @@ fn parse_ffmpeg_stderr(stderr: &str) -> (StreamTrackPresence, Option<VideoInfo>,
             if let Some(caps) = AUDIO_RE.captures(line) {
                 presence.has_audio = true;
                 let codec = caps[1].to_string();
-                let bitrate_kbps = AUDIO_BITRATE_RE.captures(line)
+                let bitrate_kbps = AUDIO_BITRATE_RE
+                    .captures(line)
                     .and_then(|c| c[1].parse::<u32>().ok());
-                audio_info = Some(AudioInfo { codec: normalize_codec_name(&codec), bitrate_kbps });
+                audio_info = Some(AudioInfo {
+                    codec: normalize_codec_name(&codec),
+                    bitrate_kbps,
+                });
                 continue;
             }
         } else if line.contains("Audio:") && line.contains("Stream #") {
@@ -1091,7 +1138,8 @@ fn parse_ffmpeg_stderr(stderr: &str) -> (StreamTrackPresence, Option<VideoInfo>,
 
         // Format-level bitrate from Duration line
         if format_bitrate_kbps.is_none() && line.contains("Duration:") {
-            format_bitrate_kbps = FORMAT_BR_RE.captures(line)
+            format_bitrate_kbps = FORMAT_BR_RE
+                .captures(line)
                 .and_then(|c| c[1].parse::<u32>().ok());
         }
     }

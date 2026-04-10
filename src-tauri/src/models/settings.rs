@@ -186,7 +186,7 @@ impl Default for AppSettings {
         Self {
             timeout: 8.0,
             extended_timeout: None,
-            concurrency: 1,
+            concurrency: 0,
             retries: 1,
             retry_backoff: RetryBackoff::None,
             user_agent: "TiviMate/5.1.6 (Android 12)".to_string(),
@@ -223,6 +223,16 @@ mod tests {
         let settings = AppSettings::default();
         assert!(settings.scan_notifications);
         assert!(settings.accept_invalid_certs);
+    }
+
+    #[test]
+    fn default_concurrency_stays_in_auto_mode() {
+        let settings = AppSettings::default();
+        assert_eq!(settings.concurrency, 0);
+
+        let deserialized: AppSettings = serde_json::from_value(serde_json::json!({}))
+            .expect("settings should deserialize with defaults");
+        assert_eq!(deserialized.concurrency, 0);
     }
 
     #[test]

@@ -155,6 +155,16 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   }, []);
 
   const collectMetadata = useCallback(() => {
+    // IPTV streams rarely exceed 50 Mbps even at 4K HDR.
+    // Player bandwidth estimates can be wildly inflated (1000+ Mbps) during
+    // initial buffering or when codec detection fails — discard those.
+    const MAX_REASONABLE_KBPS = 100_000; // 100 Mbps
+
+    const formatBitrateKbps = (kbps: number): string | null => {
+      if (kbps <= 0 || kbps > MAX_REASONABLE_KBPS) return null;
+      return kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbps` : `${kbps} kbps`;
+    };
+
     const meta: StreamMetadata = {
       width: null, height: null, resolution: null,
       codec: null, fps: null, videoBitrate: null,
@@ -176,11 +186,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         if (level.videoCodec) meta.codec = normalizeCodecName(level.videoCodec);
         if (level.audioCodec) meta.audioCodec = normalizeCodecName(level.audioCodec);
         if (level.bitrate) {
-          const kbps = Math.round(level.bitrate / 1000);
-          meta.videoBitrate = kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbps` : `${kbps} kbps`;
+          meta.videoBitrate = formatBitrateKbps(Math.round(level.bitrate / 1000));
         } else if (hls.bandwidthEstimate && Number.isFinite(hls.bandwidthEstimate)) {
-          const kbps = Math.round(hls.bandwidthEstimate / 1000);
-          meta.videoBitrate = kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbps` : `${kbps} kbps`;
+          meta.videoBitrate = formatBitrateKbps(Math.round(hls.bandwidthEstimate / 1000));
         }
         if ((level as { frameRate?: number }).frameRate) {
           meta.fps = Math.round((level as { frameRate: number }).frameRate);
@@ -207,8 +215,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         if (!meta.audioCodec && info.audioCodec) meta.audioCodec = normalizeCodecName(info.audioCodec);
         if (!meta.fps && info.fps) meta.fps = Math.round(info.fps);
         if (!meta.videoBitrate && info.videoDataRate) {
-          const kbps = Math.round(info.videoDataRate);
-          meta.videoBitrate = kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbps` : `${kbps} kbps`;
+          meta.videoBitrate = formatBitrateKbps(Math.round(info.videoDataRate));
         }
         if (!meta.audioBitrate && info.audioDataRate) {
           meta.audioBitrate = String(Math.round(info.audioDataRate));
