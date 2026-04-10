@@ -23,7 +23,7 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.13", features = ["stream", "socks", "cookies"] }
 url = "2"
 regex = "1"
-fancy-regex = "0.14"
+fancy-regex = "0.17"
 csv = "1"
 futures = "0.3"
 thiserror = "2"
