@@ -658,6 +658,33 @@ function ScanRuntimeEffects({
   return null;
 }
 
+/** Resolve concurrency for a scan.
+ *  0 = auto: 10 for multi-server, xtream max for xtream, 1 for single-server.
+ *  1-20 = explicit user choice (but still capped at xtream max if applicable). */
+function resolveSmartConcurrency(
+  settingsConcurrency: number,
+  singleProvider: boolean,
+  xtreamMaxConnections: number | null,
+): number {
+  const auto = settingsConcurrency === 0;
+
+  if (
+    xtreamMaxConnections != null &&
+    Number.isFinite(xtreamMaxConnections) &&
+    xtreamMaxConnections > 0
+  ) {
+    const xtreamMax = Math.max(1, Math.min(20, Math.round(xtreamMaxConnections)));
+    if (auto) return Math.min(xtreamMax, 10);
+    return Math.min(settingsConcurrency, xtreamMax);
+  }
+
+  if (auto) {
+    return singleProvider ? 1 : 10;
+  }
+
+  return settingsConcurrency;
+}
+
 export default function App() {
   // Individual selectors — only re-render when the specific value changes
   const playlist = useAppStore((s) => s.playlist);
@@ -1658,12 +1685,11 @@ export default function App() {
       selected_indices: effectiveSelection.length > 0 ? effectiveSelection : null,
       timeout: currentSettings.timeout,
       extended_timeout: currentSettings.extended_timeout,
-      concurrency:
-        typeof currentPlaylist.xtream_max_connections === "number" &&
-        Number.isFinite(currentPlaylist.xtream_max_connections) &&
-        currentPlaylist.xtream_max_connections > 0
-          ? Math.max(1, Math.min(20, Math.round(currentPlaylist.xtream_max_connections)))
-          : currentSettings.concurrency,
+      concurrency: resolveSmartConcurrency(
+        currentSettings.concurrency,
+        currentPlaylist.single_provider,
+        currentPlaylist.xtream_max_connections ?? null,
+      ),
       retries: currentSettings.retries,
       retry_backoff: currentSettings.retry_backoff,
       user_agent: currentSettings.user_agent,
@@ -2295,13 +2321,16 @@ export default function App() {
                         ? "Connecting…"
                         : playlistLoadProgress?.stage === "Downloading"
                           ? "Downloading playlist…"
-                          : playlistLoadProgress?.stage === "Parsing"
-                            ? "Parsing playlist…"
-                            : playlistLoadProgress?.stage === "Processing"
-                              ? "Processing…"
-                              : "Loading playlist…"}
+                          : playlistLoadProgress?.stage === "Saving"
+                            ? "Saving to cache…"
+                            : playlistLoadProgress?.stage === "Parsing"
+                              ? "Parsing playlist…"
+                              : playlistLoadProgress?.stage === "Processing"
+                                ? "Processing…"
+                                : "Loading playlist…"}
                     </p>
-                    {playlistLoadProgress?.stage === "Connecting" && (
+                    {(playlistLoadProgress?.stage === "Connecting" ||
+                      playlistLoadProgress?.stage === "Saving") && (
                       <p className="text-sm mt-1 text-text-quaternary">
                         {playlistLoadProgress.detail}
                       </p>

@@ -186,7 +186,7 @@ impl Default for AppSettings {
         Self {
             timeout: 8.0,
             extended_timeout: None,
-            concurrency: 1,
+            concurrency: 0,
             retries: 1,
             retry_backoff: RetryBackoff::None,
             user_agent: "TiviMate/5.1.6 (Android 12)".to_string(),
