@@ -16,6 +16,7 @@ import {
   Link2,
   Pause,
   Play,
+  Radar,
   Square,
   Settings,
   Search,
@@ -222,6 +223,7 @@ export const Toolbar = memo(function Toolbar({
   const IconFolder = isMac ? SFFolder : Folder;
   const IconLink = isMac ? SFLink : Link2;
   const IconPlay = isMac ? SFPlayFill : Play;
+  const IconScan = Radar;
   const IconPause = isMac ? SFPauseFill : Pause;
   const IconStop = isMac ? SFStopFill : Square;
   const IconSettings = isMac ? SFGearshape : Settings;
@@ -313,7 +315,7 @@ export const Toolbar = memo(function Toolbar({
             title={scanDisabledReason ?? (isMac ? "Scan" : undefined)}
             className={isMac ? btn : `${btn} toolbar-btn-primary`}
           >
-            <IconPlay className="w-[22px] h-[22px]" />
+            <IconScan className="w-[22px] h-[22px]" />
             {!isMac && scanLabel}
           </button>
         )}
