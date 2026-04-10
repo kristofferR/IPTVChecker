@@ -37,6 +37,7 @@ sha2 = "0.10"
 tauri-plugin-notification = "2"
 tauri-plugin-mcp = { git = "https://github.com/P3GLEG/tauri-plugin-mcp", features = ["devtools"] }
 fs2 = "0.4.3"
+tauri-plugin-window-state = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

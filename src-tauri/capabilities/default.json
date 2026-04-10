@@ -19,6 +19,7 @@
     "core:window:allow-is-fullscreen",
     "os:default",
     "notification:default",
-    "log:default"
+    "log:default",
+    "window-state:default"
   ]
 }
