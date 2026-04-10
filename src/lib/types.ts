@@ -193,6 +193,12 @@ export interface ScanErrorPayload {
   message: string;
 }
 
+export type PlaylistLoadProgress =
+  | { stage: "Connecting"; detail: string }
+  | { stage: "Downloading"; bytes_downloaded: number; elapsed_secs: number }
+  | { stage: "Parsing"; channels_found: number }
+  | { stage: "Processing"; detail: string };
+
 export type ScreenshotFormat = "webp" | "png";
 export type ChannelLogoSize = "small" | "medium" | "large" | "huge";
 

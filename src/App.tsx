@@ -662,6 +662,7 @@ export default function App() {
   // Individual selectors — only re-render when the specific value changes
   const playlist = useAppStore((s) => s.playlist);
   const playlistLoading = useAppStore((s) => s.playlistLoading);
+  const playlistLoadProgress = useAppStore((s) => s.playlistLoadProgress);
   const playlistOpenError = useAppStore((s) => s.playlistOpenError);
   const recentPlaylists = useAppStore((s) => s.recentPlaylists);
   const channelSearch = useAppStore((s) => s.channelSearch);
@@ -1046,6 +1047,7 @@ export default function App() {
           : "Opening source";
 
       getStore().setPlaylistOpenError(null);
+      getStore().setPlaylistLoadProgress(null);
       getStore().setPlaylistLoading(true);
       const safeLabel = sourceLabel.replace(/username=\S+/g, "username=***").replace(/password=\S+/g, "password=***");
       logger.info(`[App] ${loadingAction}: ${safeLabel}`);
@@ -1109,6 +1111,7 @@ export default function App() {
         return { ok: false, error: message };
       } finally {
         getStore().setPlaylistLoading(false);
+        getStore().setPlaylistLoadProgress(null);
       }
     },
     [channelSearch, commitLoadedPlaylist, loadFullSourcePreview, refreshRecentPlaylists],
@@ -1781,6 +1784,12 @@ export default function App() {
         listen("menu://open-log", () => handleOpenLogRef.current()),
         listen("menu://check-updates", () => void checkForUpdatesRef.current(true)),
         listen("menu://keyboard-shortcuts", () => getStore().setShowKeyboardShortcuts(true)),
+        listen<import("./lib/types").PlaylistLoadProgress>(
+          "playlist://load-progress",
+          (event) => {
+            getStore().setPlaylistLoadProgress(event.payload);
+          },
+        ),
       ]);
       if (cancelled) {
         for (const off of listeners) off();
@@ -2282,8 +2291,41 @@ export default function App() {
                   <>
                     <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-blue-500" />
                     <p className="text-lg font-medium">
-                      Loading playlist…
+                      {playlistLoadProgress?.stage === "Connecting"
+                        ? "Connecting…"
+                        : playlistLoadProgress?.stage === "Downloading"
+                          ? "Downloading playlist…"
+                          : playlistLoadProgress?.stage === "Parsing"
+                            ? "Parsing playlist…"
+                            : playlistLoadProgress?.stage === "Processing"
+                              ? "Processing…"
+                              : "Loading playlist…"}
                     </p>
+                    {playlistLoadProgress?.stage === "Connecting" && (
+                      <p className="text-sm mt-1 text-text-quaternary">
+                        {playlistLoadProgress.detail}
+                      </p>
+                    )}
+                    {playlistLoadProgress?.stage === "Downloading" && (
+                      <p className="text-sm mt-1 tabular-nums">
+                        {(playlistLoadProgress.bytes_downloaded / (1024 * 1024)).toFixed(1)} MB
+                        {playlistLoadProgress.elapsed_secs > 0 && (
+                          <span className="ml-2 text-text-quaternary">
+                            {(playlistLoadProgress.bytes_downloaded / playlistLoadProgress.elapsed_secs / (1024 * 1024)).toFixed(1)} MB/s
+                          </span>
+                        )}
+                      </p>
+                    )}
+                    {playlistLoadProgress?.stage === "Parsing" && (
+                      <p className="text-sm mt-1 tabular-nums">
+                        {playlistLoadProgress.channels_found.toLocaleString()} channels found
+                      </p>
+                    )}
+                    {playlistLoadProgress?.stage === "Processing" && (
+                      <p className="text-sm mt-1 text-text-quaternary">
+                        {playlistLoadProgress.detail}
+                      </p>
+                    )}
                   </>
                 ) : (
                   <>

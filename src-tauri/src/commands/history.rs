@@ -1228,6 +1228,7 @@ http://streams.example.com/c.m3u8
         });
 
         let first_preview = crate::commands::playlist::open_playlist_url_from_data_dir(
+            None,
             &data_dir,
             &format!(" http://LOCALHOST:{}/playlist.m3u8#first ", address.port()),
             None,
@@ -1237,6 +1238,7 @@ http://streams.example.com/c.m3u8
         .expect("first URL playlist open should succeed");
 
         let second_preview = crate::commands::playlist::open_playlist_url_from_data_dir(
+            None,
             &data_dir,
             &format!("http://localhost:{}/playlist.m3u8#second", address.port()),
             None,

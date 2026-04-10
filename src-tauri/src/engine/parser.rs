@@ -376,6 +376,7 @@ fn parse_playlist_reader<R: BufRead>(
     playlist_name: String,
     group_filter: &Option<String>,
     pattern: &Option<ChannelSearchPattern>,
+    on_channel_parsed: Option<&dyn Fn(usize)>,
 ) -> Result<PlaylistPreview, AppError> {
     let mut channels = Vec::new();
     let mut groups = BTreeSet::new();
@@ -444,6 +445,9 @@ fn parse_playlist_reader<R: BufRead>(
 
             pending_channel = false;
             source_index += 1;
+            if let Some(cb) = &on_channel_parsed {
+                cb(source_index);
+            }
         }
     }
 
@@ -485,6 +489,15 @@ pub fn parse_playlist(
     group_filter: &Option<String>,
     channel_search: &Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
+    parse_playlist_with_progress(file_path, group_filter, channel_search, None)
+}
+
+pub fn parse_playlist_with_progress(
+    file_path: &str,
+    group_filter: &Option<String>,
+    channel_search: &Option<String>,
+    on_channel_parsed: Option<&dyn Fn(usize)>,
+) -> Result<PlaylistPreview, AppError> {
     let path = Path::new(file_path);
     if !path.exists() {
         return Err(AppError::FileNotFound(file_path.to_string()));
@@ -502,7 +515,14 @@ pub fn parse_playlist(
         .unwrap_or_else(|| file_path.to_string());
     let pattern = compile_channel_search_pattern(channel_search)?;
 
-    parse_playlist_reader(reader, file_path, playlist_name, group_filter, &pattern)
+    parse_playlist_reader(
+        reader,
+        file_path,
+        playlist_name,
+        group_filter,
+        &pattern,
+        on_channel_parsed,
+    )
 }
 
 /// Parse M3U/M3U8 data from memory (used by fuzz targets and in-memory tests).
@@ -520,6 +540,7 @@ pub fn parse_m3u(
         playlist_name.to_string(),
         group_filter,
         &pattern,
+        None,
     )
 }
 

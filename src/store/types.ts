@@ -2,6 +2,7 @@ import type {
   AppSettings,
   ChannelResult,
   CurrentSourceDescriptor,
+  PlaylistLoadProgress,
   PlaylistPreview,
   RecentPlaylistEntry,
   ScanHistoryItem,
@@ -22,6 +23,7 @@ export interface PlaylistSlice {
   playlist: PlaylistPreview | null;
   cachedSourcePreview: PlaylistPreview | null;
   playlistLoading: boolean;
+  playlistLoadProgress: PlaylistLoadProgress | null;
   playlistOpenError: string | null;
   recentPlaylists: RecentPlaylistEntry[];
   currentSourceDescriptor: CurrentSourceDescriptor | null;
@@ -30,6 +32,7 @@ export interface PlaylistSlice {
   setPlaylist: (playlist: PlaylistPreview | null) => void;
   setCachedSourcePreview: (preview: PlaylistPreview | null) => void;
   setPlaylistLoading: (loading: boolean) => void;
+  setPlaylistLoadProgress: (progress: PlaylistLoadProgress | null) => void;
   setPlaylistOpenError: (error: string | null) => void;
   setRecentPlaylists: (entries: RecentPlaylistEntry[]) => void;
   setCurrentSourceDescriptor: (descriptor: CurrentSourceDescriptor | null) => void;
