@@ -339,8 +339,6 @@ pub fn run() {
             .text("menu.file.export_renamed", "Export Renamed Playlist")
             .text("menu.file.export_filtered_m3u", "Export Filtered M3U/M3U8")
             .text("menu.file.export_scan_log", "Export Scan Log (JSON)")
-            .separator()
-            .close_window()
             .build()?;
 
         let edit_menu = SubmenuBuilder::new(app, "Edit")
@@ -407,6 +405,15 @@ pub fn run() {
             .accelerator("Cmd+/")
             .build(app)?;
 
+        let window_menu =
+            SubmenuBuilder::with_id(app, tauri::menu::WINDOW_SUBMENU_ID, "Window")
+                .minimize()
+                .maximize()
+                .fullscreen()
+                .separator()
+                .close_window()
+                .build()?;
+
         let help_menu = SubmenuBuilder::new(app, "Help")
             .item(&shortcuts_item)
             .separator()
@@ -419,6 +426,7 @@ pub fn run() {
             .item(&edit_menu)
             .item(&scan_menu)
             .item(&view_menu)
+            .item(&window_menu)
             .item(&help_menu)
             .build()
     });
