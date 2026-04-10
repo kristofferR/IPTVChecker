@@ -270,7 +270,7 @@ export function ChannelTable({
       (sum, col) => sum + (col.key === "name" ? 0 : columnWidths[col.key]),
       0,
     );
-    const autoWidth = containerWidth - sumOther;
+    const autoWidth = containerWidth - sumOther - 32; // px-4 padding on each side
     return Math.max(columnWidths.name, autoWidth);
   }, [columns, columnOrder, columnWidths, containerWidth]);
 
@@ -284,13 +284,14 @@ export function ChannelTable({
     [columns, columnWidths, effectiveNameWidth],
   );
 
+  const ROW_PADDING_PX = 32; // px-4 on each side
   const tableWidth = useMemo(
     () =>
       columns.reduce(
         (sum, column) =>
           sum + (column.key === "name" ? effectiveNameWidth : columnWidths[column.key]),
         0,
-      ),
+      ) + ROW_PADDING_PX,
     [columns, columnWidths, effectiveNameWidth],
   );
 
