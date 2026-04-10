@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Least-privilege capability for primary and spawned app windows (`main*`). Granted permissions are limited to: core IPC defaults for command invocation, dialog open/save for playlist and export pickers, event listen/unlisten for backend and menu events, start-dragging for the custom toolbar titlebar behavior, OS info for platform detection, and native notification APIs.",
+  "description": "Least-privilege capability for primary and spawned app windows (`main*`). Granted permissions are limited to: core IPC defaults for command invocation, dialog open/save for playlist and export pickers, event listen/unlisten for backend and menu events, start-dragging for the custom toolbar titlebar behavior, OS info for platform detection, native notification APIs, and window-state persistence (size, position, maximized, fullscreen).",
   "windows": ["main*", "settings", "log"],
   "permissions": [
     "core:default",

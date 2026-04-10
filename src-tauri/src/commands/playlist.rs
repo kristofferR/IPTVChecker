@@ -102,17 +102,22 @@ fn server_location_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
 }
 
 /// Fast host extraction without full URL parsing.
-/// Handles `http://host:port/path` and `http://host/path` patterns.
+/// Handles `http://host:port/path`, `http://user:pass@host/path`, etc.
 fn extract_host_fast(url: &str) -> Option<&str> {
     let after_scheme = url.strip_prefix("http://")
         .or_else(|| url.strip_prefix("https://"))
         .or_else(|| url.strip_prefix("rtsp://"))
         .or_else(|| url.strip_prefix("rtmp://"))?;
+    // Skip userinfo if present (user:pass@)
+    let after_userinfo = after_scheme
+        .find('@')
+        .map(|pos| &after_scheme[pos + 1..])
+        .unwrap_or(after_scheme);
     // Host ends at first '/', ':', or '?' (port, path, or query)
-    let end = after_scheme
-        .find(|c: char| c == '/' || c == ':' || c == '?' || c == '@')
-        .unwrap_or(after_scheme.len());
-    let host = &after_scheme[..end];
+    let end = after_userinfo
+        .find(|c: char| c == '/' || c == ':' || c == '?')
+        .unwrap_or(after_userinfo.len());
+    let host = &after_userinfo[..end];
     if host.is_empty() {
         return None;
     }
