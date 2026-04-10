@@ -7,7 +7,7 @@ pub mod state;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use state::AppState;
 use tauri::webview::PageLoadEvent;
@@ -26,6 +26,10 @@ static APP_IS_QUITTING: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static WINDOW_CLOSED_BY_USER: AtomicBool = AtomicBool::new(false);
 static NEXT_WINDOW_ID: AtomicUsize = AtomicUsize::new(1);
+
+/// Menu events queued while no windows were available.
+/// Drained once a new window finishes loading.
+static PENDING_MENU_EVENTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 #[cfg(target_os = "macos")]
 fn schedule_macos_system_appearance_patch(app: tauri::AppHandle, window_label: String) {
@@ -204,13 +208,28 @@ fn emit_menu_event_to_focused_window(app: &tauri::AppHandle, event_name: &str) {
         return;
     }
 
-    log::warn!(
-        "No focused/main window available for menu event '{}'; falling back to broadcast",
+    // Try any existing main-like window (main1, main2, etc.)
+    for (label, window) in app.webview_windows() {
+        if label.starts_with("main") {
+            log::debug!(
+                "menu event '{}' dispatched to window '{}'",
+                event_name,
+                label
+            );
+            let _ = window.emit(event_name, ());
+            return;
+        }
+    }
+
+    // No windows exist — create one and queue the event for after page load
+    log::info!(
+        "No windows available for menu event '{}'; creating window and queueing event",
         event_name
     );
-    if let Err(error) = app.emit(event_name, ()) {
-        log::warn!("Broadcast menu event '{}' failed: {}", event_name, error);
+    if let Ok(mut queue) = PENDING_MENU_EVENTS.lock() {
+        queue.push(event_name.to_string());
     }
+    create_new_window(app);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -789,6 +808,38 @@ pub fn run() {
                 let _ = window.unminimize();
                 let _ = window.show();
                 let _ = window.set_focus();
+            }
+
+            // Dispatch any menu events that were queued while no windows existed.
+            // Use a short delay so the frontend React app has time to mount and
+            // register its event listeners before we emit.
+            let pending: Vec<String> = PENDING_MENU_EVENTS
+                .lock()
+                .map(|mut q| q.drain(..).collect())
+                .unwrap_or_default();
+            if !pending.is_empty() {
+                let handle = webview.app_handle().clone();
+                let label = window.label().to_string();
+                std::thread::spawn(move || {
+                    // 500ms is enough for React to mount + register listeners
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    if let Some(target) = handle.get_webview_window(&label) {
+                        for event_name in &pending {
+                            log::debug!(
+                                "Dispatching queued menu event '{}' to window '{}'",
+                                event_name,
+                                label
+                            );
+                            if let Err(e) = target.emit(event_name.as_str(), ()) {
+                                log::warn!(
+                                    "Failed to dispatch queued menu event '{}': {}",
+                                    event_name,
+                                    e
+                                );
+                            }
+                        }
+                    }
+                });
             }
         })
         .on_window_event(|_window, _event| {
