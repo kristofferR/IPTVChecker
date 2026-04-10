@@ -4,19 +4,21 @@ pub mod error;
 pub mod models;
 pub mod state;
 
+use std::collections::{HashMap, HashSet};
 #[cfg(target_os = "macos")]
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use state::AppState;
 use tauri::webview::PageLoadEvent;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Listener, Manager};
 
 /// Stdout log level, dynamically updated from user settings.
 /// The global `log::max_level()` stays at Trace so the Webview target
 /// always receives all events (the Log window does its own filtering).
-pub(crate) static STDOUT_LOG_LEVEL: AtomicUsize = AtomicUsize::new(log::LevelFilter::Error as usize);
+pub(crate) static STDOUT_LOG_LEVEL: AtomicUsize =
+    AtomicUsize::new(log::LevelFilter::Error as usize);
 #[cfg(target_os = "macos")]
 use tauri_plugin_liquid_glass::{LiquidGlassConfig, LiquidGlassExt};
 use tauri_plugin_store::StoreExt;
@@ -26,6 +28,12 @@ static APP_IS_QUITTING: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static WINDOW_CLOSED_BY_USER: AtomicBool = AtomicBool::new(false);
 static NEXT_WINDOW_ID: AtomicUsize = AtomicUsize::new(1);
+
+/// Menu events queued until their destination window declares itself ready.
+static PENDING_MENU_EVENTS: LazyLock<Mutex<HashMap<String, Vec<String>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static READY_MENU_WINDOWS: LazyLock<Mutex<HashSet<String>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
 
 #[cfg(target_os = "macos")]
 fn schedule_macos_system_appearance_patch(app: tauri::AppHandle, window_label: String) {
@@ -95,6 +103,10 @@ fn schedule_macos_system_appearance_patch(app: tauri::AppHandle, window_label: S
 }
 
 fn create_window_from_main_config(app: &tauri::AppHandle, label: String) {
+    if let Ok(mut ready) = READY_MENU_WINDOWS.lock() {
+        ready.remove(&label);
+    }
+
     let Some(mut window_config) = app
         .config()
         .app
@@ -152,31 +164,129 @@ fn create_fresh_main_window(app: &tauri::AppHandle) {
     create_window_from_main_config(app, "main".to_string());
 }
 
-fn create_new_window(app: &tauri::AppHandle) {
+fn create_new_window(app: &tauri::AppHandle) -> String {
     let id = NEXT_WINDOW_ID.fetch_add(1, Ordering::Relaxed);
-    create_window_from_main_config(app, format!("main{}", id));
+    let label = format!("main{}", id);
+    create_window_from_main_config(app, label.clone());
+    label
 }
 
-fn emit_menu_event_to_focused_window(app: &tauri::AppHandle, event_name: &str) {
-    if let Some(window) = app.get_focused_window() {
-        let window_label = window.label().to_string();
-        match window.emit(event_name, ()) {
-            Ok(_) => {
-                log::trace!(
-                    "menu event '{}' dispatched to focused window '{}'",
-                    event_name,
-                    window_label
-                );
-            }
-            Err(error) => {
+fn queue_menu_event(window_label: &str, event_name: &str) {
+    if let Ok(mut queue) = PENDING_MENU_EVENTS.lock() {
+        queue
+            .entry(window_label.to_string())
+            .or_default()
+            .push(event_name.to_string());
+    }
+}
+
+fn is_menu_window_ready(window_label: &str) -> bool {
+    READY_MENU_WINDOWS
+        .lock()
+        .map(|ready| ready.contains(window_label))
+        .unwrap_or(false)
+}
+
+fn emit_menu_event_to_window(
+    app: &tauri::AppHandle,
+    window_label: &str,
+    event_name: &str,
+    context: &str,
+) -> bool {
+    if !is_menu_window_ready(window_label) {
+        log::debug!(
+            "Queueing menu event '{}' for window '{}' until listeners are ready",
+            event_name,
+            window_label
+        );
+        queue_menu_event(window_label, event_name);
+        return false;
+    }
+
+    let Some(window) = app.get_webview_window(window_label) else {
+        log::debug!(
+            "Window '{}' disappeared before menu event '{}'; queueing",
+            window_label,
+            event_name
+        );
+        queue_menu_event(window_label, event_name);
+        return false;
+    };
+
+    match window.emit(event_name, ()) {
+        Ok(_) => {
+            log::trace!(
+                "menu event '{}' dispatched to {} '{}'",
+                event_name,
+                context,
+                window_label
+            );
+            true
+        }
+        Err(error) => {
+            log::warn!(
+                "Failed to dispatch menu event '{}' to {} '{}': {}",
+                event_name,
+                context,
+                window_label,
+                error
+            );
+            false
+        }
+    }
+}
+
+fn flush_pending_menu_events(app: &tauri::AppHandle, window_label: &str) {
+    let pending = PENDING_MENU_EVENTS
+        .lock()
+        .ok()
+        .and_then(|mut queue| queue.remove(window_label))
+        .unwrap_or_default();
+    if pending.is_empty() {
+        return;
+    }
+
+    if let Some(window) = app.get_webview_window(window_label) {
+        for event_name in pending {
+            log::debug!(
+                "Dispatching queued menu event '{}' to window '{}'",
+                event_name,
+                window_label
+            );
+            if let Err(error) = window.emit(event_name.as_str(), ()) {
                 log::warn!(
-                    "Failed to dispatch menu event '{}' to focused window '{}': {}",
+                    "Failed to dispatch queued menu event '{}' to '{}': {}",
                     event_name,
                     window_label,
                     error
                 );
             }
         }
+    } else if let Ok(mut queue) = PENDING_MENU_EVENTS.lock() {
+        queue.insert(window_label.to_string(), pending);
+    }
+}
+
+fn mark_menu_window_ready(app: &tauri::AppHandle, window_label: &str) {
+    if let Ok(mut ready) = READY_MENU_WINDOWS.lock() {
+        ready.insert(window_label.to_string());
+    }
+    flush_pending_menu_events(app, window_label);
+}
+
+fn clear_menu_window_state(window_label: &str) {
+    if let Ok(mut ready) = READY_MENU_WINDOWS.lock() {
+        ready.remove(window_label);
+    }
+    if let Ok(mut queue) = PENDING_MENU_EVENTS.lock() {
+        queue.remove(window_label);
+    }
+}
+
+fn emit_menu_event_to_focused_window(app: &tauri::AppHandle, event_name: &str) {
+    if let Some(window) = app.get_focused_window() {
+        let window_label = window.label().to_string();
+        let _ = emit_menu_event_to_window(app, &window_label, event_name, "focused window");
         return;
     }
 
@@ -185,32 +295,26 @@ fn emit_menu_event_to_focused_window(app: &tauri::AppHandle, event_name: &str) {
         event_name
     );
 
-    if let Some(main_window) = app.get_webview_window("main") {
-        match main_window.emit(event_name, ()) {
-            Ok(_) => {
-                log::trace!(
-                    "menu event '{}' dispatched to fallback main window",
-                    event_name
-                );
-            }
-            Err(error) => {
-                log::warn!(
-                    "Failed to dispatch menu event '{}' to fallback main window: {}",
-                    event_name,
-                    error
-                );
-            }
-        }
+    if app.get_webview_window("main").is_some() {
+        let _ = emit_menu_event_to_window(app, "main", event_name, "fallback main window");
         return;
     }
 
-    log::warn!(
-        "No focused/main window available for menu event '{}'; falling back to broadcast",
+    // Try any existing main-like window (main1, main2, etc.)
+    for (label, _window) in app.webview_windows() {
+        if label.starts_with("main") {
+            let _ = emit_menu_event_to_window(app, &label, event_name, "window");
+            return;
+        }
+    }
+
+    // No windows exist — create one and queue the event for after page load
+    log::info!(
+        "No windows available for menu event '{}'; creating window and queueing event",
         event_name
     );
-    if let Err(error) = app.emit(event_name, ()) {
-        log::warn!("Broadcast menu event '{}' failed: {}", event_name, error);
-    }
+    let label = create_new_window(app);
+    queue_menu_event(&label, event_name);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -248,7 +352,18 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_os::init());
+        .plugin(tauri_plugin_os::init())
+        .plugin(
+            tauri_plugin_window_state::Builder::new()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::POSITION
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED
+                        | tauri_plugin_window_state::StateFlags::FULLSCREEN,
+                )
+                .with_denylist(&["settings", "log"])
+                .build(),
+        );
 
     #[cfg(target_os = "macos")]
     let builder = builder.plugin(tauri_plugin_liquid_glass::init());
@@ -320,8 +435,6 @@ pub fn run() {
             .text("menu.file.export_renamed", "Export Renamed Playlist")
             .text("menu.file.export_filtered_m3u", "Export Filtered M3U/M3U8")
             .text("menu.file.export_scan_log", "Export Scan Log (JSON)")
-            .separator()
-            .close_window()
             .build()?;
 
         let edit_menu = SubmenuBuilder::new(app, "Edit")
@@ -350,10 +463,9 @@ pub fn run() {
                 .accelerator("Cmd+Shift+X")
                 .build(app)?;
 
-        let log_window_item =
-            MenuItemBuilder::with_id("menu.view.log_window", "Log")
-                .accelerator("Alt+Cmd+L")
-                .build(app)?;
+        let log_window_item = MenuItemBuilder::with_id("menu.view.log_window", "Log")
+            .accelerator("Alt+Cmd+L")
+            .build(app)?;
 
         let view_menu = SubmenuBuilder::new(app, "View")
             .item(&toggle_sidebar_item)
@@ -388,6 +500,14 @@ pub fn run() {
             .accelerator("Cmd+/")
             .build(app)?;
 
+        let window_menu = SubmenuBuilder::with_id(app, tauri::menu::WINDOW_SUBMENU_ID, "Window")
+            .minimize()
+            .maximize()
+            .fullscreen()
+            .separator()
+            .close_window()
+            .build()?;
+
         let help_menu = SubmenuBuilder::new(app, "Help")
             .item(&shortcuts_item)
             .separator()
@@ -400,6 +520,7 @@ pub fn run() {
             .item(&edit_menu)
             .item(&scan_menu)
             .item(&view_menu)
+            .item(&window_menu)
             .item(&help_menu)
             .build()
     });
@@ -477,10 +598,9 @@ pub fn run() {
                 .accelerator("Ctrl+Shift+X")
                 .build(app)?;
 
-        let log_window_item =
-            MenuItemBuilder::with_id("menu.view.log_window", "Log")
-                .accelerator("Ctrl+Alt+L")
-                .build(app)?;
+        let log_window_item = MenuItemBuilder::with_id("menu.view.log_window", "Log")
+            .accelerator("Ctrl+Alt+L")
+            .build(app)?;
 
         let view_menu = SubmenuBuilder::new(app, "View")
             .item(&toggle_sidebar_item)
@@ -582,6 +702,23 @@ pub fn run() {
 
     builder
         .setup(|app| {
+            let app_handle = app.handle().clone();
+            app.listen_any("menu-ready", move |event| {
+                match serde_json::from_str::<String>(event.payload()) {
+                    Ok(window_label) => {
+                        log::debug!("Menu listeners ready in window '{}'", window_label);
+                        mark_menu_window_ready(&app_handle, &window_label);
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "Ignoring invalid menu-ready payload '{}': {}",
+                            event.payload(),
+                            error
+                        );
+                    }
+                }
+            });
+
             // Load persisted settings
             if let Ok(store) = app.store("settings.json") {
                 if let Some(value) = store.get("settings") {
@@ -619,7 +756,9 @@ pub fn run() {
                 let handle_for_proxy = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     match engine::stream_proxy::start_streaming_proxy(handle_for_proxy).await {
-                        Ok(port) => { let _ = port_tx.send(port); }
+                        Ok(port) => {
+                            let _ = port_tx.send(port);
+                        }
                         Err(error) => {
                             log::error!("Failed to start streaming proxy: {}", error);
                             let _ = port_tx.send(0);
@@ -705,9 +844,7 @@ pub fn run() {
                     .on_tray_icon_event(|tray, event| {
                         // Left-click on tray icon shows/focuses the main window
                         if matches!(event, tauri::tray::TrayIconEvent::Click { .. }) {
-                            if let Some(window) =
-                                tray.app_handle().get_webview_window("main")
-                            {
+                            if let Some(window) = tray.app_handle().get_webview_window("main") {
                                 let _ = window.show();
                                 let _ = window.unminimize();
                                 let _ = window.set_focus();
@@ -792,6 +929,10 @@ pub fn run() {
             }
         })
         .on_window_event(|_window, _event| {
+            if matches!(_event, tauri::WindowEvent::Destroyed) {
+                clear_menu_window_state(_window.label());
+            }
+
             #[cfg(target_os = "macos")]
             if let tauri::WindowEvent::CloseRequested { .. } = _event {
                 if !APP_IS_QUITTING.load(Ordering::Relaxed) {
@@ -815,7 +956,8 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("streamproxy", |ctx, request, responder| {
             let app_handle = ctx.app_handle().clone();
             tauri::async_runtime::spawn(async move {
-                let response = engine::stream_proxy::handle_proxy_request(&app_handle, request).await;
+                let response =
+                    engine::stream_proxy::handle_proxy_request(&app_handle, request).await;
                 responder.respond(response);
             });
         })

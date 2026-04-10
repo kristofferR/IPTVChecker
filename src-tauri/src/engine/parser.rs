@@ -376,6 +376,7 @@ fn parse_playlist_reader<R: BufRead>(
     playlist_name: String,
     group_filter: &Option<String>,
     pattern: &Option<ChannelSearchPattern>,
+    on_channel_parsed: Option<&dyn Fn(usize)>,
 ) -> Result<PlaylistPreview, AppError> {
     let mut channels = Vec::new();
     let mut groups = BTreeSet::new();
@@ -444,6 +445,9 @@ fn parse_playlist_reader<R: BufRead>(
 
             pending_channel = false;
             source_index += 1;
+            if let Some(cb) = &on_channel_parsed {
+                cb(source_index);
+            }
         }
     }
 
@@ -485,12 +489,26 @@ pub fn parse_playlist(
     group_filter: &Option<String>,
     channel_search: &Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
+    parse_playlist_with_progress(file_path, group_filter, channel_search, None)
+}
+
+pub fn parse_playlist_with_progress(
+    file_path: &str,
+    group_filter: &Option<String>,
+    channel_search: &Option<String>,
+    on_channel_parsed: Option<&dyn Fn(usize)>,
+) -> Result<PlaylistPreview, AppError> {
     let path = Path::new(file_path);
     if !path.exists() {
         return Err(AppError::FileNotFound(file_path.to_string()));
     }
     if path.is_dir() {
-        return parse_playlist_directory(file_path, group_filter, channel_search);
+        return parse_playlist_directory(
+            file_path,
+            group_filter,
+            channel_search,
+            on_channel_parsed,
+        );
     }
 
     log::info!("Parsing playlist: {}", file_path);
@@ -502,7 +520,14 @@ pub fn parse_playlist(
         .unwrap_or_else(|| file_path.to_string());
     let pattern = compile_channel_search_pattern(channel_search)?;
 
-    parse_playlist_reader(reader, file_path, playlist_name, group_filter, &pattern)
+    parse_playlist_reader(
+        reader,
+        file_path,
+        playlist_name,
+        group_filter,
+        &pattern,
+        on_channel_parsed,
+    )
 }
 
 /// Parse M3U/M3U8 data from memory (used by fuzz targets and in-memory tests).
@@ -520,6 +545,7 @@ pub fn parse_m3u(
         playlist_name.to_string(),
         group_filter,
         &pattern,
+        None,
     )
 }
 
@@ -527,6 +553,7 @@ fn parse_playlist_directory(
     dir_path: &str,
     group_filter: &Option<String>,
     channel_search: &Option<String>,
+    on_channel_parsed: Option<&dyn Fn(usize)>,
 ) -> Result<PlaylistPreview, AppError> {
     let files = find_playlists_in_dir(dir_path)?;
     if files.is_empty() {
@@ -540,9 +567,18 @@ fn parse_playlist_directory(
     let mut channels = Vec::new();
     let mut groups = BTreeSet::new();
     let mut source_index = 0usize;
+    let mut parsed_channels = 0usize;
 
     for file in files {
-        let parsed = parse_playlist(&file, &None, &None)?;
+        let last_reported = std::cell::Cell::new(0usize);
+        let child_progress = |child_count: usize| {
+            last_reported.set(child_count);
+            if let Some(cb) = on_channel_parsed {
+                cb(parsed_channels + child_count);
+            }
+        };
+        let parsed = parse_playlist_with_progress(&file, &None, &None, Some(&child_progress))?;
+        parsed_channels += last_reported.get();
         for mut channel in parsed.channels {
             let playlist_group = format!("{}{}", PLAYLIST_GROUP_PREFIX, channel.playlist);
             groups.insert(channel.group.clone());
@@ -889,6 +925,47 @@ http://example.com/beta.m3u8
         assert_eq!(playlist_filtered.total_channels, 1);
         assert_eq!(playlist_filtered.channels[0].name, "Beta");
         assert_eq!(playlist_filtered.channels[0].index, 1);
+
+        std::fs::remove_dir_all(root).expect("fixture directory should be removable");
+    }
+
+    #[test]
+    fn test_parse_playlist_directory_reports_cumulative_progress() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be monotonic")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("iptv-parser-progress-{unique}"));
+        let nested = root.join("nested");
+        std::fs::create_dir_all(&nested).expect("nested fixture dir should be created");
+
+        let first = root.join("first.m3u8");
+        let second = nested.join("second.m3u");
+        std::fs::write(
+            &first,
+            "\
+#EXTM3U
+#EXTINF:-1 group-title=\"Sports\",Alpha
+http://example.com/alpha.m3u8
+",
+        )
+        .expect("first fixture should be writable");
+        std::fs::write(
+            &second,
+            "\
+#EXTM3U
+#EXTINF:-1 group-title=\"News\",Beta
+http://example.com/beta.m3u8
+",
+        )
+        .expect("second fixture should be writable");
+
+        let progress = std::cell::RefCell::new(Vec::new());
+        let on_progress = |count: usize| progress.borrow_mut().push(count);
+        parse_playlist_with_progress(&root.to_string_lossy(), &None, &None, Some(&on_progress))
+            .expect("directory parse should succeed");
+
+        assert_eq!(*progress.borrow(), vec![1, 2]);
 
         std::fs::remove_dir_all(root).expect("fixture directory should be removable");
     }

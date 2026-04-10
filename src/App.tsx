@@ -9,7 +9,7 @@ import {
   useState,
   type ProfilerOnRenderCallback,
 } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -658,10 +658,39 @@ function ScanRuntimeEffects({
   return null;
 }
 
+/** Resolve concurrency for a scan.
+ *  0 = auto: 10 for multi-server, xtream max for xtream, 1 for single-server.
+ *  1-20 = explicit user choice (but still capped at xtream max if applicable). */
+function resolveSmartConcurrency(
+  settingsConcurrency: number,
+  singleProvider: boolean,
+  xtreamMaxConnections: number | null,
+): number {
+  const auto = settingsConcurrency === 0;
+  const clampedSettings = Math.max(1, Math.min(20, Math.round(settingsConcurrency)));
+
+  if (
+    xtreamMaxConnections != null &&
+    Number.isFinite(xtreamMaxConnections) &&
+    xtreamMaxConnections > 0
+  ) {
+    const xtreamMax = Math.max(1, Math.min(20, Math.round(xtreamMaxConnections)));
+    if (auto) return xtreamMax;
+    return Math.min(clampedSettings, xtreamMax);
+  }
+
+  if (auto) {
+    return singleProvider ? 1 : 10;
+  }
+
+  return clampedSettings;
+}
+
 export default function App() {
   // Individual selectors — only re-render when the specific value changes
   const playlist = useAppStore((s) => s.playlist);
   const playlistLoading = useAppStore((s) => s.playlistLoading);
+  const playlistLoadProgress = useAppStore((s) => s.playlistLoadProgress);
   const playlistOpenError = useAppStore((s) => s.playlistOpenError);
   const recentPlaylists = useAppStore((s) => s.recentPlaylists);
   const channelSearch = useAppStore((s) => s.channelSearch);
@@ -1046,6 +1075,7 @@ export default function App() {
           : "Opening source";
 
       getStore().setPlaylistOpenError(null);
+      getStore().setPlaylistLoadProgress(null);
       getStore().setPlaylistLoading(true);
       const safeLabel = sourceLabel.replace(/username=\S+/g, "username=***").replace(/password=\S+/g, "password=***");
       logger.info(`[App] ${loadingAction}: ${safeLabel}`);
@@ -1109,6 +1139,7 @@ export default function App() {
         return { ok: false, error: message };
       } finally {
         getStore().setPlaylistLoading(false);
+        getStore().setPlaylistLoadProgress(null);
       }
     },
     [channelSearch, commitLoadedPlaylist, loadFullSourcePreview, refreshRecentPlaylists],
@@ -1655,12 +1686,11 @@ export default function App() {
       selected_indices: effectiveSelection.length > 0 ? effectiveSelection : null,
       timeout: currentSettings.timeout,
       extended_timeout: currentSettings.extended_timeout,
-      concurrency:
-        typeof currentPlaylist.xtream_max_connections === "number" &&
-        Number.isFinite(currentPlaylist.xtream_max_connections) &&
-        currentPlaylist.xtream_max_connections > 0
-          ? Math.max(1, Math.min(20, Math.round(currentPlaylist.xtream_max_connections)))
-          : currentSettings.concurrency,
+      concurrency: resolveSmartConcurrency(
+        currentSettings.concurrency,
+        currentPlaylist.single_provider,
+        currentPlaylist.xtream_max_connections ?? null,
+      ),
       retries: currentSettings.retries,
       retry_backoff: currentSettings.retry_backoff,
       user_agent: currentSettings.user_agent,
@@ -1781,11 +1811,19 @@ export default function App() {
         listen("menu://open-log", () => handleOpenLogRef.current()),
         listen("menu://check-updates", () => void checkForUpdatesRef.current(true)),
         listen("menu://keyboard-shortcuts", () => getStore().setShowKeyboardShortcuts(true)),
+        listen<import("./lib/types").PlaylistLoadProgress>(
+          "playlist://load-progress",
+          (event) => {
+            getStore().setPlaylistLoadProgress(event.payload);
+          },
+        ),
       ]);
       if (cancelled) {
         for (const off of listeners) off();
       } else {
         unlisten.push(...listeners);
+        // Only declare this window ready after its menu listeners are mounted.
+        void emit("menu-ready", getCurrentWindow().label).catch(() => {});
       }
     };
 
@@ -2282,8 +2320,44 @@ export default function App() {
                   <>
                     <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-blue-500" />
                     <p className="text-lg font-medium">
-                      Loading playlist…
+                      {playlistLoadProgress?.stage === "Connecting"
+                        ? "Connecting…"
+                        : playlistLoadProgress?.stage === "Downloading"
+                          ? "Downloading playlist…"
+                          : playlistLoadProgress?.stage === "Saving"
+                            ? "Saving to cache…"
+                            : playlistLoadProgress?.stage === "Parsing"
+                              ? "Parsing playlist…"
+                              : playlistLoadProgress?.stage === "Processing"
+                                ? "Processing…"
+                                : "Loading playlist…"}
                     </p>
+                    {(playlistLoadProgress?.stage === "Connecting" ||
+                      playlistLoadProgress?.stage === "Saving") && (
+                      <p className="text-sm mt-1 text-text-quaternary">
+                        {playlistLoadProgress.detail}
+                      </p>
+                    )}
+                    {playlistLoadProgress?.stage === "Downloading" && (
+                      <p className="text-sm mt-1 tabular-nums">
+                        {(playlistLoadProgress.bytes_downloaded / (1024 * 1024)).toFixed(1)} MB
+                        {playlistLoadProgress.elapsed_secs > 0 && (
+                          <span className="ml-2 text-text-quaternary">
+                            {(playlistLoadProgress.bytes_downloaded / playlistLoadProgress.elapsed_secs / (1024 * 1024)).toFixed(1)} MB/s
+                          </span>
+                        )}
+                      </p>
+                    )}
+                    {playlistLoadProgress?.stage === "Parsing" && (
+                      <p className="text-sm mt-1 tabular-nums">
+                        {playlistLoadProgress.channels_found.toLocaleString()} channels found
+                      </p>
+                    )}
+                    {playlistLoadProgress?.stage === "Processing" && (
+                      <p className="text-sm mt-1 text-text-quaternary">
+                        {playlistLoadProgress.detail}
+                      </p>
+                    )}
                   </>
                 ) : (
                   <>

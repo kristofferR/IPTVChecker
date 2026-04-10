@@ -882,18 +882,28 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     </label>
                     <input
                       type="number"
-                      value={draft.concurrency}
+                      value={draft.concurrency || ""}
+                      placeholder="Auto"
                       onChange={(event) => {
-                        const value = parseInt(event.target.value, 10);
+                        const raw = event.target.value.trim();
+                        if (raw === "") {
+                          updateSetting("concurrency", 0);
+                          return;
+                        }
+                        const value = parseInt(raw, 10);
                         updateSetting(
                           "concurrency",
-                          Number.isNaN(value) ? 1 : Math.max(1, Math.min(20, value)),
+                          Number.isNaN(value) ? 0 : Math.max(0, Math.min(20, value)),
                         );
                       }}
-                      min="1"
+                      min="0"
                       max="20"
                       className={inputClass}
                     />
+                    <p className="text-[11px] text-text-quaternary mt-1">
+                      0 or empty = auto (Xtream max for Xtream playlists, 10 for multi-server, 1
+                      for single-server)
+                    </p>
                   </div>
 
                 </div>
