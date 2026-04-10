@@ -226,6 +226,16 @@ mod tests {
     }
 
     #[test]
+    fn default_concurrency_stays_in_auto_mode() {
+        let settings = AppSettings::default();
+        assert_eq!(settings.concurrency, 0);
+
+        let deserialized: AppSettings = serde_json::from_value(serde_json::json!({}))
+            .expect("settings should deserialize with defaults");
+        assert_eq!(deserialized.concurrency, 0);
+    }
+
+    #[test]
     fn default_low_fps_threshold_is_23() {
         let settings = AppSettings::default();
         assert_eq!(settings.low_fps_threshold, 23.0);

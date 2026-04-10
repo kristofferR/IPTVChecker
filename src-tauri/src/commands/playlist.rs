@@ -102,17 +102,28 @@ fn server_location_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
 }
 
 /// Fast host extraction without full URL parsing.
-/// Handles `http://host:port/path` and `http://host/path` patterns.
+/// Handles `http://host:port/path`, `http://user:pass@host/path`, etc.
 fn extract_host_fast(url: &str) -> Option<&str> {
-    let after_scheme = url.strip_prefix("http://")
+    let after_scheme = url
+        .strip_prefix("http://")
         .or_else(|| url.strip_prefix("https://"))
         .or_else(|| url.strip_prefix("rtsp://"))
         .or_else(|| url.strip_prefix("rtmp://"))?;
-    // Host ends at first '/', ':', or '?' (port, path, or query)
-    let end = after_scheme
-        .find(|c: char| c == '/' || c == ':' || c == '?' || c == '@')
-        .unwrap_or(after_scheme.len());
-    let host = &after_scheme[..end];
+    // Skip userinfo if present (user:pass@)
+    let after_userinfo = after_scheme
+        .rfind('@')
+        .map(|pos| &after_scheme[pos + 1..])
+        .unwrap_or(after_scheme);
+    let host = if let Some(bracketed) = after_userinfo.strip_prefix('[') {
+        let end = bracketed.find(']')?;
+        &bracketed[..end]
+    } else {
+        // Host ends at first '/', ':', '?', or '#' (port, path, query, or fragment)
+        let end = after_userinfo
+            .find(|c: char| c == '/' || c == ':' || c == '?' || c == '#')
+            .unwrap_or(after_userinfo.len());
+        &after_userinfo[..end]
+    };
     if host.is_empty() {
         return None;
     }
@@ -1817,15 +1828,15 @@ pub async fn open_playlist(
     group_filter: Option<String>,
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
-    emit_load_progress(Some(&app), PlaylistLoadProgress::Parsing { channels_found: 0 });
+    emit_load_progress(
+        Some(&app),
+        PlaylistLoadProgress::Parsing { channels_found: 0 },
+    );
     let mut preview = {
         let last_emit = std::cell::Cell::new(Instant::now() - PROGRESS_THROTTLE);
         let on_progress = |channels_found: usize| {
             if last_emit.get().elapsed() >= PROGRESS_THROTTLE {
-                emit_load_progress(
-                    Some(&app),
-                    PlaylistLoadProgress::Parsing { channels_found },
-                );
+                emit_load_progress(Some(&app), PlaylistLoadProgress::Parsing { channels_found });
                 last_emit.set(Instant::now());
             }
         };
@@ -1848,8 +1859,7 @@ pub async fn open_playlist_url(
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
     let data_dir = app_data_dir(&app)?;
-    open_playlist_url_from_data_dir(Some(&app), &data_dir, &url, group_filter, channel_search)
-        .await
+    open_playlist_url_from_data_dir(Some(&app), &data_dir, &url, group_filter, channel_search).await
 }
 
 pub(crate) async fn open_playlist_url_from_data_dir(
@@ -1942,7 +1952,25 @@ pub async fn open_playlist_xtream(
         }
     };
 
-    let mut preview = parser::parse_playlist(&cached_path, &group_filter, &channel_search)?;
+    emit_load_progress(
+        Some(&app),
+        PlaylistLoadProgress::Parsing { channels_found: 0 },
+    );
+    let mut preview = {
+        let last_emit = std::cell::Cell::new(Instant::now() - PROGRESS_THROTTLE);
+        let on_progress = |channels_found: usize| {
+            if last_emit.get().elapsed() >= PROGRESS_THROTTLE {
+                emit_load_progress(Some(&app), PlaylistLoadProgress::Parsing { channels_found });
+                last_emit.set(Instant::now());
+            }
+        };
+        parser::parse_playlist_with_progress(
+            &cached_path,
+            &group_filter,
+            &channel_search,
+            Some(&on_progress),
+        )?
+    };
     let server_host = server.host_str().unwrap_or("Xtream");
     preview.file_name = format!("{} ({})", server_host, username);
     preview.source_identity = Some(source_key);
@@ -2648,11 +2676,11 @@ mod tests {
     use super::{
         build_stalker_endpoint_candidates, build_stalker_preview, build_xtream_download_url,
         build_xtream_player_api_action_url, build_xtream_player_api_url, build_xtream_source_key,
-        cleanup_stale_cache_temp_files, download_playlist_bytes,
-        extract_host_fast, is_single_provider,
+        cleanup_stale_cache_temp_files, download_playlist_bytes, extract_host_fast,
         extract_stalker_stream_url, extract_xtream_account_info, extract_xtream_max_connections,
-        normalize_stalker_mac, normalize_stalker_portal, normalize_url_identity,
-        normalize_xtream_server, parse_ipapi_location, source_cache_file_name,
+        is_single_provider, normalize_stalker_mac, normalize_stalker_portal,
+        normalize_url_identity, normalize_xtream_server, parse_ipapi_location,
+        source_cache_file_name,
     };
     use crate::models::channel::{Channel, ContentType};
     use std::time::Duration;
@@ -2829,6 +2857,20 @@ mod tests {
             super::dominant_host_from_counts(&counts),
             Some("one.example.com".to_string())
         );
+    }
+
+    #[test]
+    fn extract_host_fast_handles_userinfo_ipv6_and_empty_hosts() {
+        assert_eq!(
+            extract_host_fast("http://user:p@ss@host.example.com/live/1.m3u8"),
+            Some("host.example.com")
+        );
+        assert_eq!(
+            extract_host_fast("http://user:pass@[::1]:8080/path"),
+            Some("::1")
+        );
+        assert_eq!(extract_host_fast("http://"), None);
+        assert_eq!(extract_host_fast("https://?token=abc"), None);
     }
 
     #[test]
