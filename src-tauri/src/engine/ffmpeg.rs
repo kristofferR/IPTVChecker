@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
@@ -85,10 +85,30 @@ async fn graceful_kill(child: &mut tokio::process::Child, grace: std::time::Dura
     let _ = child.wait().await;
 }
 
+/// Cached resolved binary paths — resolved once per session.
+static FFMPEG_PATH: OnceLock<String> = OnceLock::new();
+static FFPROBE_PATH: OnceLock<String> = OnceLock::new();
+
+/// Cached ffmpeg/ffprobe availability — checked once per session.
+static FFTOOLS_AVAILABLE: OnceLock<(bool, bool)> = OnceLock::new();
+
 /// Resolve the path to an executable, preferring the bundled sidecar binary
-/// over the system PATH. This bypasses the Tauri shell plugin which can
-/// silently fail for long-running commands.
+/// over the system PATH. Results are cached per binary name for the session.
 fn resolve_binary(app: &AppHandle, name: &str) -> String {
+    let cache = match name {
+        "ffmpeg" => Some(&FFMPEG_PATH),
+        "ffprobe" => Some(&FFPROBE_PATH),
+        _ => None,
+    };
+    if let Some(lock) = cache {
+        return lock
+            .get_or_init(|| resolve_binary_uncached(app, name))
+            .clone();
+    }
+    resolve_binary_uncached(app, name)
+}
+
+fn resolve_binary_uncached(app: &AppHandle, name: &str) -> String {
     let ext = if cfg!(target_os = "windows") {
         ".exe"
     } else {
@@ -453,20 +473,24 @@ async fn run_tool_command(
 
 /// Check if ffmpeg and ffprobe sidecars are available.
 pub async fn check_availability(app: &AppHandle) -> (bool, bool) {
+    if let Some(&cached) = FFTOOLS_AVAILABLE.get() {
+        return cached;
+    }
+
     let no_cancel = CancellationToken::new();
     let version_timeout = Some(std::time::Duration::from_secs(5));
-    let ffmpeg_ok = run_tool_command(app, "ffmpeg", &["-version"], &no_cancel, version_timeout)
-        .await
-        .is_ok();
-    let ffprobe_ok = run_tool_command(app, "ffprobe", &["-version"], &no_cancel, version_timeout)
-        .await
-        .is_ok();
+    let (ffmpeg_result, ffprobe_result) = tokio::join!(
+        run_tool_command(app, "ffmpeg", &["-version"], &no_cancel, version_timeout),
+        run_tool_command(app, "ffprobe", &["-version"], &no_cancel, version_timeout),
+    );
+    let result = (ffmpeg_result.is_ok(), ffprobe_result.is_ok());
     log::debug!(
         "ffmpeg available: {}, ffprobe available: {}",
-        ffmpeg_ok,
-        ffprobe_ok
+        result.0,
+        result.1
     );
-    (ffmpeg_ok, ffprobe_ok)
+    let _ = FFTOOLS_AVAILABLE.set(result);
+    result
 }
 
 /// Video stream info from ffprobe.
