@@ -24,6 +24,7 @@ import type {
   ScanSettingsPreset,
   ScreenshotCacheStats,
 } from "../lib/types";
+import { useAppStore } from "../store";
 
 type SettingsTab = "general" | "scanning" | "media" | "network" | "advanced";
 
@@ -166,6 +167,7 @@ function SegmentedControl<T extends string>({
 }
 
 export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
+  const platform = useAppStore((s) => s.platform);
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [draft, setDraft] = useState<AppSettings>(settings);
   const [presetCollection, setPresetCollection] = useState<ScanPresetCollection>({
@@ -656,6 +658,26 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                       updateSetting("separate_placeholder_status", checked, { immediate: true })
                     }
                     ariaLabel="Separate placeholder status"
+                  />
+                </div>
+
+                <div className={rowClass}>
+                  <div>
+                    <p className="text-[13px] font-medium">Show header button text</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      {platform === "macos"
+                        ? "Display labels beside toolbar icons instead of the default icon-only macOS header."
+                        : "Display labels beside toolbar icons in the main window header."}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={draft.show_header_button_text}
+                    onChange={(checked) =>
+                      updateSetting("show_header_button_text", checked, {
+                        immediate: true,
+                      })
+                    }
+                    ariaLabel="Show header button text"
                   />
                 </div>
               </section>

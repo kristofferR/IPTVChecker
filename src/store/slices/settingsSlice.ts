@@ -2,6 +2,10 @@ import type { StateCreator } from "zustand";
 import type { AppStore, SettingsSlice } from "../types";
 import type { AppSettings, ScanPresetConfig } from "../../lib/types";
 import { getScanPresets, getSettings, updateSettings } from "../../lib/tauri";
+import { inferPlatformFromNavigator } from "../../lib/platform";
+
+const defaultShowHeaderButtonText =
+  inferPlatformFromNavigator() !== "macos";
 
 export const DEFAULT_SETTINGS: AppSettings = {
   timeout: 8.0,
@@ -30,6 +34,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   screenshot_retention_count: 1,
   low_space_threshold_gb: 5.0,
   separate_placeholder_status: true,
+  show_header_button_text: defaultShowHeaderButtonText,
 };
 
 function applyPresetConfig(

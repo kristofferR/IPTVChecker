@@ -63,6 +63,9 @@ const toolbarBtn =
 const toolbarBtnMac =
   "flex items-center justify-center px-3 py-[6px] toolbar-btn disabled:opacity-40 disabled:pointer-events-none";
 
+const toolbarBtnMacText =
+  "flex items-center gap-2 px-3 py-[6px] text-[13px] toolbar-btn disabled:opacity-40 disabled:pointer-events-none";
+
 const dragIgnoreSelector =
   "button, input, textarea, select, a, [role='button'], [contenteditable='true'], [data-no-window-drag]";
 
@@ -101,6 +104,9 @@ export const Toolbar = memo(function Toolbar({
   const selectedIndices = useAppStore((s) => s.selectedChannelIndices);
   const separatePlaceholder = useAppStore(
     (s) => s.settings.separate_placeholder_status,
+  );
+  const showHeaderButtonText = useAppStore(
+    (s) => s.settings.show_header_button_text,
   );
   const searchTextCacheRef = useRef<SearchTextCache>(new WeakMap());
 
@@ -203,6 +209,7 @@ export const Toolbar = memo(function Toolbar({
   }, [channelSearch]);
 
   const isMac = platform === "macos";
+  const showButtonText = showHeaderButtonText;
   const scanning = scanState === "scanning";
   const paused = scanState === "paused";
   const inScanSession = scanning || paused;
@@ -262,7 +269,15 @@ export const Toolbar = memo(function Toolbar({
   };
 
   const dragRegionAttr = useWindowDragRegion ? true : undefined;
-  const btn = isMac ? toolbarBtnMac : toolbarBtn;
+  const btn = showButtonText
+    ? isMac
+      ? toolbarBtnMacText
+      : toolbarBtn
+    : isMac
+      ? toolbarBtnMac
+      : `${toolbarBtn} justify-center px-2.5`;
+  const btnWithOptionalText = (extraClasses = "") =>
+    `${btn} ${extraClasses}`.trim();
   const toolbarPadding = hasPlaylist
     ? "pt-[var(--toolbar-pt)] pb-2"
     : isMac
@@ -283,40 +298,44 @@ export const Toolbar = memo(function Toolbar({
             {scanning ? (
               <button
                 onClick={onPauseScan}
-                className={btn}
+                className={btnWithOptionalText()}
                 title="Pause Scan"
+                aria-label="Pause Scan"
               >
                 <IconPause className="w-[22px] h-[22px]" />
-                {!isMac && "Pause"}
+                {showButtonText && "Pause"}
               </button>
             ) : (
               <button
                 onClick={onResumeScan}
-                className={isMac ? btn : `${btn} toolbar-btn-primary`}
+                className={btnWithOptionalText("toolbar-btn-primary")}
                 title="Resume Scan"
+                aria-label="Resume Scan"
               >
                 <IconPlay className="w-[22px] h-[22px]" />
-                {!isMac && "Resume"}
+                {showButtonText && "Resume"}
               </button>
             )}
             <button
               onClick={onStopScan}
-              className={`${btn} toolbar-btn-stop`}
+              className={btnWithOptionalText("toolbar-btn-stop")}
               title="Stop Scan"
+              aria-label="Stop Scan"
             >
               <IconStop className="w-[19px] h-[19px]" />
-              {!isMac && "Stop"}
+              {showButtonText && "Stop"}
             </button>
           </>
         ) : (
           <button
             onClick={onStartScan}
             disabled={scanDisabledReason !== null}
-            title={scanDisabledReason ?? (isMac ? "Scan" : undefined)}
-            className={isMac ? btn : `${btn} toolbar-btn-primary`}
+            title={scanDisabledReason ?? "Scan"}
+            className={btnWithOptionalText("toolbar-btn-primary")}
+            aria-label={scanLabel}
           >
             <IconScan className="w-[22px] h-[22px]" />
-            {!isMac && scanLabel}
+            {showButtonText && scanLabel}
           </button>
         )}
       </div>
@@ -326,31 +345,34 @@ export const Toolbar = memo(function Toolbar({
         <button
           onClick={onOpen}
           disabled={inScanSession}
-          className={btn}
+          className={btnWithOptionalText()}
           title="Open File"
+          aria-label="Open File"
         >
           <IconOpen className="w-[22px] h-[22px]" />
-          {!isMac && "Open"}
+          {showButtonText && "Open"}
         </button>
 
         <button
           onClick={onOpenFolder}
           disabled={inScanSession}
-          className={btn}
+          className={btnWithOptionalText()}
           title="Open Folder"
+          aria-label="Open Folder"
         >
           <IconFolder className="w-[22px] h-[22px]" />
-          {!isMac && "Open Folder"}
+          {showButtonText && "Open Folder"}
         </button>
 
         <button
           onClick={onOpenUrl}
           disabled={inScanSession}
-          className={btn}
+          className={btnWithOptionalText()}
           title="Open URL"
+          aria-label="Open URL"
         >
           <IconLink className="w-[22px] h-[22px]" />
-          {!isMac && "Open URL"}
+          {showButtonText && "Open URL"}
         </button>
       </div>
 
@@ -436,6 +458,7 @@ export const Toolbar = memo(function Toolbar({
           playlistName={playlistName}
           playlistPath={playlistPath}
           disabled={!hasResults}
+          showButtonText={showButtonText}
           menuRequest={menuExportRequest}
           scanState={scanState}
           isMac={isMac}
@@ -444,29 +467,33 @@ export const Toolbar = memo(function Toolbar({
         <button
           onClick={onToggleReport}
           disabled={!hasPlaylist}
-          className={`${isMac ? btn : `${btn} px-2.5`} ${showReport ? "toolbar-btn-primary" : ""}`}
+          className={`${btnWithOptionalText()} ${showReport ? "toolbar-btn-primary" : ""}`.trim()}
           title={showReport ? "Hide Report" : "Show Report"}
+          aria-label={showReport ? "Hide Report" : "Show Report"}
         >
           <IconReport className="w-[22px] h-[22px]" />
-          {!isMac && "Report"}
+          {showButtonText && "Report"}
         </button>
 
         <button
           onClick={handleOpenHistory}
           disabled={!hasPlaylist}
-          className={isMac ? btn : `${btn} px-2.5`}
+          className={btnWithOptionalText()}
           title="History"
+          aria-label="History"
         >
           <IconHistory className="w-[22px] h-[22px]" />
-          {!isMac && "History"}
+          {showButtonText && "History"}
         </button>
 
         <button
           onClick={onOpenSettings}
-          className={isMac ? btn : `${btn} px-2 min-w-9 justify-center`}
+          className={btnWithOptionalText("min-w-9")}
           title="Settings"
+          aria-label="Settings"
         >
           <IconSettings className="w-[22px] h-[22px]" />
+          {showButtonText && "Settings"}
         </button>
       </div>
     </div>
