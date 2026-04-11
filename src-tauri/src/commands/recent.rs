@@ -10,6 +10,10 @@ use crate::error::AppError;
 const RECENT_STORE_KEY: &str = "recent_playlists";
 const RECENT_LIMIT: usize = 10;
 const RECENT_SLOT_COUNT: usize = 10;
+const DEFAULT_PLAYLIST_URL: &str = "https://iptv-org.github.io/iptv/index.m3u";
+const DEFAULT_PLAYLIST_LABEL: &str = "iptv-org — Full index";
+const LEGACY_DEFAULT_PLAYLIST_URL: &str = "https://iptv-org.github.io/iptv/categories/news.m3u";
+const LEGACY_DEFAULT_PLAYLIST_LABEL: &str = "iptv-org — News channels";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
@@ -128,8 +132,8 @@ fn build_label(kind: &RecentPlaylistKind, value: &str) -> String {
 fn default_recent_playlists() -> Vec<RecentPlaylistEntry> {
     vec![RecentPlaylistEntry {
         kind: RecentPlaylistKind::Url,
-        value: "https://iptv-org.github.io/iptv/categories/news.m3u".to_string(),
-        label: "iptv-org — News channels".to_string(),
+        value: DEFAULT_PLAYLIST_URL.to_string(),
+        label: DEFAULT_PLAYLIST_LABEL.to_string(),
     }]
 }
 
@@ -168,17 +172,30 @@ fn sanitize_recent_playlists(entries: Vec<RecentPlaylistEntry>) -> Vec<RecentPla
             continue;
         }
 
-        let value = match entry.kind {
+        let (entry_kind, entry_value, entry_label) = if entry.kind == RecentPlaylistKind::Url
+            && raw_value == LEGACY_DEFAULT_PLAYLIST_URL
+            && entry.label.trim() == LEGACY_DEFAULT_PLAYLIST_LABEL
+        {
+            (
+                RecentPlaylistKind::Url,
+                DEFAULT_PLAYLIST_URL.to_string(),
+                DEFAULT_PLAYLIST_LABEL.to_string(),
+            )
+        } else {
+            (entry.kind.clone(), raw_value.to_string(), entry.label.clone())
+        };
+
+        let value = match entry_kind {
             RecentPlaylistKind::File => {
-                let normalized = raw_value.to_string();
+                let normalized = entry_value;
                 if !Path::new(&normalized).exists() {
                     continue;
                 }
                 normalized
             }
-            RecentPlaylistKind::Url => raw_value.to_string(),
+            RecentPlaylistKind::Url => entry_value,
             RecentPlaylistKind::Xtream => {
-                let Some(source) = parse_xtream_recent_value(raw_value) else {
+                let Some(source) = parse_xtream_recent_value(&entry_value) else {
                     continue;
                 };
                 let xtream_key = (source.server.clone(), source.username.clone());
@@ -193,19 +210,19 @@ fn sanitize_recent_playlists(entries: Vec<RecentPlaylistEntry>) -> Vec<RecentPla
             }
         };
 
-        let key = (entry.kind.clone(), value.clone());
+        let key = (entry_kind.clone(), value.clone());
         if seen.contains(&key) {
             continue;
         }
         seen.insert(key);
 
         sanitized.push(RecentPlaylistEntry {
-            kind: entry.kind.clone(),
+            kind: entry_kind.clone(),
             value: value.clone(),
-            label: if entry.label.trim().is_empty() {
-                build_label(&entry.kind, &value)
+            label: if entry_label.trim().is_empty() {
+                build_label(&entry_kind, &value)
             } else {
-                entry.label
+                entry_label
             },
         });
 
@@ -398,9 +415,34 @@ pub async fn clear_recent_playlists(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_label, parse_xtream_recent_value, sanitize_recent_playlists, RecentPlaylistEntry,
+        build_label, default_recent_playlists, parse_xtream_recent_value,
+        sanitize_recent_playlists, DEFAULT_PLAYLIST_LABEL, DEFAULT_PLAYLIST_URL,
+        LEGACY_DEFAULT_PLAYLIST_LABEL, LEGACY_DEFAULT_PLAYLIST_URL, RecentPlaylistEntry,
         RecentPlaylistKind,
     };
+
+    #[test]
+    fn default_recent_playlist_points_to_iptv_org_index() {
+        let entries = default_recent_playlists();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, RecentPlaylistKind::Url);
+        assert_eq!(entries[0].value, DEFAULT_PLAYLIST_URL);
+        assert_eq!(entries[0].label, DEFAULT_PLAYLIST_LABEL);
+    }
+
+    #[test]
+    fn sanitize_recent_playlists_migrates_legacy_seeded_default() {
+        let entries = sanitize_recent_playlists(vec![RecentPlaylistEntry {
+            kind: RecentPlaylistKind::Url,
+            value: LEGACY_DEFAULT_PLAYLIST_URL.to_string(),
+            label: LEGACY_DEFAULT_PLAYLIST_LABEL.to_string(),
+        }]);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].kind, RecentPlaylistKind::Url);
+        assert_eq!(entries[0].value, DEFAULT_PLAYLIST_URL);
+        assert_eq!(entries[0].label, DEFAULT_PLAYLIST_LABEL);
+    }
 
     #[test]
     fn parse_xtream_recent_value_requires_valid_shape() {
