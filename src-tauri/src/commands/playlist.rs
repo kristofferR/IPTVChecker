@@ -298,7 +298,8 @@ async fn populate_server_metadata(app: Option<&AppHandle>, preview: &mut Playlis
         preview.single_provider = max * 10 >= total * 9;
     }
 
-    // server_location
+    // server_location — only look up when ≥90% of channels share the same host
+    if preview.single_provider {
     if let Some(host) = dominant_host_from_counts(&counts) {
         if !host.eq_ignore_ascii_case("localhost") {
             if let Ok(cache) = server_location_cache().lock() {
@@ -322,6 +323,7 @@ async fn populate_server_metadata(app: Option<&AppHandle>, preview: &mut Playlis
             }
             preview.server_location = location;
         }
+    }
     }
 }
 

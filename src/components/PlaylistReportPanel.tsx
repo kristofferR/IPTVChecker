@@ -284,10 +284,14 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
 
         <div className="mt-2 flex items-center gap-2 text-[12px]">
           <span className={`font-medium ${statusClass}`}>{statusLabel}</span>
-          <span className="text-text-tertiary">•</span>
-          <span className="text-text-secondary truncate" title={playlist.server_location ?? "Unknown location"}>
-            {playlist.server_location ?? "Unknown location"}
-          </span>
+          {playlist.server_location && (
+            <>
+              <span className="text-text-tertiary">•</span>
+              <span className="text-text-secondary truncate" title={playlist.server_location}>
+                {playlist.server_location}
+              </span>
+            </>
+          )}
           <span className="text-text-tertiary">•</span>
           <span className="text-text-secondary">
             {latencyStats.average == null ? "Ping N/A" : `Avg ${Math.round(latencyStats.average)} ms`}
