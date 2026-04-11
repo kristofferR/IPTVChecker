@@ -125,6 +125,7 @@ jobs:
       - name: Update Homebrew tap
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          RELEASE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
             echo "HOMEBREW_TAP_TOKEN not configured, skipping tap update"
@@ -135,19 +136,21 @@ jobs:
           REPO="kristofferR/IPTVChecker"
           TAP_REPO="kristofferR/homebrew-tap"
 
-          # Download assets and compute SHA256 hashes
+          # Download assets using GITHUB_TOKEN (has access to IPTVChecker repo)
+          mkdir -p /tmp/assets
           for asset in \
             "IPTV.Checker_${VERSION}_mac_arm.dmg" \
             "IPTV.Checker_${VERSION}_mac_x64.dmg" \
             "IPTV.Checker_${VERSION}_lin_arm.AppImage" \
             "IPTV.Checker_${VERSION}_lin_x64.AppImage"; do
-            gh release download "$GITHUB_REF_NAME" --repo "$REPO" --pattern "$asset" --dir /tmp/assets || true
+            GH_TOKEN="$RELEASE_TOKEN" gh release download "$GITHUB_REF_NAME" --repo "$REPO" --pattern "$asset" --dir /tmp/assets
           done
 
-          SHA_MAC_ARM=$(sha256sum "/tmp/assets/IPTV.Checker_${VERSION}_mac_arm.dmg" 2>/dev/null | cut -d' ' -f1 || echo "FIXME")
-          SHA_MAC_X64=$(sha256sum "/tmp/assets/IPTV.Checker_${VERSION}_mac_x64.dmg" 2>/dev/null | cut -d' ' -f1 || echo "FIXME")
-          SHA_LIN_ARM=$(sha256sum "/tmp/assets/IPTV.Checker_${VERSION}_lin_arm.AppImage" 2>/dev/null | cut -d' ' -f1 || echo "FIXME")
-          SHA_LIN_X64=$(sha256sum "/tmp/assets/IPTV.Checker_${VERSION}_lin_x64.AppImage" 2>/dev/null | cut -d' ' -f1 || echo "FIXME")
+          # Compute SHA256 hashes (fail if any asset is missing)
+          SHA_MAC_ARM=$(sha256sum "/tmp/assets/IPTV.Checker_${VERSION}_mac_arm.dmg" | cut -d' ' -f1)
+          SHA_MAC_X64=$(sha256sum "/tmp/assets/IPTV.Checker_${VERSION}_mac_x64.dmg" | cut -d' ' -f1)
+          SHA_LIN_ARM=$(sha256sum "/tmp/assets/IPTV.Checker_${VERSION}_lin_arm.AppImage" | cut -d' ' -f1)
+          SHA_LIN_X64=$(sha256sum "/tmp/assets/IPTV.Checker_${VERSION}_lin_x64.AppImage" | cut -d' ' -f1)
 
           # Generate updated cask formula
           cat > /tmp/iptv-checker.rb << CASK_EOF
