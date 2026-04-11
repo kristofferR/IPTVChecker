@@ -25,6 +25,7 @@ import { isScanActive } from "../lib/scanState";
 import { isInputLikeTarget, isPrimaryModifierPressed } from "../lib/shortcuts";
 import { channelRowHeightPixels } from "../lib/channelLogoSize";
 import { detectChannelProtocol } from "../lib/streamProtocol";
+import { getChannelTableLayout } from "../lib/channelTableLayout";
 import { useAppStore } from "../store";
 
 interface ChannelTableProps {
@@ -1118,10 +1119,9 @@ export function ChannelTable({
         );
       })
     : [];
-  const scrollContainerTop = hasMacHeaderReveal
-    ? 0
-    : "calc(-1 * var(--toolbar-height, 0px))";
-  const contentPaddingTop = portalTarget ? undefined : "calc(var(--toolbar-height, 0px) + 2rem)";
+  const { scrollContainerTop } = getChannelTableLayout({
+    hasPortaledHeader: Boolean(portalTarget),
+  });
 
   const renderVirtualRows = useCallback(
     (
@@ -1316,7 +1316,6 @@ export function ChannelTable({
           style={{
             minWidth: `${tableWidth}px`,
             minHeight: "100%",
-            paddingTop: contentPaddingTop,
           }}
         >
 

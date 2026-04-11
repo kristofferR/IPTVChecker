@@ -2134,7 +2134,6 @@ export default function App() {
     if (!el) return;
     const update = () => {
       const nextToolbarHeight = el.offsetHeight;
-      document.documentElement.style.setProperty("--toolbar-height", `${nextToolbarHeight}px`);
       setToolbarHeight((prev) =>
         prev === nextToolbarHeight ? prev : nextToolbarHeight,
       );
