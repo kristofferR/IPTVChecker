@@ -85,6 +85,7 @@ pub struct AppSettings {
     pub screenshot_retention_count: u32,
     pub low_space_threshold_gb: f64,
     pub separate_placeholder_status: bool,
+    pub show_header_button_text: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -210,6 +211,7 @@ impl Default for AppSettings {
             screenshot_retention_count: 1,
             low_space_threshold_gb: 5.0,
             separate_placeholder_status: true,
+            show_header_button_text: !cfg!(target_os = "macos"),
         }
     }
 }
@@ -257,6 +259,7 @@ mod tests {
         assert!(settings.report_auto_reveal);
         assert_eq!(settings.low_fps_threshold, 23.0);
         assert_eq!(settings.channel_logo_size, super::ChannelLogoSize::Small);
+        assert_eq!(settings.show_header_button_text, !cfg!(target_os = "macos"));
     }
 
     #[test]

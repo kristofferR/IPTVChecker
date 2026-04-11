@@ -230,6 +230,7 @@ export interface AppSettings {
   screenshot_retention_count: number;
   low_space_threshold_gb: number;
   separate_placeholder_status: boolean;
+  show_header_button_text: boolean;
 }
 
 export interface ScanPresetConfig {
