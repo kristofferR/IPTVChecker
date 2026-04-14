@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { FolderOpen, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { SavedPlaylistDraft } from "../lib/types";
@@ -37,6 +37,22 @@ function validateDraft(draft: SavedPlaylistDraft): string | null {
     }
   }
   return null;
+}
+
+function handleSelectAllShortcut(
+  event: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
+): void {
+  const lowerKey = event.key.toLowerCase();
+  const hasPrimaryModifier =
+    (event.metaKey && !event.ctrlKey) || (event.ctrlKey && !event.metaKey);
+
+  if (!hasPrimaryModifier || event.altKey || event.shiftKey || lowerKey !== "a") {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  event.currentTarget.select();
 }
 
 export default function SavedPlaylistEditorDialog({
@@ -145,6 +161,7 @@ export default function SavedPlaylistEditorDialog({
             <input
               type="text"
               value={form.display_name}
+              onKeyDown={handleSelectAllShortcut}
               onChange={(event) =>
                 setForm({ ...form, display_name: event.target.value } as SavedPlaylistDraft)
               }
@@ -159,6 +176,7 @@ export default function SavedPlaylistEditorDialog({
                 <input
                   type="text"
                   value={form.path}
+                  onKeyDown={handleSelectAllShortcut}
                   onChange={(event) =>
                     setForm({ ...form, path: event.target.value } as SavedPlaylistDraft)
                   }
@@ -182,6 +200,7 @@ export default function SavedPlaylistEditorDialog({
               <input
                 type="text"
                 value={form.url}
+                onKeyDown={handleSelectAllShortcut}
                 onChange={(event) =>
                   setForm({ ...form, url: event.target.value } as SavedPlaylistDraft)
                 }
@@ -200,6 +219,7 @@ export default function SavedPlaylistEditorDialog({
                   <input
                     type="text"
                     value={form.username}
+                    onKeyDown={handleSelectAllShortcut}
                     onChange={(event) =>
                       setForm({
                         ...form,
@@ -216,6 +236,7 @@ export default function SavedPlaylistEditorDialog({
                   <input
                     type="password"
                     value={form.password ?? ""}
+                    onKeyDown={handleSelectAllShortcut}
                     onChange={(event) =>
                       setForm({
                         ...form,
@@ -235,6 +256,7 @@ export default function SavedPlaylistEditorDialog({
                   rows={5}
                   value={form.servers.join("\n")}
                   placeholder={"http://server-1.example.com\nhttp://server-2.example.com"}
+                  onKeyDown={handleSelectAllShortcut}
                   onChange={(event) =>
                     setForm({
                       ...form,
