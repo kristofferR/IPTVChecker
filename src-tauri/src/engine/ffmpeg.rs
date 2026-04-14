@@ -55,7 +55,7 @@ const TARGET_TRIPLE: &str = "aarch64-pc-windows-msvc";
 
 /// Send SIGTERM (Unix) and wait up to `grace` for the process to exit.
 /// Falls back to SIGKILL if the grace period expires or on Windows.
-async fn graceful_kill(child: &mut tokio::process::Child, grace: std::time::Duration) {
+async fn graceful_kill(child: &mut tokio::process::Child, _grace: std::time::Duration) {
     #[cfg(unix)]
     {
         if let Some(pid) = child.id() {
@@ -63,7 +63,7 @@ async fn graceful_kill(child: &mut tokio::process::Child, grace: std::time::Dura
             unsafe {
                 libc::kill(pid as libc::pid_t, libc::SIGTERM);
             }
-            match tokio::time::timeout(grace, child.wait()).await {
+            match tokio::time::timeout(_grace, child.wait()).await {
                 Ok(_) => return,
                 Err(_) => {
                     log::debug!(

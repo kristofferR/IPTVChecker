@@ -10,11 +10,14 @@ import {
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   BarChart3,
+  BookmarkPlus,
   History,
   Folder,
   FolderOpen,
+  Library,
   Link2,
   Pause,
+  PencilLine,
   Play,
   Radar,
   Square,
@@ -48,6 +51,9 @@ interface ToolbarProps {
   onOpen: () => void;
   onOpenFolder: () => void;
   onOpenUrl: () => void;
+  onRenamePlaylist: () => void;
+  onSavePlaylist: () => void;
+  onManageSavedPlaylists: () => void;
   onStartScan: () => void;
   onPauseScan: () => void;
   onResumeScan: () => void;
@@ -75,6 +81,9 @@ export const Toolbar = memo(function Toolbar({
   onOpen,
   onOpenFolder,
   onOpenUrl,
+  onRenamePlaylist,
+  onSavePlaylist,
+  onManageSavedPlaylists,
   onStartScan,
   onPauseScan,
   onResumeScan,
@@ -229,6 +238,9 @@ export const Toolbar = memo(function Toolbar({
   const IconOpen = isMac ? SFDocumentViewfinder : FolderOpen;
   const IconFolder = isMac ? SFFolder : Folder;
   const IconLink = isMac ? SFLink : Link2;
+  const IconRename = PencilLine;
+  const IconSavePlaylist = BookmarkPlus;
+  const IconSavedPlaylists = Library;
   const IconPlay = isMac ? SFPlayFill : Play;
   const IconScan = Radar;
   const IconPause = isMac ? SFPauseFill : Pause;
@@ -340,7 +352,7 @@ export const Toolbar = memo(function Toolbar({
         )}
       </div>
 
-      {/* Source group: Open, Open Folder, Open URL */}
+      {/* Source group: Open, Open Folder, Open URL, Rename, Save */}
       <div className={isMac ? "toolbar-group" : "flex items-center gap-1.5"}>
         <button
           onClick={onOpen}
@@ -373,6 +385,39 @@ export const Toolbar = memo(function Toolbar({
         >
           <IconLink className="w-[22px] h-[22px]" />
           {showButtonText && "Open URL"}
+        </button>
+
+        <button
+          onClick={onRenamePlaylist}
+          disabled={!hasPlaylist || inScanSession}
+          className={btnWithOptionalText()}
+          title="Rename Playlist"
+          aria-label="Rename Playlist"
+        >
+          <IconRename className="w-[18px] h-[18px]" />
+          {showButtonText && "Rename"}
+        </button>
+
+        <button
+          onClick={onSavePlaylist}
+          disabled={!hasPlaylist || inScanSession}
+          className={btnWithOptionalText()}
+          title="Save Playlist"
+          aria-label="Save Playlist"
+        >
+          <IconSavePlaylist className="w-[18px] h-[18px]" />
+          {showButtonText && "Save"}
+        </button>
+
+        <button
+          onClick={onManageSavedPlaylists}
+          disabled={inScanSession}
+          className={btnWithOptionalText()}
+          title="Saved Playlists"
+          aria-label="Saved Playlists"
+        >
+          <IconSavedPlaylists className="w-[18px] h-[18px]" />
+          {showButtonText && "Saved"}
         </button>
       </div>
 
