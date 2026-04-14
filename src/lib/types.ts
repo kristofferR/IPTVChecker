@@ -98,6 +98,21 @@ export interface XtreamOpenRequest {
 
 export type SavedPlaylistKind = "file" | "url" | "xtream";
 
+export type RenameSourceDescriptor =
+  | {
+      kind: "path";
+      path: string;
+    }
+  | {
+      kind: "url";
+      url: string;
+    }
+  | {
+      kind: "xtream";
+      server: string;
+      username: string;
+    };
+
 export type SavedPlaylistEntry =
   | {
       id: string;
@@ -147,6 +162,12 @@ export type SavedPlaylistDraft =
 export interface SavedPlaylistUpsertResult {
   entry: SavedPlaylistEntry;
   entries: SavedPlaylistEntry[];
+}
+
+export interface RenamePlaylistSourceInput {
+  saved_playlist_id?: string | null;
+  descriptor?: RenameSourceDescriptor | null;
+  display_name: string;
 }
 
 export interface StalkerOpenRequest {

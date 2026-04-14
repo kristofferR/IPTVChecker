@@ -280,7 +280,18 @@ fn sanitize_recent_playlists_inner(
         let saved_playlist_id = if let Some(app) = app {
             entry_saved_playlist_id
                 .as_deref()
-                .and_then(|id| crate::commands::saved::saved_playlist_by_id(app, id))
+                .and_then(
+                    |id| match crate::commands::saved::saved_playlist_by_id(app, id) {
+                        Ok(entry) => entry,
+                        Err(error) => {
+                            log::warn!(
+                                "Failed to resolve saved playlist '{id}' for recent menu: {}",
+                                error
+                            );
+                            None
+                        }
+                    },
+                )
                 .map(|entry| entry.id)
         } else {
             entry_saved_playlist_id.clone()

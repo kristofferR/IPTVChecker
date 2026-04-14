@@ -7,6 +7,7 @@ import {
   normalizeUrlIdentity,
   normalizeXtreamServer,
   savedPlaylistSecondaryLabel,
+  savedEntryToSourceDescriptor,
 } from "../src/lib/savedPlaylists";
 import type { CurrentSourceDescriptor, SavedPlaylistEntry } from "../src/lib/types";
 
@@ -166,6 +167,25 @@ describe("saved playlist helpers", () => {
       kind: "xtream",
       server: "https://alpha.example.com",
       username: "alice",
+    });
+  });
+
+  it("rebuilds concrete source descriptors from saved playlists", () => {
+    expect(savedEntryToSourceDescriptor(savedPlaylists[0]!)).toEqual({
+      kind: "path",
+      path: "/tmp/demo.m3u",
+    });
+
+    expect(savedEntryToSourceDescriptor(savedPlaylists[1]!)).toEqual({
+      kind: "url",
+      url: "https://example.com/playlist.m3u#fragment",
+    });
+
+    expect(savedEntryToSourceDescriptor(savedPlaylists[2]!)).toEqual({
+      kind: "xtream",
+      server: "https://beta.example.com",
+      username: "alice",
+      password: "secret",
     });
   });
 });

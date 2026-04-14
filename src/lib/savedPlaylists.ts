@@ -1,5 +1,6 @@
 import type {
   CurrentSourceDescriptor,
+  RenameSourceDescriptor,
   SavedPlaylistDraft,
   SavedPlaylistEntry,
 } from "./types";
@@ -153,13 +154,38 @@ export function buildSavedPlaylistDraftFromSource(
   }
 }
 
+export function savedEntryToSourceDescriptor(
+  entry: SavedPlaylistEntry,
+): CurrentSourceDescriptor | null {
+  switch (entry.kind) {
+    case "file":
+      return {
+        kind: "path",
+        path: entry.path,
+      };
+    case "url":
+      return {
+        kind: "url",
+        url: entry.url,
+      };
+    case "xtream": {
+      const server = entry.preferred_server ?? entry.servers[0] ?? null;
+      if (!server || !entry.password) {
+        return null;
+      }
+      return {
+        kind: "xtream",
+        server,
+        username: entry.username,
+        password: entry.password,
+      };
+    }
+  }
+}
+
 export function buildRenameDescriptor(
   descriptor: CurrentSourceDescriptor | null,
-):
-  | { kind: "path"; path: string }
-  | { kind: "url"; url: string }
-  | { kind: "xtream"; server: string; username: string }
-  | null {
+): RenameSourceDescriptor | null {
   if (!descriptor) {
     return null;
   }
