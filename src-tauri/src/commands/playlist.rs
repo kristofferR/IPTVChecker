@@ -348,7 +348,7 @@ fn hash_source_key(source_key: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-fn normalize_url_identity(url: &Url) -> String {
+pub(crate) fn normalize_url_identity(url: &Url) -> String {
     let mut normalized = url.clone();
     normalized.set_fragment(None);
     if (normalized.scheme() == "http" && normalized.port() == Some(80))
@@ -366,7 +366,7 @@ fn source_cache_file_name(source_key: &str) -> String {
 /// Derive a human-friendly playlist name from a URL.
 /// Prefers the filename from the path (e.g. "news.m3u"), falling back to the
 /// hostname (e.g. "iptv-org.github.io").
-fn friendly_name_from_url(url: &Url) -> String {
+pub(crate) fn friendly_name_from_url(url: &Url) -> String {
     if let Some(segments) = url.path_segments() {
         if let Some(last) = segments.filter(|s| !s.is_empty()).last() {
             // Use the segment if it looks like a real name (has extension,
@@ -706,7 +706,7 @@ async fn download_playlist_to_cache_in_data_dir(
     download_playlist_to_cache(app, cache_path, download_url, error_label).await
 }
 
-fn normalize_xtream_server(server: &str) -> Result<Url, AppError> {
+pub(crate) fn normalize_xtream_server(server: &str) -> Result<Url, AppError> {
     let mut parsed = parse_http_url(server, "Invalid Xtream server URL")?;
     if parsed.host_str().is_none() {
         return Err(AppError::Parse(
@@ -801,7 +801,7 @@ fn build_xtream_player_api_action_url(
     api_url
 }
 
-fn build_xtream_source_key(server: &Url, username: &str) -> String {
+pub(crate) fn build_xtream_source_key(server: &Url, username: &str) -> String {
     format!(
         "xtream:{}|{}|m3u_plus|ts",
         xtream_server_identity(server),
@@ -1738,6 +1738,7 @@ fn build_stalker_preview(
             normalize_url_identity(portal).trim_end_matches('/'),
             mac.to_ascii_lowercase()
         )),
+        saved_playlist_id: None,
         server_location: None,
         single_provider: true,
         xtream_max_connections: None,
@@ -1830,15 +1831,27 @@ pub async fn open_playlist(
     group_filter: Option<String>,
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
+    let mut preview =
+        open_playlist_path_inner(&app, path, group_filter, channel_search).await?;
+    crate::commands::saved::apply_persisted_playlist_metadata(&app, &mut preview, None, None)?;
+    Ok(preview)
+}
+
+pub(crate) async fn open_playlist_path_inner(
+    app: &AppHandle,
+    path: String,
+    group_filter: Option<String>,
+    channel_search: Option<String>,
+) -> Result<PlaylistPreview, AppError> {
     emit_load_progress(
-        Some(&app),
+        Some(app),
         PlaylistLoadProgress::Parsing { channels_found: 0 },
     );
     let mut preview = {
         let last_emit = std::cell::Cell::new(Instant::now() - PROGRESS_THROTTLE);
         let on_progress = |channels_found: usize| {
             if last_emit.get().elapsed() >= PROGRESS_THROTTLE {
-                emit_load_progress(Some(&app), PlaylistLoadProgress::Parsing { channels_found });
+                emit_load_progress(Some(app), PlaylistLoadProgress::Parsing { channels_found });
                 last_emit.set(Instant::now());
             }
         };
@@ -1849,7 +1862,7 @@ pub async fn open_playlist(
             Some(&on_progress),
         )?
     };
-    populate_server_metadata(Some(&app), &mut preview).await;
+    populate_server_metadata(Some(app), &mut preview).await;
     Ok(preview)
 }
 
@@ -1861,7 +1874,11 @@ pub async fn open_playlist_url(
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
     let data_dir = app_data_dir(&app)?;
-    open_playlist_url_from_data_dir(Some(&app), &data_dir, &url, group_filter, channel_search).await
+    let mut preview =
+        open_playlist_url_from_data_dir(Some(&app), &data_dir, &url, group_filter, channel_search)
+            .await?;
+    crate::commands::saved::apply_persisted_playlist_metadata(&app, &mut preview, None, None)?;
+    Ok(preview)
 }
 
 pub(crate) async fn open_playlist_url_from_data_dir(
@@ -1907,6 +1924,19 @@ pub async fn open_playlist_xtream(
     group_filter: Option<String>,
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
+    let mut preview =
+        open_playlist_xtream_inner(&app, &source, group_filter, channel_search, None).await?;
+    crate::commands::saved::apply_persisted_playlist_metadata(&app, &mut preview, None, None)?;
+    Ok(preview)
+}
+
+pub(crate) async fn open_playlist_xtream_inner(
+    app: &tauri::AppHandle,
+    source: &XtreamOpenRequest,
+    group_filter: Option<String>,
+    channel_search: Option<String>,
+    source_identity_override: Option<String>,
+) -> Result<PlaylistPreview, AppError> {
     let username = source.username.trim().to_string();
     if username.is_empty() {
         return Err(AppError::Parse(
@@ -1924,14 +1954,14 @@ pub async fn open_playlist_xtream(
     let server = normalize_xtream_server(&source.server)?;
     let source_key = build_xtream_source_key(&server, &username);
     let download_url = build_xtream_download_url(&server, &username, &password);
-    let data_dir = app_data_dir(&app)?;
+    let data_dir = app_data_dir(app)?;
     let cache_path = remote_playlist_cache_path_from_data_dir(&data_dir, &source_key)?;
 
     // Try /get.php and account info in parallel.
     let (xtream_account_info, m3u_result) = tokio::join!(
         fetch_xtream_account_info(&server, &username, &password),
         download_playlist_to_cache_in_data_dir(
-            Some(&app),
+            Some(app),
             &data_dir,
             &source_key,
             &download_url,
@@ -1955,14 +1985,14 @@ pub async fn open_playlist_xtream(
     };
 
     emit_load_progress(
-        Some(&app),
+        Some(app),
         PlaylistLoadProgress::Parsing { channels_found: 0 },
     );
     let mut preview = {
         let last_emit = std::cell::Cell::new(Instant::now() - PROGRESS_THROTTLE);
         let on_progress = |channels_found: usize| {
             if last_emit.get().elapsed() >= PROGRESS_THROTTLE {
-                emit_load_progress(Some(&app), PlaylistLoadProgress::Parsing { channels_found });
+                emit_load_progress(Some(app), PlaylistLoadProgress::Parsing { channels_found });
                 last_emit.set(Instant::now());
             }
         };
@@ -1975,12 +2005,12 @@ pub async fn open_playlist_xtream(
     };
     let server_host = server.host_str().unwrap_or("Xtream");
     preview.file_name = format!("{} ({})", server_host, username);
-    preview.source_identity = Some(source_key);
+    preview.source_identity = Some(source_identity_override.unwrap_or(source_key));
     preview.xtream_max_connections = xtream_account_info
         .as_ref()
         .and_then(|account| account.max_connections);
     preview.xtream_account_info = xtream_account_info;
-    populate_server_metadata(Some(&app), &mut preview).await;
+    populate_server_metadata(Some(app), &mut preview).await;
     Ok(preview)
 }
 

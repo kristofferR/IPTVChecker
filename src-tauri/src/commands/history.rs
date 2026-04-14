@@ -748,6 +748,7 @@ mod tests {
         ScanConfig {
             file_path: preview.file_path.clone(),
             source_identity: preview.source_identity.clone(),
+            playlist_display_name: Some(preview.file_name.clone()),
             group_filter: None,
             channel_search: None,
             selected_indices: None,
@@ -847,6 +848,7 @@ mod tests {
         ScanConfig {
             file_path: file_path.to_string(),
             source_identity: source_identity.map(String::from),
+            playlist_display_name: None,
             group_filter: None,
             channel_search: None,
             selected_indices: None,

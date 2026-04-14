@@ -5,6 +5,7 @@ import type {
   PlaylistLoadProgress,
   PlaylistPreview,
   RecentPlaylistEntry,
+  SavedPlaylistEntry,
   ScanHistoryItem,
   ScanProgress,
   ScanSummary,
@@ -26,6 +27,7 @@ export interface PlaylistSlice {
   playlistLoadProgress: PlaylistLoadProgress | null;
   playlistOpenError: string | null;
   recentPlaylists: RecentPlaylistEntry[];
+  savedPlaylists: SavedPlaylistEntry[];
   currentSourceDescriptor: CurrentSourceDescriptor | null;
   lastAppliedSourceFilter: string;
 
@@ -35,6 +37,7 @@ export interface PlaylistSlice {
   setPlaylistLoadProgress: (progress: PlaylistLoadProgress | null) => void;
   setPlaylistOpenError: (error: string | null) => void;
   setRecentPlaylists: (entries: RecentPlaylistEntry[]) => void;
+  setSavedPlaylists: (entries: SavedPlaylistEntry[]) => void;
   setCurrentSourceDescriptor: (descriptor: CurrentSourceDescriptor | null) => void;
   setLastAppliedSourceFilter: (value: string) => void;
 }

@@ -68,6 +68,7 @@ export interface PlaylistPreview {
   file_path: string;
   file_name: string;
   source_identity: string | null;
+  saved_playlist_id: string | null;
   server_location: string | null;
   single_provider: boolean;
   xtream_max_connections: number | null;
@@ -95,6 +96,80 @@ export interface XtreamOpenRequest {
   password: string;
 }
 
+export type SavedPlaylistKind = "file" | "url" | "xtream";
+
+export type RenameSourceDescriptor =
+  | {
+      kind: "path";
+      path: string;
+    }
+  | {
+      kind: "url";
+      url: string;
+    }
+  | {
+      kind: "xtream";
+      server: string;
+      username: string;
+    };
+
+export type SavedPlaylistEntry =
+  | {
+      id: string;
+      kind: "file";
+      display_name: string;
+      path: string;
+    }
+  | {
+      id: string;
+      kind: "url";
+      display_name: string;
+      url: string;
+    }
+  | {
+      id: string;
+      kind: "xtream";
+      display_name: string;
+      servers: string[];
+      preferred_server: string | null;
+      username: string;
+      password: string | null;
+    };
+
+export type SavedPlaylistDraft =
+  | {
+      id?: string | null;
+      kind: "file";
+      display_name: string;
+      path: string;
+    }
+  | {
+      id?: string | null;
+      kind: "url";
+      display_name: string;
+      url: string;
+    }
+  | {
+      id?: string | null;
+      kind: "xtream";
+      display_name: string;
+      servers: string[];
+      preferred_server?: string | null;
+      username: string;
+      password: string | null;
+    };
+
+export interface SavedPlaylistUpsertResult {
+  entry: SavedPlaylistEntry;
+  entries: SavedPlaylistEntry[];
+}
+
+export interface RenamePlaylistSourceInput {
+  saved_playlist_id?: string | null;
+  descriptor?: RenameSourceDescriptor | null;
+  display_name: string;
+}
+
 export interface StalkerOpenRequest {
   portal: string;
   mac: string;
@@ -108,6 +183,10 @@ export type CurrentSourceDescriptor =
   | {
       kind: "url";
       url: string;
+    }
+  | {
+      kind: "saved";
+      id: string;
     }
   | ({
       kind: "xtream";
@@ -125,6 +204,7 @@ export interface XtreamRecentSource {
 export interface ScanConfig {
   file_path: string;
   source_identity: string | null;
+  playlist_display_name: string | null;
   group_filter: string | null;
   channel_search: string | null;
   selected_indices: number[] | null;
@@ -300,6 +380,7 @@ export interface RecentPlaylistEntry {
   kind: RecentPlaylistKind;
   value: string;
   label: string;
+  saved_playlist_id?: string | null;
 }
 
 export interface XtreamChannelProbe {
