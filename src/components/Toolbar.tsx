@@ -10,9 +10,11 @@ import {
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   BarChart3,
+  BookmarkPlus,
   History,
   Folder,
   FolderOpen,
+  Library,
   Link2,
   Pause,
   Play,
@@ -48,6 +50,8 @@ interface ToolbarProps {
   onOpen: () => void;
   onOpenFolder: () => void;
   onOpenUrl: () => void;
+  onSavePlaylist: () => void;
+  onManageSavedPlaylists: () => void;
   onStartScan: () => void;
   onPauseScan: () => void;
   onResumeScan: () => void;
@@ -75,6 +79,8 @@ export const Toolbar = memo(function Toolbar({
   onOpen,
   onOpenFolder,
   onOpenUrl,
+  onSavePlaylist,
+  onManageSavedPlaylists,
   onStartScan,
   onPauseScan,
   onResumeScan,
@@ -98,6 +104,7 @@ export const Toolbar = memo(function Toolbar({
     (s) => s.playlist !== null && s.showReportPanel,
   );
   const hasPlaylist = useAppStore((s) => s.playlist !== null);
+  const currentSourceDescriptor = useAppStore((s) => s.currentSourceDescriptor);
   const playlistName = useAppStore((s) => s.playlist?.file_name ?? "");
   const playlistPath = useAppStore((s) => s.playlist?.file_path ?? "");
   const groups = useAppStore((s) => s.playlist?.groups ?? EMPTY_GROUPS);
@@ -221,6 +228,10 @@ export const Toolbar = memo(function Toolbar({
   const scanDisabledReason = !hasPlaylist
     ? "Open a playlist first"
     : scanBlockedReason;
+  const canSavePlaylist =
+    hasPlaylist &&
+    currentSourceDescriptor !== null &&
+    currentSourceDescriptor.kind !== "stalker";
   const filtersDisabled = !hasPlaylist;
   const statusLabel = (value: string, label: string) =>
     hasPlaylist ? `${label} (${statusOptionCounts[value] ?? 0})` : label;
@@ -229,6 +240,8 @@ export const Toolbar = memo(function Toolbar({
   const IconOpen = isMac ? SFDocumentViewfinder : FolderOpen;
   const IconFolder = isMac ? SFFolder : Folder;
   const IconLink = isMac ? SFLink : Link2;
+  const IconSavePlaylist = BookmarkPlus;
+  const IconSavedPlaylists = Library;
   const IconPlay = isMac ? SFPlayFill : Play;
   const IconScan = Radar;
   const IconPause = isMac ? SFPauseFill : Pause;
@@ -340,7 +353,7 @@ export const Toolbar = memo(function Toolbar({
         )}
       </div>
 
-      {/* Source group: Open, Open Folder, Open URL */}
+      {/* Source group: Open actions */}
       <div className={isMac ? "toolbar-group" : "flex items-center gap-1.5"}>
         <button
           onClick={onOpen}
@@ -373,6 +386,31 @@ export const Toolbar = memo(function Toolbar({
         >
           <IconLink className="w-[22px] h-[22px]" />
           {showButtonText && "Open URL"}
+        </button>
+      </div>
+
+      {/* Source group: saved playlist actions */}
+      <div className={isMac ? "toolbar-group" : "flex items-center gap-1.5"}>
+        <button
+          onClick={onSavePlaylist}
+          disabled={!canSavePlaylist || inScanSession}
+          className={btnWithOptionalText()}
+          title="Save Playlist"
+          aria-label="Save Playlist"
+        >
+          <IconSavePlaylist className="w-[22px] h-[22px]" />
+          {showButtonText && "Save"}
+        </button>
+
+        <button
+          onClick={onManageSavedPlaylists}
+          disabled={inScanSession}
+          className={btnWithOptionalText()}
+          title="Saved Playlists"
+          aria-label="Saved Playlists"
+        >
+          <IconSavedPlaylists className="w-[22px] h-[22px]" />
+          {showButtonText && "Saved"}
         </button>
       </div>
 

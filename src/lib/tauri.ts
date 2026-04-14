@@ -9,6 +9,10 @@ import type {
   ScanHistoryItem,
   RecentPlaylistEntry,
   RecentPlaylistKind,
+  RenamePlaylistSourceInput,
+  SavedPlaylistDraft,
+  SavedPlaylistEntry,
+  SavedPlaylistUpsertResult,
   ScreenshotCacheStats,
   StalkerOpenRequest,
   XtreamOpenRequest,
@@ -213,14 +217,53 @@ export async function getRecentPlaylists(): Promise<RecentPlaylistEntry[]> {
 export async function addRecentPlaylist(
   kind: RecentPlaylistKind,
   value: string,
+  label?: string | null,
+  savedPlaylistId?: string | null,
 ): Promise<RecentPlaylistEntry[]> {
   return invoke("add_recent_playlist", {
-    recent: { kind, value },
+    recent: {
+      kind,
+      value,
+      label: label ?? null,
+      saved_playlist_id: savedPlaylistId ?? null,
+    },
   });
 }
 
 export async function clearRecentPlaylists(): Promise<RecentPlaylistEntry[]> {
   return invoke("clear_recent_playlists");
+}
+
+export async function getSavedPlaylists(): Promise<SavedPlaylistEntry[]> {
+  return invoke("get_saved_playlists");
+}
+
+export async function upsertSavedPlaylist(
+  draft: SavedPlaylistDraft,
+): Promise<SavedPlaylistUpsertResult> {
+  return invoke("upsert_saved_playlist", { draft });
+}
+
+export async function deleteSavedPlaylist(id: string): Promise<SavedPlaylistEntry[]> {
+  return invoke("delete_saved_playlist", { id });
+}
+
+export async function openSavedPlaylist(
+  id: string,
+  groupFilter?: string,
+  channelSearch?: string,
+): Promise<PlaylistPreview> {
+  return invoke("open_saved_playlist", {
+    id,
+    groupFilter: groupFilter ?? null,
+    channelSearch: channelSearch ?? null,
+  });
+}
+
+export async function renamePlaylistSource(
+  input: RenamePlaylistSourceInput,
+): Promise<void> {
+  return invoke("rename_playlist_source", { input });
 }
 
 export async function testXtreamServers(
