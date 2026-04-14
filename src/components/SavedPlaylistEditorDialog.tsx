@@ -97,14 +97,22 @@ export default function SavedPlaylistEditorDialog({
   const handleSave = async () => {
     const normalized =
       form.kind === "xtream"
-        ? {
-            ...form,
-            display_name: form.display_name.trim(),
-            username: form.username.trim(),
-            password: form.password?.trim() ?? null,
-            preferred_server: form.preferred_server?.trim() || null,
-            servers: form.servers.map((server) => server.trim()).filter(Boolean),
-          }
+        ? (() => {
+            const servers = form.servers.map((server) => server.trim()).filter(Boolean);
+            const preferredServer = form.preferred_server?.trim() ?? "";
+
+            return {
+              ...form,
+              display_name: form.display_name.trim(),
+              username: form.username.trim(),
+              password: form.password?.trim() ?? null,
+              preferred_server:
+                preferredServer && servers.includes(preferredServer)
+                  ? preferredServer
+                  : null,
+              servers,
+            };
+          })()
         : form.kind === "url"
           ? {
               ...form,
