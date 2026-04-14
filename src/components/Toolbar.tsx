@@ -17,7 +17,6 @@ import {
   Library,
   Link2,
   Pause,
-  PencilLine,
   Play,
   Radar,
   Square,
@@ -51,7 +50,6 @@ interface ToolbarProps {
   onOpen: () => void;
   onOpenFolder: () => void;
   onOpenUrl: () => void;
-  onRenamePlaylist: () => void;
   onSavePlaylist: () => void;
   onManageSavedPlaylists: () => void;
   onStartScan: () => void;
@@ -81,7 +79,6 @@ export const Toolbar = memo(function Toolbar({
   onOpen,
   onOpenFolder,
   onOpenUrl,
-  onRenamePlaylist,
   onSavePlaylist,
   onManageSavedPlaylists,
   onStartScan,
@@ -238,7 +235,6 @@ export const Toolbar = memo(function Toolbar({
   const IconOpen = isMac ? SFDocumentViewfinder : FolderOpen;
   const IconFolder = isMac ? SFFolder : Folder;
   const IconLink = isMac ? SFLink : Link2;
-  const IconRename = PencilLine;
   const IconSavePlaylist = BookmarkPlus;
   const IconSavedPlaylists = Library;
   const IconPlay = isMac ? SFPlayFill : Play;
@@ -352,7 +348,7 @@ export const Toolbar = memo(function Toolbar({
         )}
       </div>
 
-      {/* Source group: Open, Open Folder, Open URL, Rename, Save */}
+      {/* Source group: Open actions */}
       <div className={isMac ? "toolbar-group" : "flex items-center gap-1.5"}>
         <button
           onClick={onOpen}
@@ -386,18 +382,10 @@ export const Toolbar = memo(function Toolbar({
           <IconLink className="w-[22px] h-[22px]" />
           {showButtonText && "Open URL"}
         </button>
+      </div>
 
-        <button
-          onClick={onRenamePlaylist}
-          disabled={!hasPlaylist || inScanSession}
-          className={btnWithOptionalText()}
-          title="Rename Playlist"
-          aria-label="Rename Playlist"
-        >
-          <IconRename className="w-[18px] h-[18px]" />
-          {showButtonText && "Rename"}
-        </button>
-
+      {/* Source group: saved playlist actions */}
+      <div className={isMac ? "toolbar-group" : "flex items-center gap-1.5"}>
         <button
           onClick={onSavePlaylist}
           disabled={!hasPlaylist || inScanSession}
@@ -405,7 +393,7 @@ export const Toolbar = memo(function Toolbar({
           title="Save Playlist"
           aria-label="Save Playlist"
         >
-          <IconSavePlaylist className="w-[18px] h-[18px]" />
+          <IconSavePlaylist className="w-[22px] h-[22px]" />
           {showButtonText && "Save"}
         </button>
 
@@ -416,7 +404,7 @@ export const Toolbar = memo(function Toolbar({
           title="Saved Playlists"
           aria-label="Saved Playlists"
         >
-          <IconSavedPlaylists className="w-[18px] h-[18px]" />
+          <IconSavedPlaylists className="w-[22px] h-[22px]" />
           {showButtonText && "Saved"}
         </button>
       </div>

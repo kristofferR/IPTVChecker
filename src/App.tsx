@@ -47,7 +47,6 @@ import {
   openPlaylistXtream,
   openPlaylistUrl,
   checkFfmpegAvailable,
-  renamePlaylistSource,
   readScreenshot,
   openChannelInPlayer,
   quickCheckChannel,
@@ -95,7 +94,6 @@ import {
   validateSourceFilterPattern,
 } from "./lib/sourceFilter";
 import {
-  buildRenameDescriptor,
   buildSavedPlaylistDraftFromSource,
   findSavedPlaylistForCurrentSource,
   savedPlaylistSecondaryLabel,
@@ -1551,31 +1549,6 @@ export default function App() {
     [refreshRecentPlaylists],
   );
 
-  const handleRenameCurrentPlaylist = useCallback(async () => {
-    const state = getStore();
-    if (!state.playlist) {
-      state.setMenuInfo("Open a playlist first.");
-      return;
-    }
-
-    const nextName = window.prompt("Rename playlist", state.playlist.file_name)?.trim();
-    if (!nextName || nextName === state.playlist.file_name) {
-      return;
-    }
-
-    try {
-      await renamePlaylistSource({
-        saved_playlist_id: state.playlist.saved_playlist_id ?? null,
-        descriptor: buildRenameDescriptor(state.currentSourceDescriptor),
-        display_name: nextName,
-      });
-      patchCurrentPlaylistMetadata(nextName, state.playlist.saved_playlist_id ?? null);
-      await Promise.all([refreshRecentPlaylists(), refreshSavedPlaylists()]);
-    } catch (err) {
-      state.setMenuInfo(errorToString(err));
-    }
-  }, [patchCurrentPlaylistMetadata, refreshRecentPlaylists, refreshSavedPlaylists]);
-
   const handlePreferSavedXtreamServer = useCallback(
     async (entry: SavedPlaylistEntry, server: string) => {
       if (entry.kind !== "xtream") {
@@ -2536,7 +2509,6 @@ export default function App() {
         onOpen={handleOpen}
         onOpenFolder={handleOpenFolder}
         onOpenUrl={handleOpenUrl}
-        onRenamePlaylist={handleRenameCurrentPlaylist}
         onSavePlaylist={handleSaveCurrentPlaylist}
         onManageSavedPlaylists={handleManageSavedPlaylists}
         onStartScan={handleStartScan}

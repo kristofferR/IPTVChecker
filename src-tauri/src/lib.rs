@@ -125,7 +125,7 @@ fn create_window_from_main_config(app: &tauri::AppHandle, label: String) {
     match tauri::WebviewWindowBuilder::from_config(app, &window_config)
         .and_then(|builder| builder.build())
     {
-        Ok(_window) => {
+        Ok(window) => {
             let theme_preference = {
                 let state = app.state::<Arc<AppState>>();
                 let theme = state.settings.blocking_lock().theme;
