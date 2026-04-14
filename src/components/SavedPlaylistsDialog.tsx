@@ -20,6 +20,11 @@ export default function SavedPlaylistsDialog({
   onTestServers,
   onClose,
 }: SavedPlaylistsDialogProps) {
+  const closeThen = (action: () => void) => {
+    onClose();
+    window.setTimeout(action, 0);
+  };
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -93,7 +98,7 @@ export default function SavedPlaylistsDialog({
                       </button>
                       <button
                         type="button"
-                        onClick={() => onEdit(entry)}
+                        onClick={() => closeThen(() => onEdit(entry))}
                         className="inline-flex items-center gap-1.5 rounded-md bg-btn px-3 py-1.5 text-[12px] text-text-primary hover:bg-btn-hover transition-colors"
                       >
                         <Pencil className="h-3.5 w-3.5" />
@@ -102,7 +107,7 @@ export default function SavedPlaylistsDialog({
                       {entry.kind === "xtream" && (
                         <button
                           type="button"
-                          onClick={() => onTestServers(entry)}
+                          onClick={() => closeThen(() => onTestServers(entry))}
                           className="inline-flex items-center gap-1.5 rounded-md bg-btn px-3 py-1.5 text-[12px] text-text-primary hover:bg-btn-hover transition-colors"
                         >
                           <Server className="h-3.5 w-3.5" />

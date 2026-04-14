@@ -97,6 +97,7 @@ import {
   buildSavedPlaylistDraftFromSource,
   findSavedPlaylistForCurrentSource,
   savedPlaylistSecondaryLabel,
+  savedEntryToSourceDescriptor,
 } from "./lib/savedPlaylists";
 
 function errorToString(err: unknown): string {
@@ -1515,11 +1516,10 @@ export default function App() {
         currentSaved,
       );
       if (currentMatch && currentMatch.id === result.entry.id) {
-        state.setCurrentSourceDescriptor({ kind: "saved", id: result.entry.id });
-        patchCurrentPlaylistMetadata(result.entry.display_name, result.entry.id);
+        await openSavedPlaylistById(result.entry.id);
       }
     },
-    [patchCurrentPlaylistMetadata, refreshRecentPlaylists],
+    [openSavedPlaylistById, refreshRecentPlaylists],
   );
 
   const handleDeleteSavedPlaylistById = useCallback(
@@ -1530,23 +1530,26 @@ export default function App() {
       }
 
       try {
+        const currentState = getStore();
+        const deletedEntry =
+          currentState.savedPlaylists.find((entry) => entry.id === id) ?? null;
+        const fallbackDescriptor = deletedEntry
+          ? savedEntryToSourceDescriptor(deletedEntry)
+          : null;
         const entries = await deleteSavedPlaylist(id);
         getStore().setSavedPlaylists(entries);
         void refreshRecentPlaylists();
 
         const state = getStore();
         if (state.playlist?.saved_playlist_id === id) {
-          state.setCurrentSourceDescriptor(null);
-          state.setPlaylist({
-            ...state.playlist,
-            saved_playlist_id: null,
-          });
+          state.setCurrentSourceDescriptor(fallbackDescriptor);
+          patchCurrentPlaylistMetadata(state.playlist.file_name, null);
         }
       } catch (err) {
         getStore().setMenuInfo(errorToString(err));
       }
     },
-    [refreshRecentPlaylists],
+    [patchCurrentPlaylistMetadata, refreshRecentPlaylists],
   );
 
   const handlePreferSavedXtreamServer = useCallback(
@@ -1569,13 +1572,13 @@ export default function App() {
 
         const state = getStore();
         if (state.playlist?.saved_playlist_id === entry.id) {
-          patchCurrentPlaylistMetadata(result.entry.display_name, entry.id);
+          await openSavedPlaylistById(entry.id);
         }
       } catch (err) {
         getStore().setMenuInfo(errorToString(err));
       }
     },
-    [patchCurrentPlaylistMetadata],
+    [openSavedPlaylistById],
   );
 
   const ensureSourceFilterApplied = useCallback(async () => {

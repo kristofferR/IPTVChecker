@@ -151,8 +151,10 @@ fn sanitize_saved_playlist_entry(
     let source = match entry.source {
         SavedPlaylistSource::File { path } => {
             let path = path.trim();
-            if path.is_empty() || !Path::new(path).exists() {
-                return Err(AppError::Other("Saved playlist file does not exist".to_string()));
+            if path.is_empty() {
+                return Err(AppError::Other(
+                    "Saved playlist file path cannot be empty".to_string(),
+                ));
             }
             SavedPlaylistSource::File {
                 path: path.to_string(),
@@ -245,14 +247,16 @@ fn sanitize_saved_playlists(entries: Vec<SavedPlaylistEntry>) -> Vec<SavedPlayli
     sanitized
 }
 
-fn load_saved_playlists_raw(app: &tauri::AppHandle) -> Vec<SavedPlaylistEntry> {
+fn load_saved_playlists_raw(app: &tauri::AppHandle) -> Result<Vec<SavedPlaylistEntry>, AppError> {
     let Ok(store) = app.store("settings.json") else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let Some(value) = store.get(SAVED_PLAYLISTS_STORE_KEY) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    serde_json::from_value::<Vec<SavedPlaylistEntry>>(value).unwrap_or_default()
+    serde_json::from_value::<Vec<SavedPlaylistEntry>>(value).map_err(|error| {
+        AppError::Other(format!("Failed to parse saved playlists: {error}"))
+    })
 }
 
 fn save_saved_playlists(app: &tauri::AppHandle, entries: &[SavedPlaylistEntry]) {
@@ -264,8 +268,10 @@ fn save_saved_playlists(app: &tauri::AppHandle, entries: &[SavedPlaylistEntry]) 
     }
 }
 
-pub(crate) fn load_saved_playlists(app: &tauri::AppHandle) -> Vec<SavedPlaylistEntry> {
-    sanitize_saved_playlists(load_saved_playlists_raw(app))
+pub(crate) fn load_saved_playlists(
+    app: &tauri::AppHandle,
+) -> Result<Vec<SavedPlaylistEntry>, AppError> {
+    Ok(sanitize_saved_playlists(load_saved_playlists_raw(app)?))
 }
 
 fn persist_saved_playlists(
@@ -311,14 +317,14 @@ fn save_source_display_names(app: &tauri::AppHandle, names: &HashMap<String, Str
 pub(crate) fn saved_playlist_by_id(
     app: &tauri::AppHandle,
     id: &str,
-) -> Option<SavedPlaylistEntry> {
+) -> Result<Option<SavedPlaylistEntry>, AppError> {
     let target = id.trim();
     if target.is_empty() {
-        return None;
+        return Ok(None);
     }
-    load_saved_playlists(app)
+    Ok(load_saved_playlists(app)?
         .into_iter()
-        .find(|entry| entry.id == target)
+        .find(|entry| entry.id == target))
 }
 
 pub(crate) fn resolve_source_display_name(
@@ -329,8 +335,12 @@ pub(crate) fn resolve_source_display_name(
     fallback: &str,
 ) -> String {
     if let Some(id) = saved_playlist_id {
-        if let Some(entry) = saved_playlist_by_id(app, id) {
-            return entry.display_name;
+        match saved_playlist_by_id(app, id) {
+            Ok(Some(entry)) => return entry.display_name,
+            Ok(None) => {}
+            Err(error) => {
+                log::warn!("Failed to load saved playlist metadata for '{id}': {error}");
+            }
         }
     }
 
@@ -449,15 +459,19 @@ fn update_saved_menu(app: &tauri::AppHandle, entries: &[SavedPlaylistEntry]) {
 fn update_saved_menu(_app: &tauri::AppHandle, _entries: &[SavedPlaylistEntry]) {}
 
 pub fn refresh_saved_menu(app: &tauri::AppHandle) {
-    let entries = load_saved_playlists(app);
-    let _ = persist_saved_playlists(app, entries);
+    match load_saved_playlists(app) {
+        Ok(entries) => update_saved_menu(app, &entries),
+        Err(error) => {
+            log::warn!("Failed to refresh saved menu: {error}");
+        }
+    }
 }
 
 #[tauri::command]
 pub async fn get_saved_playlists(
     app: tauri::AppHandle,
 ) -> Result<Vec<SavedPlaylistEntry>, AppError> {
-    let entries = load_saved_playlists(&app);
+    let entries = load_saved_playlists(&app)?;
     Ok(persist_saved_playlists(&app, entries))
 }
 
@@ -472,7 +486,7 @@ pub async fn upsert_saved_playlist(
         source: draft.source,
     })?;
 
-    let mut entries = load_saved_playlists(&app);
+    let mut entries = load_saved_playlists(&app)?;
     if let Some(index) = entries.iter().position(|existing| existing.id == entry.id) {
         entries[index] = entry.clone();
     } else {
@@ -498,7 +512,7 @@ pub async fn delete_saved_playlist(
         return Err(AppError::Other("Saved playlist id cannot be empty".to_string()));
     }
 
-    let mut entries = load_saved_playlists(&app);
+    let mut entries = load_saved_playlists(&app)?;
     entries.retain(|entry| entry.id != target);
     let entries = persist_saved_playlists(&app, entries);
     crate::commands::recent::refresh_recent_menu(&app);
@@ -518,7 +532,7 @@ pub async fn rename_playlist_source(
     }
 
     if let Some(saved_playlist_id) = input.saved_playlist_id.as_deref() {
-        let mut entries = load_saved_playlists(&app);
+        let mut entries = load_saved_playlists(&app)?;
         let Some(entry) = entries
             .iter_mut()
             .find(|entry| entry.id == saved_playlist_id.trim())
@@ -556,11 +570,17 @@ pub async fn open_saved_playlist(
     group_filter: Option<String>,
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
-    let entry = saved_playlist_by_id(&app, &id)
+    let entry = saved_playlist_by_id(&app, &id)?
         .ok_or_else(|| AppError::Other("Saved playlist not found".to_string()))?;
 
     let mut preview = match &entry.source {
         SavedPlaylistSource::File { path } => {
+            if !Path::new(path).exists() {
+                return Err(AppError::Other(format!(
+                    "Saved playlist file does not exist: {}",
+                    path
+                )));
+            }
             crate::commands::playlist::open_playlist_path_inner(
                 &app,
                 path.clone(),
@@ -641,14 +661,26 @@ pub async fn open_saved_playlist(
             };
 
             if let Some(server) = winning_server {
-                let mut entries = load_saved_playlists(&app);
-                if let Some(saved_entry) = entries.iter_mut().find(|value| value.id == entry.id) {
-                    if let SavedPlaylistSource::Xtream { preferred_server, .. } =
-                        &mut saved_entry.source
-                    {
-                        *preferred_server = Some(server);
+                match load_saved_playlists(&app) {
+                    Ok(mut entries) => {
+                        if let Some(saved_entry) =
+                            entries.iter_mut().find(|value| value.id == entry.id)
+                        {
+                            if let SavedPlaylistSource::Xtream { preferred_server, .. } =
+                                &mut saved_entry.source
+                            {
+                                *preferred_server = Some(server);
+                            }
+                            let _ = persist_saved_playlists(&app, entries);
+                        }
                     }
-                    let _ = persist_saved_playlists(&app, entries);
+                    Err(error) => {
+                        log::warn!(
+                            "Failed to update preferred server for saved playlist '{}': {}",
+                            entry.id,
+                            error
+                        );
+                    }
                 }
             }
 
@@ -718,5 +750,24 @@ mod tests {
             _ => panic!("expected xtream source"),
         }
         assert_eq!(entry.display_name, "demo.example.com (alice)");
+    }
+
+    #[test]
+    fn sanitize_saved_playlist_entry_keeps_missing_file_paths() {
+        let entry = sanitize_saved_playlist_entry(SavedPlaylistEntry {
+            id: "saved-file".to_string(),
+            display_name: "Offline File".to_string(),
+            source: SavedPlaylistSource::File {
+                path: "/definitely/not/present/playlist.m3u".to_string(),
+            },
+        })
+        .expect("missing file paths should remain saveable");
+
+        match entry.source {
+            SavedPlaylistSource::File { path } => {
+                assert_eq!(path, "/definitely/not/present/playlist.m3u");
+            }
+            _ => panic!("expected file source"),
+        }
     }
 }

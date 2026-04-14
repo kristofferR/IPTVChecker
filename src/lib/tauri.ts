@@ -9,6 +9,7 @@ import type {
   ScanHistoryItem,
   RecentPlaylistEntry,
   RecentPlaylistKind,
+  RenamePlaylistSourceInput,
   SavedPlaylistDraft,
   SavedPlaylistEntry,
   SavedPlaylistUpsertResult,
@@ -259,15 +260,9 @@ export async function openSavedPlaylist(
   });
 }
 
-export async function renamePlaylistSource(input: {
-  saved_playlist_id?: string | null;
-  descriptor?:
-    | { kind: "path"; path: string }
-    | { kind: "url"; url: string }
-    | { kind: "xtream"; server: string; username: string }
-    | null;
-  display_name: string;
-}): Promise<void> {
+export async function renamePlaylistSource(
+  input: RenamePlaylistSourceInput,
+): Promise<void> {
   return invoke("rename_playlist_source", { input });
 }
 
