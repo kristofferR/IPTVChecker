@@ -318,6 +318,7 @@ fn emit_menu_event_to_focused_window(app: &tauri::AppHandle, event_name: &str) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[cfg(not(fuzzing))]
 pub fn run() {
     // Workaround for webkit2gtk DMABUF rendering issues on Wayland (common with
     // NVIDIA and some Intel GPUs). Must be set before any GTK/webkit2gtk init.
@@ -1044,4 +1045,9 @@ pub fn run() {
                 _ => {}
             }
         });
+}
+
+#[cfg(fuzzing)]
+pub fn run() {
+    panic!("iptv_checker_lib::run is unavailable during fuzzing builds");
 }
