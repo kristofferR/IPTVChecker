@@ -117,7 +117,7 @@ export default function SavedPlaylistEditorDialog({
     }
   };
 
-  const title = form.id ? "Edit Saved Playlist" : "Save Playlist";
+  const title = form.id ? "Edit Playlist" : "Save Playlist";
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center px-4">
@@ -125,9 +125,6 @@ export default function SavedPlaylistEditorDialog({
       <div className="relative w-full max-w-2xl rounded-xl border border-border-app bg-overlay shadow-2xl">
         <div className="flex items-start justify-between border-b border-border-app px-5 pb-3 pt-4">
           <div>
-            <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-1">
-              Saved Playlist
-            </p>
             <h2 className="text-[18px] font-semibold text-text-primary">{title}</h2>
           </div>
           <button
@@ -232,11 +229,12 @@ export default function SavedPlaylistEditorDialog({
 
               <div className="space-y-1.5">
                 <label className="text-[12px] font-medium text-text-secondary">
-                  Servers
+                  Servers (one per line)
                 </label>
                 <textarea
                   rows={5}
                   value={form.servers.join("\n")}
+                  placeholder={"http://server-1.example.com\nhttp://server-2.example.com"}
                   onChange={(event) =>
                     setForm({
                       ...form,
@@ -245,6 +243,9 @@ export default function SavedPlaylistEditorDialog({
                   }
                   className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[13px] text-text-primary focus:border-blue-500 focus:outline-none font-mono resize-none"
                 />
+                <p className="text-[11px] text-text-tertiary">
+                  Enter one server URL per line.
+                </p>
               </div>
 
               <div className="space-y-1.5">
