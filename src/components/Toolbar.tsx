@@ -104,6 +104,7 @@ export const Toolbar = memo(function Toolbar({
     (s) => s.playlist !== null && s.showReportPanel,
   );
   const hasPlaylist = useAppStore((s) => s.playlist !== null);
+  const currentSourceDescriptor = useAppStore((s) => s.currentSourceDescriptor);
   const playlistName = useAppStore((s) => s.playlist?.file_name ?? "");
   const playlistPath = useAppStore((s) => s.playlist?.file_path ?? "");
   const groups = useAppStore((s) => s.playlist?.groups ?? EMPTY_GROUPS);
@@ -227,6 +228,10 @@ export const Toolbar = memo(function Toolbar({
   const scanDisabledReason = !hasPlaylist
     ? "Open a playlist first"
     : scanBlockedReason;
+  const canSavePlaylist =
+    hasPlaylist &&
+    currentSourceDescriptor !== null &&
+    currentSourceDescriptor.kind !== "stalker";
   const filtersDisabled = !hasPlaylist;
   const statusLabel = (value: string, label: string) =>
     hasPlaylist ? `${label} (${statusOptionCounts[value] ?? 0})` : label;
@@ -388,7 +393,7 @@ export const Toolbar = memo(function Toolbar({
       <div className={isMac ? "toolbar-group" : "flex items-center gap-1.5"}>
         <button
           onClick={onSavePlaylist}
-          disabled={!hasPlaylist || inScanSession}
+          disabled={!canSavePlaylist || inScanSession}
           className={btnWithOptionalText()}
           title="Save Playlist"
           aria-label="Save Playlist"

@@ -6,6 +6,7 @@ use tauri_plugin_store::StoreExt;
 use url::Url;
 
 use crate::error::AppError;
+use crate::models::saved_playlist::{SavedPlaylistEntry as SavedSourceEntry, SavedPlaylistSource};
 
 const RECENT_STORE_KEY: &str = "recent_playlists";
 const RECENT_LIMIT: usize = 10;
@@ -133,6 +134,69 @@ fn build_label(kind: &RecentPlaylistKind, value: &str) -> String {
                 )
             })
             .unwrap_or_else(|| "Invalid Source".to_string()),
+    }
+}
+
+fn find_saved_playlist_for_recent(
+    app: &tauri::AppHandle,
+    kind: &RecentPlaylistKind,
+    value: &str,
+) -> Result<Option<SavedSourceEntry>, AppError> {
+    let entries = crate::commands::saved::load_saved_playlists(app)?;
+
+    match kind {
+        RecentPlaylistKind::File => {
+            let target = crate::commands::saved::path_source_identity(value);
+            Ok(entries.into_iter().find(|entry| {
+                matches!(
+                    &entry.source,
+                    SavedPlaylistSource::File { path }
+                        if crate::commands::saved::path_source_identity(path) == target
+                )
+            }))
+        }
+        RecentPlaylistKind::Url => {
+            let target = crate::commands::saved::source_identity_for_url(value)?;
+            Ok(entries.into_iter().find(|entry| {
+                matches!(
+                    &entry.source,
+                    SavedPlaylistSource::Url { url }
+                        if crate::commands::saved::source_identity_for_url(url)
+                            .ok()
+                            .as_deref()
+                            == Some(target.as_str())
+                )
+            }))
+        }
+        RecentPlaylistKind::Xtream => {
+            let Some(source) = parse_xtream_recent_value(value) else {
+                return Ok(None);
+            };
+            let target = crate::commands::saved::source_identity_for_xtream(
+                &source.server,
+                &source.username,
+            )?;
+
+            Ok(entries.into_iter().find(|entry| {
+                match &entry.source {
+                    SavedPlaylistSource::Xtream {
+                        servers, username, ..
+                    } => {
+                        if username.trim() != source.username {
+                            return false;
+                        }
+
+                        servers.iter().any(|server| {
+                            crate::commands::saved::source_identity_for_xtream(server, username)
+                                .ok()
+                                .as_deref()
+                                == Some(target.as_str())
+                        })
+                    }
+                    _ => false,
+                }
+            }))
+        }
     }
 }
 
@@ -278,20 +342,37 @@ fn sanitize_recent_playlists_inner(
         };
 
         let saved_playlist_id = if let Some(app) = app {
-            entry_saved_playlist_id
+            let validated_saved_entry = entry_saved_playlist_id
                 .as_deref()
-                .and_then(
-                    |id| match crate::commands::saved::saved_playlist_by_id(app, id) {
-                        Ok(entry) => entry,
-                        Err(error) => {
-                            log::warn!(
-                                "Failed to resolve saved playlist '{id}' for recent menu: {}",
-                                error
-                            );
-                            None
-                        }
-                    },
-                )
+                .and_then(|id| match crate::commands::saved::saved_playlist_by_id(app, id) {
+                    Ok(entry) => entry,
+                    Err(error) => {
+                        log::warn!(
+                            "Failed to resolve saved playlist '{id}' for recent menu: {}",
+                            error
+                        );
+                        None
+                    }
+                });
+
+            let matched_saved_entry = if validated_saved_entry.is_some() {
+                None
+            } else {
+                match find_saved_playlist_for_recent(app, &entry_kind, &value) {
+                    Ok(entry) => entry,
+                    Err(error) => {
+                        log::warn!(
+                            "Failed to backfill saved playlist id for recent entry '{}': {}",
+                            value,
+                            error
+                        );
+                        None
+                    }
+                }
+            };
+
+            validated_saved_entry
+                .or(matched_saved_entry)
                 .map(|entry| entry.id)
         } else {
             entry_saved_playlist_id.clone()
