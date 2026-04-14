@@ -888,8 +888,10 @@ fn source_mtime_ms(path: &str) -> Option<u64> {
 
 fn playlist_preview_cache_key(config: &ScanConfig) -> String {
     format!(
-        "{}|g:{}|s:{}",
+        "{}|i:{}|n:{}|g:{}|s:{}",
         config.file_path,
+        config.source_identity.as_deref().unwrap_or("*"),
+        config.playlist_display_name.as_deref().unwrap_or("*"),
         config.group_filter.as_deref().unwrap_or("*"),
         config.channel_search.as_deref().unwrap_or("*")
     )
@@ -911,10 +913,19 @@ async fn parse_playlist_with_cache(
     }
 
     let parse_started_at = Instant::now();
-    let preview = parser::parse_playlist(
+    let mut preview = parser::parse_playlist(
         &config.file_path,
         &config.group_filter,
         &config.channel_search,
+    )?;
+    crate::commands::saved::apply_persisted_playlist_metadata(
+        app,
+        &mut preview,
+        config
+            .source_identity
+            .as_deref()
+            .and_then(|value| value.strip_prefix("saved:")),
+        config.playlist_display_name.as_deref(),
     )?;
     let parse_ms = parse_started_at.elapsed().as_secs_f64() * 1000.0;
     record_backend_perf(

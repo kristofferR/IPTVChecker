@@ -34,21 +34,21 @@ function validateHttpUrl(url: string, label: string): string | null {
 }
 
 interface ServerTestModalProps {
-  initialServer: string;
+  initialServersText: string;
   username: string;
   password: string;
   onSelectServer: (server: string) => void;
   onClose: () => void;
 }
 
-function ServerTestModal({
-  initialServer,
+export function ServerTestModal({
+  initialServersText,
   username,
   password,
   onSelectServer,
   onClose,
 }: ServerTestModalProps) {
-  const [testServers, setTestServers] = useState(initialServer);
+  const [testServers, setTestServers] = useState(initialServersText);
   const [testReport, setTestReport] = useState<XtreamServerTestReport | null>(null);
   const [testRunning, setTestRunning] = useState(false);
   const [testError, setTestError] = useState<string | null>(null);
@@ -697,7 +697,7 @@ export default function OpenSourceDialog({
 
       {showServerTest && (
         <ServerTestModal
-          initialServer={xtreamServer.trim()}
+          initialServersText={xtreamServer.trim()}
           username={xtreamUsername.trim()}
           password={xtreamPassword.trim()}
           onSelectServer={(server) => setXtreamServer(server)}

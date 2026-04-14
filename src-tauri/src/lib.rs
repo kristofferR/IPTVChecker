@@ -125,7 +125,7 @@ fn create_window_from_main_config(app: &tauri::AppHandle, label: String) {
     match tauri::WebviewWindowBuilder::from_config(app, &window_config)
         .and_then(|builder| builder.build())
     {
-        Ok(window) => {
+        Ok(_window) => {
             let theme_preference = {
                 let state = app.state::<Arc<AppState>>();
                 let theme = state.settings.blocking_lock().theme;
@@ -429,6 +429,12 @@ pub fn run() {
                     .text("menu.file.recent.clear", "Clear Recent")
                     .build()?,
             )
+            .item(
+                &SubmenuBuilder::with_id(app, "menu.file.open_saved", "Open Saved")
+                    .text("menu.file.saved.0", "No saved playlists")
+                    .build()?,
+            )
+            .text("menu.file.manage_saved", "Manage Saved Playlists…")
             .separator()
             .item(&export_csv_item)
             .text("menu.file.export_split", "Export Split Playlists")
@@ -458,6 +464,11 @@ pub fn run() {
             MenuItemBuilder::with_id("menu.view.toggle_prescan_filter", "Show Source Filter")
                 .accelerator("Cmd+Shift+F")
                 .build(app)?;
+        let toggle_header_button_text_item = MenuItemBuilder::with_id(
+            "menu.view.toggle_header_button_text",
+            "Show Header Button Text",
+        )
+        .build(app)?;
         let clear_filters_item =
             MenuItemBuilder::with_id("menu.view.clear_filters", "Clear Filters")
                 .accelerator("Cmd+Shift+X")
@@ -471,6 +482,7 @@ pub fn run() {
             .item(&toggle_sidebar_item)
             .item(&toggle_report_item)
             .item(&toggle_prescan_item)
+            .item(&toggle_header_button_text_item)
             .item(&clear_filters_item)
             .text("menu.view.history", "Scan History")
             .separator()
@@ -561,6 +573,12 @@ pub fn run() {
                     .text("menu.file.recent.clear", "Clear Recent")
                     .build()?,
             )
+            .item(
+                &SubmenuBuilder::with_id(app, "menu.file.open_saved", "Open Saved")
+                    .text("menu.file.saved.0", "No saved playlists")
+                    .build()?,
+            )
+            .text("menu.file.manage_saved", "Manage Saved Playlists…")
             .separator()
             .item(&export_csv_item)
             .text("menu.file.export_split", "Export Split Playlists")
@@ -593,6 +611,11 @@ pub fn run() {
             MenuItemBuilder::with_id("menu.view.toggle_prescan_filter", "Show Source Filter")
                 .accelerator("Ctrl+Shift+F")
                 .build(app)?;
+        let toggle_header_button_text_item = MenuItemBuilder::with_id(
+            "menu.view.toggle_header_button_text",
+            "Show Header Button Text",
+        )
+        .build(app)?;
         let clear_filters_item =
             MenuItemBuilder::with_id("menu.view.clear_filters", "Clear Filters")
                 .accelerator("Ctrl+Shift+X")
@@ -606,6 +629,7 @@ pub fn run() {
             .item(&toggle_sidebar_item)
             .item(&toggle_report_item)
             .item(&toggle_prescan_item)
+            .item(&toggle_header_button_text_item)
             .item(&clear_filters_item)
             .text("menu.view.history", "Scan History")
             .separator()
@@ -673,6 +697,17 @@ pub fn run() {
             "menu.file.recent.8" => Some("menu://open-recent-8"),
             "menu.file.recent.9" => Some("menu://open-recent-9"),
             "menu.file.recent.clear" => Some("menu://clear-recent"),
+            "menu.file.saved.0" => Some("menu://open-saved-0"),
+            "menu.file.saved.1" => Some("menu://open-saved-1"),
+            "menu.file.saved.2" => Some("menu://open-saved-2"),
+            "menu.file.saved.3" => Some("menu://open-saved-3"),
+            "menu.file.saved.4" => Some("menu://open-saved-4"),
+            "menu.file.saved.5" => Some("menu://open-saved-5"),
+            "menu.file.saved.6" => Some("menu://open-saved-6"),
+            "menu.file.saved.7" => Some("menu://open-saved-7"),
+            "menu.file.saved.8" => Some("menu://open-saved-8"),
+            "menu.file.saved.9" => Some("menu://open-saved-9"),
+            "menu.file.manage_saved" => Some("menu://manage-saved"),
             "menu.file.export_csv" => Some("menu://export-csv"),
             "menu.file.export_split" => Some("menu://export-split"),
             "menu.file.export_renamed" => Some("menu://export-renamed"),
@@ -681,6 +716,7 @@ pub fn run() {
             "menu.view.toggle_sidebar" => Some("menu://toggle-sidebar"),
             "menu.view.toggle_report" => Some("menu://toggle-report"),
             "menu.view.toggle_prescan_filter" => Some("menu://toggle-prescan-filter"),
+            "menu.view.toggle_header_button_text" => Some("menu://toggle-header-button-text"),
             "menu.view.clear_filters" => Some("menu://clear-filters"),
             "menu.view.history" => Some("menu://open-history"),
             "menu.view.log_window" => Some("menu://open-log"),
@@ -745,6 +781,7 @@ pub fn run() {
             }
 
             commands::recent::refresh_recent_menu(&app.handle());
+            commands::saved::refresh_saved_menu(&app.handle());
 
             // Start the localhost streaming proxy for MPEG-TS playback.
             // Use a oneshot channel so we block until the port is known,
@@ -909,6 +946,11 @@ pub fn run() {
             commands::recent::get_recent_playlists,
             commands::recent::add_recent_playlist,
             commands::recent::clear_recent_playlists,
+            commands::saved::get_saved_playlists,
+            commands::saved::upsert_saved_playlist,
+            commands::saved::delete_saved_playlist,
+            commands::saved::open_saved_playlist,
+            commands::saved::rename_playlist_source,
             commands::playlist::test_xtream_servers,
         ])
         .on_page_load(|webview, payload| {

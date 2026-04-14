@@ -34,6 +34,8 @@ impl Default for RetryBackoff {
 pub struct ScanConfig {
     pub file_path: String,
     pub source_identity: Option<String>,
+    #[serde(default)]
+    pub playlist_display_name: Option<String>,
     pub group_filter: Option<String>,
     pub channel_search: Option<String>,
     pub selected_indices: Option<Vec<usize>>,
@@ -186,6 +188,7 @@ mod tests {
         ScanConfig {
             file_path: "/tmp/test.m3u8".to_string(),
             source_identity: None,
+            playlist_display_name: None,
             group_filter: None,
             channel_search: None,
             selected_indices: None,

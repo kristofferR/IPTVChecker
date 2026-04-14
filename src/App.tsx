@@ -26,6 +26,8 @@ import type {
   RecentPlaylistEntry,
   ScanConfig,
   PlaylistPreview,
+  SavedPlaylistDraft,
+  SavedPlaylistEntry,
   StalkerOpenRequest,
   XtreamOpenRequest,
   XtreamRecentSource,
@@ -35,16 +37,21 @@ import {
   addRecentPlaylist,
   clearRecentPlaylists,
   clearScanHistory,
+  deleteSavedPlaylist,
+  getSavedPlaylists,
   getRecentPlaylists,
   getScanHistory,
   openPlaylist,
+  openSavedPlaylist,
   openPlaylistStalker,
   openPlaylistXtream,
   openPlaylistUrl,
   checkFfmpegAvailable,
+  renamePlaylistSource,
   readScreenshot,
   openChannelInPlayer,
   quickCheckChannel,
+  upsertSavedPlaylist,
 } from "./lib/tauri";
 import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
@@ -61,6 +68,15 @@ import { ProgressBar } from "./components/ProgressBar";
 const KeyboardShortcutsDialog = lazy(() => import("./components/KeyboardShortcutsDialog"));
 const HistoryPanel = lazy(() => import("./components/HistoryPanel"));
 const OpenSourceDialog = lazy(() => import("./components/OpenSourceDialog"));
+const XtreamServerTestDialog = lazy(() =>
+  import("./components/OpenSourceDialog").then((module) => ({
+    default: module.ServerTestModal,
+  })),
+);
+const SavedPlaylistsDialog = lazy(() => import("./components/SavedPlaylistsDialog"));
+const SavedPlaylistEditorDialog = lazy(
+  () => import("./components/SavedPlaylistEditorDialog"),
+);
 import { AlertTriangle, ExternalLink, FolderOpen, Info, Loader2, X } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { detectPlatform } from "./lib/platform";
@@ -78,6 +94,12 @@ import {
   resolvePreservedGroupFilter,
   validateSourceFilterPattern,
 } from "./lib/sourceFilter";
+import {
+  buildRenameDescriptor,
+  buildSavedPlaylistDraftFromSource,
+  findSavedPlaylistForCurrentSource,
+  savedPlaylistSecondaryLabel,
+} from "./lib/savedPlaylists";
 
 function errorToString(err: unknown): string {
   if (typeof err === "string") {
@@ -295,6 +317,60 @@ function recentTitle(entry: RecentPlaylistEntry): string {
     return entry.value;
   }
   return `${source.server} (${source.username})`;
+}
+
+function applyDisplayNameToPreview(
+  preview: PlaylistPreview,
+  displayName: string,
+  savedPlaylistId?: string | null,
+): PlaylistPreview {
+  const uniquePlaylistLabels = new Set(
+    preview.channels
+      .map((channel) => channel.playlist.trim())
+      .filter((value) => value.length > 0),
+  );
+  const shouldRewriteChannelPlaylists = uniquePlaylistLabels.size <= 1;
+
+  return {
+    ...preview,
+    file_name: displayName,
+    saved_playlist_id: savedPlaylistId ?? null,
+    channels: shouldRewriteChannelPlaylists
+      ? preview.channels.map((channel) => ({
+          ...channel,
+          playlist: displayName,
+        }))
+      : preview.channels,
+  };
+}
+
+function savedEntryToDraft(entry: SavedPlaylistEntry): SavedPlaylistDraft {
+  switch (entry.kind) {
+    case "file":
+      return {
+        id: entry.id,
+        kind: "file",
+        display_name: entry.display_name,
+        path: entry.path,
+      };
+    case "url":
+      return {
+        id: entry.id,
+        kind: "url",
+        display_name: entry.display_name,
+        url: entry.url,
+      };
+    case "xtream":
+      return {
+        id: entry.id,
+        kind: "xtream",
+        display_name: entry.display_name,
+        servers: [...entry.servers],
+        preferred_server: entry.preferred_server,
+        username: entry.username,
+        password: entry.password,
+      };
+  }
 }
 
 const selectLiveSelectedChannel = (state: AppStore): ChannelResult | null => {
@@ -693,6 +769,7 @@ export default function App() {
   const playlistLoadProgress = useAppStore((s) => s.playlistLoadProgress);
   const playlistOpenError = useAppStore((s) => s.playlistOpenError);
   const recentPlaylists = useAppStore((s) => s.recentPlaylists);
+  const savedPlaylists = useAppStore((s) => s.savedPlaylists);
   const channelSearch = useAppStore((s) => s.channelSearch);
   const platform = useAppStore((s) => s.platform);
   const isMac = useAppStore((s) => s.isMac);
@@ -720,6 +797,11 @@ export default function App() {
   const historyError = useAppStore((s) => s.historyError);
   const historyClearing = useAppStore((s) => s.historyClearing);
   const modKey = isMac ? "Cmd" : "Ctrl";
+  const [savedPlaylistsDialogOpen, setSavedPlaylistsDialogOpen] = useState(false);
+  const [savedPlaylistEditorDraft, setSavedPlaylistEditorDraft] =
+    useState<SavedPlaylistDraft | null>(null);
+  const [savedXtreamTestEntry, setSavedXtreamTestEntry] =
+    useState<SavedPlaylistEntry | null>(null);
 
   const sidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const reportSidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
@@ -768,6 +850,12 @@ export default function App() {
       cancelled = true;
     };
   }, [platform]);
+
+  useEffect(() => {
+    const title = playlist ? `${playlist.file_name} | IPTV Checker` : "IPTV Checker";
+    document.title = title;
+    void getCurrentWindow().setTitle(title).catch(() => {});
+  }, [playlist]);
 
   // Detect platform via native plugin and refresh the initial fallback.
   useEffect(() => {
@@ -860,6 +948,16 @@ export default function App() {
     }
   }, []);
 
+  const refreshSavedPlaylists = useCallback(async (): Promise<SavedPlaylistEntry[]> => {
+    try {
+      const entries = await getSavedPlaylists();
+      getStore().setSavedPlaylists(entries);
+      return entries;
+    } catch {
+      return [];
+    }
+  }, []);
+
   const handleClearRecentPlaylists = useCallback(async () => {
     try {
       const entries = await clearRecentPlaylists();
@@ -872,6 +970,10 @@ export default function App() {
   useEffect(() => {
     void refreshRecentPlaylists();
   }, [refreshRecentPlaylists]);
+
+  useEffect(() => {
+    void refreshSavedPlaylists();
+  }, [refreshSavedPlaylists]);
 
   const checkForUpdates = useCallback(
     async (force: boolean, knownCurrentVersion?: string) => {
@@ -1015,6 +1117,8 @@ export default function App() {
           return openPlaylist(descriptor.path, undefined, undefined);
         case "url":
           return openPlaylistUrl(descriptor.url, undefined, undefined);
+        case "saved":
+          return openSavedPlaylist(descriptor.id, undefined, undefined);
         case "xtream":
           return openPlaylistXtream(
             {
@@ -1063,6 +1167,8 @@ export default function App() {
             return `path=${descriptor.path}`;
           case "url":
             return `url=${descriptor.url}`;
+          case "saved":
+            return `saved id=${descriptor.id}`;
           case "xtream":
             return `xtream server=${descriptor.server}, username=${descriptor.username}`;
           case "stalker":
@@ -1145,6 +1251,85 @@ export default function App() {
     [channelSearch, commitLoadedPlaylist, loadFullSourcePreview, refreshRecentPlaylists],
   );
 
+  const patchCurrentPlaylistMetadata = useCallback(
+    (displayName: string, savedPlaylistId?: string | null) => {
+      const state = getStore();
+      if (state.playlist) {
+        state.setPlaylist(
+          applyDisplayNameToPreview(state.playlist, displayName, savedPlaylistId),
+        );
+      }
+      if (state.cachedSourcePreview) {
+        state.setCachedSourcePreview(
+          applyDisplayNameToPreview(
+            state.cachedSourcePreview,
+            displayName,
+            savedPlaylistId,
+          ),
+        );
+      }
+    },
+    [],
+  );
+
+  const openSavedPlaylistById = useCallback(
+    async (id: string): Promise<string | true> => {
+      const result = await loadAndCommitSource(
+        {
+          kind: "saved",
+          id,
+        },
+        "freshOpen",
+      );
+      if (!result.ok) {
+        return result.error;
+      }
+
+      const nextSaved = await refreshSavedPlaylists();
+      const savedEntry = nextSaved.find((entry) => entry.id === id);
+      if (!savedEntry) {
+        void refreshRecentPlaylists();
+        return true;
+      }
+
+      try {
+        const recentPayload =
+          savedEntry.kind === "file"
+            ? {
+                kind: "file" as const,
+                value: savedEntry.path,
+              }
+            : savedEntry.kind === "url"
+              ? {
+                  kind: "url" as const,
+                  value: savedEntry.url,
+                }
+              : {
+                  kind: "xtream" as const,
+                  value: serializeXtreamRecent({
+                    server:
+                      savedEntry.preferred_server ?? savedEntry.servers[0] ?? "",
+                    username: savedEntry.username,
+                    password: savedEntry.password ?? undefined,
+                  }),
+                };
+
+        const entries = await addRecentPlaylist(
+          recentPayload.kind,
+          recentPayload.value,
+          savedEntry.display_name,
+          savedEntry.id,
+        );
+        getStore().setRecentPlaylists(entries);
+      } catch {
+        // Ignore recent-list update failures.
+      }
+
+      return true;
+    },
+    [loadAndCommitSource, refreshRecentPlaylists, refreshSavedPlaylists],
+  );
+
   const openPlaylistPath = useCallback(async (selectedPath: string) => {
     const result = await loadAndCommitSource(
       {
@@ -1158,7 +1343,7 @@ export default function App() {
     }
 
     try {
-      const entries = await addRecentPlaylist("file", selectedPath);
+      const entries = await addRecentPlaylist("file", selectedPath, null, null);
       getStore().setRecentPlaylists(entries);
     } catch {
       // Ignore recent-list update failures.
@@ -1207,7 +1392,7 @@ export default function App() {
     }
 
     try {
-      const entries = await addRecentPlaylist("url", url);
+      const entries = await addRecentPlaylist("url", url, null, null);
       getStore().setRecentPlaylists(entries);
     } catch {
       // Ignore recent-list update failures.
@@ -1253,6 +1438,8 @@ export default function App() {
             username: source.username,
             password: savePassword ? source.password : undefined,
           }),
+          null,
+          null,
         );
         getStore().setRecentPlaylists(entries);
       } catch {
@@ -1277,6 +1464,145 @@ export default function App() {
       return result.ok ? true : result.error;
     },
     [loadAndCommitSource],
+  );
+
+  const handleOpenSaved = useCallback((id: string) => {
+    void openSavedPlaylistById(id);
+  }, [openSavedPlaylistById]);
+
+  const handleManageSavedPlaylists = useCallback(() => {
+    setSavedPlaylistsDialogOpen(true);
+  }, []);
+
+  const handleSaveCurrentPlaylist = useCallback(() => {
+    const state = getStore();
+    const currentPlaylist = state.playlist;
+    const descriptor = state.currentSourceDescriptor;
+    const existing = findSavedPlaylistForCurrentSource(
+      state.savedPlaylists,
+      descriptor,
+      currentPlaylist?.saved_playlist_id,
+    );
+
+    if (existing) {
+      setSavedPlaylistEditorDraft(savedEntryToDraft(existing));
+      return;
+    }
+
+    const draft = buildSavedPlaylistDraftFromSource(
+      descriptor,
+      currentPlaylist?.file_name ?? "",
+      null,
+    );
+    if (!draft) {
+      state.setMenuInfo("Open a file, URL, or Xtream source first.");
+      return;
+    }
+    setSavedPlaylistEditorDraft(draft);
+  }, []);
+
+  const handleSavePlaylistDraft = useCallback(
+    async (draft: SavedPlaylistDraft) => {
+      const result = await upsertSavedPlaylist(draft);
+      getStore().setSavedPlaylists(result.entries);
+      setSavedPlaylistEditorDraft(null);
+      void refreshRecentPlaylists();
+
+      const state = getStore();
+      const currentPlaylist = state.playlist;
+      const currentSaved = currentPlaylist?.saved_playlist_id ?? null;
+      const currentMatch = findSavedPlaylistForCurrentSource(
+        result.entries,
+        state.currentSourceDescriptor,
+        currentSaved,
+      );
+      if (currentMatch && currentMatch.id === result.entry.id) {
+        state.setCurrentSourceDescriptor({ kind: "saved", id: result.entry.id });
+        patchCurrentPlaylistMetadata(result.entry.display_name, result.entry.id);
+      }
+    },
+    [patchCurrentPlaylistMetadata, refreshRecentPlaylists],
+  );
+
+  const handleDeleteSavedPlaylistById = useCallback(
+    async (id: string) => {
+      const confirmed = window.confirm("Delete this saved playlist?");
+      if (!confirmed) {
+        return;
+      }
+
+      try {
+        const entries = await deleteSavedPlaylist(id);
+        getStore().setSavedPlaylists(entries);
+        void refreshRecentPlaylists();
+
+        const state = getStore();
+        if (state.playlist?.saved_playlist_id === id) {
+          state.setCurrentSourceDescriptor(null);
+          state.setPlaylist({
+            ...state.playlist,
+            saved_playlist_id: null,
+          });
+        }
+      } catch (err) {
+        getStore().setMenuInfo(errorToString(err));
+      }
+    },
+    [refreshRecentPlaylists],
+  );
+
+  const handleRenameCurrentPlaylist = useCallback(async () => {
+    const state = getStore();
+    if (!state.playlist) {
+      state.setMenuInfo("Open a playlist first.");
+      return;
+    }
+
+    const nextName = window.prompt("Rename playlist", state.playlist.file_name)?.trim();
+    if (!nextName || nextName === state.playlist.file_name) {
+      return;
+    }
+
+    try {
+      await renamePlaylistSource({
+        saved_playlist_id: state.playlist.saved_playlist_id ?? null,
+        descriptor: buildRenameDescriptor(state.currentSourceDescriptor),
+        display_name: nextName,
+      });
+      patchCurrentPlaylistMetadata(nextName, state.playlist.saved_playlist_id ?? null);
+      await Promise.all([refreshRecentPlaylists(), refreshSavedPlaylists()]);
+    } catch (err) {
+      state.setMenuInfo(errorToString(err));
+    }
+  }, [patchCurrentPlaylistMetadata, refreshRecentPlaylists, refreshSavedPlaylists]);
+
+  const handlePreferSavedXtreamServer = useCallback(
+    async (entry: SavedPlaylistEntry, server: string) => {
+      if (entry.kind !== "xtream") {
+        return;
+      }
+      try {
+        const result = await upsertSavedPlaylist({
+          id: entry.id,
+          kind: "xtream",
+          display_name: entry.display_name,
+          servers: [...entry.servers],
+          preferred_server: server,
+          username: entry.username,
+          password: entry.password,
+        });
+        getStore().setSavedPlaylists(result.entries);
+        setSavedXtreamTestEntry(null);
+
+        const state = getStore();
+        if (state.playlist?.saved_playlist_id === entry.id) {
+          patchCurrentPlaylistMetadata(result.entry.display_name, entry.id);
+        }
+      } catch (err) {
+        getStore().setMenuInfo(errorToString(err));
+      }
+    },
+    [patchCurrentPlaylistMetadata],
   );
 
   const ensureSourceFilterApplied = useCallback(async () => {
@@ -1389,6 +1715,10 @@ export default function App() {
 
   const handleOpenRecent = useCallback(
     (entry: RecentPlaylistEntry) => {
+      if (entry.saved_playlist_id) {
+        void openSavedPlaylistById(entry.saved_playlist_id);
+        return;
+      }
       if (entry.kind === "url") {
         void openPlaylistUrlValue(entry.value);
         return;
@@ -1417,16 +1747,31 @@ export default function App() {
       }
       void openPlaylistPath(entry.value);
     },
-    [openPlaylistPath, openPlaylistUrlValue, openPlaylistXtreamValue, openSourceDialog, refreshRecentPlaylists],
+    [
+      openPlaylistPath,
+      openPlaylistUrlValue,
+      openPlaylistXtreamValue,
+      openSavedPlaylistById,
+      openSourceDialog,
+      refreshRecentPlaylists,
+    ],
   );
 
   const recentPlaylistsRef = useRef<RecentPlaylistEntry[]>(recentPlaylists);
   useEffect(() => {
     recentPlaylistsRef.current = recentPlaylists;
   }, [recentPlaylists]);
+  const savedPlaylistsRef = useRef<SavedPlaylistEntry[]>(savedPlaylists);
+  useEffect(() => {
+    savedPlaylistsRef.current = savedPlaylists;
+  }, [savedPlaylists]);
   const startScreenRecentPlaylists = useMemo(
     () => recentPlaylists.slice(0, START_SCREEN_RECENT_LIMIT),
     [recentPlaylists],
+  );
+  const startScreenSavedPlaylists = useMemo(
+    () => savedPlaylists.slice(0, 8),
+    [savedPlaylists],
   );
 
   useEffect(() => {
@@ -1681,6 +2026,7 @@ export default function App() {
     const config: ScanConfig = {
       file_path: currentPlaylist.file_path,
       source_identity: currentPlaylist.source_identity ?? null,
+      playlist_display_name: currentPlaylist.file_name,
       group_filter: currentGroupFilter !== "all" ? currentGroupFilter : null,
       channel_search: currentChannelSearch || null,
       selected_indices: effectiveSelection.length > 0 ? effectiveSelection : null,
@@ -1749,8 +2095,11 @@ export default function App() {
   handleOpenUrlRef.current = handleOpenUrl;
   const handleOpenRecentRef = useRef(handleOpenRecent);
   handleOpenRecentRef.current = handleOpenRecent;
+  const handleOpenSavedRef = useRef(handleOpenSaved);
+  handleOpenSavedRef.current = handleOpenSaved;
   const handleClearRecentRef = useRef(handleClearRecentPlaylists);
   handleClearRecentRef.current = handleClearRecentPlaylists;
+  const handleManageSavedRef = useRef<() => void>(() => {});
   const handleStartScanRef = useRef(handleStartScan);
   handleStartScanRef.current = handleStartScan;
   const pauseRef = useRef(pause);
@@ -1784,7 +2133,14 @@ export default function App() {
             if (entry) handleOpenRecentRef.current(entry);
           }),
         ),
+        ...Array.from({ length: 10 }, (_, i) =>
+          listen(`menu://open-saved-${i}`, () => {
+            const entry = savedPlaylistsRef.current[i];
+            if (entry) handleOpenSavedRef.current(entry.id);
+          }),
+        ),
         listen("menu://clear-recent", () => void handleClearRecentRef.current()),
+        listen("menu://manage-saved", () => handleManageSavedRef.current()),
         listen("menu://export-csv", () => queueExport("csv")),
         listen("menu://export-split", () => queueExport("split")),
         listen("menu://export-renamed", () => queueExport("renamed")),
@@ -1795,6 +2151,13 @@ export default function App() {
         listen("menu://toggle-prescan-filter", () => {
           const current = settingsRef.current;
           void saveSettingsRef.current({ ...current, show_prescan_filter: !current.show_prescan_filter });
+        }),
+        listen("menu://toggle-header-button-text", () => {
+          const current = settingsRef.current;
+          void saveSettingsRef.current({
+            ...current,
+            show_header_button_text: !current.show_header_button_text,
+          });
         }),
         listen("menu://clear-filters", () => {
           getStore().setSearch("");
@@ -1930,6 +2293,9 @@ export default function App() {
   useEffect(() => {
     handleOpenSettingsRef.current = handleOpenSettings;
   }, [handleOpenSettings]);
+  useEffect(() => {
+    handleManageSavedRef.current = handleManageSavedPlaylists;
+  }, [handleManageSavedPlaylists]);
 
   const handleOpenLog = useCallback(async () => {
     const existing = await WebviewWindow.getByLabel("log");
@@ -2170,6 +2536,9 @@ export default function App() {
         onOpen={handleOpen}
         onOpenFolder={handleOpenFolder}
         onOpenUrl={handleOpenUrl}
+        onRenamePlaylist={handleRenameCurrentPlaylist}
+        onSavePlaylist={handleSaveCurrentPlaylist}
+        onManageSavedPlaylists={handleManageSavedPlaylists}
         onStartScan={handleStartScan}
         onPauseScan={pause}
         onResumeScan={resume}
@@ -2403,6 +2772,41 @@ export default function App() {
                       </button>
                     </div>
 
+                    {startScreenSavedPlaylists.length > 0 && (
+                      <div className="mt-6 text-left mx-auto max-w-xl">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-[12px] uppercase tracking-[0.08em] text-text-tertiary">
+                            Saved Playlists
+                          </p>
+                          <button
+                            onClick={handleManageSavedPlaylists}
+                            className="text-[12px] text-text-tertiary hover:text-text-primary transition-colors"
+                            type="button"
+                          >
+                            Manage…
+                          </button>
+                        </div>
+                        <div className="space-y-1">
+                          {startScreenSavedPlaylists.map((entry) => (
+                            <button
+                              key={entry.id}
+                              onClick={() => handleOpenSaved(entry.id)}
+                              className="w-full text-left px-3 py-2 rounded-lg border border-border-subtle hover:border-border-app hover:bg-panel-subtle transition-colors"
+                              type="button"
+                              title={savedPlaylistSecondaryLabel(entry)}
+                            >
+                              <span className="text-[13px] text-text-primary block truncate">
+                                {entry.display_name}
+                              </span>
+                              <span className="text-[11px] text-text-tertiary block truncate mt-0.5">
+                                {savedPlaylistSecondaryLabel(entry)}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {startScreenRecentPlaylists.length > 0 && (
                       <div className="mt-6 text-left mx-auto max-w-xl">
                         <div className="flex items-center justify-between mb-2">
@@ -2472,6 +2876,43 @@ export default function App() {
             onOpenXtream={openPlaylistXtreamValue}
             onOpenStalker={openPlaylistStalkerValue}
             onClose={() => getStore().setOpenSourceDialogState(null)}
+          />
+        </Suspense>
+      )}
+
+      {savedPlaylistsDialogOpen && (
+        <Suspense fallback={null}>
+          <SavedPlaylistsDialog
+            playlists={savedPlaylists}
+            onOpen={(id) => handleOpenSaved(id)}
+            onEdit={(entry) => setSavedPlaylistEditorDraft(savedEntryToDraft(entry))}
+            onDelete={(id) => void handleDeleteSavedPlaylistById(id)}
+            onTestServers={(entry) => setSavedXtreamTestEntry(entry)}
+            onClose={() => setSavedPlaylistsDialogOpen(false)}
+          />
+        </Suspense>
+      )}
+
+      {savedPlaylistEditorDraft && (
+        <Suspense fallback={null}>
+          <SavedPlaylistEditorDialog
+            draft={savedPlaylistEditorDraft}
+            onClose={() => setSavedPlaylistEditorDraft(null)}
+            onSave={(draft) => void handleSavePlaylistDraft(draft)}
+          />
+        </Suspense>
+      )}
+
+      {savedXtreamTestEntry?.kind === "xtream" && (
+        <Suspense fallback={null}>
+          <XtreamServerTestDialog
+            initialServersText={savedXtreamTestEntry.servers.join("\n")}
+            username={savedXtreamTestEntry.username}
+            password={savedXtreamTestEntry.password ?? ""}
+            onSelectServer={(server) =>
+              void handlePreferSavedXtreamServer(savedXtreamTestEntry, server)
+            }
+            onClose={() => setSavedXtreamTestEntry(null)}
           />
         </Suspense>
       )}
