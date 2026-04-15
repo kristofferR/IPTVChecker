@@ -151,7 +151,22 @@ fn build_scope_key(config: &ScanConfig) -> String {
     let selected = config
         .selected_indices
         .as_ref()
-        .map(|indices| format!("selected:{}", indices.len()))
+        .and_then(|indices| {
+            if indices.is_empty() {
+                return None;
+            }
+
+            let mut normalized = indices.clone();
+            normalized.sort_unstable();
+            normalized.dedup();
+
+            let selection = normalized
+                .into_iter()
+                .map(|index| index.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            Some(format!("selected:{selection}"))
+        })
         .unwrap_or_else(|| "selected:*".to_string());
 
     format!(
@@ -1138,6 +1153,33 @@ mod tests {
             get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
         assert_eq!(history.len(), 2);
         // run-2 has different scope_key from run-1, so no diff
+        assert!(history[0].diff.is_none());
+        assert!(history[1].diff.is_none());
+
+        let _ = std::fs::remove_dir_all(&test_root);
+    }
+
+    #[test]
+    fn v2_same_selection_size_but_different_indices_do_not_produce_diff() {
+        let test_root = create_test_root_dir("v2-selection-scope-keys");
+        std::fs::create_dir_all(&test_root).unwrap();
+
+        let mut config1 = make_config("/tmp/sample.m3u8", None);
+        config1.selected_indices = Some(vec![1, 5]);
+        let mut config2 = make_config("/tmp/sample.m3u8", None);
+        config2.selected_indices = Some(vec![2, 6]);
+
+        let results = vec![sample_result("http://example.com/a", ChannelStatus::Alive)];
+        let summary = make_summary(1, 0);
+
+        append_scan_history_at_dir(&test_root, "run-1", &config1, &summary, results.clone(), 20)
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(2));
+        append_scan_history_at_dir(&test_root, "run-2", &config2, &summary, results, 20).unwrap();
+
+        let history =
+            get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
+        assert_eq!(history.len(), 2);
         assert!(history[0].diff.is_none());
         assert!(history[1].diff.is_none());
 
