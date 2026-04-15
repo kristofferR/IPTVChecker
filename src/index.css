@@ -216,18 +216,27 @@ body {
   }
 }
 
-/* Windows: overlay titlebar needs drag region + padding for window controls */
+/* Windows: overlay titlebar still needs right-side room for controls. */
 [data-platform="windows"] {
   --toolbar-pt: 2rem;
   --toolbar-pr: 138px;
 }
 
-/* Linux: native WM decorations — no overlay padding, use DE scrollbar style */
+/* Main window already sits below native chrome/menus on Windows/Linux. */
+[data-window="main"][data-platform="windows"] {
+  --toolbar-pt: 0.25rem;
+}
+
+/* Linux: native WM decorations — use DE scrollbar style. */
 [data-platform="linux"] {
   --toolbar-pt: 0.5rem;
   --toolbar-pl: 1rem;
   scrollbar-color: var(--text-tertiary) transparent;
   scrollbar-width: thin;
+}
+
+[data-window="main"][data-platform="linux"] {
+  --toolbar-pt: 0.25rem;
 }
 
 /* Native-feeling scroll containers on macOS */
