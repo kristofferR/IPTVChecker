@@ -30,7 +30,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg", "nsis", "appimage", "deb", "rpm"],
+    "targets": ["dmg", "nsis", "appimage", "deb", "rpm"],
     "category": "Utility",
     "shortDescription": "Validate IPTV playlists and inspect stream health.",
     "icon": [
