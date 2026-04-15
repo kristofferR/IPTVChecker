@@ -24,6 +24,11 @@ document.documentElement.dataset.theme = "system";
 const windowParam = new URLSearchParams(window.location.search).get("window");
 const isSettingsWindow = windowParam === "settings";
 const isLogWindow = windowParam === "log";
+document.documentElement.dataset.window = isLogWindow
+  ? "log"
+  : isSettingsWindow
+    ? "settings"
+    : "main";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
