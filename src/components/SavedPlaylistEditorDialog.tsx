@@ -2,6 +2,7 @@ import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from "r
 import { FolderOpen, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { SavedPlaylistDraft } from "../lib/types";
+import PasswordField from "./PasswordField";
 
 interface SavedPlaylistEditorDialogProps {
   draft: SavedPlaylistDraft;
@@ -238,11 +239,14 @@ export default function SavedPlaylistEditorDialog({
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[12px] font-medium text-text-secondary">
+                  <label
+                    htmlFor="saved-playlist-xtream-password"
+                    className="text-[12px] font-medium text-text-secondary"
+                  >
                     Password
                   </label>
-                  <input
-                    type="password"
+                  <PasswordField
+                    id="saved-playlist-xtream-password"
                     value={form.password ?? ""}
                     onKeyDown={handleSelectAllShortcut}
                     onChange={(event) =>
