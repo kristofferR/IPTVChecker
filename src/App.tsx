@@ -2779,11 +2779,7 @@ export default function App() {
               )
             ) : (
               <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden native-scroll text-text-tertiary">
-              <div
-                className={`min-h-full flex flex-col items-center text-center px-4 ${
-                  playlistLoading ? "justify-center py-6" : "justify-start pt-0 pb-6"
-                }`}
-              >
+              <div className="min-h-full flex flex-col items-center justify-center text-center px-4 py-6">
                 {playlistLoading ? (
                   <div className="select-none">
                     <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-blue-500" />
@@ -2847,122 +2843,126 @@ export default function App() {
                   </div>
                 ) : (
                   <>
-                    <div className="select-none pt-3">
-                      <p className="text-lg font-medium mb-2">
-                        No playlist loaded
-                      </p>
-                      <p className="text-[15px] mb-4">
-                        Click Open or press{" "}
-                        <kbd className="px-2 py-0.5 bg-input rounded text-[13px] border border-border-app">
-                          {modKey}+O
-                        </kbd>{" "}
-                        to load an M3U playlist
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center justify-center gap-2">
-                      <button
-                        onClick={handleOpen}
-                        className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-600/25 transition-colors"
-                        type="button"
-                      >
-                        <FolderOpen className="w-4 h-4" />
-                        Open File
-                      </button>
-                      <button
-                        onClick={handleOpenFolder}
-                        className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
-                        type="button"
-                      >
-                        <FolderOpen className="w-4 h-4" />
-                        Open Folder
-                      </button>
-                      <button
-                        onClick={handleOpenUrl}
-                        className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
-                        type="button"
-                      >
-                        Add URL
-                      </button>
-                      <button
-                        onClick={handleOpenXtream}
-                        className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
-                        type="button"
-                      >
-                        Add Xtream
-                      </button>
+                    <div className="flex flex-col items-center">
+                      <div className="select-none pt-3">
+                        <p className="text-lg font-medium mb-2">
+                          No playlist loaded
+                        </p>
+                        <p className="text-[15px] mb-4">
+                          Click Open or press{" "}
+                          <kbd className="px-2 py-0.5 bg-input rounded text-[13px] border border-border-app">
+                            {modKey}+O
+                          </kbd>{" "}
+                          to load an M3U playlist
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        <button
+                          onClick={handleOpen}
+                          className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-600/25 transition-colors"
+                          type="button"
+                        >
+                          <FolderOpen className="w-4 h-4" />
+                          Open File
+                        </button>
+                        <button
+                          onClick={handleOpenFolder}
+                          className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
+                          type="button"
+                        >
+                          <FolderOpen className="w-4 h-4" />
+                          Open Folder
+                        </button>
+                        <button
+                          onClick={handleOpenUrl}
+                          className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
+                          type="button"
+                        >
+                          Add URL
+                        </button>
+                        <button
+                          onClick={handleOpenXtream}
+                          className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
+                          type="button"
+                        >
+                          Add Xtream
+                        </button>
+                      </div>
                     </div>
 
-                    {startScreenSavedPlaylists.length > 0 && (
-                      <div className="mt-6 text-left mx-auto max-w-xl">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-[12px] uppercase tracking-[0.08em] text-text-tertiary">
-                            Saved Playlists
-                          </p>
-                          <button
-                            onClick={handleManageSavedPlaylists}
-                            className="text-[12px] text-text-tertiary hover:text-text-primary transition-colors"
-                            type="button"
-                          >
-                            Manage…
-                          </button>
-                        </div>
-                        <div className="space-y-1">
-                          {startScreenSavedPlaylists.map((entry) => (
+                    <div className="mt-6 w-full max-w-xl text-left">
+                      {startScreenSavedPlaylists.length > 0 && (
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-[12px] uppercase tracking-[0.08em] text-text-tertiary">
+                              Saved Playlists
+                            </p>
                             <button
-                              key={entry.id}
-                              onClick={() => handleOpenSaved(entry.id)}
-                              className="w-full text-left px-3 py-2 rounded-lg border border-border-subtle hover:border-border-app hover:bg-panel-subtle transition-colors"
+                              onClick={handleManageSavedPlaylists}
+                              className="text-[12px] text-text-tertiary hover:text-text-primary transition-colors"
                               type="button"
-                              title={savedPlaylistSecondaryLabel(entry)}
                             >
-                              <span className="text-[13px] text-text-primary block truncate">
-                                {entry.display_name}
-                              </span>
-                              <span className="text-[11px] text-text-tertiary block truncate mt-0.5">
-                                {savedPlaylistSecondaryLabel(entry)}
-                              </span>
+                              Manage…
                             </button>
-                          ))}
+                          </div>
+                          <div className="space-y-1">
+                            {startScreenSavedPlaylists.map((entry) => (
+                              <button
+                                key={entry.id}
+                                onClick={() => handleOpenSaved(entry.id)}
+                                className="w-full text-left px-3 py-2 rounded-lg border border-border-subtle hover:border-border-app hover:bg-panel-subtle transition-colors"
+                                type="button"
+                                title={savedPlaylistSecondaryLabel(entry)}
+                              >
+                                <span className="text-[13px] text-text-primary block truncate">
+                                  {entry.display_name}
+                                </span>
+                                <span className="text-[11px] text-text-tertiary block truncate mt-0.5">
+                                  {savedPlaylistSecondaryLabel(entry)}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    {startScreenRecentPlaylists.length > 0 && (
-                      <div className="mt-6 text-left mx-auto max-w-xl">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-[12px] uppercase tracking-[0.08em] text-text-tertiary">
-                            Open Recent
-                          </p>
-                          <button
-                            onClick={() => {
-                              void handleClearRecentPlaylists();
-                            }}
-                            className="text-[12px] text-text-tertiary hover:text-text-primary transition-colors"
-                            type="button"
-                          >
-                            Clear
-                          </button>
-                        </div>
-                        <div className="space-y-1">
-                          {startScreenRecentPlaylists.map((entry) => (
+                      {startScreenRecentPlaylists.length > 0 && (
+                        <div className={startScreenSavedPlaylists.length > 0 ? "mt-6" : ""}>
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-[12px] uppercase tracking-[0.08em] text-text-tertiary">
+                              Open Recent
+                            </p>
                             <button
-                              key={`${entry.kind}:${entry.value}`}
-                              onClick={() => handleOpenRecent(entry)}
-                              className="w-full text-left px-3 py-2 rounded-lg border border-border-subtle hover:border-border-app hover:bg-panel-subtle transition-colors"
+                              onClick={() => {
+                                void handleClearRecentPlaylists();
+                              }}
+                              className="text-[12px] text-text-tertiary hover:text-text-primary transition-colors"
                               type="button"
-                              title={recentTitle(entry)}
                             >
-                              <span className="text-[13px] text-text-primary block truncate">
-                                {entry.label}
-                              </span>
-                              <span className="text-[11px] text-text-tertiary block truncate mt-0.5">
-                                {recentValueLabel(entry)}
-                              </span>
+                              Clear
                             </button>
-                          ))}
+                          </div>
+                          <div className="space-y-1">
+                            {startScreenRecentPlaylists.map((entry) => (
+                              <button
+                                key={`${entry.kind}:${entry.value}`}
+                                onClick={() => handleOpenRecent(entry)}
+                                className="w-full text-left px-3 py-2 rounded-lg border border-border-subtle hover:border-border-app hover:bg-panel-subtle transition-colors"
+                                type="button"
+                                title={recentTitle(entry)}
+                              >
+                                <span className="text-[13px] text-text-primary block truncate">
+                                  {entry.label}
+                                </span>
+                                <span className="text-[11px] text-text-tertiary block truncate mt-0.5">
+                                  {recentValueLabel(entry)}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </>
                 )}
               </div>
