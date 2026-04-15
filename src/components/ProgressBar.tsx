@@ -34,6 +34,8 @@ export const ProgressBar = memo(function ProgressBar() {
   if (showTelemetry) {
     if (scanState === "paused") {
       telemetryLabel = "—";
+    } else if (scanState === "cancelling") {
+      telemetryLabel = "Stopping scan…";
     } else if (throughputChannelsPerSecond == null) {
       telemetryLabel = "Calculating speed…";
     } else {
@@ -61,6 +63,11 @@ export const ProgressBar = memo(function ProgressBar() {
         {scanState === "paused" && (
           <span className="text-[12px] text-yellow-400 font-medium uppercase tracking-[0.04em]">
             Paused
+          </span>
+        )}
+        {scanState === "cancelling" && (
+          <span className="text-[12px] text-orange-400 font-medium uppercase tracking-[0.04em]">
+            Stopping
           </span>
         )}
       </div>

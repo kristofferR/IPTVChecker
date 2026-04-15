@@ -595,7 +595,7 @@ export function useScan() {
     // The backend scan://cancelled event will still arrive later to
     // deliver the summary and clean up activeRunId.
     getStore().applyScanRuntime({
-      scanState: "cancelled",
+      scanState: "cancelling",
       telemetry: EMPTY_TELEMETRY,
     });
     try {

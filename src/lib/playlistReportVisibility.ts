@@ -2,6 +2,7 @@ export type ReportScanState =
   | "idle"
   | "scanning"
   | "paused"
+  | "cancelling"
   | "complete"
   | "cancelled";
 

@@ -571,8 +571,7 @@ function ScanRuntimeEffects({
     const previous = reportAutoRevealPreviousScanStateRef.current;
     const scanJustStarted =
       scanState === "scanning" &&
-      previous !== "scanning" &&
-      previous !== "paused";
+      !isScanActive(previous);
 
     if (scanJustStarted) {
       reportAutoRevealBlockedRef.current = false;
