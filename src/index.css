@@ -370,6 +370,14 @@ body {
   box-shadow: 0 0 0 3px var(--focus-ring), inset 0 0.5px 1px rgb(0 0 0 / 0.04);
 }
 
+.toolbar-select {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 [data-platform="macos"] .channel-row:hover {
   background: rgb(0 0 0 / 0.045);
 }

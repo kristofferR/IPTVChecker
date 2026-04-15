@@ -299,6 +299,7 @@ export const Toolbar = memo(function Toolbar({
       ? "pt-[calc(var(--toolbar-pt)-0.5rem)] pb-1"
       : "pt-[var(--toolbar-pt)] pb-1";
   const toolbarSurface = isMac ? "" : "bg-panel";
+  const selectedGroupTitle = groupFilter === "all" ? "All Groups" : groupFilter;
 
   return (
     <div
@@ -449,104 +450,112 @@ export const Toolbar = memo(function Toolbar({
         </span>
       )}
 
-      <div data-tauri-drag-region={dragRegionAttr} className="flex-1" />
-
-      {/* Filters: Group, Status, Search */}
       <div
-        className={`flex items-center gap-[clamp(0.35rem,0.8vw,0.85rem)] ${filtersDisabled ? "opacity-50" : ""}`}
-        data-no-window-drag
+        data-tauri-drag-region={dragRegionAttr}
+        className="ml-auto flex flex-1 min-w-0 items-center justify-end gap-[clamp(0.45rem,0.9vw,1rem)]"
       >
-        <select
-          value={groupFilter}
-          disabled={filtersDisabled}
-          onChange={(e) => handleGroupChange(e.target.value)}
-          className="native-field h-7 text-[12px] px-2 bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
+        {/* Filters: Group, Status, Search */}
+        <div
+          className={`flex min-w-0 flex-1 items-center justify-end gap-[clamp(0.35rem,0.8vw,0.85rem)] ${filtersDisabled ? "opacity-50" : ""}`}
+          data-no-window-drag
         >
-          <option value="all">All Groups</option>
-          {groups.map((g) => (
-            <option key={g} value={g}>
-              {g}
-            </option>
-          ))}
-        </select>
-        <select
-          value={statusFilter}
-          disabled={filtersDisabled}
-          onChange={(e) => handleStatusChange(e.target.value)}
-          className="native-field h-7 text-[12px] px-2 bg-input border border-border-app rounded-md text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
-        >
-          <option value="all">{statusLabel("all", "All Status")}</option>
-          <option value="alive">{statusLabel("alive", "Alive")}</option>
-          <option value="drm">{statusLabel("drm", "DRM")}</option>
-          <option value="dead">{statusLabel("dead", "Dead")}</option>
-          <option value="geoblocked">{statusLabel("geoblocked", "Geoblocked")}</option>
-          {(statusOptionCounts.placeholder ?? 0) > 0 && (
-            <option value="placeholder">{statusLabel("placeholder", "Placeholder")}</option>
-          )}
-          <option value="mislabeled">{statusLabel("mislabeled", "Mislabeled")}</option>
-          <option value="audio_only">{statusLabel("audio_only", "Audio Only")}</option>
-          <option value="duplicates">{statusLabel("duplicates", "Duplicates")}</option>
-          <option value="pending">{statusLabel("pending", "Pending")}</option>
-        </select>
-        <div className="relative ml-[clamp(0.15rem,0.5vw,0.6rem)]">
-          <Search className="search-icon absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary" />
-          <input
-            ref={searchInputRef}
-            type="search"
-            placeholder="Search..."
-            value={search}
-            disabled={filtersDisabled}
-            onChange={(e) => handleSearchChange(e.target.value)}
-            className="native-field h-7 w-[clamp(9rem,16vw,12.5rem)] pl-7 pr-2 text-[12px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:cursor-not-allowed"
-          />
+          <div className="flex min-w-0 flex-[1.6_1_0%] items-center gap-[clamp(0.35rem,0.8vw,0.85rem)]">
+            <div className="min-w-[6rem] flex-1">
+              <select
+                value={groupFilter}
+                title={selectedGroupTitle}
+                disabled={filtersDisabled}
+                onChange={(e) => handleGroupChange(e.target.value)}
+                className="toolbar-select native-field h-7 w-full min-w-0 px-2 bg-input border border-border-app rounded-md text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
+              >
+                <option value="all">All Groups</option>
+                {groups.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <select
+              value={statusFilter}
+              disabled={filtersDisabled}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              className="toolbar-select native-field h-7 w-[clamp(8.75rem,12vw,10.5rem)] shrink-0 px-2 bg-input border border-border-app rounded-md text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
+            >
+              <option value="all">{statusLabel("all", "All Status")}</option>
+              <option value="alive">{statusLabel("alive", "Alive")}</option>
+              <option value="drm">{statusLabel("drm", "DRM")}</option>
+              <option value="dead">{statusLabel("dead", "Dead")}</option>
+              <option value="geoblocked">{statusLabel("geoblocked", "Geoblocked")}</option>
+              {(statusOptionCounts.placeholder ?? 0) > 0 && (
+                <option value="placeholder">{statusLabel("placeholder", "Placeholder")}</option>
+              )}
+              <option value="mislabeled">{statusLabel("mislabeled", "Mislabeled")}</option>
+              <option value="audio_only">{statusLabel("audio_only", "Audio Only")}</option>
+              <option value="duplicates">{statusLabel("duplicates", "Duplicates")}</option>
+              <option value="pending">{statusLabel("pending", "Pending")}</option>
+            </select>
+          </div>
+          <div className="relative ml-[clamp(0.15rem,0.5vw,0.6rem)] min-w-[6rem] flex-[0_1_clamp(8.5rem,15vw,12.5rem)]">
+            <Search className="search-icon absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary" />
+            <input
+              ref={searchInputRef}
+              type="search"
+              placeholder="Search..."
+              value={search}
+              disabled={filtersDisabled}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              className="native-field h-7 w-full min-w-0 pl-7 pr-2 text-[12px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:cursor-not-allowed"
+            />
+          </div>
         </div>
-      </div>
 
-      {/* Actions group: Export, History, Settings */}
-      <div className={isMac ? "toolbar-group" : "flex items-center gap-1.5"}>
-        <ExportMenu
-          scopeCounts={exportScopeCounts}
-          resolveScopeResults={resolveExportScopeResults}
-          playlistName={playlistName}
-          playlistPath={playlistPath}
-          disabled={!hasResults}
-          showButtonText={showButtonText}
-          menuRequest={menuExportRequest}
-          scanState={scanState}
-          isMac={isMac}
-        />
+        {/* Actions group: Export, History, Settings */}
+        <div className={`${isMac ? "toolbar-group" : "flex items-center gap-1.5"} shrink-0`}>
+          <ExportMenu
+            scopeCounts={exportScopeCounts}
+            resolveScopeResults={resolveExportScopeResults}
+            playlistName={playlistName}
+            playlistPath={playlistPath}
+            disabled={!hasResults}
+            showButtonText={showButtonText}
+            menuRequest={menuExportRequest}
+            scanState={scanState}
+            isMac={isMac}
+          />
 
-        <button
-          onClick={onToggleReport}
-          disabled={!hasPlaylist}
-          className={`${btnWithOptionalText()} ${showReport ? "toolbar-btn-primary" : ""}`.trim()}
-          title={showReport ? "Hide Report" : "Show Report"}
-          aria-label={showReport ? "Hide Report" : "Show Report"}
-        >
-          <IconReport className="w-[22px] h-[22px]" />
-          {showButtonText && "Report"}
-        </button>
+          <button
+            onClick={onToggleReport}
+            disabled={!hasPlaylist}
+            className={`${btnWithOptionalText()} ${showReport ? "toolbar-btn-primary" : ""}`.trim()}
+            title={showReport ? "Hide Report" : "Show Report"}
+            aria-label={showReport ? "Hide Report" : "Show Report"}
+          >
+            <IconReport className="w-[22px] h-[22px]" />
+            {showButtonText && "Report"}
+          </button>
 
-        <button
-          onClick={handleOpenHistory}
-          disabled={!hasPlaylist}
-          className={btnWithOptionalText()}
-          title="History"
-          aria-label="History"
-        >
-          <IconHistory className="w-[22px] h-[22px]" />
-          {showButtonText && "History"}
-        </button>
+          <button
+            onClick={handleOpenHistory}
+            disabled={!hasPlaylist}
+            className={btnWithOptionalText()}
+            title="History"
+            aria-label="History"
+          >
+            <IconHistory className="w-[22px] h-[22px]" />
+            {showButtonText && "History"}
+          </button>
 
-        <button
-          onClick={onOpenSettings}
-          className={btnWithOptionalText("min-w-9")}
-          title="Settings"
-          aria-label="Settings"
-        >
-          <IconSettings className="w-[22px] h-[22px]" />
-          {showButtonText && "Settings"}
-        </button>
+          <button
+            onClick={onOpenSettings}
+            className={btnWithOptionalText("min-w-9")}
+            title="Settings"
+            aria-label="Settings"
+          >
+            <IconSettings className="w-[22px] h-[22px]" />
+            {showButtonText && "Settings"}
+          </button>
+        </div>
       </div>
     </div>
   );
