@@ -2785,7 +2785,7 @@ export default function App() {
                 }`}
               >
                 {playlistLoading ? (
-                  <>
+                  <div className="select-none">
                     <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-blue-500" />
                     <p className="text-lg font-medium">
                       {playlistLoadProgress?.stage === "Connecting"
@@ -2844,7 +2844,7 @@ export default function App() {
                         {playlistLoadProgress.detail}
                       </p>
                     )}
-                  </>
+                  </div>
                 ) : (
                   <>
                     <div className="select-none pt-3">
