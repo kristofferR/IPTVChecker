@@ -5,6 +5,8 @@ pub mod models;
 pub mod state;
 
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
+use std::path::Path;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -28,12 +30,67 @@ static APP_IS_QUITTING: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static WINDOW_CLOSED_BY_USER: AtomicBool = AtomicBool::new(false);
 static NEXT_WINDOW_ID: AtomicUsize = AtomicUsize::new(1);
+const FRONTEND_OPEN_PATHS_EVENT: &str = "app://open-paths";
 
 /// Menu events queued until their destination window declares itself ready.
 static PENDING_MENU_EVENTS: LazyLock<Mutex<HashMap<String, Vec<String>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+/// Open-path events queued until their destination window declares itself ready.
+static PENDING_OPEN_PATHS: LazyLock<Mutex<HashMap<String, Vec<String>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 static READY_MENU_WINDOWS: LazyLock<Mutex<HashSet<String>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
+
+fn is_supported_playlist_path(path: &Path) -> bool {
+    if path.is_dir() {
+        return true;
+    }
+
+    path.extension()
+        .and_then(OsStr::to_str)
+        .map(|ext| ext.eq_ignore_ascii_case("m3u") || ext.eq_ignore_ascii_case("m3u8"))
+        .unwrap_or(false)
+}
+
+fn openable_path_from_path(path: &Path) -> Option<String> {
+    if !path.exists() || !is_supported_playlist_path(path) {
+        return None;
+    }
+
+    Some(path.to_string_lossy().into_owned())
+}
+
+fn openable_path_from_url(url: &url::Url) -> Option<String> {
+    if url.scheme() != "file" {
+        return None;
+    }
+
+    let path = url.to_file_path().ok()?;
+    openable_path_from_path(&path)
+}
+
+fn openable_path_from_arg(arg: &OsStr) -> Option<String> {
+    openable_path_from_path(Path::new(arg)).or_else(|| {
+        arg.to_str()
+            .and_then(|value| url::Url::parse(value).ok())
+            .and_then(|url| openable_path_from_url(&url))
+    })
+}
+
+fn collect_launch_open_paths() -> Vec<String> {
+    let mut paths = Vec::new();
+    for arg in std::env::args_os().skip(1) {
+        let Some(path) = openable_path_from_arg(&arg) else {
+            continue;
+        };
+
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+
+    paths
+}
 
 #[cfg(target_os = "macos")]
 fn schedule_macos_system_appearance_patch(app: tauri::AppHandle, window_label: String) {
@@ -180,6 +237,21 @@ fn queue_menu_event(window_label: &str, event_name: &str) {
     }
 }
 
+fn queue_open_paths(window_label: &str, paths: &[String]) {
+    if paths.is_empty() {
+        return;
+    }
+
+    if let Ok(mut queue) = PENDING_OPEN_PATHS.lock() {
+        let entry = queue.entry(window_label.to_string()).or_default();
+        for path in paths {
+            if !entry.contains(path) {
+                entry.push(path.clone());
+            }
+        }
+    }
+}
+
 fn is_menu_window_ready(window_label: &str) -> bool {
     READY_MENU_WINDOWS
         .lock()
@@ -267,11 +339,43 @@ fn flush_pending_menu_events(app: &tauri::AppHandle, window_label: &str) {
     }
 }
 
+fn flush_pending_open_paths(app: &tauri::AppHandle, window_label: &str) {
+    let pending = PENDING_OPEN_PATHS
+        .lock()
+        .ok()
+        .and_then(|mut queue| queue.remove(window_label))
+        .unwrap_or_default();
+    if pending.is_empty() {
+        return;
+    }
+
+    if let Some(window) = app.get_webview_window(window_label) {
+        log::debug!(
+            "Dispatching queued open-path event with {} path(s) to window '{}'",
+            pending.len(),
+            window_label
+        );
+        if let Err(error) = window.emit(FRONTEND_OPEN_PATHS_EVENT, pending.clone()) {
+            log::warn!(
+                "Failed to dispatch queued open-path event to '{}': {}",
+                window_label,
+                error
+            );
+            if let Ok(mut queue) = PENDING_OPEN_PATHS.lock() {
+                queue.insert(window_label.to_string(), pending);
+            }
+        }
+    } else if let Ok(mut queue) = PENDING_OPEN_PATHS.lock() {
+        queue.insert(window_label.to_string(), pending);
+    }
+}
+
 fn mark_menu_window_ready(app: &tauri::AppHandle, window_label: &str) {
     if let Ok(mut ready) = READY_MENU_WINDOWS.lock() {
         ready.insert(window_label.to_string());
     }
     flush_pending_menu_events(app, window_label);
+    flush_pending_open_paths(app, window_label);
 }
 
 fn clear_menu_window_state(window_label: &str) {
@@ -279,6 +383,9 @@ fn clear_menu_window_state(window_label: &str) {
         ready.remove(window_label);
     }
     if let Ok(mut queue) = PENDING_MENU_EVENTS.lock() {
+        queue.remove(window_label);
+    }
+    if let Ok(mut queue) = PENDING_OPEN_PATHS.lock() {
         queue.remove(window_label);
     }
 }
@@ -315,6 +422,95 @@ fn emit_menu_event_to_focused_window(app: &tauri::AppHandle, event_name: &str) {
     );
     let label = create_new_window(app);
     queue_menu_event(&label, event_name);
+}
+
+fn emit_open_paths_to_window(
+    app: &tauri::AppHandle,
+    window_label: &str,
+    paths: &[String],
+    context: &str,
+) -> bool {
+    if paths.is_empty() {
+        return true;
+    }
+
+    if !is_menu_window_ready(window_label) {
+        log::debug!(
+            "Queueing open-path event for window '{}' until listeners are ready",
+            window_label
+        );
+        queue_open_paths(window_label, paths);
+        return false;
+    }
+
+    let Some(window) = app.get_webview_window(window_label) else {
+        log::debug!(
+            "Window '{}' disappeared before open-path event; queueing",
+            window_label
+        );
+        queue_open_paths(window_label, paths);
+        return false;
+    };
+
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+
+    match window.emit(FRONTEND_OPEN_PATHS_EVENT, paths) {
+        Ok(_) => {
+            log::trace!(
+                "open-path event dispatched to {} '{}' with {} path(s)",
+                context,
+                window_label,
+                paths.len()
+            );
+            true
+        }
+        Err(error) => {
+            log::warn!(
+                "Failed to dispatch open-path event to {} '{}': {}",
+                context,
+                window_label,
+                error
+            );
+            false
+        }
+    }
+}
+
+fn emit_open_paths_to_focused_window(app: &tauri::AppHandle, paths: &[String]) {
+    if paths.is_empty() {
+        return;
+    }
+
+    if let Some(window) = app.get_focused_window() {
+        let window_label = window.label().to_string();
+        let _ = emit_open_paths_to_window(app, &window_label, paths, "focused window");
+        return;
+    }
+
+    log::debug!(
+        "No focused window for open-path event; trying main window fallback"
+    );
+
+    if app.get_webview_window("main").is_some() {
+        let _ = emit_open_paths_to_window(app, "main", paths, "fallback main window");
+        return;
+    }
+
+    for (label, _window) in app.webview_windows() {
+        if label.starts_with("main") {
+            let _ = emit_open_paths_to_window(app, &label, paths, "window");
+            return;
+        }
+    }
+
+    log::info!(
+        "No windows available for open-path event; creating window and queueing {} path(s)",
+        paths.len()
+    );
+    let label = create_new_window(app);
+    queue_open_paths(&label, paths);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -784,6 +980,15 @@ pub fn run() {
             commands::recent::refresh_recent_menu(&app.handle());
             commands::saved::refresh_saved_menu(&app.handle());
 
+            let launch_open_paths = collect_launch_open_paths();
+            if !launch_open_paths.is_empty() {
+                log::info!(
+                    "Detected {} playlist path(s) from launch arguments",
+                    launch_open_paths.len()
+                );
+                emit_open_paths_to_focused_window(&app.handle(), &launch_open_paths);
+            }
+
             // Start the localhost streaming proxy for MPEG-TS playback.
             // Use a oneshot channel so we block until the port is known,
             // preventing a race where the user clicks Play before the proxy
@@ -1009,6 +1214,17 @@ pub fn run() {
         .run(|_app, _event| {
             #[cfg(target_os = "macos")]
             match _event {
+                tauri::RunEvent::Opened { urls } => {
+                    let paths: Vec<String> =
+                        urls.iter().filter_map(openable_path_from_url).collect();
+                    if !paths.is_empty() {
+                        log::info!(
+                            "Received macOS open request with {} playlist path(s)",
+                            paths.len()
+                        );
+                        emit_open_paths_to_focused_window(_app, &paths);
+                    }
+                }
                 tauri::RunEvent::MenuEvent(menu_event) => {
                     let event_id = menu_event.id().as_ref();
                     if event_id.contains("quit") {
@@ -1050,4 +1266,81 @@ pub fn run() {
 #[cfg(fuzzing)]
 pub fn run() {
     panic!("iptv_checker_lib::run is unavailable during fuzzing builds");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_supported_playlist_path, openable_path_from_arg, openable_path_from_url};
+    use std::path::PathBuf;
+
+    fn unique_temp_path(stem: &str, extension: Option<&str>) -> PathBuf {
+        let unique = format!(
+            "iptv-checker-open-path-{}-{}-{}",
+            stem,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock should be after unix epoch")
+                .as_nanos()
+        );
+        let mut path = std::env::temp_dir().join(unique);
+        if let Some(extension) = extension {
+            path.set_extension(extension);
+        }
+        path
+    }
+
+    #[test]
+    fn supported_playlist_path_accepts_directories_and_m3u_extensions() {
+        let dir = unique_temp_path("dir", None);
+        let m3u = unique_temp_path("playlist", Some("m3u"));
+        let m3u8 = unique_temp_path("playlist", Some("M3U8"));
+        let txt = unique_temp_path("playlist", Some("txt"));
+
+        std::fs::create_dir(&dir).expect("temp dir should be creatable");
+        std::fs::write(&m3u, "#EXTM3U\n").expect("m3u fixture should be writable");
+        std::fs::write(&m3u8, "#EXTM3U\n").expect("m3u8 fixture should be writable");
+        std::fs::write(&txt, "plain text").expect("txt fixture should be writable");
+
+        assert!(is_supported_playlist_path(&dir));
+        assert!(is_supported_playlist_path(&m3u));
+        assert!(is_supported_playlist_path(&m3u8));
+        assert!(!is_supported_playlist_path(&txt));
+
+        std::fs::remove_dir_all(&dir).expect("temp dir cleanup should succeed");
+        std::fs::remove_file(&m3u).expect("m3u cleanup should succeed");
+        std::fs::remove_file(&m3u8).expect("m3u8 cleanup should succeed");
+        std::fs::remove_file(&txt).expect("txt cleanup should succeed");
+    }
+
+    #[test]
+    fn openable_path_helpers_reject_unsupported_inputs() {
+        let txt = unique_temp_path("unsupported", Some("txt"));
+        std::fs::write(&txt, "plain text").expect("txt fixture should be writable");
+
+        assert!(openable_path_from_arg(txt.as_os_str()).is_none());
+
+        let http_url = url::Url::parse("https://example.com/list.m3u8")
+            .expect("http url should parse");
+        assert!(openable_path_from_url(&http_url).is_none());
+
+        std::fs::remove_file(&txt).expect("txt cleanup should succeed");
+    }
+
+    #[test]
+    fn openable_path_helpers_accept_file_urls_and_paths() {
+        let file = unique_temp_path("with-space", Some("m3u8"));
+        std::fs::write(&file, "#EXTM3U\n").expect("m3u8 fixture should be writable");
+
+        let from_arg = openable_path_from_arg(file.as_os_str())
+            .expect("plain file path arg should be accepted");
+        assert_eq!(from_arg, file.to_string_lossy());
+
+        let file_url = url::Url::from_file_path(&file).expect("file url should be creatable");
+        let from_url =
+            openable_path_from_url(&file_url).expect("file url should be accepted");
+        assert_eq!(from_url, file.to_string_lossy());
+
+        std::fs::remove_file(&file).expect("m3u8 cleanup should succeed");
+    }
 }
