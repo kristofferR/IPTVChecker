@@ -225,6 +225,7 @@ body {
 /* Main window already sits below native chrome/menus on Windows/Linux. */
 [data-window="main"][data-platform="windows"] {
   --toolbar-pt: 0.25rem;
+  --toolbar-pr: 0.75rem;
 }
 
 /* Linux: native WM decorations — use DE scrollbar style. */
