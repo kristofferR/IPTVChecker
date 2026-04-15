@@ -13,6 +13,7 @@ import type {
 import { cancelScan, pauseScan, resetScan, resumeScan, startScan } from "../lib/tauri";
 import { logger } from "../lib/logger";
 import {
+  getChannelIdFromUrl,
   resetChannelResultForRescan,
   toPendingChannelResult,
 } from "../lib/channelResults";
@@ -87,6 +88,17 @@ function buildFlatResultsAndMetrics(
       lowFpsCount,
       mislabeledCount,
     },
+  };
+}
+
+function mergeChannelIntoResult(
+  channel: Channel,
+  existing: ChannelResult,
+): ChannelResult {
+  return {
+    ...existing,
+    ...channel,
+    channel_id: getChannelIdFromUrl(channel.url),
   };
 }
 
@@ -609,16 +621,24 @@ export function useScan() {
     }
   }, []);
 
-  const initFromPlaylist = useCallback(
-    async (channels: Channel[]) => {
+  const syncFromPlaylist = useCallback(
+    async (channels: Channel[], preserveExistingResults = false) => {
       // Cancel any running scan and reset backend state
       await resetScan().catch(() => {});
 
-      const pending = channels.map((channel) => toPendingChannelResult(channel));
-      const rebuilt = buildFlatResultsAndMetrics(pending);
-      const duplicates = findDuplicateChannelIndices(pending);
+      const synced = channels.map((channel) => {
+        const existing = resultsRef.current[channel.index];
+        if (preserveExistingResults && existing) {
+          return mergeChannelIntoResult(channel, existing);
+        }
+        return toPendingChannelResult(channel);
+      });
+      const rebuilt = buildFlatResultsAndMetrics(synced);
+      const duplicates = findDuplicateChannelIndices(synced);
 
-      logger.debug(`[useScan] initFromPlaylist: ${pending.length} channels`);
+      logger.debug(
+        `[useScan] syncFromPlaylist: ${synced.length} channels, preserveExistingResults=${preserveExistingResults}`,
+      );
       commitCollections({
         resultsByIndex: rebuilt.resultsByIndex,
         flatResults: rebuilt.flatResults,
@@ -646,6 +666,13 @@ export function useScan() {
     [commitCollections],
   );
 
+  const initFromPlaylist = useCallback(
+    async (channels: Channel[]) => {
+      await syncFromPlaylist(channels, false);
+    },
+    [syncFromPlaylist],
+  );
+
   const updateResult = useCallback((result: ChannelResult) => {
     const next = applyResultUpdates(
       {
@@ -666,6 +693,7 @@ export function useScan() {
     pause,
     resume,
     initFromPlaylist,
+    syncFromPlaylist,
     updateResult,
   };
 }

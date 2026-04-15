@@ -28,6 +28,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: "system",
   log_level: "error",
   show_prescan_filter: false,
+  hide_vod_content: false,
   report_auto_reveal: true,
   channel_logo_size: "small",
   screenshot_format: "webp",

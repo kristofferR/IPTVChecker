@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  applyContentVisibilityToPreview,
   applySourceFilterToPreview,
   compileSourceFilterRegex,
   hasDirtySourceFilter,
@@ -127,5 +128,48 @@ describe("sourceFilter helpers", () => {
     expect(filtered.movie_count).toBe(1);
     expect(filtered.groups).toEqual(preview.groups);
     expect(filtered.channels.map((channel) => channel.index)).toEqual([8, 107]);
+  });
+
+  it("returns the preview unchanged when content visibility filtering is disabled", () => {
+    const filtered = applyContentVisibilityToPreview(preview, false);
+
+    expect(filtered).toBe(preview);
+  });
+
+  it("can hide VOD and series entries from the visible preview", () => {
+    const filtered = applyContentVisibilityToPreview({
+      ...preview,
+      total_channels: 4,
+      series_count: 1,
+      groups: ["Kids", "Sports", "Movies", "Series"],
+      channels: [
+        ...preview.channels,
+        {
+          index: 200,
+          playlist: "sample.m3u8",
+          name: "Series One",
+          group: "Series",
+          language: null,
+          tvg_id: null,
+          tvg_name: null,
+          tvg_logo: null,
+          tvg_chno: null,
+          url: "http://example.com/series/one.mkv",
+          content_type: "series",
+          extinf_line: "#EXTINF:-1 group-title=\"Series\",Series One",
+          metadata_lines: [],
+        },
+      ],
+    }, true);
+
+    expect(filtered.channels.map((channel) => channel.name)).toEqual([
+      "SE: Disney Junior [Multi-Audio]",
+      "Friday Event",
+    ]);
+    expect(filtered.total_channels).toBe(2);
+    expect(filtered.live_count).toBe(2);
+    expect(filtered.movie_count).toBe(0);
+    expect(filtered.series_count).toBe(0);
+    expect(filtered.groups).toEqual(["Kids", "Sports"]);
   });
 });
