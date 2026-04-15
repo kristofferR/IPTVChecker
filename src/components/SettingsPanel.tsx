@@ -631,6 +631,22 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
 
                 <div className={rowClass}>
                   <div>
+                    <p className="text-[13px] font-medium">Hide VOD / series entries</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Remove movies and series from loaded playlists, scans, and exports until re-enabled.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={draft.hide_vod_content}
+                    onChange={(checked) =>
+                      updateSetting("hide_vod_content", checked, { immediate: true })
+                    }
+                    ariaLabel="Hide VOD and series entries"
+                  />
+                </div>
+
+                <div className={rowClass}>
+                  <div>
                     <p className="text-[13px] font-medium">Auto-reveal report panel</p>
                     <p className="text-[11px] text-text-tertiary mt-0.5">
                       Slide in the playlist report near scan completion.

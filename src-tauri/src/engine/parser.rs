@@ -370,17 +370,28 @@ fn content_type_totals(channels: &[Channel]) -> (usize, usize, usize) {
     (live, movie, series)
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ParseProgress {
+    pub channels_found: usize,
+    pub live_found: usize,
+    pub movie_found: usize,
+    pub series_found: usize,
+}
+
 fn parse_playlist_reader<R: BufRead>(
     reader: R,
     file_path: &str,
     playlist_name: String,
     group_filter: &Option<String>,
     pattern: &Option<ChannelSearchPattern>,
-    on_channel_parsed: Option<&dyn Fn(usize)>,
+    on_channel_parsed: Option<&dyn Fn(ParseProgress)>,
 ) -> Result<PlaylistPreview, AppError> {
     let mut channels = Vec::new();
     let mut groups = BTreeSet::new();
     let mut source_index = 0usize;
+    let mut live_found = 0usize;
+    let mut movie_found = 0usize;
+    let mut series_found = 0usize;
     let mut pending_channel = false;
     let mut pending_extinf: Option<String> = None;
     let mut pending_metadata: Vec<String> = Vec::new();
@@ -420,12 +431,18 @@ fn parse_playlist_reader<R: BufRead>(
                 continue;
             }
 
+            let content_type = ContentType::detect_from_url(&line);
+            match content_type {
+                ContentType::Live => live_found += 1,
+                ContentType::Movie => movie_found += 1,
+                ContentType::Series => series_found += 1,
+            }
+
             if let Some(extinf_line) = pending_extinf.take() {
                 let name = get_channel_name(&extinf_line);
                 let group = get_group_name(&extinf_line);
                 let language = detect_channel_language(&group, &name, &extinf_line);
                 let (tvg_id, tvg_name, tvg_logo, tvg_chno) = extract_tvg_metadata(&extinf_line);
-                let content_type = ContentType::detect_from_url(&line);
                 channels.push(Channel {
                     index: source_index,
                     playlist: playlist_name.clone(),
@@ -446,7 +463,12 @@ fn parse_playlist_reader<R: BufRead>(
             pending_channel = false;
             source_index += 1;
             if let Some(cb) = &on_channel_parsed {
-                cb(source_index);
+                cb(ParseProgress {
+                    channels_found: source_index,
+                    live_found,
+                    movie_found,
+                    series_found,
+                });
             }
         }
     }
@@ -497,7 +519,7 @@ pub fn parse_playlist_with_progress(
     file_path: &str,
     group_filter: &Option<String>,
     channel_search: &Option<String>,
-    on_channel_parsed: Option<&dyn Fn(usize)>,
+    on_channel_parsed: Option<&dyn Fn(ParseProgress)>,
 ) -> Result<PlaylistPreview, AppError> {
     let path = Path::new(file_path);
     if !path.exists() {
@@ -554,7 +576,7 @@ fn parse_playlist_directory(
     dir_path: &str,
     group_filter: &Option<String>,
     channel_search: &Option<String>,
-    on_channel_parsed: Option<&dyn Fn(usize)>,
+    on_channel_parsed: Option<&dyn Fn(ParseProgress)>,
 ) -> Result<PlaylistPreview, AppError> {
     let files = find_playlists_in_dir(dir_path)?;
     if files.is_empty() {
@@ -568,18 +590,30 @@ fn parse_playlist_directory(
     let mut channels = Vec::new();
     let mut groups = BTreeSet::new();
     let mut source_index = 0usize;
-    let mut parsed_channels = 0usize;
+    let mut parsed_progress = ParseProgress::default();
 
     for file in files {
-        let last_reported = std::cell::Cell::new(0usize);
-        let child_progress = |child_count: usize| {
+        let last_reported = std::cell::Cell::new(ParseProgress::default());
+        let base_progress = parsed_progress;
+        let child_progress = |child_count: ParseProgress| {
             last_reported.set(child_count);
             if let Some(cb) = on_channel_parsed {
-                cb(parsed_channels + child_count);
+                cb(ParseProgress {
+                    channels_found: base_progress.channels_found + child_count.channels_found,
+                    live_found: base_progress.live_found + child_count.live_found,
+                    movie_found: base_progress.movie_found + child_count.movie_found,
+                    series_found: base_progress.series_found + child_count.series_found,
+                });
             }
         };
         let parsed = parse_playlist_with_progress(&file, &None, &None, Some(&child_progress))?;
-        parsed_channels += last_reported.get();
+        let last = last_reported.get();
+        parsed_progress = ParseProgress {
+            channels_found: base_progress.channels_found + last.channels_found,
+            live_found: base_progress.live_found + last.live_found,
+            movie_found: base_progress.movie_found + last.movie_found,
+            series_found: base_progress.series_found + last.series_found,
+        };
         for mut channel in parsed.channels {
             let playlist_group = format!("{}{}", PLAYLIST_GROUP_PREFIX, channel.playlist);
             groups.insert(channel.group.clone());
@@ -963,13 +997,82 @@ http://example.com/beta.m3u8
         .expect("second fixture should be writable");
 
         let progress = std::cell::RefCell::new(Vec::new());
-        let on_progress = |count: usize| progress.borrow_mut().push(count);
+        let on_progress = |count: ParseProgress| progress.borrow_mut().push(count);
         parse_playlist_with_progress(&root.to_string_lossy(), &None, &None, Some(&on_progress))
             .expect("directory parse should succeed");
 
-        assert_eq!(*progress.borrow(), vec![1, 2]);
+        assert_eq!(
+            *progress.borrow(),
+            vec![
+                ParseProgress {
+                    channels_found: 1,
+                    live_found: 1,
+                    movie_found: 0,
+                    series_found: 0,
+                },
+                ParseProgress {
+                    channels_found: 2,
+                    live_found: 2,
+                    movie_found: 0,
+                    series_found: 0,
+                },
+            ]
+        );
 
         std::fs::remove_dir_all(root).expect("fixture directory should be removable");
+    }
+
+    #[test]
+    fn test_parse_playlist_progress_tracks_live_and_vod_counts() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be monotonic")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("iptv-parser-mixed-progress-{unique}.m3u8"));
+        std::fs::write(
+            &path,
+            "\
+#EXTM3U
+#EXTINF:-1 group-title=\"Live\",Live One
+http://example.com/live.m3u8
+#EXTINF:-1 group-title=\"Movies\",Movie One
+http://example.com/movie/one.mp4
+#EXTINF:-1 group-title=\"Series\",Series One
+http://example.com/series/one.mkv
+",
+        )
+        .expect("fixture should be writable");
+
+        let progress = std::cell::RefCell::new(Vec::new());
+        let on_progress = |count: ParseProgress| progress.borrow_mut().push(count);
+        parse_playlist_with_progress(&path.to_string_lossy(), &None, &None, Some(&on_progress))
+            .expect("mixed parse should succeed");
+
+        assert_eq!(
+            *progress.borrow(),
+            vec![
+                ParseProgress {
+                    channels_found: 1,
+                    live_found: 1,
+                    movie_found: 0,
+                    series_found: 0,
+                },
+                ParseProgress {
+                    channels_found: 2,
+                    live_found: 1,
+                    movie_found: 1,
+                    series_found: 0,
+                },
+                ParseProgress {
+                    channels_found: 3,
+                    live_found: 1,
+                    movie_found: 1,
+                    series_found: 1,
+                },
+            ]
+        );
+
+        std::fs::remove_file(path).expect("fixture should be removable");
     }
 
     #[test]

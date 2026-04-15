@@ -279,7 +279,13 @@ export type PlaylistLoadProgress =
   | { stage: "Connecting"; detail: string }
   | { stage: "Downloading"; bytes_downloaded: number; elapsed_secs: number }
   | { stage: "Saving"; detail: string }
-  | { stage: "Parsing"; channels_found: number }
+  | {
+      stage: "Parsing";
+      channels_found: number;
+      live_found: number;
+      movie_found: number;
+      series_found: number;
+    }
   | { stage: "Processing"; detail: string };
 
 export type ScreenshotFormat = "webp" | "png";
@@ -306,6 +312,7 @@ export interface AppSettings {
   theme: ThemePreference;
   log_level: string;
   show_prescan_filter: boolean;
+  hide_vod_content: boolean;
   report_auto_reveal: boolean;
   channel_logo_size: ChannelLogoSize;
   screenshot_format: ScreenshotFormat;

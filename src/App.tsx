@@ -87,6 +87,7 @@ import { isInputLikeTarget, isPrimaryModifierPressed } from "./lib/shortcuts";
 import { recordUiPerf, startLongTaskObserver, uiPerfEnabled } from "./lib/perf";
 import { shouldAutoRevealReportPanel } from "./lib/playlistReportVisibility";
 import {
+  applyContentVisibilityToPreview,
   applySourceFilterToPreview,
   hasDirtySourceFilter,
   normalizeSourceFilter,
@@ -341,6 +342,17 @@ function applyDisplayNameToPreview(
         }))
       : preview.channels,
   };
+}
+
+function buildVisiblePlaylistPreview(
+  preview: PlaylistPreview,
+  sourceFilter: string,
+  hideVodContent: boolean,
+): PlaylistPreview {
+  return applyContentVisibilityToPreview(
+    applySourceFilterToPreview(preview, sourceFilter),
+    hideVodContent,
+  );
 }
 
 function savedEntryToDraft(entry: SavedPlaylistEntry): SavedPlaylistDraft {
@@ -795,6 +807,8 @@ export default function App() {
   const historyLoading = useAppStore((s) => s.historyLoading);
   const historyError = useAppStore((s) => s.historyError);
   const historyClearing = useAppStore((s) => s.historyClearing);
+  const settingsHydrated = useAppStore((s) => s.settingsHydrated);
+  const hideVodContent = useAppStore((s) => s.settings.hide_vod_content);
   const modKey = isMac ? "Cmd" : "Ctrl";
   const [savedPlaylistsDialogOpen, setSavedPlaylistsDialogOpen] = useState(false);
   const [savedPlaylistEditorDraft, setSavedPlaylistEditorDraft] =
@@ -822,6 +836,7 @@ export default function App() {
     pause,
     resume,
     initFromPlaylist,
+    syncFromPlaylist,
     updateResult,
   } = useScan();
   const channelSearchError = useMemo(
@@ -1142,6 +1157,12 @@ export default function App() {
     [],
   );
 
+  const buildVisiblePreview = useCallback(
+    (preview: PlaylistPreview, sourceFilter: string) =>
+      buildVisiblePlaylistPreview(preview, sourceFilter, hideVodContent),
+    [hideVodContent],
+  );
+
   const loadAndCommitSource = useCallback(
     async (
       descriptor: CurrentSourceDescriptor,
@@ -1207,10 +1228,7 @@ export default function App() {
           );
         }
 
-        const preview = applySourceFilterToPreview(
-          cachedPreview,
-          normalizedSourceFilter,
-        );
+        const preview = buildVisiblePreview(cachedPreview, normalizedSourceFilter);
         await commitLoadedPlaylist(
           preview,
           cachedPreview,
@@ -1247,8 +1265,75 @@ export default function App() {
         getStore().setPlaylistLoadProgress(null);
       }
     },
-    [channelSearch, commitLoadedPlaylist, loadFullSourcePreview, refreshRecentPlaylists],
+    [
+      buildVisiblePreview,
+      channelSearch,
+      commitLoadedPlaylist,
+      loadFullSourcePreview,
+      refreshRecentPlaylists,
+    ],
   );
+
+  const previousHideVodContentRef = useRef(hideVodContent);
+
+  useEffect(() => {
+    if (!settingsHydrated) {
+      previousHideVodContentRef.current = hideVodContent;
+      return;
+    }
+
+    if (previousHideVodContentRef.current === hideVodContent) {
+      return;
+    }
+    previousHideVodContentRef.current = hideVodContent;
+
+    const state = getStore();
+    if (!state.cachedSourcePreview) {
+      return;
+    }
+
+    const nextPreview = buildVisiblePreview(
+      state.cachedSourcePreview,
+      state.lastAppliedSourceFilter,
+    );
+    const visibleIndices = new Set(
+      nextPreview.channels.map((channel) => channel.index),
+    );
+    const selectedIndex = state.selectedChannel?.index ?? null;
+    const pendingPlaybackIndex = state.pendingPlaybackChannel?.index ?? null;
+    const nextSelectedIndices = state.selectedChannelIndices.filter((index) =>
+      visibleIndices.has(index),
+    );
+
+    state.setPlaylist(nextPreview);
+    state.setGroupFilter(
+      resolvePreservedGroupFilter(state.groupFilter, nextPreview.groups),
+    );
+    state.setSelectedChannelIndices(nextSelectedIndices);
+
+    if (selectedIndex == null || !visibleIndices.has(selectedIndex)) {
+      state.setSelectedChannel(null);
+    }
+    if (pendingPlaybackIndex == null || !visibleIndices.has(pendingPlaybackIndex)) {
+      state.setPendingPlaybackChannel(null);
+    }
+
+    void syncFromPlaylist(nextPreview.channels, true).then(() => {
+      if (selectedIndex == null || !visibleIndices.has(selectedIndex)) {
+        return;
+      }
+
+      const refreshed = getStore().results[selectedIndex];
+      if (refreshed) {
+        getStore().setSelectedChannel(refreshed);
+      }
+    });
+  }, [
+    buildVisiblePreview,
+    hideVodContent,
+    settingsHydrated,
+    syncFromPlaylist,
+  ]);
 
   const patchCurrentPlaylistMetadata = useCallback(
     (displayName: string, savedPlaylistId?: string | null) => {
@@ -2692,9 +2777,27 @@ export default function App() {
                       </p>
                     )}
                     {playlistLoadProgress?.stage === "Parsing" && (
-                      <p className="text-sm mt-1 tabular-nums">
-                        {playlistLoadProgress.channels_found.toLocaleString()} channels found
-                      </p>
+                      <div className="text-sm mt-1 tabular-nums">
+                        <p>
+                          {playlistLoadProgress.channels_found.toLocaleString()} entries found
+                        </p>
+                        <p className="text-text-quaternary">
+                          {playlistLoadProgress.live_found.toLocaleString()} channels
+                          <span className="mx-2">•</span>
+                          {(
+                            playlistLoadProgress.movie_found +
+                            playlistLoadProgress.series_found
+                          ).toLocaleString()}{" "}
+                          VOD
+                          {(playlistLoadProgress.movie_found > 0 ||
+                            playlistLoadProgress.series_found > 0) && (
+                            <span className="ml-2">
+                              ({playlistLoadProgress.movie_found.toLocaleString()} movies,{" "}
+                              {playlistLoadProgress.series_found.toLocaleString()} series)
+                            </span>
+                          )}
+                        </p>
+                      </div>
                     )}
                     {playlistLoadProgress?.stage === "Processing" && (
                       <p className="text-sm mt-1 text-text-quaternary">

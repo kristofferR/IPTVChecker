@@ -79,6 +79,7 @@ pub struct AppSettings {
     pub theme: ThemePreference,
     pub log_level: String,
     pub show_prescan_filter: bool,
+    pub hide_vod_content: bool,
     pub report_auto_reveal: bool,
     pub channel_logo_size: ChannelLogoSize,
     pub screenshot_format: ScreenshotFormat,
@@ -205,6 +206,7 @@ impl Default for AppSettings {
             theme: ThemePreference::System,
             log_level: "error".to_string(),
             show_prescan_filter: false,
+            hide_vod_content: false,
             report_auto_reveal: true,
             channel_logo_size: ChannelLogoSize::default(),
             screenshot_format: ScreenshotFormat::default(),
@@ -257,6 +259,7 @@ mod tests {
             .expect("settings should deserialize with defaults");
         assert!(settings.scan_notifications);
         assert!(settings.report_auto_reveal);
+        assert!(!settings.hide_vod_content);
         assert_eq!(settings.low_fps_threshold, 23.0);
         assert_eq!(settings.channel_logo_size, super::ChannelLogoSize::Small);
         assert_eq!(settings.show_header_button_text, !cfg!(target_os = "macos"));

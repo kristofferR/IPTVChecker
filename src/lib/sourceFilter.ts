@@ -40,6 +40,12 @@ function contentTypeTotals(channels: Channel[]): {
   };
 }
 
+function visibleGroups(channels: Channel[]): string[] {
+  return Array.from(new Set(channels.map((channel) => channel.group)))
+    .filter((group) => group.trim().length > 0)
+    .sort((left, right) => left.localeCompare(right));
+}
+
 export function normalizeSourceFilter(value: string | null | undefined): string {
   return value?.trim() ?? "";
 }
@@ -87,6 +93,28 @@ export function applySourceFilterToPreview(
     channels,
     // Keep the full group list to mirror backend source-filter semantics.
     groups: [...preview.groups],
+  };
+}
+
+export function applyContentVisibilityToPreview(
+  preview: PlaylistPreview,
+  hideVodContent: boolean,
+): PlaylistPreview {
+  if (!hideVodContent) {
+    return preview;
+  }
+
+  const channels = preview.channels.filter((channel) => channel.content_type === "live");
+  const totals = contentTypeTotals(channels);
+
+  return {
+    ...preview,
+    total_channels: channels.length,
+    live_count: totals.live_count,
+    movie_count: totals.movie_count,
+    series_count: totals.series_count,
+    groups: visibleGroups(channels),
+    channels,
   };
 }
 

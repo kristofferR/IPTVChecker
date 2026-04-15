@@ -30,6 +30,9 @@ pub enum PlaylistLoadProgress {
     },
     Parsing {
         channels_found: usize,
+        live_found: usize,
+        movie_found: usize,
+        series_found: usize,
     },
     Processing {
         detail: &'static str,
@@ -300,30 +303,30 @@ async fn populate_server_metadata(app: Option<&AppHandle>, preview: &mut Playlis
 
     // server_location — only look up when ≥90% of channels share the same host
     if preview.single_provider {
-    if let Some(host) = dominant_host_from_counts(&counts) {
-        if !host.eq_ignore_ascii_case("localhost") {
-            if let Ok(cache) = server_location_cache().lock() {
-                if let Some(cached) = cache.get(&host) {
-                    preview.server_location = cached.clone();
-                    return;
+        if let Some(host) = dominant_host_from_counts(&counts) {
+            if !host.eq_ignore_ascii_case("localhost") {
+                if let Ok(cache) = server_location_cache().lock() {
+                    if let Some(cached) = cache.get(&host) {
+                        preview.server_location = cached.clone();
+                        return;
+                    }
                 }
+                emit_load_progress(
+                    app,
+                    PlaylistLoadProgress::Processing {
+                        detail: "Looking up server location",
+                    },
+                );
+                let location = match resolve_host_ip(&host).await {
+                    Some(ip) => lookup_ip_location(ip).await,
+                    None => None,
+                };
+                if let Ok(mut cache) = server_location_cache().lock() {
+                    cache.insert(host, location.clone());
+                }
+                preview.server_location = location;
             }
-            emit_load_progress(
-                app,
-                PlaylistLoadProgress::Processing {
-                    detail: "Looking up server location",
-                },
-            );
-            let location = match resolve_host_ip(&host).await {
-                Some(ip) => lookup_ip_location(ip).await,
-                None => None,
-            };
-            if let Ok(mut cache) = server_location_cache().lock() {
-                cache.insert(host, location.clone());
-            }
-            preview.server_location = location;
         }
-    }
     }
 }
 
@@ -1831,8 +1834,7 @@ pub async fn open_playlist(
     group_filter: Option<String>,
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
-    let mut preview =
-        open_playlist_path_inner(&app, path, group_filter, channel_search).await?;
+    let mut preview = open_playlist_path_inner(&app, path, group_filter, channel_search).await?;
     crate::commands::saved::apply_persisted_playlist_metadata(&app, &mut preview, None, None)?;
     Ok(preview)
 }
@@ -1845,13 +1847,26 @@ pub(crate) async fn open_playlist_path_inner(
 ) -> Result<PlaylistPreview, AppError> {
     emit_load_progress(
         Some(app),
-        PlaylistLoadProgress::Parsing { channels_found: 0 },
+        PlaylistLoadProgress::Parsing {
+            channels_found: 0,
+            live_found: 0,
+            movie_found: 0,
+            series_found: 0,
+        },
     );
     let mut preview = {
         let last_emit = std::cell::Cell::new(Instant::now() - PROGRESS_THROTTLE);
-        let on_progress = |channels_found: usize| {
+        let on_progress = |progress: parser::ParseProgress| {
             if last_emit.get().elapsed() >= PROGRESS_THROTTLE {
-                emit_load_progress(Some(app), PlaylistLoadProgress::Parsing { channels_found });
+                emit_load_progress(
+                    Some(app),
+                    PlaylistLoadProgress::Parsing {
+                        channels_found: progress.channels_found,
+                        live_found: progress.live_found,
+                        movie_found: progress.movie_found,
+                        series_found: progress.series_found,
+                    },
+                );
                 last_emit.set(Instant::now());
             }
         };
@@ -1895,16 +1910,32 @@ pub(crate) async fn open_playlist_url_from_data_dir(
     let cached_path =
         download_playlist_to_cache_in_data_dir(app, data_dir, &source_key, &parsed, "playlist URL")
             .await?;
-    emit_load_progress(app, PlaylistLoadProgress::Parsing { channels_found: 0 });
+    emit_load_progress(
+        app,
+        PlaylistLoadProgress::Parsing {
+            channels_found: 0,
+            live_found: 0,
+            movie_found: 0,
+            series_found: 0,
+        },
+    );
     let mut preview = {
         let last_emit = std::cell::Cell::new(Instant::now() - PROGRESS_THROTTLE);
-        let on_progress = |channels_found: usize| {
+        let on_progress = |progress: parser::ParseProgress| {
             if last_emit.get().elapsed() >= PROGRESS_THROTTLE {
-                emit_load_progress(app, PlaylistLoadProgress::Parsing { channels_found });
+                emit_load_progress(
+                    app,
+                    PlaylistLoadProgress::Parsing {
+                        channels_found: progress.channels_found,
+                        live_found: progress.live_found,
+                        movie_found: progress.movie_found,
+                        series_found: progress.series_found,
+                    },
+                );
                 last_emit.set(Instant::now());
             }
         };
-        let cb: Option<&dyn Fn(usize)> = if app.is_some() {
+        let cb: Option<&dyn Fn(parser::ParseProgress)> = if app.is_some() {
             Some(&on_progress)
         } else {
             None
@@ -1986,13 +2017,26 @@ pub(crate) async fn open_playlist_xtream_inner(
 
     emit_load_progress(
         Some(app),
-        PlaylistLoadProgress::Parsing { channels_found: 0 },
+        PlaylistLoadProgress::Parsing {
+            channels_found: 0,
+            live_found: 0,
+            movie_found: 0,
+            series_found: 0,
+        },
     );
     let mut preview = {
         let last_emit = std::cell::Cell::new(Instant::now() - PROGRESS_THROTTLE);
-        let on_progress = |channels_found: usize| {
+        let on_progress = |progress: parser::ParseProgress| {
             if last_emit.get().elapsed() >= PROGRESS_THROTTLE {
-                emit_load_progress(Some(app), PlaylistLoadProgress::Parsing { channels_found });
+                emit_load_progress(
+                    Some(app),
+                    PlaylistLoadProgress::Parsing {
+                        channels_found: progress.channels_found,
+                        live_found: progress.live_found,
+                        movie_found: progress.movie_found,
+                        series_found: progress.series_found,
+                    },
+                );
                 last_emit.set(Instant::now());
             }
         };
