@@ -142,10 +142,19 @@ function formatSourceReloadError(err: unknown): string {
     : `Failed to reload source: ${normalized}`;
 }
 
-async function restoreAndFocusWindow(window: WebviewWindow): Promise<void> {
+async function restoreAndFocusWindow(window: {
+  unminimize: () => Promise<void>;
+  show: () => Promise<void>;
+  setFocus: () => Promise<void>;
+}): Promise<void> {
   await window.unminimize().catch(() => {});
   await window.show().catch(() => {});
   await window.setFocus();
+}
+
+function isPlaylistLikePath(path: string): boolean {
+  const normalized = path.toLowerCase();
+  return normalized.endsWith(".m3u") || normalized.endsWith(".m3u8");
 }
 
 const UPDATE_CHECK_COOLDOWN_MS = 24 * 60 * 60 * 1000;
@@ -1875,9 +1884,23 @@ export default function App() {
     void refreshHistory();
   }, [playlist, refreshHistory]);
 
+  const handleExternalOpenPaths = useCallback((paths: string[]) => {
+    const targetPath = paths.find((path) => path.trim().length > 0) ?? null;
+    if (!targetPath) {
+      return;
+    }
+
+    if (paths.length > 1) {
+      getStore().setMenuInfo(`Opened ${paths.length} items. Loaded the first one.`);
+    }
+
+    void restoreAndFocusWindow(getCurrentWindow()).catch(() => {});
+    void openPlaylistPath(targetPath);
+  }, [openPlaylistPath]);
+
   const handleDroppedPaths = useCallback((paths: string[]) => {
     const playlistPath = paths.find((path) =>
-      path.toLowerCase().endsWith(".m3u") || path.toLowerCase().endsWith(".m3u8"),
+      isPlaylistLikePath(path),
     );
 
     if (!playlistPath) {
@@ -2153,6 +2176,8 @@ export default function App() {
   handleOpenFolderRef.current = handleOpenFolder;
   const handleOpenUrlRef = useRef(handleOpenUrl);
   handleOpenUrlRef.current = handleOpenUrl;
+  const handleOpenExternalPathsRef = useRef(handleExternalOpenPaths);
+  handleOpenExternalPathsRef.current = handleExternalOpenPaths;
   const handleOpenRecentRef = useRef(handleOpenRecent);
   handleOpenRecentRef.current = handleOpenRecent;
   const handleOpenSavedRef = useRef(handleOpenSaved);
@@ -2187,6 +2212,9 @@ export default function App() {
         listen("menu://open-playlist", () => void handleOpenRef.current()),
         listen("menu://open-folder", () => void handleOpenFolderRef.current()),
         listen("menu://open-url", () => void handleOpenUrlRef.current()),
+        listen<string[]>("app://open-paths", (event) => {
+          handleOpenExternalPathsRef.current(event.payload);
+        }),
         ...Array.from({ length: 10 }, (_, i) =>
           listen(`menu://open-recent-${i}`, () => {
             const entry = recentPlaylistsRef.current[i];
