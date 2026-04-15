@@ -27,7 +27,13 @@ export const COLUMN_DEFINITIONS: ColumnDefinition[] = [
   { key: "latency", label: "Latency", defaultWidth: 76, minWidth: 62, align: "right" },
   { key: "bitrate", label: "Bitrate", defaultWidth: 100, minWidth: 80, align: "right" },
   { key: "audio", label: "Audio", defaultWidth: 84, minWidth: 66, align: "right" },
-  { key: "audio_layout", label: "Layout", defaultWidth: 92, minWidth: 72, align: "center" },
+  {
+    key: "audio_layout",
+    label: "Audio Channels",
+    defaultWidth: 92,
+    minWidth: 72,
+    align: "center",
+  },
 ];
 
 export const COLUMN_DEFINITION_MAP: Record<ColumnKey, ColumnDefinition> =
@@ -44,7 +50,12 @@ export const DEFAULT_COLUMN_ORDER: ColumnKey[] = COLUMN_DEFINITIONS.map(
 );
 
 export const DEFAULT_VISIBLE_COLUMN_ORDER: ColumnKey[] = DEFAULT_COLUMN_ORDER.filter(
-  (key) => key !== "url" && key !== "latency" && key !== "error" && key !== "hdr",
+  (key) =>
+    key !== "url" &&
+    key !== "latency" &&
+    key !== "error" &&
+    key !== "hdr" &&
+    key !== "audio_layout",
 );
 
 export const DEFAULT_COLUMN_WIDTHS: Record<ColumnKey, number> =
