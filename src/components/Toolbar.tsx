@@ -71,11 +71,14 @@ interface ToolbarProps {
 const toolbarBtn =
   "flex items-center gap-2 px-3 py-1.5 min-h-9 text-[14px] rounded-md toolbar-btn disabled:opacity-40 disabled:pointer-events-none";
 
+const toolbarBtnText =
+  "flex flex-col items-center justify-center gap-1 px-3 py-1.5 min-h-[3.15rem] text-[11px] leading-none text-center whitespace-nowrap rounded-md toolbar-btn disabled:opacity-40 disabled:pointer-events-none";
+
 const toolbarBtnMac =
   "flex items-center justify-center px-3 py-[6px] toolbar-btn disabled:opacity-40 disabled:pointer-events-none";
 
 const toolbarBtnMacText =
-  "flex items-center gap-2 px-3 py-[6px] text-[13px] toolbar-btn disabled:opacity-40 disabled:pointer-events-none";
+  "flex flex-col items-center justify-center gap-1 px-3 py-[6px] min-h-[3.05rem] text-[11px] leading-none text-center whitespace-nowrap toolbar-btn disabled:opacity-40 disabled:pointer-events-none";
 
 const dragIgnoreSelector =
   "button, input, textarea, select, a, [role='button'], [contenteditable='true'], [data-no-window-drag]";
@@ -412,7 +415,7 @@ export const Toolbar = memo(function Toolbar({
   const btn = showButtonText
     ? isMac
       ? toolbarBtnMacText
-      : toolbarBtn
+      : toolbarBtnText
     : isMac
       ? toolbarBtnMac
       : `${toolbarBtn} justify-center px-2.5`;
@@ -518,8 +521,14 @@ export const Toolbar = memo(function Toolbar({
             aria-expanded={openMenuVisible}
           >
             <IconOpen className="w-[22px] h-[22px]" />
-            {showButtonText && "Open"}
-            <IconChevron className="h-3.5 w-3.5 opacity-70" />
+            {showButtonText ? (
+              <span className="inline-flex items-center gap-1 leading-none">
+                <span>Open</span>
+                <IconChevron className="h-3 w-3 opacity-70" />
+              </span>
+            ) : (
+              <IconChevron className="h-3.5 w-3.5 opacity-70" />
+            )}
           </button>
 
           {openMenuVisible && (

@@ -315,8 +315,8 @@ export function ExportMenu({
         className={
           showButtonText
             ? isMac
-              ? "flex items-center gap-2 px-3 py-[6px] text-[13px] toolbar-btn disabled:opacity-40 disabled:pointer-events-none"
-              : "flex items-center gap-2 px-3 py-1.5 min-h-9 text-[14px] rounded-md toolbar-btn disabled:opacity-40 disabled:pointer-events-none"
+              ? "flex flex-col items-center justify-center gap-1 px-3 py-[6px] min-h-[3.05rem] text-[11px] leading-none text-center whitespace-nowrap toolbar-btn disabled:opacity-40 disabled:pointer-events-none"
+              : "flex flex-col items-center justify-center gap-1 px-3 py-1.5 min-h-[3.15rem] text-[11px] leading-none text-center whitespace-nowrap rounded-md toolbar-btn disabled:opacity-40 disabled:pointer-events-none"
             : isMac
               ? "flex items-center justify-center px-3 py-[6px] toolbar-btn disabled:opacity-40 disabled:pointer-events-none"
               : "flex items-center justify-center px-2.5 py-1.5 min-h-9 text-[14px] rounded-md toolbar-btn disabled:opacity-40 disabled:pointer-events-none"
@@ -328,8 +328,16 @@ export function ExportMenu({
         ) : (
           <IconExport className={isMac ? "w-[22px] h-[22px]" : "w-4 h-4"} />
         )}
-        {showButtonText && (exporting ? "Exporting..." : "Export")}
-        {showButtonText && !exporting && <IconChevron className="w-[14px] h-[14px]" />}
+        {showButtonText && (
+          exporting ? (
+            <span className="leading-none">Exporting...</span>
+          ) : (
+            <span className="inline-flex items-center gap-1 leading-none">
+              <span>Export</span>
+              <IconChevron className="h-3 w-3" />
+            </span>
+          )
+        )}
       </button>
       {open && (
         <div className="macos-popover absolute right-0 top-full mt-1 w-64 bg-dropdown backdrop-blur-xl border border-border-app rounded-lg shadow-xl z-50 py-1">
