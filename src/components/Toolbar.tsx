@@ -4,6 +4,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -74,6 +75,40 @@ const dragIgnoreSelector =
   "button, input, textarea, select, a, [role='button'], [contenteditable='true'], [data-no-window-drag]";
 
 const EMPTY_GROUPS: string[] = [];
+const GROUP_FILTER_LABEL = "All Groups";
+const GROUP_SELECT_CHROME_WIDTH = 28;
+const DEFAULT_FILTER_SELECT_WIDTH = "clamp(8.75rem,12vw,10.5rem)";
+
+function measureGroupSelectWidth(
+  select: HTMLSelectElement,
+  labels: readonly string[],
+): number | null {
+  const context = document.createElement("canvas").getContext("2d");
+  if (!context) {
+    return null;
+  }
+
+  const computedStyle = window.getComputedStyle(select);
+  context.font =
+    computedStyle.font ||
+    `${computedStyle.fontWeight} ${computedStyle.fontSize} ${computedStyle.fontFamily}`;
+
+  const widestLabel = labels.reduce((maxWidth, label) => {
+    const width = context.measureText(label).width;
+    return width > maxWidth ? width : maxWidth;
+  }, 0);
+
+  const horizontalPadding =
+    Number.parseFloat(computedStyle.paddingLeft) +
+    Number.parseFloat(computedStyle.paddingRight);
+  const horizontalBorder =
+    Number.parseFloat(computedStyle.borderLeftWidth) +
+    Number.parseFloat(computedStyle.borderRightWidth);
+
+  return Math.ceil(
+    widestLabel + horizontalPadding + horizontalBorder + GROUP_SELECT_CHROME_WIDTH,
+  );
+}
 
 export const Toolbar = memo(function Toolbar({
   onOpenUrl,
@@ -116,7 +151,9 @@ export const Toolbar = memo(function Toolbar({
   );
   const searchTextCacheRef = useRef<SearchTextCache>(new WeakMap());
   const openMenuRef = useRef<HTMLDivElement | null>(null);
+  const groupSelectRef = useRef<HTMLSelectElement | null>(null);
   const [openMenuVisible, setOpenMenuVisible] = useState(false);
+  const [groupSelectWidth, setGroupSelectWidth] = useState<number | null>(null);
 
   const filteredExportResults = useMemo(
     () =>
@@ -268,6 +305,38 @@ export const Toolbar = memo(function Toolbar({
     }
   }, [inScanSession]);
 
+  useLayoutEffect(() => {
+    const select = groupSelectRef.current;
+    if (!select) {
+      return;
+    }
+
+    if (!hasPlaylist) {
+      setGroupSelectWidth(null);
+      return;
+    }
+
+    let disposed = false;
+    const labels = [GROUP_FILTER_LABEL, ...groups];
+
+    const updateWidth = () => {
+      if (disposed) {
+        return;
+      }
+
+      const nextWidth = measureGroupSelectWidth(select, labels);
+      setGroupSelectWidth((currentWidth) =>
+        currentWidth === nextWidth ? currentWidth : nextWidth,
+      );
+    };
+
+    updateWidth();
+    void document.fonts?.ready.then(updateWidth);
+    return () => {
+      disposed = true;
+    };
+  }, [groups, hasPlaylist, platform]);
+
   // Platform-appropriate icons
   const IconOpen = isMac ? SFLink : Link2;
   const IconChevron = isMac ? SFChevronDown : ChevronDown;
@@ -338,7 +407,18 @@ export const Toolbar = memo(function Toolbar({
       ? "pt-[var(--toolbar-pt)] pb-1"
       : "pt-[var(--toolbar-pt)] pb-1";
   const toolbarSurface = isMac ? "" : "bg-panel";
-  const selectedGroupTitle = groupFilter === "all" ? "All Groups" : groupFilter;
+  const selectedGroupTitle =
+    groupFilter === "all" ? GROUP_FILTER_LABEL : groupFilter;
+  const groupSelectStyle =
+    groupSelectWidth === null
+      ? {
+          flexBasis: DEFAULT_FILTER_SELECT_WIDTH,
+          maxWidth: DEFAULT_FILTER_SELECT_WIDTH,
+        }
+      : {
+          flexBasis: `${groupSelectWidth}px`,
+          maxWidth: `${groupSelectWidth}px`,
+        };
 
   return (
     <div
@@ -510,19 +590,20 @@ export const Toolbar = memo(function Toolbar({
       >
         {/* Filters: Group, Status, Search */}
         <div
-          className={`flex min-w-0 flex-1 items-center justify-end gap-[clamp(0.35rem,0.8vw,0.85rem)] ${filtersDisabled ? "opacity-50" : ""}`}
+          className={`flex min-w-0 flex-1 items-center justify-end gap-[clamp(0.5rem,0.95vw,1rem)] ${filtersDisabled ? "opacity-50" : ""}`}
           data-no-window-drag
         >
-          <div className="flex min-w-0 flex-[1.6_1_0%] items-center gap-[clamp(0.35rem,0.8vw,0.85rem)]">
-            <div className="min-w-[6rem] flex-1">
+          <div className="flex min-w-0 items-center gap-[clamp(0.5rem,0.95vw,1rem)]">
+            <div className="min-w-0 shrink" style={groupSelectStyle}>
               <select
+                ref={groupSelectRef}
                 value={groupFilter}
                 title={selectedGroupTitle}
                 disabled={filtersDisabled}
                 onChange={(e) => handleGroupChange(e.target.value)}
-                className="toolbar-select native-field h-7 w-full min-w-0 px-2 bg-input border border-border-app rounded-md text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
+                className="toolbar-select native-field h-7 w-full min-w-0 pl-2.5 pr-7 bg-input border border-border-app rounded-md text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
               >
-                <option value="all">All Groups</option>
+                <option value="all">{GROUP_FILTER_LABEL}</option>
                 {groups.map((g) => (
                   <option key={g} value={g}>
                     {g}
@@ -534,7 +615,7 @@ export const Toolbar = memo(function Toolbar({
               value={statusFilter}
               disabled={filtersDisabled}
               onChange={(e) => handleStatusChange(e.target.value)}
-              className="toolbar-select native-field h-7 w-[clamp(8.75rem,12vw,10.5rem)] shrink-0 px-2 bg-input border border-border-app rounded-md text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
+              className="toolbar-select native-field h-7 w-[clamp(8.75rem,12vw,10.5rem)] shrink-0 pl-2.5 pr-7 bg-input border border-border-app rounded-md text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
             >
               <option value="all">{statusLabel("all", "All Status")}</option>
               <option value="alive">{statusLabel("alive", "Alive")}</option>
@@ -550,7 +631,7 @@ export const Toolbar = memo(function Toolbar({
               <option value="pending">{statusLabel("pending", "Pending")}</option>
             </select>
           </div>
-          <div className="relative ml-[clamp(0.15rem,0.5vw,0.6rem)] min-w-[6rem] flex-[0_1_clamp(8.5rem,15vw,12.5rem)]">
+          <div className="relative ml-[clamp(0.35rem,0.75vw,0.85rem)] min-w-[6rem] flex-[0_1_clamp(8.5rem,15vw,12.5rem)]">
             <Search className="search-icon absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary" />
             <input
               ref={searchInputRef}
