@@ -427,6 +427,15 @@ export const Toolbar = memo(function Toolbar({
       ? "pt-[var(--toolbar-pt)] pb-1"
       : "pt-[var(--toolbar-pt)] pb-1";
   const toolbarSurface = isMac ? "" : "bg-panel";
+  const toolbarHorizontalPadding = isMac
+    ? "pl-[var(--toolbar-pl)] pr-[var(--toolbar-pr,0.75rem)]"
+    : "pl-[var(--toolbar-pl)] pr-3";
+  const inlinePlaylistNameClass = isMac
+    ? "absolute top-[6px] left-1/2 max-w-[40%] -translate-x-1/2 truncate text-[13px] text-text-tertiary pointer-events-none"
+    : "ml-1 max-w-64 truncate text-[13px] text-text-tertiary";
+  const rightControlsClass =
+    "ml-auto flex flex-1 min-w-0 items-center justify-end gap-[clamp(0.45rem,0.9vw,1rem)]";
+  const filtersClass = `flex min-w-0 flex-1 items-center justify-end gap-[clamp(0.5rem,0.95vw,1rem)] ${filtersDisabled ? "opacity-50" : ""}`;
   const selectedGroupTitle =
     groupFilter === "all" ? GROUP_FILTER_LABEL : groupFilter;
   const groupSelectStyle =
@@ -444,7 +453,7 @@ export const Toolbar = memo(function Toolbar({
     <div
       onPointerDown={handlePointerDown}
       data-tauri-drag-region={dragRegionAttr}
-      className={`flex items-center px-3 ${toolbarSurface} ${toolbarPadding} pl-[var(--toolbar-pl)] pr-[var(--toolbar-pr,0.75rem)] relative ${isMac ? "gap-3" : "gap-1.5"}`}
+      className={`relative flex items-center px-3 ${toolbarSurface} ${toolbarPadding} ${toolbarHorizontalPadding} ${isMac ? "gap-3" : "gap-1.5"}`}
     >
       {/* Scan group: Scan / Pause+Stop — under traffic lights on macOS */}
       <div className={isMac ? "toolbar-group toolbar-group-prominent -ml-[calc(var(--toolbar-pl)-0.75rem)] mr-2" : "flex items-center gap-1.5"}>
@@ -611,7 +620,7 @@ export const Toolbar = memo(function Toolbar({
       {playlistName && isMac && (
         <span
           data-tauri-drag-region
-          className="absolute top-[6px] left-1/2 -translate-x-1/2 text-[13px] text-text-tertiary truncate max-w-[40%] pointer-events-none"
+          className={inlinePlaylistNameClass}
           title={playlistName}
         >
           {playlistName}
@@ -621,7 +630,7 @@ export const Toolbar = memo(function Toolbar({
       {/* Non-macOS: playlist name inline */}
       {playlistName && !isMac && (
         <span
-          className="text-[13px] text-text-tertiary truncate max-w-64 ml-1"
+          className={inlinePlaylistNameClass}
           title={playlistName}
         >
           {playlistName}
@@ -630,11 +639,11 @@ export const Toolbar = memo(function Toolbar({
 
       <div
         data-tauri-drag-region={dragRegionAttr}
-        className="ml-auto flex flex-1 min-w-0 items-center justify-end gap-[clamp(0.45rem,0.9vw,1rem)]"
+        className={rightControlsClass}
       >
         {/* Filters: Group, Status, Search */}
         <div
-          className={`flex min-w-0 flex-1 items-center justify-end gap-[clamp(0.5rem,0.95vw,1rem)] ${filtersDisabled ? "opacity-50" : ""}`}
+          className={filtersClass}
           data-no-window-drag
         >
           <div className="flex min-w-0 items-center gap-[clamp(0.5rem,0.95vw,1rem)]">
