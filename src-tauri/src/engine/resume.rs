@@ -1,10 +1,14 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
+use std::sync::LazyLock;
 
 use crate::error::AppError;
 use crate::models::channel::ChannelResult;
+use crate::models::scan_log::{ChannelAttemptDebugLog, ChannelDebugLog};
 
 const REDACTED_QUERY_VALUE: &str = "REDACTED";
+static URL_IN_TEXT_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r#"https?://[^\s"'<>]+"#).expect("valid URL regex"));
 
 fn sanitize_url_for_persistence(url: &str) -> String {
     let trimmed = url.trim();
@@ -49,6 +53,82 @@ fn sanitize_log_entry(entry: &str) -> String {
 pub struct CheckpointWriteEntry {
     pub log_entry: String,
     pub result: ChannelResult,
+}
+
+#[derive(Debug, Clone)]
+pub struct CheckpointWriteEntryWithLog {
+    pub log_entry: String,
+    pub result: ChannelResult,
+    pub channel_log: ChannelDebugLog,
+}
+
+#[derive(Debug, Clone)]
+pub struct CheckpointResumeEntry {
+    pub result: ChannelResult,
+    pub channel_log: Option<ChannelDebugLog>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct PersistedCheckpointEntry {
+    result: ChannelResult,
+    #[serde(default)]
+    channel_log: Option<ChannelDebugLog>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(untagged)]
+enum PersistedCheckpointLine {
+    Entry(PersistedCheckpointEntry),
+    LegacyResult(ChannelResult),
+}
+
+fn sanitize_embedded_urls(value: &str) -> String {
+    URL_IN_TEXT_RE
+        .replace_all(value, |captures: &regex::Captures<'_>| {
+            sanitize_url_for_persistence(&captures[0])
+        })
+        .into_owned()
+}
+
+fn sanitize_attempt_log_for_persistence(attempt: &ChannelAttemptDebugLog) -> ChannelAttemptDebugLog {
+    let mut sanitized = attempt.clone();
+    sanitized.redirect_chain = sanitized
+        .redirect_chain
+        .iter()
+        .map(|url| sanitize_url_for_persistence(url))
+        .collect();
+    sanitized.reason = sanitized.reason.as_deref().map(sanitize_embedded_urls);
+    sanitized
+}
+
+fn sanitize_channel_log_for_persistence(channel_log: &ChannelDebugLog) -> ChannelDebugLog {
+    let mut sanitized = channel_log.clone();
+    sanitized.channel_url = sanitize_url_for_persistence(&sanitized.channel_url);
+    sanitized.redirect_chain = sanitized
+        .redirect_chain
+        .iter()
+        .map(|url| sanitize_url_for_persistence(url))
+        .collect();
+    sanitized.final_reason = sanitized.final_reason.as_deref().map(sanitize_embedded_urls);
+    sanitized.diagnostics_output = sanitized
+        .diagnostics_output
+        .as_deref()
+        .map(sanitize_embedded_urls);
+    sanitized.attempts = sanitized
+        .attempts
+        .iter()
+        .map(sanitize_attempt_log_for_persistence)
+        .collect();
+    sanitized
+}
+
+fn sanitize_checkpoint_entry_for_persistence(
+    entry: &CheckpointWriteEntryWithLog,
+) -> PersistedCheckpointEntry {
+    PersistedCheckpointEntry {
+        result: sanitize_result_for_persistence(&entry.result),
+        channel_log: Some(sanitize_channel_log_for_persistence(&entry.channel_log)),
+    }
 }
 
 fn sanitize_result_for_persistence(result: &ChannelResult) -> ChannelResult {
@@ -117,8 +197,19 @@ pub fn write_log_entry(log_file: &str, entry: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Load checkpointed channel results (JSON lines) and keep the latest result per index.
-pub fn load_checkpoint_results(checkpoint_file: &str) -> Vec<ChannelResult> {
+fn build_resumed_channel_log(result: &ChannelResult) -> ChannelDebugLog {
+    ChannelDebugLog {
+        channel_index: result.index,
+        channel_name: result.name.clone(),
+        channel_url: result.url.clone(),
+        final_verdict: result.status.to_string(),
+        final_reason: result.error_reason.clone(),
+        ..ChannelDebugLog::default()
+    }
+}
+
+/// Load checkpointed resume entries and keep the latest entry per index.
+pub fn load_checkpoint_entries(checkpoint_file: &str) -> Vec<CheckpointResumeEntry> {
     let path = Path::new(checkpoint_file);
     if !path.exists() {
         return Vec::new();
@@ -132,16 +223,34 @@ pub fn load_checkpoint_results(checkpoint_file: &str) -> Vec<ChannelResult> {
         }
     };
 
-    let mut by_index: BTreeMap<usize, ChannelResult> = BTreeMap::new();
+    let mut by_index: BTreeMap<usize, CheckpointResumeEntry> = BTreeMap::new();
     let mut malformed = 0u32;
     for line in content.lines() {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
-        match serde_json::from_str::<ChannelResult>(line) {
-            Ok(result) => {
-                by_index.insert(result.index, result);
+        match serde_json::from_str::<PersistedCheckpointLine>(line) {
+            Ok(PersistedCheckpointLine::Entry(entry)) => {
+                let channel_log = entry
+                    .channel_log
+                    .or_else(|| Some(build_resumed_channel_log(&entry.result)));
+                by_index.insert(
+                    entry.result.index,
+                    CheckpointResumeEntry {
+                        result: entry.result,
+                        channel_log,
+                    },
+                );
+            }
+            Ok(PersistedCheckpointLine::LegacyResult(result)) => {
+                by_index.insert(
+                    result.index,
+                    CheckpointResumeEntry {
+                        channel_log: Some(build_resumed_channel_log(&result)),
+                        result,
+                    },
+                );
             }
             Err(_) => {
                 malformed += 1;
@@ -157,13 +266,23 @@ pub fn load_checkpoint_results(checkpoint_file: &str) -> Vec<ChannelResult> {
     by_index.into_values().collect()
 }
 
+/// Load checkpointed channel results (JSON lines) and keep the latest result per index.
+pub fn load_checkpoint_results(checkpoint_file: &str) -> Vec<ChannelResult> {
+    load_checkpoint_entries(checkpoint_file)
+        .into_iter()
+        .map(|entry| entry.result)
+        .collect()
+}
+
 /// Append a single channel result to a checkpoint file as JSON.
 pub fn write_result_entry(checkpoint_file: &str, result: &ChannelResult) -> Result<(), AppError> {
     use std::io::Write;
 
-    let sanitized = sanitize_result_for_persistence(result);
-
-    let serialized = serde_json::to_string(&sanitized).map_err(|error| {
+    let serialized = serde_json::to_string(&PersistedCheckpointEntry {
+        result: sanitize_result_for_persistence(result),
+        channel_log: None,
+    })
+    .map_err(|error| {
         AppError::Parse(format!("Failed to serialize checkpoint result: {}", error))
     })?;
 
@@ -202,7 +321,45 @@ pub fn write_entries(
 
     for entry in entries {
         writeln!(log, "{}", sanitize_log_entry(&entry.log_entry)).map_err(AppError::Io)?;
-        let serialized = serde_json::to_string(&sanitize_result_for_persistence(&entry.result))
+        let serialized = serde_json::to_string(&PersistedCheckpointEntry {
+            result: sanitize_result_for_persistence(&entry.result),
+            channel_log: None,
+        })
+        .map_err(|error| {
+            AppError::Parse(format!("Failed to serialize checkpoint result: {}", error))
+        })?;
+        writeln!(checkpoint, "{}", serialized).map_err(AppError::Io)?;
+    }
+
+    Ok(())
+}
+
+/// Append a batch of log+result+channel-log entries, opening each file only once.
+pub fn write_entries_with_channel_logs(
+    log_file: &str,
+    checkpoint_file: &str,
+    entries: &[CheckpointWriteEntryWithLog],
+) -> Result<(), AppError> {
+    use std::io::Write;
+
+    if entries.is_empty() {
+        return Ok(());
+    }
+
+    let mut log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_file)
+        .map_err(AppError::Io)?;
+    let mut checkpoint = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(checkpoint_file)
+        .map_err(AppError::Io)?;
+
+    for entry in entries {
+        writeln!(log, "{}", sanitize_log_entry(&entry.log_entry)).map_err(AppError::Io)?;
+        let serialized = serde_json::to_string(&sanitize_checkpoint_entry_for_persistence(entry))
             .map_err(|error| {
                 AppError::Parse(format!("Failed to serialize checkpoint result: {}", error))
             })?;
@@ -257,6 +414,31 @@ mod tests {
         }
     }
 
+    fn make_channel_log(index: usize, url: &str) -> ChannelDebugLog {
+        ChannelDebugLog {
+            channel_index: index,
+            channel_name: format!("Channel {index}"),
+            channel_url: url.to_string(),
+            redirect_chain: vec![format!("{url}?token=redirect")],
+            final_verdict: "Alive".to_string(),
+            final_reason: Some(format!("Failure for {url}?token=reason")),
+            diagnostics_output: Some(format!("ffprobe input {url}?token=diag")),
+            attempts: vec![ChannelAttemptDebugLog {
+                attempt: 1,
+                timeout_secs: 5.0,
+                started_at_epoch_ms: 10,
+                ended_at_epoch_ms: 20,
+                verdict: "Alive".to_string(),
+                reason: Some(format!("Attempt via {url}?token=attempt")),
+                redirect_chain: vec![format!("{url}?token=attempt-chain")],
+                bytes_transferred: 512,
+                ttfb_ms: Some(42),
+                http_status_codes: vec![200],
+            }],
+            ..ChannelDebugLog::default()
+        }
+    }
+
     fn temp_file(name: &str) -> String {
         let pid = std::process::id();
         let nanos = std::time::SystemTime::now()
@@ -288,6 +470,62 @@ mod tests {
         assert_eq!(loaded[0].status, ChannelStatus::Alive);
         assert_eq!(loaded[1].index, 5);
 
+        let _ = std::fs::remove_file(&checkpoint_file);
+    }
+
+    #[test]
+    fn checkpoint_entries_round_trip_channel_logs_with_redaction() {
+        let log_file = temp_file("resume-checkpoint-log");
+        let checkpoint_file = temp_file("resume-checkpoint-entries");
+        let mut result = make_result(8, "Secret", ChannelStatus::Alive);
+        result.url = "https://demo:secret@example.com/live.m3u8?token=abc123".to_string();
+        result.stream_url =
+            Some("https://stream.example.com/hls.m3u8?auth=xyz987&session=abcd".to_string());
+        let channel_log = make_channel_log(result.index, &result.url);
+
+        write_entries_with_channel_logs(
+            &log_file,
+            &checkpoint_file,
+            &[CheckpointWriteEntryWithLog {
+                log_entry: format!("8 - Secret {}", result.url),
+                result: result.clone(),
+                channel_log: channel_log.clone(),
+            }],
+        )
+        .expect("entry write should succeed");
+
+        let persisted =
+            std::fs::read_to_string(&checkpoint_file).expect("checkpoint should be readable");
+        assert!(!persisted.contains("abc123"));
+        assert!(!persisted.contains("xyz987"));
+        assert!(persisted.contains("token=REDACTED"));
+        assert!(persisted.contains("auth=REDACTED"));
+
+        let loaded = load_checkpoint_entries(&checkpoint_file);
+        assert_eq!(loaded.len(), 1);
+        let loaded_log = loaded[0]
+            .channel_log
+            .as_ref()
+            .expect("channel log should persist");
+        assert_eq!(loaded_log.channel_index, 8);
+        assert!(loaded_log.channel_url.contains("token=REDACTED"));
+        assert!(
+            loaded_log
+                .diagnostics_output
+                .as_deref()
+                .unwrap_or_default()
+                .contains("token=REDACTED")
+        );
+        assert!(
+            loaded_log
+                .attempts
+                .first()
+                .and_then(|attempt| attempt.reason.as_deref())
+                .unwrap_or_default()
+                .contains("token=REDACTED")
+        );
+
+        let _ = std::fs::remove_file(&log_file);
         let _ = std::fs::remove_file(&checkpoint_file);
     }
 

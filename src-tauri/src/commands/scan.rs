@@ -1015,7 +1015,7 @@ async fn emit_result_batch_event(
 async fn flush_checkpoint_entries(
     log_file: &str,
     checkpoint_file: &str,
-    pending: &mut Vec<resume::CheckpointWriteEntry>,
+    pending: &mut Vec<resume::CheckpointWriteEntryWithLog>,
     app: &AppHandle,
     state: &Arc<AppState>,
     run_id: &str,
@@ -1028,7 +1028,7 @@ async fn flush_checkpoint_entries(
     let checkpoint_path = checkpoint_file.to_string();
     let flush_started_at = Instant::now();
     let flush_result = tokio::task::spawn_blocking(move || {
-        resume::write_entries(&log_path, &checkpoint_path, &batch)
+        resume::write_entries_with_channel_logs(&log_path, &checkpoint_path, &batch)
     })
     .await;
     let flush_ms = flush_started_at.elapsed().as_secs_f64() * 1000.0;
@@ -1057,7 +1057,7 @@ async fn flush_checkpoint_entries(
 }
 
 async fn run_checkpoint_writer(
-    mut rx: tokio::sync::mpsc::Receiver<resume::CheckpointWriteEntry>,
+    mut rx: tokio::sync::mpsc::Receiver<resume::CheckpointWriteEntryWithLog>,
     log_file: String,
     checkpoint_file: String,
     app: AppHandle,
@@ -1065,7 +1065,7 @@ async fn run_checkpoint_writer(
     run_id: String,
 ) {
     let mut pending =
-        Vec::<resume::CheckpointWriteEntry>::with_capacity(CHECKPOINT_FLUSH_MAX_BATCH);
+        Vec::<resume::CheckpointWriteEntryWithLog>::with_capacity(CHECKPOINT_FLUSH_MAX_BATCH);
     let mut ticker = tokio::time::interval(std::time::Duration::from_millis(
         CHECKPOINT_FLUSH_INTERVAL_MS,
     ));
@@ -1228,14 +1228,14 @@ async fn execute_scan_run(
     );
 
     let channel_indices: HashSet<usize> = channels.iter().map(|channel| channel.index).collect();
-    let mut resumed_results = resume::load_checkpoint_results(&checkpoint_file)
+    let mut resumed_entries = resume::load_checkpoint_entries(&checkpoint_file)
         .into_iter()
-        .filter(|result| channel_indices.contains(&result.index))
+        .filter(|entry| channel_indices.contains(&entry.result.index))
         .collect::<Vec<_>>();
-    resumed_results.sort_by_key(|result| result.index);
+    resumed_entries.sort_by_key(|entry| entry.result.index);
 
     let resumed_indices: HashSet<usize> =
-        resumed_results.iter().map(|result| result.index).collect();
+        resumed_entries.iter().map(|entry| entry.result.index).collect();
     if resumed_indices.is_empty() {
         let log_file_clone = log_file.clone();
         let checkpoint_file_clone = checkpoint_file.clone();
@@ -1249,7 +1249,7 @@ async fn execute_scan_run(
         log::info!(
             "Resuming scan {} with {} completed channels and {} remaining",
             run_id,
-            resumed_results.len(),
+            resumed_entries.len(),
             channels.len()
         );
     }
@@ -1409,7 +1409,7 @@ async fn execute_scan_run(
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel::<WorkerOutput>(256);
     let (checkpoint_tx, checkpoint_rx) =
-        tokio::sync::mpsc::channel::<resume::CheckpointWriteEntry>(1024);
+        tokio::sync::mpsc::channel::<resume::CheckpointWriteEntryWithLog>(1024);
 
     let checkpoint_task = tokio::spawn(run_checkpoint_writer(
         checkpoint_rx,
@@ -1438,9 +1438,13 @@ async fn execute_scan_run(
             .checked_sub(std::time::Duration::from_millis(PROGRESS_EMIT_INTERVAL_MS))
             .unwrap_or_else(Instant::now);
 
-        for result in resumed_results {
+        for resumed_entry in resumed_entries {
+            let result = resumed_entry.result;
             counters.apply(&result);
             completed_results.push(result.clone());
+            if let Some(channel_log) = resumed_entry.channel_log {
+                channel_logs.push(channel_log);
+            }
             if batch_events_enabled {
                 pending_batch_results.push(result);
                 if pending_batch_results.len() >= RESULT_BATCH_MAX_ITEMS {
@@ -2010,9 +2014,10 @@ async fn execute_scan_run(
             }
 
             let _ = checkpoint_tx
-                .send(resume::CheckpointWriteEntry {
+                .send(resume::CheckpointWriteEntryWithLog {
                     log_entry: format!("{} - {} {}", channel.index + 1, channel.name, channel.url),
                     result: result.clone(),
+                    channel_log: shared.channel_log.clone(),
                 })
                 .await;
             let _ = tx
