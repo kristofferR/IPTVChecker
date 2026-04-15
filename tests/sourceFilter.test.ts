@@ -130,6 +130,12 @@ describe("sourceFilter helpers", () => {
     expect(filtered.channels.map((channel) => channel.index)).toEqual([8, 107]);
   });
 
+  it("returns the preview unchanged when content visibility filtering is disabled", () => {
+    const filtered = applyContentVisibilityToPreview(preview, false);
+
+    expect(filtered).toBe(preview);
+  });
+
   it("can hide VOD and series entries from the visible preview", () => {
     const filtered = applyContentVisibilityToPreview({
       ...preview,
