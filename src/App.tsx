@@ -2619,27 +2619,37 @@ export default function App() {
         reportAutoRevealDoneRef={reportAutoRevealDoneRef}
         reportWasAutoShownRef={reportWasAutoShownRef}
       />
-      <div ref={toolbarMeasureRef} className={`relative z-20 ${isMac ? "glass-material bg-panel" : ""}`}>
-      <Toolbar
-        onOpen={handleOpen}
-        onOpenFolder={handleOpenFolder}
-        onOpenUrl={handleOpenUrl}
-        onSavePlaylist={handleSaveCurrentPlaylist}
-        onManageSavedPlaylists={handleManageSavedPlaylists}
-        onStartScan={handleStartScan}
-        onPauseScan={pause}
-        onResumeScan={resume}
-        onStopScan={cancel}
-        onOpenSettings={handleOpenSettings}
-        onToggleReport={handleToggleReport}
-        searchInputRef={searchInputRef}
-      />
-      {isMac && playlist && (
-        <div className="flex flex-col" style={tableChromeStyle}>
-          <div ref={headerPortalRef} />
-          <FilterBar onApply={handleApplySourceFilter} variant="chrome" />
+      <div
+        ref={toolbarMeasureRef}
+        className={`relative z-20 ${isMac ? "glass-material bg-panel" : ""} ${isMac && !playlist ? "pb-7" : ""}`}
+      >
+        {isMac && !playlist && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 bg-panel"
+          />
+        )}
+        <div className="relative z-10">
+          <Toolbar
+            onOpenUrl={handleOpenUrl}
+            onOpenXtream={handleOpenXtream}
+            onSavePlaylist={handleSaveCurrentPlaylist}
+            onManageSavedPlaylists={handleManageSavedPlaylists}
+            onStartScan={handleStartScan}
+            onPauseScan={pause}
+            onResumeScan={resume}
+            onStopScan={cancel}
+            onOpenSettings={handleOpenSettings}
+            onToggleReport={handleToggleReport}
+            searchInputRef={searchInputRef}
+          />
+          {isMac && playlist && (
+            <div className="flex flex-col" style={tableChromeStyle}>
+              <div ref={headerPortalRef} />
+              <FilterBar onApply={handleApplySourceFilter} variant="chrome" />
+            </div>
+          )}
         </div>
-      )}
       </div>
 
       <div className="flex flex-col flex-1 min-h-0">
@@ -2769,8 +2779,8 @@ export default function App() {
                 channelTableElement
               )
             ) : (
-              <div className="flex-1 flex items-center justify-center text-text-tertiary">
-              <div className="text-center px-4">
+              <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden native-scroll text-text-tertiary">
+              <div className="min-h-full flex flex-col items-center justify-center text-center px-4 py-6">
                 {playlistLoading ? (
                   <>
                     <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-blue-500" />

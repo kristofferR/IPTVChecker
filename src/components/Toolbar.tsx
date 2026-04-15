@@ -6,14 +6,15 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
 } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   BarChart3,
   BookmarkPlus,
+  ChevronDown,
   History,
-  Folder,
-  FolderOpen,
+  KeyRound,
   Library,
   Link2,
   Pause,
@@ -28,8 +29,7 @@ import {
   SFPlayFill,
   SFPauseFill,
   SFStopFill,
-  SFDocumentViewfinder,
-  SFFolder,
+  SFChevronDown,
   SFLink,
   SFGearshape,
   SFClockArrow,
@@ -48,9 +48,8 @@ import { ExportMenu } from "./ExportMenu";
 import { useAppStore } from "../store";
 
 interface ToolbarProps {
-  onOpen: () => void;
-  onOpenFolder: () => void;
   onOpenUrl: () => void;
+  onOpenXtream: () => void;
   onSavePlaylist: () => void;
   onManageSavedPlaylists: () => void;
   onStartScan: () => void;
@@ -77,9 +76,8 @@ const dragIgnoreSelector =
 const EMPTY_GROUPS: string[] = [];
 
 export const Toolbar = memo(function Toolbar({
-  onOpen,
-  onOpenFolder,
   onOpenUrl,
+  onOpenXtream,
   onSavePlaylist,
   onManageSavedPlaylists,
   onStartScan,
@@ -117,6 +115,8 @@ export const Toolbar = memo(function Toolbar({
     (s) => s.settings.show_header_button_text,
   );
   const searchTextCacheRef = useRef<SearchTextCache>(new WeakMap());
+  const openMenuRef = useRef<HTMLDivElement | null>(null);
+  const [openMenuVisible, setOpenMenuVisible] = useState(false);
 
   const filteredExportResults = useMemo(
     () =>
@@ -182,6 +182,30 @@ export const Toolbar = memo(function Toolbar({
     };
   }, [completedResults, filteredExportResults, selectedIndices]);
 
+  useEffect(() => {
+    const handlePointerDownOutside = (event: MouseEvent) => {
+      if (
+        openMenuRef.current &&
+        !openMenuRef.current.contains(event.target as Node)
+      ) {
+        setOpenMenuVisible(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenMenuVisible(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDownOutside);
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDownOutside);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, []);
+
   const resolveExportScopeResults = useCallback(
     (scope: ExportScope): ChannelResult[] => {
       const context = exportContextRef.current;
@@ -238,9 +262,15 @@ export const Toolbar = memo(function Toolbar({
   const statusLabel = (value: string, label: string) =>
     hasPlaylist ? `${label} (${statusOptionCounts[value] ?? 0})` : label;
 
+  useEffect(() => {
+    if (inScanSession) {
+      setOpenMenuVisible(false);
+    }
+  }, [inScanSession]);
+
   // Platform-appropriate icons
-  const IconOpen = isMac ? SFDocumentViewfinder : FolderOpen;
-  const IconFolder = isMac ? SFFolder : Folder;
+  const IconOpen = isMac ? SFLink : Link2;
+  const IconChevron = isMac ? SFChevronDown : ChevronDown;
   const IconLink = isMac ? SFLink : Link2;
   const IconSavePlaylist = BookmarkPlus;
   const IconSavedPlaylists = Library;
@@ -283,6 +313,15 @@ export const Toolbar = memo(function Toolbar({
     useAppStore.getState().setShowHistory(true);
   };
 
+  const handleOpenAction = (action: "url" | "xtream") => {
+    setOpenMenuVisible(false);
+    if (action === "xtream") {
+      onOpenXtream();
+      return;
+    }
+    onOpenUrl();
+  };
+
   const dragRegionAttr = useWindowDragRegion ? true : undefined;
   const btn = showButtonText
     ? isMac
@@ -296,7 +335,7 @@ export const Toolbar = memo(function Toolbar({
   const toolbarPadding = hasPlaylist
     ? "pt-[var(--toolbar-pt)] pb-2"
     : isMac
-      ? "pt-[calc(var(--toolbar-pt)-0.5rem)] pb-1"
+      ? "pt-[var(--toolbar-pt)] pb-1"
       : "pt-[var(--toolbar-pt)] pb-1";
   const toolbarSurface = isMac ? "" : "bg-panel";
   const selectedGroupTitle = groupFilter === "all" ? "All Groups" : groupFilter;
@@ -370,38 +409,53 @@ export const Toolbar = memo(function Toolbar({
 
       {/* Source group: Open actions */}
       <div className={isMac ? "toolbar-group" : "flex items-center gap-1.5"}>
-        <button
-          onClick={onOpen}
-          disabled={inScanSession}
-          className={btnWithOptionalText()}
-          title="Open File"
-          aria-label="Open File"
-        >
-          <IconOpen className="w-[22px] h-[22px]" />
-          {showButtonText && "Open"}
-        </button>
+        <div className="relative" ref={openMenuRef} data-no-window-drag>
+          <button
+            type="button"
+            onClick={() => setOpenMenuVisible((visible) => !visible)}
+            disabled={inScanSession}
+            className={btnWithOptionalText("gap-1.5")}
+            title="Open URL/Xtream"
+            aria-label="Open URL/Xtream"
+            aria-haspopup="menu"
+            aria-expanded={openMenuVisible}
+          >
+            <IconOpen className="w-[22px] h-[22px]" />
+            {showButtonText && "Open URL/Xtream"}
+            <IconChevron className="h-3.5 w-3.5 opacity-70" />
+          </button>
 
-        <button
-          onClick={onOpenFolder}
-          disabled={inScanSession}
-          className={btnWithOptionalText()}
-          title="Open Folder"
-          aria-label="Open Folder"
-        >
-          <IconFolder className="w-[22px] h-[22px]" />
-          {showButtonText && "Open Folder"}
-        </button>
-
-        <button
-          onClick={onOpenUrl}
-          disabled={inScanSession}
-          className={btnWithOptionalText()}
-          title="Open URL"
-          aria-label="Open URL"
-        >
-          <IconLink className="w-[22px] h-[22px]" />
-          {showButtonText && "Open URL"}
-        </button>
+          {openMenuVisible && (
+            <div
+              className={
+                isMac
+                  ? "macos-popover absolute left-0 top-full mt-1 z-50 w-52 rounded-lg border border-border-app bg-dropdown py-1 shadow-xl backdrop-blur-xl"
+                  : "absolute left-0 top-full mt-1 z-50 w-52 rounded-lg border border-border-app bg-dropdown/95 p-1.5 shadow-xl backdrop-blur-xl"
+              }
+              role="menu"
+              aria-label="Open URL or Xtream"
+            >
+              <button
+                type="button"
+                onClick={() => handleOpenAction("url")}
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[13px] text-text-primary transition-colors hover:bg-btn-hover"
+                role="menuitem"
+              >
+                <IconLink className="h-4 w-4 shrink-0" />
+                <span>Open URL</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleOpenAction("xtream")}
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[13px] text-text-primary transition-colors hover:bg-btn-hover"
+                role="menuitem"
+              >
+                <KeyRound className="h-4 w-4 shrink-0" />
+                <span>Open Xtream</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Source group: saved playlist actions */}
