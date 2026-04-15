@@ -14,6 +14,8 @@ import {
   BarChart3,
   BookmarkPlus,
   ChevronDown,
+  Folder,
+  FolderOpen,
   History,
   KeyRound,
   Library,
@@ -31,6 +33,8 @@ import {
   SFPauseFill,
   SFStopFill,
   SFChevronDown,
+  SFDocumentViewfinder,
+  SFFolder,
   SFLink,
   SFGearshape,
   SFClockArrow,
@@ -49,6 +53,8 @@ import { ExportMenu } from "./ExportMenu";
 import { useAppStore } from "../store";
 
 interface ToolbarProps {
+  onOpen: () => void;
+  onOpenFolder: () => void;
   onOpenUrl: () => void;
   onOpenXtream: () => void;
   onSavePlaylist: () => void;
@@ -111,6 +117,8 @@ function measureGroupSelectWidth(
 }
 
 export const Toolbar = memo(function Toolbar({
+  onOpen,
+  onOpenFolder,
   onOpenUrl,
   onOpenXtream,
   onSavePlaylist,
@@ -338,8 +346,9 @@ export const Toolbar = memo(function Toolbar({
   }, [groups, hasPlaylist, platform]);
 
   // Platform-appropriate icons
-  const IconOpen = isMac ? SFLink : Link2;
+  const IconOpen = isMac ? SFDocumentViewfinder : FolderOpen;
   const IconChevron = isMac ? SFChevronDown : ChevronDown;
+  const IconFolder = isMac ? SFFolder : Folder;
   const IconLink = isMac ? SFLink : Link2;
   const IconSavePlaylist = BookmarkPlus;
   const IconSavedPlaylists = Library;
@@ -382,8 +391,16 @@ export const Toolbar = memo(function Toolbar({
     useAppStore.getState().setShowHistory(true);
   };
 
-  const handleOpenAction = (action: "url" | "xtream") => {
+  const handleOpenAction = (action: "file" | "folder" | "url" | "xtream") => {
     setOpenMenuVisible(false);
+    if (action === "file") {
+      onOpen();
+      return;
+    }
+    if (action === "folder") {
+      onOpenFolder();
+      return;
+    }
     if (action === "xtream") {
       onOpenXtream();
       return;
@@ -495,13 +512,13 @@ export const Toolbar = memo(function Toolbar({
             onClick={() => setOpenMenuVisible((visible) => !visible)}
             disabled={inScanSession}
             className={btnWithOptionalText("gap-1.5")}
-            title="Open URL/Xtream"
-            aria-label="Open URL/Xtream"
+            title="Open Playlist Source"
+            aria-label="Open Playlist Source"
             aria-haspopup="menu"
             aria-expanded={openMenuVisible}
           >
             <IconOpen className="w-[22px] h-[22px]" />
-            {showButtonText && "Open URL/Xtream"}
+            {showButtonText && "Open"}
             <IconChevron className="h-3.5 w-3.5 opacity-70" />
           </button>
 
@@ -513,8 +530,26 @@ export const Toolbar = memo(function Toolbar({
                   : "absolute left-0 top-full mt-1 z-50 w-52 rounded-lg border border-border-app bg-dropdown/95 p-1.5 shadow-xl backdrop-blur-xl"
               }
               role="menu"
-              aria-label="Open URL or Xtream"
+              aria-label="Open playlist source"
             >
+              <button
+                type="button"
+                onClick={() => handleOpenAction("file")}
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[13px] text-text-primary transition-colors hover:bg-btn-hover"
+                role="menuitem"
+              >
+                <IconOpen className="h-4 w-4 shrink-0" />
+                <span>Open File</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleOpenAction("folder")}
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[13px] text-text-primary transition-colors hover:bg-btn-hover"
+                role="menuitem"
+              >
+                <IconFolder className="h-4 w-4 shrink-0" />
+                <span>Open Folder</span>
+              </button>
               <button
                 type="button"
                 onClick={() => handleOpenAction("url")}
