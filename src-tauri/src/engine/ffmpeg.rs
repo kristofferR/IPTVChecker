@@ -88,9 +88,54 @@ static FFPROBE_PATH: OnceLock<String> = OnceLock::new();
 /// Cached ffmpeg/ffprobe availability — checked once per session.
 static FFTOOLS_AVAILABLE: OnceLock<(bool, bool)> = OnceLock::new();
 
-/// Resolve the path to an executable, preferring the system PATH and falling
-/// back to bundled sidecar binaries. Results are cached per binary name for the
-/// session.
+fn binary_candidate_names(name: &str, ext: &str) -> [String; 2] {
+    [format!("{name}-{TARGET_TRIPLE}{ext}"), format!("{name}{ext}")]
+}
+
+fn resolve_binary_from_dir(dir: &Path, candidates: &[String]) -> Option<String> {
+    for candidate in candidates {
+        let path = dir.join(candidate);
+        if path.is_file() {
+            return Some(path.to_string_lossy().to_string());
+        }
+    }
+    None
+}
+
+fn resolve_bundled_binary(app: &AppHandle, candidates: &[String]) -> Option<String> {
+    #[cfg(debug_assertions)]
+    {
+        // In `tauri dev`, prefer the project sidecar inputs directly so debug
+        // runs use the same ffmpeg build that production packages bundle.
+        let dev_binaries_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries");
+        if let Some(path) = resolve_binary_from_dir(&dev_binaries_dir, candidates) {
+            return Some(path);
+        }
+    }
+
+    // Check the executable's own directory next (macOS bundles externalBin
+    // into Contents/MacOS/, alongside the main binary).
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            if let Some(path) = resolve_binary_from_dir(dir, candidates) {
+                return Some(path);
+            }
+        }
+    }
+
+    // Also check the Tauri resource directory.
+    if let Ok(dir) = app.path().resource_dir() {
+        if let Some(path) = resolve_binary_from_dir(&dir, candidates) {
+            return Some(path);
+        }
+    }
+
+    None
+}
+
+/// Resolve the path to an executable, preferring bundled sidecar binaries over
+/// the system PATH so debug and production use the same ffmpeg build. Results
+/// are cached per binary name for the session.
 fn resolve_binary(app: &AppHandle, name: &str) -> String {
     let cache = match name {
         "ffmpeg" => Some(&FFMPEG_PATH),
@@ -112,36 +157,14 @@ fn resolve_binary_uncached(app: &AppHandle, name: &str) -> String {
         ""
     };
 
-    let candidates = [
-        format!("{name}-{TARGET_TRIPLE}{ext}"),
-        format!("{name}{ext}"),
-    ];
+    let candidates = binary_candidate_names(name, ext);
 
-    if let Some(path) = resolve_binary_from_path(name, ext) {
+    if let Some(path) = resolve_bundled_binary(app, &candidates) {
         return path;
     }
 
-    // Check the executable's own directory next (macOS bundles externalBin
-    // into Contents/MacOS/, alongside the main binary).
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            for candidate in &candidates {
-                let path = dir.join(candidate);
-                if path.exists() {
-                    return path.to_string_lossy().to_string();
-                }
-            }
-        }
-    }
-
-    // Also check the Tauri resource directory.
-    if let Ok(dir) = app.path().resource_dir() {
-        for candidate in &candidates {
-            let path = dir.join(candidate);
-            if path.exists() {
-                return path.to_string_lossy().to_string();
-            }
-        }
+    if let Some(path) = resolve_binary_from_path(name, ext) {
+        return path;
     }
 
     name.to_string()
@@ -364,6 +387,27 @@ fn validate_captured_screenshot(path: &Path, format: ScreenshotFormat) -> Result
     }
 
     Ok(())
+}
+
+fn append_screenshot_output_args<'a>(
+    args: &mut Vec<&'a str>,
+    format: ScreenshotFormat,
+    output_path: &'a str,
+) {
+    args.extend_from_slice(&["-frames:v", "1", "-update", "1"]);
+
+    match format {
+        ScreenshotFormat::Webp => {
+            args.extend_from_slice(&["-c:v", "libwebp", "-quality", "90", "-pix_fmt", "yuv420p"]);
+        }
+        ScreenshotFormat::Png => {
+            // Force 8-bit PNG output. HDR HEVC sources otherwise default to
+            // rgb48be, which inflates files well past the UI read limit.
+            args.extend_from_slice(&["-pix_fmt", "rgb24"]);
+        }
+    }
+
+    args.push(output_path);
 }
 
 /// Run an ffmpeg/ffprobe command via resolved binary path with cancellation
@@ -959,11 +1003,8 @@ async fn capture_screenshot_with_format(
 
     // Capture the first available frame — no seeking (-ss) since live IPTV
     // streams don't support it reliably and it causes hangs.
-    let mut args = vec!["-y", "-user_agent", user_agent, "-i", url, "-frames:v", "1"];
-    if format == ScreenshotFormat::Webp {
-        args.extend_from_slice(&["-c:v", "libwebp", "-quality", "90", "-pix_fmt", "yuv420p"]);
-    }
-    args.push(&output_str);
+    let mut args = vec!["-y", "-user_agent", user_agent, "-i", url];
+    append_screenshot_output_args(&mut args, format, &output_str);
 
     let (_stdout, stderr) =
         run_tool_command(app, "ffmpeg", &args, cancel, Some(timeout_duration)).await?;
@@ -1400,11 +1441,7 @@ pub async fn run_combined_diagnostics(
 
     // Output 1: screenshot (if wanted)
     if let Some(ref out) = screenshot_str {
-        args.extend_from_slice(&["-frames:v", "1"]);
-        if screenshot_format == ScreenshotFormat::Webp {
-            args.extend_from_slice(&["-c:v", "libwebp", "-quality", "90", "-pix_fmt", "yuv420p"]);
-        }
-        args.push(out);
+        append_screenshot_output_args(&mut args, screenshot_format, out);
     }
 
     // Output 2: null sink for bitrate profiling (or just metadata-only decode)
@@ -1661,11 +1698,12 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        build_screenshot_file_name, check_label_mismatch, contains_word, normalize_superscript,
-        parse_bytes_read, parse_ffmpeg_stderr, parse_ffprobe_fps, parse_probe_snapshot,
-        parse_stream_track_presence, resolution_label, sanitize_screenshot_stem,
-        screenshot_header_is_valid, unique_screenshot_output_path, validate_captured_screenshot,
-        ScreenshotFormat, MAX_SCREENSHOT_STEM_LEN,
+        append_screenshot_output_args, binary_candidate_names, build_screenshot_file_name,
+        check_label_mismatch, contains_word, normalize_superscript, parse_bytes_read,
+        parse_ffmpeg_stderr, parse_ffprobe_fps, parse_probe_snapshot,
+        parse_stream_track_presence, resolution_label, resolve_binary_from_dir,
+        sanitize_screenshot_stem, screenshot_header_is_valid, unique_screenshot_output_path,
+        validate_captured_screenshot, ScreenshotFormat, MAX_SCREENSHOT_STEM_LEN, TARGET_TRIPLE,
     };
 
     #[test]
@@ -1735,6 +1773,30 @@ mod tests {
     }
 
     #[test]
+    fn resolve_binary_from_dir_prefers_target_specific_name() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be monotonic")
+            .as_nanos();
+        let test_dir = std::env::temp_dir().join(format!("iptv-checker-binary-resolve-{unique}"));
+        std::fs::create_dir_all(&test_dir).expect("temp dir should be creatable");
+
+        let candidates = binary_candidate_names("ffmpeg", "");
+        let generic = test_dir.join("ffmpeg");
+        let target_specific = test_dir.join(format!("ffmpeg-{TARGET_TRIPLE}"));
+        std::fs::write(&generic, b"generic").expect("generic binary should be writable");
+        std::fs::write(&target_specific, b"target").expect("target binary should be writable");
+
+        let resolved = resolve_binary_from_dir(&test_dir, &candidates);
+        assert_eq!(
+            resolved.as_deref(),
+            Some(target_specific.to_string_lossy().as_ref())
+        );
+
+        std::fs::remove_dir_all(&test_dir).expect("temp dir should be removable");
+    }
+
+    #[test]
     fn screenshot_header_validation_matches_format() {
         let png_header = [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13];
         let webp_header = [b'R', b'I', b'F', b'F', 0, 0, 0, 0, b'W', b'E', b'B', b'P'];
@@ -1750,6 +1812,28 @@ mod tests {
             ScreenshotFormat::Webp,
             &png_header
         ));
+    }
+
+    #[test]
+    fn screenshot_output_args_force_png_to_8_bit_rgb() {
+        let mut args = Vec::new();
+        append_screenshot_output_args(&mut args, ScreenshotFormat::Png, "/tmp/frame.png");
+
+        assert!(args.windows(2).any(|pair| pair == ["-update", "1"]));
+        assert!(args.windows(2).any(|pair| pair == ["-pix_fmt", "rgb24"]));
+        assert!(!args.iter().any(|arg| *arg == "libwebp"));
+        assert_eq!(args.last(), Some(&"/tmp/frame.png"));
+    }
+
+    #[test]
+    fn screenshot_output_args_keep_webp_encoder_settings() {
+        let mut args = Vec::new();
+        append_screenshot_output_args(&mut args, ScreenshotFormat::Webp, "/tmp/frame.webp");
+
+        assert!(args.windows(2).any(|pair| pair == ["-update", "1"]));
+        assert!(args.windows(2).any(|pair| pair == ["-c:v", "libwebp"]));
+        assert!(args.windows(2).any(|pair| pair == ["-pix_fmt", "yuv420p"]));
+        assert_eq!(args.last(), Some(&"/tmp/frame.webp"));
     }
 
     #[test]
