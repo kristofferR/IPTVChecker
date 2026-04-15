@@ -27,13 +27,66 @@ fi
 
 mkdir -p "${BIN_DIR}"
 
+host_can_execute_target() {
+    [[ "${TARGET}" == "${HOST_TARGET}" ]]
+}
+
+binary_is_symlink() {
+    local output="$1"
+    [[ -L "${output}" ]]
+}
+
+ffmpeg_has_required_encoders() {
+    local bin="$1"
+    local encoders
+    encoders="$("${bin}" -hide_banner -encoders 2>/dev/null || true)"
+    grep -q "libwebp" <<< "${encoders}" && grep -qE '(^|[[:space:]])png[[:space:]]' <<< "${encoders}"
+}
+
+binary_passes_host_validation() {
+    local name="$1"
+    local output="$2"
+
+    [[ -x "${output}" ]] || return 1
+    "${output}" -version > /dev/null 2>&1 || return 1
+
+    if [[ "${name}" == "ffmpeg" ]]; then
+        ffmpeg_has_required_encoders "${output}" || return 1
+    fi
+
+    return 0
+}
+
+should_replace_existing_binary() {
+    local name="$1"
+    local output="$2"
+
+    if [[ ! -e "${output}" ]]; then
+        return 0
+    fi
+
+    if binary_is_symlink "${output}"; then
+        echo "  ${name}: replacing symlinked binary at ${output}"
+        rm -f "${output}"
+        return 0
+    fi
+
+    if host_can_execute_target && ! binary_passes_host_validation "${name}" "${output}"; then
+        echo "  ${name}: replacing invalid or feature-incomplete host binary at ${output}"
+        rm -f "${output}"
+        return 0
+    fi
+
+    return 1
+}
+
 download_macos_riedl() {
     local arch="$1"
     local base="https://ffmpeg.martin-riedl.de/redirect/latest/macos/${arch}/release"
 
     for name in ffmpeg ffprobe; do
         local output="${BIN_DIR}/${name}-${TARGET}${EXT}"
-        if [[ -f "${output}" ]]; then
+        if ! should_replace_existing_binary "${name}" "${output}"; then
             echo "  ${name}: already exists, skipping (delete to re-download)"
             continue
         fi
@@ -53,7 +106,7 @@ download_macos_riedl() {
 download_macos_evermeet() {
     for name in ffmpeg ffprobe; do
         local output="${BIN_DIR}/${name}-${TARGET}${EXT}"
-        if [[ -f "${output}" ]]; then
+        if ! should_replace_existing_binary "${name}" "${output}"; then
             echo "  ${name}: already exists, skipping (delete to re-download)"
             continue
         fi
@@ -106,7 +159,7 @@ download_btbn() {
     for name in ffmpeg ffprobe; do
         local src="${extract_dir}/${archive}/bin/${name}${EXT}"
         local output="${BIN_DIR}/${name}-${TARGET}${EXT}"
-        if [[ -f "${output}" ]]; then
+        if ! should_replace_existing_binary "${name}" "${output}"; then
             echo "  ${name}: already exists, skipping"
         elif [[ -f "${src}" ]]; then
             mv "${src}" "${output}"
@@ -154,6 +207,10 @@ if [[ "${TARGET}" == "${HOST_TARGET}" ]]; then
     for name in ffmpeg ffprobe; do
         local_bin="${BIN_DIR}/${name}-${TARGET}${EXT}"
         if [[ -x "${local_bin}" ]]; then
+            if ! binary_passes_host_validation "${name}" "${local_bin}"; then
+                echo "Error: ${local_bin} is missing required runtime features" >&2
+                exit 1
+            fi
             version=$("${local_bin}" -version 2>&1 | head -1)
             echo "  ${name}: ${version}"
         fi
