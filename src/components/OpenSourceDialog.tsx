@@ -8,6 +8,7 @@ import type {
   XtreamServerTestReport,
 } from "../lib/types";
 import { testXtreamServers } from "../lib/tauri";
+import PasswordField from "./PasswordField";
 
 type OpenSourceMode = "url" | "xtream" | "stalker";
 
@@ -601,9 +602,8 @@ export default function OpenSourceDialog({
                   >
                     Password
                   </label>
-                  <input
+                  <PasswordField
                     id="open-source-xtream-password"
-                    type="password"
                     value={xtreamPassword}
                     onChange={(event) => setXtreamPassword(event.target.value)}
                     className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[14px] text-text-primary placeholder:text-text-muted focus:border-blue-500 focus:outline-none"
