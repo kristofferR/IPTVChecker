@@ -2621,13 +2621,12 @@ export default function App() {
       />
       <div
         ref={toolbarMeasureRef}
-        className={`relative z-20 ${isMac ? "glass-material bg-panel" : ""} ${isMac && !playlist ? "pb-7" : ""}`}
+        className={`relative z-20 ${isMac && playlist ? "glass-material bg-panel" : ""} ${isMac && !playlist ? "pb-4" : ""}`}
       >
         {isMac && !playlist && (
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0 bg-panel"
-          />
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+            <div className="absolute inset-0 glass-material bg-panel" />
+          </div>
         )}
         <div className="relative z-10">
           <Toolbar
@@ -2780,7 +2779,11 @@ export default function App() {
               )
             ) : (
               <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden native-scroll text-text-tertiary">
-              <div className="min-h-full flex flex-col items-center justify-center text-center px-4 py-6">
+              <div
+                className={`min-h-full flex flex-col items-center text-center px-4 ${
+                  playlistLoading ? "justify-center py-6" : "justify-start pt-0 pb-6"
+                }`}
+              >
                 {playlistLoading ? (
                   <>
                     <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-blue-500" />
@@ -2844,16 +2847,18 @@ export default function App() {
                   </>
                 ) : (
                   <>
-                    <p className="text-lg font-medium mb-2">
-                      No playlist loaded
-                    </p>
-                    <p className="text-[15px] mb-4">
-                      Click Open or press{" "}
-                      <kbd className="px-2 py-0.5 bg-input rounded text-[13px] border border-border-app">
-                        {modKey}+O
-                      </kbd>{" "}
-                      to load an M3U playlist
-                    </p>
+                    <div className="select-none pt-3">
+                      <p className="text-lg font-medium mb-2">
+                        No playlist loaded
+                      </p>
+                      <p className="text-[15px] mb-4">
+                        Click Open or press{" "}
+                        <kbd className="px-2 py-0.5 bg-input rounded text-[13px] border border-border-app">
+                          {modKey}+O
+                        </kbd>{" "}
+                        to load an M3U playlist
+                      </p>
+                    </div>
                     <div className="flex flex-wrap items-center justify-center gap-2">
                       <button
                         onClick={handleOpen}
