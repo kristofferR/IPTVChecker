@@ -39,9 +39,11 @@ struct SharedUrlResult {
     width: Option<u32>,
     height: Option<u32>,
     fps: Option<u32>,
+    hdr_format: Option<String>,
     video_bitrate: Option<String>,
     audio_bitrate: Option<String>,
     audio_codec: Option<String>,
+    audio_channel_layout: Option<String>,
     audio_only: bool,
     screenshot_path: Option<String>,
     low_framerate: bool,
@@ -68,9 +70,11 @@ impl SharedUrlResult {
             width: None,
             height: None,
             fps: None,
+            hdr_format: None,
             video_bitrate: None,
             audio_bitrate: None,
             audio_codec: None,
+            audio_channel_layout: None,
             audio_only: false,
             screenshot_path: None,
             low_framerate: false,
@@ -236,9 +240,11 @@ async fn compute_shared_url_result(
                 width: None,
                 height: None,
                 fps: None,
+                hdr_format: None,
                 video_bitrate: None,
                 audio_bitrate: None,
                 audio_codec: None,
+                audio_channel_layout: None,
                 audio_only: false,
                 screenshot_path: None,
                 low_framerate: false,
@@ -262,9 +268,11 @@ async fn compute_shared_url_result(
         width: None,
         height: None,
         fps: None,
+        hdr_format: None,
         video_bitrate: None,
         audio_bitrate: None,
         audio_codec: None,
+        audio_channel_layout: None,
         audio_only: false,
         screenshot_path: None,
         low_framerate: false,
@@ -320,6 +328,7 @@ async fn compute_shared_url_result(
                         shared.width = info.width;
                         shared.height = info.height;
                         shared.fps = info.fps;
+                        shared.hdr_format = info.hdr_format;
                         shared.low_framerate = info
                             .fps
                             .map(|fps| (fps as f64) <= low_fps_threshold)
@@ -329,6 +338,7 @@ async fn compute_shared_url_result(
                 if let Some(audio) = diag.audio_info {
                     shared.audio_codec = Some(audio.codec);
                     shared.audio_bitrate = audio.bitrate_kbps.map(|b| format!("{}", b));
+                    shared.audio_channel_layout = audio.channel_layout;
                 }
                 if let Some(kbps) = diag.profiled_bitrate_kbps {
                     shared.video_bitrate = Some(format!("{kbps} kbps"));
@@ -414,6 +424,7 @@ async fn compute_shared_url_result(
                     shared.width = info.width;
                     shared.height = info.height;
                     shared.fps = info.fps;
+                    shared.hdr_format = info.hdr_format;
                     shared.low_framerate = info
                         .fps
                         .map(|fps| (fps as f64) <= low_fps_threshold)
@@ -426,6 +437,7 @@ async fn compute_shared_url_result(
             if let Some(audio) = snapshot.audio_info {
                 shared.audio_codec = Some(audio.codec);
                 shared.audio_bitrate = audio.bitrate_kbps.map(|b| format!("{}", b));
+                shared.audio_channel_layout = audio.channel_layout;
             }
             format_bitrate_kbps = snapshot.format_bitrate_kbps;
             shared.channel_log.diagnostics_output = Some(snapshot.ffprobe_output);
@@ -1971,9 +1983,11 @@ async fn execute_scan_run(
                 height: shared.height,
                 fps: shared.fps,
                 latency_ms: shared.latency_ms,
+                hdr_format: shared.hdr_format.clone(),
                 video_bitrate: shared.video_bitrate.clone(),
                 audio_bitrate: shared.audio_bitrate.clone(),
                 audio_codec: shared.audio_codec.clone(),
+                audio_channel_layout: shared.audio_channel_layout.clone(),
                 audio_only: shared.audio_only,
                 screenshot_path: shared.screenshot_path.clone(),
                 label_mismatches: Vec::new(),
@@ -2383,9 +2397,11 @@ mod tests {
             height: None,
             fps: None,
             latency_ms: None,
+            hdr_format: None,
             video_bitrate: None,
             audio_bitrate: None,
             audio_codec: None,
+            audio_channel_layout: None,
             audio_only: false,
             screenshot_path: None,
             label_mismatches: if mismatched {

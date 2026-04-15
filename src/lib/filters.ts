@@ -10,10 +10,12 @@ export type SortField =
   | "status"
   | "resolution"
   | "codec"
+  | "hdr"
   | "fps"
   | "latency"
   | "bitrate"
   | "audio"
+  | "audio_layout"
   | "error";
 
 export type SortDirection = "asc" | "desc";
@@ -55,6 +57,17 @@ function parseBitrateKbps(value: string | null): number | null {
   if (!match) return null;
 
   const numeric = Number.parseFloat(match[0]);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function parseAudioLayout(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) return null;
+
+  const numeric = trimmed.endsWith(" ch")
+    ? Number.parseFloat(trimmed.slice(0, -3))
+    : Number.parseFloat(trimmed);
   return Number.isFinite(numeric) ? numeric : null;
 }
 
@@ -209,6 +222,14 @@ export function sortResults(
       }
       case "codec":
         return (a.codec ?? "").localeCompare(b.codec ?? "") * dir;
+      case "hdr":
+        return compareOptionalText(
+          a.hdr_format,
+          b.hdr_format,
+          dir,
+          a.index,
+          b.index,
+        );
       case "fps":
         return ((a.fps ?? 0) - (b.fps ?? 0)) * dir;
       case "latency": {
@@ -236,6 +257,14 @@ export function sortResults(
         return compareOptionalNumber(
           parseBitrateKbps(a.audio_bitrate),
           parseBitrateKbps(b.audio_bitrate),
+          dir,
+          a.index,
+          b.index,
+        );
+      case "audio_layout":
+        return compareOptionalNumber(
+          parseAudioLayout(a.audio_channel_layout),
+          parseAudioLayout(b.audio_channel_layout),
           dir,
           a.index,
           b.index,

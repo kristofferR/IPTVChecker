@@ -398,6 +398,18 @@ export function ThumbnailPanel({
                 <p className="font-medium text-[12px]">{result.fps} fps</p>
               </div>
             )}
+            {result.hdr_format && (
+              <div>
+                <span className="text-text-tertiary">HDR</span>
+                <p className="font-medium text-[12px]">{result.hdr_format}</p>
+              </div>
+            )}
+            {result.audio_channel_layout && (
+              <div>
+                <span className="text-text-tertiary">Audio Layout</span>
+                <p className="font-medium text-[12px]">{result.audio_channel_layout}</p>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -606,8 +618,14 @@ export function ThumbnailPanel({
                   {result.video_bitrate && result.video_bitrate !== "Unknown" && result.video_bitrate !== "N/A" && (
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">{result.video_bitrate}</span>
                   )}
+                  {result.hdr_format && (
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">{result.hdr_format}</span>
+                  )}
                   {result.audio_bitrate && (
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">{result.audio_bitrate} kbps audio</span>
+                  )}
+                  {result.audio_channel_layout && (
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">{result.audio_channel_layout} audio</span>
                   )}
                 </>
               )}

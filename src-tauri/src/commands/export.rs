@@ -122,7 +122,13 @@ pub async fn export_csv(
                 r.playlist.as_str()
             };
             let status_str = r.status.to_string();
-            let codec = r.codec.as_deref().unwrap_or("Unknown");
+            let codec = match (&r.codec, &r.hdr_format) {
+                (Some(codec), Some(hdr)) if codec != "Unknown" => format!("{codec} {hdr}"),
+                (Some(_), Some(hdr)) => hdr.clone(),
+                (Some(codec), None) if codec != "Unknown" => codec.clone(),
+                (None, Some(hdr)) => hdr.clone(),
+                _ => "Unknown".to_string(),
+            };
             let bitrate = r
                 .video_bitrate
                 .as_deref()
@@ -130,11 +136,7 @@ pub async fn export_csv(
                 .unwrap_or_else(|| "Unknown".to_string());
             let resolution = r.resolution.as_deref().unwrap_or("Unknown");
             let fps = r.fps.map(|f| f.to_string()).unwrap_or_default();
-            let audio = format!(
-                "{} kbps {}",
-                r.audio_bitrate.as_deref().unwrap_or("Unknown"),
-                r.audio_codec.as_deref().unwrap_or("Unknown")
-            );
+            let audio = format_audio_info(r);
             let audio_only = if r.audio_only { "Yes" } else { "No" };
             let error_reason = r.error_reason.as_deref().unwrap_or_default();
 
@@ -146,7 +148,7 @@ pub async fn export_csv(
                 sanitize_csv_cell(&r.group),
                 sanitize_csv_cell(&r.name),
                 sanitize_csv_cell(&r.channel_id),
-                sanitize_csv_cell(codec),
+                sanitize_csv_cell(&codec),
                 sanitize_csv_cell(&bitrate),
                 sanitize_csv_cell(resolution),
                 sanitize_csv_cell(&fps),
@@ -417,6 +419,9 @@ fn format_video_info(r: &ChannelResult) -> String {
             parts.push(codec.clone());
         }
     }
+    if let Some(ref hdr_format) = r.hdr_format {
+        parts.push(hdr_format.clone());
+    }
     let base = if parts.is_empty() {
         "Unknown".to_string()
     } else {
@@ -431,11 +436,23 @@ fn format_video_info(r: &ChannelResult) -> String {
 }
 
 fn format_audio_info(r: &ChannelResult) -> String {
-    match (&r.audio_bitrate, &r.audio_codec) {
-        (Some(bitrate), Some(codec)) if codec != "Unknown" => {
-            format!("{} kbps {}", bitrate, codec)
+    let mut parts = Vec::new();
+    if let Some(ref bitrate) = r.audio_bitrate {
+        parts.push(format!("{bitrate} kbps"));
+    }
+    if let Some(ref codec) = r.audio_codec {
+        if codec != "Unknown" {
+            parts.push(codec.clone());
         }
-        _ => "Unknown".to_string(),
+    }
+    if let Some(ref layout) = r.audio_channel_layout {
+        parts.push(layout.clone());
+    }
+
+    if parts.is_empty() {
+        "Unknown".to_string()
+    } else {
+        parts.join(" ")
     }
 }
 
@@ -466,9 +483,11 @@ mod tests {
             height: Some(1080),
             fps: Some(30),
             latency_ms: Some(230),
+            hdr_format: None,
             video_bitrate: Some("5000 kbps".to_string()),
             audio_bitrate: Some("192".to_string()),
             audio_codec: Some("AAC".to_string()),
+            audio_channel_layout: None,
             audio_only: false,
             screenshot_path: None,
             label_mismatches: Vec::new(),
