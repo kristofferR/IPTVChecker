@@ -94,6 +94,7 @@ export const StatsPanel = memo(function StatsPanel() {
   const effectiveLowFpsCount = summary?.low_framerate ?? lowFpsCount;
   const effectiveMislabeledCount = summary?.mislabeled ?? mislabeledCount;
   const showRightStatus =
+    scanState === "cancelling" ||
     scanState === "paused" ||
     effectiveLowFpsCount > 0 ||
     effectiveMislabeledCount > 0 ||
@@ -172,6 +173,11 @@ export const StatsPanel = memo(function StatsPanel() {
           {scanState === "paused" && (
             <span className="text-[12px] text-yellow-400 font-medium uppercase tracking-[0.04em]">
               Paused
+            </span>
+          )}
+          {scanState === "cancelling" && (
+            <span className="text-[12px] text-orange-400 font-medium uppercase tracking-[0.04em]">
+              Stopping
             </span>
           )}
           {effectiveLowFpsCount > 0 && (

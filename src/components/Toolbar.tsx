@@ -22,6 +22,7 @@ import {
   Square,
   Settings,
   Search,
+  Loader2,
 } from "lucide-react";
 import {
   SFPlayFill,
@@ -219,7 +220,8 @@ export const Toolbar = memo(function Toolbar({
   const showButtonText = showHeaderButtonText;
   const scanning = scanState === "scanning";
   const paused = scanState === "paused";
-  const inScanSession = scanning || paused;
+  const cancelling = scanState === "cancelling";
+  const inScanSession = scanning || paused || cancelling;
   const hasResults = exportScopeCounts.all > 0;
   const scanLabel =
     selectedIndices.length > 0
@@ -308,7 +310,17 @@ export const Toolbar = memo(function Toolbar({
       <div className={isMac ? "toolbar-group toolbar-group-prominent -ml-[calc(var(--toolbar-pl)-0.75rem)] mr-2" : "flex items-center gap-1.5"}>
         {inScanSession ? (
           <>
-            {scanning ? (
+            {cancelling ? (
+              <button
+                disabled
+                className={btnWithOptionalText("toolbar-btn-stop")}
+                title="Stopping Scan"
+                aria-label="Stopping Scan"
+              >
+                <Loader2 className="w-[19px] h-[19px] animate-spin" />
+                {showButtonText && "Stopping…"}
+              </button>
+            ) : scanning ? (
               <button
                 onClick={onPauseScan}
                 className={btnWithOptionalText()}
@@ -329,15 +341,17 @@ export const Toolbar = memo(function Toolbar({
                 {showButtonText && "Resume"}
               </button>
             )}
-            <button
-              onClick={onStopScan}
-              className={btnWithOptionalText("toolbar-btn-stop")}
-              title="Stop Scan"
-              aria-label="Stop Scan"
-            >
-              <IconStop className="w-[19px] h-[19px]" />
-              {showButtonText && "Stop"}
-            </button>
+            {!cancelling && (
+              <button
+                onClick={onStopScan}
+                className={btnWithOptionalText("toolbar-btn-stop")}
+                title="Stop Scan"
+                aria-label="Stop Scan"
+              >
+                <IconStop className="w-[19px] h-[19px]" />
+                {showButtonText && "Stop"}
+              </button>
+            )}
           </>
         ) : (
           <button
