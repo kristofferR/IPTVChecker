@@ -32,12 +32,16 @@ static TBR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(\d+(?:\.\d+)?)\s+tbr").unwrap());
 static AUDIO_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"Stream #\d+:\d+.*?: Audio: (\w+)").unwrap());
+static AUDIO_LAYOUT_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"Audio: .*?,\s*\d+\s*Hz,\s*([^,]+)").unwrap());
 static AUDIO_BITRATE_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(\d+)\s+kb/s").unwrap());
 static FORMAT_BR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"bitrate:\s*(\d+)\s*kb/s").unwrap());
 static BYTES_READ_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(\d+)\s+bytes\s+read").unwrap());
+static AUDIO_LAYOUT_VALUE_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(\d+(?:\.\d+)?)").unwrap());
 
 // Compile-time target triple for resolving sidecar binary paths.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -512,6 +516,7 @@ pub struct VideoInfo {
     pub fps: Option<u32>,
     pub resolution: String,
     pub bitrate_kbps: Option<u32>,
+    pub hdr_format: Option<String>,
 }
 
 /// Audio stream info from ffprobe.
@@ -519,6 +524,7 @@ pub struct VideoInfo {
 pub struct AudioInfo {
     pub codec: String,
     pub bitrate_kbps: Option<u32>,
+    pub channel_layout: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -554,6 +560,19 @@ struct FfprobeCombinedStream {
     height: Option<u32>,
     r_frame_rate: Option<String>,
     bit_rate: Option<String>,
+    color_transfer: Option<String>,
+    color_primaries: Option<String>,
+    color_space: Option<String>,
+    pix_fmt: Option<String>,
+    channels: Option<u32>,
+    channel_layout: Option<String>,
+    #[serde(default)]
+    side_data_list: Vec<FfprobeStreamSideData>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct FfprobeStreamSideData {
+    side_data_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -592,6 +611,130 @@ fn truncate_ffprobe_output(stdout: &str) -> String {
         truncated.push_str("\n...truncated...");
     }
     truncated
+}
+
+fn detect_hdr_format_from_ffprobe(stream: &FfprobeCombinedStream) -> Option<String> {
+    let codec = stream
+        .codec_name
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let transfer = stream
+        .color_transfer
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let primaries = stream
+        .color_primaries
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let color_space = stream
+        .color_space
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let pix_fmt = stream
+        .pix_fmt
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    if codec.contains("dovi")
+        || stream.side_data_list.iter().any(|side_data| {
+            side_data
+                .side_data_type
+                .as_deref()
+                .map(|value| {
+                    let lower = value.to_ascii_lowercase();
+                    lower.contains("dovi") || lower.contains("dolby vision")
+                })
+                .unwrap_or(false)
+        })
+    {
+        return Some("Dolby Vision".to_string());
+    }
+
+    if transfer == "arib-std-b67" {
+        return Some("HLG".to_string());
+    }
+
+    let bt2020 = primaries.contains("bt2020") || color_space.contains("bt2020");
+    let high_bit_depth = pix_fmt.contains("10") || pix_fmt.contains("12");
+    if transfer == "smpte2084" {
+        return Some(if bt2020 || high_bit_depth {
+            "HDR10".to_string()
+        } else {
+            "PQ".to_string()
+        });
+    }
+
+    if bt2020 && high_bit_depth {
+        return Some("HDR".to_string());
+    }
+
+    None
+}
+
+fn normalize_audio_channel_layout(raw: &str, channels: Option<u32>) -> Option<String> {
+    let lower = raw.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        return None;
+    }
+
+    if let Some(captures) = AUDIO_LAYOUT_VALUE_RE.captures(&lower) {
+        return captures
+            .get(1)
+            .map(|value| value.as_str().to_string())
+            .filter(|value| audio_layout_score(value.as_str()).is_some_and(|score| score > 2.0));
+    }
+
+    let normalized = match lower.as_str() {
+        "quad" => Some("4.0".to_string()),
+        "hexagonal" => Some("6.0".to_string()),
+        "octagonal" => Some("8.0".to_string()),
+        _ => None,
+    };
+    if normalized.is_some() {
+        return normalized;
+    }
+
+    channels.and_then(|count| {
+        if count > 2 {
+            Some(format!("{count} ch"))
+        } else {
+            None
+        }
+    })
+}
+
+fn audio_layout_score(value: &str) -> Option<f64> {
+    value
+        .strip_suffix(" ch")
+        .unwrap_or(value)
+        .parse::<f64>()
+        .ok()
+}
+
+fn detect_hdr_format_from_ffmpeg_line(line: &str) -> Option<String> {
+    let lower = line.to_ascii_lowercase();
+    if lower.contains("dovi") || lower.contains("dolby vision") {
+        return Some("Dolby Vision".to_string());
+    }
+    if lower.contains("arib-std-b67") || contains_word(&lower, "hlg") {
+        return Some("HLG".to_string());
+    }
+    if lower.contains("smpte2084") {
+        return Some("HDR10".to_string());
+    }
+    let high_bit_depth =
+        lower.contains("p010") || lower.contains("10le") || lower.contains("10be")
+            || lower.contains("12le")
+            || lower.contains("12be");
+    if lower.contains("bt2020") && high_bit_depth {
+        return Some("HDR".to_string());
+    }
+    None
 }
 
 fn parse_probe_snapshot(stdout: &str) -> Result<ProbeSnapshot, serde_json::Error> {
@@ -647,6 +790,7 @@ fn parse_probe_snapshot(stdout: &str) -> Result<ProbeSnapshot, serde_json::Error
             fps,
             resolution: resolution_label(width, height),
             bitrate_kbps,
+            hdr_format: detect_hdr_format_from_ffprobe(stream),
         }
     });
 
@@ -661,6 +805,10 @@ fn parse_probe_snapshot(stdout: &str) -> Result<ProbeSnapshot, serde_json::Error
             .as_deref()
             .and_then(|value| value.parse::<u64>().ok())
             .map(|bits| (bits / 1000) as u32),
+        channel_layout: stream
+            .channel_layout
+            .as_deref()
+            .and_then(|layout| normalize_audio_channel_layout(layout, stream.channels)),
     });
 
     let format_bitrate_kbps = parsed
@@ -772,8 +920,7 @@ pub async fn collect_probe_snapshot_with_timeout(
             "15000000",
             "-probesize",
             "15000000",
-            "-show_entries",
-            "stream=codec_type,codec_name,width,height,r_frame_rate,bit_rate",
+            "-show_streams",
             "-show_format",
             "-of",
             "json",
@@ -1080,7 +1227,7 @@ fn parse_ffmpeg_stderr(
     Option<u32>,
 ) {
     let mut presence = StreamTrackPresence::default();
-    let mut best_video: Option<(String, Option<u32>, Option<u32>, Option<u32>, u64)> = None; // (codec, w, h, fps, pixels)
+    let mut best_video: Option<(String, Option<u32>, Option<u32>, Option<u32>, u64, Option<String>)> = None; // (codec, w, h, fps, pixels, hdr)
     let mut audio_info: Option<AudioInfo> = None;
     let mut format_bitrate_kbps: Option<u32> = None;
 
@@ -1107,12 +1254,13 @@ fn parse_ffmpeg_stderr(
                 .filter(|&f| f > 0 && f <= 240);
 
             let pixels = w.unwrap_or(0) as u64 * h.unwrap_or(0) as u64;
+            let hdr_format = detect_hdr_format_from_ffmpeg_line(line);
             let is_better = match &best_video {
-                Some((_, _, _, _, prev_px)) => pixels > *prev_px,
+                Some((_, _, _, _, prev_px, _)) => pixels > *prev_px,
                 None => true,
             };
             if is_better {
-                best_video = Some((codec, w, h, fps, pixels));
+                best_video = Some((codec, w, h, fps, pixels, hdr_format));
             }
 
             continue;
@@ -1126,9 +1274,14 @@ fn parse_ffmpeg_stderr(
                 let bitrate_kbps = AUDIO_BITRATE_RE
                     .captures(line)
                     .and_then(|c| c[1].parse::<u32>().ok());
+                let channel_layout = AUDIO_LAYOUT_RE
+                    .captures(line)
+                    .and_then(|captures| captures.get(1))
+                    .and_then(|value| normalize_audio_channel_layout(value.as_str(), None));
                 audio_info = Some(AudioInfo {
                     codec: normalize_codec_name(&codec),
                     bitrate_kbps,
+                    channel_layout,
                 });
                 continue;
             }
@@ -1144,13 +1297,14 @@ fn parse_ffmpeg_stderr(
         }
     }
 
-    let video_info = best_video.map(|(codec, w, h, fps, _)| VideoInfo {
+    let video_info = best_video.map(|(codec, w, h, fps, _, hdr_format)| VideoInfo {
         codec: normalize_codec_name(&codec),
         width: w,
         height: h,
         fps,
         resolution: resolution_label(w, h),
         bitrate_kbps: None, // Not available from ffmpeg stderr stream lines
+        hdr_format,
     });
 
     (presence, video_info, audio_info, format_bitrate_kbps)
@@ -1652,9 +1806,11 @@ mod tests {
         assert_eq!(video.height, Some(1080));
         assert_eq!(video.fps, Some(30));
         assert_eq!(video.resolution, "1080p");
+        assert_eq!(video.hdr_format, None);
         let audio = snapshot.audio_info.expect("audio info should exist");
         assert_eq!(audio.codec, "AAC");
         assert_eq!(audio.bitrate_kbps, Some(128));
+        assert_eq!(audio.channel_layout, None);
         assert!(snapshot.ffprobe_output.contains("\"streams\""));
     }
 
@@ -1671,6 +1827,64 @@ mod tests {
         assert_eq!(video.codec, "HEVC");
         assert_eq!(video.resolution, "4K");
         assert_eq!(video.fps, Some(50));
+        assert_eq!(video.hdr_format, None);
+    }
+
+    #[test]
+    fn parse_probe_snapshot_detects_hdr_and_multichannel_audio() {
+        let output = r#"{
+            "streams":[
+                {
+                    "codec_type":"video",
+                    "codec_name":"hevc",
+                    "width":3840,
+                    "height":2160,
+                    "r_frame_rate":"50",
+                    "pix_fmt":"yuv420p10le",
+                    "color_space":"bt2020nc",
+                    "color_primaries":"bt2020",
+                    "color_transfer":"smpte2084"
+                },
+                {
+                    "codec_type":"audio",
+                    "codec_name":"eac3",
+                    "bit_rate":"384000",
+                    "channel_layout":"5.1(side)",
+                    "channels":6
+                }
+            ]
+        }"#;
+
+        let snapshot = parse_probe_snapshot(output).expect("probe snapshot should parse");
+        let video = snapshot.video_info.expect("video info should exist");
+        assert_eq!(video.hdr_format.as_deref(), Some("HDR10"));
+
+        let audio = snapshot.audio_info.expect("audio info should exist");
+        assert_eq!(audio.codec, "EAC3");
+        assert_eq!(audio.channel_layout.as_deref(), Some("5.1"));
+    }
+
+    #[test]
+    fn parse_probe_snapshot_detects_dolby_vision_side_data() {
+        let output = r#"{
+            "streams":[
+                {
+                    "codec_type":"video",
+                    "codec_name":"hevc",
+                    "width":3840,
+                    "height":2160,
+                    "r_frame_rate":"24",
+                    "pix_fmt":"yuv420p10le",
+                    "side_data_list":[
+                        {"side_data_type":"DOVI configuration record"}
+                    ]
+                }
+            ]
+        }"#;
+
+        let snapshot = parse_probe_snapshot(output).expect("probe snapshot should parse");
+        let video = snapshot.video_info.expect("video info should exist");
+        assert_eq!(video.hdr_format.as_deref(), Some("Dolby Vision"));
     }
 
     #[test]
@@ -1743,10 +1957,12 @@ Input #0, mpegts, from 'http://example.com/stream':
         assert_eq!(v.height, Some(1080));
         assert_eq!(v.fps, Some(50));
         assert_eq!(v.resolution, "1080p");
+        assert_eq!(v.hdr_format, None);
 
         let a = audio.unwrap();
         assert_eq!(a.codec, "AAC");
         assert_eq!(a.bitrate_kbps, Some(127));
+        assert_eq!(a.channel_layout, None);
 
         assert_eq!(fmt_br, None); // "bitrate: N/A"
     }
@@ -1756,7 +1972,7 @@ Input #0, mpegts, from 'http://example.com/stream':
         let stderr = r#"
 Input #0, hls, from 'http://example.com/stream.m3u8':
   Duration: N/A, start: 0.0, bitrate: 4500 kb/s
-  Stream #0:0: Video: hevc (Main 10), yuv420p10le(tv, bt2020nc), 3840x2160, 25 fps, 25 tbr, 90k tbn
+  Stream #0:0: Video: hevc (Main 10), yuv420p10le(tv, bt2020nc/bt2020/smpte2084), 3840x2160, 25 fps, 25 tbr, 90k tbn
   Stream #0:1: Audio: ac3, 48000 Hz, 5.1(side), fltp, 448 kb/s
 "#;
         let (presence, video, audio, fmt_br) = parse_ffmpeg_stderr(stderr);
@@ -1769,10 +1985,12 @@ Input #0, hls, from 'http://example.com/stream.m3u8':
         assert_eq!(v.height, Some(2160));
         assert_eq!(v.fps, Some(25));
         assert_eq!(v.resolution, "4K");
+        assert_eq!(v.hdr_format.as_deref(), Some("HDR10"));
 
         let a = audio.unwrap();
         assert_eq!(a.codec, "AC3");
         assert_eq!(a.bitrate_kbps, Some(448));
+        assert_eq!(a.channel_layout.as_deref(), Some("5.1"));
 
         assert_eq!(fmt_br, Some(4500));
     }

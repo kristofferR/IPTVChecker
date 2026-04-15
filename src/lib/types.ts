@@ -46,9 +46,11 @@ export interface ChannelResult {
   height: number | null;
   fps: number | null;
   latency_ms: number | null;
+  hdr_format: string | null;
   video_bitrate: string | null;
   audio_bitrate: string | null;
   audio_codec: string | null;
+  audio_channel_layout: string | null;
   audio_only: boolean;
   screenshot_path: string | null;
   label_mismatches: string[];

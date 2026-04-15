@@ -54,6 +54,8 @@ function buildChannelMetadataSummary(channel: ChannelResult): string {
     ? `${channel.audio_bitrate} kbps`
     : "Unknown";
   const audioCodec = channel.audio_codec ?? "Unknown";
+  const hdrFormat = channel.hdr_format ?? "Unknown";
+  const audioLayout = channel.audio_channel_layout ?? "Unknown";
   const resolvedStreamUrl = channel.stream_url?.trim() || null;
   const hasResolvedStreamUrl =
     !!resolvedStreamUrl && resolvedStreamUrl !== channel.url;
@@ -69,9 +71,11 @@ function buildChannelMetadataSummary(channel: ChannelResult): string {
     `Error Reason: ${errorReason}`,
     `URL: ${channel.url}`,
     `Codec: ${channel.codec ?? "Unknown"}`,
+    `HDR: ${hdrFormat}`,
     `Resolution: ${channel.resolution ?? "Unknown"}`,
     `Video Bitrate: ${videoBitrate}`,
     `Audio: ${audioBitrate} ${audioCodec}`,
+    `Audio Layout: ${audioLayout}`,
   ];
 
   if (hasResolvedStreamUrl) {

@@ -35,9 +35,11 @@ function makeResult(): ChannelResult {
     height: 1080,
     fps: 30,
     latency_ms: 450,
+    hdr_format: "HDR10",
     video_bitrate: "5000",
     audio_bitrate: "192",
     audio_codec: "aac",
+    audio_channel_layout: "5.1",
     audio_only: true,
     screenshot_path: "/tmp/shot.png",
     label_mismatches: ["Group mismatch"],
@@ -77,6 +79,8 @@ describe("channelResults helpers", () => {
 
     expect(reset.status).toBe("pending");
     expect(reset.codec).toBeNull();
+    expect(reset.hdr_format).toBeNull();
+    expect(reset.audio_channel_layout).toBeNull();
     expect(reset.audio_only).toBe(false);
     expect(reset.screenshot_path).toBeNull();
     expect(reset.label_mismatches).toEqual([]);

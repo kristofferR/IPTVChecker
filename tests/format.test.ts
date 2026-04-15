@@ -31,9 +31,11 @@ function makeResult(
     height: null,
     fps: null,
     latency_ms: null,
+    hdr_format: null,
     video_bitrate: null,
     audio_bitrate: null,
     audio_codec: null,
+    audio_channel_layout: null,
     audio_only: false,
     screenshot_path: null,
     label_mismatches: [],
@@ -59,30 +61,33 @@ describe("format helpers", () => {
     expect(statusIcon("dead")).toBe("✕");
   });
 
-  it("formats video info from resolution, fps, codec, and bitrate", () => {
+  it("formats video info from resolution, fps, codec, HDR, and bitrate", () => {
     expect(
       formatVideoInfo(
         makeResult({
           resolution: "1080p",
           fps: 60,
           codec: "h264",
+          hdr_format: "HDR10",
           video_bitrate: "5000 kbps",
         }),
       ),
-    ).toBe("1080p60 h264 (5000 kbps)");
+    ).toBe("1080p60 h264 HDR10 (5000 kbps)");
   });
 
-  it("formats audio info only when bitrate and codec are both known", () => {
+  it("formats audio info from any known bitrate, codec, or layout metadata", () => {
     expect(
       formatAudioInfo(
         makeResult({
           audio_bitrate: "192",
           audio_codec: "aac",
+          audio_channel_layout: "5.1",
         }),
       ),
-    ).toBe("192 kbps aac");
+    ).toBe("192 kbps aac 5.1");
     expect(formatAudioInfo(makeResult({ audio_bitrate: "192", audio_codec: "Unknown" }))).toBe(
-      "—",
+      "192 kbps",
     );
+    expect(formatAudioInfo(makeResult({ audio_channel_layout: "7.1" }))).toBe("7.1");
   });
 });

@@ -185,6 +185,12 @@ function ChannelRowImpl({
             {result.codec ?? "—"}
           </span>
         );
+      case "hdr":
+        return (
+          <span className="text-text-secondary">
+            {result.hdr_format ?? "—"}
+          </span>
+        );
       case "fps":
         return (
           <span className="text-text-secondary tabular-nums">
@@ -213,6 +219,12 @@ function ChannelRowImpl({
             {result.audio_bitrate
               ? `${result.audio_bitrate} kbps`
               : "—"}
+          </span>
+        );
+      case "audio_layout":
+        return (
+          <span className="text-text-secondary">
+            {result.audio_channel_layout ?? "—"}
           </span>
         );
       default:

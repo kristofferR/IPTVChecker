@@ -102,6 +102,9 @@ export function formatVideoInfo(result: ChannelResult): string {
   if (result.codec && result.codec !== "Unknown") {
     parts.push(result.codec);
   }
+  if (result.hdr_format) {
+    parts.push(result.hdr_format);
+  }
   const base = parts.length > 0 ? parts.join(" ") : "—";
   if (
     result.video_bitrate &&
@@ -118,10 +121,17 @@ export function statusDotColor(status: ChannelStatus): string {
 }
 
 export function formatAudioInfo(result: ChannelResult): string {
-  if (result.audio_bitrate && result.audio_codec && result.audio_codec !== "Unknown") {
-    return `${result.audio_bitrate} kbps ${result.audio_codec}`;
+  const parts: string[] = [];
+  if (result.audio_bitrate) {
+    parts.push(`${result.audio_bitrate} kbps`);
   }
-  return "—";
+  if (result.audio_codec && result.audio_codec !== "Unknown") {
+    parts.push(result.audio_codec);
+  }
+  if (result.audio_channel_layout) {
+    parts.push(result.audio_channel_layout);
+  }
+  return parts.length > 0 ? parts.join(" ") : "—";
 }
 
 export function resolveResolutionLabel(width: number, height: number): string {

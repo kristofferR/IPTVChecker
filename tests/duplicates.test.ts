@@ -22,9 +22,11 @@ function makeResult(index: number, url: string): ChannelResult {
     height: null,
     fps: null,
     latency_ms: null,
+    hdr_format: null,
     video_bitrate: null,
     audio_bitrate: null,
     audio_codec: null,
+    audio_channel_layout: null,
     audio_only: false,
     screenshot_path: null,
     label_mismatches: [],
@@ -34,6 +36,10 @@ function makeResult(index: number, url: string): ChannelResult {
     extinf_line: "#EXTINF:-1,Channel",
     metadata_lines: [],
     stream_url: null,
+    retry_count: null,
+    error_reason: null,
+    last_error_reason: null,
+    drm_system: null,
   };
 }
 
