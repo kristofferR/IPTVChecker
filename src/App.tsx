@@ -246,7 +246,11 @@ function formatScanNotificationBody(stats: {
   return `${base} | Score ${stats.playlist_score.overall.toFixed(1)}/10`;
 }
 
-async function canSendNotifications(): Promise<boolean> {
+async function canSendNotifications(requiresPermission: boolean): Promise<boolean> {
+  if (!requiresPermission) {
+    return true;
+  }
+
   try {
     if (await isPermissionGranted()) {
       return true;
@@ -662,14 +666,19 @@ function ScanRuntimeEffects({
     const body = `${playlistPrefix}${formatScanNotificationBody(summary)}`;
 
     void (async () => {
-      if (!(await canSendNotifications())) return;
-      sendNotification({
-        title,
-        body,
-        autoCancel: true,
-      });
+      if (!(await canSendNotifications(isMac))) return;
+
+      try {
+        sendNotification({
+          title,
+          body,
+          autoCancel: true,
+        });
+      } catch (error) {
+        logger.warn("Failed to send scan notification", error);
+      }
     })();
-  }, [scanNotifications, scanState, summary, playlist, refreshHistory]);
+  }, [scanNotifications, scanState, summary, playlist, refreshHistory, isMac]);
 
   useEffect(() => {
     const appWindow = getCurrentWindow();
