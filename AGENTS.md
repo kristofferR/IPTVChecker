@@ -55,7 +55,7 @@ lib/        — Types, Tauri invoke wrappers, formatting helpers, sort/filter lo
 ## Releases
 
 To create a new release:
-1. Bump version in all three files: `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, `package.json`
+1. Bump version in all four files: `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, `package.json`, and `README.md` (update the three `download/vX.Y.Z/` asset URLs and the filenames in the Download block under the screenshot)
 2. Run `cargo check` in `src-tauri/` to update `Cargo.lock`
 3. Commit: `Bump version to X.Y.Z`
 4. Tag: `git tag vX.Y.Z`
