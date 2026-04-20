@@ -48,7 +48,7 @@
   </sub>
   <br />
   <sub>
-    Homebrew for macOS/Linux and other package managers are mentioned further down in repo
+    Homebrew for macOS/Linux and other package managers are mentioned further down.
   </sub>
 </p>
 
