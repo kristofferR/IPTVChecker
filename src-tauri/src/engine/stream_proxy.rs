@@ -7,7 +7,16 @@ use url::{Host, Url};
 
 use crate::state::AppState;
 
-const PROXY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Fail fast if upstream's TCP/TLS handshake stalls.
+const PROXY_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Total timeout for buffered manifest/segment fetches through the Tauri scheme
+/// proxy. These responses are finite and should stay bounded.
+const PROXY_BUFFERED_RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Per-read inactivity timeout — resets on every successful read, so it does NOT
+/// cap total stream duration. Only kills truly dead/stalled connections.
+const PROXY_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// Base64url-encode an original stream URL for the proxy scheme.
 pub fn encode_proxy_url(original: &str) -> String {
@@ -253,10 +262,7 @@ pub async fn handle_proxy_request(
     let state = app.state::<Arc<AppState>>();
     let (user_agent, accept_invalid_certs) = {
         let settings = state.settings.lock().await;
-        (
-            settings.user_agent.clone(),
-            settings.accept_invalid_certs,
-        )
+        (settings.user_agent.clone(), settings.accept_invalid_certs)
     };
 
     let client = get_or_create_proxy_client(state.inner(), accept_invalid_certs).await;
@@ -268,7 +274,7 @@ pub async fn handle_proxy_request(
             HeaderValue::from_str(&user_agent)
                 .unwrap_or_else(|_| HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")),
         )
-        .timeout(PROXY_TIMEOUT);
+        .timeout(PROXY_BUFFERED_RESPONSE_TIMEOUT);
 
     // Forward Range header for partial content requests
     if let Some(range) = request.headers().get(RANGE) {
@@ -302,18 +308,22 @@ pub async fn handle_proxy_request(
 
     let body = match upstream_response.bytes().await {
         Ok(bytes) => bytes.to_vec(),
-        Err(_) => {
+        Err(err) => {
             log::warn!(
-                "Stream proxy: failed to read upstream body for {}",
-                redact_url(&original_url)
+                "Stream proxy: failed to read buffered upstream body for {} ({})",
+                redact_url(&original_url),
+                reqwest_error_kind(&err)
             );
+            if err.is_timeout() {
+                return error_response(504, "Upstream response timed out");
+            }
             return error_response(502, "Failed to read upstream response");
         }
     };
 
     // Rewrite M3U8 manifests so internal URLs also go through the proxy
-    let looks_like_m3u8 = is_m3u8_response(&content_type, &final_url)
-        || body.starts_with(b"#EXTM3U");
+    let looks_like_m3u8 =
+        is_m3u8_response(&content_type, &final_url) || body.starts_with(b"#EXTM3U");
     let body = if looks_like_m3u8 {
         let manifest = String::from_utf8_lossy(&body);
         rewrite_m3u8_manifest(&manifest, &final_url).into_bytes()
@@ -340,9 +350,14 @@ pub async fn handle_proxy_request(
     builder = builder
         .header("access-control-allow-origin", "*")
         .header("access-control-allow-headers", "range")
-        .header("access-control-expose-headers", "content-range, content-length");
+        .header(
+            "access-control-expose-headers",
+            "content-range, content-length",
+        );
 
-    builder.body(body).unwrap_or_else(|_| error_response(500, "Failed to build response"))
+    builder
+        .body(body)
+        .unwrap_or_else(|_| error_response(500, "Failed to build response"))
 }
 
 fn error_response(status: u16, message: &str) -> tauri::http::Response<Vec<u8>> {
@@ -359,6 +374,22 @@ fn error_response(status: u16, message: &str) -> tauri::http::Response<Vec<u8>> 
         })
 }
 
+fn build_proxy_client(
+    accept_invalid_certs: bool,
+    connect_timeout: std::time::Duration,
+    read_timeout: std::time::Duration,
+) -> reqwest::Client {
+    reqwest::Client::builder()
+        .danger_accept_invalid_certs(accept_invalid_certs)
+        .cookie_store(true)
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .pool_max_idle_per_host(0)
+        .connect_timeout(connect_timeout)
+        .read_timeout(read_timeout)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
 async fn get_or_create_proxy_client(
     state: &AppState,
     accept_invalid_certs: bool,
@@ -370,16 +401,66 @@ async fn get_or_create_proxy_client(
         }
     }
 
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(accept_invalid_certs)
-        .cookie_store(true)
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .pool_max_idle_per_host(0)
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
+    let client = build_proxy_client(
+        accept_invalid_certs,
+        PROXY_CONNECT_TIMEOUT,
+        PROXY_READ_TIMEOUT,
+    );
 
     *guard = Some((client.clone(), accept_invalid_certs));
     client
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamForwardOutcome {
+    Completed,
+    UpstreamReadTimeout,
+    UpstreamReadError(&'static str),
+    DownstreamClosed,
+}
+
+async fn forward_response_as_chunked_stream<W>(
+    writer: &mut W,
+    response: reqwest::Response,
+) -> StreamForwardOutcome
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    use futures::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    let mut outcome = StreamForwardOutcome::Completed;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk_result) = stream.next().await {
+        match chunk_result {
+            Ok(chunk) => {
+                let size_line = format!("{:x}\r\n", chunk.len());
+                if writer.write_all(size_line.as_bytes()).await.is_err() {
+                    return StreamForwardOutcome::DownstreamClosed;
+                }
+                if writer.write_all(&chunk).await.is_err() {
+                    return StreamForwardOutcome::DownstreamClosed;
+                }
+                if writer.write_all(b"\r\n").await.is_err() {
+                    return StreamForwardOutcome::DownstreamClosed;
+                }
+            }
+            Err(err) => {
+                outcome = if err.is_timeout() {
+                    StreamForwardOutcome::UpstreamReadTimeout
+                } else {
+                    StreamForwardOutcome::UpstreamReadError(reqwest_error_kind(&err))
+                };
+                break;
+            }
+        }
+    }
+
+    if writer.write_all(b"0\r\n\r\n").await.is_err() {
+        return StreamForwardOutcome::DownstreamClosed;
+    }
+
+    outcome
 }
 
 // ---------------------------------------------------------------------------
@@ -396,7 +477,10 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
 
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
-    log::info!("[StreamProxy] Localhost streaming proxy started on port {}", port);
+    log::info!(
+        "[StreamProxy] Localhost streaming proxy started on port {}",
+        port
+    );
 
     tokio::spawn(async move {
         loop {
@@ -442,10 +526,7 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                 let state = app_handle.state::<Arc<AppState>>();
                 let (user_agent, accept_invalid_certs) = {
                     let settings = state.settings.lock().await;
-                    (
-                        settings.user_agent.clone(),
-                        settings.accept_invalid_certs,
-                    )
+                    (settings.user_agent.clone(), settings.accept_invalid_certs)
                 };
 
                 let client = get_or_create_proxy_client(state.inner(), accept_invalid_certs).await;
@@ -454,10 +535,10 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     .get(&url)
                     .header(
                         USER_AGENT,
-                        HeaderValue::from_str(&user_agent)
-                            .unwrap_or_else(|_| HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")),
+                        HeaderValue::from_str(&user_agent).unwrap_or_else(|_| {
+                            HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")
+                        }),
                     )
-                    .timeout(PROXY_TIMEOUT)
                     .send()
                     .await
                 {
@@ -509,34 +590,33 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     return;
                 }
 
-                // Stream body chunks
-                use futures::StreamExt;
-                let mut stream = response.bytes_stream();
-                while let Some(chunk_result) = stream.next().await {
-                    match chunk_result {
-                        Ok(chunk) => {
-                            // Write chunked transfer encoding
-                            let size_line = format!("{:x}\r\n", chunk.len());
-                            if socket.write_all(size_line.as_bytes()).await.is_err() {
-                                break;
-                            }
-                            if socket.write_all(&chunk).await.is_err() {
-                                break;
-                            }
-                            if socket.write_all(b"\r\n").await.is_err() {
-                                break;
-                            }
-                        }
-                        Err(err) => {
-                            log::debug!("[StreamProxy] Stream read error for {}: {}", redact_url(&url), err);
-                            break;
-                        }
+                match forward_response_as_chunked_stream(&mut socket, response).await {
+                    StreamForwardOutcome::Completed => {
+                        log::debug!(
+                            "[StreamProxy] Upstream stream ended normally for {}",
+                            redact_url(&url)
+                        );
+                    }
+                    StreamForwardOutcome::UpstreamReadTimeout => {
+                        log::warn!(
+                            "[StreamProxy] Upstream stream stalled/timed out for {}",
+                            redact_url(&url)
+                        );
+                    }
+                    StreamForwardOutcome::UpstreamReadError(kind) => {
+                        log::warn!(
+                            "[StreamProxy] Upstream stream terminated for {} ({})",
+                            redact_url(&url),
+                            kind
+                        );
+                    }
+                    StreamForwardOutcome::DownstreamClosed => {
+                        log::debug!(
+                            "[StreamProxy] Downstream disconnected while streaming {}",
+                            redact_url(&url)
+                        );
                     }
                 }
-
-                // Send final chunk
-                let _ = socket.write_all(b"0\r\n\r\n").await;
-                log::debug!("[StreamProxy] Stream ended for {}", redact_url(&url));
             });
         }
     });
@@ -556,6 +636,70 @@ fn parse_stream_request(request: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    #[derive(Clone)]
+    struct TestStreamChunk {
+        body: Vec<u8>,
+        delay_after: Duration,
+    }
+
+    async fn spawn_chunked_upstream(
+        chunks: Vec<TestStreamChunk>,
+        tail_delay: Duration,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener should bind");
+        let addr = listener
+            .local_addr()
+            .expect("listener should have local addr");
+
+        let handle = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("server should accept");
+            let mut request_buf = vec![0u8; 8192];
+            let _ = socket.read(&mut request_buf).await;
+
+            let headers = concat!(
+                "HTTP/1.1 200 OK\r\n",
+                "Content-Type: video/mp2t\r\n",
+                "Transfer-Encoding: chunked\r\n",
+                "Connection: close\r\n",
+                "\r\n"
+            );
+            socket
+                .write_all(headers.as_bytes())
+                .await
+                .expect("server should write headers");
+
+            for chunk in chunks {
+                let size_line = format!("{:x}\r\n", chunk.body.len());
+                if socket.write_all(size_line.as_bytes()).await.is_err() {
+                    return;
+                }
+                if socket.write_all(&chunk.body).await.is_err() {
+                    return;
+                }
+                if socket.write_all(b"\r\n").await.is_err() {
+                    return;
+                }
+                if !chunk.delay_after.is_zero() {
+                    tokio::time::sleep(chunk.delay_after).await;
+                }
+            }
+
+            if !tail_delay.is_zero() {
+                tokio::time::sleep(tail_delay).await;
+            }
+
+            let _ = socket.write_all(b"0\r\n\r\n").await;
+            let _ = socket.shutdown().await;
+        });
+
+        (format!("http://{addr}"), handle)
+    }
 
     #[test]
     fn encode_decode_roundtrip() {
@@ -600,8 +744,14 @@ segment-002.ts
             "streamproxy://localhost/{}",
             encode_proxy_url("http://iptv.example.com/live/720p/segment-002.ts")
         );
-        assert!(result.contains(&expected_seg1), "segment-001 not rewritten:\n{result}");
-        assert!(result.contains(&expected_seg2), "segment-002 not rewritten:\n{result}");
+        assert!(
+            result.contains(&expected_seg1),
+            "segment-001 not rewritten:\n{result}"
+        );
+        assert!(
+            result.contains(&expected_seg2),
+            "segment-002 not rewritten:\n{result}"
+        );
         // Tags should be preserved
         assert!(result.contains("#EXTM3U"));
         assert!(result.contains("#EXT-X-TARGETDURATION:4"));
@@ -623,7 +773,10 @@ https://cdn.example.com/hls/720p/index.m3u8
             "streamproxy://localhost/{}",
             encode_proxy_url("https://cdn.example.com/hls/1080p/index.m3u8")
         );
-        assert!(result.contains(&expected_1080), "absolute URL not rewritten:\n{result}");
+        assert!(
+            result.contains(&expected_1080),
+            "absolute URL not rewritten:\n{result}"
+        );
     }
 
     #[test]
@@ -641,7 +794,10 @@ segment-001.ts
             "streamproxy://localhost/{}",
             encode_proxy_url("https://keys.example.com/key?id=1")
         );
-        assert!(result.contains(&expected_key), "EXT-X-KEY URI not rewritten:\n{result}");
+        assert!(
+            result.contains(&expected_key),
+            "EXT-X-KEY URI not rewritten:\n{result}"
+        );
     }
 
     #[test]
@@ -659,9 +815,15 @@ segment-001.m4s
             "streamproxy://localhost/{}",
             encode_proxy_url("http://example.com/hls/init.mp4")
         );
-        assert!(result.contains(&expected_map), "EXT-X-MAP URI not rewritten:\n{result}");
+        assert!(
+            result.contains(&expected_map),
+            "EXT-X-MAP URI not rewritten:\n{result}"
+        );
         // BYTERANGE should be preserved
-        assert!(result.contains("BYTERANGE="), "BYTERANGE attribute lost:\n{result}");
+        assert!(
+            result.contains("BYTERANGE="),
+            "BYTERANGE attribute lost:\n{result}"
+        );
     }
 
     #[test]
@@ -683,16 +845,34 @@ segment.ts
 
     #[test]
     fn is_m3u8_by_content_type() {
-        assert!(is_m3u8_response("application/vnd.apple.mpegurl", "http://example.com/stream"));
-        assert!(is_m3u8_response("application/x-mpegurl", "http://example.com/stream"));
-        assert!(!is_m3u8_response("video/mp2t", "http://example.com/segment.ts"));
+        assert!(is_m3u8_response(
+            "application/vnd.apple.mpegurl",
+            "http://example.com/stream"
+        ));
+        assert!(is_m3u8_response(
+            "application/x-mpegurl",
+            "http://example.com/stream"
+        ));
+        assert!(!is_m3u8_response(
+            "video/mp2t",
+            "http://example.com/segment.ts"
+        ));
     }
 
     #[test]
     fn is_m3u8_by_url_extension() {
-        assert!(is_m3u8_response("application/octet-stream", "http://example.com/live.m3u8"));
-        assert!(is_m3u8_response("text/plain", "http://example.com/live.m3u8?token=abc"));
-        assert!(!is_m3u8_response("text/plain", "http://example.com/segment.ts"));
+        assert!(is_m3u8_response(
+            "application/octet-stream",
+            "http://example.com/live.m3u8"
+        ));
+        assert!(is_m3u8_response(
+            "text/plain",
+            "http://example.com/live.m3u8?token=abc"
+        ));
+        assert!(!is_m3u8_response(
+            "text/plain",
+            "http://example.com/segment.ts"
+        ));
     }
 
     #[test]
@@ -703,6 +883,70 @@ segment.ts
             parse_stream_request(request).as_deref(),
             Some("https://example.com/strøm?token=abc+123")
         );
+    }
+
+    #[tokio::test]
+    async fn forward_response_as_chunked_stream_allows_long_lived_streams_without_total_timeout() {
+        let read_timeout = Duration::from_millis(250);
+        let simulated_old_total_timeout = Duration::from_millis(300);
+        let chunks = vec![
+            TestStreamChunk {
+                body: vec![0x01; 64],
+                delay_after: Duration::from_millis(140),
+            },
+            TestStreamChunk {
+                body: vec![0x02; 64],
+                delay_after: Duration::from_millis(140),
+            },
+            TestStreamChunk {
+                body: vec![0x03; 64],
+                delay_after: Duration::from_millis(140),
+            },
+        ];
+        let (url, server_handle) = spawn_chunked_upstream(chunks, Duration::ZERO).await;
+        let client = build_proxy_client(false, Duration::from_secs(1), read_timeout);
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .expect("stream request should succeed");
+
+        let started = Instant::now();
+        let mut sink = tokio::io::sink();
+        let outcome = forward_response_as_chunked_stream(&mut sink, response).await;
+        let elapsed = started.elapsed();
+
+        assert_eq!(outcome, StreamForwardOutcome::Completed);
+        assert!(
+            elapsed > simulated_old_total_timeout,
+            "stream completed too quickly to cover the old timeout window: {:?}",
+            elapsed
+        );
+
+        server_handle.await.expect("server task should finish");
+    }
+
+    #[tokio::test]
+    async fn forward_response_as_chunked_stream_times_out_when_upstream_stalls() {
+        let read_timeout = Duration::from_millis(120);
+        let chunks = vec![TestStreamChunk {
+            body: vec![0xAA; 64],
+            delay_after: Duration::ZERO,
+        }];
+        let (url, server_handle) = spawn_chunked_upstream(chunks, Duration::from_millis(250)).await;
+        let client = build_proxy_client(false, Duration::from_secs(1), read_timeout);
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .expect("stream request should succeed");
+
+        let mut sink = tokio::io::sink();
+        let outcome = forward_response_as_chunked_stream(&mut sink, response).await;
+
+        assert_eq!(outcome, StreamForwardOutcome::UpstreamReadTimeout);
+
+        server_handle.await.expect("server task should finish");
     }
 
     #[tokio::test]

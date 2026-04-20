@@ -571,11 +571,13 @@ pub struct AudioInfo {
     pub channel_layout: Option<String>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Deserialize)]
 struct FfprobeTrackOutput {
     streams: Vec<FfprobeTrackStream>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Deserialize)]
 struct FfprobeTrackStream {
     codec_type: Option<String>,
@@ -630,6 +632,7 @@ struct FfprobeCombinedOutput {
     format: Option<FfprobeFormat>,
 }
 
+#[cfg(test)]
 fn parse_stream_track_presence(stdout: &str) -> Result<StreamTrackPresence, serde_json::Error> {
     let parsed: FfprobeTrackOutput = serde_json::from_str(stdout)?;
     let mut presence = StreamTrackPresence::default();
