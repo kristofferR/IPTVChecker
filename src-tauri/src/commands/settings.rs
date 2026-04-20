@@ -796,10 +796,11 @@ pub async fn get_screenshot_cache_stats(
 ) -> Result<ScreenshotCacheStats, AppError> {
     let cache_root = screenshot_cache_root(&app);
     let cache_root_clone = cache_root.clone();
-    let (total_bytes, file_count) = tokio::task::spawn_blocking(move || collect_dir_stats(&cache_root_clone))
-        .await
-        .map_err(|e| AppError::Other(format!("Failed to collect screenshot stats: {}", e)))?
-        .map_err(AppError::Io)?;
+    let (total_bytes, file_count) =
+        tokio::task::spawn_blocking(move || collect_dir_stats(&cache_root_clone))
+            .await
+            .map_err(|e| AppError::Other(format!("Failed to collect screenshot stats: {}", e)))?
+            .map_err(AppError::Io)?;
     let state = app.state::<Arc<AppState>>();
     let threshold_gb = state.settings.lock().await.low_space_threshold_gb;
     let disk_space = Some(disk::get_disk_space_info(&cache_root, threshold_gb));

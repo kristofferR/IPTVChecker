@@ -22,10 +22,8 @@ pub const CONSECUTIVE_FAILURE_THRESHOLD: u32 = 3;
 /// Returns true if the given error reason string represents a network-level failure
 /// (i.e. the problem is connectivity, not the stream itself).
 pub fn is_network_level_error(reason: &str) -> bool {
-    matches!(
-        reason,
-        "Timeout" | "Connection refused" | "DNS failure"
-    ) || reason.starts_with("Connection reset")
+    matches!(reason, "Timeout" | "Connection refused" | "DNS failure")
+        || reason.starts_with("Connection reset")
         || reason.starts_with("Connection closed")
         || reason.contains("network is unreachable")
         || reason.contains("Network is unreachable")
@@ -100,6 +98,8 @@ mod tests {
         assert!(!is_network_level_error("HTTP 404"));
         assert!(!is_network_level_error("Invalid URL"));
         assert!(!is_network_level_error("Redirect loop"));
-        assert!(!is_network_level_error("No data (insufficient stream data: 0 bytes)"));
+        assert!(!is_network_level_error(
+            "No data (insufficient stream data: 0 bytes)"
+        ));
     }
 }

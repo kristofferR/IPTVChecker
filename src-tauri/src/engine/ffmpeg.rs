@@ -1,14 +1,16 @@
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, OnceLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 use tauri::{AppHandle, Manager};
 use tokio_util::sync::CancellationToken;
+use url::Url;
 
 use crate::engine::stream_proxy::redact_url;
 use crate::error::AppError;
 use crate::models::settings::ScreenshotFormat;
+use crate::state::AppState;
 
 const MAX_SCREENSHOT_STEM_LEN: usize = 120;
 const FALLBACK_SCREENSHOT_STEM: &str = "channel";
@@ -89,7 +91,10 @@ static FFPROBE_PATH: OnceLock<String> = OnceLock::new();
 static FFTOOLS_AVAILABLE: OnceLock<(bool, bool)> = OnceLock::new();
 
 fn binary_candidate_names(name: &str, ext: &str) -> [String; 2] {
-    [format!("{name}-{TARGET_TRIPLE}{ext}"), format!("{name}{ext}")]
+    [
+        format!("{name}-{TARGET_TRIPLE}{ext}"),
+        format!("{name}{ext}"),
+    ]
 }
 
 fn resolve_binary_from_dir(dir: &Path, candidates: &[String]) -> Option<String> {
@@ -191,34 +196,350 @@ fn configure_background_process(_command: &mut tokio::process::Command) {
     }
 }
 
+fn exit_code_label(exit_code: Option<i32>) -> String {
+    exit_code
+        .map(|code| code.to_string())
+        .unwrap_or_else(|| "terminated by signal".to_string())
+}
+
+fn strip_ffmpeg_log_prefix(line: &str) -> &str {
+    let trimmed = line.trim();
+    if trimmed.starts_with('[') {
+        if let Some(end) = trimmed.find(']') {
+            let remainder = trimmed[end + 1..].trim_start();
+            if !remainder.is_empty() {
+                return remainder;
+            }
+        }
+    }
+    trimmed
+}
+
+fn is_ffmpeg_banner_line(line: &str) -> bool {
+    let lower = line.trim().to_ascii_lowercase();
+    lower.starts_with("ffmpeg version")
+        || lower.starts_with("copyright")
+        || lower.starts_with("built with")
+        || lower.starts_with("configuration:")
+        || lower.starts_with("libav")
+}
+
+fn is_actionable_stderr_line(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    [
+        "error",
+        "failed",
+        "invalid",
+        "timed out",
+        "refused",
+        "denied",
+        "forbidden",
+        "unauthorized",
+        "not found",
+        "unreachable",
+        "reset by peer",
+        "server returned",
+        "could not",
+        "unable to",
+        "missing",
+        "conversion failed",
+        "exiting with exit code",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn classify_ffmpeg_stderr(lines: &[String]) -> Option<String> {
+    let lower = lines.join("\n").to_ascii_lowercase();
+
+    if lower.contains("server returned 5xx") {
+        return Some("server rejected ffmpeg connection (HTTP 5XX)".to_string());
+    }
+    if lower.contains("server returned 403") || lower.contains("403 forbidden") {
+        return Some("server rejected ffmpeg connection (HTTP 403 Forbidden)".to_string());
+    }
+    if lower.contains("server returned 401") || lower.contains("401 unauthorized") {
+        return Some("server rejected ffmpeg connection (HTTP 401 Unauthorized)".to_string());
+    }
+    if lower.contains("server returned 404") || lower.contains("404 not found") {
+        return Some("stream not found for ffmpeg (HTTP 404)".to_string());
+    }
+    if lower.contains("server returned 4") {
+        return Some("server rejected ffmpeg connection (HTTP 4XX)".to_string());
+    }
+    if lower.contains("connection refused") {
+        return Some("connection refused while opening stream".to_string());
+    }
+    if lower.contains("connection reset by peer") {
+        return Some("connection reset while reading stream".to_string());
+    }
+    if lower.contains("operation timed out") || lower.contains("connection timed out") {
+        return Some("timed out while opening stream".to_string());
+    }
+    if lower.contains("invalid data found when processing input") {
+        return Some("invalid stream data for ffmpeg".to_string());
+    }
+    if lower.contains("error opening input files") || lower.contains("error opening input") {
+        return Some("ffmpeg could not open the stream".to_string());
+    }
+
+    None
+}
+
+fn truncate_stderr_summary(summary: &str) -> String {
+    let mut excerpt: String = summary.chars().take(MAX_STDERR_EXCERPT_CHARS).collect();
+    if summary.chars().count() > MAX_STDERR_EXCERPT_CHARS {
+        excerpt.push_str("...");
+    }
+    excerpt
+}
+
 fn stderr_excerpt(stderr: &str) -> String {
     let trimmed = stderr.trim();
     if trimmed.is_empty() {
         return "no stderr output".to_string();
     }
 
-    let sanitized = trimmed
+    let lines = trimmed
         .lines()
         .map(sanitize_ffmpeg_stderr_line)
-        .collect::<Vec<_>>()
-        .join("\n");
-    let mut excerpt: String = sanitized.chars().take(MAX_STDERR_EXCERPT_CHARS).collect();
-    if trimmed.chars().count() > MAX_STDERR_EXCERPT_CHARS {
-        excerpt.push_str("...");
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        return "no stderr output".to_string();
     }
-    excerpt
+
+    if let Some(classified) = classify_ffmpeg_stderr(&lines) {
+        return classified;
+    }
+
+    let actionable = lines
+        .iter()
+        .filter(|line| !is_ffmpeg_banner_line(line) && is_actionable_stderr_line(line))
+        .cloned()
+        .collect::<Vec<_>>();
+    let relevant = if actionable.is_empty() {
+        let non_banner = lines
+            .iter()
+            .filter(|line| !is_ffmpeg_banner_line(line))
+            .cloned()
+            .collect::<Vec<_>>();
+        if non_banner.is_empty() {
+            lines
+        } else {
+            non_banner
+        }
+    } else {
+        actionable
+    };
+
+    let tail = relevant
+        .iter()
+        .skip(relevant.len().saturating_sub(3))
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" | ");
+    truncate_stderr_summary(&tail)
 }
 
 fn sanitize_ffmpeg_stderr_line(line: &str) -> String {
-    if line.contains("Input #") {
-        if let Some((prefix, remainder)) = line.split_once(" from '") {
+    let trimmed = strip_ffmpeg_log_prefix(line);
+    if trimmed.contains("Input #") {
+        if let Some((prefix, remainder)) = trimmed.split_once(" from '") {
             if let Some((url, suffix)) = remainder.split_once('\'') {
                 return format!("{prefix} from '{}'{suffix}", redact_url(url));
             }
         }
         return "Input #<REDACTED> from '<REDACTED_URL>'".to_string();
     }
-    line.to_string()
+    trimmed.to_string()
+}
+
+fn should_route_tool_through_stream_proxy(url: &str) -> bool {
+    let Ok(parsed) = Url::parse(url) else {
+        return false;
+    };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return false;
+    }
+
+    let path = parsed.path().to_ascii_lowercase();
+    [
+        ".ts", ".m2ts", ".mts", ".mp4", ".m4s", ".mov", ".mkv", ".avi", ".mpeg", ".mpg",
+    ]
+    .iter()
+    .any(|suffix| path.ends_with(suffix))
+}
+
+fn should_route_tool_through_stream_proxy_with_hint(
+    url: &str,
+    route_hint_url: Option<&str>,
+) -> bool {
+    should_route_tool_through_stream_proxy(url)
+        || route_hint_url
+            .map(should_route_tool_through_stream_proxy)
+            .unwrap_or(false)
+}
+
+fn proxy_upstream_source_url<'a>(url: &'a str, route_hint_url: Option<&'a str>) -> &'a str {
+    if should_route_tool_through_stream_proxy(url) {
+        url
+    } else if route_hint_url
+        .map(should_route_tool_through_stream_proxy)
+        .unwrap_or(false)
+    {
+        route_hint_url.unwrap_or(url)
+    } else {
+        url
+    }
+}
+
+async fn ensure_streaming_proxy_port(app: &AppHandle) -> u16 {
+    let state = app.state::<Arc<AppState>>();
+    let port = state
+        .streaming_proxy_port
+        .load(std::sync::atomic::Ordering::Relaxed);
+    if port > 0 {
+        return port;
+    }
+
+    let _guard = state.streaming_proxy_start_lock.lock().await;
+    let port = state
+        .streaming_proxy_port
+        .load(std::sync::atomic::Ordering::Relaxed);
+    if port > 0 {
+        return port;
+    }
+
+    match crate::engine::stream_proxy::start_streaming_proxy(app.clone()).await {
+        Ok(port) => {
+            state
+                .streaming_proxy_port
+                .store(port, std::sync::atomic::Ordering::Relaxed);
+            log::info!(
+                "[StreamProxy] Lazily started localhost streaming proxy on port {}",
+                port
+            );
+            port
+        }
+        Err(error) => {
+            log::warn!(
+                "[StreamProxy] Failed to lazily start localhost streaming proxy: {}",
+                error
+            );
+            0
+        }
+    }
+}
+
+async fn prepare_stream_tool_url(
+    app: &AppHandle,
+    url: &str,
+    route_hint_url: Option<&str>,
+) -> String {
+    if !should_route_tool_through_stream_proxy_with_hint(url, route_hint_url) {
+        return url.to_string();
+    }
+
+    let proxy_source_url = proxy_upstream_source_url(url, route_hint_url);
+    let port = ensure_streaming_proxy_port(app).await;
+    if port == 0 {
+        log::debug!(
+            "Streaming proxy unavailable for ffmpeg/ffprobe input, using raw URL: {}",
+            redact_url(url)
+        );
+        return url.to_string();
+    }
+
+    let proxied = crate::engine::stream_proxy::build_streaming_proxy_url(port, proxy_source_url);
+    let routing_detail = format!(
+        "{}{}",
+        if proxy_source_url != url {
+            format!(" (resolved url: {})", redact_url(url))
+        } else {
+            String::new()
+        },
+        route_hint_url
+            .filter(|hint| *hint != proxy_source_url && *hint != url)
+            .map(|hint| format!(" (hint: {})", redact_url(hint)))
+            .unwrap_or_default()
+    );
+    log::debug!(
+        "Routing ffmpeg/ffprobe input via localhost proxy: {}{}",
+        redact_url(proxy_source_url),
+        routing_detail
+    );
+    proxied
+}
+
+fn format_ffmpeg_exit_reason(exit_code: Option<i32>, stderr: &str) -> String {
+    let summary = stderr_excerpt(stderr);
+    if summary == "no stderr output" || summary == "output file missing" {
+        return format!(
+            "ffmpeg exited with {} - {}",
+            exit_code_label(exit_code),
+            summary
+        );
+    }
+
+    let lower = summary.to_ascii_lowercase();
+    if lower.starts_with("server rejected ffmpeg connection")
+        || lower.starts_with("stream not found for ffmpeg")
+        || lower.starts_with("connection refused")
+        || lower.starts_with("connection reset")
+        || lower.starts_with("timed out while opening stream")
+        || lower.starts_with("invalid stream data for ffmpeg")
+        || lower.starts_with("ffmpeg could not open the stream")
+    {
+        return summary;
+    }
+
+    format!(
+        "ffmpeg exited with {} - {}",
+        exit_code_label(exit_code),
+        summary
+    )
+}
+
+pub(crate) fn should_retry_screenshot_as_png(reason: Option<&str>) -> bool {
+    let Some(reason) = reason else {
+        return true;
+    };
+
+    let lower = reason.to_ascii_lowercase();
+    !(lower.starts_with("server rejected ffmpeg connection")
+        || lower.starts_with("stream not found for ffmpeg")
+        || lower.starts_with("connection refused")
+        || lower.starts_with("connection reset")
+        || lower.starts_with("timed out while opening stream")
+        || lower.starts_with("invalid stream data for ffmpeg")
+        || lower.starts_with("ffmpeg could not open the stream"))
+}
+
+fn is_stream_open_failure_reason(reason: &str) -> bool {
+    let lower = reason.to_ascii_lowercase();
+    lower.starts_with("server rejected ffmpeg connection")
+        || lower.starts_with("stream not found for ffmpeg")
+        || lower.starts_with("connection refused")
+        || lower.starts_with("connection reset")
+        || lower.starts_with("timed out while opening stream")
+        || lower.starts_with("invalid stream data for ffmpeg")
+        || lower.starts_with("ffmpeg could not open the stream")
+}
+
+struct ToolCommandOutput {
+    stdout: String,
+    stderr: String,
+    resolved_bin: String,
+    success: bool,
+    exit_code: Option<i32>,
+}
+
+impl ToolCommandOutput {
+    fn exit_label(&self) -> String {
+        exit_code_label(self.exit_code)
+    }
 }
 
 fn trim_windows_unsafe_edges(value: &str) -> String {
@@ -412,18 +733,16 @@ fn append_screenshot_output_args<'a>(
 
 /// Run an ffmpeg/ffprobe command via resolved binary path with cancellation
 /// and optional timeout handling.
-async fn run_tool_command(
-    app: &AppHandle,
+async fn run_resolved_tool_command(
+    resolved_bin: String,
     name: &str,
     args: &[&str],
     cancel: &CancellationToken,
     timeout: Option<std::time::Duration>,
-) -> Result<(String, String), AppError> {
+) -> Result<ToolCommandOutput, AppError> {
     if cancel.is_cancelled() {
         return Err(AppError::Cancelled);
     }
-
-    let resolved_bin = resolve_binary(app, name);
 
     let mut command = tokio::process::Command::new(&resolved_bin);
     configure_background_process(&mut command);
@@ -507,24 +826,46 @@ async fn run_tool_command(
     let stdout_buf = stdout_reader.await.unwrap_or_default();
     let stderr_buf = stderr_reader.await.unwrap_or_default();
 
-    let stdout = String::from_utf8_lossy(&stdout_buf).to_string();
-    let stderr = String::from_utf8_lossy(&stderr_buf).to_string();
+    Ok(ToolCommandOutput {
+        stdout: String::from_utf8_lossy(&stdout_buf).to_string(),
+        stderr: String::from_utf8_lossy(&stderr_buf).to_string(),
+        resolved_bin,
+        success: status.success(),
+        exit_code: status.code(),
+    })
+}
 
-    if !status.success() {
-        let exit_code = status
-            .code()
-            .map(|code| code.to_string())
-            .unwrap_or_else(|| "terminated by signal".to_string());
+async fn run_tool_command_with_output(
+    app: &AppHandle,
+    name: &str,
+    args: &[&str],
+    cancel: &CancellationToken,
+    timeout: Option<std::time::Duration>,
+) -> Result<ToolCommandOutput, AppError> {
+    let resolved_bin = resolve_binary(app, name);
+    run_resolved_tool_command(resolved_bin, name, args, cancel, timeout).await
+}
+
+async fn run_tool_command(
+    app: &AppHandle,
+    name: &str,
+    args: &[&str],
+    cancel: &CancellationToken,
+    timeout: Option<std::time::Duration>,
+) -> Result<(String, String), AppError> {
+    let output = run_tool_command_with_output(app, name, args, cancel, timeout).await?;
+
+    if !output.success {
         return Err(AppError::Other(format!(
             "{} failed (binary: {}, exit: {}) - {}",
             name,
-            resolved_bin,
-            exit_code,
-            stderr_excerpt(&stderr)
+            output.resolved_bin,
+            output.exit_label(),
+            stderr_excerpt(&output.stderr)
         )));
     }
 
-    Ok((stdout, stderr))
+    Ok((output.stdout, output.stderr))
 }
 
 /// Check if ffmpeg and ffprobe sidecars are available.
@@ -774,10 +1115,11 @@ fn detect_hdr_format_from_ffmpeg_line(line: &str) -> Option<String> {
     if lower.contains("smpte2084") {
         return Some("HDR10".to_string());
     }
-    let high_bit_depth =
-        lower.contains("p010") || lower.contains("10le") || lower.contains("10be")
-            || lower.contains("12le")
-            || lower.contains("12be");
+    let high_bit_depth = lower.contains("p010")
+        || lower.contains("10le")
+        || lower.contains("10be")
+        || lower.contains("12le")
+        || lower.contains("12be");
     if lower.contains("bt2020") && high_bit_depth {
         return Some("HDR".to_string());
     }
@@ -946,7 +1288,7 @@ pub async fn collect_probe_snapshot(
     url: &str,
     cancel: &CancellationToken,
 ) -> Result<ProbeSnapshot, AppError> {
-    collect_probe_snapshot_with_timeout(app, url, cancel, Some(FFPROBE_TIMEOUT)).await
+    collect_probe_snapshot_with_timeout(app, url, None, cancel, Some(FFPROBE_TIMEOUT)).await
 }
 
 /// Collect stream diagnostics from one ffprobe run (track presence, video, audio,
@@ -954,9 +1296,11 @@ pub async fn collect_probe_snapshot(
 pub async fn collect_probe_snapshot_with_timeout(
     app: &AppHandle,
     url: &str,
+    route_hint_url: Option<&str>,
     cancel: &CancellationToken,
     timeout: Option<std::time::Duration>,
 ) -> Result<ProbeSnapshot, AppError> {
+    let input_url = prepare_stream_tool_url(app, url, route_hint_url).await;
     let (stdout, stderr) = run_tool_command(
         app,
         "ffprobe",
@@ -971,7 +1315,7 @@ pub async fn collect_probe_snapshot_with_timeout(
             "-show_format",
             "-of",
             "json",
-            url,
+            &input_url,
         ],
         cancel,
         timeout,
@@ -990,8 +1334,8 @@ pub async fn collect_probe_snapshot_with_timeout(
 /// Capture a screenshot frame from a stream via ffmpeg.
 /// Uses the unified command runner for consistent sidecar/PATH resolution
 /// and bounded diagnostics on failures/timeouts.
-async fn capture_screenshot_with_format(
-    app: &AppHandle,
+async fn capture_screenshot_with_format_using_binary(
+    resolved_bin: String,
     url: &str,
     output_dir: &str,
     file_name: &str,
@@ -1009,8 +1353,15 @@ async fn capture_screenshot_with_format(
     let mut args = vec!["-y", "-user_agent", user_agent, "-i", url];
     append_screenshot_output_args(&mut args, format, &output_str);
 
-    let (_stdout, stderr) =
-        run_tool_command(app, "ffmpeg", &args, cancel, Some(timeout_duration)).await?;
+    let command_output = run_resolved_tool_command(
+        resolved_bin,
+        "ffmpeg",
+        &args,
+        cancel,
+        Some(timeout_duration),
+    )
+    .await?;
+    let stderr_summary = stderr_excerpt(&command_output.stderr);
 
     if output_path.exists() {
         if let Err(error) = validate_captured_screenshot(&output_path, format) {
@@ -1021,24 +1372,63 @@ async fn capture_screenshot_with_format(
                 error
             );
             return Err(AppError::Other(format!(
-                "Failed to capture screenshot for {} - {}",
-                file_name, error
+                "invalid screenshot output - {}",
+                error
             )));
         }
-        log::debug!("Screenshot captured: {}", output_str);
+        if !command_output.success {
+            log::warn!(
+                "Screenshot captured for {} despite ffmpeg exiting {} - {}",
+                file_name,
+                command_output.exit_label(),
+                stderr_summary
+            );
+        } else {
+            log::debug!("Screenshot captured: {}", output_str);
+        }
         Ok(output_str)
-    } else {
+    } else if !command_output.success {
+        let reason = format_ffmpeg_exit_reason(command_output.exit_code, &command_output.stderr);
         log::warn!(
-            "Screenshot capture failed for {} (exists={}) - {}",
+            "Screenshot capture failed for {} using '{}' - {}",
             file_name,
-            output_path.exists(),
-            stderr_excerpt(&stderr)
+            command_output.resolved_bin,
+            reason
         );
-        Err(AppError::Other(format!(
-            "Failed to capture screenshot for {} - output file missing",
-            file_name,
-        )))
+        Err(AppError::Other(reason))
+    } else {
+        let reason = if stderr_summary == "no stderr output" {
+            "output file missing".to_string()
+        } else {
+            format!("output file missing - {}", stderr_summary)
+        };
+        log::warn!("Screenshot capture failed for {} - {}", file_name, reason);
+        Err(AppError::Other(reason))
     }
+}
+
+async fn capture_screenshot_with_format(
+    app: &AppHandle,
+    url: &str,
+    route_hint_url: Option<&str>,
+    output_dir: &str,
+    file_name: &str,
+    user_agent: &str,
+    format: ScreenshotFormat,
+    cancel: &CancellationToken,
+) -> Result<String, AppError> {
+    let resolved_bin = resolve_binary(app, "ffmpeg");
+    let input_url = prepare_stream_tool_url(app, url, route_hint_url).await;
+    capture_screenshot_with_format_using_binary(
+        resolved_bin,
+        &input_url,
+        output_dir,
+        file_name,
+        user_agent,
+        format,
+        cancel,
+    )
+    .await
 }
 
 /// Capture a screenshot frame from a stream via ffmpeg.
@@ -1046,6 +1436,7 @@ async fn capture_screenshot_with_format(
 pub async fn capture_screenshot(
     app: &AppHandle,
     url: &str,
+    route_hint_url: Option<&str>,
     output_dir: &str,
     file_name: &str,
     user_agent: &str,
@@ -1057,20 +1448,31 @@ pub async fn capture_screenshot(
     }
 
     match capture_screenshot_with_format(
-        app, url, output_dir, file_name, user_agent, format, cancel,
+        app,
+        url,
+        route_hint_url,
+        output_dir,
+        file_name,
+        user_agent,
+        format,
+        cancel,
     )
     .await
     {
         Ok(path) => Ok(path),
-        Err(error) if format == ScreenshotFormat::Webp => {
+        Err(AppError::Other(reason))
+            if format == ScreenshotFormat::Webp
+                && should_retry_screenshot_as_png(Some(&reason)) =>
+        {
             log::warn!(
                 "WebP screenshot capture failed for {} ({}), retrying as PNG",
                 file_name,
-                error
+                reason
             );
             capture_screenshot_with_format(
                 app,
                 url,
+                route_hint_url,
                 output_dir,
                 file_name,
                 user_agent,
@@ -1078,6 +1480,14 @@ pub async fn capture_screenshot(
                 cancel,
             )
             .await
+        }
+        Err(AppError::Other(reason)) if format == ScreenshotFormat::Webp => {
+            log::debug!(
+                "Skipping PNG screenshot retry for {} because the failure is not output-format specific ({})",
+                file_name,
+                reason
+            );
+            Err(AppError::Other(reason))
         }
         Err(error) => Err(error),
     }
@@ -1092,6 +1502,7 @@ pub async fn capture_screenshot(
 pub async fn profile_bitrate(
     app: &AppHandle,
     url: &str,
+    route_hint_url: Option<&str>,
     user_agent: &str,
     timeout_secs: f64,
     cancel: &CancellationToken,
@@ -1107,6 +1518,7 @@ pub async fn profile_bitrate(
     };
 
     let resolved_bin = resolve_binary(app, "ffmpeg");
+    let input_url = prepare_stream_tool_url(app, url, route_hint_url).await;
 
     // Leave at least 15s of headroom within the timeout for connection
     // setup and graceful shutdown. Minimum streaming duration is 3s.
@@ -1123,7 +1535,7 @@ pub async fn profile_bitrate(
             "-user_agent",
             user_agent,
             "-i",
-            url,
+            &input_url,
             "-t",
             &sample_secs_str,
             "-f",
@@ -1169,7 +1581,7 @@ pub async fn profile_bitrate(
     });
 
     // Wait for exit with cancellation and timeout, accepting any exit code.
-    let timed_out = tokio::select! {
+    let (timed_out, _exit_code) = tokio::select! {
         _ = cancel.cancelled() => {
             let _ = child.kill().await;
             let _ = child.wait().await;
@@ -1178,10 +1590,11 @@ pub async fn profile_bitrate(
         }
         _ = tokio::time::sleep(timeout_duration) => {
             graceful_kill(&mut child, GRACEFUL_KILL_TIMEOUT).await;
-            true
+            (true, None)
         }
-        _status = child.wait() => {
-            false
+        status = child.wait() => {
+            let status = status.map_err(|_| AppError::FfmpegNotAvailable)?;
+            (false, status.code())
         }
     };
 
@@ -1254,6 +1667,7 @@ pub struct CombinedDiagnostics {
     pub audio_info: Option<AudioInfo>,
     pub format_bitrate_kbps: Option<u32>,
     pub screenshot_path: Option<String>,
+    pub screenshot_error_reason: Option<String>,
     pub profiled_bitrate_kbps: Option<u64>,
     pub diagnostics_output: String,
 }
@@ -1271,7 +1685,14 @@ fn parse_ffmpeg_stderr(
     Option<u32>,
 ) {
     let mut presence = StreamTrackPresence::default();
-    let mut best_video: Option<(String, Option<u32>, Option<u32>, Option<u32>, u64, Option<String>)> = None; // (codec, w, h, fps, pixels, hdr)
+    let mut best_video: Option<(
+        String,
+        Option<u32>,
+        Option<u32>,
+        Option<u32>,
+        u64,
+        Option<String>,
+    )> = None; // (codec, w, h, fps, pixels, hdr)
     let mut audio_info: Option<AudioInfo> = None;
     let mut format_bitrate_kbps: Option<u32> = None;
 
@@ -1394,6 +1815,7 @@ fn parse_bytes_read(stderr: &str, sample_secs: u64) -> Option<u64> {
 pub async fn run_combined_diagnostics(
     app: &AppHandle,
     url: &str,
+    route_hint_url: Option<&str>,
     user_agent: &str,
     output_dir: &str,
     file_name: &str,
@@ -1416,6 +1838,7 @@ pub async fn run_combined_diagnostics(
     };
 
     let resolved_bin = resolve_binary(app, "ffmpeg");
+    let input_url = prepare_stream_tool_url(app, url, route_hint_url).await;
 
     // When profiling, stream for 3–10 seconds to gather bitrate data.
     let sample_secs = if profile_bitrate {
@@ -1440,7 +1863,7 @@ pub async fn run_combined_diagnostics(
         .map(|p| p.to_string_lossy().to_string());
 
     // Build ffmpeg args
-    let mut args: Vec<&str> = vec!["-v", "verbose", "-user_agent", user_agent, "-i", url];
+    let mut args: Vec<&str> = vec!["-v", "verbose", "-user_agent", user_agent, "-i", &input_url];
 
     // Output 1: screenshot (if wanted)
     if let Some(ref out) = screenshot_str {
@@ -1497,8 +1920,10 @@ pub async fn run_combined_diagnostics(
         buf
     });
 
-    // Wait for exit with cancellation and timeout, accepting any exit code
-    let timed_out = tokio::select! {
+    // Wait for exit with cancellation and timeout, accepting any exit code.
+    // Keep the exit code so screenshot validation can accept a valid frame even
+    // when ffmpeg returns non-zero after writing it.
+    let (timed_out, exit_code) = tokio::select! {
         _ = cancel.cancelled() => {
             let _ = child.kill().await;
             let _ = child.wait().await;
@@ -1507,15 +1932,17 @@ pub async fn run_combined_diagnostics(
         }
         _ = tokio::time::sleep(timeout_duration) => {
             graceful_kill(&mut child, GRACEFUL_KILL_TIMEOUT).await;
-            true
+            (true, None)
         }
-        _status = child.wait() => {
-            false
+        status = child.wait() => {
+            let status = status.map_err(|_| AppError::FfmpegNotAvailable)?;
+            (false, status.code())
         }
     };
 
     let stderr_buf = stderr_reader.await.unwrap_or_default();
     let stderr = String::from_utf8_lossy(&stderr_buf);
+    let stderr_summary = stderr_excerpt(&stderr);
 
     // Parse stream metadata from verbose output
     let (track_presence, video_info, audio_info, format_bitrate_kbps) =
@@ -1525,19 +1952,26 @@ pub async fn run_combined_diagnostics(
     let profiled_bitrate_kbps = if profile_bitrate {
         let kbps = parse_bytes_read(&stderr, sample_secs);
         if kbps.is_none() && !timed_out {
-            log::warn!(
-                "Combined diagnostics: no bytes-read data in stderr. stderr tail: {}",
-                stderr
-                    .lines()
-                    .rev()
-                    .take(3)
-                    .map(sanitize_ffmpeg_stderr_line)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect::<Vec<_>>()
-                    .join(" | ")
-            );
+            if is_stream_open_failure_reason(&stderr_summary) {
+                log::debug!(
+                    "Combined diagnostics skipped bitrate profile after ffmpeg input failure ({})",
+                    stderr_summary
+                );
+            } else {
+                log::warn!(
+                    "Combined diagnostics: no bytes-read data in stderr. stderr tail: {}",
+                    stderr
+                        .lines()
+                        .rev()
+                        .take(3)
+                        .map(sanitize_ffmpeg_stderr_line)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                );
+            }
         }
         kbps
     } else {
@@ -1545,22 +1979,49 @@ pub async fn run_combined_diagnostics(
     };
 
     // Validate screenshot
-    let validated_screenshot = if let Some(ref path) = screenshot_path {
+    let (validated_screenshot, screenshot_error_reason) = if let Some(ref path) = screenshot_path {
         if path.exists() {
             match validate_captured_screenshot(path, screenshot_format) {
-                Ok(()) => Some(path.to_string_lossy().to_string()),
+                Ok(()) => {
+                    if let Some(code) = exit_code {
+                        if code != 0 {
+                            log::warn!(
+                                "Combined diagnostics captured screenshot despite ffmpeg exiting {}",
+                                code
+                            );
+                        }
+                    }
+                    (Some(path.to_string_lossy().to_string()), None)
+                }
                 Err(error) => {
                     let _ = std::fs::remove_file(path);
                     log::warn!("Combined diagnostics: invalid screenshot - {}", error);
-                    None
+                    (None, Some(format!("invalid screenshot output - {}", error)))
                 }
             }
         } else {
-            log::debug!("Combined diagnostics: screenshot output file missing");
-            None
+            let reason = if timed_out {
+                format!(
+                    "ffmpeg timed out after {:.1}s",
+                    timeout_duration.as_secs_f64()
+                )
+            } else if let Some(code) = exit_code {
+                if code == 0 {
+                    "output file missing".to_string()
+                } else {
+                    format_ffmpeg_exit_reason(Some(code), &stderr)
+                }
+            } else {
+                "output file missing".to_string()
+            };
+            log::debug!(
+                "Combined diagnostics: screenshot output file missing ({})",
+                reason
+            );
+            (None, Some(reason))
         }
     } else {
-        None
+        (None, None)
     };
 
     // Truncate stderr for debug log
@@ -1591,6 +2052,7 @@ pub async fn run_combined_diagnostics(
         audio_info,
         format_bitrate_kbps,
         screenshot_path: validated_screenshot,
+        screenshot_error_reason,
         profiled_bitrate_kbps,
         diagnostics_output,
     })
@@ -1698,16 +2160,57 @@ pub fn check_label_mismatch(channel_name: &str, resolution: &str) -> Vec<String>
 
 #[cfg(test)]
 mod tests {
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
         append_screenshot_output_args, binary_candidate_names, build_screenshot_file_name,
-        check_label_mismatch, contains_word, normalize_superscript, parse_bytes_read,
-        parse_ffmpeg_stderr, parse_ffprobe_fps, parse_probe_snapshot,
-        parse_stream_track_presence, resolution_label, resolve_binary_from_dir,
-        sanitize_screenshot_stem, screenshot_header_is_valid, unique_screenshot_output_path,
-        validate_captured_screenshot, ScreenshotFormat, MAX_SCREENSHOT_STEM_LEN, TARGET_TRIPLE,
+        capture_screenshot_with_format_using_binary, check_label_mismatch, contains_word,
+        format_ffmpeg_exit_reason, normalize_superscript, parse_bytes_read, parse_ffmpeg_stderr,
+        parse_ffprobe_fps, parse_probe_snapshot, parse_stream_track_presence,
+        proxy_upstream_source_url, resolution_label, resolve_binary_from_dir,
+        sanitize_screenshot_stem, screenshot_header_is_valid, should_retry_screenshot_as_png,
+        should_route_tool_through_stream_proxy, should_route_tool_through_stream_proxy_with_hint,
+        stderr_excerpt, unique_screenshot_output_path, validate_captured_screenshot,
+        ScreenshotFormat, MAX_SCREENSHOT_STEM_LEN, TARGET_TRIPLE,
     };
+    use crate::error::AppError;
+    use tokio_util::sync::CancellationToken;
+
+    #[cfg(unix)]
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be monotonic")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("{prefix}-{unique}"));
+        std::fs::create_dir_all(&path).expect("temp dir should be creatable");
+        path
+    }
+
+    #[cfg(unix)]
+    fn write_executable_script(dir: &Path, name: &str, body: &str) -> String {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = dir.join(name);
+        std::fs::write(&path, body).expect("script should be writable");
+
+        let mut permissions = std::fs::metadata(&path)
+            .expect("script metadata should exist")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&path, permissions).expect("script should be executable");
+
+        path.to_string_lossy().to_string()
+    }
+
+    #[cfg(unix)]
+    fn screenshot_fixture_bytes(format: ScreenshotFormat) -> &'static str {
+        match format {
+            ScreenshotFormat::Png => "\\211PNG\\r\\n\\032\\n\\000\\000\\000\\rIHDR",
+            ScreenshotFormat::Webp => "RIFF\\000\\000\\000\\000WEBP",
+        }
+    }
 
     #[test]
     fn parse_fractional_fps() {
@@ -1856,6 +2359,75 @@ mod tests {
         let error = validate_captured_screenshot(&invalid_path, ScreenshotFormat::Webp)
             .expect_err("invalid header should be rejected");
         assert!(error.contains("invalid"));
+
+        std::fs::remove_dir_all(&test_dir).expect("temp dir should be removable");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn capture_screenshot_accepts_valid_output_from_nonzero_exit() {
+        for format in [ScreenshotFormat::Png, ScreenshotFormat::Webp] {
+            let test_dir = temp_dir("iptv-checker-screenshot-success");
+            let output_dir = test_dir.to_string_lossy().to_string();
+            let binary_path = write_executable_script(
+                &test_dir,
+                "fake-ffmpeg.sh",
+                &format!(
+                    "#!/bin/sh\nout=\"\"\nfor arg in \"$@\"; do\n  out=\"$arg\"\ndone\nprintf '{}' > \"$out\"\nprintf '%s\\n' 'simulated ffmpeg failure' >&2\nexit 1\n",
+                    screenshot_fixture_bytes(format)
+                ),
+            );
+
+            let captured = capture_screenshot_with_format_using_binary(
+                binary_path,
+                "https://example.com/live.m3u8",
+                &output_dir,
+                "channel",
+                "UnitTest",
+                format,
+                &CancellationToken::new(),
+            )
+            .await
+            .expect("valid screenshot should be accepted despite non-zero exit");
+
+            let captured_path = PathBuf::from(&captured);
+            assert!(captured_path.exists());
+            validate_captured_screenshot(&captured_path, format)
+                .expect("captured file should remain valid");
+
+            std::fs::remove_dir_all(&test_dir).expect("temp dir should be removable");
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn capture_screenshot_fails_when_nonzero_exit_produces_no_file() {
+        let test_dir = temp_dir("iptv-checker-screenshot-missing");
+        let output_dir = test_dir.to_string_lossy().to_string();
+        let binary_path = write_executable_script(
+            &test_dir,
+            "fake-ffmpeg.sh",
+            "#!/bin/sh\nprintf '%s\\n' 'simulated ffmpeg failure' >&2\nexit 1\n",
+        );
+
+        let error = capture_screenshot_with_format_using_binary(
+            binary_path,
+            "https://example.com/live.m3u8",
+            &output_dir,
+            "channel",
+            "UnitTest",
+            ScreenshotFormat::Png,
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("missing output should fail");
+
+        match error {
+            AppError::Other(message) => {
+                assert!(message.contains("ffmpeg exited with 1"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
 
         std::fs::remove_dir_all(&test_dir).expect("temp dir should be removable");
     }
@@ -2126,5 +2698,93 @@ Input #0, mp3, from 'http://example.com/radio':
     fn parse_bytes_read_returns_none_when_no_data() {
         let stderr = "Error opening input: Server returned 5XX\n";
         assert_eq!(parse_bytes_read(stderr, 10), None);
+    }
+
+    #[test]
+    fn stderr_excerpt_prefers_actionable_tail_over_ffmpeg_banner() {
+        let stderr = r#"
+ffmpeg version 8.1-test
+Copyright (c) 2000-2026 the FFmpeg developers
+built with Apple clang version 14.0.0
+configuration: --enable-something
+[http @ 0x123] Error opening input files: Server returned 5XX Server Error reply
+Exiting with exit code -1482175992
+"#;
+
+        assert_eq!(
+            stderr_excerpt(stderr),
+            "server rejected ffmpeg connection (HTTP 5XX)"
+        );
+    }
+
+    #[test]
+    fn format_ffmpeg_exit_reason_returns_concise_stream_open_failure() {
+        let stderr = r#"
+ffmpeg version 8.1-test
+[http @ 0x123] Error opening input files: Server returned 5XX Server Error reply
+Exiting with exit code -1482175992
+"#;
+
+        assert_eq!(
+            format_ffmpeg_exit_reason(Some(8), stderr),
+            "server rejected ffmpeg connection (HTTP 5XX)"
+        );
+    }
+
+    #[test]
+    fn should_retry_screenshot_as_png_skips_stream_open_failures() {
+        assert!(!should_retry_screenshot_as_png(Some(
+            "server rejected ffmpeg connection (HTTP 5XX)"
+        )));
+        assert!(!should_retry_screenshot_as_png(Some(
+            "timed out while opening stream"
+        )));
+        assert!(should_retry_screenshot_as_png(Some(
+            "invalid screenshot output - output image header is invalid"
+        )));
+    }
+
+    #[test]
+    fn should_route_tool_through_stream_proxy_matches_direct_media_extensions() {
+        assert!(should_route_tool_through_stream_proxy(
+            "http://example.com/live/channel.ts"
+        ));
+        assert!(should_route_tool_through_stream_proxy(
+            "https://example.com/video/file.mkv?token=abc"
+        ));
+        assert!(!should_route_tool_through_stream_proxy(
+            "https://example.com/live/master.m3u8"
+        ));
+    }
+
+    #[test]
+    fn should_route_tool_through_stream_proxy_uses_original_url_hint_for_redirected_xtream_streams()
+    {
+        assert!(should_route_tool_through_stream_proxy_with_hint(
+            "http://185.245.1.187/live/play/opaque-token/483974",
+            Some("http://185.245.2.107/live/user/pass/483974.ts"),
+        ));
+        assert!(!should_route_tool_through_stream_proxy_with_hint(
+            "https://example.com/live/master",
+            Some("https://example.com/live/master.m3u8"),
+        ));
+    }
+
+    #[test]
+    fn proxy_upstream_source_url_prefers_original_media_url_hint_over_redirected_opaque_url() {
+        assert_eq!(
+            proxy_upstream_source_url(
+                "http://185.245.1.187/live/play/opaque-token/483974",
+                Some("http://185.245.2.107/live/user/pass/483974.ts"),
+            ),
+            "http://185.245.2.107/live/user/pass/483974.ts"
+        );
+        assert_eq!(
+            proxy_upstream_source_url(
+                "http://185.245.2.107/live/user/pass/483974.ts",
+                Some("http://185.245.2.107/live/user/pass/483974.ts"),
+            ),
+            "http://185.245.2.107/live/user/pass/483974.ts"
+        );
     }
 }

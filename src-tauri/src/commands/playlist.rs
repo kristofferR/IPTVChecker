@@ -40,13 +40,76 @@ pub enum PlaylistLoadProgress {
 }
 
 const PROGRESS_THROTTLE: Duration = Duration::from_millis(100);
+const PROGRESS_LOG_THROTTLE: Duration = Duration::from_secs(1);
+
+#[derive(Default)]
+struct PlaylistProgressLogState {
+    last_download_log_at: Option<Instant>,
+    last_download_bytes: u64,
+    last_parse_log_at: Option<Instant>,
+    last_parse_channels: usize,
+}
+
+static PLAYLIST_PROGRESS_LOG_STATE: OnceLock<Mutex<PlaylistProgressLogState>> = OnceLock::new();
+
+fn playlist_progress_log_state() -> &'static Mutex<PlaylistProgressLogState> {
+    PLAYLIST_PROGRESS_LOG_STATE.get_or_init(|| Mutex::new(PlaylistProgressLogState::default()))
+}
 
 fn emit_load_progress(app: Option<&AppHandle>, progress: PlaylistLoadProgress) {
     match &progress {
         PlaylistLoadProgress::Connecting { detail } => {
             log::info!("[playlist-load] Connecting: {}", detail);
         }
-        PlaylistLoadProgress::Downloading { .. } | PlaylistLoadProgress::Parsing { .. } => {}
+        PlaylistLoadProgress::Downloading {
+            bytes_downloaded,
+            elapsed_secs,
+        } => {
+            if let Ok(mut state) = playlist_progress_log_state().lock() {
+                let should_log = *bytes_downloaded == 0
+                    || state.last_download_log_at.is_none()
+                    || state
+                        .last_download_log_at
+                        .is_some_and(|at| at.elapsed() >= PROGRESS_LOG_THROTTLE)
+                    || bytes_downloaded.saturating_sub(state.last_download_bytes)
+                        >= 5 * 1024 * 1024;
+                if should_log {
+                    log::info!(
+                        "[playlist-load] Downloading: {:.1} MB in {:.1}s",
+                        *bytes_downloaded as f64 / (1024.0 * 1024.0),
+                        elapsed_secs
+                    );
+                    state.last_download_log_at = Some(Instant::now());
+                    state.last_download_bytes = *bytes_downloaded;
+                }
+            }
+        }
+        PlaylistLoadProgress::Parsing {
+            channels_found,
+            live_found,
+            movie_found,
+            series_found,
+        } => {
+            if let Ok(mut state) = playlist_progress_log_state().lock() {
+                let should_log = *channels_found == 0
+                    || state.last_parse_log_at.is_none()
+                    || state
+                        .last_parse_log_at
+                        .is_some_and(|at| at.elapsed() >= PROGRESS_LOG_THROTTLE)
+                    || channels_found.saturating_sub(state.last_parse_channels) >= 10_000;
+                if should_log {
+                    log::info!(
+                        "[playlist-load] Parsing: {} channels (live: {}, movies: {}, series: {})",
+                        channels_found,
+                        live_found,
+                        movie_found,
+                        series_found
+                    );
+                    state.last_parse_log_at = Some(Instant::now());
+                    state.last_parse_channels = *channels_found;
+                }
+            }
+        }
         PlaylistLoadProgress::Saving { detail } => {
             log::info!("[playlist-load] Saving: {}", detail);
         }
@@ -1757,6 +1820,7 @@ fn build_stalker_preview(
 
 #[tauri::command]
 pub async fn open_playlist_stalker(
+    app: AppHandle,
     source: StalkerOpenRequest,
     group_filter: Option<String>,
     channel_search: Option<String>,
@@ -1811,7 +1875,17 @@ pub async fn open_playlist_stalker(
             continue;
         }
 
-        populate_server_metadata(None, &mut preview).await;
+        populate_server_metadata(Some(&app), &mut preview).await;
+        crate::commands::scan::seed_cached_playlist_preview(
+            &app,
+            &preview.file_path,
+            preview.source_identity.as_deref(),
+            Some(&preview.file_name),
+            group_filter.as_deref(),
+            channel_search.as_deref(),
+            &preview,
+        )
+        .await;
         return Ok(preview);
     }
 
@@ -1834,8 +1908,20 @@ pub async fn open_playlist(
     group_filter: Option<String>,
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
+    let cache_group_filter = group_filter.clone();
+    let cache_channel_search = channel_search.clone();
     let mut preview = open_playlist_path_inner(&app, path, group_filter, channel_search).await?;
     crate::commands::saved::apply_persisted_playlist_metadata(&app, &mut preview, None, None)?;
+    crate::commands::scan::seed_cached_playlist_preview(
+        &app,
+        &preview.file_path,
+        preview.source_identity.as_deref(),
+        Some(&preview.file_name),
+        cache_group_filter.as_deref(),
+        cache_channel_search.as_deref(),
+        &preview,
+    )
+    .await;
     Ok(preview)
 }
 
@@ -1888,11 +1974,23 @@ pub async fn open_playlist_url(
     group_filter: Option<String>,
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
+    let cache_group_filter = group_filter.clone();
+    let cache_channel_search = channel_search.clone();
     let data_dir = app_data_dir(&app)?;
     let mut preview =
         open_playlist_url_from_data_dir(Some(&app), &data_dir, &url, group_filter, channel_search)
             .await?;
     crate::commands::saved::apply_persisted_playlist_metadata(&app, &mut preview, None, None)?;
+    crate::commands::scan::seed_cached_playlist_preview(
+        &app,
+        &preview.file_path,
+        preview.source_identity.as_deref(),
+        Some(&preview.file_name),
+        cache_group_filter.as_deref(),
+        cache_channel_search.as_deref(),
+        &preview,
+    )
+    .await;
     Ok(preview)
 }
 
@@ -1955,9 +2053,21 @@ pub async fn open_playlist_xtream(
     group_filter: Option<String>,
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
+    let cache_group_filter = group_filter.clone();
+    let cache_channel_search = channel_search.clone();
     let mut preview =
         open_playlist_xtream_inner(&app, &source, group_filter, channel_search, None).await?;
     crate::commands::saved::apply_persisted_playlist_metadata(&app, &mut preview, None, None)?;
+    crate::commands::scan::seed_cached_playlist_preview(
+        &app,
+        &preview.file_path,
+        preview.source_identity.as_deref(),
+        Some(&preview.file_name),
+        cache_group_filter.as_deref(),
+        cache_channel_search.as_deref(),
+        &preview,
+    )
+    .await;
     Ok(preview)
 }
 
@@ -2347,6 +2457,7 @@ async fn probe_server_channels(
         let (codec, resolution, fps) = match ffmpeg::collect_probe_snapshot_with_timeout(
             app,
             &stream_url,
+            None,
             &cancel,
             Some(SERVER_TEST_FFPROBE_TIMEOUT),
         )
@@ -2368,6 +2479,7 @@ async fn probe_server_channels(
             match ffmpeg::capture_screenshot(
                 app,
                 &stream_url,
+                None,
                 &screenshot_dir.to_string_lossy(),
                 &file_name,
                 PLAYLIST_DOWNLOAD_USER_AGENT,

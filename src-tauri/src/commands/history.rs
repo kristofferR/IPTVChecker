@@ -331,13 +331,20 @@ fn save_v2_index(base_dir: &Path, index: &HistoryIndexV2) -> Result<(), AppError
     }
 }
 
-fn write_run_file(base_dir: &Path, run_id: &str, results: &[ChannelResult]) -> Result<(), AppError> {
+fn write_run_file(
+    base_dir: &Path,
+    run_id: &str,
+    results: &[ChannelResult],
+) -> Result<(), AppError> {
     let runs_dir = v2_runs_dir(base_dir);
     std::fs::create_dir_all(&runs_dir).map_err(AppError::Io)?;
 
     let run_path = v2_run_file_path(base_dir, run_id);
     let bytes = serde_json::to_vec(results).map_err(|error| {
-        AppError::Parse(format!("Failed to serialize run file {}: {}", run_id, error))
+        AppError::Parse(format!(
+            "Failed to serialize run file {}: {}",
+            run_id, error
+        ))
     })?;
     std::fs::write(&run_path, bytes).map_err(AppError::Io)?;
     Ok(())
@@ -346,9 +353,8 @@ fn write_run_file(base_dir: &Path, run_id: &str, results: &[ChannelResult]) -> R
 fn load_run_file(base_dir: &Path, run_id: &str) -> Result<Vec<ChannelResult>, AppError> {
     let run_path = v2_run_file_path(base_dir, run_id);
     let bytes = std::fs::read(&run_path).map_err(AppError::Io)?;
-    serde_json::from_slice(&bytes).map_err(|error| {
-        AppError::Parse(format!("Failed to parse run file {}: {}", run_id, error))
-    })
+    serde_json::from_slice(&bytes)
+        .map_err(|error| AppError::Parse(format!("Failed to parse run file {}: {}", run_id, error)))
 }
 
 fn delete_run_file(base_dir: &Path, run_id: &str) {
@@ -373,7 +379,10 @@ fn load_v1_store(path: &Path) -> Result<ScanHistoryStoreV1, AppError> {
     match serde_json::from_slice::<ScanHistoryStoreV1>(&bytes) {
         Ok(store) => Ok(store),
         Err(error) => {
-            log::warn!("V1 scan history file is corrupt, skipping migration: {}", error);
+            log::warn!(
+                "V1 scan history file is corrupt, skipping migration: {}",
+                error
+            );
             Ok(ScanHistoryStoreV1::default())
         }
     }
@@ -398,7 +407,11 @@ fn migrate_v1_to_v2(base_dir: &Path) -> Result<(), AppError> {
     // Write per-run files
     for entry in &v1_store.entries {
         if let Err(error) = write_run_file(base_dir, &entry.id, &entry.results) {
-            log::warn!("Failed to write per-run file during migration for {}: {}", entry.id, error);
+            log::warn!(
+                "Failed to write per-run file during migration for {}: {}",
+                entry.id,
+                error
+            );
         }
     }
 
@@ -421,7 +434,10 @@ fn migrate_v1_to_v2(base_dir: &Path) -> Result<(), AppError> {
                 let newer = entries[i];
                 let older = entries[i + 1];
                 if newer.scope_key == older.scope_key {
-                    Some(compute_history_diff_from_results(&newer.results, &older.results))
+                    Some(compute_history_diff_from_results(
+                        &newer.results,
+                        &older.results,
+                    ))
                 } else {
                     None
                 }
@@ -456,7 +472,10 @@ fn migrate_v1_to_v2(base_dir: &Path) -> Result<(), AppError> {
         log::warn!("Failed to rename v1 history file to backup: {}", error);
     }
 
-    log::info!("V1 to v2 migration complete ({} entries)", index.entries.len());
+    log::info!(
+        "V1 to v2 migration complete ({} entries)",
+        index.entries.len()
+    );
     Ok(())
 }
 
@@ -522,14 +541,7 @@ pub fn append_scan_history(
     history_limit: usize,
 ) -> Result<(), AppError> {
     let base_dir = history_base_dir(app)?;
-    append_scan_history_at_dir(
-        &base_dir,
-        run_id,
-        config,
-        summary,
-        results,
-        history_limit,
-    )
+    append_scan_history_at_dir(&base_dir, run_id, config, summary, results, history_limit)
 }
 
 fn append_scan_history_at_dir(
@@ -556,9 +568,7 @@ fn append_scan_history_at_dir(
 
     let diff = if let Some(prev_entry) = candidates.first() {
         match load_run_file(base_dir, &prev_entry.id) {
-            Ok(prev_results) => {
-                Some(compute_history_diff_from_results(&results, &prev_results))
-            }
+            Ok(prev_results) => Some(compute_history_diff_from_results(&results, &prev_results)),
             Err(error) => {
                 log::warn!(
                     "Failed to load previous run file {} for diff computation: {}",
@@ -740,6 +750,7 @@ mod tests {
             audio_channel_layout: None,
             audio_only: false,
             screenshot_path: None,
+            screenshot_error_reason: None,
             label_mismatches: Vec::new(),
             low_framerate: false,
             error_message: None,
@@ -814,6 +825,7 @@ mod tests {
             audio_channel_layout: None,
             audio_only: false,
             screenshot_path: None,
+            screenshot_error_reason: None,
             label_mismatches: Vec::new(),
             low_framerate: false,
             error_message: None,
@@ -959,8 +971,7 @@ mod tests {
 
         append_scan_history_at_dir(&test_root, "run-1", &config, &summary1, results1, 20).unwrap();
 
-        let history =
-            get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
+        let history = get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].id, "run-1");
         assert!(history[0].diff.is_none()); // no previous run to diff against
@@ -975,8 +986,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(2));
         append_scan_history_at_dir(&test_root, "run-2", &config, &summary2, results2, 20).unwrap();
 
-        let history =
-            get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
+        let history = get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].id, "run-2");
         assert_eq!(history[1].id, "run-1");
@@ -984,8 +994,8 @@ mod tests {
         // run-2 should have a diff against run-1
         let diff = history[0].diff.as_ref().expect("run-2 should have diff");
         assert_eq!(diff.channels_gained, 1); // c is new
-        assert_eq!(diff.channels_lost, 1);   // b is gone
-        assert_eq!(diff.became_dead, 1);     // a went alive -> dead
+        assert_eq!(diff.channels_lost, 1); // b is gone
+        assert_eq!(diff.became_dead, 1); // a went alive -> dead
 
         // run-1 still has no diff
         assert!(history[1].diff.is_none());
@@ -1019,8 +1029,7 @@ mod tests {
             .unwrap();
         }
 
-        let history =
-            get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
+        let history = get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
         assert_eq!(history.len(), 3);
 
         // Per-run files for run-1 and run-2 should be deleted
@@ -1048,13 +1057,11 @@ mod tests {
         std::thread::sleep(Duration::from_millis(2));
         append_scan_history_at_dir(&test_root, "run-2", &config, &summary, results, 20).unwrap();
 
-        let removed =
-            clear_scan_history_at_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
+        let removed = clear_scan_history_at_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
         assert_eq!(removed, 2);
 
         // History should be empty
-        let history =
-            get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
+        let history = get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
         assert!(history.is_empty());
 
         // Per-run files should be deleted
@@ -1107,8 +1114,7 @@ mod tests {
         std::fs::write(&v1_path, bytes).unwrap();
 
         // Access history — should trigger migration
-        let history =
-            get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
+        let history = get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].id, "old-run-2");
         assert_eq!(history[1].id, "old-run-1");
@@ -1149,8 +1155,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(2));
         append_scan_history_at_dir(&test_root, "run-2", &config2, &summary, results, 20).unwrap();
 
-        let history =
-            get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
+        let history = get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
         assert_eq!(history.len(), 2);
         // run-2 has different scope_key from run-1, so no diff
         assert!(history[0].diff.is_none());
@@ -1177,8 +1182,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(2));
         append_scan_history_at_dir(&test_root, "run-2", &config2, &summary, results, 20).unwrap();
 
-        let history =
-            get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
+        let history = get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
         assert_eq!(history.len(), 2);
         assert!(history[0].diff.is_none());
         assert!(history[1].diff.is_none());

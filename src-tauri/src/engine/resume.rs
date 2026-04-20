@@ -90,7 +90,9 @@ fn sanitize_embedded_urls(value: &str) -> String {
         .into_owned()
 }
 
-fn sanitize_attempt_log_for_persistence(attempt: &ChannelAttemptDebugLog) -> ChannelAttemptDebugLog {
+fn sanitize_attempt_log_for_persistence(
+    attempt: &ChannelAttemptDebugLog,
+) -> ChannelAttemptDebugLog {
     let mut sanitized = attempt.clone();
     sanitized.redirect_chain = sanitized
         .redirect_chain
@@ -109,7 +111,14 @@ fn sanitize_channel_log_for_persistence(channel_log: &ChannelDebugLog) -> Channe
         .iter()
         .map(|url| sanitize_url_for_persistence(url))
         .collect();
-    sanitized.final_reason = sanitized.final_reason.as_deref().map(sanitize_embedded_urls);
+    sanitized.final_reason = sanitized
+        .final_reason
+        .as_deref()
+        .map(sanitize_embedded_urls);
+    sanitized.screenshot_error_reason = sanitized
+        .screenshot_error_reason
+        .as_deref()
+        .map(sanitize_embedded_urls);
     sanitized.diagnostics_output = sanitized
         .diagnostics_output
         .as_deref()
@@ -204,6 +213,7 @@ fn build_resumed_channel_log(result: &ChannelResult) -> ChannelDebugLog {
         channel_url: result.url.clone(),
         final_verdict: result.status.to_string(),
         final_reason: result.error_reason.clone(),
+        screenshot_error_reason: result.screenshot_error_reason.clone(),
         ..ChannelDebugLog::default()
     }
 }
@@ -258,9 +268,7 @@ pub fn load_checkpoint_entries(checkpoint_file: &str) -> Vec<CheckpointResumeEnt
         }
     }
     if malformed > 0 {
-        log::warn!(
-            "Checkpoint {checkpoint_file}: skipped {malformed} malformed JSON line(s)"
-        );
+        log::warn!("Checkpoint {checkpoint_file}: skipped {malformed} malformed JSON line(s)");
     }
 
     by_index.into_values().collect()
@@ -361,8 +369,8 @@ pub fn write_entries_with_channel_logs(
         writeln!(log, "{}", sanitize_log_entry(&entry.log_entry)).map_err(AppError::Io)?;
         let serialized = serde_json::to_string(&sanitize_checkpoint_entry_for_persistence(entry))
             .map_err(|error| {
-                AppError::Parse(format!("Failed to serialize checkpoint result: {}", error))
-            })?;
+            AppError::Parse(format!("Failed to serialize checkpoint result: {}", error))
+        })?;
         writeln!(checkpoint, "{}", serialized).map_err(AppError::Io)?;
     }
 
@@ -401,6 +409,7 @@ mod tests {
             audio_channel_layout: None,
             audio_only: false,
             screenshot_path: None,
+            screenshot_error_reason: None,
             label_mismatches: Vec::new(),
             low_framerate: false,
             error_message: None,
@@ -422,6 +431,7 @@ mod tests {
             redirect_chain: vec![format!("{url}?token=redirect")],
             final_verdict: "Alive".to_string(),
             final_reason: Some(format!("Failure for {url}?token=reason")),
+            screenshot_error_reason: Some(format!("Capture failed for {url}?token=screenshot")),
             diagnostics_output: Some(format!("ffprobe input {url}?token=diag")),
             attempts: vec![ChannelAttemptDebugLog {
                 attempt: 1,
@@ -509,21 +519,17 @@ mod tests {
             .expect("channel log should persist");
         assert_eq!(loaded_log.channel_index, 8);
         assert!(loaded_log.channel_url.contains("token=REDACTED"));
-        assert!(
-            loaded_log
-                .diagnostics_output
-                .as_deref()
-                .unwrap_or_default()
-                .contains("token=REDACTED")
-        );
-        assert!(
-            loaded_log
-                .attempts
-                .first()
-                .and_then(|attempt| attempt.reason.as_deref())
-                .unwrap_or_default()
-                .contains("token=REDACTED")
-        );
+        assert!(loaded_log
+            .diagnostics_output
+            .as_deref()
+            .unwrap_or_default()
+            .contains("token=REDACTED"));
+        assert!(loaded_log
+            .attempts
+            .first()
+            .and_then(|attempt| attempt.reason.as_deref())
+            .unwrap_or_default()
+            .contains("token=REDACTED"));
 
         let _ = std::fs::remove_file(&log_file);
         let _ = std::fs::remove_file(&checkpoint_file);

@@ -11,7 +11,6 @@ use crate::commands::history;
 use crate::commands::settings;
 use crate::engine::{checker, connectivity, disk, ffmpeg, parser, proxy, resume, stream_proxy};
 use crate::error::AppError;
-use crate::models::settings::ScreenshotFormat;
 use crate::models::backend_perf::BackendPerfSample;
 use crate::models::channel::{Channel, ChannelResult, ChannelStatus};
 use crate::models::playlist::PlaylistPreview;
@@ -20,6 +19,7 @@ use crate::models::scan::{
     ScanResultBatchPayload, ScanSummary,
 };
 use crate::models::scan_log::{ChannelDebugLog, ScanDebugLog};
+use crate::models::settings::ScreenshotFormat;
 use crate::state::AppState;
 
 static NEXT_SCAN_RUN_ID: AtomicU64 = AtomicU64::new(1);
@@ -46,6 +46,7 @@ struct SharedUrlResult {
     audio_channel_layout: Option<String>,
     audio_only: bool,
     screenshot_path: Option<String>,
+    screenshot_error_reason: Option<String>,
     low_framerate: bool,
     stream_url: Option<String>,
     retry_count: Option<u32>,
@@ -77,12 +78,61 @@ impl SharedUrlResult {
             audio_channel_layout: None,
             audio_only: false,
             screenshot_path: None,
+            screenshot_error_reason: None,
             low_framerate: false,
             stream_url,
             retry_count,
             error_reason,
             channel_log,
         }
+    }
+}
+
+fn set_screenshot_capture_success(shared: &mut SharedUrlResult, path: String) {
+    shared.screenshot_path = Some(path);
+    shared.screenshot_error_reason = None;
+    shared.channel_log.screenshot_error_reason = None;
+}
+
+fn set_screenshot_capture_error(shared: &mut SharedUrlResult, reason: String) {
+    shared.screenshot_path = None;
+    shared.screenshot_error_reason = Some(reason.clone());
+    shared.channel_log.screenshot_error_reason = Some(reason);
+}
+
+fn apply_parallel_screenshot_outcome(
+    shared: &mut SharedUrlResult,
+    outcome: Result<Option<String>, AppError>,
+) {
+    match outcome {
+        Ok(Some(path)) => set_screenshot_capture_success(shared, path),
+        Ok(None) | Err(AppError::Cancelled) => {}
+        Err(error) => set_screenshot_capture_error(shared, error.to_string()),
+    }
+}
+
+fn apply_combined_screenshot_outcome(
+    shared: &mut SharedUrlResult,
+    primary_path: Option<String>,
+    primary_error_reason: Option<String>,
+    fallback_result: Option<Result<String, AppError>>,
+) {
+    if let Some(path) = primary_path {
+        set_screenshot_capture_success(shared, path);
+        return;
+    }
+
+    if let Some(result) = fallback_result {
+        match result {
+            Ok(path) => set_screenshot_capture_success(shared, path),
+            Err(AppError::Cancelled) => {}
+            Err(error) => set_screenshot_capture_error(shared, error.to_string()),
+        }
+        return;
+    }
+
+    if let Some(reason) = primary_error_reason {
+        set_screenshot_capture_error(shared, reason);
     }
 }
 
@@ -247,6 +297,7 @@ async fn compute_shared_url_result(
                 audio_channel_layout: None,
                 audio_only: false,
                 screenshot_path: None,
+                screenshot_error_reason: None,
                 low_framerate: false,
                 stream_url,
                 retry_count: (retry_count > 0).then_some(retry_count),
@@ -275,6 +326,7 @@ async fn compute_shared_url_result(
         audio_channel_layout: None,
         audio_only: false,
         screenshot_path: None,
+        screenshot_error_reason: None,
         low_framerate: false,
         stream_url,
         retry_count: (retry_count > 0).then_some(retry_count),
@@ -307,6 +359,7 @@ async fn compute_shared_url_result(
         match ffmpeg::run_combined_diagnostics(
             app,
             &target_url,
+            Some(channel_url),
             user_agent,
             screenshots_dir.unwrap_or(&String::new()),
             screenshot_file_name,
@@ -319,8 +372,7 @@ async fn compute_shared_url_result(
         .await
         {
             Ok(diag) => {
-                shared.audio_only =
-                    diag.track_presence.has_audio && !diag.track_presence.has_video;
+                shared.audio_only = diag.track_presence.has_audio && !diag.track_presence.has_video;
                 if let Some(info) = diag.video_info {
                     if !shared.audio_only {
                         shared.codec = Some(info.codec);
@@ -346,34 +398,50 @@ async fn compute_shared_url_result(
                 format_bitrate_kbps = diag.format_bitrate_kbps;
                 shared.channel_log.diagnostics_output = Some(diag.diagnostics_output);
 
-                // Screenshot: if combined run got it, use it; otherwise retry PNG
-                if let Some(path) = diag.screenshot_path {
-                    shared.screenshot_path = Some(path);
-                } else if want_screenshot
+                let png_fallback_result = if diag.screenshot_path.is_none()
+                    && want_screenshot
                     && screenshot_format == ScreenshotFormat::Webp
+                    && ffmpeg::should_retry_screenshot_as_png(
+                        diag.screenshot_error_reason.as_deref(),
+                    )
                     && !cancel.is_cancelled()
                 {
-                    if let Ok(path) = ffmpeg::capture_screenshot(
-                        app,
-                        &target_url,
-                        screenshots_dir.unwrap(),
-                        screenshot_file_name,
-                        user_agent,
-                        ScreenshotFormat::Png,
-                        cancel,
+                    Some(
+                        ffmpeg::capture_screenshot(
+                            app,
+                            &target_url,
+                            Some(channel_url),
+                            screenshots_dir.unwrap(),
+                            screenshot_file_name,
+                            user_agent,
+                            ScreenshotFormat::Png,
+                            cancel,
+                        )
+                        .await,
                     )
-                    .await
-                    {
-                        shared.screenshot_path = Some(path);
-                    }
-                }
+                } else {
+                    None
+                };
+                apply_combined_screenshot_outcome(
+                    &mut shared,
+                    diag.screenshot_path,
+                    diag.screenshot_error_reason,
+                    png_fallback_result,
+                );
             }
             Err(AppError::Cancelled) => {
                 drop(diagnostics_permit);
                 return Err(AppError::Cancelled);
             }
             Err(err) => {
-                log::warn!("Combined diagnostics failed for {}: {}", redacted_target_url, err);
+                log::warn!(
+                    "Combined diagnostics failed for {}: {}",
+                    redacted_target_url,
+                    err
+                );
+                if want_screenshot {
+                    set_screenshot_capture_error(&mut shared, err.to_string());
+                }
             }
         }
         drop(diagnostics_permit);
@@ -387,6 +455,7 @@ async fn compute_shared_url_result(
             ffmpeg::collect_probe_snapshot_with_timeout(
                 app,
                 &target_url,
+                Some(channel_url),
                 cancel,
                 Some(ffprobe_timeout_duration),
             )
@@ -396,12 +465,13 @@ async fn compute_shared_url_result(
 
         let screenshot_fut = async {
             if !want_screenshot || cancel.is_cancelled() {
-                return None;
+                return Ok(None);
             }
             let dir = screenshots_dir.unwrap();
             ffmpeg::capture_screenshot(
                 app,
                 &target_url,
+                Some(channel_url),
                 dir,
                 screenshot_file_name,
                 user_agent,
@@ -409,7 +479,7 @@ async fn compute_shared_url_result(
                 cancel,
             )
             .await
-            .ok()
+            .map(Some)
         };
 
         let (probe_result, screenshot_result) = tokio::join!(ffprobe_fut, screenshot_fut);
@@ -443,9 +513,7 @@ async fn compute_shared_url_result(
             shared.channel_log.diagnostics_output = Some(snapshot.ffprobe_output);
         }
 
-        if let Some(path) = screenshot_result {
-            shared.screenshot_path = Some(path);
-        }
+        apply_parallel_screenshot_outcome(&mut shared, screenshot_result);
 
         // Release permit before bitrate profiling to avoid starving other channels.
         drop(diagnostics_permit);
@@ -454,6 +522,7 @@ async fn compute_shared_url_result(
             match ffmpeg::profile_bitrate(
                 app,
                 &target_url,
+                Some(channel_url),
                 user_agent,
                 ffmpeg_bitrate_timeout_secs,
                 cancel,
@@ -465,7 +534,11 @@ async fn compute_shared_url_result(
                 }
                 Err(AppError::Cancelled) => {}
                 Err(err) => {
-                    log::warn!("Bitrate profiling failed for {}: {}", redacted_target_url, err);
+                    log::warn!(
+                        "Bitrate profiling failed for {}: {}",
+                        redacted_target_url,
+                        err
+                    );
                 }
             }
         }
@@ -898,15 +971,53 @@ fn source_mtime_ms(path: &str) -> Option<u64> {
     Some(duration.as_millis().min(u128::from(u64::MAX)) as u64)
 }
 
-fn playlist_preview_cache_key(config: &ScanConfig) -> String {
+pub(crate) fn playlist_preview_cache_key_from_parts(
+    file_path: &str,
+    source_identity: Option<&str>,
+    playlist_display_name: Option<&str>,
+    group_filter: Option<&str>,
+    channel_search: Option<&str>,
+) -> String {
     format!(
-        "{}|i:{}|n:{}|g:{}|s:{}",
-        config.file_path,
-        config.source_identity.as_deref().unwrap_or("*"),
-        config.playlist_display_name.as_deref().unwrap_or("*"),
-        config.group_filter.as_deref().unwrap_or("*"),
-        config.channel_search.as_deref().unwrap_or("*")
+        "{file_path}|i:{}|n:{}|g:{}|s:{}",
+        source_identity.unwrap_or("*"),
+        playlist_display_name.unwrap_or("*"),
+        group_filter.unwrap_or("*"),
+        channel_search.unwrap_or("*")
     )
+}
+
+fn playlist_preview_cache_key(config: &ScanConfig) -> String {
+    playlist_preview_cache_key_from_parts(
+        &config.file_path,
+        config.source_identity.as_deref(),
+        config.playlist_display_name.as_deref(),
+        config.group_filter.as_deref(),
+        config.channel_search.as_deref(),
+    )
+}
+
+pub(crate) async fn seed_cached_playlist_preview(
+    app: &AppHandle,
+    file_path: &str,
+    source_identity: Option<&str>,
+    playlist_display_name: Option<&str>,
+    group_filter: Option<&str>,
+    channel_search: Option<&str>,
+    preview: &PlaylistPreview,
+) {
+    let state = app.state::<Arc<AppState>>();
+    let cache_key = playlist_preview_cache_key_from_parts(
+        file_path,
+        source_identity,
+        playlist_display_name,
+        group_filter,
+        channel_search,
+    );
+    let source_mtime = source_mtime_ms(file_path);
+    state
+        .put_cached_playlist_preview(cache_key, preview.clone(), source_mtime)
+        .await;
 }
 
 async fn parse_playlist_with_cache(
@@ -921,6 +1032,11 @@ async fn parse_playlist_with_cache(
         .get_cached_playlist_preview(&cache_key, source_mtime)
         .await
     {
+        log::info!(
+            "Scan {}: using cached playlist preview for {}",
+            run_id,
+            config.file_path
+        );
         return Ok(cached);
     }
 
@@ -1234,8 +1350,10 @@ async fn execute_scan_run(
         .collect::<Vec<_>>();
     resumed_entries.sort_by_key(|entry| entry.result.index);
 
-    let resumed_indices: HashSet<usize> =
-        resumed_entries.iter().map(|entry| entry.result.index).collect();
+    let resumed_indices: HashSet<usize> = resumed_entries
+        .iter()
+        .map(|entry| entry.result.index)
+        .collect();
     if resumed_indices.is_empty() {
         let log_file_clone = log_file.clone();
         let checkpoint_file_clone = checkpoint_file.clone();
@@ -1339,8 +1457,12 @@ async fn execute_scan_run(
             let dir_clone = dir.clone();
             tokio::task::spawn_blocking(move || std::fs::create_dir_all(&dir_clone))
                 .await
-                .map_err(|e| AppError::Other(format!("Failed to create screenshots directory: {}", e)))?
-                .map_err(|e| AppError::Other(format!("Failed to create screenshots directory: {}", e)))?;
+                .map_err(|e| {
+                    AppError::Other(format!("Failed to create screenshots directory: {}", e))
+                })?
+                .map_err(|e| {
+                    AppError::Other(format!("Failed to create screenshots directory: {}", e))
+                })?;
         }
 
         // Write scan metadata for eviction logic
@@ -1624,7 +1746,9 @@ async fn execute_scan_run(
         }
 
         // Check if enough consecutive network failures have occurred to warrant a connectivity check
-        if consecutive_net_failures.load(Ordering::Relaxed) >= connectivity::CONSECUTIVE_FAILURE_THRESHOLD {
+        if consecutive_net_failures.load(Ordering::Relaxed)
+            >= connectivity::CONSECUTIVE_FAILURE_THRESHOLD
+        {
             if !connectivity::check_connectivity().await {
                 log::warn!("Network connectivity lost — pausing scan until recovery");
                 let _ = app.emit(
@@ -1706,8 +1830,12 @@ async fn execute_scan_run(
 
                 // Decay pressure counters periodically to make the system responsive to changes
                 if total_so_far > 100 {
-                    timeout_pressure.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v / 2)).ok();
-                    adaptive_success_count.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v / 2)).ok();
+                    timeout_pressure
+                        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v / 2))
+                        .ok();
+                    adaptive_success_count
+                        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v / 2))
+                        .ok();
                 }
             }
         }
@@ -1994,6 +2122,7 @@ async fn execute_scan_run(
                 audio_channel_layout: shared.audio_channel_layout.clone(),
                 audio_only: shared.audio_only,
                 screenshot_path: shared.screenshot_path.clone(),
+                screenshot_error_reason: shared.screenshot_error_reason.clone(),
                 label_mismatches: Vec::new(),
                 low_framerate: shared.low_framerate,
                 error_message: None,
@@ -2282,8 +2411,7 @@ pub async fn reset_scan(app: AppHandle, window: Window) -> Result<(), AppError> 
 }
 
 /// Shared HTTP clients for quick-check operations, keyed by TLS validation mode.
-static QUICK_CHECK_CLIENT_STRICT: std::sync::OnceLock<reqwest::Client> =
-    std::sync::OnceLock::new();
+static QUICK_CHECK_CLIENT_STRICT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
 static QUICK_CHECK_CLIENT_INSECURE: std::sync::OnceLock<reqwest::Client> =
     std::sync::OnceLock::new();
 
@@ -2369,6 +2497,7 @@ pub async fn quick_check_channel(
     result.stream_url = stream_url;
     result.latency_ms = latency_ms;
     result.error_reason = error_reason;
+    result.screenshot_error_reason = None;
     Ok(result)
 }
 
@@ -2409,6 +2538,7 @@ mod tests {
             audio_channel_layout: None,
             audio_only: false,
             screenshot_path: None,
+            screenshot_error_reason: None,
             label_mismatches: if mismatched {
                 vec!["Label mismatch".to_string()]
             } else {
@@ -2444,6 +2574,32 @@ mod tests {
         }
     }
 
+    fn make_shared_result() -> SharedUrlResult {
+        SharedUrlResult {
+            status: ChannelStatus::Alive,
+            drm_system: None,
+            latency_ms: None,
+            codec: None,
+            resolution: None,
+            width: None,
+            height: None,
+            fps: None,
+            hdr_format: None,
+            video_bitrate: None,
+            audio_bitrate: None,
+            audio_codec: None,
+            audio_channel_layout: None,
+            audio_only: false,
+            screenshot_path: None,
+            screenshot_error_reason: None,
+            low_framerate: false,
+            stream_url: Some("https://example.com/live.m3u8".to_string()),
+            retry_count: None,
+            error_reason: None,
+            channel_log: ChannelDebugLog::default(),
+        }
+    }
+
     #[test]
     fn canonicalize_stream_url_removes_default_port_and_fragment() {
         assert_eq!(
@@ -2461,6 +2617,20 @@ mod tests {
         assert_eq!(
             canonicalize_stream_url("  not-a-valid-url  "),
             "not-a-valid-url"
+        );
+    }
+
+    #[test]
+    fn playlist_preview_cache_key_from_parts_matches_scan_config_shape() {
+        assert_eq!(
+            playlist_preview_cache_key_from_parts(
+                "/tmp/playlist.m3u8",
+                Some("saved:abc"),
+                Some("My Playlist"),
+                Some("Sports"),
+                Some("arsenal"),
+            ),
+            "/tmp/playlist.m3u8|i:saved:abc|n:My Playlist|g:Sports|s:arsenal"
         );
     }
 
@@ -2573,6 +2743,84 @@ mod tests {
     #[test]
     fn compute_playlist_score_returns_none_for_empty_scans() {
         assert!(compute_playlist_score(&[], 0).is_none());
+    }
+
+    #[test]
+    fn parallel_screenshot_outcome_preserves_success_path() {
+        let mut shared = make_shared_result();
+        shared.screenshot_error_reason = Some("old error".to_string());
+        shared.channel_log.screenshot_error_reason = Some("old error".to_string());
+
+        apply_parallel_screenshot_outcome(&mut shared, Ok(Some("/tmp/channel.png".to_string())));
+
+        assert_eq!(shared.screenshot_path.as_deref(), Some("/tmp/channel.png"));
+        assert!(shared.screenshot_error_reason.is_none());
+        assert!(shared.channel_log.screenshot_error_reason.is_none());
+    }
+
+    #[test]
+    fn parallel_screenshot_outcome_preserves_error_reason() {
+        let mut shared = make_shared_result();
+
+        apply_parallel_screenshot_outcome(
+            &mut shared,
+            Err(AppError::Other(
+                "ffmpeg exited with 1 - no stderr output".to_string(),
+            )),
+        );
+
+        assert!(shared.screenshot_path.is_none());
+        assert_eq!(
+            shared.screenshot_error_reason.as_deref(),
+            Some("ffmpeg exited with 1 - no stderr output")
+        );
+        assert_eq!(
+            shared.channel_log.screenshot_error_reason.as_deref(),
+            Some("ffmpeg exited with 1 - no stderr output")
+        );
+    }
+
+    #[test]
+    fn combined_screenshot_outcome_uses_primary_path() {
+        let mut shared = make_shared_result();
+        shared.screenshot_error_reason = Some("old error".to_string());
+        shared.channel_log.screenshot_error_reason = Some("old error".to_string());
+
+        apply_combined_screenshot_outcome(
+            &mut shared,
+            Some("/tmp/combined.webp".to_string()),
+            Some("ignored error".to_string()),
+            Some(Ok("/tmp/fallback.png".to_string())),
+        );
+
+        assert_eq!(
+            shared.screenshot_path.as_deref(),
+            Some("/tmp/combined.webp")
+        );
+        assert!(shared.screenshot_error_reason.is_none());
+        assert!(shared.channel_log.screenshot_error_reason.is_none());
+    }
+
+    #[test]
+    fn combined_screenshot_outcome_preserves_fallback_failure_reason() {
+        let mut shared = make_shared_result();
+
+        apply_combined_screenshot_outcome(
+            &mut shared,
+            None,
+            Some("primary failure".to_string()),
+            Some(Err(AppError::Other("fallback failure".to_string()))),
+        );
+
+        assert!(shared.screenshot_path.is_none());
+        assert_eq!(
+            shared.screenshot_error_reason.as_deref(),
+            Some("fallback failure")
+        );
+        assert_eq!(
+            shared.channel_log.screenshot_error_reason.as_deref(),
+            Some("fallback failure")
+        );
     }
 
     #[tokio::test]

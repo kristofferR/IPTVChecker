@@ -67,9 +67,7 @@ fn parse_xtream_recent_value(value: &str) -> Option<XtreamRecentValue> {
         return None;
     }
     let server = normalize_xtream_server(&parsed.server)?;
-    let password = parsed
-        .password
-        .filter(|p| !p.is_empty());
+    let password = parsed.password.filter(|p| !p.is_empty());
     Some(XtreamRecentValue {
         server,
         username,
@@ -177,24 +175,22 @@ fn find_saved_playlist_for_recent(
                 &source.username,
             )?;
 
-            Ok(entries.into_iter().find(|entry| {
-                match &entry.source {
-                    SavedPlaylistSource::Xtream {
-                        servers, username, ..
-                    } => {
-                        if username.trim() != source.username {
-                            return false;
-                        }
-
-                        servers.iter().any(|server| {
-                            crate::commands::saved::source_identity_for_xtream(server, username)
-                                .ok()
-                                .as_deref()
-                                == Some(target.as_str())
-                        })
+            Ok(entries.into_iter().find(|entry| match &entry.source {
+                SavedPlaylistSource::Xtream {
+                    servers, username, ..
+                } => {
+                    if username.trim() != source.username {
+                        return false;
                     }
-                    _ => false,
+
+                    servers.iter().any(|server| {
+                        crate::commands::saved::source_identity_for_xtream(server, username)
+                            .ok()
+                            .as_deref()
+                            == Some(target.as_str())
+                    })
                 }
+                _ => false,
             }))
         }
     }
@@ -216,8 +212,7 @@ fn load_recent_playlists(app: &tauri::AppHandle) -> Vec<RecentPlaylistEntry> {
     let Some(value) = store.get(RECENT_STORE_KEY) else {
         return default_recent_playlists();
     };
-    let entries =
-        serde_json::from_value::<Vec<RecentPlaylistEntry>>(value).unwrap_or_default();
+    let entries = serde_json::from_value::<Vec<RecentPlaylistEntry>>(value).unwrap_or_default();
     if entries.is_empty() {
         return default_recent_playlists();
     }
@@ -247,8 +242,8 @@ fn sanitize_recent_playlists_inner(
             continue;
         }
 
-        let (entry_kind, entry_value, entry_label, entry_saved_playlist_id) =
-            if entry.kind == RecentPlaylistKind::Url
+        let (entry_kind, entry_value, entry_label, entry_saved_playlist_id) = if entry.kind
+            == RecentPlaylistKind::Url
             && raw_value == LEGACY_DEFAULT_PLAYLIST_URL
             && entry.label.trim() == LEGACY_DEFAULT_PLAYLIST_LABEL
         {
@@ -314,15 +309,15 @@ fn sanitize_recent_playlists_inner(
                     RecentPlaylistKind::Url => {
                         crate::commands::saved::source_identity_for_url(&value).ok()
                     }
-                    RecentPlaylistKind::Xtream => parse_xtream_recent_value(&value).and_then(
-                        |source| {
+                    RecentPlaylistKind::Xtream => {
+                        parse_xtream_recent_value(&value).and_then(|source| {
                             crate::commands::saved::source_identity_for_xtream(
                                 &source.server,
                                 &source.username,
                             )
                             .ok()
-                        },
-                    ),
+                        })
+                    }
                 }
                 .as_deref(),
                 match entry_kind {
@@ -342,9 +337,8 @@ fn sanitize_recent_playlists_inner(
         };
 
         let saved_playlist_id = if let Some(app) = app {
-            let validated_saved_entry = entry_saved_playlist_id
-                .as_deref()
-                .and_then(|id| match crate::commands::saved::saved_playlist_by_id(app, id) {
+            let validated_saved_entry = entry_saved_playlist_id.as_deref().and_then(|id| {
+                match crate::commands::saved::saved_playlist_by_id(app, id) {
                     Ok(entry) => entry,
                     Err(error) => {
                         log::warn!(
@@ -353,7 +347,8 @@ fn sanitize_recent_playlists_inner(
                         );
                         None
                     }
-                });
+                }
+            });
 
             let matched_saved_entry = if validated_saved_entry.is_some() {
                 None
@@ -599,9 +594,9 @@ pub async fn clear_recent_playlists(
 mod tests {
     use super::{
         build_label, default_recent_playlists, parse_xtream_recent_value,
-        sanitize_recent_playlists_for_tests, DEFAULT_PLAYLIST_LABEL,
-        DEFAULT_PLAYLIST_URL, LEGACY_DEFAULT_PLAYLIST_LABEL,
-        LEGACY_DEFAULT_PLAYLIST_URL, RecentPlaylistEntry, RecentPlaylistKind,
+        sanitize_recent_playlists_for_tests, RecentPlaylistEntry, RecentPlaylistKind,
+        DEFAULT_PLAYLIST_LABEL, DEFAULT_PLAYLIST_URL, LEGACY_DEFAULT_PLAYLIST_LABEL,
+        LEGACY_DEFAULT_PLAYLIST_URL,
     };
 
     #[test]

@@ -1,6 +1,7 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use reqwest::header::{HeaderValue, CONTENT_TYPE, RANGE, USER_AGENT};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::Manager;
 use url::{Host, Url};
@@ -27,6 +28,64 @@ pub fn encode_proxy_url(original: &str) -> String {
 pub fn decode_proxy_url(encoded: &str) -> Option<String> {
     let bytes = URL_SAFE_NO_PAD.decode(encoded).ok()?;
     String::from_utf8(bytes).ok()
+}
+
+pub fn build_streaming_proxy_url(port: u16, original: &str) -> String {
+    let encoded: String = url::form_urlencoded::byte_serialize(original.as_bytes()).collect();
+    format!("http://127.0.0.1:{port}/stream?url={encoded}")
+}
+
+async fn streaming_proxy_port_is_alive(port: u16) -> bool {
+    if port == 0 {
+        return false;
+    }
+
+    matches!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(250),
+            tokio::net::TcpStream::connect(("127.0.0.1", port)),
+        )
+        .await,
+        Ok(Ok(_))
+    )
+}
+
+pub async fn ensure_streaming_proxy_port(app: tauri::AppHandle) -> u16 {
+    let state = app.state::<Arc<AppState>>();
+    let port = state.streaming_proxy_port.load(Ordering::Relaxed);
+    if streaming_proxy_port_is_alive(port).await {
+        return port;
+    }
+    if port > 0 {
+        log::warn!(
+            "[StreamProxy] Stored proxy port {} is unreachable, restarting listener",
+            port
+        );
+    }
+
+    let _guard = state.streaming_proxy_start_lock.lock().await;
+    let port = state.streaming_proxy_port.load(Ordering::Relaxed);
+    if streaming_proxy_port_is_alive(port).await {
+        return port;
+    }
+
+    match start_streaming_proxy(app.clone()).await {
+        Ok(port) => {
+            state.streaming_proxy_port.store(port, Ordering::Relaxed);
+            log::info!(
+                "[StreamProxy] Lazily started localhost streaming proxy on port {}",
+                port
+            );
+            port
+        }
+        Err(error) => {
+            log::warn!(
+                "[StreamProxy] Failed to start localhost streaming proxy: {}",
+                error
+            );
+            0
+        }
+    }
 }
 
 fn is_m3u8_response(content_type: &str, url: &str) -> bool {
@@ -720,6 +779,17 @@ mod tests {
     #[test]
     fn decode_invalid_base64_returns_none() {
         assert!(decode_proxy_url("!!!invalid!!!").is_none());
+    }
+
+    #[test]
+    fn build_streaming_proxy_url_percent_encodes_original_url() {
+        assert_eq!(
+            build_streaming_proxy_url(
+                61234,
+                "http://example.com/live/123.ts?token=a+b&name=V SPORT"
+            ),
+            "http://127.0.0.1:61234/stream?url=http%3A%2F%2Fexample.com%2Flive%2F123.ts%3Ftoken%3Da%2Bb%26name%3DV+SPORT"
+        );
     }
 
     #[test]

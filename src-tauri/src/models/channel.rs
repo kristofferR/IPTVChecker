@@ -169,6 +169,8 @@ pub struct ChannelResult {
     #[serde(default)]
     pub audio_only: bool,
     pub screenshot_path: Option<String>,
+    #[serde(default)]
+    pub screenshot_error_reason: Option<String>,
     pub label_mismatches: Vec<String>,
     pub low_framerate: bool,
     pub error_message: Option<String>,
@@ -215,6 +217,7 @@ mod tests {
             audio_channel_layout: None,
             audio_only: false,
             screenshot_path: None,
+            screenshot_error_reason: None,
             label_mismatches: Vec::new(),
             low_framerate: false,
             error_message: None,

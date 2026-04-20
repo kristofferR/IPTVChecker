@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { findDuplicateChannelIndices } from "../src/lib/duplicates";
+import {
+  findDuplicateChannelIndices,
+  findDuplicateChannelIndicesChunked,
+} from "../src/lib/duplicates";
 import type { ChannelResult } from "../src/lib/types";
 
 function makeResult(index: number, url: string): ChannelResult {
@@ -29,6 +32,7 @@ function makeResult(index: number, url: string): ChannelResult {
     audio_channel_layout: null,
     audio_only: false,
     screenshot_path: null,
+    screenshot_error_reason: null,
     label_mismatches: [],
     low_framerate: false,
     error_message: null,
@@ -79,5 +83,20 @@ describe("findDuplicateChannelIndices", () => {
     const results = [makeResult(0, " not a url "), makeResult(1, "not a url")];
 
     expect(Array.from(findDuplicateChannelIndices(results))).toEqual([0, 1]);
+  });
+
+  it("matches the synchronous duplicate set when chunked", async () => {
+    const results = [
+      makeResult(0, "http://example.com/live/stream.ts?b=2&a=1"),
+      makeResult(1, "http://example.com/live/stream.ts?a=1&b=2"),
+      makeResult(2, "http://example.com/live/other.ts"),
+      makeResult(3, "http://example.com/live/stream.ts?a=1&b=2#frag"),
+    ];
+
+    const chunked = await findDuplicateChannelIndicesChunked(results, {
+      batchSize: 1,
+    });
+
+    expect(Array.from(chunked ?? []).sort((a, b) => a - b)).toEqual([0, 1, 3]);
   });
 });
