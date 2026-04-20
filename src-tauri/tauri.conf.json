@@ -55,7 +55,11 @@
         "section": "utility"
       },
       "rpm": {
-        "depends": ["webkit2gtk4.1", "gtk3", "libayatana-appindicator-gtk3"]
+        "depends": ["webkit2gtk4.1", "gtk3", "libayatana-appindicator-gtk3"],
+        "compression": {
+          "type": "zstd",
+          "level": 3
+        }
       },
       "appimage": {
         "bundleMediaFramework": true
