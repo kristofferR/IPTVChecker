@@ -46,6 +46,10 @@
     Intel Mac, Windows ARM, Linux ARM, <code>.deb</code>/<code>.rpm</code>, or Windows portable?
     <a href="https://github.com/kristofferR/IPTVChecker/releases/latest">See all files →</a>
   </sub>
+  <br />
+  <sub>
+    Homebrew for macOS/Linux and other package managers are mentioned further down in repo
+  </sub>
 </p>
 
 ---
