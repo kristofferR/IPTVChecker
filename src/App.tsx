@@ -1051,9 +1051,6 @@ export default function App() {
           };
           getStore().setUpdateNotice(notice);
           localStorage.setItem(UPDATE_CACHE_KEY, JSON.stringify(notice));
-          if (force) {
-            getStore().setMenuInfo(`Update available: v${latestVersion}`);
-          }
           return;
         }
 
