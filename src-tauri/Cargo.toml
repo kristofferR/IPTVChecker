@@ -1,6 +1,6 @@
 [package]
 name = "iptv-checker"
-version = "1.4.1"
+version = "1.4.2"
 description = "Cross-platform IPTV Stream Checker"
 authors = []
 edition = "2021"
