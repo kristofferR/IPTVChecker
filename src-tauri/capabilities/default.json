@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Least-privilege capability for primary and spawned app windows (`main*`). Granted permissions are limited to: core IPC defaults for command invocation, dialog open/save for playlist and export pickers, event listen/unlisten for backend and menu events, start-dragging for the custom toolbar titlebar behavior, OS info for platform detection, native notification APIs, and window-state persistence (size, position, maximized, fullscreen).",
+  "description": "Least-privilege capability for primary and spawned app windows (`main*`). Granted permissions are limited to: core IPC defaults for command invocation, dialog open/save for playlist and export pickers, event listen/unlisten for backend and menu events, start-dragging for the custom toolbar titlebar behavior, OS info for platform detection, native notification APIs, window-state persistence (size, position, maximized, fullscreen), and opener with a scope restricted to the project's GitHub releases URLs (used by the update banner's Download button).",
   "windows": ["main*", "settings", "log"],
   "permissions": [
     "core:default",
@@ -20,6 +20,10 @@
     "os:default",
     "notification:default",
     "log:default",
-    "window-state:default"
+    "window-state:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://github.com/kristofferR/IPTVChecker/*" }]
+    }
   ]
 }
