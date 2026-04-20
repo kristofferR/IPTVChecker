@@ -11,6 +11,7 @@ import {
 } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { setLiquidGlassEffect } from "tauri-plugin-liquid-glass-api";
@@ -2742,15 +2743,18 @@ export default function App() {
             Update available: <strong>v{updateNotice.latest_version}</strong>
             {appVersion ? ` (current v${appVersion})` : ""}.
           </span>
-          <a
-            href={updateNotice.release_url}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            type="button"
+            onClick={() => {
+              void openUrl(updateNotice.release_url).catch((err) => {
+                logger.error("[Update] Failed to open release URL:", errorToString(err));
+              });
+            }}
             className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-emerald-400/30 hover:bg-emerald-500/15 transition-colors"
           >
             Download
             <ExternalLink className="w-3.5 h-3.5" />
-          </a>
+          </button>
           <button
             onClick={() => {
               getStore().setUpdateNotice(null);
