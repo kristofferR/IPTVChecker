@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LoaderCircle, Maximize, Pause, PictureInPicture2, Play, Square, Volume2, VolumeX } from "lucide-react";
+import { AlertTriangle, LoaderCircle, Maximize, Pause, PictureInPicture2, Play, Square, Volume2, VolumeX } from "lucide-react";
 
 interface StreamPlayerProps {
   playerState: "idle" | "loading" | "playing" | "error";
   errorMessage: string | null;
   isPaused: boolean;
+  isRecovering: boolean;
+  recoveryAttempt: number | null;
+  recoveryMessage: string | null;
   volume: number;
   muted: boolean;
   containerRef?: React.RefObject<HTMLDivElement | null>;
@@ -22,6 +25,9 @@ export function StreamPlayer({
   playerState,
   errorMessage,
   isPaused,
+  isRecovering,
+  recoveryAttempt,
+  recoveryMessage,
   volume,
   muted,
   containerRef,
@@ -72,9 +78,23 @@ export function StreamPlayer({
 
       {/* Loading overlay */}
       {playerState === "loading" && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/60">
+        <div
+          className={`absolute inset-0 flex flex-col items-center justify-center gap-2 ${
+            isRecovering ? "bg-amber-950/65" : "bg-black/60"
+          }`}
+        >
           <LoaderCircle className="h-6 w-6 animate-spin text-white" />
-          <span className="text-[12px] text-white/80 font-medium">Connecting...</span>
+          <span className="text-[12px] font-medium text-white/85">
+            {isRecovering ? recoveryMessage ?? "Reconnecting..." : "Connecting..."}
+          </span>
+          {isRecovering && (
+            <div className="flex items-center gap-1.5 text-[11px] text-amber-100/85">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              <span>
+                Trying a clean reconnect{recoveryAttempt ? ` (${recoveryAttempt}/2)` : ""}
+              </span>
+            </div>
+          )}
         </div>
       )}
 

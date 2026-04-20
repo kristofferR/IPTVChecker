@@ -534,6 +534,9 @@ function SelectedChannelSidebar({
         playerState={streamPlayer.playerState}
         errorMessage={streamPlayer.errorMessage}
         isPaused={streamPlayer.isPaused}
+        isRecovering={streamPlayer.isRecovering}
+        recoveryAttempt={streamPlayer.recoveryAttempt}
+        recoveryMessage={streamPlayer.recoveryMessage}
         volume={streamPlayer.volume}
         muted={streamPlayer.muted}
         videoElement={streamPlayer.videoElement}

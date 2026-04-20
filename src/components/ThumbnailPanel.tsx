@@ -25,6 +25,9 @@ interface ThumbnailPanelProps {
   playerState?: "idle" | "loading" | "playing" | "error";
   errorMessage?: string | null;
   isPaused?: boolean;
+  isRecovering?: boolean;
+  recoveryAttempt?: number | null;
+  recoveryMessage?: string | null;
   volume?: number;
   muted?: boolean;
   videoElement?: HTMLVideoElement;
@@ -52,6 +55,9 @@ export function ThumbnailPanel({
   playerState = "idle",
   errorMessage: playerErrorMessage,
   isPaused,
+  isRecovering,
+  recoveryAttempt,
+  recoveryMessage,
   volume,
   muted,
   videoElement,
@@ -243,6 +249,9 @@ export function ThumbnailPanel({
           playerState={playerState}
           errorMessage={playerErrorMessage ?? null}
           isPaused={isPaused ?? false}
+          isRecovering={isRecovering ?? false}
+          recoveryAttempt={recoveryAttempt ?? null}
+          recoveryMessage={recoveryMessage ?? null}
           volume={volume ?? 0.75}
           muted={muted ?? false}
           onTogglePause={onTogglePause}
@@ -524,6 +533,9 @@ export function ThumbnailPanel({
                   playerState={playerState}
                   errorMessage={playerErrorMessage ?? null}
                   isPaused={isPaused ?? false}
+                  isRecovering={isRecovering ?? false}
+                  recoveryAttempt={recoveryAttempt ?? null}
+                  recoveryMessage={recoveryMessage ?? null}
                   volume={volume ?? 0.75}
                   muted={muted ?? false}
                   onTogglePause={onTogglePause}
