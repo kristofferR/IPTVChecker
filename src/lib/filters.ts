@@ -64,6 +64,8 @@ function parseAudioLayout(value: string | null | undefined): number | null {
   if (!value) return null;
   const trimmed = value.trim().toLowerCase();
   if (!trimmed) return null;
+  if (trimmed === "stereo") return 2;
+  if (trimmed === "mono") return 1;
 
   const numeric = trimmed.endsWith(" ch")
     ? Number.parseFloat(trimmed.slice(0, -3))

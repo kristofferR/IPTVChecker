@@ -29,7 +29,7 @@ export const COLUMN_DEFINITIONS: ColumnDefinition[] = [
   { key: "audio", label: "Audio", defaultWidth: 84, minWidth: 66, align: "right" },
   {
     key: "audio_layout",
-    label: "Audio Channels",
+    label: "Channels",
     defaultWidth: 92,
     minWidth: 72,
     align: "center",
