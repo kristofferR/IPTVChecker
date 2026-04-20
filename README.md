@@ -13,6 +13,41 @@
   <img src="docs/screenshot.png" alt="IPTV Checker screenshot" width="720">
 </p>
 
+<h3 align="center">Download</h3>
+
+<table align="center">
+  <tr>
+    <td align="center" width="220">
+      <a href="https://github.com/kristofferR/IPTVChecker/releases/download/v1.4.0/IPTV.Checker_1.4.0_mac_arm.dmg">
+        <img src="docs/icons/download.svg" width="56" height="56" alt=""><br>
+        <strong>Download for macOS</strong><br>
+        <sub>Apple Silicon &middot; .dmg</sub>
+      </a>
+    </td>
+    <td align="center" width="220">
+      <a href="https://github.com/kristofferR/IPTVChecker/releases/download/v1.4.0/IPTV.Checker_1.4.0_win_x64_setup.exe">
+        <img src="docs/icons/download.svg" width="56" height="56" alt=""><br>
+        <strong>Download for Windows</strong><br>
+        <sub>64-bit installer &middot; .exe</sub>
+      </a>
+    </td>
+    <td align="center" width="220">
+      <a href="https://github.com/kristofferR/IPTVChecker/releases/download/v1.4.0/IPTV.Checker_1.4.0_lin_x64.AppImage">
+        <img src="docs/icons/download.svg" width="56" height="56" alt=""><br>
+        <strong>Download for Linux</strong><br>
+        <sub>AppImage &middot; x64</sub>
+      </a>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <sub>
+    Intel Mac, Windows ARM, Linux ARM, <code>.deb</code>/<code>.rpm</code>, or Windows portable?
+    <a href="https://github.com/kristofferR/IPTVChecker/releases/latest">See all files →</a>
+  </sub>
+</p>
+
 ---
 
 ## Features
@@ -68,7 +103,7 @@ brew install --adopt iptv-checker
 
 ### All platforms
 
-Download the latest release from the [Releases](https://github.com/kristofferR/IPTVChecker/releases/latest) page.
+The buttons above link to the default installer for each OS. Every architecture and package format is attached to each [GitHub release](https://github.com/kristofferR/IPTVChecker/releases/latest):
 
 | Platform | Architecture | Files |
 |----------|-------------|-------|
