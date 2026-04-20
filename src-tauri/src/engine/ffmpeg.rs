@@ -1066,34 +1066,40 @@ fn detect_hdr_format_from_ffprobe(stream: &FfprobeCombinedStream) -> Option<Stri
 
 fn normalize_audio_channel_layout(raw: &str, channels: Option<u32>) -> Option<String> {
     let lower = raw.trim().to_ascii_lowercase();
-    if lower.is_empty() {
-        return None;
+
+    match lower.as_str() {
+        "stereo" | "2.0" | "2" => return Some("Stereo".to_string()),
+        "mono" | "1.0" | "1" => return Some("Mono".to_string()),
+        "quad" => return Some("4.0".to_string()),
+        "hexagonal" => return Some("6.0".to_string()),
+        "octagonal" => return Some("8.0".to_string()),
+        _ => {}
     }
 
-    if let Some(captures) = AUDIO_LAYOUT_VALUE_RE.captures(&lower) {
-        return captures
-            .get(1)
-            .map(|value| value.as_str().to_string())
-            .filter(|value| audio_layout_score(value.as_str()).is_some_and(|score| score > 2.0));
-    }
-
-    let normalized = match lower.as_str() {
-        "quad" => Some("4.0".to_string()),
-        "hexagonal" => Some("6.0".to_string()),
-        "octagonal" => Some("8.0".to_string()),
-        _ => None,
-    };
-    if normalized.is_some() {
-        return normalized;
-    }
-
-    channels.and_then(|count| {
-        if count > 2 {
-            Some(format!("{count} ch"))
-        } else {
-            None
+    if !lower.is_empty() {
+        if let Some(captures) = AUDIO_LAYOUT_VALUE_RE.captures(&lower) {
+            if let Some(value) = captures.get(1) {
+                if let Some(score) = audio_layout_score(value.as_str()) {
+                    if score > 2.0 {
+                        return Some(value.as_str().to_string());
+                    }
+                    if (score - 2.0).abs() < f64::EPSILON {
+                        return Some("Stereo".to_string());
+                    }
+                    if (score - 1.0).abs() < f64::EPSILON {
+                        return Some("Mono".to_string());
+                    }
+                }
+            }
         }
-    })
+    }
+
+    match channels {
+        Some(1) => Some("Mono".to_string()),
+        Some(2) => Some("Stereo".to_string()),
+        Some(count) if count > 2 => Some(format!("{count} ch")),
+        _ => None,
+    }
 }
 
 fn audio_layout_score(value: &str) -> Option<f64> {
@@ -2621,7 +2627,7 @@ Input #0, mpegts, from 'http://example.com/stream':
         let a = audio.unwrap();
         assert_eq!(a.codec, "AAC");
         assert_eq!(a.bitrate_kbps, Some(127));
-        assert_eq!(a.channel_layout, None);
+        assert_eq!(a.channel_layout, Some("Stereo".to_string()));
 
         assert_eq!(fmt_br, None); // "bitrate: N/A"
     }
