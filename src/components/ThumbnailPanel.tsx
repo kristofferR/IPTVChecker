@@ -398,18 +398,6 @@ export function ThumbnailPanel({
                 <p className="font-medium text-[12px]">{result.fps} fps</p>
               </div>
             )}
-            {result.hdr_format && (
-              <div>
-                <span className="text-text-tertiary">HDR</span>
-                <p className="font-medium text-[12px]">{result.hdr_format}</p>
-              </div>
-            )}
-            {result.audio_channel_layout && (
-              <div>
-                <span className="text-text-tertiary">Audio Layout</span>
-                <p className="font-medium text-[12px]">{result.audio_channel_layout}</p>
-              </div>
-            )}
           </>
         )}
       </div>
