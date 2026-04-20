@@ -33,6 +33,7 @@ function makeResult(
     audio_channel_layout: null,
     audio_only: false,
     screenshot_path: null,
+    screenshot_error_reason: null,
     label_mismatches: [],
     low_framerate: false,
     error_message: null,

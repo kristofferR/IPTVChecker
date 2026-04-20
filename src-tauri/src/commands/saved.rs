@@ -107,8 +107,8 @@ pub(crate) fn path_source_identity(path: &str) -> String {
 
 fn normalized_url_string(url: &str) -> Result<String, AppError> {
     let trimmed = url.trim();
-    let parsed = Url::parse(trimmed)
-        .map_err(|_| AppError::Parse("Invalid playlist URL".to_string()))?;
+    let parsed =
+        Url::parse(trimmed).map_err(|_| AppError::Parse("Invalid playlist URL".to_string()))?;
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
         return Err(AppError::Parse(
             "Invalid playlist URL: must start with http:// or https://".to_string(),
@@ -145,7 +145,9 @@ fn sanitize_saved_playlist_entry(
 ) -> Result<SavedPlaylistEntry, AppError> {
     let id = entry.id.trim().to_string();
     if id.is_empty() {
-        return Err(AppError::Other("Saved playlist id cannot be empty".to_string()));
+        return Err(AppError::Other(
+            "Saved playlist id cannot be empty".to_string(),
+        ));
     }
 
     let source = match entry.source {
@@ -178,9 +180,7 @@ fn sanitize_saved_playlist_entry(
             let password = password
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| {
-                    AppError::Parse("Xtream password cannot be empty".to_string())
-                })?;
+                .ok_or_else(|| AppError::Parse("Xtream password cannot be empty".to_string()))?;
 
             let mut normalized_servers = Vec::new();
             let mut seen = HashSet::new();
@@ -254,9 +254,8 @@ fn load_saved_playlists_raw(app: &tauri::AppHandle) -> Result<Vec<SavedPlaylistE
     let Some(value) = store.get(SAVED_PLAYLISTS_STORE_KEY) else {
         return Ok(Vec::new());
     };
-    serde_json::from_value::<Vec<SavedPlaylistEntry>>(value).map_err(|error| {
-        AppError::Other(format!("Failed to parse saved playlists: {error}"))
-    })
+    serde_json::from_value::<Vec<SavedPlaylistEntry>>(value)
+        .map_err(|error| AppError::Other(format!("Failed to parse saved playlists: {error}")))
 }
 
 fn save_saved_playlists(app: &tauri::AppHandle, entries: &[SavedPlaylistEntry]) {
@@ -496,10 +495,7 @@ pub async fn upsert_saved_playlist(
     let entries = persist_saved_playlists(&app, entries);
     crate::commands::recent::refresh_recent_menu(&app);
 
-    Ok(SavedPlaylistUpsertResult {
-        entry,
-        entries,
-    })
+    Ok(SavedPlaylistUpsertResult { entry, entries })
 }
 
 #[tauri::command]
@@ -509,7 +505,9 @@ pub async fn delete_saved_playlist(
 ) -> Result<Vec<SavedPlaylistEntry>, AppError> {
     let target = id.trim();
     if target.is_empty() {
-        return Err(AppError::Other("Saved playlist id cannot be empty".to_string()));
+        return Err(AppError::Other(
+            "Saved playlist id cannot be empty".to_string(),
+        ));
     }
 
     let mut entries = load_saved_playlists(&app)?;
@@ -666,8 +664,9 @@ pub async fn open_saved_playlist(
                         if let Some(saved_entry) =
                             entries.iter_mut().find(|value| value.id == entry.id)
                         {
-                            if let SavedPlaylistSource::Xtream { preferred_server, .. } =
-                                &mut saved_entry.source
+                            if let SavedPlaylistSource::Xtream {
+                                preferred_server, ..
+                            } = &mut saved_entry.source
                             {
                                 *preferred_server = Some(server);
                             }
@@ -688,7 +687,22 @@ pub async fn open_saved_playlist(
         }
     };
 
-    apply_persisted_playlist_metadata(&app, &mut preview, Some(&entry.id), Some(&entry.display_name))?;
+    apply_persisted_playlist_metadata(
+        &app,
+        &mut preview,
+        Some(&entry.id),
+        Some(&entry.display_name),
+    )?;
+    crate::commands::scan::seed_cached_playlist_preview(
+        &app,
+        &preview.file_path,
+        preview.source_identity.as_deref(),
+        Some(&preview.file_name),
+        group_filter.as_deref(),
+        channel_search.as_deref(),
+        &preview,
+    )
+    .await;
     Ok(preview)
 }
 
@@ -745,7 +759,10 @@ mod tests {
                 ..
             } => {
                 assert_eq!(servers, vec!["https://demo.example.com".to_string()]);
-                assert_eq!(preferred_server, Some("https://demo.example.com".to_string()));
+                assert_eq!(
+                    preferred_server,
+                    Some("https://demo.example.com".to_string())
+                );
             }
             _ => panic!("expected xtream source"),
         }

@@ -1,4 +1,7 @@
-import type { ChannelResult } from "./types";
+export interface DuplicateChannelCandidate {
+  index: number;
+  url: string;
+}
 
 const UNRESERVED_CHAR = /^[A-Za-z0-9\-._~]$/u;
 
@@ -65,7 +68,7 @@ function canonicalizeUrl(url: string): string {
 }
 
 export function findDuplicateChannelIndices(
-  results: Iterable<ChannelResult>,
+  results: Iterable<DuplicateChannelCandidate>,
 ): Set<number> {
   const firstByUrl = new Map<string, number>();
   const duplicates = new Set<number>();
@@ -82,6 +85,49 @@ export function findDuplicateChannelIndices(
 
     duplicates.add(first);
     duplicates.add(result.index);
+  }
+
+  return duplicates;
+}
+
+export async function findDuplicateChannelIndicesChunked(
+  results: ReadonlyArray<DuplicateChannelCandidate>,
+  options: {
+    batchSize?: number;
+    shouldCancel?: () => boolean;
+  } = {},
+): Promise<Set<number> | null> {
+  const batchSize = Math.max(250, options.batchSize ?? 2_000);
+  const shouldCancel = options.shouldCancel ?? (() => false);
+  const firstByUrl = new Map<string, number>();
+  const duplicates = new Set<number>();
+
+  for (let start = 0; start < results.length; start += batchSize) {
+    if (shouldCancel()) {
+      return null;
+    }
+
+    const end = Math.min(results.length, start + batchSize);
+    for (let index = start; index < end; index += 1) {
+      const result = results[index];
+      const key = canonicalizeUrl(result.url);
+      if (!key) continue;
+
+      const first = firstByUrl.get(key);
+      if (first == null) {
+        firstByUrl.set(key, result.index);
+        continue;
+      }
+
+      duplicates.add(first);
+      duplicates.add(result.index);
+    }
+
+    if (end < results.length) {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    }
   }
 
   return duplicates;

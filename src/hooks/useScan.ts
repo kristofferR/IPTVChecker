@@ -17,7 +17,7 @@ import {
   resetChannelResultForRescan,
   toPendingChannelResult,
 } from "../lib/channelResults";
-import { findDuplicateChannelIndices } from "../lib/duplicates";
+import { findDuplicateChannelIndicesChunked } from "../lib/duplicates";
 import {
   pendingScanErrorMessageForRun,
   runScopedScanErrorMessage,
@@ -118,6 +118,7 @@ export function useScan() {
   const activeRunId = useRef<string | null>(null);
   const pendingScanError = useRef<ScanEvent<ScanErrorPayload> | null>(null);
   const runClock = useRef<RunClockState | null>(null);
+  const duplicateComputeVersion = useRef(0);
   /** Active-elapsed-ms timestamp for each channel completion (sliding window source). */
   const completionActiveMs = useRef<number[]>([]);
   /** Wall-clock time of last telemetry state update (for throttle). */
@@ -623,6 +624,10 @@ export function useScan() {
 
   const syncFromPlaylist = useCallback(
     async (channels: Channel[], preserveExistingResults = false) => {
+      const syncStartedAt = performance.now();
+      const duplicateVersion = duplicateComputeVersion.current + 1;
+      duplicateComputeVersion.current = duplicateVersion;
+
       // Cancel any running scan and reset backend state
       await resetScan().catch(() => {});
 
@@ -633,11 +638,12 @@ export function useScan() {
         }
         return toPendingChannelResult(channel);
       });
+      const rebuildStartedAt = performance.now();
       const rebuilt = buildFlatResultsAndMetrics(synced);
-      const duplicates = findDuplicateChannelIndices(synced);
+      const rebuildMs = performance.now() - rebuildStartedAt;
 
       logger.debug(
-        `[useScan] syncFromPlaylist: ${synced.length} channels, preserveExistingResults=${preserveExistingResults}`,
+        `[useScan] syncFromPlaylist: ${synced.length} channels, preserveExistingResults=${preserveExistingResults}, rebuild=${rebuildMs.toFixed(1)}ms`,
       );
       commitCollections({
         resultsByIndex: rebuilt.resultsByIndex,
@@ -646,7 +652,7 @@ export function useScan() {
         metrics: rebuilt.metrics,
       });
       getStore().applyScanRuntime({
-        duplicateIndices: duplicates,
+        duplicateIndices: new Set(),
         progress: null,
         summary: null,
         scanError: null,
@@ -662,6 +668,28 @@ export function useScan() {
       runClock.current = null;
       completionActiveMs.current = [];
       lastTelemetryUpdateMs.current = 0;
+
+      const duplicateStartedAt = performance.now();
+      void findDuplicateChannelIndicesChunked(channels, {
+        batchSize: 2000,
+        shouldCancel: () => duplicateComputeVersion.current !== duplicateVersion,
+      }).then((duplicates) => {
+        if (
+          duplicates == null ||
+          duplicateComputeVersion.current !== duplicateVersion
+        ) {
+          return;
+        }
+
+        getStore().applyScanRuntime({ duplicateIndices: duplicates });
+        logger.debug(
+          `[useScan] duplicate scan complete: ${duplicates.size} flagged indices in ${(performance.now() - duplicateStartedAt).toFixed(1)}ms`,
+        );
+      });
+
+      logger.info(
+        `[useScan] playlist sync complete: ${channels.length} channels ready in ${(performance.now() - syncStartedAt).toFixed(1)}ms`,
+      );
     },
     [commitCollections],
   );

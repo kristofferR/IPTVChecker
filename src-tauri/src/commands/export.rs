@@ -490,6 +490,7 @@ mod tests {
             audio_channel_layout: None,
             audio_only: false,
             screenshot_path: None,
+            screenshot_error_reason: None,
             label_mismatches: Vec::new(),
             low_framerate: false,
             error_message: None,

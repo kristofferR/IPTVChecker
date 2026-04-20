@@ -1137,7 +1137,14 @@ export default function App() {
       state.setSelectedChannelIndices([]);
       state.setPendingPlaybackChannel(null);
 
+      const initStartedAt = performance.now();
+      logger.info(
+        `[App] Preparing scan cache for ${preview.channels.length} visible channels`,
+      );
       await initFromPlaylist(preview.channels);
+      logger.info(
+        `[App] Scan cache ready in ${(performance.now() - initStartedAt).toFixed(1)}ms`,
+      );
     },
     [initFromPlaylist],
   );

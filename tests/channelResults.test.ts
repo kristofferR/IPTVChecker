@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   getChannelErrorReason,
   getChannelIdFromUrl,
+  getScreenshotErrorReason,
   resetChannelResultForRescan,
   toPendingChannelResult,
 } from "../src/lib/channelResults";
@@ -42,6 +43,7 @@ function makeResult(): ChannelResult {
     audio_channel_layout: "5.1",
     audio_only: true,
     screenshot_path: "/tmp/shot.png",
+    screenshot_error_reason: null,
     label_mismatches: ["Group mismatch"],
     low_framerate: true,
     error_message: "Dead stream",
@@ -83,6 +85,7 @@ describe("channelResults helpers", () => {
     expect(reset.audio_channel_layout).toBeNull();
     expect(reset.audio_only).toBe(false);
     expect(reset.screenshot_path).toBeNull();
+    expect(reset.screenshot_error_reason).toBeNull();
     expect(reset.label_mismatches).toEqual([]);
     expect(reset.retry_count).toBeNull();
     expect(reset.error_reason).toBeNull();
@@ -99,5 +102,12 @@ describe("channelResults helpers", () => {
       "Legacy",
     );
     expect(getChannelErrorReason({ error_reason: null, last_error_reason: null })).toBeNull();
+  });
+
+  it("returns a trimmed screenshot error reason when present", () => {
+    expect(getScreenshotErrorReason({ screenshot_error_reason: " ffmpeg exited with 1 " })).toBe(
+      "ffmpeg exited with 1",
+    );
+    expect(getScreenshotErrorReason({ screenshot_error_reason: null })).toBeNull();
   });
 });

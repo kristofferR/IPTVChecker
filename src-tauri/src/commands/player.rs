@@ -181,11 +181,36 @@ pub async fn open_channel_in_player(channel: PlayerChannel) -> Result<(), AppErr
 }
 
 #[tauri::command]
-pub fn get_streaming_proxy_port(app: tauri::AppHandle) -> u16 {
+pub async fn get_streaming_proxy_port(app: tauri::AppHandle) -> u16 {
     let state = app.state::<Arc<AppState>>();
-    state
-        .streaming_proxy_port
-        .load(Ordering::Relaxed)
+    let port = state.streaming_proxy_port.load(Ordering::Relaxed);
+    if port > 0 {
+        return port;
+    }
+
+    let _guard = state.streaming_proxy_start_lock.lock().await;
+    let port = state.streaming_proxy_port.load(Ordering::Relaxed);
+    if port > 0 {
+        return port;
+    }
+
+    match crate::engine::stream_proxy::start_streaming_proxy(app.clone()).await {
+        Ok(port) => {
+            state.streaming_proxy_port.store(port, Ordering::Relaxed);
+            log::info!(
+                "[StreamProxy] Lazily started localhost streaming proxy on port {}",
+                port
+            );
+            port
+        }
+        Err(error) => {
+            log::warn!(
+                "[StreamProxy] Failed to lazily start localhost streaming proxy from player command: {}",
+                error
+            );
+            0
+        }
+    }
 }
 
 #[cfg(test)]

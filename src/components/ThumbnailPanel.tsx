@@ -6,6 +6,7 @@ import type { ChannelResult } from "../lib/types";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
 import { isScanActive, type ScanState } from "../lib/scanState";
+import { getThumbnailDisplayState } from "../lib/thumbnailState";
 import { StatusBadge } from "./StatusBadge";
 import { StreamPlayer } from "./StreamPlayer";
 
@@ -180,35 +181,17 @@ export function ThumbnailPanel({
 
   const retryCount = result.retry_count ?? 0;
   const lastErrorReason = getChannelErrorReason(result);
+  const thumbnailState = getThumbnailDisplayState({
+    result,
+    screenshotUrl,
+    screenshotLoading,
+    screenshotLoadError,
+    screenshotsEnabled,
+    scanState,
+  });
+  const scanActive = isScanActive(scanState);
   const resolvedUrl = result.stream_url?.trim() || null;
   const showResolvedUrl = !!resolvedUrl && resolvedUrl !== result.url;
-  const scanActive = isScanActive(scanState);
-  const waitingForScanResult =
-    scanActive && (result.status === "pending" || result.status === "checking");
-  const showUnscannedPlaceholder =
-    !scanActive && result.status === "pending";
-  const showQuickCheckSpinner =
-    !scanActive && result.status === "checking";
-  const loadingStoredScreenshot =
-    screenshotLoading || (!!result.screenshot_path && !screenshotUrl && !screenshotLoadError);
-  const showLoadingPlaceholder = showQuickCheckSpinner || (screenshotsEnabled && (waitingForScanResult || loadingStoredScreenshot));
-  const showScreenshotError =
-    screenshotsEnabled &&
-    !showLoadingPlaceholder &&
-    !screenshotUrl &&
-    !!result.screenshot_path &&
-    screenshotLoadError;
-  const showDrmPlaceholder = result.status === "drm" && !screenshotUrl;
-  const showNoThumbnailCaptured =
-    screenshotsEnabled &&
-    !showLoadingPlaceholder &&
-    !screenshotUrl &&
-    result.status === "alive" &&
-    !result.screenshot_path;
-  const showScreenshotsDisabled =
-    !screenshotsEnabled &&
-    result.status === "alive" &&
-    !screenshotUrl;
   const mediaFrameClass = "relative w-full aspect-video overflow-hidden rounded-lg border border-border-app";
   const lightboxPlaceholderClass =
     "w-[400px] max-w-[88vw] aspect-video rounded-xl border border-white/15 bg-black/60 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]";
@@ -278,25 +261,33 @@ export function ThumbnailPanel({
             Click to enlarge
           </div>
         </button>
-      ) : showLoadingPlaceholder ? (
+      ) : thumbnailState.showLoadingPlaceholder ? (
         <div className={`${mediaFrameClass} bg-panel-subtle isolate`}>
           <div className="absolute inset-0 rounded-[inherit] animate-pulse bg-gradient-to-br from-panel to-panel-subtle" />
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-secondary">
             <LoaderCircle className="h-5 w-5 animate-spin" />
             <span className="text-[11px] font-medium">
-              {waitingForScanResult ? "Waiting for scan result..." : "Loading thumbnail..."}
+              {thumbnailState.waitingForScanResult ? "Waiting for scan result..." : "Loading thumbnail..."}
             </span>
           </div>
         </div>
-      ) : showScreenshotError ? (
+      ) : thumbnailState.showStoredScreenshotLoadError ? (
         <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 text-center">
           <ImageOff className="h-9 w-9 text-red-300/90" strokeWidth={1.75} />
           <p className="text-[12px] font-medium text-red-200">Thumbnail unavailable</p>
           <p className="text-[11px] text-red-200/80">
-            {lastErrorReason ? `Capture failed: ${lastErrorReason}` : "Capture timed out or decode failed."}
+            Saved screenshot could not be read from disk.
           </p>
         </div>
-      ) : showDrmPlaceholder ? (
+      ) : thumbnailState.showCaptureError ? (
+        <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 text-center">
+          <ImageOff className="h-9 w-9 text-red-300/90" strokeWidth={1.75} />
+          <p className="text-[12px] font-medium text-red-200">Thumbnail unavailable</p>
+          <p className="text-[11px] text-red-200/80">
+            Capture failed: {thumbnailState.screenshotErrorReason}
+          </p>
+        </div>
+      ) : thumbnailState.showDrmPlaceholder ? (
         <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 text-center">
           <CircleHelp className="h-8 w-8 text-cyan-300/90" strokeWidth={1.75} />
           <p className="text-[12px] font-medium text-cyan-200">DRM-protected stream</p>
@@ -304,19 +295,19 @@ export function ThumbnailPanel({
             {result.drm_system ? `Detected system: ${result.drm_system}` : "Detected encrypted playback requirements."}
           </p>
         </div>
-      ) : showNoThumbnailCaptured ? (
+      ) : thumbnailState.showNoThumbnailCaptured ? (
         <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
           <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
           <p className="text-[12px] font-medium text-text-secondary">No thumbnail captured</p>
           <p className="text-[11px] text-text-tertiary">This channel scanned successfully, but no frame was saved.</p>
         </div>
-      ) : showUnscannedPlaceholder ? (
+      ) : thumbnailState.showUnscannedPlaceholder ? (
         <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
           <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
           <p className="text-[12px] font-medium text-text-secondary">Unscanned</p>
           <p className="text-[11px] text-text-tertiary">Start a scan to capture this thumbnail.</p>
         </div>
-      ) : showScreenshotsDisabled ? (
+      ) : thumbnailState.showScreenshotsDisabled ? (
         <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
           <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
           <p className="text-[12px] font-medium text-text-secondary">Screenshots disabled</p>

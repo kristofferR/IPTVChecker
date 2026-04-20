@@ -53,6 +53,7 @@ export interface ChannelResult {
   audio_channel_layout: string | null;
   audio_only: boolean;
   screenshot_path: string | null;
+  screenshot_error_reason?: string | null;
   label_mismatches: string[];
   low_framerate: boolean;
   error_message: string | null;

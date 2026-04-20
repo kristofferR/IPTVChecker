@@ -16,6 +16,7 @@ function pendingScanFields() {
     audio_channel_layout: null,
     audio_only: false,
     screenshot_path: null,
+    screenshot_error_reason: null,
     label_mismatches: [],
     low_framerate: false,
     error_message: null,
@@ -45,6 +46,12 @@ export function getChannelErrorReason(
   result: Pick<ChannelResult, "error_reason" | "last_error_reason">,
 ): string | null {
   return result.error_reason?.trim() || result.last_error_reason?.trim() || null;
+}
+
+export function getScreenshotErrorReason(
+  result: Pick<ChannelResult, "screenshot_error_reason">,
+): string | null {
+  return result.screenshot_error_reason?.trim() || null;
 }
 
 export function toPendingChannelResult(channel: Channel): ChannelResult {

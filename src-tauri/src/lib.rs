@@ -489,9 +489,7 @@ fn emit_open_paths_to_focused_window(app: &tauri::AppHandle, paths: &[String]) {
         return;
     }
 
-    log::debug!(
-        "No focused window for open-path event; trying main window fallback"
-    );
+    log::debug!("No focused window for open-path event; trying main window fallback");
 
     if app.get_webview_window("main").is_some() {
         let _ = emit_open_paths_to_window(app, "main", paths, "fallback main window");
@@ -1321,8 +1319,8 @@ mod tests {
 
         assert!(openable_path_from_arg(txt.as_os_str()).is_none());
 
-        let http_url = url::Url::parse("https://example.com/list.m3u8")
-            .expect("http url should parse");
+        let http_url =
+            url::Url::parse("https://example.com/list.m3u8").expect("http url should parse");
         assert!(openable_path_from_url(&http_url).is_none());
 
         std::fs::remove_file(&txt).expect("txt cleanup should succeed");
@@ -1338,8 +1336,7 @@ mod tests {
         assert_eq!(from_arg, file.to_string_lossy());
 
         let file_url = url::Url::from_file_path(&file).expect("file url should be creatable");
-        let from_url =
-            openable_path_from_url(&file_url).expect("file url should be accepted");
+        let from_url = openable_path_from_url(&file_url).expect("file url should be accepted");
         assert_eq!(from_url, file.to_string_lossy());
 
         std::fs::remove_file(&file).expect("m3u8 cleanup should succeed");
