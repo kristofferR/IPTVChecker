@@ -15,6 +15,7 @@ export type SortField =
   | "latency"
   | "bitrate"
   | "audio"
+  | "audio_codec"
   | "audio_layout"
   | "error";
 
@@ -263,6 +264,8 @@ export function sortResults(
           a.index,
           b.index,
         );
+      case "audio_codec":
+        return (a.audio_codec ?? "").localeCompare(b.audio_codec ?? "") * dir;
       case "audio_layout":
         return compareOptionalNumber(
           parseAudioLayout(a.audio_channel_layout),

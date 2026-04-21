@@ -221,6 +221,14 @@ function ChannelRowImpl({
               : "—"}
           </span>
         );
+      case "audio_codec":
+        return (
+          <span className="text-text-secondary">
+            {result.audio_codec && result.audio_codec !== "Unknown"
+              ? result.audio_codec
+              : "—"}
+          </span>
+        );
       case "audio_layout":
         return (
           <span className="text-text-secondary">
