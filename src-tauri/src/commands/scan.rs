@@ -308,7 +308,14 @@ async fn compute_shared_url_result(
         ));
     }
 
-    let target_url = stream_url.as_deref().unwrap_or(channel_url).to_string();
+    // Hand ffmpeg the manifest URL, not the resolved leaf segment: for HLS,
+    // verify() descends to a media segment that may have rolled off the live
+    // window (404) or lack init context (invalid data). The original channel
+    // URL is what the player uses and is what ffmpeg can reliably open.
+    let target_url = match stream_url.as_deref() {
+        Some(resolved) if checker::is_manifest_url(resolved) => resolved.to_string(),
+        _ => channel_url.to_string(),
+    };
     let redacted_target_url = stream_proxy::redact_url(&target_url);
     let mut shared = SharedUrlResult {
         status: status.clone(),

@@ -220,6 +220,15 @@ fn retry_delay_seconds(backoff: RetryBackoff, retry_index: u32) -> u64 {
     }
 }
 
+/// True when a URL's path points to an HLS or DASH manifest (`.m3u8` / `.mpd`).
+/// URL-only — used where no response content-type is available.
+pub fn is_manifest_url(url: &str) -> bool {
+    let path = Url::parse(url)
+        .map(|u| u.path().to_lowercase())
+        .unwrap_or_default();
+    path.ends_with(".m3u8") || path.ends_with(".mpd")
+}
+
 fn is_playlist_content_type(content_type: &str, url: &str) -> bool {
     let ct = content_type.to_lowercase();
     let path = Url::parse(url)
@@ -2009,5 +2018,27 @@ segment.ts
         assert_eq!(outcome.drm_system, None);
         assert_eq!(outcome.stream_url, Some(format!("{base_url}/clear.mpd")));
         server_handle.abort();
+    }
+
+    #[test]
+    fn is_manifest_url_recognizes_hls_and_dash_paths() {
+        assert!(is_manifest_url("https://example.com/live/channel.m3u8"));
+        assert!(is_manifest_url("https://example.com/live/channel.M3U8"));
+        assert!(is_manifest_url("https://example.com/dash/manifest.mpd"));
+        assert!(is_manifest_url(
+            "https://example.com/live/channel.m3u8?token=abc&ts=1"
+        ));
+    }
+
+    #[test]
+    fn is_manifest_url_rejects_media_and_unknown_paths() {
+        assert!(!is_manifest_url(
+            "https://example.com/live/seg-0-12345.hls.fmp4"
+        ));
+        assert!(!is_manifest_url("https://example.com/live/segment.ts"));
+        assert!(!is_manifest_url("https://example.com/live/segment.m4s"));
+        assert!(!is_manifest_url("https://example.com/live/video.mp4"));
+        assert!(!is_manifest_url("https://example.com/live/channel-1"));
+        assert!(!is_manifest_url("not a url"));
     }
 }
