@@ -22,11 +22,12 @@ export const COLUMN_DEFINITIONS: ColumnDefinition[] = [
   { key: "group", label: "Group", defaultWidth: 220, minWidth: 120, align: "left" },
   { key: "resolution", label: "Res", defaultWidth: 84, minWidth: 68, align: "center" },
   { key: "codec", label: "Codec", defaultWidth: 66, minWidth: 50, align: "center" },
-  { key: "hdr", label: "HDR", defaultWidth: 90, minWidth: 70, align: "center" },
   { key: "fps", label: "FPS", defaultWidth: 48, minWidth: 40, align: "center" },
-  { key: "latency", label: "Latency", defaultWidth: 76, minWidth: 62, align: "right" },
   { key: "bitrate", label: "Bitrate", defaultWidth: 100, minWidth: 80, align: "right" },
+  { key: "hdr", label: "HDR", defaultWidth: 90, minWidth: 70, align: "center" },
+  { key: "latency", label: "Latency", defaultWidth: 76, minWidth: 62, align: "right" },
   { key: "audio", label: "Audio", defaultWidth: 84, minWidth: 66, align: "right" },
+  { key: "audio_codec", label: "Codec", defaultWidth: 72, minWidth: 56, align: "center" },
   {
     key: "audio_layout",
     label: "Channels",
@@ -52,9 +53,8 @@ export const DEFAULT_COLUMN_ORDER: ColumnKey[] = COLUMN_DEFINITIONS.map(
 export const DEFAULT_VISIBLE_COLUMN_ORDER: ColumnKey[] = DEFAULT_COLUMN_ORDER.filter(
   (key) =>
     key !== "url" &&
-    key !== "latency" &&
     key !== "error" &&
-    key !== "hdr" &&
+    key !== "playlist" &&
     key !== "audio_layout",
 );
 
