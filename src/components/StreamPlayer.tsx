@@ -1,5 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, LoaderCircle, Maximize, Pause, PictureInPicture2, Play, Square, Volume2, VolumeX } from "lucide-react";
+import {
+  AlertTriangle,
+  Cast,
+  LoaderCircle,
+  Maximize,
+  Pause,
+  PictureInPicture2,
+  Play,
+  RefreshCw,
+  Square,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
+import { useChromecast } from "../hooks/useChromecast";
+import type { CastMediaRequest, ChromecastDevice } from "../lib/types";
 
 interface StreamPlayerProps {
   playerState: "idle" | "loading" | "playing" | "error";
@@ -11,6 +25,7 @@ interface StreamPlayerProps {
   volume: number;
   muted: boolean;
   containerRef?: React.RefObject<HTMLDivElement | null>;
+  castRequest?: CastMediaRequest | null;
   onTogglePause: () => void;
   onStop: () => void;
   onSetVolume: (v: number) => void;
@@ -31,6 +46,7 @@ export function StreamPlayer({
   volume,
   muted,
   containerRef,
+  castRequest,
   onTogglePause,
   onStop,
   onSetVolume,
@@ -41,7 +57,17 @@ export function StreamPlayer({
   onPip,
 }: StreamPlayerProps) {
   const [controlsVisible, setControlsVisible] = useState(true);
+  const [castMenuOpen, setCastMenuOpen] = useState(false);
+  const [castStarting, setCastStarting] = useState(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const castMenuRef = useRef<HTMLDivElement>(null);
+
+  const chromecast = useChromecast();
+  const castSupported = !!castRequest && castRequest.streamKind !== "mpeg_ts";
+  const isCasting =
+    !!chromecast.session &&
+    chromecast.session.state !== "stopped" &&
+    chromecast.session.state !== "error";
 
   const scheduleHide = useCallback(() => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
@@ -67,6 +93,48 @@ export function StreamPlayer({
     };
   }, [playerState, isPaused, scheduleHide]);
 
+  useEffect(() => {
+    if (!castMenuOpen) return;
+    const onDocClick = (event: MouseEvent) => {
+      if (!castMenuRef.current) return;
+      if (!castMenuRef.current.contains(event.target as Node)) {
+        setCastMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [castMenuOpen]);
+
+  const openCastMenu = useCallback(() => {
+    setCastMenuOpen(true);
+    void chromecast.refreshDevices();
+  }, [chromecast]);
+
+  const handleCastDevice = useCallback(
+    async (device: ChromecastDevice) => {
+      if (!castRequest) return;
+      setCastStarting(true);
+      try {
+        await chromecast.cast(device, castRequest);
+        setCastMenuOpen(false);
+        if (!isPaused) onTogglePause();
+      } catch {
+        // error surfaces via chromecast.error; keep menu open so user sees it
+      } finally {
+        setCastStarting(false);
+      }
+    },
+    [castRequest, chromecast, isPaused, onTogglePause],
+  );
+
+  const handleStopCast = useCallback(async () => {
+    try {
+      await chromecast.stop();
+    } finally {
+      setCastMenuOpen(false);
+    }
+  }, [chromecast]);
+
   return (
     <div
       ref={containerRef}
@@ -75,6 +143,15 @@ export function StreamPlayer({
       onMouseEnter={showControls}
     >
       {/* Video element is appended here by ThumbnailPanel */}
+
+      {isCasting && chromecast.session && (
+        <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-1 rounded-md bg-blue-600/85 text-white text-[11px] font-medium shadow-md backdrop-blur-sm">
+          <Cast className="w-3 h-3" />
+          <span className="truncate max-w-[180px]">
+            Casting to {chromecast.session.deviceName}
+          </span>
+        </div>
+      )}
 
       {/* Loading overlay */}
       {playerState === "loading" && (
@@ -167,6 +244,85 @@ export function StreamPlayer({
             className="w-16 h-1 accent-white cursor-pointer"
             title={`Volume: ${Math.round((muted ? 0 : volume) * 100)}%`}
           />
+          {castSupported && (
+            <div ref={castMenuRef} className="relative ml-1">
+              <button
+                type="button"
+                onClick={() => (castMenuOpen ? setCastMenuOpen(false) : openCastMenu())}
+                className={`p-1 transition-colors ${
+                  isCasting ? "text-blue-300 hover:text-blue-200" : "text-white hover:text-white/80"
+                }`}
+                title={isCasting ? `Casting to ${chromecast.session?.deviceName ?? "device"}` : "Cast"}
+              >
+                <Cast className="w-4 h-4" />
+              </button>
+              {castMenuOpen && (
+                <div className="absolute bottom-full right-0 mb-2 w-64 rounded-md border border-white/10 bg-black/90 backdrop-blur-sm shadow-xl text-white text-[12px] z-10">
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
+                    <span className="font-medium">
+                      {isCasting ? "Casting" : "Cast to device"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void chromecast.refreshDevices()}
+                      disabled={chromecast.discovering}
+                      className="p-1 text-white/70 hover:text-white disabled:opacity-50"
+                      title="Refresh devices"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${chromecast.discovering ? "animate-spin" : ""}`} />
+                    </button>
+                  </div>
+                  {isCasting && chromecast.session && (
+                    <div className="px-3 py-2 border-b border-white/10">
+                      <div className="text-white/85">{chromecast.session.deviceName}</div>
+                      <div className="text-[11px] text-white/55 capitalize">{chromecast.session.state}</div>
+                      <button
+                        type="button"
+                        onClick={() => void handleStopCast()}
+                        className="mt-2 w-full px-2 py-1 text-[11px] font-medium rounded bg-red-600/80 hover:bg-red-600 transition-colors"
+                      >
+                        Stop casting
+                      </button>
+                    </div>
+                  )}
+                  <div className="max-h-64 overflow-y-auto">
+                    {chromecast.devices.length === 0 ? (
+                      <div className="px-3 py-3 text-[11px] text-white/55 text-center">
+                        {chromecast.discovering ? "Searching for devices..." : "No devices found"}
+                      </div>
+                    ) : (
+                      chromecast.devices.map((device) => {
+                        const isActive = chromecast.session?.deviceId === device.id && isCasting;
+                        return (
+                          <button
+                            key={device.id}
+                            type="button"
+                            onClick={() => void handleCastDevice(device)}
+                            disabled={castStarting || isActive}
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-left"
+                          >
+                            <Cast className="w-3.5 h-3.5 shrink-0 text-white/70" />
+                            <div className="flex-1 min-w-0">
+                              <div className="truncate">{device.friendlyName}</div>
+                              {device.model && (
+                                <div className="text-[10px] text-white/45 truncate">{device.model}</div>
+                              )}
+                            </div>
+                            {isActive && <span className="text-[10px] text-blue-300">Active</span>}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                  {chromecast.error && (
+                    <div className="px-3 py-2 border-t border-white/10 text-[11px] text-red-300">
+                      {chromecast.error}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {onPip && (
             <button
               type="button"

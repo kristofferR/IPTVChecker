@@ -423,3 +423,38 @@ export interface XtreamServerTestReport {
 
 export type RetryBackoff = "none" | "linear" | "exponential";
 export type ThemePreference = "system" | "light" | "dark";
+
+export interface ChromecastDevice {
+  id: string;
+  friendlyName: string;
+  model: string | null;
+  host: string;
+  port: number;
+}
+
+export type CastSessionState =
+  | "connecting"
+  | "loading"
+  | "playing"
+  | "paused"
+  | "stopped"
+  | "error";
+
+export interface CastSession {
+  deviceId: string;
+  deviceName: string;
+  state: CastSessionState;
+  streamUrl: string;
+  channelName: string | null;
+  channelLogo: string | null;
+  errorMessage: string | null;
+}
+
+export type CastStreamKind = "hls" | "mpeg_ts" | "other";
+
+export interface CastMediaRequest {
+  originalUrl: string;
+  channelName: string | null;
+  channelLogo: string | null;
+  streamKind: CastStreamKind;
+}

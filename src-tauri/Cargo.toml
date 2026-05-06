@@ -39,6 +39,9 @@ tauri-plugin-notification = "2"
 tauri-plugin-mcp = { git = "https://github.com/P3GLEG/tauri-plugin-mcp", features = ["devtools"] }
 fs2 = "0.4.3"
 tauri-plugin-window-state = "2"
+rust_cast = { version = "0.21.0", features = ["thread_safe"] }
+mdns-sd = "0.19.1"
+local-ip-address = "0.6.12"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
