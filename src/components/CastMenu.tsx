@@ -98,10 +98,15 @@ function CastMenuPopover({
   const handleCast = useCallback(
     async (device: ChromecastDevice) => {
       setStarting(true);
+      // Fire onCastStart BEFORE the network round-trip with the TV. The parent
+      // uses it to stop local playback (releasing the IPTV upstream slot for
+      // ffmpeg), and it also flips playIntentActive=false so arrow-key
+      // navigation in the channel table won't auto-start a new local stream
+      // mid-handshake.
+      onCastStart?.();
       try {
         await chromecast.cast(device, castRequest);
         setOpen(false);
-        onCastStart?.();
       } catch {
         // error surfaces via chromecast.error; keep menu open so the user sees it
       } finally {
@@ -226,9 +231,12 @@ function CastMenuInline({
   const handleCast = useCallback(
     async (device: ChromecastDevice) => {
       setStarting(true);
+      // Fire onCastStart BEFORE the network round-trip — see CastMenuPopover
+      // for the rationale (release upstream slot + suppress arrow-key
+      // auto-play during the cast handshake).
+      onCastStart?.();
       try {
         await chromecast.cast(device, castRequest);
-        onCastStart?.();
       } catch {
         // error surfaces via chromecast.error; row stays expanded
       } finally {
