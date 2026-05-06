@@ -71,10 +71,13 @@ export function StreamPlayer({
 
   const scheduleHide = useCallback(() => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    // Don't auto-hide while the cast picker is open — the user may still be
+    // reading the device list when the timer would otherwise fire.
+    if (castMenuOpen) return;
     if (playerState === "playing" && !isPaused) {
       hideTimerRef.current = setTimeout(() => setControlsVisible(false), 3000);
     }
-  }, [playerState, isPaused]);
+  }, [playerState, isPaused, castMenuOpen]);
 
   const showControls = useCallback(() => {
     setControlsVisible(true);
@@ -82,6 +85,14 @@ export function StreamPlayer({
   }, [scheduleHide]);
 
   useEffect(() => {
+    if (castMenuOpen) {
+      setControlsVisible(true);
+      if (hideTimerRef.current) {
+        clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = null;
+      }
+      return;
+    }
     if (playerState === "playing" && !isPaused) {
       scheduleHide();
     } else {
@@ -91,7 +102,7 @@ export function StreamPlayer({
     return () => {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     };
-  }, [playerState, isPaused, scheduleHide]);
+  }, [playerState, isPaused, scheduleHide, castMenuOpen]);
 
   useEffect(() => {
     if (!castMenuOpen) return;
