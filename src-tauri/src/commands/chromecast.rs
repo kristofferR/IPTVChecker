@@ -36,7 +36,12 @@ pub async fn cast_to_device(
         active.stop().await;
     }
 
-    let proxy_handle = cast_proxy::start(app.clone(), request.original_url.clone()).await?;
+    let proxy_handle = cast_proxy::start(
+        app.clone(),
+        request.original_url.clone(),
+        request.stream_kind,
+    )
+    .await?;
     let cast_url = proxy_handle.url.clone();
 
     let session = match chromecast::start_session(

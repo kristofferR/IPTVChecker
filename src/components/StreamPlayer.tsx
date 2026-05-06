@@ -63,7 +63,7 @@ export function StreamPlayer({
   const castMenuRef = useRef<HTMLDivElement>(null);
 
   const chromecast = useChromecast();
-  const castSupported = !!castRequest && castRequest.streamKind !== "mpeg_ts";
+  const castSupported = !!castRequest;
   const isCasting =
     !!chromecast.session &&
     chromecast.session.state !== "stopped" &&
