@@ -6,11 +6,23 @@
 //! whose path starts with `/cast/<token>/` are served, so this short-lived,
 //! per-session listener does not become an open relay.
 //!
+//! Two modes:
+//! - **HLS pass-through** (`/cast/<token>/stream` + `/cast/<token>/seg/<b64>`):
+//!   used when the upstream is already an HLS playlist. The proxy fetches the
+//!   manifest, rewrites segment/key URIs to round-trip through itself, and
+//!   forwards segments untouched.
+//! - **Remux** (`/cast/<token>/hls/playlist.m3u8` + `/cast/<token>/hls/seg_NNNNN.ts`):
+//!   used when the upstream is MPEG-TS. ffmpeg is spawned in copy mode to
+//!   produce a sliding-window HLS playlist in a temp directory, which is then
+//!   served from disk.
+//!
 //! Lifecycle: [`start`] returns a [`CastProxyHandle`] containing the bound
 //! address and a cancel guard; dropping the handle (or calling `shutdown`)
-//! tears the listener down and aborts in-flight forwarders.
+//! tears the listener down, aborts in-flight forwarders, kills ffmpeg, and
+//! removes the temp directory.
 
 use std::net::IpAddr;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -20,16 +32,22 @@ use reqwest::header::{HeaderValue, CONTENT_TYPE, USER_AGENT};
 use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::process::Child;
+use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
+use crate::engine::ffmpeg::{configure_background_process, graceful_kill, resolve_binary, GRACEFUL_KILL_TIMEOUT};
 use crate::engine::stream_proxy::redact_url;
 use crate::error::AppError;
+use crate::models::chromecast::CastStreamKind;
 use crate::state::AppState;
 
 const CAST_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const CAST_READ_TIMEOUT: Duration = Duration::from_secs(20);
 const MANIFEST_FETCH_TIMEOUT: Duration = Duration::from_secs(15);
+const REMUX_PLAYLIST_READY_TIMEOUT: Duration = Duration::from_secs(20);
+const REMUX_PLAYLIST_POLL_INTERVAL: Duration = Duration::from_millis(150);
 
 pub struct CastProxyHandle {
     pub url: String,
@@ -37,6 +55,7 @@ pub struct CastProxyHandle {
     pub port: u16,
     pub token: String,
     cancel: CancellationToken,
+    remux: Arc<Mutex<Option<RemuxState>>>,
 }
 
 impl CastProxyHandle {
@@ -48,6 +67,37 @@ impl CastProxyHandle {
 impl Drop for CastProxyHandle {
     fn drop(&mut self) {
         self.cancel.cancel();
+        // Best-effort sync cleanup: try to lock without awaiting and clean up
+        // the remux directory. The tokio task spawned in `start_remux` has its
+        // own cleanup hook tied to the cancel token, which handles the killing
+        // of ffmpeg and tempdir removal in the async context.
+        if let Ok(mut guard) = self.remux.try_lock() {
+            if let Some(state) = guard.take() {
+                state.cleanup_blocking();
+            }
+        }
+    }
+}
+
+struct RemuxState {
+    tmpdir: PathBuf,
+    /// ffmpeg child handle. We hold it for diagnostic logging; the worker task
+    /// is responsible for waiting on it.
+    child: Option<Child>,
+}
+
+impl RemuxState {
+    fn cleanup_blocking(self) {
+        // Best-effort sync cleanup used in Drop. The async cleanup path in
+        // `cleanup` is preferred when available.
+        let RemuxState { tmpdir, mut child } = self;
+        if let Some(c) = child.as_mut() {
+            let _ = c.start_kill();
+        }
+        // We deliberately don't `wait()` here — the spawned worker task will.
+        // Just attempt to remove the directory; if files are still open it
+        // will be cleaned up by the OS on next reboot.
+        let _ = std::fs::remove_dir_all(&tmpdir);
     }
 }
 
@@ -74,10 +124,12 @@ pub fn detect_lan_ip() -> Option<IpAddr> {
 }
 
 /// Bind a fresh LAN-facing listener and serve upstream content for a single
-/// cast URL until cancelled.
+/// cast URL until cancelled. For MPEG-TS sources, spawns ffmpeg to remux into
+/// HLS so Chromecast can consume the stream.
 pub async fn start(
     app: AppHandle,
     upstream_url: String,
+    stream_kind: CastStreamKind,
 ) -> Result<CastProxyHandle, AppError> {
     let token = generate_token();
     let lan_ip = detect_lan_ip()
@@ -87,25 +139,49 @@ pub async fn start(
         .await
         .map_err(AppError::Io)?;
     let port = listener.local_addr().map_err(AppError::Io)?.port();
-    let cast_url = format!("http://{lan_ip}:{port}/cast/{token}/stream");
-
-    log::info!(
-        "[CastProxy] Listening on 0.0.0.0:{port} (advertising {lan_ip}:{port}) for {}",
-        redact_url(&upstream_url)
-    );
 
     let cancel = CancellationToken::new();
-    let cancel_for_loop = cancel.clone();
+    let remux_state: Arc<Mutex<Option<RemuxState>>> = Arc::new(Mutex::new(None));
 
+    let cast_url = if stream_kind == CastStreamKind::MpegTs {
+        let started = start_remux(
+            app.clone(),
+            upstream_url.clone(),
+            token.clone(),
+            cancel.clone(),
+            remux_state.clone(),
+        )
+        .await?;
+        format!(
+            "http://{lan_ip}:{port}/cast/{token}/hls/{}",
+            started.playlist_filename
+        )
+    } else {
+        format!("http://{lan_ip}:{port}/cast/{token}/stream")
+    };
+
+    log::info!(
+        "[CastProxy] Listening on 0.0.0.0:{port} (advertising {lan_ip}:{port}) for {} (mode={:?})",
+        redact_url(&upstream_url),
+        stream_kind
+    );
+
+    let cancel_for_loop = cancel.clone();
     let token_clone = token.clone();
     let upstream_clone = upstream_url.clone();
     let app_for_loop = app.clone();
+    let remux_for_loop = remux_state.clone();
 
     tokio::spawn(async move {
         loop {
             tokio::select! {
                 _ = cancel_for_loop.cancelled() => {
                     log::info!("[CastProxy] Listener on port {port} cancelled");
+                    // Clean up remux state if any
+                    let mut guard = remux_for_loop.lock().await;
+                    if let Some(state) = guard.take() {
+                        cleanup_remux_async(state).await;
+                    }
                     break;
                 }
                 accept = listener.accept() => {
@@ -120,6 +196,7 @@ pub async fn start(
                     let token_for_conn = token_clone.clone();
                     let upstream_for_conn = upstream_clone.clone();
                     let cancel_for_conn = cancel_for_loop.clone();
+                    let remux_for_conn = remux_for_loop.clone();
                     tokio::spawn(async move {
                         if let Err(err) = handle_connection(
                             app_for_conn,
@@ -127,6 +204,7 @@ pub async fn start(
                             peer.to_string(),
                             token_for_conn,
                             upstream_for_conn,
+                            remux_for_conn,
                             cancel_for_conn,
                         )
                         .await
@@ -145,7 +223,182 @@ pub async fn start(
         port,
         token,
         cancel,
+        remux: remux_state,
     })
+}
+
+struct RemuxStartInfo {
+    playlist_filename: String,
+}
+
+/// Spawn ffmpeg to remux the upstream MPEG-TS into a sliding-window HLS
+/// playlist on disk. Waits for the playlist file to appear (so the Cast
+/// device's first GET doesn't 404) before returning.
+async fn start_remux(
+    app: AppHandle,
+    upstream_url: String,
+    token: String,
+    cancel: CancellationToken,
+    remux_state: Arc<Mutex<Option<RemuxState>>>,
+) -> Result<RemuxStartInfo, AppError> {
+    let tmpdir = std::env::temp_dir().join(format!("iptv-cast-{token}"));
+    std::fs::create_dir_all(&tmpdir).map_err(AppError::Io)?;
+
+    let (user_agent, accept_invalid_certs) = {
+        let state = app.state::<Arc<AppState>>();
+        let settings = state.settings.lock().await;
+        (settings.user_agent.clone(), settings.accept_invalid_certs)
+    };
+
+    let ffmpeg_bin = resolve_binary(&app, "ffmpeg");
+    let playlist_path = tmpdir.join("playlist.m3u8");
+    let segment_pattern = tmpdir.join("seg_%05d.ts");
+
+    let mut cmd = tokio::process::Command::new(&ffmpeg_bin);
+    configure_background_process(&mut cmd);
+    cmd.kill_on_drop(true);
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+
+    cmd.arg("-hide_banner").arg("-loglevel").arg("warning");
+    cmd.arg("-fflags").arg("+genpts+discardcorrupt");
+    cmd.arg("-user_agent").arg(&user_agent);
+    if accept_invalid_certs {
+        cmd.arg("-tls_verify").arg("0");
+    }
+    cmd.arg("-reconnect").arg("1");
+    cmd.arg("-reconnect_streamed").arg("1");
+    cmd.arg("-reconnect_delay_max").arg("5");
+    cmd.arg("-i").arg(&upstream_url);
+    cmd.arg("-c").arg("copy");
+    cmd.arg("-f").arg("hls");
+    cmd.arg("-hls_time").arg("4");
+    cmd.arg("-hls_list_size").arg("6");
+    cmd.arg("-hls_flags")
+        .arg("delete_segments+omit_endlist+independent_segments");
+    cmd.arg("-hls_segment_filename").arg(&segment_pattern);
+    cmd.arg(&playlist_path);
+
+    log::info!(
+        "[CastProxy] Spawning ffmpeg remux for {} → {}",
+        redact_url(&upstream_url),
+        playlist_path.display()
+    );
+
+    let mut child = cmd.spawn().map_err(|err| {
+        AppError::Other(format!(
+            "Failed to spawn ffmpeg for cast remux ({ffmpeg_bin}): {err}"
+        ))
+    })?;
+
+    // Drain stderr so the pipe doesn't fill and stall ffmpeg. Also useful for
+    // diagnostics when remux fails.
+    if let Some(stderr) = child.stderr.take() {
+        tokio::spawn(async move {
+            use tokio::io::{AsyncBufReadExt, BufReader};
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                log::debug!("[CastProxy/ffmpeg] {line}");
+            }
+        });
+    }
+
+    // Park the child on the worker so we can wait on it; cancel kills it.
+    let cancel_for_worker = cancel.clone();
+    let tmpdir_for_worker = tmpdir.clone();
+    let upstream_for_worker = upstream_url.clone();
+    let remux_state_for_worker = remux_state.clone();
+    tokio::spawn(async move {
+        tokio::select! {
+            status = child.wait() => {
+                match status {
+                    Ok(s) if s.success() => {
+                        log::info!(
+                            "[CastProxy/ffmpeg] Exited cleanly for {}",
+                            redact_url(&upstream_for_worker)
+                        );
+                    }
+                    Ok(s) => {
+                        log::warn!(
+                            "[CastProxy/ffmpeg] Exited with status {:?} for {}",
+                            s.code(),
+                            redact_url(&upstream_for_worker)
+                        );
+                    }
+                    Err(err) => {
+                        log::warn!("[CastProxy/ffmpeg] wait() failed: {err}");
+                    }
+                }
+                // ffmpeg ended on its own — also cancel the listener so the
+                // session tears down rather than serving a dead playlist.
+                cancel_for_worker.cancel();
+                let mut guard = remux_state_for_worker.lock().await;
+                if let Some(state) = guard.take() {
+                    cleanup_remux_async(state).await;
+                }
+            }
+            _ = cancel_for_worker.cancelled() => {
+                log::info!("[CastProxy/ffmpeg] Cancellation received, terminating");
+                graceful_kill(&mut child, GRACEFUL_KILL_TIMEOUT).await;
+                let _ = std::fs::remove_dir_all(&tmpdir_for_worker);
+            }
+        }
+    });
+
+    // Wait for the playlist to actually be written so the Cast device's first
+    // GET doesn't 404.
+    wait_for_playlist(&playlist_path, REMUX_PLAYLIST_READY_TIMEOUT, &cancel).await?;
+
+    {
+        let mut guard = remux_state.lock().await;
+        *guard = Some(RemuxState {
+            tmpdir: tmpdir.clone(),
+            child: None,
+        });
+    }
+
+    Ok(RemuxStartInfo {
+        playlist_filename: "playlist.m3u8".to_string(),
+    })
+}
+
+async fn wait_for_playlist(
+    path: &Path,
+    timeout: Duration,
+    cancel: &CancellationToken,
+) -> Result<(), AppError> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        if path.exists() {
+            // Wait for at least one segment line to appear so the Chromecast
+            // doesn't request an empty playlist.
+            if let Ok(content) = tokio::fs::read_to_string(path).await {
+                if content.contains("#EXTINF") {
+                    return Ok(());
+                }
+            }
+        }
+        if cancel.is_cancelled() {
+            return Err(AppError::Other(
+                "Cast remux was cancelled before playlist became ready".to_string(),
+            ));
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(AppError::Other(
+                "ffmpeg did not produce an HLS playlist in time".to_string(),
+            ));
+        }
+        tokio::time::sleep(REMUX_PLAYLIST_POLL_INTERVAL).await;
+    }
+}
+
+async fn cleanup_remux_async(state: RemuxState) {
+    let RemuxState { tmpdir, mut child } = state;
+    if let Some(c) = child.as_mut() {
+        graceful_kill(c, GRACEFUL_KILL_TIMEOUT).await;
+    }
+    let _ = tokio::fs::remove_dir_all(&tmpdir).await;
 }
 
 async fn handle_connection(
@@ -154,6 +407,7 @@ async fn handle_connection(
     peer: String,
     token: String,
     upstream_url: String,
+    remux_state: Arc<Mutex<Option<RemuxState>>>,
     cancel: CancellationToken,
 ) -> std::io::Result<()> {
     let mut buf = vec![0u8; 8192];
@@ -177,9 +431,22 @@ async fn handle_connection(
         return Ok(());
     }
 
-    // Determine whether this is the entrypoint (/stream) or a rewritten
-    // segment/sub-playlist (/seg/<base64>).
     let suffix = &path[allowed_prefix.len()..];
+
+    // Remux mode: serve files from the on-disk HLS directory.
+    if let Some(rest) = suffix.strip_prefix("hls/") {
+        let tmpdir_opt = {
+            let guard = remux_state.lock().await;
+            guard.as_ref().map(|s| s.tmpdir.clone())
+        };
+        let Some(tmpdir) = tmpdir_opt else {
+            let _ = write_simple(&mut socket, 503, "text/plain", b"Remux not ready").await;
+            return Ok(());
+        };
+        return serve_remux_file(&mut socket, &tmpdir, rest).await;
+    }
+
+    // Pass-through mode: entrypoint or rewritten manifest segment.
     let resolved_upstream = if let Some(encoded) = suffix.strip_prefix("seg/") {
         match decode_segment(encoded) {
             Some(url) => url,
@@ -203,6 +470,50 @@ async fn handle_connection(
         cancel,
     )
     .await
+}
+
+async fn serve_remux_file(
+    socket: &mut tokio::net::TcpStream,
+    tmpdir: &Path,
+    relative: &str,
+) -> std::io::Result<()> {
+    // Reject path traversal: allow only simple filenames, no slashes.
+    if relative.contains('/') || relative.contains("..") || relative.is_empty() {
+        let _ = write_simple(socket, 400, "text/plain", b"Bad path").await;
+        return Ok(());
+    }
+    let file_path = tmpdir.join(relative);
+    let bytes = match tokio::fs::read(&file_path).await {
+        Ok(data) => data,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            let _ = write_simple(socket, 404, "text/plain", b"Not found").await;
+            return Ok(());
+        }
+        Err(err) => {
+            log::warn!("[CastProxy] Failed to read remux file {file_path:?}: {err}");
+            let _ = write_simple(socket, 500, "text/plain", b"Read error").await;
+            return Ok(());
+        }
+    };
+    let content_type = if relative.ends_with(".m3u8") {
+        "application/vnd.apple.mpegurl"
+    } else if relative.ends_with(".ts") {
+        "video/mp2t"
+    } else {
+        "application/octet-stream"
+    };
+    let header = format!(
+        "HTTP/1.1 200 OK\r\n\
+         Content-Type: {content_type}\r\n\
+         Content-Length: {len}\r\n\
+         Cache-Control: no-cache\r\n\
+         Connection: close\r\n\
+         \r\n",
+        len = bytes.len()
+    );
+    socket.write_all(header.as_bytes()).await?;
+    socket.write_all(&bytes).await?;
+    Ok(())
 }
 
 async fn serve_upstream(
