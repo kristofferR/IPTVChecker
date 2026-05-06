@@ -55,7 +55,10 @@ import {
 } from "./lib/tauri";
 import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
+import { useChromecast, type UseChromecastResult } from "./hooks/useChromecast";
 import { useStreamPlayer } from "./hooks/useStreamPlayer";
+import { buildCastRequest, isCastSessionActive } from "./lib/cast";
+import type { ChromecastDevice } from "./lib/types";
 import { useAppStore } from "./store";
 import type { AppStore, OpenSourceDialogState, UpdateNotice } from "./store/types";
 import { Toolbar } from "./components/Toolbar";
@@ -432,6 +435,7 @@ function SelectedChannelSidebar({
   sidebarWidth,
   onResizeStart,
   streamPlayer,
+  chromecast,
   onPlayChannel,
   onScanChannel,
   onStopPlayer,
@@ -441,6 +445,7 @@ function SelectedChannelSidebar({
   sidebarWidth: number;
   onResizeStart: (event: React.MouseEvent) => void;
   streamPlayer: StreamPlayerController;
+  chromecast: UseChromecastResult;
   onPlayChannel: (result: ChannelResult) => void;
   onScanChannel: (indices: number[]) => void;
   onStopPlayer: () => void;
@@ -530,6 +535,7 @@ function SelectedChannelSidebar({
         onLightboxChange={(value) => getStore().setLightboxOpen(value)}
         onPlayChannel={onPlayChannel}
         onScanChannel={onScanChannel}
+        chromecast={chromecast}
         isPlaying={streamPlayer.playerState !== "idle"}
         playerState={streamPlayer.playerState}
         errorMessage={streamPlayer.errorMessage}
@@ -845,6 +851,26 @@ export default function App() {
   const streamPlayer = useStreamPlayer({
     onPlaybackFailed: (result) => handlePlaybackFailedRef.current?.(result),
   });
+
+  const baseChromecast = useChromecast();
+  // mDNS discovery is best-effort; the device list can drop a device between
+  // scans even while a cast is live. Stash the device every time we cast so
+  // redirect attempts can fall back to it instead of giving up.
+  const lastCastDeviceRef = useRef<ChromecastDevice | null>(null);
+  const baseCastFn = baseChromecast.cast;
+  const wrappedCast = useCallback<UseChromecastResult["cast"]>(
+    async (device, request) => {
+      lastCastDeviceRef.current = device;
+      await baseCastFn(device, request);
+    },
+    [baseCastFn],
+  );
+  const chromecast = useMemo<UseChromecastResult>(
+    () => ({ ...baseChromecast, cast: wrappedCast }),
+    [baseChromecast, wrappedCast],
+  );
+  const castSession = chromecast.session;
+  const isCasting = isCastSessionActive(castSession);
 
   const { settings, save: saveSettings, applyExternal: applyExternalSettings } = useSettings();
   const settingsRef = useRef(settings);
@@ -2474,10 +2500,28 @@ export default function App() {
         getStore().setPendingPlaybackChannel(result);
         return;
       }
+      // While a cast session is active, redirect the cast to the new channel
+      // instead of starting a competing local stream. Single-connection IPTV
+      // upstreams can only feed one consumer; starting local play would kick
+      // the cast pipeline's ffmpeg off the upstream.
+      if (isCastSessionActive(chromecast.session)) {
+        const session = chromecast.session;
+        const device =
+          chromecast.devices.find((d) => d.id === session.deviceId) ??
+          (lastCastDeviceRef.current?.id === session.deviceId
+            ? lastCastDeviceRef.current
+            : null);
+        if (device) {
+          void chromecast.cast(device, buildCastRequest(result));
+          return;
+        }
+        // Fall through to local play if we can't resolve the device — better
+        // than silently doing nothing.
+      }
       getStore().setPlayIntentActive(true);
       streamPlayer.play(result);
     },
-    [streamPlayer],
+    [chromecast, streamPlayer],
   );
 
   const handleStopPlayer = useCallback(() => {
@@ -2595,6 +2639,7 @@ export default function App() {
       onOpenChannel={handlePlayInApp}
       onOpenExternal={handleOpenExternal}
       onScanSelected={handleScanSelected}
+      isCasting={isCasting}
       headerPortalRef={isMac ? headerPortalRef : undefined}
       toolbarHeight={toolbarHeight}
     />
@@ -2782,6 +2827,7 @@ export default function App() {
               sidebarWidth={sidebarWidth}
               onResizeStart={handleSidebarDragStart}
               streamPlayer={streamPlayer}
+              chromecast={chromecast}
               onPlayChannel={handlePlayInApp}
               onScanChannel={handleScanSelected}
               onStopPlayer={handleStopPlayer}

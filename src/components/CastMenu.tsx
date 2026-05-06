@@ -5,6 +5,7 @@ import type {
   CastSession,
   ChromecastDevice,
 } from "../lib/types";
+import { isCastSessionActive } from "../lib/cast";
 
 interface UseChromecastShape {
   devices: ChromecastDevice[];
@@ -27,10 +28,6 @@ interface CastMenuProps {
    * suppress auto-hide of surrounding chrome while the picker is visible.
    */
   onOpenChange?: (open: boolean) => void;
-}
-
-function isCastingSession(session: CastSession | null): session is CastSession {
-  return !!session && session.state !== "stopped" && session.state !== "error";
 }
 
 export function CastMenu({
@@ -70,7 +67,7 @@ function CastMenuPopover({
   const [open, setOpenState] = useState(false);
   const [starting, setStarting] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const isCasting = isCastingSession(chromecast.session);
+  const isCasting = isCastSessionActive(chromecast.session);
 
   const setOpen = useCallback(
     (next: boolean) => {
@@ -212,7 +209,7 @@ function CastMenuInline({
 }: Omit<CastMenuProps, "mode">) {
   const [expanded, setExpanded] = useState(false);
   const [starting, setStarting] = useState(false);
-  const isCasting = isCastingSession(chromecast.session);
+  const isCasting = isCastSessionActive(chromecast.session);
 
   // Auto-expand when casting so the active session is always visible without
   // an extra click; collapse back when it ends.

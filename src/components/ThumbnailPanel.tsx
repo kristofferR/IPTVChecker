@@ -2,31 +2,16 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import { CircleHelp, ExternalLink, Fullscreen, ImageOff, LoaderCircle, Play, RotateCw, Shrink, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { CastMediaRequest, CastStreamKind, ChannelResult } from "../lib/types";
+import type { ChannelResult } from "../lib/types";
+import { buildCastRequest, isCastSessionActive } from "../lib/cast";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
 import { isScanActive, type ScanState } from "../lib/scanState";
 import { getThumbnailDisplayState } from "../lib/thumbnailState";
-import { useChromecast } from "../hooks/useChromecast";
+import type { UseChromecastResult } from "../hooks/useChromecast";
 import { CastMenu } from "./CastMenu";
 import { StatusBadge } from "./StatusBadge";
 import { StreamPlayer } from "./StreamPlayer";
-
-function detectStreamKind(url: string): CastStreamKind {
-  // Strip query/fragment from a path-like string before checking the extension,
-  // so URLs like ".../stream.ts?token=..." still classify as MPEG-TS.
-  const stripQuery = (s: string) => s.split(/[?#]/, 1)[0].toLowerCase();
-  try {
-    const path = new URL(url).pathname.toLowerCase();
-    if (path.endsWith(".m3u8")) return "hls";
-    if (path.endsWith(".ts")) return "mpeg_ts";
-  } catch {
-    const path = stripQuery(url);
-    if (path.endsWith(".m3u8")) return "hls";
-    if (path.endsWith(".ts")) return "mpeg_ts";
-  }
-  return "other";
-}
 
 interface ThumbnailPanelProps {
   result: ChannelResult | null;
@@ -39,6 +24,12 @@ interface ThumbnailPanelProps {
   onLightboxChange: (open: boolean) => void;
   onPlayChannel?: (result: ChannelResult) => void;
   onScanChannel?: (indices: number[]) => void;
+  /**
+   * Shared chromecast hook lifted up from App.tsx so the play handler there
+   * can intercept channel selection and redirect the cast instead of starting
+   * a competing local stream.
+   */
+  chromecast: UseChromecastResult;
   // Stream player props
   isPlaying?: boolean;
   playerState?: "idle" | "loading" | "playing" | "error";
@@ -70,6 +61,7 @@ export function ThumbnailPanel({
   onLightboxChange,
   onPlayChannel,
   onScanChannel,
+  chromecast,
   isPlaying,
   playerState = "idle",
   errorMessage: playerErrorMessage,
@@ -96,11 +88,6 @@ export function ThumbnailPanel({
 
   const sidebarPlayerRef = useRef<HTMLDivElement>(null);
   const lightboxPlayerRef = useRef<HTMLDivElement>(null);
-
-  // One discovery+session shared by the sidebar inline cast row and the
-  // lightbox in-player popover. Hoisted up here so we don't run two parallel
-  // listeners when both render paths are active.
-  const chromecast = useChromecast();
 
   // Move the imperative video element between sidebar and lightbox containers.
   // useLayoutEffect ensures the move happens before paint, so there's no flash.
@@ -218,15 +205,7 @@ export function ThumbnailPanel({
   // Memoized so the prop identity is stable across renders — without this, any
   // useEffect downstream of `castRequest` would tear down and re-fire on every
   // parent re-render even when none of its inputs actually changed.
-  const castRequest = useMemo<CastMediaRequest>(
-    () => ({
-      originalUrl: resolvedUrl ?? result.url,
-      channelName: result.name || null,
-      channelLogo: result.tvg_logo || null,
-      streamKind: detectStreamKind(resolvedUrl ?? result.url),
-    }),
-    [resolvedUrl, result.url, result.name, result.tvg_logo],
-  );
+  const castRequest = useMemo(() => buildCastRequest(result), [result]);
   const mediaFrameClass = "relative w-full aspect-video overflow-hidden rounded-lg border border-border-app";
   const lightboxPlaceholderClass =
     "w-[400px] max-w-[88vw] aspect-video rounded-xl border border-white/15 bg-black/60 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]";
@@ -404,15 +383,10 @@ export function ThumbnailPanel({
       )}
 
       {(() => {
-        const castSession = chromecast.session;
-        const isCasting =
-          !!castSession &&
-          castSession.state !== "stopped" &&
-          castSession.state !== "error";
         // Keep the row visible while a session is active so the user can
         // still hit Stop after we've torn down the local player.
         if (lightboxOpen) return null;
-        if (!isPlaying && !isCasting) return null;
+        if (!isPlaying && !isCastSessionActive(chromecast.session)) return null;
         return (
           <CastMenu
             chromecast={chromecast}

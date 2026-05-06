@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import type { UseChromecastResult } from "../hooks/useChromecast";
 import type { CastMediaRequest } from "../lib/types";
+import { isCastSessionActive } from "../lib/cast";
 import { CastMenu } from "./CastMenu";
 
 interface StreamPlayerProps {
@@ -75,10 +76,7 @@ export function StreamPlayer({
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showCastUi = !compact && !!castRequest && !!chromecast;
-  const isCasting =
-    !!chromecast?.session &&
-    chromecast.session.state !== "stopped" &&
-    chromecast.session.state !== "error";
+  const isCasting = isCastSessionActive(chromecast?.session ?? null);
 
   const scheduleHide = useCallback(() => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
