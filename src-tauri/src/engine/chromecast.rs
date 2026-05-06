@@ -1,21 +1,24 @@
 //! Chromecast discovery and casting session management.
 //!
 //! Discovery uses mDNS browsing on `_googlecast._tcp.local.`. A Cast session
-//! runs on a dedicated worker thread because rust_cast's `CastDevice` performs
-//! synchronous TLS reads — we bridge it to async Tokio code via blocking
-//! channels and `spawn_blocking`.
+//! drives an async `cast_sender::Receiver` from a tokio task. cast-sender uses
+//! async-native-tls (system TLS) which accepts Chromecast's self-signed certs
+//! — rustls's webpki parser rejects those with `UnsupportedCertVersion`
+//! before any custom verifier can run, which is why we cannot use rust_cast
+//! 0.19+ against real devices.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use cast_sender::namespace::media::{
+    GenericMediaMetadataBuilder, MediaInformationBuilder, StreamType,
+};
+use cast_sender::{App as CastApp, AppId, ImageBuilder, MediaController, Receiver};
 use mdns_sd::{ServiceDaemon, ServiceEvent};
-use rust_cast::channels::media::{Media, Metadata, GenericMediaMetadata, Image, StreamType};
-use rust_cast::channels::receiver::CastDeviceApp;
-use rust_cast::{CastDevice, ChannelMessage};
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::Mutex;
+use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 
 use crate::error::AppError;
@@ -27,8 +30,11 @@ use crate::state::AppState;
 static SESSION_UID: AtomicU64 = AtomicU64::new(1);
 
 const CAST_SERVICE_TYPE: &str = "_googlecast._tcp.local.";
-const DEFAULT_RECEIVER_ID: &str = "receiver-0";
 const CAST_STATUS_EVENT: &str = "cast://status";
+/// How often we poll `Receiver::is_connected` to detect that the device went
+/// away (TV powered off, network blip). cast-sender exposes no event for this,
+/// so a periodic check is the simplest reliable signal.
+const CONNECTION_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 /// One-shot mDNS scan that browses for Chromecast devices and returns the set
 /// resolved within `wait`. Default wait keeps the UI snappy while still giving
@@ -40,8 +46,6 @@ pub async fn discover(wait: Duration) -> Result<Vec<ChromecastDevice>, AppError>
         .browse(CAST_SERVICE_TYPE)
         .map_err(|e| AppError::Other(format!("mDNS browse failed: {e}")))?;
 
-    // Spawn a blocking task that drains events from the flume receiver until the
-    // wait deadline elapses, then deduplicates by device id.
     let devices = tokio::task::spawn_blocking(move || -> HashMap<String, ChromecastDevice> {
         let mut found: HashMap<String, ChromecastDevice> = HashMap::new();
         let deadline = std::time::Instant::now() + wait;
@@ -90,9 +94,7 @@ fn resolved_to_device(info: &mdns_sd::ResolvedService) -> Option<ChromecastDevic
                 .map(|s| s.to_string())
         })
         .unwrap_or_else(|| "Chromecast".to_string());
-    let model = info
-        .get_property_val_str("md")
-        .map(|s| s.to_string());
+    let model = info.get_property_val_str("md").map(|s| s.to_string());
     Some(ChromecastDevice {
         id,
         friendly_name,
@@ -100,12 +102,6 @@ fn resolved_to_device(info: &mdns_sd::ResolvedService) -> Option<ChromecastDevic
         host,
         port: info.port,
     })
-}
-
-/// Commands sent from the async world into the blocking session worker.
-#[derive(Debug)]
-enum SessionCommand {
-    Stop,
 }
 
 /// State the AppState tracks per active cast session. Only one session at a
@@ -116,7 +112,7 @@ pub struct ActiveCastSession {
     /// the stored session is still its own (and not a successor) before
     /// clearing it from `AppState`.
     pub uid: u64,
-    cmd_tx: std::sync::mpsc::Sender<SessionCommand>,
+    stop_tx: Option<oneshot::Sender<()>>,
     worker: Option<JoinHandle<()>>,
 }
 
@@ -126,7 +122,9 @@ impl ActiveCastSession {
     }
 
     pub async fn stop(mut self) {
-        let _ = self.cmd_tx.send(SessionCommand::Stop);
+        if let Some(tx) = self.stop_tx.take() {
+            let _ = tx.send(());
+        }
         if let Some(handle) = self.worker.take() {
             let _ = handle.await;
         }
@@ -134,41 +132,42 @@ impl ActiveCastSession {
 }
 
 /// Start a Cast session: connect, launch the default media receiver, load
-/// media. Spawns a worker thread that owns the `CastDevice` and handles
-/// heartbeats and shutdown commands.
+/// media. Spawns a tokio task that owns the `Receiver` and watches for stop
+/// signals or device disconnect.
 pub async fn start_session(
     app: AppHandle,
     device: ChromecastDevice,
     request: CastMediaRequest,
     cast_url: String,
 ) -> Result<ActiveCastSession, AppError> {
-    let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SessionCommand>();
-    let (ready_tx, ready_rx) =
-        tokio::sync::oneshot::channel::<Result<(String, String), AppError>>();
-
+    let (stop_tx, stop_rx) = oneshot::channel::<()>();
+    let (ready_tx, ready_rx) = oneshot::channel::<Result<(), AppError>>();
     let uid = SESSION_UID.fetch_add(1, Ordering::Relaxed);
+
     let device_for_worker = device.clone();
     let request_for_worker = request.clone();
     let cast_url_for_worker = cast_url.clone();
     let app_for_worker = app.clone();
 
-    let worker = tokio::task::spawn_blocking(move || {
+    let worker = tokio::spawn(async move {
         run_session_worker(
             app_for_worker,
             uid,
             device_for_worker,
             request_for_worker,
             cast_url_for_worker,
-            cmd_rx,
+            stop_rx,
             ready_tx,
-        );
+        )
+        .await;
     });
 
-    let (session_id, transport_id) = ready_rx
+    ready_rx
         .await
         .map_err(|_| AppError::Other("Cast worker exited before ready".to_string()))??;
+
     log::info!(
-        "[Chromecast] Session ready on '{}' (session_id={session_id}, transport_id={transport_id})",
+        "[Chromecast] Session ready on '{}'",
         device.friendly_name
     );
 
@@ -186,43 +185,33 @@ pub async fn start_session(
     Ok(ActiveCastSession {
         session,
         uid,
-        cmd_tx,
+        stop_tx: Some(stop_tx),
         worker: Some(worker),
     })
 }
 
-fn run_session_worker(
+async fn run_session_worker(
     app: AppHandle,
     uid: u64,
     device: ChromecastDevice,
     request: CastMediaRequest,
     cast_url: String,
-    cmd_rx: std::sync::mpsc::Receiver<SessionCommand>,
-    ready_tx: tokio::sync::oneshot::Sender<Result<(String, String), AppError>>,
+    mut stop_rx: oneshot::Receiver<()>,
+    ready_tx: oneshot::Sender<Result<(), AppError>>,
 ) {
-    // Connect (without host verification — Chromecast self-signed certs).
-    let cast = match CastDevice::connect_without_host_verification(device.host.clone(), device.port)
-    {
-        Ok(c) => c,
-        Err(err) => {
-            let _ = ready_tx.send(Err(AppError::Other(format!(
-                "Failed to connect to {}: {err}",
-                device.host
-            ))));
-            return;
-        }
-    };
+    let receiver = Receiver::new();
 
-    if let Err(err) = cast.connection.connect(DEFAULT_RECEIVER_ID.to_string()) {
+    if let Err(err) = receiver.connect(&device.host).await {
         let _ = ready_tx.send(Err(AppError::Other(format!(
             "Cast connect handshake failed: {err}"
         ))));
         return;
     }
 
-    let app_handle = match cast.receiver.launch_app(&CastDeviceApp::DefaultMediaReceiver) {
-        Ok(app) => app,
+    let cast_app = match receiver.launch_app(AppId::DefaultMediaReceiver).await {
+        Ok(a) => a,
         Err(err) => {
+            receiver.disconnect().await;
             let _ = ready_tx.send(Err(AppError::Other(format!(
                 "Default media receiver launch failed: {err}"
             ))));
@@ -230,111 +219,129 @@ fn run_session_worker(
         }
     };
 
-    let transport_id = app_handle.transport_id.clone();
-    let session_id = app_handle.session_id.clone();
-    if let Err(err) = cast.connection.connect(transport_id.clone()) {
-        let _ = ready_tx.send(Err(AppError::Other(format!(
-            "Receiver app connect failed: {err}"
-        ))));
-        return;
-    }
-
-    let content_type = match request.stream_kind {
-        CastStreamKind::Hls => "application/vnd.apple.mpegurl",
-        CastStreamKind::MpegTs => "video/mp2t",
-        CastStreamKind::Other => "application/octet-stream",
+    let media_controller = match MediaController::new(cast_app.clone(), receiver.clone()) {
+        Ok(c) => c,
+        Err(err) => {
+            let _ = receiver.stop_app(&cast_app).await;
+            receiver.disconnect().await;
+            let _ = ready_tx.send(Err(AppError::Other(format!(
+                "Media controller init failed: {err}"
+            ))));
+            return;
+        }
     };
 
-    let metadata = Metadata::Generic(GenericMediaMetadata {
-        title: request.channel_name.clone(),
-        subtitle: None,
-        images: request
-            .channel_logo
-            .clone()
-            .map(|url| vec![Image::new(url)])
-            .unwrap_or_default(),
-        release_date: None,
-    });
-
-    let media = Media {
-        content_id: cast_url.clone(),
-        stream_type: StreamType::Live,
-        content_type: content_type.to_string(),
-        metadata: Some(metadata),
-        duration: None,
+    let media_info = match build_media_info(&request, &cast_url) {
+        Ok(m) => m,
+        Err(err) => {
+            let _ = receiver.stop_app(&cast_app).await;
+            receiver.disconnect().await;
+            let _ = ready_tx.send(Err(err));
+            return;
+        }
     };
 
-    if let Err(err) = cast
-        .media
-        .load(transport_id.clone(), session_id.clone(), &media)
-    {
+    if let Err(err) = media_controller.load(media_info).await {
+        let _ = receiver.stop_app(&cast_app).await;
+        receiver.disconnect().await;
         let _ = ready_tx.send(Err(AppError::Other(format!("LOAD failed: {err}"))));
         return;
     }
 
-    if ready_tx
-        .send(Ok((session_id.clone(), transport_id.clone())))
-        .is_err()
-    {
-        // Caller dropped — stop session immediately.
-        let _ = cast.receiver.stop_app(session_id.clone());
+    if ready_tx.send(Ok(())).is_err() {
+        // Caller dropped before we signaled ready — tear down immediately.
+        let _ = receiver.stop_app(&cast_app).await;
+        receiver.disconnect().await;
         return;
     }
 
-    // Drive the session: respond to heartbeats, watch for stop commands or
-    // disconnects. This loop runs until a Stop command arrives, the device
-    // disconnects, or a fatal error occurs.
-    //
-    // `manual_stop` distinguishes the explicit Stop command (where the caller
-    // already cleared `AppState` before sending Stop) from self-exit paths
-    // (Connection::Close, errors), where the worker must clear the stored
-    // session itself so `get_cast_status()` doesn't keep reporting Playing.
-    let mut manual_stop = false;
-    loop {
-        if let Ok(SessionCommand::Stop) = cmd_rx.try_recv() {
-            let _ = cast.media.stop(transport_id.clone(), 0);
-            let _ = cast.receiver.stop_app(session_id.clone());
-            emit_state(&app, &device, CastSessionState::Stopped, &cast_url, &request, None);
-            log::info!("[Chromecast] Session on '{}' stopped", device.friendly_name);
-            manual_stop = true;
-            break;
-        }
+    let manual_stop =
+        drive_session(&app, &device, &request, &cast_url, &receiver, &cast_app, &mut stop_rx)
+            .await;
 
-        match cast.receive() {
-            Ok(ChannelMessage::Heartbeat(_)) => {
-                if let Err(err) = cast.heartbeat.pong() {
-                    log::warn!("[Chromecast] Heartbeat pong failed: {err}");
-                    emit_error(&app, &device, format!("Cast device disconnected: {err}"));
-                    break;
-                }
-            }
-            Ok(ChannelMessage::Connection(
-                rust_cast::channels::connection::ConnectionResponse::Close,
-            )) => {
-                log::info!("[Chromecast] Receiver closed connection");
-                emit_state(&app, &device, CastSessionState::Stopped, &cast_url, &request, None);
-                break;
-            }
-            Ok(_) => {}
-            Err(err) => {
-                let msg = format!("{err}");
-                log::warn!("[Chromecast] receive() error: {msg}");
-                emit_error(&app, &device, msg);
-                break;
-            }
-        }
-    }
-
-    // On self-exit, clear AppState so a remounted frontend that calls
-    // `get_cast_status()` no longer sees a stale Playing state. The uid match
-    // prevents us from clearing a successor session that was started after we
-    // disconnected.
+    // For self-exit paths (device disconnected, error) we clear the stored
+    // session so a remounted frontend calling `get_cast_status()` doesn't see
+    // a stale Playing state. On manual stop the caller already cleared the
+    // session before sending Stop, so we skip. The uid match prevents
+    // clearing a successor session started after we exited.
     if !manual_stop {
         let app_for_cleanup = app.clone();
-        if let Ok(handle) = tokio::runtime::Handle::try_current().map(|h| h) {
-            handle.spawn(async move {
-                clear_app_state_if_uid_matches(&app_for_cleanup, uid).await;
-            });
+        tokio::spawn(async move {
+            clear_app_state_if_uid_matches(&app_for_cleanup, uid).await;
+        });
+    }
+}
+
+fn build_media_info(
+    request: &CastMediaRequest,
+    cast_url: &str,
+) -> Result<cast_sender::namespace::media::MediaInformation, AppError> {
+    // The cast proxy always serves HLS to the Chromecast — direct pass-through
+    // for HLS upstreams, ffmpeg-remuxed HLS for MPEG-TS. So the receiver always
+    // sees an .m3u8 manifest regardless of the upstream's original wire format.
+    let content_type = match request.stream_kind {
+        CastStreamKind::Hls | CastStreamKind::MpegTs => "application/vnd.apple.mpegurl",
+        CastStreamKind::Other => "application/octet-stream",
+    };
+
+    let images = request
+        .channel_logo
+        .as_ref()
+        .and_then(|url| ImageBuilder::default().url(url.clone()).build().ok())
+        .map(|img| vec![img])
+        .unwrap_or_default();
+
+    let mut metadata_builder = GenericMediaMetadataBuilder::default();
+    if let Some(title) = request.channel_name.clone() {
+        metadata_builder.title(title);
+    }
+    if !images.is_empty() {
+        metadata_builder.images(images);
+    }
+    let metadata = metadata_builder
+        .build()
+        .map_err(|err| AppError::Other(format!("Cast metadata build failed: {err}")))?;
+
+    MediaInformationBuilder::default()
+        .content_id(cast_url.to_string())
+        .stream_type(StreamType::Live)
+        .content_type(content_type.to_string())
+        .metadata(metadata)
+        .build()
+        .map_err(|err| AppError::Other(format!("Cast MediaInformation build failed: {err}")))
+}
+
+/// Returns `true` if the session ended due to an explicit stop signal,
+/// `false` if the device disconnected on its own.
+async fn drive_session(
+    app: &AppHandle,
+    device: &ChromecastDevice,
+    request: &CastMediaRequest,
+    cast_url: &str,
+    receiver: &Receiver,
+    cast_app: &CastApp,
+    stop_rx: &mut oneshot::Receiver<()>,
+) -> bool {
+    let mut tick = tokio::time::interval(CONNECTION_POLL_INTERVAL);
+    // First tick fires immediately — skip it so we don't false-positive on a
+    // session that has barely started.
+    tick.tick().await;
+    loop {
+        tokio::select! {
+            _ = &mut *stop_rx => {
+                let _ = receiver.stop_app(cast_app).await;
+                receiver.disconnect().await;
+                emit_state(app, device, CastSessionState::Stopped, cast_url, request, None);
+                log::info!("[Chromecast] Session on '{}' stopped", device.friendly_name);
+                return true;
+            }
+            _ = tick.tick() => {
+                if !receiver.is_connected().await {
+                    log::info!("[Chromecast] Receiver connection lost on '{}'", device.friendly_name);
+                    emit_state(app, device, CastSessionState::Stopped, cast_url, request, None);
+                    return false;
+                }
+            }
         }
     }
 }
@@ -372,19 +379,6 @@ fn emit_state(
         channel_name: request.channel_name.clone(),
         channel_logo: request.channel_logo.clone(),
         error_message,
-    };
-    emit_status(app, &session);
-}
-
-fn emit_error(app: &AppHandle, device: &ChromecastDevice, message: String) {
-    let session = CastSession {
-        device_id: device.id.clone(),
-        device_name: device.friendly_name.clone(),
-        state: CastSessionState::Error,
-        stream_url: String::new(),
-        channel_name: None,
-        channel_logo: None,
-        error_message: Some(message),
     };
     emit_status(app, &session);
 }

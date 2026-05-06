@@ -39,7 +39,12 @@ tauri-plugin-notification = "2"
 tauri-plugin-mcp = { git = "https://github.com/P3GLEG/tauri-plugin-mcp", features = ["devtools"] }
 fs2 = "0.4.3"
 tauri-plugin-window-state = "2"
-rust_cast = { version = "0.21.0", features = ["thread_safe"] }
+# cast-sender uses async-native-tls (system TLS: SChannel on Windows,
+# Security.framework on macOS, OpenSSL on Linux). This is the only maintained
+# Rust Chromecast crate that doesn't go through rustls — rustls's webpki parser
+# rejects Chromecast's self-signed certs with UnsupportedCertVersion before any
+# verifier runs, which makes rust_cast 0.19+ unusable against real devices.
+cast-sender = "0.3"
 mdns-sd = "0.19.1"
 local-ip-address = "0.6.12"
 
