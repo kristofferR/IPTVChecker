@@ -12,7 +12,7 @@ import type {
   ChromecastDevice,
 } from "../lib/types";
 
-interface UseChromecastResult {
+export interface UseChromecastResult {
   devices: ChromecastDevice[];
   discovering: boolean;
   session: CastSession | null;
