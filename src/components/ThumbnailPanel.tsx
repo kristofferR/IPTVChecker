@@ -7,6 +7,8 @@ import { getChannelErrorReason } from "../lib/channelResults";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
 import { isScanActive, type ScanState } from "../lib/scanState";
 import { getThumbnailDisplayState } from "../lib/thumbnailState";
+import { useChromecast } from "../hooks/useChromecast";
+import { CastMenu } from "./CastMenu";
 import { StatusBadge } from "./StatusBadge";
 import { StreamPlayer } from "./StreamPlayer";
 
@@ -94,6 +96,11 @@ export function ThumbnailPanel({
 
   const sidebarPlayerRef = useRef<HTMLDivElement>(null);
   const lightboxPlayerRef = useRef<HTMLDivElement>(null);
+
+  // One discovery+session shared by the sidebar inline cast row and the
+  // lightbox in-player popover. Hoisted up here so we don't run two parallel
+  // listeners when both render paths are active.
+  const chromecast = useChromecast();
 
   // Move the imperative video element between sidebar and lightbox containers.
   // useLayoutEffect ensures the move happens before paint, so there's no flash.
@@ -274,6 +281,8 @@ export function ThumbnailPanel({
           onFullscreen={() => onLightboxChange(true)}
           onPip={onPip}
           castRequest={castRequest}
+          compact
+          chromecast={chromecast}
         />
       ) : screenshotUrl ? (
         <button
@@ -393,6 +402,26 @@ export function ThumbnailPanel({
           )}
         </div>
       )}
+
+      {(() => {
+        const castSession = chromecast.session;
+        const isCasting =
+          !!castSession &&
+          castSession.state !== "stopped" &&
+          castSession.state !== "error";
+        // Keep the row visible while a session is active so the user can
+        // still hit Stop after we've torn down the local player.
+        if (lightboxOpen) return null;
+        if (!isPlaying && !isCasting) return null;
+        return (
+          <CastMenu
+            chromecast={chromecast}
+            castRequest={castRequest}
+            mode="inline"
+            onCastStart={() => onStopPlayer?.()}
+          />
+        );
+      })()}
 
       <div className="grid grid-cols-2 gap-2 text-[11px]">
         <div>
@@ -554,6 +583,7 @@ export function ThumbnailPanel({
                   onRetry={() => onRetryPlay?.(result)}
                   onPip={onPip ? () => { onPip(); closeLightbox(); } : undefined}
                   castRequest={castRequest}
+                  chromecast={chromecast}
                 />
                 <button
                   type="button"
