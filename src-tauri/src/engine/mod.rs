@@ -1,4 +1,6 @@
+pub mod cast_proxy;
 pub mod checker;
+pub mod chromecast;
 pub mod connectivity;
 pub mod disk;
 pub mod ffmpeg;

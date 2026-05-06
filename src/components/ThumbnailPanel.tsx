@@ -2,13 +2,26 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 import { CircleHelp, ExternalLink, Fullscreen, ImageOff, LoaderCircle, Play, RotateCw, Shrink, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { ChannelResult } from "../lib/types";
+import type { CastMediaRequest, CastStreamKind, ChannelResult } from "../lib/types";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
 import { isScanActive, type ScanState } from "../lib/scanState";
 import { getThumbnailDisplayState } from "../lib/thumbnailState";
 import { StatusBadge } from "./StatusBadge";
 import { StreamPlayer } from "./StreamPlayer";
+
+function detectStreamKind(url: string): CastStreamKind {
+  try {
+    const path = new URL(url).pathname.toLowerCase();
+    if (path.endsWith(".m3u8")) return "hls";
+    if (path.endsWith(".ts")) return "mpeg_ts";
+  } catch {
+    const lower = url.toLowerCase();
+    if (lower.includes(".m3u8")) return "hls";
+    if (lower.endsWith(".ts")) return "mpeg_ts";
+  }
+  return "other";
+}
 
 interface ThumbnailPanelProps {
   result: ChannelResult | null;
@@ -192,6 +205,12 @@ export function ThumbnailPanel({
   const scanActive = isScanActive(scanState);
   const resolvedUrl = result.stream_url?.trim() || null;
   const showResolvedUrl = !!resolvedUrl && resolvedUrl !== result.url;
+  const castRequest: CastMediaRequest = {
+    originalUrl: resolvedUrl ?? result.url,
+    channelName: result.name || null,
+    channelLogo: result.tvg_logo || null,
+    streamKind: detectStreamKind(resolvedUrl ?? result.url),
+  };
   const mediaFrameClass = "relative w-full aspect-video overflow-hidden rounded-lg border border-border-app";
   const lightboxPlaceholderClass =
     "w-[400px] max-w-[88vw] aspect-video rounded-xl border border-white/15 bg-black/60 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]";
@@ -245,6 +264,7 @@ export function ThumbnailPanel({
           onRetry={() => onRetryPlay?.(result)}
           onFullscreen={() => onLightboxChange(true)}
           onPip={onPip}
+          castRequest={castRequest}
         />
       ) : screenshotUrl ? (
         <button
@@ -524,6 +544,7 @@ export function ThumbnailPanel({
                   onOpenExternal={() => onOpenExternal?.(result)}
                   onRetry={() => onRetryPlay?.(result)}
                   onPip={onPip ? () => { onPip(); closeLightbox(); } : undefined}
+                  castRequest={castRequest}
                 />
                 <button
                   type="button"
