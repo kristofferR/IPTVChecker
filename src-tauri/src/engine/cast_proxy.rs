@@ -142,6 +142,11 @@ pub async fn start(
 
     let cancel = CancellationToken::new();
     let remux_state: Arc<Mutex<Option<RemuxState>>> = Arc::new(Mutex::new(None));
+    // Final URL of the manifest after redirects, populated on the first
+    // successful manifest fetch in `serve_upstream`. Used as the same-origin
+    // anchor for segment-fetch validation so CDN-fronted streams (where the
+    // operator URL 302s into a different host) don't self-reject.
+    let resolved_origin: Arc<Mutex<Option<Url>>> = Arc::new(Mutex::new(None));
 
     // Build one HTTP client for the entire cast session. Cookies set on the
     // manifest response must persist into segment requests, so we cannot
@@ -191,6 +196,7 @@ pub async fn start(
     let remux_for_loop = remux_state.clone();
     let client_for_loop = client.clone();
     let user_agent_for_loop = user_agent.clone();
+    let resolved_origin_for_loop = resolved_origin.clone();
 
     tokio::spawn(async move {
         loop {
@@ -218,6 +224,7 @@ pub async fn start(
                     let remux_for_conn = remux_for_loop.clone();
                     let client_for_conn = client_for_loop.clone();
                     let user_agent_for_conn = user_agent_for_loop.clone();
+                    let resolved_origin_for_conn = resolved_origin_for_loop.clone();
                     tokio::spawn(async move {
                         if let Err(err) = handle_connection(
                             socket,
@@ -228,6 +235,7 @@ pub async fn start(
                             cancel_for_conn,
                             client_for_conn,
                             user_agent_for_conn,
+                            resolved_origin_for_conn,
                         )
                         .await
                         {
@@ -437,6 +445,7 @@ async fn handle_connection(
     cancel: CancellationToken,
     client: Arc<reqwest::Client>,
     user_agent: String,
+    resolved_origin: Arc<Mutex<Option<Url>>>,
 ) -> std::io::Result<()> {
     let mut buf = vec![0u8; 8192];
     let n = socket.read(&mut buf).await?;
@@ -495,18 +504,32 @@ async fn handle_connection(
                 return Ok(());
             }
         };
-        let base_url = match Url::parse(&upstream_url) {
-            Ok(u) => u,
-            Err(_) => {
-                let _ = write_simple(&mut socket, 500, "text/plain", b"Bad base").await;
-                return Ok(());
+        // Validate against the manifest's resolved origin if we've fetched it
+        // already (post-redirect, so CDN-fronted streams aren't self-rejected),
+        // falling back to the operator-supplied URL if the manifest hasn't
+        // been fetched yet — and accept either origin if both are available
+        // (some master playlists reference sub-playlists/segments on a
+        // separate CDN host).
+        let resolved_base = resolved_origin.lock().await.clone();
+        let upstream_base = Url::parse(&upstream_url).ok();
+        let allowed = match (&resolved_base, &upstream_base) {
+            (Some(r), Some(u)) => {
+                is_target_allowed(r, &decoded_url) || is_target_allowed(u, &decoded_url)
             }
+            (Some(r), None) => is_target_allowed(r, &decoded_url),
+            (None, Some(u)) => is_target_allowed(u, &decoded_url),
+            (None, None) => false,
         };
-        if !is_target_allowed(&base_url, &decoded_url) {
+        if !allowed {
+            let base_label = resolved_base
+                .as_ref()
+                .or(upstream_base.as_ref())
+                .map(|u| u.as_str().to_string())
+                .unwrap_or_default();
             log::warn!(
                 "[CastProxy] Rejected out-of-origin segment fetch for {} (base {})",
                 redact_url(decoded_url.as_str()),
-                redact_url(base_url.as_str())
+                redact_url(&base_label)
             );
             let _ = write_simple(&mut socket, 403, "text/plain", b"Forbidden").await;
             return Ok(());
@@ -526,6 +549,7 @@ async fn handle_connection(
         cancel,
         client,
         user_agent,
+        resolved_origin,
     )
     .await
 }
@@ -581,6 +605,7 @@ async fn serve_upstream(
     cancel: CancellationToken,
     client: Arc<reqwest::Client>,
     user_agent: String,
+    resolved_origin: Arc<Mutex<Option<Url>>>,
 ) -> std::io::Result<()> {
     let response = match tokio::time::timeout(
         MANIFEST_FETCH_TIMEOUT,
@@ -624,6 +649,13 @@ async fn serve_upstream(
     let looks_like_m3u8 = is_m3u8(&content_type, &final_url);
 
     if looks_like_m3u8 {
+        // Remember the manifest's resolved origin so subsequent segment
+        // requests are validated against the same base used to rewrite the
+        // segment URIs (otherwise CDN-fronted streams would self-reject).
+        if let Ok(parsed) = Url::parse(&final_url) {
+            let mut guard = resolved_origin.lock().await;
+            *guard = Some(parsed);
+        }
         // Buffer the manifest, rewrite URIs to round-trip through this proxy.
         let body = match response.bytes().await {
             Ok(bytes) => bytes,
@@ -971,5 +1003,73 @@ http://iptv.example.com/live/720p/seg-2.ts
             &base,
             &Url::parse("http://iptv.example.com:80/live/seg.ts").unwrap()
         ));
+    }
+
+    /// Mirrors the segment-fetch acceptance logic in `handle_connection`. We
+    /// keep it as a test-local helper so the pairwise check is exercised
+    /// without spinning up sockets.
+    fn segment_accepted(
+        resolved: Option<&Url>,
+        upstream: Option<&Url>,
+        decoded: &Url,
+    ) -> bool {
+        match (resolved, upstream) {
+            (Some(r), Some(u)) => is_target_allowed(r, decoded) || is_target_allowed(u, decoded),
+            (Some(r), None) => is_target_allowed(r, decoded),
+            (None, Some(u)) => is_target_allowed(u, decoded),
+            (None, None) => false,
+        }
+    }
+
+    #[test]
+    fn segment_accepted_after_redirect_to_cdn() {
+        // Operator URL — what the user typed in / what the proxy was started with.
+        let upstream = Url::parse("http://provider.example/stream.m3u8").unwrap();
+        // Final URL after the manifest fetch followed a 302 to the CDN.
+        let resolved = Url::parse("http://cdn.example/stream.m3u8").unwrap();
+        // Segment URI rewritten against the CDN base.
+        let cdn_segment = Url::parse("http://cdn.example/seg-1.ts").unwrap();
+
+        // Without resolved_origin populated yet (e.g. seg request races ahead
+        // of the manifest, which shouldn't happen but we want a clean fail
+        // rather than a random pass), the CDN segment must be rejected.
+        assert!(!segment_accepted(None, Some(&upstream), &cdn_segment));
+
+        // With resolved_origin populated by the manifest fetch, the CDN
+        // segment is accepted — this is the regression the redirect-aware
+        // allowlist exists to fix.
+        assert!(segment_accepted(Some(&resolved), Some(&upstream), &cdn_segment));
+
+        // A segment on the operator host (still legitimate during transition)
+        // is accepted as long as either origin matches.
+        let provider_segment = Url::parse("http://provider.example/seg-2.ts").unwrap();
+        assert!(segment_accepted(Some(&resolved), Some(&upstream), &provider_segment));
+
+        // A loopback or unrelated host is still rejected even with both
+        // origins populated.
+        let loopback = Url::parse("http://127.0.0.1:9000/x.ts").unwrap();
+        assert!(!segment_accepted(Some(&resolved), Some(&upstream), &loopback));
+    }
+
+    #[test]
+    fn rewrite_manifest_uses_post_redirect_base() {
+        // Simulates the case where the manifest was fetched from
+        // provider.example but redirected to cdn.example — `serve_upstream`
+        // calls rewrite_manifest with the post-redirect URL, and the rewritten
+        // segments encode CDN URLs. The redirect-aware seg validator on the
+        // fetch boundary then accepts those CDN segments.
+        let manifest = "\
+#EXTM3U
+#EXT-X-TARGETDURATION:6
+#EXTINF:6.0,
+seg-1.ts
+";
+        let cdn_final_url = "http://cdn.example/live/720p/index.m3u8";
+        let rewritten = rewrite_manifest(manifest, cdn_final_url, "tok");
+        let cdn_b64 = encode_segment("http://cdn.example/live/720p/seg-1.ts");
+        assert!(
+            rewritten.contains(&format!("/cast/tok/seg/{cdn_b64}")),
+            "rewrite must encode the CDN URL: {rewritten}"
+        );
     }
 }
