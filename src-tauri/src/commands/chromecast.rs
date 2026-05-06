@@ -24,6 +24,10 @@ pub async fn cast_to_device(
 ) -> Result<CastSession, AppError> {
     let state = app.state::<Arc<AppState>>();
 
+    // Serialize the entire teardown/start/store sequence so overlapping
+    // cast_to_device / stop_cast calls cannot interleave and orphan a session.
+    let _lifecycle = state.cast_lifecycle_lock.lock().await;
+
     // Tear down any prior session before starting a new one.
     let (prior_session, prior_proxy) = {
         let mut guard = state.cast_state.lock().await;
@@ -71,6 +75,10 @@ pub async fn cast_to_device(
 #[tauri::command]
 pub async fn stop_cast(app: AppHandle) -> Result<(), AppError> {
     let state = app.state::<Arc<AppState>>();
+
+    // Serialize against in-flight cast_to_device transitions.
+    let _lifecycle = state.cast_lifecycle_lock.lock().await;
+
     let (session, proxy) = {
         let mut guard = state.cast_state.lock().await;
         (guard.session.take(), guard.proxy.take())

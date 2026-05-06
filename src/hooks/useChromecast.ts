@@ -86,11 +86,17 @@ export function useChromecast(): UseChromecastResult {
           const next = event.payload;
           if (next.state === "stopped") {
             setSession(null);
+            setError(null);
             return;
           }
           setSession(next);
           if (next.state === "error") {
             setError(next.errorMessage ?? "Cast session error");
+          } else {
+            // A healthy update means whatever caused a previous error has
+            // recovered — drop the stale message so the menu doesn't keep
+            // showing it.
+            setError(null);
           }
         });
       } catch (err) {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CircleHelp, ExternalLink, Fullscreen, ImageOff, LoaderCircle, Play, RotateCw, Shrink, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -11,14 +11,17 @@ import { StatusBadge } from "./StatusBadge";
 import { StreamPlayer } from "./StreamPlayer";
 
 function detectStreamKind(url: string): CastStreamKind {
+  // Strip query/fragment from a path-like string before checking the extension,
+  // so URLs like ".../stream.ts?token=..." still classify as MPEG-TS.
+  const stripQuery = (s: string) => s.split(/[?#]/, 1)[0].toLowerCase();
   try {
     const path = new URL(url).pathname.toLowerCase();
     if (path.endsWith(".m3u8")) return "hls";
     if (path.endsWith(".ts")) return "mpeg_ts";
   } catch {
-    const lower = url.toLowerCase();
-    if (lower.includes(".m3u8")) return "hls";
-    if (lower.endsWith(".ts")) return "mpeg_ts";
+    const path = stripQuery(url);
+    if (path.endsWith(".m3u8")) return "hls";
+    if (path.endsWith(".ts")) return "mpeg_ts";
   }
   return "other";
 }
@@ -205,12 +208,18 @@ export function ThumbnailPanel({
   const scanActive = isScanActive(scanState);
   const resolvedUrl = result.stream_url?.trim() || null;
   const showResolvedUrl = !!resolvedUrl && resolvedUrl !== result.url;
-  const castRequest: CastMediaRequest = {
-    originalUrl: resolvedUrl ?? result.url,
-    channelName: result.name || null,
-    channelLogo: result.tvg_logo || null,
-    streamKind: detectStreamKind(resolvedUrl ?? result.url),
-  };
+  // Memoized so the prop identity is stable across renders — without this, any
+  // useEffect downstream of `castRequest` would tear down and re-fire on every
+  // parent re-render even when none of its inputs actually changed.
+  const castRequest = useMemo<CastMediaRequest>(
+    () => ({
+      originalUrl: resolvedUrl ?? result.url,
+      channelName: result.name || null,
+      channelLogo: result.tvg_logo || null,
+      streamKind: detectStreamKind(resolvedUrl ?? result.url),
+    }),
+    [resolvedUrl, result.url, result.name, result.tvg_logo],
+  );
   const mediaFrameClass = "relative w-full aspect-video overflow-hidden rounded-lg border border-border-app";
   const lightboxPlaceholderClass =
     "w-[400px] max-w-[88vw] aspect-video rounded-xl border border-white/15 bg-black/60 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]";

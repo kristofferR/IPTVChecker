@@ -6,6 +6,7 @@
 //! channels and `spawn_blocking`.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,7 +14,7 @@ use mdns_sd::{ServiceDaemon, ServiceEvent};
 use rust_cast::channels::media::{Media, Metadata, GenericMediaMetadata, Image, StreamType};
 use rust_cast::channels::receiver::CastDeviceApp;
 use rust_cast::{CastDevice, ChannelMessage};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
@@ -21,6 +22,9 @@ use crate::error::AppError;
 use crate::models::chromecast::{
     CastMediaRequest, CastSession, CastSessionState, CastStreamKind, ChromecastDevice,
 };
+use crate::state::AppState;
+
+static SESSION_UID: AtomicU64 = AtomicU64::new(1);
 
 const CAST_SERVICE_TYPE: &str = "_googlecast._tcp.local.";
 const DEFAULT_RECEIVER_ID: &str = "receiver-0";
@@ -108,6 +112,10 @@ enum SessionCommand {
 /// time is supported in the current scope.
 pub struct ActiveCastSession {
     pub session: CastSession,
+    /// Unique-per-process id, used by the worker's self-cleanup path to verify
+    /// the stored session is still its own (and not a successor) before
+    /// clearing it from `AppState`.
+    pub uid: u64,
     cmd_tx: std::sync::mpsc::Sender<SessionCommand>,
     worker: Option<JoinHandle<()>>,
 }
@@ -138,6 +146,7 @@ pub async fn start_session(
     let (ready_tx, ready_rx) =
         tokio::sync::oneshot::channel::<Result<(String, String), AppError>>();
 
+    let uid = SESSION_UID.fetch_add(1, Ordering::Relaxed);
     let device_for_worker = device.clone();
     let request_for_worker = request.clone();
     let cast_url_for_worker = cast_url.clone();
@@ -146,6 +155,7 @@ pub async fn start_session(
     let worker = tokio::task::spawn_blocking(move || {
         run_session_worker(
             app_for_worker,
+            uid,
             device_for_worker,
             request_for_worker,
             cast_url_for_worker,
@@ -175,6 +185,7 @@ pub async fn start_session(
 
     Ok(ActiveCastSession {
         session,
+        uid,
         cmd_tx,
         worker: Some(worker),
     })
@@ -182,6 +193,7 @@ pub async fn start_session(
 
 fn run_session_worker(
     app: AppHandle,
+    uid: u64,
     device: ChromecastDevice,
     request: CastMediaRequest,
     cast_url: String,
@@ -272,11 +284,19 @@ fn run_session_worker(
     // Drive the session: respond to heartbeats, watch for stop commands or
     // disconnects. This loop runs until a Stop command arrives, the device
     // disconnects, or a fatal error occurs.
+    //
+    // `manual_stop` distinguishes the explicit Stop command (where the caller
+    // already cleared `AppState` before sending Stop) from self-exit paths
+    // (Connection::Close, errors), where the worker must clear the stored
+    // session itself so `get_cast_status()` doesn't keep reporting Playing.
+    let mut manual_stop = false;
     loop {
         if let Ok(SessionCommand::Stop) = cmd_rx.try_recv() {
             let _ = cast.media.stop(transport_id.clone(), 0);
             let _ = cast.receiver.stop_app(session_id.clone());
+            emit_state(&app, &device, CastSessionState::Stopped, &cast_url, &request, None);
             log::info!("[Chromecast] Session on '{}' stopped", device.friendly_name);
+            manual_stop = true;
             break;
         }
 
@@ -302,6 +322,32 @@ fn run_session_worker(
                 emit_error(&app, &device, msg);
                 break;
             }
+        }
+    }
+
+    // On self-exit, clear AppState so a remounted frontend that calls
+    // `get_cast_status()` no longer sees a stale Playing state. The uid match
+    // prevents us from clearing a successor session that was started after we
+    // disconnected.
+    if !manual_stop {
+        let app_for_cleanup = app.clone();
+        if let Ok(handle) = tokio::runtime::Handle::try_current().map(|h| h) {
+            handle.spawn(async move {
+                clear_app_state_if_uid_matches(&app_for_cleanup, uid).await;
+            });
+        }
+    }
+}
+
+async fn clear_app_state_if_uid_matches(app: &AppHandle, uid: u64) {
+    let state = app.state::<Arc<AppState>>();
+    let mut guard = state.cast_state.lock().await;
+    let matches = guard.session.as_ref().map(|s| s.uid) == Some(uid);
+    if matches {
+        log::info!("[Chromecast] Clearing stored session after worker exit (uid={uid})");
+        let _ = guard.session.take();
+        if let Some(proxy) = guard.proxy.take() {
+            proxy.shutdown();
         }
     }
 }

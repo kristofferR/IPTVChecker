@@ -143,6 +143,25 @@ pub async fn start(
     let cancel = CancellationToken::new();
     let remux_state: Arc<Mutex<Option<RemuxState>>> = Arc::new(Mutex::new(None));
 
+    // Build one HTTP client for the entire cast session. Cookies set on the
+    // manifest response must persist into segment requests, so we cannot
+    // reconstruct the client per call.
+    let (user_agent, accept_invalid_certs) = {
+        let state = app.state::<Arc<AppState>>();
+        let settings = state.settings.lock().await;
+        (settings.user_agent.clone(), settings.accept_invalid_certs)
+    };
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(accept_invalid_certs)
+        .cookie_store(true)
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .pool_max_idle_per_host(0)
+        .connect_timeout(CAST_CONNECT_TIMEOUT)
+        .read_timeout(CAST_READ_TIMEOUT)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let client = Arc::new(client);
+
     let cast_url = if stream_kind == CastStreamKind::MpegTs {
         let started = start_remux(
             app.clone(),
@@ -169,8 +188,9 @@ pub async fn start(
     let cancel_for_loop = cancel.clone();
     let token_clone = token.clone();
     let upstream_clone = upstream_url.clone();
-    let app_for_loop = app.clone();
     let remux_for_loop = remux_state.clone();
+    let client_for_loop = client.clone();
+    let user_agent_for_loop = user_agent.clone();
 
     tokio::spawn(async move {
         loop {
@@ -192,20 +212,22 @@ pub async fn start(
                             continue;
                         }
                     };
-                    let app_for_conn = app_for_loop.clone();
                     let token_for_conn = token_clone.clone();
                     let upstream_for_conn = upstream_clone.clone();
                     let cancel_for_conn = cancel_for_loop.clone();
                     let remux_for_conn = remux_for_loop.clone();
+                    let client_for_conn = client_for_loop.clone();
+                    let user_agent_for_conn = user_agent_for_loop.clone();
                     tokio::spawn(async move {
                         if let Err(err) = handle_connection(
-                            app_for_conn,
                             socket,
                             peer.to_string(),
                             token_for_conn,
                             upstream_for_conn,
                             remux_for_conn,
                             cancel_for_conn,
+                            client_for_conn,
+                            user_agent_for_conn,
                         )
                         .await
                         {
@@ -347,8 +369,13 @@ async fn start_remux(
     });
 
     // Wait for the playlist to actually be written so the Cast device's first
-    // GET doesn't 404.
-    wait_for_playlist(&playlist_path, REMUX_PLAYLIST_READY_TIMEOUT, &cancel).await?;
+    // GET doesn't 404. On failure, trip the cancel so the spawned ffmpeg
+    // worker terminates and removes the temp dir.
+    if let Err(err) = wait_for_playlist(&playlist_path, REMUX_PLAYLIST_READY_TIMEOUT, &cancel).await
+    {
+        cancel.cancel();
+        return Err(err);
+    }
 
     {
         let mut guard = remux_state.lock().await;
@@ -402,13 +429,14 @@ async fn cleanup_remux_async(state: RemuxState) {
 }
 
 async fn handle_connection(
-    app: AppHandle,
     mut socket: tokio::net::TcpStream,
     peer: String,
     token: String,
     upstream_url: String,
     remux_state: Arc<Mutex<Option<RemuxState>>>,
     cancel: CancellationToken,
+    client: Arc<reqwest::Client>,
+    user_agent: String,
 ) -> std::io::Result<()> {
     let mut buf = vec![0u8; 8192];
     let n = socket.read(&mut buf).await?;
@@ -448,13 +476,42 @@ async fn handle_connection(
 
     // Pass-through mode: entrypoint or rewritten manifest segment.
     let resolved_upstream = if let Some(encoded) = suffix.strip_prefix("seg/") {
-        match decode_segment(encoded) {
+        let decoded = match decode_segment(encoded) {
             Some(url) => url,
             None => {
                 let _ = write_simple(&mut socket, 400, "text/plain", b"Bad segment").await;
                 return Ok(());
             }
+        };
+        // Defense in depth: even though `rewrite_manifest` only emits
+        // same-origin segment URLs, anyone who learns the token could craft
+        // a `/cast/<token>/seg/<b64>` request to make us SSRF. Validate that
+        // the decoded URL still shares origin with the upstream we were
+        // started for.
+        let decoded_url = match Url::parse(&decoded) {
+            Ok(u) => u,
+            Err(_) => {
+                let _ = write_simple(&mut socket, 400, "text/plain", b"Bad segment").await;
+                return Ok(());
+            }
+        };
+        let base_url = match Url::parse(&upstream_url) {
+            Ok(u) => u,
+            Err(_) => {
+                let _ = write_simple(&mut socket, 500, "text/plain", b"Bad base").await;
+                return Ok(());
+            }
+        };
+        if !is_target_allowed(&base_url, &decoded_url) {
+            log::warn!(
+                "[CastProxy] Rejected out-of-origin segment fetch for {} (base {})",
+                redact_url(decoded_url.as_str()),
+                redact_url(base_url.as_str())
+            );
+            let _ = write_simple(&mut socket, 403, "text/plain", b"Forbidden").await;
+            return Ok(());
         }
+        decoded
     } else if suffix == "stream" {
         upstream_url.clone()
     } else {
@@ -463,11 +520,12 @@ async fn handle_connection(
     };
 
     serve_upstream(
-        app,
         &mut socket,
         resolved_upstream,
         token,
         cancel,
+        client,
+        user_agent,
     )
     .await
 }
@@ -517,28 +575,13 @@ async fn serve_remux_file(
 }
 
 async fn serve_upstream(
-    app: AppHandle,
     socket: &mut tokio::net::TcpStream,
     upstream_url: String,
     token: String,
     cancel: CancellationToken,
+    client: Arc<reqwest::Client>,
+    user_agent: String,
 ) -> std::io::Result<()> {
-    let state = app.state::<Arc<AppState>>();
-    let (user_agent, accept_invalid_certs) = {
-        let settings = state.settings.lock().await;
-        (settings.user_agent.clone(), settings.accept_invalid_certs)
-    };
-
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(accept_invalid_certs)
-        .cookie_store(true)
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .pool_max_idle_per_host(0)
-        .connect_timeout(CAST_CONNECT_TIMEOUT)
-        .read_timeout(CAST_READ_TIMEOUT)
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
-
     let response = match tokio::time::timeout(
         MANIFEST_FETCH_TIMEOUT,
         client
@@ -691,9 +734,31 @@ fn is_m3u8(content_type: &str, url: &str) -> bool {
     false
 }
 
+/// Reject non-HTTP(S) schemes and any target whose origin doesn't match the
+/// base URL. The base URL itself is the operator-supplied stream we already
+/// trust, so by pinning to its origin we prevent a malicious manifest from
+/// pointing at loopback, RFC1918, or metadata endpoints. We deliberately do
+/// not try to resolve hostnames (no DNS) — same-origin pinning is sufficient
+/// because the operator already accepted the original host.
+fn is_target_allowed(base: &Url, target: &Url) -> bool {
+    if !matches!(target.scheme(), "http" | "https") {
+        return false;
+    }
+    if target.scheme() != base.scheme() {
+        return false;
+    }
+    if target.host_str() != base.host_str() {
+        return false;
+    }
+    target.port_or_known_default() == base.port_or_known_default()
+}
+
 /// Rewrite all URI references in an HLS manifest to come back through this
 /// proxy, so the Chromecast only ever talks to us. We base64url-encode the
 /// resolved upstream URL into the path so we don't need persistent state.
+/// Targets that don't pass [`is_target_allowed`] are left unrewritten — the
+/// Cast device will then attempt them directly (and likely fail), but the
+/// proxy refuses to act as a confused-deputy fetcher for them.
 fn rewrite_manifest(body: &str, base_url: &str, token: &str) -> String {
     let base = match Url::parse(base_url) {
         Ok(u) => u,
@@ -723,8 +788,16 @@ fn rewrite_manifest(body: &str, base_url: &str, token: &str) -> String {
             continue;
         }
         match base.join(trimmed) {
-            Ok(resolved) => {
+            Ok(resolved) if is_target_allowed(&base, &resolved) => {
                 out.push_str(&format!("/cast/{token}/seg/{}", encode_segment(resolved.as_str())));
+            }
+            Ok(rejected) => {
+                log::warn!(
+                    "[CastProxy] Refusing to proxy out-of-origin segment {} (base {})",
+                    redact_url(rejected.as_str()),
+                    redact_url(base.as_str())
+                );
+                out.push_str(line);
             }
             Err(_) => out.push_str(line),
         }
@@ -755,10 +828,18 @@ fn rewrite_tag_uri(line: &str, base: &Url, token: &str) -> String {
     };
     let original = &after[start..end];
     let resolved = match base.join(original) {
-        Ok(u) => u.to_string(),
+        Ok(u) if is_target_allowed(base, &u) => u,
+        Ok(rejected) => {
+            log::warn!(
+                "[CastProxy] Refusing to proxy out-of-origin tag URI {} (base {})",
+                redact_url(rejected.as_str()),
+                redact_url(base.as_str())
+            );
+            return line.to_string();
+        }
         Err(_) => return line.to_string(),
     };
-    let new_uri = format!("/cast/{token}/seg/{}", encode_segment(&resolved));
+    let new_uri = format!("/cast/{token}/seg/{}", encode_segment(resolved.as_str()));
 
     let mut result = String::with_capacity(line.len() + new_uri.len());
     result.push_str(&line[..uri_pos + 4]);
@@ -820,5 +901,75 @@ seg-2.ts
     fn parse_request_path_extracts_target() {
         let request = "GET /cast/abc/stream HTTP/1.1\r\nHost: 192.168.1.10:5500\r\n\r\n";
         assert_eq!(parse_request_path(request), Some("/cast/abc/stream"));
+    }
+
+    #[test]
+    fn rewrite_manifest_drops_cross_origin_segments() {
+        let manifest = "\
+#EXTM3U
+#EXTINF:6.0,
+http://127.0.0.1:9000/internal.ts
+#EXTINF:6.0,
+http://iptv.example.com/live/720p/seg-2.ts
+";
+        let base = "http://iptv.example.com/live/720p/index.m3u8";
+        let rewritten = rewrite_manifest(manifest, base, "abc");
+        // Loopback segment must remain unrewritten (no /cast/abc/seg/ prefix).
+        assert!(
+            rewritten.contains("http://127.0.0.1:9000/internal.ts"),
+            "loopback line should be left untouched: {rewritten}"
+        );
+        let internal_b64 = encode_segment("http://127.0.0.1:9000/internal.ts");
+        assert!(
+            !rewritten.contains(&internal_b64),
+            "loopback segment must not be encoded into a /seg/ URL: {rewritten}"
+        );
+        // Same-origin segment still rewritten.
+        let allowed_b64 = encode_segment("http://iptv.example.com/live/720p/seg-2.ts");
+        assert!(
+            rewritten.contains(&format!("/cast/abc/seg/{allowed_b64}")),
+            "same-origin segment must be rewritten: {rewritten}"
+        );
+    }
+
+    #[test]
+    fn is_target_allowed_blocks_non_http() {
+        let base = Url::parse("http://iptv.example.com/live/index.m3u8").unwrap();
+        let target = Url::parse("file:///etc/passwd").unwrap();
+        assert!(!is_target_allowed(&base, &target));
+    }
+
+    #[test]
+    fn is_target_allowed_blocks_cross_origin() {
+        let base = Url::parse("http://iptv.example.com/live/index.m3u8").unwrap();
+        assert!(!is_target_allowed(
+            &base,
+            &Url::parse("http://127.0.0.1/x").unwrap()
+        ));
+        assert!(!is_target_allowed(
+            &base,
+            &Url::parse("http://other.example.com/x").unwrap()
+        ));
+        assert!(!is_target_allowed(
+            &base,
+            &Url::parse("https://iptv.example.com/x").unwrap()
+        ));
+        assert!(!is_target_allowed(
+            &base,
+            &Url::parse("http://iptv.example.com:9000/x").unwrap()
+        ));
+    }
+
+    #[test]
+    fn is_target_allowed_accepts_same_origin() {
+        let base = Url::parse("http://iptv.example.com/live/index.m3u8").unwrap();
+        assert!(is_target_allowed(
+            &base,
+            &Url::parse("http://iptv.example.com/live/seg.ts").unwrap()
+        ));
+        assert!(is_target_allowed(
+            &base,
+            &Url::parse("http://iptv.example.com:80/live/seg.ts").unwrap()
+        ));
     }
 }

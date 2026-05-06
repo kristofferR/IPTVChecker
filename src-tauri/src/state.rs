@@ -80,6 +80,10 @@ pub struct AppState {
     pub streaming_proxy_port: std::sync::atomic::AtomicU16,
     pub streaming_proxy_start_lock: Mutex<()>,
     pub cast_state: Mutex<CastState>,
+    /// Held for the entire start/stop cast lifecycle so concurrent
+    /// `cast_to_device` / `stop_cast` calls cannot interleave and corrupt
+    /// the stored session.
+    pub cast_lifecycle_lock: Mutex<()>,
     window_scan_states: Mutex<HashMap<String, WindowScanState>>,
     backend_perf_samples: Mutex<VecDeque<BackendPerfSample>>,
     playlist_preview_cache: Mutex<HashMap<String, CachedPlaylistPreview>>,
@@ -93,6 +97,7 @@ impl AppState {
             streaming_proxy_port: std::sync::atomic::AtomicU16::new(0),
             streaming_proxy_start_lock: Mutex::new(()),
             cast_state: Mutex::new(CastState::default()),
+            cast_lifecycle_lock: Mutex::new(()),
             window_scan_states: Mutex::new(HashMap::new()),
             backend_perf_samples: Mutex::new(VecDeque::new()),
             playlist_preview_cache: Mutex::new(HashMap::new()),
