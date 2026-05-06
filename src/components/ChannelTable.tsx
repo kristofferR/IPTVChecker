@@ -33,9 +33,18 @@ interface ChannelTableProps {
   onOpenChannel?: (result: ChannelResult) => void;
   onOpenExternal?: (result: ChannelResult) => void;
   onScanSelected?: (selectedIndices: number[]) => void;
+  /**
+   * True when a Chromecast session is active. Enables arrow-key auto-open as
+   * a "channel-surfing" redirect of the cast (debounced) even when no local
+   * playback is in progress.
+   */
+  isCasting?: boolean;
   headerPortalRef?: RefObject<HTMLDivElement | null>;
   toolbarHeight: number;
 }
+
+/** ms to coalesce rapid arrow-key presses into one cast redirect. */
+const CAST_REDIRECT_DEBOUNCE_MS = 300;
 
 type CopyAction = "name" | "url" | "m3u" | "metadata";
 
@@ -121,6 +130,7 @@ export function ChannelTable({
   onOpenChannel,
   onOpenExternal,
   onScanSelected,
+  isCasting = false,
   headerPortalRef,
   toolbarHeight,
 }: ChannelTableProps) {
@@ -646,6 +656,19 @@ export function ChannelTable({
     setColumnMenuState(null);
   }, [defaultVisibleColumnOrder, hasColumnCustomizations]);
 
+  // Debounce timer for arrow-key cast redirects. Each tap clears the previous
+  // timer and schedules a new one, so a key burst coalesces into a single
+  // backend cast_to_device call instead of one per keystroke.
+  const castRedirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (castRedirectTimerRef.current) {
+        clearTimeout(castRedirectTimerRef.current);
+        castRedirectTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const moveFocusBy = useCallback(
     (delta: number) => {
       if (filteredResults.length === 0) return;
@@ -667,7 +690,21 @@ export function ChannelTable({
           emitSelection(selected);
           setSelectionAnchor(result.index);
           onSelectChannel(result);
-          if (isPlaying && !isScanActive(scanState)) onOpenChannel?.(result);
+          if ((isPlaying || isCasting) && !isScanActive(scanState)) {
+            if (isCasting) {
+              // Coalesce key bursts so each press doesn't fire a full cast
+              // re-handshake (~300ms backend round-trip).
+              if (castRedirectTimerRef.current) {
+                clearTimeout(castRedirectTimerRef.current);
+              }
+              castRedirectTimerRef.current = setTimeout(() => {
+                castRedirectTimerRef.current = null;
+                onOpenChannel?.(result);
+              }, CAST_REDIRECT_DEBOUNCE_MS);
+            } else {
+              onOpenChannel?.(result);
+            }
+          }
         }
 
         virtualizer.scrollToIndex(next, { align: "auto" });
@@ -681,6 +718,7 @@ export function ChannelTable({
       onSelectChannel,
       onOpenChannel,
       isPlaying,
+      isCasting,
       scanState,
       virtualizer,
     ],
@@ -838,6 +876,11 @@ export function ChannelTable({
     (event: React.MouseEvent<HTMLDivElement>) => {
       const row = getRowFromEvent(event);
       if (!row) return;
+      // Cancel any pending arrow-key debounce so the immediate action wins.
+      if (castRedirectTimerRef.current) {
+        clearTimeout(castRedirectTimerRef.current);
+        castRedirectTimerRef.current = null;
+      }
       onOpenChannel?.(row.result);
     },
     [getRowFromEvent, onOpenChannel],
@@ -893,6 +936,10 @@ export function ChannelTable({
 
   const handlePreviewChannel = useCallback(() => {
     if (!contextMenuState) return;
+    if (castRedirectTimerRef.current) {
+      clearTimeout(castRedirectTimerRef.current);
+      castRedirectTimerRef.current = null;
+    }
     onOpenChannel?.(contextMenuState.channel);
     setContextMenuState(null);
   }, [contextMenuState, onOpenChannel]);
