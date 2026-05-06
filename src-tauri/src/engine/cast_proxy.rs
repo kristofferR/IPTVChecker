@@ -294,7 +294,11 @@ async fn start_remux(
     cmd.arg("-hide_banner").arg("-loglevel").arg("warning");
     cmd.arg("-fflags").arg("+genpts+discardcorrupt");
     cmd.arg("-user_agent").arg(&user_agent);
-    if accept_invalid_certs {
+    // `-tls_verify` is a private option of the TLS protocol — only add it
+    // when the URL actually uses HTTPS, otherwise some ffmpeg builds reject
+    // it as "Option not found" and abort the whole pipeline before the input
+    // is even opened.
+    if accept_invalid_certs && upstream_url.to_ascii_lowercase().starts_with("https://") {
         cmd.arg("-tls_verify").arg("0");
     }
     cmd.arg("-reconnect").arg("1");
@@ -453,6 +457,12 @@ async fn handle_connection(
         return Ok(());
     }
     let request = String::from_utf8_lossy(&buf[..n]);
+    let method = request
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().next())
+        .unwrap_or("?")
+        .to_string();
     let path = match parse_request_path(&request) {
         Some(p) => p,
         None => {
@@ -460,6 +470,23 @@ async fn handle_connection(
             return Ok(());
         }
     };
+    log::info!("[CastProxy] {method} {path} from {peer}");
+
+    // Chromecast CAF receivers send a CORS preflight (OPTIONS) before fetching
+    // adaptive media. Answer it directly with the same allow-* headers we
+    // attach to real responses.
+    if method.eq_ignore_ascii_case("OPTIONS") {
+        let header = "HTTP/1.1 204 No Content\r\n\
+             Access-Control-Allow-Origin: *\r\n\
+             Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n\
+             Access-Control-Allow-Headers: Content-Type, Range, Accept-Encoding, Origin, User-Agent\r\n\
+             Access-Control-Max-Age: 86400\r\n\
+             Content-Length: 0\r\n\
+             Connection: close\r\n\
+             \r\n";
+        let _ = socket.write_all(header.as_bytes()).await;
+        return Ok(());
+    }
 
     let allowed_prefix = format!("/cast/{token}/");
     if !path.starts_with(&allowed_prefix) {
@@ -589,6 +616,10 @@ async fn serve_remux_file(
          Content-Type: {content_type}\r\n\
          Content-Length: {len}\r\n\
          Cache-Control: no-cache\r\n\
+         Access-Control-Allow-Origin: *\r\n\
+         Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n\
+         Access-Control-Allow-Headers: Content-Type, Range, Accept-Encoding, Origin, User-Agent\r\n\
+         Access-Control-Expose-Headers: Content-Length, Content-Range, Date\r\n\
          Connection: close\r\n\
          \r\n",
         len = bytes.len()
@@ -672,6 +703,10 @@ async fn serve_upstream(
              Content-Type: application/vnd.apple.mpegurl\r\n\
              Content-Length: {len}\r\n\
              Cache-Control: no-cache\r\n\
+             Access-Control-Allow-Origin: *\r\n\
+             Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n\
+             Access-Control-Allow-Headers: Content-Type, Range, Accept-Encoding, Origin, User-Agent\r\n\
+             Access-Control-Expose-Headers: Content-Length, Content-Range, Date\r\n\
              Connection: close\r\n\
              \r\n",
             status = status.as_u16(),
@@ -691,6 +726,10 @@ async fn serve_upstream(
         "{status_line}Content-Type: {content_type}\r\n\
          Transfer-Encoding: chunked\r\n\
          Cache-Control: no-cache\r\n\
+         Access-Control-Allow-Origin: *\r\n\
+         Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n\
+         Access-Control-Allow-Headers: Content-Type, Range, Accept-Encoding, Origin, User-Agent\r\n\
+         Access-Control-Expose-Headers: Content-Length, Content-Range, Date\r\n\
          Connection: close\r\n\
          \r\n"
     );
@@ -745,7 +784,12 @@ async fn write_simple(
     body: &[u8],
 ) -> std::io::Result<()> {
     let header = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status}\r\n\
+         Content-Type: {content_type}\r\n\
+         Content-Length: {len}\r\n\
+         Access-Control-Allow-Origin: *\r\n\
+         Connection: close\r\n\
+         \r\n",
         len = body.len()
     );
     socket.write_all(header.as_bytes()).await?;
