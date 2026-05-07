@@ -802,14 +802,30 @@ export function ChannelTable({
       }
 
       selectSingle(result, rowIndex);
+
+      // Plain row click while casting → redirect the cast (same debounce as
+      // arrow-key channel surfing so a click burst doesn't fan out into
+      // multiple cast_to_device calls).
+      if (isCasting && !isScanActive(scanState)) {
+        if (castRedirectTimerRef.current) {
+          clearTimeout(castRedirectTimerRef.current);
+        }
+        castRedirectTimerRef.current = setTimeout(() => {
+          castRedirectTimerRef.current = null;
+          onOpenChannel?.(result);
+        }, CAST_REDIRECT_DEBOUNCE_MS);
+      }
     },
     [
       isMac,
       selectRange,
       updateSelection,
       onSelectChannel,
+      onOpenChannel,
       clearSelection,
       selectSingle,
+      isCasting,
+      scanState,
     ],
   );
 
