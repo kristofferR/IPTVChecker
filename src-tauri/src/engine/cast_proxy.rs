@@ -182,6 +182,7 @@ pub async fn start(
             token.clone(),
             cancel.clone(),
             remux_state.clone(),
+            client.clone(),
         )
         .await?;
         (
@@ -283,6 +284,7 @@ async fn start_remux(
     token: String,
     cancel: CancellationToken,
     remux_state: Arc<Mutex<Option<RemuxState>>>,
+    client: Arc<reqwest::Client>,
 ) -> Result<RemuxStartInfo, AppError> {
     let tmpdir = std::env::temp_dir().join(format!("iptv-cast-{token}"));
     std::fs::create_dir_all(&tmpdir).map_err(AppError::Io)?;
@@ -324,24 +326,37 @@ async fn start_remux(
     let mut cmd = tokio::process::Command::new(&ffmpeg_bin);
     configure_background_process(&mut cmd);
     cmd.kill_on_drop(true);
-    cmd.stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped());
+    // For HEVC we pipe upstream bytes into ffmpeg's stdin via our own
+    // reconnecting fetcher (see below). H.264 stays on ffmpeg's HTTP input
+    // because TS+HLS is more tolerant of mid-stream resets and the simpler
+    // path is well-tested.
+    cmd.stdin(if is_hevc {
+        std::process::Stdio::piped()
+    } else {
+        std::process::Stdio::null()
+    })
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::piped());
 
     cmd.arg("-hide_banner").arg("-loglevel").arg("warning");
     cmd.arg("-fflags").arg("+genpts+discardcorrupt");
-    cmd.arg("-user_agent").arg(&user_agent);
-    // `-tls_verify` is a private option of the TLS protocol — only add it
-    // when the URL actually uses HTTPS, otherwise some ffmpeg builds reject
-    // it as "Option not found" and abort the whole pipeline before the input
-    // is even opened.
-    if accept_invalid_certs && upstream_url.to_ascii_lowercase().starts_with("https://") {
-        cmd.arg("-tls_verify").arg("0");
+    if is_hevc {
+        cmd.arg("-f").arg("mpegts");
+        cmd.arg("-i").arg("pipe:0");
+    } else {
+        cmd.arg("-user_agent").arg(&user_agent);
+        // `-tls_verify` is a private option of the TLS protocol — only add it
+        // when the URL actually uses HTTPS, otherwise some ffmpeg builds reject
+        // it as "Option not found" and abort the whole pipeline before the
+        // input is even opened.
+        if accept_invalid_certs && upstream_url.to_ascii_lowercase().starts_with("https://") {
+            cmd.arg("-tls_verify").arg("0");
+        }
+        cmd.arg("-reconnect").arg("1");
+        cmd.arg("-reconnect_streamed").arg("1");
+        cmd.arg("-reconnect_delay_max").arg("5");
+        cmd.arg("-i").arg(&upstream_url);
     }
-    cmd.arg("-reconnect").arg("1");
-    cmd.arg("-reconnect_streamed").arg("1");
-    cmd.arg("-reconnect_delay_max").arg("5");
-    cmd.arg("-i").arg(&upstream_url);
     if is_hevc {
         // Video: copy HEVC; rewrite the fMP4 sample-entry codec tag so the
         // receiver's codec sniffer sees `hvc1` (Cast/Apple-standard) rather
@@ -412,6 +427,28 @@ async fn start_remux(
             "Failed to spawn ffmpeg for cast remux ({ffmpeg_bin}): {err}"
         ))
     })?;
+
+    // For HEVC, pump upstream bytes into ffmpeg's stdin via our own
+    // reconnecting fetcher. ffmpeg's built-in `-reconnect 1 -reconnect_streamed
+    // 1` opens a fresh HTTP response each time the upstream hangs up; the
+    // resulting byte stream looks the same to the demuxer as ours, but
+    // upstream resets land on TCP-message boundaries and ffmpeg flushes its
+    // demuxer state, which on 4K HEVC means broken segments mid-window. With
+    // a stdin pipe ffmpeg sees one continuous TS source for the lifetime of
+    // the cast, and -fflags +genpts+discardcorrupt smooths over the inevitable
+    // PTS resets between upstream connections instead of treating each as a
+    // fresh demux session.
+    if is_hevc {
+        if let Some(stdin) = child.stdin.take() {
+            spawn_upstream_pump(
+                upstream_url.clone(),
+                user_agent.clone(),
+                client.clone(),
+                stdin,
+                cancel.clone(),
+            );
+        }
+    }
 
     // Drain stderr so the pipe doesn't fill and stall ffmpeg. Each line is
     // logged at DEBUG and also kept in a small ring buffer that the wait task
@@ -554,6 +591,134 @@ async fn cleanup_remux_async(state: RemuxState) {
         graceful_kill(c, GRACEFUL_KILL_TIMEOUT).await;
     }
     let _ = tokio::fs::remove_dir_all(&tmpdir).await;
+}
+
+/// Pump bytes from the upstream IPTV URL into ffmpeg's stdin, transparently
+/// reconnecting whenever the upstream hangs up or errors. Used for HEVC casts
+/// so ffmpeg sees one continuous MPEG-TS byte stream instead of a sequence of
+/// separate HTTP responses (which on single-connection IPTV servers happen
+/// every few seconds and inject PTS resets ffmpeg's demuxer treats as a fresh
+/// session — fatal for a live DASH muxer).
+///
+/// Exits when:
+/// - the cancel token fires (cast session ended), or
+/// - writing to ffmpeg's stdin fails (ffmpeg has died).
+fn spawn_upstream_pump(
+    upstream_url: String,
+    user_agent: String,
+    client: Arc<reqwest::Client>,
+    mut stdin: tokio::process::ChildStdin,
+    cancel: CancellationToken,
+) {
+    tokio::spawn(async move {
+        use futures::StreamExt;
+        // Short fixed backoff between reconnects: long enough to avoid pinning
+        // a CPU on a permanently-broken upstream, short enough that the gap
+        // doesn't starve ffmpeg's demuxer of bytes through a real reconnect.
+        const RECONNECT_BACKOFF: Duration = Duration::from_millis(200);
+        let mut reconnects: u32 = 0;
+
+        'session: loop {
+            if cancel.is_cancelled() {
+                break;
+            }
+            let label = if reconnects == 0 {
+                "initial connect".to_string()
+            } else {
+                format!("reconnect #{reconnects}")
+            };
+            log::info!(
+                "[CastProxy/pump] {label} for {}",
+                redact_url(&upstream_url)
+            );
+
+            let response_result = tokio::select! {
+                _ = cancel.cancelled() => break 'session,
+                r = client
+                    .get(&upstream_url)
+                    .header(
+                        USER_AGENT,
+                        HeaderValue::from_str(&user_agent).unwrap_or_else(|_| {
+                            HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")
+                        }),
+                    )
+                    .send() => r,
+            };
+
+            let response = match response_result {
+                Ok(r) if r.status().is_success() => r,
+                Ok(r) => {
+                    log::warn!(
+                        "[CastProxy/pump] Upstream returned {} ({label})",
+                        r.status()
+                    );
+                    tokio::select! {
+                        _ = cancel.cancelled() => break 'session,
+                        _ = tokio::time::sleep(RECONNECT_BACKOFF) => {}
+                    }
+                    reconnects += 1;
+                    continue;
+                }
+                Err(err) => {
+                    log::warn!("[CastProxy/pump] Upstream connect failed ({label}): {err}");
+                    tokio::select! {
+                        _ = cancel.cancelled() => break 'session,
+                        _ = tokio::time::sleep(RECONNECT_BACKOFF) => {}
+                    }
+                    reconnects += 1;
+                    continue;
+                }
+            };
+
+            let mut stream = response.bytes_stream();
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => break 'session,
+                    chunk = stream.next() => {
+                        match chunk {
+                            Some(Ok(bytes)) => {
+                                if let Err(err) = stdin.write_all(&bytes).await {
+                                    // ffmpeg closed its stdin (likely died).
+                                    // Nothing more we can do — exit the pump
+                                    // and let the worker task observe the exit.
+                                    log::info!(
+                                        "[CastProxy/pump] ffmpeg stdin closed ({err}); pump exiting"
+                                    );
+                                    break 'session;
+                                }
+                            }
+                            Some(Err(err)) => {
+                                log::info!(
+                                    "[CastProxy/pump] Upstream read error ({label}): {err}; reconnecting"
+                                );
+                                break;
+                            }
+                            None => {
+                                log::info!(
+                                    "[CastProxy/pump] Upstream EOF ({label}); reconnecting"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            tokio::select! {
+                _ = cancel.cancelled() => break 'session,
+                _ = tokio::time::sleep(RECONNECT_BACKOFF) => {}
+            }
+            reconnects += 1;
+        }
+
+        // Best-effort flush + close so ffmpeg sees EOF promptly when we exit.
+        let _ = stdin.shutdown().await;
+        log::info!(
+            "[CastProxy/pump] Pump terminated for {} after {} reconnect(s)",
+            redact_url(&upstream_url),
+            reconnects
+        );
+    });
 }
 
 /// Best-effort probe of the upstream's primary video codec. Used to decide
