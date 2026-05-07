@@ -23,15 +23,17 @@ pub async fn start_airplay(
 ) -> Result<AirPlaySession, AppError> {
     let state = app.state::<Arc<AppState>>();
 
-    // Serialize the entire teardown/start/store sequence so overlapping
-    // start_airplay / stop_airplay calls can't interleave.
+    // Lock order (must match `cast_to_device` to avoid ABBA): cast lifecycle
+    // lock first, then airplay lifecycle lock. The cast lock both serializes
+    // any concurrent start/stop on the cast side and lets us tear down a
+    // live cast session as part of the mutual-exclusion guarantee — only one
+    // external receiver may hold the upstream slot at a time.
+    let _cast_lifecycle = state.cast_lifecycle_lock.lock().await;
     let _lifecycle = state.airplay_lifecycle_lock.lock().await;
 
     // Mutual exclusion with Chromecast: if a cast is live we must stop it
-    // before opening a new upstream slot. Take the lifecycle lock through
-    // the same path stop_cast uses so we don't race a concurrent cast op.
+    // before opening a new upstream slot.
     {
-        let _cast_lifecycle = state.cast_lifecycle_lock.lock().await;
         let (session, proxy) = {
             let mut guard = state.cast_state.lock().await;
             (guard.session.take(), guard.proxy.take())
@@ -86,8 +88,17 @@ pub async fn start_airplay(
 
 #[tauri::command]
 pub async fn stop_airplay(app: AppHandle) -> Result<(), AppError> {
-    let state = app.state::<Arc<AppState>>();
+    teardown_airplay(&app).await;
+    Ok(())
+}
 
+/// Idempotent teardown of any live AirPlay session and proxy. Used both by
+/// the explicit `stop_airplay` command and by the AVPlayer window delegate
+/// when the user closes the window via the title-bar button (which would
+/// otherwise leave the session "playing" in app state while the window is
+/// gone).
+pub async fn teardown_airplay(app: &AppHandle) {
+    let state = app.state::<Arc<AppState>>();
     let _lifecycle = state.airplay_lifecycle_lock.lock().await;
 
     let (session, proxy) = {
@@ -98,9 +109,8 @@ pub async fn stop_airplay(app: AppHandle) -> Result<(), AppError> {
         handle.shutdown();
     }
     if let Some(active) = session {
-        active.stop(&app).await;
+        active.stop(app).await;
     }
-    Ok(())
 }
 
 #[tauri::command]
