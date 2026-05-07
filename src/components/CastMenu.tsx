@@ -2,12 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AirVent, Cast, ChevronDown, RefreshCw, Square } from "lucide-react";
 import type {
   AirPlayMediaRequest,
-  AirPlaySession,
   CastMediaRequest,
   CastSession,
   ChromecastDevice,
 } from "../lib/types";
 import { isAirPlaySessionActive, isCastSessionActive } from "../lib/cast";
+import type { UseAirPlayResult } from "../hooks/useAirPlay";
 
 interface UseChromecastShape {
   devices: ChromecastDevice[];
@@ -16,14 +16,6 @@ interface UseChromecastShape {
   error: string | null;
   refreshDevices: () => Promise<void>;
   cast: (device: ChromecastDevice, request: CastMediaRequest) => Promise<void>;
-  stop: () => Promise<void>;
-}
-
-interface UseAirPlayShape {
-  available: boolean;
-  session: AirPlaySession | null;
-  error: string | null;
-  start: (request: AirPlayMediaRequest) => Promise<void>;
   stop: () => Promise<void>;
 }
 
@@ -37,7 +29,7 @@ interface CastMenuProps {
    * route-picker UI lives in the AVPlayerView HUD that opens when AirPlay
    * starts, so we just need a "Start AirPlay" / "Stop" affordance here.
    */
-  airplay?: UseAirPlayShape;
+  airplay?: UseAirPlayResult;
   airplayRequest?: AirPlayMediaRequest;
   /** Fired after a cast successfully starts — e.g. to pause the local player. */
   onCastStart?: () => void;

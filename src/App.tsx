@@ -2524,7 +2524,10 @@ export default function App() {
             ? lastCastDeviceRef.current
             : null);
         if (device) {
-          void chromecast.cast(device, buildCastRequest(result));
+          // Fire-and-forget — the hook already mirrors any rejection into
+          // `chromecast.error` which renders in CastMenu. Swallow the
+          // rejection here so it doesn't surface as an unhandled promise.
+          void chromecast.cast(device, buildCastRequest(result)).catch(() => {});
           return;
         }
         // Fall through to local play if we can't resolve the device — better
@@ -2535,7 +2538,9 @@ export default function App() {
       // ffmpeg fan-out and cause receiver dropouts. Restart the AirPlay
       // session against the new channel instead.
       if (isAirPlaySessionActive(airplay.session)) {
-        void airplay.start(buildAirPlayRequest(result));
+        // Same pattern as the cast branch above — the hook records the
+        // error in `airplay.error`; swallow the rejection here.
+        void airplay.start(buildAirPlayRequest(result)).catch(() => {});
         return;
       }
       getStore().setPlayIntentActive(true);
