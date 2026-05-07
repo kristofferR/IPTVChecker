@@ -34,11 +34,11 @@ interface ChannelTableProps {
   onOpenExternal?: (result: ChannelResult) => void;
   onScanSelected?: (selectedIndices: number[]) => void;
   /**
-   * True when a Chromecast session is active. Enables arrow-key auto-open as
-   * a "channel-surfing" redirect of the cast (debounced) even when no local
-   * playback is in progress.
+   * True when an external receiver session (Chromecast or AirPlay) is active.
+   * Enables arrow-key auto-open as a "channel-surfing" redirect to that
+   * receiver (debounced) even when no local playback is in progress.
    */
-  isCasting?: boolean;
+  isReceiverActive?: boolean;
   headerPortalRef?: RefObject<HTMLDivElement | null>;
   toolbarHeight: number;
 }
@@ -130,7 +130,7 @@ export function ChannelTable({
   onOpenChannel,
   onOpenExternal,
   onScanSelected,
-  isCasting = false,
+  isReceiverActive = false,
   headerPortalRef,
   toolbarHeight,
 }: ChannelTableProps) {
@@ -690,8 +690,8 @@ export function ChannelTable({
           emitSelection(selected);
           setSelectionAnchor(result.index);
           onSelectChannel(result);
-          if ((isPlaying || isCasting) && !isScanActive(scanState)) {
-            if (isCasting) {
+          if ((isPlaying || isReceiverActive) && !isScanActive(scanState)) {
+            if (isReceiverActive) {
               // Coalesce key bursts so each press doesn't fire a full cast
               // re-handshake (~300ms backend round-trip).
               if (castRedirectTimerRef.current) {
@@ -718,7 +718,7 @@ export function ChannelTable({
       onSelectChannel,
       onOpenChannel,
       isPlaying,
-      isCasting,
+      isReceiverActive,
       scanState,
       virtualizer,
     ],
@@ -806,7 +806,7 @@ export function ChannelTable({
       // Plain row click while casting → redirect the cast (same debounce as
       // arrow-key channel surfing so a click burst doesn't fan out into
       // multiple cast_to_device calls).
-      if (isCasting && !isScanActive(scanState)) {
+      if (isReceiverActive && !isScanActive(scanState)) {
         if (castRedirectTimerRef.current) {
           clearTimeout(castRedirectTimerRef.current);
         }
@@ -824,7 +824,7 @@ export function ChannelTable({
       onOpenChannel,
       clearSelection,
       selectSingle,
-      isCasting,
+      isReceiverActive,
       scanState,
     ],
   );

@@ -3,11 +3,17 @@ import { createPortal } from "react-dom";
 import { CircleHelp, ExternalLink, Fullscreen, ImageOff, LoaderCircle, Play, RotateCw, Shrink, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { ChannelResult } from "../lib/types";
-import { buildCastRequest, isCastSessionActive } from "../lib/cast";
+import {
+  buildAirPlayRequest,
+  buildCastRequest,
+  isAirPlaySessionActive,
+  isCastSessionActive,
+} from "../lib/cast";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
 import { isScanActive, type ScanState } from "../lib/scanState";
 import { getThumbnailDisplayState } from "../lib/thumbnailState";
+import type { UseAirPlayResult } from "../hooks/useAirPlay";
 import type { UseChromecastResult } from "../hooks/useChromecast";
 import { CastMenu } from "./CastMenu";
 import { StatusBadge } from "./StatusBadge";
@@ -30,6 +36,11 @@ interface ThumbnailPanelProps {
    * a competing local stream.
    */
   chromecast: UseChromecastResult;
+  /**
+   * Optional AirPlay hook (macOS only). When provided and `available`, the
+   * inline CastMenu renders an AirPlay control above the cast section.
+   */
+  airplay?: UseAirPlayResult;
   // Stream player props
   isPlaying?: boolean;
   playerState?: "idle" | "loading" | "playing" | "error";
@@ -62,6 +73,7 @@ export function ThumbnailPanel({
   onPlayChannel,
   onScanChannel,
   chromecast,
+  airplay,
   isPlaying,
   playerState = "idle",
   errorMessage: playerErrorMessage,
@@ -206,6 +218,7 @@ export function ThumbnailPanel({
   // useEffect downstream of `castRequest` would tear down and re-fire on every
   // parent re-render even when none of its inputs actually changed.
   const castRequest = useMemo(() => buildCastRequest(result), [result]);
+  const airplayRequest = useMemo(() => buildAirPlayRequest(result), [result]);
   const mediaFrameClass = "relative w-full aspect-video overflow-hidden rounded-lg border border-border-app";
   const lightboxPlaceholderClass =
     "w-[400px] max-w-[88vw] aspect-video rounded-xl border border-white/15 bg-black/60 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]";
@@ -262,6 +275,8 @@ export function ThumbnailPanel({
           castRequest={castRequest}
           compact
           chromecast={chromecast}
+          airplay={airplay}
+          airplayRequest={airplayRequest}
         />
       ) : screenshotUrl ? (
         <button
@@ -383,22 +398,27 @@ export function ThumbnailPanel({
       )}
 
       {(() => {
-        // Keep the row visible while a session is active so the user can
-        // still hit Stop after we've torn down the local player. The
+        // Keep the row visible while a receiver session is active so the user
+        // can still hit Stop after we've torn down the local player. The
         // lightbox-open carve-out matters for casts started from the
         // lightbox: starting a cast unmounts the lightbox StreamPlayer
         // (onStopPlayer fires), and without this fallback the user would
         // have to manually close the lightbox to find a way to stop or
         // retarget the cast.
         const hasCastSession = isCastSessionActive(chromecast.session);
-        if (!isPlaying && !hasCastSession) return null;
-        if (lightboxOpen && !hasCastSession) return null;
+        const hasAirPlaySession = isAirPlaySessionActive(airplay?.session ?? null);
+        const hasReceiverSession = hasCastSession || hasAirPlaySession;
+        if (!isPlaying && !hasReceiverSession) return null;
+        if (lightboxOpen && !hasReceiverSession) return null;
         return (
           <CastMenu
             chromecast={chromecast}
             castRequest={castRequest}
+            airplay={airplay}
+            airplayRequest={airplayRequest}
             mode="inline"
             onCastStart={() => onStopPlayer?.()}
+            onAirPlayStart={() => onStopPlayer?.()}
           />
         );
       })()}
@@ -564,6 +584,8 @@ export function ThumbnailPanel({
                   onPip={onPip ? () => { onPip(); closeLightbox(); } : undefined}
                   castRequest={castRequest}
                   chromecast={chromecast}
+                  airplay={airplay}
+                  airplayRequest={airplayRequest}
                 />
                 <button
                   type="button"

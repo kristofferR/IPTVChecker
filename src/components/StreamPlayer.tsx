@@ -11,9 +11,10 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react";
+import type { UseAirPlayResult } from "../hooks/useAirPlay";
 import type { UseChromecastResult } from "../hooks/useChromecast";
-import type { CastMediaRequest } from "../lib/types";
-import { isCastSessionActive } from "../lib/cast";
+import type { AirPlayMediaRequest, CastMediaRequest } from "../lib/types";
+import { isAirPlaySessionActive, isCastSessionActive } from "../lib/cast";
 import { CastMenu } from "./CastMenu";
 
 interface StreamPlayerProps {
@@ -39,6 +40,12 @@ interface StreamPlayerProps {
    * UI is shown regardless of `castRequest`.
    */
   chromecast?: UseChromecastResult;
+  /**
+   * Optional shared AirPlay hook (macOS only). When provided and `available`
+   * is true, the in-overlay menu also offers an AirPlay button.
+   */
+  airplay?: UseAirPlayResult;
+  airplayRequest?: AirPlayMediaRequest;
   onTogglePause: () => void;
   onStop: () => void;
   onSetVolume: (v: number) => void;
@@ -62,6 +69,8 @@ export function StreamPlayer({
   castRequest,
   compact = false,
   chromecast,
+  airplay,
+  airplayRequest,
   onTogglePause,
   onStop,
   onSetVolume,
@@ -77,6 +86,7 @@ export function StreamPlayer({
 
   const showCastUi = !compact && !!castRequest && !!chromecast;
   const isCasting = isCastSessionActive(chromecast?.session ?? null);
+  const isAirPlaying = isAirPlaySessionActive(airplay?.session ?? null);
 
   const scheduleHide = useCallback(() => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
@@ -137,6 +147,16 @@ export function StreamPlayer({
           <Cast className="w-3 h-3" />
           <span className="truncate max-w-[180px]">
             Casting to {chromecast.session.deviceName}
+          </span>
+        </div>
+      )}
+      {showCastUi && !isCasting && isAirPlaying && (
+        <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-1 rounded-md bg-blue-600/85 text-white text-[11px] font-medium shadow-md backdrop-blur-sm">
+          <Cast className="w-3 h-3" />
+          <span className="truncate max-w-[180px]">
+            {airplay?.session?.externalPlaybackActive
+              ? "AirPlaying to receiver"
+              : "AirPlay window open"}
           </span>
         </div>
       )}
@@ -236,8 +256,11 @@ export function StreamPlayer({
             <CastMenu
               chromecast={chromecast}
               castRequest={castRequest}
+              airplay={airplay}
+              airplayRequest={airplayRequest}
               mode="popover"
               onCastStart={handleCastStart}
+              onAirPlayStart={handleCastStart}
               onOpenChange={setCastMenuPinned}
             />
           )}

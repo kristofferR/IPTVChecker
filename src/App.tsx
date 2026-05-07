@@ -55,9 +55,15 @@ import {
 } from "./lib/tauri";
 import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
+import { useAirPlay, type UseAirPlayResult } from "./hooks/useAirPlay";
 import { useChromecast, type UseChromecastResult } from "./hooks/useChromecast";
 import { useStreamPlayer } from "./hooks/useStreamPlayer";
-import { buildCastRequest, isCastSessionActive } from "./lib/cast";
+import {
+  buildAirPlayRequest,
+  buildCastRequest,
+  isAirPlaySessionActive,
+  isCastSessionActive,
+} from "./lib/cast";
 import type { ChromecastDevice } from "./lib/types";
 import { useAppStore } from "./store";
 import type { AppStore, OpenSourceDialogState, UpdateNotice } from "./store/types";
@@ -436,6 +442,7 @@ function SelectedChannelSidebar({
   onResizeStart,
   streamPlayer,
   chromecast,
+  airplay,
   onPlayChannel,
   onScanChannel,
   onStopPlayer,
@@ -446,6 +453,7 @@ function SelectedChannelSidebar({
   onResizeStart: (event: React.MouseEvent) => void;
   streamPlayer: StreamPlayerController;
   chromecast: UseChromecastResult;
+  airplay: UseAirPlayResult;
   onPlayChannel: (result: ChannelResult) => void;
   onScanChannel: (indices: number[]) => void;
   onStopPlayer: () => void;
@@ -536,6 +544,7 @@ function SelectedChannelSidebar({
         onPlayChannel={onPlayChannel}
         onScanChannel={onScanChannel}
         chromecast={chromecast}
+        airplay={airplay}
         isPlaying={streamPlayer.playerState !== "idle"}
         playerState={streamPlayer.playerState}
         errorMessage={streamPlayer.errorMessage}
@@ -869,8 +878,11 @@ export default function App() {
     () => ({ ...baseChromecast, cast: wrappedCast }),
     [baseChromecast, wrappedCast],
   );
+  const airplay = useAirPlay();
   const castSession = chromecast.session;
+  const airplaySession = airplay.session;
   const isCasting = isCastSessionActive(castSession);
+  const isAirPlaying = isAirPlaySessionActive(airplaySession);
 
   const { settings, save: saveSettings, applyExternal: applyExternalSettings } = useSettings();
   const settingsRef = useRef(settings);
@@ -2518,10 +2530,18 @@ export default function App() {
         // Fall through to local play if we can't resolve the device — better
         // than silently doing nothing.
       }
+      // Same rationale for AirPlay: AVPlayer holds the proxy URL on the live
+      // upstream slot, so starting a competing local stream would kick the
+      // ffmpeg fan-out and cause receiver dropouts. Restart the AirPlay
+      // session against the new channel instead.
+      if (isAirPlaySessionActive(airplay.session)) {
+        void airplay.start(buildAirPlayRequest(result));
+        return;
+      }
       getStore().setPlayIntentActive(true);
       streamPlayer.play(result);
     },
-    [chromecast, streamPlayer],
+    [airplay, chromecast, streamPlayer],
   );
 
   const handleStopPlayer = useCallback(() => {
@@ -2639,7 +2659,7 @@ export default function App() {
       onOpenChannel={handlePlayInApp}
       onOpenExternal={handleOpenExternal}
       onScanSelected={handleScanSelected}
-      isCasting={isCasting}
+      isReceiverActive={isCasting || isAirPlaying}
       headerPortalRef={isMac ? headerPortalRef : undefined}
       toolbarHeight={toolbarHeight}
     />
@@ -2828,6 +2848,7 @@ export default function App() {
               onResizeStart={handleSidebarDragStart}
               streamPlayer={streamPlayer}
               chromecast={chromecast}
+              airplay={airplay}
               onPlayChannel={handlePlayInApp}
               onScanChannel={handleScanSelected}
               onStopPlayer={handleStopPlayer}
