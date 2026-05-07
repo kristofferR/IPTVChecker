@@ -458,3 +458,26 @@ export interface CastMediaRequest {
   channelLogo: string | null;
   streamKind: CastStreamKind;
 }
+
+export type AirPlaySessionState =
+  | "connecting"
+  | "playing"
+  | "paused"
+  | "stopped"
+  | "error";
+
+export interface AirPlaySession {
+  state: AirPlaySessionState;
+  streamUrl: string;
+  channelName: string | null;
+  channelLogo: string | null;
+  errorMessage: string | null;
+  externalPlaybackActive: boolean;
+}
+
+export interface AirPlayMediaRequest {
+  originalUrl: string;
+  channelName: string | null;
+  channelLogo: string | null;
+  streamKind: CastStreamKind;
+}

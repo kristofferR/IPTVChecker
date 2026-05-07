@@ -1,3 +1,4 @@
+pub mod airplay;
 pub mod backend_perf;
 pub mod channel;
 pub mod chromecast;
