@@ -2130,6 +2130,7 @@ export default function App() {
       group_filter: currentGroupFilter !== "all" ? currentGroupFilter : null,
       channel_search: currentChannelSearch || null,
       selected_indices: effectiveSelection.length > 0 ? effectiveSelection : null,
+      hide_vod_content: currentSettings.hide_vod_content,
       timeout: currentSettings.timeout,
       extended_timeout: currentSettings.extended_timeout,
       concurrency: resolveSmartConcurrency(

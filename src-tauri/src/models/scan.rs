@@ -39,6 +39,8 @@ pub struct ScanConfig {
     pub group_filter: Option<String>,
     pub channel_search: Option<String>,
     pub selected_indices: Option<Vec<usize>>,
+    #[serde(default)]
+    pub hide_vod_content: bool,
     pub timeout: f64,
     pub extended_timeout: Option<f64>,
     pub concurrency: u32,
@@ -192,6 +194,7 @@ mod tests {
             group_filter: None,
             channel_search: None,
             selected_indices: None,
+            hide_vod_content: false,
             timeout: 10.0,
             extended_timeout: Some(20.0),
             concurrency: 1,

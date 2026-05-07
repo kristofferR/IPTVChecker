@@ -936,6 +936,14 @@ fn filter_channels_by_selection(
     }
 }
 
+fn filter_channels_by_content_type(channels: &mut Vec<Channel>, hide_vod_content: bool) {
+    if hide_vod_content {
+        channels.retain(|channel| {
+            matches!(channel.content_type, crate::models::channel::ContentType::Live)
+        });
+    }
+}
+
 fn next_scan_run_id() -> String {
     format!(
         "scan-run-{}",
@@ -1265,6 +1273,7 @@ async fn execute_scan_run(
     let preview_single_provider = preview.single_provider;
     let mut channels = preview.channels;
     filter_channels_by_selection(&mut channels, &config.selected_indices);
+    filter_channels_by_content_type(&mut channels, config.hide_vod_content);
     let total = channels.len();
 
     if total == 0 {
@@ -2666,6 +2675,37 @@ mod tests {
         assert_eq!(channels.len(), 2);
         assert_eq!(channels[0].index, 0);
         assert_eq!(channels[1].index, 5);
+    }
+
+    #[test]
+    fn content_type_filter_keeps_all_when_disabled() {
+        let mut live = make_channel(0);
+        let mut movie = make_channel(1);
+        let mut series = make_channel(2);
+        live.content_type = crate::models::channel::ContentType::Live;
+        movie.content_type = crate::models::channel::ContentType::Movie;
+        series.content_type = crate::models::channel::ContentType::Series;
+        let mut channels = vec![live, movie, series];
+        filter_channels_by_content_type(&mut channels, false);
+        assert_eq!(channels.len(), 3);
+    }
+
+    #[test]
+    fn content_type_filter_drops_movies_and_series_when_enabled() {
+        let mut live = make_channel(0);
+        let mut movie = make_channel(1);
+        let mut series = make_channel(2);
+        live.content_type = crate::models::channel::ContentType::Live;
+        movie.content_type = crate::models::channel::ContentType::Movie;
+        series.content_type = crate::models::channel::ContentType::Series;
+        let mut channels = vec![live, movie, series];
+        filter_channels_by_content_type(&mut channels, true);
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0].index, 0);
+        assert!(matches!(
+            channels[0].content_type,
+            crate::models::channel::ContentType::Live
+        ));
     }
 
     #[test]
