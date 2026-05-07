@@ -58,8 +58,9 @@ pub async fn cast_to_device(
         {
             Ok(new_proxy) => {
                 let new_cast_url = new_proxy.url.clone();
+                let new_is_dash = new_proxy.is_dash;
                 match active
-                    .swap_media(&app, request.clone(), new_cast_url.clone())
+                    .swap_media(&app, request.clone(), new_cast_url.clone(), new_is_dash)
                     .await
                 {
                     Ok(snapshot) => {
@@ -129,6 +130,7 @@ pub async fn cast_to_device(
         device.clone(),
         request.clone(),
         cast_url.clone(),
+        proxy_handle.is_dash,
     )
     .await
     {

@@ -11,10 +11,13 @@
 //!   used when the upstream is already an HLS playlist. The proxy fetches the
 //!   manifest, rewrites segment/key URIs to round-trip through itself, and
 //!   forwards segments untouched.
-//! - **Remux** (`/cast/<token>/hls/playlist.m3u8` + `/cast/<token>/hls/seg_NNNNN.ts`):
+//! - **Remux** (`/cast/<token>/hls/<manifest>` + sibling segment files):
 //!   used when the upstream is MPEG-TS. ffmpeg is spawned in copy mode to
-//!   produce a sliding-window HLS playlist in a temp directory, which is then
-//!   served from disk.
+//!   produce a sliding-window manifest in a temp directory, which is then
+//!   served from disk. H.264 streams produce HLS+TS (`playlist.m3u8` + .ts);
+//!   HEVC streams produce DASH+fMP4 (`manifest.mpd` + .m4s) because CAFv3's
+//!   default HLS player (MPL) can't render fMP4 segments — DASH on the same
+//!   receiver uses Shaka, which handles fMP4 + HEVC natively.
 //!
 //! Lifecycle: [`start`] returns a [`CastProxyHandle`] containing the bound
 //! address and a cancel guard; dropping the handle (or calling `shutdown`)
@@ -54,6 +57,11 @@ pub struct CastProxyHandle {
     pub host: IpAddr,
     pub port: u16,
     pub token: String,
+    /// True when the proxy serves a DASH manifest (HEVC remux). Lets the
+    /// caller flip the LOAD payload to `application/dash+xml` so the receiver
+    /// dispatches to its DASH/Shaka player instead of the default HLS player,
+    /// which can't render fMP4 segments on CAFv3.
+    pub is_dash: bool,
     cancel: CancellationToken,
     remux: Arc<Mutex<Option<RemuxState>>>,
 }
@@ -167,7 +175,7 @@ pub async fn start(
         .unwrap_or_else(|_| reqwest::Client::new());
     let client = Arc::new(client);
 
-    let cast_url = if stream_kind == CastStreamKind::MpegTs {
+    let (cast_url, is_dash) = if stream_kind == CastStreamKind::MpegTs {
         let started = start_remux(
             app.clone(),
             upstream_url.clone(),
@@ -176,12 +184,15 @@ pub async fn start(
             remux_state.clone(),
         )
         .await?;
-        format!(
-            "http://{lan_ip}:{port}/cast/{token}/hls/{}",
-            started.playlist_filename
+        (
+            format!(
+                "http://{lan_ip}:{port}/cast/{token}/hls/{}",
+                started.manifest_filename
+            ),
+            started.is_dash,
         )
     } else {
-        format!("http://{lan_ip}:{port}/cast/{token}/stream")
+        (format!("http://{lan_ip}:{port}/cast/{token}/stream"), false)
     };
 
     log::info!(
@@ -252,13 +263,15 @@ pub async fn start(
         host: lan_ip,
         port,
         token,
+        is_dash,
         cancel,
         remux: remux_state,
     })
 }
 
 struct RemuxStartInfo {
-    playlist_filename: String,
+    manifest_filename: String,
+    is_dash: bool,
 }
 
 /// Spawn ffmpeg to remux the upstream MPEG-TS into a sliding-window HLS
@@ -281,8 +294,32 @@ async fn start_remux(
     };
 
     let ffmpeg_bin = resolve_binary(&app, "ffmpeg");
-    let playlist_path = tmpdir.join("playlist.m3u8");
-    let segment_pattern = tmpdir.join("seg_%05d.ts");
+    let ffprobe_bin = resolve_binary(&app, "ffprobe");
+
+    // Probe the upstream's video codec. HEVC needs DASH+fMP4 because:
+    // (a) HEVC must not ride MPEG-TS segments (per Cast spec — TS+HEVC fails);
+    // (b) HLS+fMP4 looks correct on the wire but the Default Media Receiver's
+    //     CAFv3 HLS player (MPL) doesn't render fMP4 segments, so it fetches
+    //     init+1 segment then emits LoadFailed;
+    // (c) DASH on the same receiver dispatches to Shaka, which handles
+    //     fMP4+HEVC out of the box. Probe is best-effort: a failure (timeout,
+    //     missing ffprobe) falls through to HLS+TS, correct for H.264.
+    let video_codec = probe_video_codec(
+        &ffprobe_bin,
+        &upstream_url,
+        &user_agent,
+        accept_invalid_certs,
+    )
+    .await;
+    let is_hevc = video_codec
+        .as_deref()
+        .map(|c| matches!(c, "hevc" | "h265"))
+        .unwrap_or(false);
+    let manifest_path = if is_hevc {
+        tmpdir.join("manifest.mpd")
+    } else {
+        tmpdir.join("playlist.m3u8")
+    };
 
     let mut cmd = tokio::process::Command::new(&ffmpeg_bin);
     configure_background_process(&mut cmd);
@@ -305,19 +342,69 @@ async fn start_remux(
     cmd.arg("-reconnect_streamed").arg("1");
     cmd.arg("-reconnect_delay_max").arg("5");
     cmd.arg("-i").arg(&upstream_url);
-    cmd.arg("-c").arg("copy");
-    cmd.arg("-f").arg("hls");
-    cmd.arg("-hls_time").arg("4");
-    cmd.arg("-hls_list_size").arg("6");
-    cmd.arg("-hls_flags")
-        .arg("delete_segments+omit_endlist+independent_segments");
-    cmd.arg("-hls_segment_filename").arg(&segment_pattern);
-    cmd.arg(&playlist_path);
+    if is_hevc {
+        // Video: copy HEVC; rewrite the fMP4 sample-entry codec tag so the
+        // receiver's codec sniffer sees `hvc1` (Cast/Apple-standard) rather
+        // than `hev1` (ffmpeg-default; Shaka and Cast reject it).
+        cmd.arg("-c:v").arg("copy");
+        cmd.arg("-tag:v").arg("hvc1");
+        // Audio: transcode to clean AAC. Copy-into-mp4 fails on MPEG-TS
+        // sources because the TS audio codec_tag (0x0F = MPEG-2 AAC OTI)
+        // is incompatible with the mp4 muxer's expected `mp4a`, and many
+        // EU broadcast streams carry MP2/AC3 audio that mp4 can't hold at
+        // all. ~5% CPU at 192 kbps stereo — cheap insurance vs. failing
+        // the whole header write with "incorrect codec parameters".
+        cmd.arg("-c:a").arg("aac");
+        cmd.arg("-b:a").arg("192k");
+        cmd.arg("-ac").arg("2");
+        // Resample with async drift correction so PTS gaps from upstream
+        // reconnects (single-conn IPTV servers kick ffmpeg every few mins;
+        // each reconnect introduces a timestamp jump) don't drop the AAC
+        // encoder. `async=1000` permits up to 1s of compensation per
+        // segment; without this the encoder flushes and the DASH muxer
+        // aborts the run with "Application provided invalid, non monotonically
+        // increasing dts".
+        cmd.arg("-af").arg("aresample=async=1000");
+        // Make negative timestamps after a TS reconnect zero-anchored
+        // rather than letting them propagate into the fMP4 sample table,
+        // which the muxer rejects.
+        cmd.arg("-avoid_negative_ts").arg("make_zero");
+
+        // DASH muxer: sliding-window live profile, fMP4 segments under
+        // SegmentTemplate so Shaka can index by $Number$. `remove_at_exit`
+        // pairs with `extra_window_size` so segments stay on disk a couple
+        // of windows past the manifest tail (covers receiver reconnects).
+        cmd.arg("-f").arg("dash");
+        cmd.arg("-seg_duration").arg("4");
+        cmd.arg("-window_size").arg("6");
+        cmd.arg("-extra_window_size").arg("2");
+        cmd.arg("-remove_at_exit").arg("1");
+        cmd.arg("-use_template").arg("1");
+        cmd.arg("-use_timeline").arg("1");
+        cmd.arg("-init_seg_name")
+            .arg("init-stream$RepresentationID$.m4s");
+        cmd.arg("-media_seg_name")
+            .arg("chunk-stream$RepresentationID$-$Number%05d$.m4s");
+    } else {
+        // H.264 + TS: pure stream copy. The MPEG-TS muxer is happy with
+        // whatever audio codec_tag the upstream carries, and Cast's MPL
+        // plays AAC-in-TS / MP3-in-TS without translation.
+        cmd.arg("-c").arg("copy");
+        let segment_pattern = tmpdir.join("seg_%05d.ts");
+        cmd.arg("-f").arg("hls");
+        cmd.arg("-hls_time").arg("4");
+        cmd.arg("-hls_list_size").arg("6");
+        cmd.arg("-hls_flags")
+            .arg("delete_segments+omit_endlist+independent_segments");
+        cmd.arg("-hls_segment_filename").arg(&segment_pattern);
+    }
+    cmd.arg(&manifest_path);
 
     log::info!(
-        "[CastProxy] Spawning ffmpeg remux for {} → {}",
+        "[CastProxy] Spawning ffmpeg remux ({}) for {} → {}",
+        if is_hevc { "DASH/HEVC" } else { "HLS/H.264" },
         redact_url(&upstream_url),
-        playlist_path.display()
+        manifest_path.display()
     );
 
     let mut child = cmd.spawn().map_err(|err| {
@@ -326,14 +413,24 @@ async fn start_remux(
         ))
     })?;
 
-    // Drain stderr so the pipe doesn't fill and stall ffmpeg. Also useful for
-    // diagnostics when remux fails.
+    // Drain stderr so the pipe doesn't fill and stall ffmpeg. Each line is
+    // logged at DEBUG and also kept in a small ring buffer that the wait task
+    // dumps at WARN on non-zero exit — so the failure reason is visible at
+    // the default log level without forcing the whole stream to INFO.
+    let stderr_tail: Arc<Mutex<std::collections::VecDeque<String>>> =
+        Arc::new(Mutex::new(std::collections::VecDeque::with_capacity(32)));
     if let Some(stderr) = child.stderr.take() {
+        let tail = stderr_tail.clone();
         tokio::spawn(async move {
             use tokio::io::{AsyncBufReadExt, BufReader};
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 log::debug!("[CastProxy/ffmpeg] {line}");
+                let mut t = tail.lock().await;
+                if t.len() >= 32 {
+                    t.pop_front();
+                }
+                t.push_back(line);
             }
         });
     }
@@ -343,6 +440,7 @@ async fn start_remux(
     let tmpdir_for_worker = tmpdir.clone();
     let upstream_for_worker = upstream_url.clone();
     let remux_state_for_worker = remux_state.clone();
+    let stderr_tail_for_worker = stderr_tail.clone();
     tokio::spawn(async move {
         tokio::select! {
             status = child.wait() => {
@@ -359,6 +457,10 @@ async fn start_remux(
                             s.code(),
                             redact_url(&upstream_for_worker)
                         );
+                        let tail = stderr_tail_for_worker.lock().await;
+                        for line in tail.iter() {
+                            log::warn!("[CastProxy/ffmpeg/stderr] {line}");
+                        }
                     }
                     Err(err) => {
                         log::warn!("[CastProxy/ffmpeg] wait() failed: {err}");
@@ -380,10 +482,11 @@ async fn start_remux(
         }
     });
 
-    // Wait for the playlist to actually be written so the Cast device's first
+    // Wait for the manifest to actually be written so the Cast device's first
     // GET doesn't 404. On failure, trip the cancel so the spawned ffmpeg
     // worker terminates and removes the temp dir.
-    if let Err(err) = wait_for_playlist(&playlist_path, REMUX_PLAYLIST_READY_TIMEOUT, &cancel).await
+    if let Err(err) =
+        wait_for_manifest(&manifest_path, is_hevc, REMUX_PLAYLIST_READY_TIMEOUT, &cancel).await
     {
         cancel.cancel();
         return Err(err);
@@ -398,34 +501,47 @@ async fn start_remux(
     }
 
     Ok(RemuxStartInfo {
-        playlist_filename: "playlist.m3u8".to_string(),
+        manifest_filename: if is_hevc {
+            "manifest.mpd".to_string()
+        } else {
+            "playlist.m3u8".to_string()
+        },
+        is_dash: is_hevc,
     })
 }
 
-async fn wait_for_playlist(
+async fn wait_for_manifest(
     path: &Path,
+    is_dash: bool,
     timeout: Duration,
     cancel: &CancellationToken,
 ) -> Result<(), AppError> {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
         if path.exists() {
-            // Wait for at least one segment line to appear so the Chromecast
-            // doesn't request an empty playlist.
+            // Block until at least one segment is referenced so the Chromecast
+            // doesn't request an empty manifest. HLS uses `#EXTINF`; DASH with
+            // SegmentTimeline emits `<S ` entries once the first segment is
+            // muxed.
             if let Ok(content) = tokio::fs::read_to_string(path).await {
-                if content.contains("#EXTINF") {
+                let ready = if is_dash {
+                    content.contains("<S ") || content.contains("<S\t")
+                } else {
+                    content.contains("#EXTINF")
+                };
+                if ready {
                     return Ok(());
                 }
             }
         }
         if cancel.is_cancelled() {
             return Err(AppError::Other(
-                "Cast remux was cancelled before playlist became ready".to_string(),
+                "Cast remux was cancelled before manifest became ready".to_string(),
             ));
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(AppError::Other(
-                "ffmpeg did not produce an HLS playlist in time".to_string(),
+                "ffmpeg did not produce a manifest in time".to_string(),
             ));
         }
         tokio::time::sleep(REMUX_PLAYLIST_POLL_INTERVAL).await;
@@ -438,6 +554,82 @@ async fn cleanup_remux_async(state: RemuxState) {
         graceful_kill(c, GRACEFUL_KILL_TIMEOUT).await;
     }
     let _ = tokio::fs::remove_dir_all(&tmpdir).await;
+}
+
+/// Best-effort probe of the upstream's primary video codec. Used to decide
+/// whether the HLS remux needs `-tag:v hvc1` (Chromecast rejects HEVC tagged
+/// as the ffmpeg-default `hev1`). Returns `None` on any failure — the caller
+/// falls through to the untagged remux, which is correct for non-HEVC streams
+/// and fails the same way it would today for HEVC.
+async fn probe_video_codec(
+    ffprobe_bin: &str,
+    upstream_url: &str,
+    user_agent: &str,
+    accept_invalid_certs: bool,
+) -> Option<String> {
+    const PROBE_TIMEOUT: Duration = Duration::from_secs(6);
+
+    let mut cmd = tokio::process::Command::new(ffprobe_bin);
+    configure_background_process(&mut cmd);
+    cmd.kill_on_drop(true);
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+
+    cmd.arg("-hide_banner").arg("-v").arg("error");
+    cmd.arg("-user_agent").arg(user_agent);
+    if accept_invalid_certs && upstream_url.to_ascii_lowercase().starts_with("https://") {
+        cmd.arg("-tls_verify").arg("0");
+    }
+    cmd.arg("-select_streams").arg("v:0");
+    cmd.arg("-show_entries").arg("stream=codec_name");
+    cmd.arg("-of").arg("default=nokey=1:noprint_wrappers=1");
+    cmd.arg(upstream_url);
+
+    let output = match tokio::time::timeout(PROBE_TIMEOUT, cmd.output()).await {
+        Ok(Ok(out)) => out,
+        Ok(Err(err)) => {
+            log::warn!(
+                "[CastProxy] ffprobe spawn failed for {}: {err}",
+                redact_url(upstream_url)
+            );
+            return None;
+        }
+        Err(_) => {
+            log::warn!(
+                "[CastProxy] ffprobe codec probe timed out for {}",
+                redact_url(upstream_url)
+            );
+            return None;
+        }
+    };
+
+    if !output.status.success() {
+        log::debug!(
+            "[CastProxy] ffprobe codec probe exited non-zero for {} (status {:?})",
+            redact_url(upstream_url),
+            output.status.code()
+        );
+        return None;
+    }
+
+    // ffprobe occasionally emits the codec name multiple times (e.g. once per
+    // probe pass) even with `-select_streams v:0`. Take the first non-empty
+    // token so a "hevc\nhevc" payload still matches the HEVC branch.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let codec = stdout
+        .split_ascii_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if codec.is_empty() {
+        return None;
+    }
+    log::info!(
+        "[CastProxy] Probed video codec={codec} for {}",
+        redact_url(upstream_url)
+    );
+    Some(codec)
 }
 
 async fn handle_connection(
@@ -606,8 +798,15 @@ async fn serve_remux_file(
     };
     let content_type = if relative.ends_with(".m3u8") {
         "application/vnd.apple.mpegurl"
+    } else if relative.ends_with(".mpd") {
+        // DASH manifest (HEVC remux). Shaka on the receiver dispatches on this
+        // content-type to its DASH parser.
+        "application/dash+xml"
     } else if relative.ends_with(".ts") {
         "video/mp2t"
+    } else if relative.ends_with(".m4s") || relative.ends_with(".mp4") {
+        // fMP4 init + media segments (DASH).
+        "video/mp4"
     } else {
         "application/octet-stream"
     };
