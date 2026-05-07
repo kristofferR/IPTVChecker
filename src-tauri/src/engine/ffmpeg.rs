@@ -19,7 +19,7 @@ const MAX_FFPROBE_OUTPUT_CHARS: usize = 16_000;
 const PNG_SIGNATURE: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
 const FFPROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 const FFMPEG_BITRATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-const GRACEFUL_KILL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+pub(crate) const GRACEFUL_KILL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -61,7 +61,7 @@ const TARGET_TRIPLE: &str = "aarch64-pc-windows-msvc";
 
 /// Send SIGTERM (Unix) and wait up to `grace` for the process to exit.
 /// Falls back to SIGKILL if the grace period expires or on Windows.
-async fn graceful_kill(child: &mut tokio::process::Child, grace: std::time::Duration) {
+pub(crate) async fn graceful_kill(child: &mut tokio::process::Child, grace: std::time::Duration) {
     #[cfg(unix)]
     {
         if let Some(pid) = child.id() {
@@ -141,7 +141,7 @@ fn resolve_bundled_binary(app: &AppHandle, candidates: &[String]) -> Option<Stri
 /// Resolve the path to an executable, preferring bundled sidecar binaries over
 /// the system PATH so debug and production use the same ffmpeg build. Results
 /// are cached per binary name for the session.
-fn resolve_binary(app: &AppHandle, name: &str) -> String {
+pub(crate) fn resolve_binary(app: &AppHandle, name: &str) -> String {
     let cache = match name {
         "ffmpeg" => Some(&FFMPEG_PATH),
         "ffprobe" => Some(&FFPROBE_PATH),
@@ -187,7 +187,7 @@ fn resolve_binary_from_path(name: &str, ext: &str) -> Option<String> {
     None
 }
 
-fn configure_background_process(_command: &mut tokio::process::Command) {
+pub(crate) fn configure_background_process(_command: &mut tokio::process::Command) {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
