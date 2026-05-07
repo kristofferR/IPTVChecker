@@ -6,6 +6,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::engine::media_proxy::MediaProxyHandle;
 use crate::engine::chromecast::ActiveCastSession;
+#[cfg(target_os = "macos")]
+use crate::engine::airplay::ActiveAirPlaySession;
 use crate::models::backend_perf::BackendPerfSample;
 use crate::models::playlist::PlaylistPreview;
 use crate::models::scan_log::ScanDebugLog;
@@ -74,6 +76,22 @@ impl Default for CastState {
     }
 }
 
+#[cfg(target_os = "macos")]
+pub struct AirPlayState {
+    pub session: Option<ActiveAirPlaySession>,
+    pub proxy: Option<MediaProxyHandle>,
+}
+
+#[cfg(target_os = "macos")]
+impl Default for AirPlayState {
+    fn default() -> Self {
+        Self {
+            session: None,
+            proxy: None,
+        }
+    }
+}
+
 pub struct AppState {
     pub settings: Mutex<AppSettings>,
     pub proxy_client: Mutex<Option<(reqwest::Client, bool)>>,
@@ -84,6 +102,13 @@ pub struct AppState {
     /// `cast_to_device` / `stop_cast` calls cannot interleave and corrupt
     /// the stored session.
     pub cast_lifecycle_lock: Mutex<()>,
+    #[cfg(target_os = "macos")]
+    pub airplay_state: Mutex<AirPlayState>,
+    /// AirPlay analog of `cast_lifecycle_lock`. Same rationale: serialize
+    /// concurrent `start_airplay` / `stop_airplay` so they can't orphan a
+    /// session or proxy.
+    #[cfg(target_os = "macos")]
+    pub airplay_lifecycle_lock: Mutex<()>,
     window_scan_states: Mutex<HashMap<String, WindowScanState>>,
     backend_perf_samples: Mutex<VecDeque<BackendPerfSample>>,
     playlist_preview_cache: Mutex<HashMap<String, CachedPlaylistPreview>>,
@@ -98,6 +123,10 @@ impl AppState {
             streaming_proxy_start_lock: Mutex::new(()),
             cast_state: Mutex::new(CastState::default()),
             cast_lifecycle_lock: Mutex::new(()),
+            #[cfg(target_os = "macos")]
+            airplay_state: Mutex::new(AirPlayState::default()),
+            #[cfg(target_os = "macos")]
+            airplay_lifecycle_lock: Mutex::new(()),
             window_scan_states: Mutex::new(HashMap::new()),
             backend_perf_samples: Mutex::new(VecDeque::new()),
             playlist_preview_cache: Mutex::new(HashMap::new()),
