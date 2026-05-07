@@ -163,7 +163,11 @@ jobs:
           workspaces: src-tauri
 
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+        # Don't pass --locked: cargo-fuzz's pinned Cargo.lock pulls
+        # rustix 0.36.5, which references internal `rustc_attrs` that
+        # current nightlies refuse to compile. Letting cargo resolve a
+        # newer rustix patch unblocks the install.
+        run: cargo install cargo-fuzz
 
       - name: Download ffmpeg binaries
         run: |
