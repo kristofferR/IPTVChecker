@@ -1,4 +1,4 @@
-pub mod cast_proxy;
+pub mod media_proxy;
 pub mod checker;
 pub mod chromecast;
 pub mod connectivity;

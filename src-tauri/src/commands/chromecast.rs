@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Manager};
 
-use crate::engine::cast_proxy;
 use crate::engine::chromecast;
+use crate::engine::media_proxy::{self, ReceiverProfile};
 use crate::error::AppError;
 use crate::models::chromecast::{CastMediaRequest, CastSession, ChromecastDevice};
 use crate::state::AppState;
@@ -54,10 +54,11 @@ pub async fn cast_to_device(
     };
 
     if let Some((mut active, prior_proxy)) = same_device_take {
-        match cast_proxy::start(
+        match media_proxy::start(
             app.clone(),
             request.original_url.clone(),
             request.stream_kind,
+            ReceiverProfile::Chromecast,
         )
         .await
         {
@@ -122,10 +123,11 @@ pub async fn cast_to_device(
         }
     }
 
-    let proxy_handle = cast_proxy::start(
+    let proxy_handle = media_proxy::start(
         app.clone(),
         request.original_url.clone(),
         request.stream_kind,
+        ReceiverProfile::Chromecast,
     )
     .await?;
     let cast_url = proxy_handle.url.clone();

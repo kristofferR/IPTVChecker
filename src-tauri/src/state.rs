@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
-use crate::engine::cast_proxy::CastProxyHandle;
+use crate::engine::media_proxy::MediaProxyHandle;
 use crate::engine::chromecast::ActiveCastSession;
 use crate::models::backend_perf::BackendPerfSample;
 use crate::models::playlist::PlaylistPreview;
@@ -62,7 +62,7 @@ impl Default for WindowScanState {
 
 pub struct CastState {
     pub session: Option<ActiveCastSession>,
-    pub proxy: Option<CastProxyHandle>,
+    pub proxy: Option<MediaProxyHandle>,
 }
 
 impl Default for CastState {

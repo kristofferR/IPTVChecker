@@ -1,7 +1,8 @@
-//! LAN-bound HTTP proxy used to stream upstream IPTV content to a Chromecast.
+//! LAN-bound HTTP proxy used to stream upstream IPTV content to a media
+//! receiver (Chromecast or AirPlay).
 //!
 //! Unlike the in-app `stream_proxy` (which binds to 127.0.0.1 for the
-//! webview), the cast proxy binds to `0.0.0.0` so the Chromecast on the LAN
+//! webview), the media proxy binds to `0.0.0.0` so receivers on the LAN
 //! can reach it. Each session generates a fresh random token; only requests
 //! whose path starts with `/cast/<token>/` are served, so this short-lived,
 //! per-session listener does not become an open relay.
@@ -14,12 +15,12 @@
 //! - **Remux** (`/cast/<token>/hls/<manifest>` + sibling segment files):
 //!   used when the upstream is MPEG-TS. ffmpeg is spawned in copy mode to
 //!   produce a sliding-window manifest in a temp directory, which is then
-//!   served from disk. H.264 streams produce HLS+TS (`playlist.m3u8` + .ts);
-//!   HEVC streams produce DASH+fMP4 (`manifest.mpd` + .m4s) because CAFv3's
-//!   default HLS player (MPL) can't render fMP4 segments — DASH on the same
-//!   receiver uses Shaka, which handles fMP4 + HEVC natively.
+//!   served from disk. The container choice depends on the [`ReceiverProfile`]:
+//!   Chromecast renders H.264 as HLS+TS but needs DASH+fMP4 for HEVC (CAFv3's
+//!   MPL can't render fMP4 in HLS); AirPlay's AVPlayer takes HLS+fMP4+HEVC
+//!   natively, so HEVC stays on HLS but with fMP4 segments.
 //!
-//! Lifecycle: [`start`] returns a [`CastProxyHandle`] containing the bound
+//! Lifecycle: [`start`] returns a [`MediaProxyHandle`] containing the bound
 //! address and a cancel guard; dropping the handle (or calling `shutdown`)
 //! tears the listener down, aborts in-flight forwarders, kills ffmpeg, and
 //! removes the temp directory.
@@ -57,7 +58,26 @@ const REMUX_PLAYLIST_POLL_INTERVAL: Duration = Duration::from_millis(150);
 /// stream) cannot OOM the proxy.
 const MAX_MANIFEST_BYTES: u64 = 2 * 1024 * 1024;
 
-pub struct CastProxyHandle {
+/// Which receiver this proxy is feeding. The receivers diverge on:
+/// - **CORS preflight**: CAFv3 receivers issue an `OPTIONS` before fetching;
+///   AVPlayer is native and doesn't.
+/// - **HEVC remux container**: Chromecast's MPL can't render fMP4 in HLS, so
+///   HEVC must be served as DASH+fMP4 to dispatch to Shaka. Apple TV's HLS
+///   engine takes fMP4+HEVC natively, so HEVC stays on HLS but with fMP4
+///   segments (avoiding the DASH muxer's stricter timestamp rules).
+/// - **HEVC sample-entry tag**: Chromecast/Shaka rejects `hev1`; both Cast
+///   and Apple TV accept `hvc1`. We rewrite to `hvc1` for Cast; Apple TV
+///   tolerates either, so we leave the default for AirPlay.
+/// - **Audio passthrough set**: CAF MPL emits LoadFailed on EAC3/AC3/MP2-in-TS,
+///   so Cast transcodes anything not AAC. Apple TV's HLS spec accepts AAC,
+///   AC3, EAC3, and MP3 natively; only MP2 still needs a transcode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReceiverProfile {
+    Chromecast,
+    AirPlay,
+}
+
+pub struct MediaProxyHandle {
     pub url: String,
     pub host: IpAddr,
     pub port: u16,
@@ -71,13 +91,13 @@ pub struct CastProxyHandle {
     remux: Arc<Mutex<Option<RemuxState>>>,
 }
 
-impl CastProxyHandle {
+impl MediaProxyHandle {
     pub fn shutdown(&self) {
         self.cancel.cancel();
     }
 }
 
-impl Drop for CastProxyHandle {
+impl Drop for MediaProxyHandle {
     fn drop(&mut self) {
         self.cancel.cancel();
         // Best-effort sync cleanup: try to lock without awaiting and clean up
@@ -137,7 +157,7 @@ pub fn detect_lan_ip() -> Option<IpAddr> {
             // Fall through to interface scan.
         }
         Err(err) => {
-            log::debug!("[CastProxy] local_ip() returned error: {err}");
+            log::debug!("[MediaProxy] local_ip() returned error: {err}");
         }
     }
     match local_ip_address::list_afinet_netifas() {
@@ -149,11 +169,11 @@ pub fn detect_lan_ip() -> Option<IpAddr> {
                     }
                 }
             }
-            log::warn!("[CastProxy] No usable IPv4 interface found");
+            log::warn!("[MediaProxy] No usable IPv4 interface found");
             None
         }
         Err(err) => {
-            log::warn!("[CastProxy] Failed to enumerate network interfaces: {err}");
+            log::warn!("[MediaProxy] Failed to enumerate network interfaces: {err}");
             None
         }
     }
@@ -161,12 +181,14 @@ pub fn detect_lan_ip() -> Option<IpAddr> {
 
 /// Bind a fresh LAN-facing listener and serve upstream content for a single
 /// cast URL until cancelled. For MPEG-TS sources, spawns ffmpeg to remux into
-/// HLS so Chromecast can consume the stream.
+/// a manifest the receiver can consume — the container choice is profile-driven
+/// (see [`ReceiverProfile`]).
 pub async fn start(
     app: AppHandle,
     upstream_url: String,
     stream_kind: CastStreamKind,
-) -> Result<CastProxyHandle, AppError> {
+    profile: ReceiverProfile,
+) -> Result<MediaProxyHandle, AppError> {
     let token = generate_token();
     let lan_ip = detect_lan_ip()
         .ok_or_else(|| AppError::Other("Could not determine LAN IP for cast proxy".to_string()))?;
@@ -211,6 +233,7 @@ pub async fn start(
             cancel.clone(),
             remux_state.clone(),
             client.clone(),
+            profile,
         )
         .await?;
         (
@@ -225,9 +248,10 @@ pub async fn start(
     };
 
     log::info!(
-        "[CastProxy] Listening on 0.0.0.0:{port} (advertising {lan_ip}:{port}) for {} (mode={:?})",
+        "[MediaProxy] Listening on 0.0.0.0:{port} (advertising {lan_ip}:{port}) for {} (mode={:?}, profile={:?})",
         redact_url(&upstream_url),
-        stream_kind
+        stream_kind,
+        profile
     );
 
     let cancel_for_loop = cancel.clone();
@@ -242,7 +266,7 @@ pub async fn start(
         loop {
             tokio::select! {
                 _ = cancel_for_loop.cancelled() => {
-                    log::info!("[CastProxy] Listener on port {port} cancelled");
+                    log::info!("[MediaProxy] Listener on port {port} cancelled");
                     // Clean up remux state if any
                     let mut guard = remux_for_loop.lock().await;
                     if let Some(state) = guard.take() {
@@ -254,7 +278,7 @@ pub async fn start(
                     let (socket, peer) = match accept {
                         Ok(pair) => pair,
                         Err(err) => {
-                            log::warn!("[CastProxy] Accept error: {err}");
+                            log::warn!("[MediaProxy] Accept error: {err}");
                             continue;
                         }
                     };
@@ -276,10 +300,11 @@ pub async fn start(
                             client_for_conn,
                             user_agent_for_conn,
                             resolved_origin_for_conn,
+                            profile,
                         )
                         .await
                         {
-                            log::debug!("[CastProxy] Connection from {peer} ended: {err}");
+                            log::debug!("[MediaProxy] Connection from {peer} ended: {err}");
                         }
                     });
                 }
@@ -287,7 +312,7 @@ pub async fn start(
         }
     });
 
-    Ok(CastProxyHandle {
+    Ok(MediaProxyHandle {
         url: cast_url,
         host: lan_ip,
         port,
@@ -303,9 +328,10 @@ struct RemuxStartInfo {
     is_dash: bool,
 }
 
-/// Spawn ffmpeg to remux the upstream MPEG-TS into a sliding-window HLS
-/// playlist on disk. Waits for the playlist file to appear (so the Cast
-/// device's first GET doesn't 404) before returning.
+/// Spawn ffmpeg to remux the upstream MPEG-TS into a sliding-window manifest
+/// on disk. Waits for the manifest file to appear (so the receiver's first GET
+/// doesn't 404) before returning. Container choice depends on `profile` and
+/// the upstream codec — see [`ReceiverProfile`].
 async fn start_remux(
     app: AppHandle,
     upstream_url: String,
@@ -313,6 +339,7 @@ async fn start_remux(
     cancel: CancellationToken,
     remux_state: Arc<Mutex<Option<RemuxState>>>,
     client: Arc<reqwest::Client>,
+    profile: ReceiverProfile,
 ) -> Result<RemuxStartInfo, AppError> {
     let tmpdir = std::env::temp_dir().join(format!("iptv-cast-{token}"));
     std::fs::create_dir_all(&tmpdir).map_err(AppError::Io)?;
@@ -349,15 +376,24 @@ async fn start_remux(
         .as_deref()
         .map(|c| matches!(c, "hevc" | "h265"))
         .unwrap_or(false);
-    // AAC is the only TS audio codec MPL plays reliably; transcode anything
-    // else (EAC3, AC3, MP2, MP3, Opus, …) to AAC. When the probe is empty we
-    // assume copy is fine — the H.264+AAC default. HEVC/DASH always
-    // transcodes regardless of this flag (mp4 muxer needs `mp4a`).
-    let audio_needs_transcode = audio_codec
-        .as_deref()
-        .map(|c| !matches!(c, "aac"))
-        .unwrap_or(false);
-    let manifest_path = if is_hevc {
+    // Profile-driven audio gate. Cast's MPL emits LoadFailed on
+    // EAC3/AC3/MP2-in-TS, so the Cast set is "AAC only". Apple HLS spec
+    // accepts AAC/AC3/EAC3/MP3 natively; only MP2 still needs transcoding.
+    // Empty probe falls through to "copy" — correct for the well-tested
+    // H.264+AAC default. HEVC always transcodes (see HEVC branch below).
+    let audio_passthrough = match (profile, audio_codec.as_deref()) {
+        (_, None) => true,
+        (ReceiverProfile::Chromecast, Some(c)) => matches!(c, "aac"),
+        (ReceiverProfile::AirPlay, Some(c)) => matches!(c, "aac" | "ac3" | "eac3" | "mp3"),
+    };
+    let audio_needs_transcode = !audio_passthrough;
+    // For HEVC: Chromecast must use DASH+fMP4 (CAFv3 MPL can't render fMP4
+    // in HLS — Shaka picks up DASH and renders it fine). Apple TV's HLS
+    // engine is the reference HEVC-fMP4-in-HLS platform, so AirPlay stays
+    // on HLS but with fMP4 segments instead of MPEG-TS.
+    let use_dash = is_hevc && profile == ReceiverProfile::Chromecast;
+    let use_fmp4_hls = is_hevc && profile == ReceiverProfile::AirPlay;
+    let manifest_path = if use_dash {
         tmpdir.join("manifest.mpd")
     } else {
         tmpdir.join("playlist.m3u8")
@@ -398,11 +434,13 @@ async fn start_remux(
         cmd.arg("-i").arg(&upstream_url);
     }
     if is_hevc {
-        // Video: copy HEVC; rewrite the fMP4 sample-entry codec tag so the
-        // receiver's codec sniffer sees `hvc1` (Cast/Apple-standard) rather
-        // than `hev1` (ffmpeg-default; Shaka and Cast reject it).
+        // Video: copy HEVC. Cast/Shaka rejects `hev1`, so override the fMP4
+        // sample-entry codec tag to `hvc1`. Apple TV accepts both, so we
+        // leave ffmpeg's default for AirPlay.
         cmd.arg("-c:v").arg("copy");
-        cmd.arg("-tag:v").arg("hvc1");
+        if profile == ReceiverProfile::Chromecast {
+            cmd.arg("-tag:v").arg("hvc1");
+        }
         // Audio: transcode to clean AAC. Copy-into-mp4 fails on MPEG-TS
         // sources because the TS audio codec_tag (0x0F = MPEG-2 AAC OTI)
         // is incompatible with the mp4 muxer's expected `mp4a`, and many
@@ -416,8 +454,8 @@ async fn start_remux(
         // reconnects (single-conn IPTV servers kick ffmpeg every few mins;
         // each reconnect introduces a timestamp jump) don't drop the AAC
         // encoder. `async=1000` permits up to 1s of compensation per
-        // segment; without this the encoder flushes and the DASH muxer
-        // aborts the run with "Application provided invalid, non monotonically
+        // segment; without this the encoder flushes and the muxer aborts
+        // the run with "Application provided invalid, non monotonically
         // increasing dts".
         cmd.arg("-af").arg("aresample=async=1000");
         // Make negative timestamps after a TS reconnect zero-anchored
@@ -425,26 +463,41 @@ async fn start_remux(
         // which the muxer rejects.
         cmd.arg("-avoid_negative_ts").arg("make_zero");
 
-        // DASH muxer: sliding-window live profile, fMP4 segments under
-        // SegmentTemplate so Shaka can index by $Number$. `remove_at_exit`
-        // pairs with `extra_window_size` so segments stay on disk a couple
-        // of windows past the manifest tail (covers receiver reconnects).
-        cmd.arg("-f").arg("dash");
-        cmd.arg("-seg_duration").arg("4");
-        cmd.arg("-window_size").arg("6");
-        cmd.arg("-extra_window_size").arg("2");
-        cmd.arg("-remove_at_exit").arg("1");
-        cmd.arg("-use_template").arg("1");
-        cmd.arg("-use_timeline").arg("1");
-        cmd.arg("-init_seg_name")
-            .arg("init-stream$RepresentationID$.m4s");
-        cmd.arg("-media_seg_name")
-            .arg("chunk-stream$RepresentationID$-$Number%05d$.m4s");
+        if use_dash {
+            // DASH muxer: sliding-window live profile, fMP4 segments under
+            // SegmentTemplate so Shaka can index by $Number$. `remove_at_exit`
+            // pairs with `extra_window_size` so segments stay on disk a couple
+            // of windows past the manifest tail (covers receiver reconnects).
+            cmd.arg("-f").arg("dash");
+            cmd.arg("-seg_duration").arg("4");
+            cmd.arg("-window_size").arg("6");
+            cmd.arg("-extra_window_size").arg("2");
+            cmd.arg("-remove_at_exit").arg("1");
+            cmd.arg("-use_template").arg("1");
+            cmd.arg("-use_timeline").arg("1");
+            cmd.arg("-init_seg_name")
+                .arg("init-stream$RepresentationID$.m4s");
+            cmd.arg("-media_seg_name")
+                .arg("chunk-stream$RepresentationID$-$Number%05d$.m4s");
+        } else if use_fmp4_hls {
+            // HLS+fMP4: Apple HLS spec since v6. Apple TV's HLS engine takes
+            // fMP4+HEVC natively, so we keep the simpler HLS framing instead
+            // of dispatching through DASH/Shaka.
+            let init_filename = tmpdir.join("init.mp4");
+            let segment_pattern = tmpdir.join("seg_%05d.m4s");
+            cmd.arg("-f").arg("hls");
+            cmd.arg("-hls_segment_type").arg("fmp4");
+            cmd.arg("-hls_time").arg("4");
+            cmd.arg("-hls_list_size").arg("6");
+            cmd.arg("-hls_flags")
+                .arg("delete_segments+omit_endlist+independent_segments");
+            cmd.arg("-hls_fmp4_init_filename").arg(&init_filename);
+            cmd.arg("-hls_segment_filename").arg(&segment_pattern);
+        }
     } else {
         // H.264 + TS. Video is always copy. Audio is copy when the upstream
-        // ships AAC (MPL native), otherwise transcoded to AAC — Default
-        // Media Receiver MPL emits LoadFailed on EAC3/AC3-in-TS even though
-        // the muxer accepts those codec_tags.
+        // codec is in the profile's passthrough set, otherwise transcoded
+        // to AAC.
         cmd.arg("-c:v").arg("copy");
         if audio_needs_transcode {
             cmd.arg("-c:a").arg("aac");
@@ -464,9 +517,13 @@ async fn start_remux(
     }
     cmd.arg(&manifest_path);
 
+    let pipeline_label = match (is_hevc, use_dash) {
+        (true, true) => "DASH/HEVC",
+        (true, false) => "HLS-fMP4/HEVC",
+        (false, _) => "HLS-TS/H.264",
+    };
     log::info!(
-        "[CastProxy] Spawning ffmpeg remux ({}) for {} → {}",
-        if is_hevc { "DASH/HEVC" } else { "HLS/H.264" },
+        "[MediaProxy] Spawning ffmpeg remux ({pipeline_label}) for {} → {}",
         redact_url(&upstream_url),
         manifest_path.display()
     );
@@ -511,7 +568,7 @@ async fn start_remux(
             use tokio::io::{AsyncBufReadExt, BufReader};
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                log::debug!("[CastProxy/ffmpeg] {line}");
+                log::debug!("[MediaProxy/ffmpeg] {line}");
                 let mut t = tail.lock().await;
                 if t.len() >= 32 {
                     t.pop_front();
@@ -533,23 +590,23 @@ async fn start_remux(
                 match status {
                     Ok(s) if s.success() => {
                         log::info!(
-                            "[CastProxy/ffmpeg] Exited cleanly for {}",
+                            "[MediaProxy/ffmpeg] Exited cleanly for {}",
                             redact_url(&upstream_for_worker)
                         );
                     }
                     Ok(s) => {
                         log::warn!(
-                            "[CastProxy/ffmpeg] Exited with status {:?} for {}",
+                            "[MediaProxy/ffmpeg] Exited with status {:?} for {}",
                             s.code(),
                             redact_url(&upstream_for_worker)
                         );
                         let tail = stderr_tail_for_worker.lock().await;
                         for line in tail.iter() {
-                            log::warn!("[CastProxy/ffmpeg/stderr] {line}");
+                            log::warn!("[MediaProxy/ffmpeg/stderr] {line}");
                         }
                     }
                     Err(err) => {
-                        log::warn!("[CastProxy/ffmpeg] wait() failed: {err}");
+                        log::warn!("[MediaProxy/ffmpeg] wait() failed: {err}");
                     }
                 }
                 // ffmpeg ended on its own — also cancel the listener so the
@@ -561,18 +618,18 @@ async fn start_remux(
                 }
             }
             _ = cancel_for_worker.cancelled() => {
-                log::info!("[CastProxy/ffmpeg] Cancellation received, terminating");
+                log::info!("[MediaProxy/ffmpeg] Cancellation received, terminating");
                 graceful_kill(&mut child, GRACEFUL_KILL_TIMEOUT).await;
                 let _ = std::fs::remove_dir_all(&tmpdir_for_worker);
             }
         }
     });
 
-    // Wait for the manifest to actually be written so the Cast device's first
+    // Wait for the manifest to actually be written so the receiver's first
     // GET doesn't 404. On failure, trip the cancel so the spawned ffmpeg
     // worker terminates and removes the temp dir.
     if let Err(err) =
-        wait_for_manifest(&manifest_path, is_hevc, REMUX_PLAYLIST_READY_TIMEOUT, &cancel).await
+        wait_for_manifest(&manifest_path, use_dash, REMUX_PLAYLIST_READY_TIMEOUT, &cancel).await
     {
         cancel.cancel();
         return Err(err);
@@ -587,12 +644,12 @@ async fn start_remux(
     }
 
     Ok(RemuxStartInfo {
-        manifest_filename: if is_hevc {
+        manifest_filename: if use_dash {
             "manifest.mpd".to_string()
         } else {
             "playlist.m3u8".to_string()
         },
-        is_dash: is_hevc,
+        is_dash: use_dash,
     })
 }
 
@@ -677,7 +734,7 @@ fn spawn_upstream_pump(
                 format!("reconnect #{reconnects}")
             };
             log::info!(
-                "[CastProxy/pump] {label} for {}",
+                "[MediaProxy/pump] {label} for {}",
                 redact_url(&upstream_url)
             );
 
@@ -698,7 +755,7 @@ fn spawn_upstream_pump(
                 Ok(r) if r.status().is_success() => r,
                 Ok(r) => {
                     log::warn!(
-                        "[CastProxy/pump] Upstream returned {} ({label})",
+                        "[MediaProxy/pump] Upstream returned {} ({label})",
                         r.status()
                     );
                     tokio::select! {
@@ -709,7 +766,7 @@ fn spawn_upstream_pump(
                     continue;
                 }
                 Err(err) => {
-                    log::warn!("[CastProxy/pump] Upstream connect failed ({label}): {err}");
+                    log::warn!("[MediaProxy/pump] Upstream connect failed ({label}): {err}");
                     tokio::select! {
                         _ = cancel.cancelled() => break 'session,
                         _ = tokio::time::sleep(RECONNECT_BACKOFF) => {}
@@ -731,20 +788,20 @@ fn spawn_upstream_pump(
                                     // Nothing more we can do — exit the pump
                                     // and let the worker task observe the exit.
                                     log::info!(
-                                        "[CastProxy/pump] ffmpeg stdin closed ({err}); pump exiting"
+                                        "[MediaProxy/pump] ffmpeg stdin closed ({err}); pump exiting"
                                     );
                                     break 'session;
                                 }
                             }
                             Some(Err(err)) => {
                                 log::info!(
-                                    "[CastProxy/pump] Upstream read error ({label}): {err}; reconnecting"
+                                    "[MediaProxy/pump] Upstream read error ({label}): {err}; reconnecting"
                                 );
                                 break;
                             }
                             None => {
                                 log::info!(
-                                    "[CastProxy/pump] Upstream EOF ({label}); reconnecting"
+                                    "[MediaProxy/pump] Upstream EOF ({label}); reconnecting"
                                 );
                                 break;
                             }
@@ -763,7 +820,7 @@ fn spawn_upstream_pump(
         // Best-effort flush + close so ffmpeg sees EOF promptly when we exit.
         let _ = stdin.shutdown().await;
         log::info!(
-            "[CastProxy/pump] Pump terminated for {} after {} reconnect(s)",
+            "[MediaProxy/pump] Pump terminated for {} after {} reconnect(s)",
             redact_url(&upstream_url),
             reconnects
         );
@@ -812,14 +869,14 @@ async fn probe_codecs(
                 Ok(Ok(out)) => out,
                 Ok(Err(err)) => {
                     log::warn!(
-                        "[CastProxy] ffprobe spawn failed for {} ({stream_selector}): {err}",
+                        "[MediaProxy] ffprobe spawn failed for {} ({stream_selector}): {err}",
                         redact_url(&upstream_url)
                     );
                     return None;
                 }
                 Err(_) => {
                     log::warn!(
-                        "[CastProxy] ffprobe codec probe timed out for {} ({stream_selector})",
+                        "[MediaProxy] ffprobe codec probe timed out for {} ({stream_selector})",
                         redact_url(&upstream_url)
                     );
                     return None;
@@ -827,7 +884,7 @@ async fn probe_codecs(
             };
             if !output.status.success() {
                 log::debug!(
-                    "[CastProxy] ffprobe codec probe exited non-zero for {} ({stream_selector}, status {:?})",
+                    "[MediaProxy] ffprobe codec probe exited non-zero for {} ({stream_selector}, status {:?})",
                     redact_url(&upstream_url),
                     output.status.code()
                 );
@@ -848,7 +905,7 @@ async fn probe_codecs(
 
     let (video, audio) = tokio::join!(run("v:0"), run("a:0"));
     log::info!(
-        "[CastProxy] Probed codecs video={} audio={} for {}",
+        "[MediaProxy] Probed codecs video={} audio={} for {}",
         video.as_deref().unwrap_or("?"),
         audio.as_deref().unwrap_or("?"),
         redact_url(upstream_url)
@@ -866,6 +923,7 @@ async fn handle_connection(
     client: Arc<reqwest::Client>,
     user_agent: String,
     resolved_origin: Arc<Mutex<Option<Url>>>,
+    profile: ReceiverProfile,
 ) -> std::io::Result<()> {
     let mut buf = vec![0u8; 8192];
     let n = socket.read(&mut buf).await?;
@@ -888,7 +946,7 @@ async fn handle_connection(
     };
     let range_header = parse_request_header(&request, "range").map(|s| s.to_string());
     log::info!(
-        "[CastProxy] {method} {redacted}{range_suffix} from {peer}",
+        "[MediaProxy] {method} {redacted}{range_suffix} from {peer}",
         redacted = redact_cast_path(path),
         range_suffix = range_header
             .as_deref()
@@ -898,8 +956,10 @@ async fn handle_connection(
 
     // Chromecast CAF receivers send a CORS preflight (OPTIONS) before fetching
     // adaptive media. Answer it directly with the same allow-* headers we
-    // attach to real responses.
-    if method.eq_ignore_ascii_case("OPTIONS") {
+    // attach to real responses. AVPlayer (AirPlay) is a native client and
+    // does not preflight, so the OPTIONS handler is a Cast-only concern —
+    // for AirPlay we fall through to the 403 token-check path.
+    if profile == ReceiverProfile::Chromecast && method.eq_ignore_ascii_case("OPTIONS") {
         let header = "HTTP/1.1 204 No Content\r\n\
              Access-Control-Allow-Origin: *\r\n\
              Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n\
@@ -914,7 +974,7 @@ async fn handle_connection(
 
     let allowed_prefix = format!("/cast/{token}/");
     if !path.starts_with(&allowed_prefix) {
-        log::warn!("[CastProxy] Rejecting request with bad token from {peer}");
+        log::warn!("[MediaProxy] Rejecting request with bad token from {peer}");
         let _ = write_simple(&mut socket, 403, "text/plain", b"Forbidden").await;
         return Ok(());
     }
@@ -985,7 +1045,7 @@ async fn handle_connection(
                 .map(|u| u.as_str().to_string())
                 .unwrap_or_default();
             log::warn!(
-                "[CastProxy] Rejected out-of-origin segment fetch for {} (base {})",
+                "[MediaProxy] Rejected out-of-origin segment fetch for {} (base {})",
                 redact_url(decoded_url.as_str()),
                 redact_url(&base_label)
             );
@@ -1039,7 +1099,7 @@ async fn serve_remux_file(
             return Ok(());
         }
         Err(err) => {
-            log::warn!("[CastProxy] Failed to read remux file {file_path:?}: {err}");
+            log::warn!("[MediaProxy] Failed to read remux file {file_path:?}: {err}");
             let _ = write_simple(socket, 500, "text/plain", b"Read error").await;
             return Ok(());
         }
@@ -1151,14 +1211,14 @@ async fn serve_upstream(
         Ok(Ok(resp)) => resp,
         Ok(Err(err)) => {
             log::warn!(
-                "[CastProxy] Upstream fetch failed for {}: {err}",
+                "[MediaProxy] Upstream fetch failed for {}: {err}",
                 redact_url(&upstream_url)
             );
             return write_simple(socket, 502, "text/plain", b"Upstream failed").await;
         }
         Err(_) => {
             log::warn!(
-                "[CastProxy] Upstream fetch timed out for {}",
+                "[MediaProxy] Upstream fetch timed out for {}",
                 redact_url(&upstream_url)
             );
             return write_simple(socket, 504, "text/plain", b"Upstream timed out").await;
@@ -1191,7 +1251,7 @@ async fn serve_upstream(
         if let Some(len) = response.content_length() {
             if len > MAX_MANIFEST_BYTES {
                 log::warn!(
-                    "[CastProxy] Manifest content-length {len} exceeds cap; refusing to rewrite"
+                    "[MediaProxy] Manifest content-length {len} exceeds cap; refusing to rewrite"
                 );
                 return write_simple(socket, 502, "text/plain", b"Manifest too large").await;
             }
@@ -1200,12 +1260,12 @@ async fn serve_upstream(
             Ok(bytes) => bytes,
             Err(ReadCappedError::TooLarge) => {
                 log::warn!(
-                    "[CastProxy] Manifest exceeded {MAX_MANIFEST_BYTES} bytes; refusing to rewrite"
+                    "[MediaProxy] Manifest exceeded {MAX_MANIFEST_BYTES} bytes; refusing to rewrite"
                 );
                 return write_simple(socket, 502, "text/plain", b"Manifest too large").await;
             }
             Err(ReadCappedError::Read(err)) => {
-                log::warn!("[CastProxy] Failed to read manifest: {err}");
+                log::warn!("[MediaProxy] Failed to read manifest: {err}");
                 return write_simple(socket, 502, "text/plain", b"Manifest read failed").await;
             }
         };
@@ -1303,7 +1363,7 @@ async fn serve_upstream(
     loop {
         tokio::select! {
             _ = cancel.cancelled() => {
-                log::debug!("[CastProxy] Forward cancelled mid-stream");
+                log::debug!("[MediaProxy] Forward cancelled mid-stream");
                 break;
             }
             chunk = stream.next() => {
@@ -1326,7 +1386,7 @@ async fn serve_upstream(
                         }
                     }
                     Err(err) => {
-                        log::warn!("[CastProxy] Upstream stream error: {err}");
+                        log::warn!("[MediaProxy] Upstream stream error: {err}");
                         break;
                     }
                 }
@@ -1567,7 +1627,7 @@ fn rewrite_manifest(body: &str, base_url: &str, token: &str) -> String {
             }
             Ok(rejected) => {
                 log::warn!(
-                    "[CastProxy] Refusing to proxy out-of-origin segment {} (base {})",
+                    "[MediaProxy] Refusing to proxy out-of-origin segment {} (base {})",
                     redact_url(rejected.as_str()),
                     redact_url(base.as_str())
                 );
@@ -1605,7 +1665,7 @@ fn rewrite_tag_uri(line: &str, base: &Url, token: &str) -> String {
         Ok(u) if is_target_allowed(base, &u) => u,
         Ok(rejected) => {
             log::warn!(
-                "[CastProxy] Refusing to proxy out-of-origin tag URI {} (base {})",
+                "[MediaProxy] Refusing to proxy out-of-origin tag URI {} (base {})",
                 redact_url(rejected.as_str()),
                 redact_url(base.as_str())
             );
