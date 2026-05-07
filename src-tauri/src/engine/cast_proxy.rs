@@ -298,15 +298,19 @@ async fn start_remux(
     let ffmpeg_bin = resolve_binary(&app, "ffmpeg");
     let ffprobe_bin = resolve_binary(&app, "ffprobe");
 
-    // Probe the upstream's video codec. HEVC needs DASH+fMP4 because:
+    // Probe the upstream's video + audio codecs. HEVC needs DASH+fMP4 because:
     // (a) HEVC must not ride MPEG-TS segments (per Cast spec — TS+HEVC fails);
     // (b) HLS+fMP4 looks correct on the wire but the Default Media Receiver's
     //     CAFv3 HLS player (MPL) doesn't render fMP4 segments, so it fetches
     //     init+1 segment then emits LoadFailed;
     // (c) DASH on the same receiver dispatches to Shaka, which handles
-    //     fMP4+HEVC out of the box. Probe is best-effort: a failure (timeout,
-    //     missing ffprobe) falls through to HLS+TS, correct for H.264.
-    let video_codec = probe_video_codec(
+    //     fMP4+HEVC out of the box.
+    // Audio: MPL is happy with AAC/MP3-in-TS, but EAC3/AC3/MP2-in-TS commonly
+    // produce LoadFailed on Default Media Receiver. Probe so we know whether
+    // a transcode-to-AAC is needed. Probe is best-effort: a failure (timeout,
+    // missing ffprobe) falls through to HLS+TS with stream copy, correct for
+    // the well-tested H.264+AAC case.
+    let (video_codec, audio_codec) = probe_codecs(
         &ffprobe_bin,
         &upstream_url,
         &user_agent,
@@ -316,6 +320,14 @@ async fn start_remux(
     let is_hevc = video_codec
         .as_deref()
         .map(|c| matches!(c, "hevc" | "h265"))
+        .unwrap_or(false);
+    // AAC is the only TS audio codec MPL plays reliably; transcode anything
+    // else (EAC3, AC3, MP2, MP3, Opus, …) to AAC. When the probe is empty we
+    // assume copy is fine — the H.264+AAC default. HEVC/DASH always
+    // transcodes regardless of this flag (mp4 muxer needs `mp4a`).
+    let audio_needs_transcode = audio_codec
+        .as_deref()
+        .map(|c| !matches!(c, "aac"))
         .unwrap_or(false);
     let manifest_path = if is_hevc {
         tmpdir.join("manifest.mpd")
@@ -401,10 +413,19 @@ async fn start_remux(
         cmd.arg("-media_seg_name")
             .arg("chunk-stream$RepresentationID$-$Number%05d$.m4s");
     } else {
-        // H.264 + TS: pure stream copy. The MPEG-TS muxer is happy with
-        // whatever audio codec_tag the upstream carries, and Cast's MPL
-        // plays AAC-in-TS / MP3-in-TS without translation.
-        cmd.arg("-c").arg("copy");
+        // H.264 + TS. Video is always copy. Audio is copy when the upstream
+        // ships AAC (MPL native), otherwise transcoded to AAC — Default
+        // Media Receiver MPL emits LoadFailed on EAC3/AC3-in-TS even though
+        // the muxer accepts those codec_tags.
+        cmd.arg("-c:v").arg("copy");
+        if audio_needs_transcode {
+            cmd.arg("-c:a").arg("aac");
+            cmd.arg("-b:a").arg("192k");
+            cmd.arg("-ac").arg("2");
+            cmd.arg("-af").arg("aresample=async=1000");
+        } else {
+            cmd.arg("-c:a").arg("copy");
+        }
         let segment_pattern = tmpdir.join("seg_%05d.ts");
         cmd.arg("-f").arg("hls");
         cmd.arg("-hls_time").arg("4");
@@ -721,80 +742,90 @@ fn spawn_upstream_pump(
     });
 }
 
-/// Best-effort probe of the upstream's primary video codec. Used to decide
-/// whether the HLS remux needs `-tag:v hvc1` (Chromecast rejects HEVC tagged
-/// as the ffmpeg-default `hev1`). Returns `None` on any failure — the caller
-/// falls through to the untagged remux, which is correct for non-HEVC streams
-/// and fails the same way it would today for HEVC.
-async fn probe_video_codec(
+/// Best-effort probe of the upstream's primary video + audio codecs. Used to
+/// pick the right ffmpeg pipeline:
+/// - Video: HEVC → DASH+fMP4 (and `-tag:v hvc1`); H.264 → HLS+TS.
+/// - Audio: anything other than AAC → transcode to AAC, since Default Media
+///   Receiver MPL emits LoadFailed on EAC3/AC3/MP2-in-TS.
+///
+/// Returns `(None, None)` on any failure — the caller falls through to the
+/// untagged H.264+copy remux, which is correct for the well-tested case.
+async fn probe_codecs(
     ffprobe_bin: &str,
     upstream_url: &str,
     user_agent: &str,
     accept_invalid_certs: bool,
-) -> Option<String> {
+) -> (Option<String>, Option<String>) {
     const PROBE_TIMEOUT: Duration = Duration::from_secs(6);
 
-    let mut cmd = tokio::process::Command::new(ffprobe_bin);
-    configure_background_process(&mut cmd);
-    cmd.kill_on_drop(true);
-    cmd.stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
+    let run = |stream_selector: &'static str| {
+        let ffprobe_bin = ffprobe_bin.to_string();
+        let upstream_url = upstream_url.to_string();
+        let user_agent = user_agent.to_string();
+        async move {
+            let mut cmd = tokio::process::Command::new(&ffprobe_bin);
+            configure_background_process(&mut cmd);
+            cmd.kill_on_drop(true);
+            cmd.stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null());
 
-    cmd.arg("-hide_banner").arg("-v").arg("error");
-    cmd.arg("-user_agent").arg(user_agent);
-    if accept_invalid_certs && upstream_url.to_ascii_lowercase().starts_with("https://") {
-        cmd.arg("-tls_verify").arg("0");
-    }
-    cmd.arg("-select_streams").arg("v:0");
-    cmd.arg("-show_entries").arg("stream=codec_name");
-    cmd.arg("-of").arg("default=nokey=1:noprint_wrappers=1");
-    cmd.arg(upstream_url);
+            cmd.arg("-hide_banner").arg("-v").arg("error");
+            cmd.arg("-user_agent").arg(&user_agent);
+            if accept_invalid_certs && upstream_url.to_ascii_lowercase().starts_with("https://") {
+                cmd.arg("-tls_verify").arg("0");
+            }
+            cmd.arg("-select_streams").arg(stream_selector);
+            cmd.arg("-show_entries").arg("stream=codec_name");
+            cmd.arg("-of").arg("default=nokey=1:noprint_wrappers=1");
+            cmd.arg(&upstream_url);
 
-    let output = match tokio::time::timeout(PROBE_TIMEOUT, cmd.output()).await {
-        Ok(Ok(out)) => out,
-        Ok(Err(err)) => {
-            log::warn!(
-                "[CastProxy] ffprobe spawn failed for {}: {err}",
-                redact_url(upstream_url)
-            );
-            return None;
-        }
-        Err(_) => {
-            log::warn!(
-                "[CastProxy] ffprobe codec probe timed out for {}",
-                redact_url(upstream_url)
-            );
-            return None;
+            let output = match tokio::time::timeout(PROBE_TIMEOUT, cmd.output()).await {
+                Ok(Ok(out)) => out,
+                Ok(Err(err)) => {
+                    log::warn!(
+                        "[CastProxy] ffprobe spawn failed for {} ({stream_selector}): {err}",
+                        redact_url(&upstream_url)
+                    );
+                    return None;
+                }
+                Err(_) => {
+                    log::warn!(
+                        "[CastProxy] ffprobe codec probe timed out for {} ({stream_selector})",
+                        redact_url(&upstream_url)
+                    );
+                    return None;
+                }
+            };
+            if !output.status.success() {
+                log::debug!(
+                    "[CastProxy] ffprobe codec probe exited non-zero for {} ({stream_selector}, status {:?})",
+                    redact_url(&upstream_url),
+                    output.status.code()
+                );
+                return None;
+            }
+            // ffprobe occasionally emits the codec name multiple times (e.g.
+            // once per probe pass) even with a single `-select_streams` index.
+            // Take the first non-empty token.
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let codec = stdout
+                .split_ascii_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if codec.is_empty() { None } else { Some(codec) }
         }
     };
 
-    if !output.status.success() {
-        log::debug!(
-            "[CastProxy] ffprobe codec probe exited non-zero for {} (status {:?})",
-            redact_url(upstream_url),
-            output.status.code()
-        );
-        return None;
-    }
-
-    // ffprobe occasionally emits the codec name multiple times (e.g. once per
-    // probe pass) even with `-select_streams v:0`. Take the first non-empty
-    // token so a "hevc\nhevc" payload still matches the HEVC branch.
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let codec = stdout
-        .split_ascii_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if codec.is_empty() {
-        return None;
-    }
+    let (video, audio) = tokio::join!(run("v:0"), run("a:0"));
     log::info!(
-        "[CastProxy] Probed video codec={codec} for {}",
+        "[CastProxy] Probed codecs video={} audio={} for {}",
+        video.as_deref().unwrap_or("?"),
+        audio.as_deref().unwrap_or("?"),
         redact_url(upstream_url)
     );
-    Some(codec)
+    (video, audio)
 }
 
 async fn handle_connection(
