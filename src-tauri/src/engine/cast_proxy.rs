@@ -51,6 +51,11 @@ const CAST_READ_TIMEOUT: Duration = Duration::from_secs(20);
 const MANIFEST_FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 const REMUX_PLAYLIST_READY_TIMEOUT: Duration = Duration::from_secs(20);
 const REMUX_PLAYLIST_POLL_INTERVAL: Duration = Duration::from_millis(150);
+/// Hard cap on manifest body buffered into memory before rewriting. Real HLS
+/// playlists are well under a megabyte; this exists so a misclassified upstream
+/// (URL ends in `.m3u8` but body is actually a long-running MPEG-TS or live
+/// stream) cannot OOM the proxy.
+const MAX_MANIFEST_BYTES: u64 = 2 * 1024 * 1024;
 
 pub struct CastProxyHandle {
     pub url: String,
@@ -1179,10 +1184,27 @@ async fn serve_upstream(
             let mut guard = resolved_origin.lock().await;
             *guard = Some(parsed);
         }
-        // Buffer the manifest, rewrite URIs to round-trip through this proxy.
-        let body = match response.bytes().await {
+        // Refuse upfront if the upstream advertised a body bigger than the cap;
+        // otherwise stream-and-cap the body so a misclassified or malicious
+        // upstream (e.g. URL ends in .m3u8 but actually returns a live MPEG-TS)
+        // can't buffer unbounded data.
+        if let Some(len) = response.content_length() {
+            if len > MAX_MANIFEST_BYTES {
+                log::warn!(
+                    "[CastProxy] Manifest content-length {len} exceeds cap; refusing to rewrite"
+                );
+                return write_simple(socket, 502, "text/plain", b"Manifest too large").await;
+            }
+        }
+        let body = match read_capped(response, MAX_MANIFEST_BYTES).await {
             Ok(bytes) => bytes,
-            Err(err) => {
+            Err(ReadCappedError::TooLarge) => {
+                log::warn!(
+                    "[CastProxy] Manifest exceeded {MAX_MANIFEST_BYTES} bytes; refusing to rewrite"
+                );
+                return write_simple(socket, 502, "text/plain", b"Manifest too large").await;
+            }
+            Err(ReadCappedError::Read(err)) => {
                 log::warn!("[CastProxy] Failed to read manifest: {err}");
                 return write_simple(socket, 502, "text/plain", b"Manifest read failed").await;
             }
@@ -1421,6 +1443,36 @@ fn parse_byte_range(header: &str, total_len: u64) -> Option<(u64, u64)> {
     }
     let end_clamped = end_inclusive.min(total_len - 1);
     Some((start, end_clamped))
+}
+
+#[derive(Debug)]
+enum ReadCappedError {
+    TooLarge,
+    Read(reqwest::Error),
+}
+
+/// Streams a reqwest response body into memory with a hard byte cap. Returns
+/// `TooLarge` as soon as accumulated bytes exceed `cap` so a malicious or
+/// misclassified upstream (chunked / no Content-Length / declared smaller than
+/// actual) can't OOM the proxy.
+async fn read_capped(
+    response: reqwest::Response,
+    cap: u64,
+) -> Result<Vec<u8>, ReadCappedError> {
+    use futures::StreamExt;
+
+    let mut buf: Vec<u8> = Vec::new();
+    let mut total: u64 = 0;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(ReadCappedError::Read)?;
+        total = total.saturating_add(chunk.len() as u64);
+        if total > cap {
+            return Err(ReadCappedError::TooLarge);
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(buf)
 }
 
 async fn write_simple(
@@ -1877,6 +1929,60 @@ seg-1.ts
         assert!(
             rewritten.contains(&format!("/cast/tok/seg/{cdn_b64}")),
             "rewrite must encode the CDN URL: {rewritten}"
+        );
+    }
+
+    /// Spawns a one-shot HTTP server that serves `body` chunked (no
+    /// Content-Length) and returns its bound `http://...` URL. Used to verify
+    /// `read_capped` against a real reqwest::Response without depending on a
+    /// full mock-server crate.
+    async fn spawn_chunked_server(body: Vec<u8>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = socket.read(&mut buf).await;
+            let header = "HTTP/1.1 200 OK\r\n\
+                          Content-Type: application/vnd.apple.mpegurl\r\n\
+                          Transfer-Encoding: chunked\r\n\
+                          Connection: close\r\n\r\n";
+            let _ = socket.write_all(header.as_bytes()).await;
+            // Emit in 64 KiB chunks so the cap can trip mid-stream rather
+            // than only after the body fully arrives.
+            for chunk in body.chunks(64 * 1024) {
+                let _ = socket
+                    .write_all(format!("{:x}\r\n", chunk.len()).as_bytes())
+                    .await;
+                let _ = socket.write_all(chunk).await;
+                let _ = socket.write_all(b"\r\n").await;
+            }
+            let _ = socket.write_all(b"0\r\n\r\n").await;
+        });
+        format!("http://{addr}/")
+    }
+
+    #[tokio::test]
+    async fn read_capped_accepts_body_within_cap() {
+        let body = b"#EXTM3U\n#EXT-X-TARGETDURATION:6\n".to_vec();
+        let url = spawn_chunked_server(body.clone()).await;
+        let resp = reqwest::get(&url).await.unwrap();
+        let bytes = read_capped(resp, 2 * 1024 * 1024).await.expect("within cap");
+        assert_eq!(bytes, body);
+    }
+
+    #[tokio::test]
+    async fn read_capped_rejects_body_over_cap() {
+        // 4 MiB body, 2 MiB cap. The cap must trip mid-stream rather than
+        // letting the proxy buffer the whole payload.
+        let body = vec![b'A'; 4 * 1024 * 1024];
+        let url = spawn_chunked_server(body).await;
+        let resp = reqwest::get(&url).await.unwrap();
+        let result = read_capped(resp, 2 * 1024 * 1024).await;
+        assert!(
+            matches!(result, Err(ReadCappedError::TooLarge)),
+            "expected TooLarge, got {:?}",
+            result.map(|b| b.len())
         );
     }
 }
