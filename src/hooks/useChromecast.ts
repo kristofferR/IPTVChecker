@@ -60,11 +60,19 @@ export function useChromecast(): UseChromecastResult {
   );
 
   const stop = useCallback(async () => {
-    setError(null);
     try {
       await stopCast();
-    } finally {
-      if (!cancelledRef.current) setSession(null);
+      // Only clear locally on a successful backend stop. If the call rejects
+      // (transport down, command error, …) the receiver may still be
+      // playing — clearing here would lie to the rest of the UI and break
+      // follow-up flows like cast-redirect that gate on isCastSessionActive.
+      if (!cancelledRef.current) {
+        setError(null);
+        setSession(null);
+      }
+    } catch (err) {
+      if (!cancelledRef.current) setError(String(err));
+      throw err;
     }
   }, []);
 

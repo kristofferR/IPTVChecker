@@ -25,7 +25,7 @@
 //! removes the temp directory.
 
 use std::net::IpAddr;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -883,7 +883,8 @@ async fn handle_connection(
     };
     let range_header = parse_request_header(&request, "range").map(|s| s.to_string());
     log::info!(
-        "[CastProxy] {method} {path}{range_suffix} from {peer}",
+        "[CastProxy] {method} {redacted}{range_suffix} from {peer}",
+        redacted = redact_cast_path(path),
         range_suffix = range_header
             .as_deref()
             .map(|r| format!(" range={r}"))
@@ -1015,8 +1016,13 @@ async fn serve_remux_file(
     method: &str,
     range_header: Option<&str>,
 ) -> std::io::Result<()> {
-    // Reject path traversal: allow only simple filenames, no slashes.
-    if relative.contains('/') || relative.contains("..") || relative.is_empty() {
+    // Cross-platform path-traversal guard. The string-level checks reject
+    // backslashes (Windows separator), drive letters (`C:foo`), and UNC
+    // forms (`\\host\share`) that `Path::components` on Unix would otherwise
+    // pass through as a single Normal component and then resolve outside
+    // tmpdir at runtime. The component-walk catches the rest (`/`, `..`,
+    // empty input, leading separator).
+    if !is_safe_remux_filename(relative) {
         let _ = write_simple(socket, 400, "text/plain", b"Bad path").await;
         return Ok(());
     }
@@ -1316,6 +1322,60 @@ fn parse_request_path(request: &str) -> Option<&str> {
     let mut parts = first.split_whitespace();
     let _method = parts.next()?;
     parts.next()
+}
+
+/// True iff `relative` names exactly one normal path component — no
+/// separators, no parent refs, no Windows drive prefix or UNC root, no
+/// leading whitespace. Walks `Path::components` (Unix-only on the target
+/// platform) plus a string-level scan for backslashes / `:` so a request
+/// served on Linux can't smuggle `C:\Windows\win.ini` past the validator,
+/// since `Path::components` on Unix would treat the whole string as a
+/// single Normal component.
+fn is_safe_remux_filename(relative: &str) -> bool {
+    if relative.is_empty() {
+        return false;
+    }
+    if relative.contains('\\') || relative.contains(':') {
+        return false;
+    }
+    let mut comps = Path::new(relative).components();
+    let first = match comps.next() {
+        Some(c) => c,
+        None => return false,
+    };
+    if !matches!(first, Component::Normal(_)) {
+        return false;
+    }
+    if comps.next().is_some() {
+        return false;
+    }
+    true
+}
+
+/// Strip the cast token and any base64-encoded segment URL from a request path
+/// so it's safe to log. Anyone with log access could otherwise replay the
+/// session token (bearer credential for the proxy) or recover upstream stream
+/// URLs from the encoded segment paths.
+///
+/// Maps:
+/// - `/cast/<token>/hls/playlist.m3u8` → `/cast/<redacted>/hls/playlist.m3u8`
+/// - `/cast/<token>/seg/<b64>`         → `/cast/<redacted>/seg/<redacted>`
+/// - everything else                   → returned as-is
+fn redact_cast_path(path: &str) -> String {
+    let Some(rest) = path.strip_prefix("/cast/") else {
+        return path.to_string();
+    };
+    let (_token, tail) = match rest.split_once('/') {
+        Some((t, tail)) => (t, tail),
+        None => return "/cast/<redacted>".to_string(),
+    };
+    if let Some(rest) = tail.strip_prefix("seg/") {
+        // The b64 after `seg/` decodes to the upstream URL. Also redact any
+        // trailing `?query` even though we don't currently emit those.
+        let _ = rest;
+        return "/cast/<redacted>/seg/<redacted>".to_string();
+    }
+    format!("/cast/<redacted>/{tail}")
 }
 
 /// Look up a single request header by name (case-insensitive). Returns the
@@ -1679,6 +1739,64 @@ http://iptv.example.com/live/720p/seg-2.ts
         // origins populated.
         let loopback = Url::parse("http://127.0.0.1:9000/x.ts").unwrap();
         assert!(!segment_accepted(Some(&resolved), Some(&upstream), &loopback));
+    }
+
+    #[test]
+    fn redact_cast_path_strips_token() {
+        assert_eq!(
+            redact_cast_path("/cast/abc123token/hls/playlist.m3u8"),
+            "/cast/<redacted>/hls/playlist.m3u8"
+        );
+        assert_eq!(redact_cast_path("/cast/tok/stream"), "/cast/<redacted>/stream");
+    }
+
+    #[test]
+    fn redact_cast_path_strips_segment_b64() {
+        // The b64 after seg/ encodes the upstream URL — must not leak.
+        assert_eq!(
+            redact_cast_path("/cast/abc/seg/aHR0cDovL2V4YW1wbGUuY29tL3MudHM"),
+            "/cast/<redacted>/seg/<redacted>"
+        );
+    }
+
+    #[test]
+    fn redact_cast_path_passes_unrelated_paths_through() {
+        assert_eq!(redact_cast_path("/health"), "/health");
+        assert_eq!(redact_cast_path("/"), "/");
+        assert_eq!(redact_cast_path(""), "");
+        // Lone `/cast/<token>` with no trailing slash still redacts.
+        assert_eq!(redact_cast_path("/cast/onlytoken"), "/cast/<redacted>");
+    }
+
+    #[test]
+    fn is_safe_remux_filename_accepts_simple_names() {
+        assert!(is_safe_remux_filename("playlist.m3u8"));
+        assert!(is_safe_remux_filename("seg_00001.ts"));
+        assert!(is_safe_remux_filename("init-stream0.m4s"));
+        assert!(is_safe_remux_filename("manifest.mpd"));
+    }
+
+    #[test]
+    fn is_safe_remux_filename_rejects_unix_traversal() {
+        assert!(!is_safe_remux_filename(""));
+        assert!(!is_safe_remux_filename(".."));
+        assert!(!is_safe_remux_filename("../etc/passwd"));
+        assert!(!is_safe_remux_filename("/etc/passwd"));
+        assert!(!is_safe_remux_filename("a/b"));
+        assert!(!is_safe_remux_filename("./a"));
+    }
+
+    #[test]
+    fn is_safe_remux_filename_rejects_windows_paths() {
+        // Drive-letter and UNC forms must be rejected even when validating
+        // on Unix, since `Path::components` on Unix would treat them as a
+        // single Normal component.
+        assert!(!is_safe_remux_filename("C:\\Windows\\win.ini"));
+        assert!(!is_safe_remux_filename("C:foo"));
+        assert!(!is_safe_remux_filename("\\\\server\\share\\file"));
+        assert!(!is_safe_remux_filename("a\\b"));
+        // A bare `:` anywhere in the filename is suspicious — block.
+        assert!(!is_safe_remux_filename("foo:bar.ts"));
     }
 
     #[test]
