@@ -679,7 +679,7 @@ async fn wait_for_manifest(
         }
         if cancel.is_cancelled() {
             return Err(AppError::Other(
-                "Cast remux was cancelled before manifest became ready".to_string(),
+                "Receiver remux was cancelled before manifest became ready".to_string(),
             ));
         }
         if tokio::time::Instant::now() >= deadline {

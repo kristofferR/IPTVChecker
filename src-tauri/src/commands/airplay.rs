@@ -12,6 +12,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::engine::airplay;
 use crate::engine::media_proxy::{self, ReceiverProfile};
+use crate::engine::stream_proxy;
 use crate::error::AppError;
 use crate::models::airplay::{AirPlayMediaRequest, AirPlaySession};
 use crate::state::AppState;
@@ -59,6 +60,13 @@ pub async fn start_airplay(
     if let Some(active) = prior_session {
         active.stop_silent(&app).await;
     }
+
+    // Free the upstream slot before ffmpeg fetches: the local stream player
+    // may still be holding it via the localhost streaming proxy, and single-
+    // credential IPTV portals reject the second concurrent fetch with
+    // HTTP 458 ("too many connections"), aborting the cast remux before its
+    // manifest becomes ready.
+    stream_proxy::cancel_active_local_streams(state.inner()).await;
 
     let proxy_handle = media_proxy::start(
         app.clone(),

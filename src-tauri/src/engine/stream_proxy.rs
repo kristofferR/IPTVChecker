@@ -4,6 +4,7 @@ use reqwest::header::{HeaderValue, CONTENT_TYPE, RANGE, USER_AGENT};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::Manager;
+use tokio_util::sync::CancellationToken;
 use url::{Host, Url};
 
 use crate::state::AppState;
@@ -18,6 +19,39 @@ const PROXY_BUFFERED_RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration
 /// Per-read inactivity timeout — resets on every successful read, so it does NOT
 /// cap total stream duration. Only kills truly dead/stalled connections.
 const PROXY_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Time to wait after cancelling local connections so the upstream server
+/// has a chance to release the single-credential slot (TCP FIN → server-side
+/// session cleanup) before the receiver path opens its own. 250ms is enough
+/// for well-behaved IPTV portals; tail providers may need more, but the
+/// receiver fetch will still typically succeed because we've at least closed
+/// our socket.
+const LOCAL_STREAM_CANCEL_GRACE: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Cancel all in-flight local streaming-proxy connections and wait briefly for
+/// the upstream slot to be released. Receiver paths (Chromecast / AirPlay)
+/// must call this before starting their own upstream fetch — single-credential
+/// IPTV providers reject the receiver with HTTP 458 ("too many connections")
+/// if the local player still holds the slot.
+///
+/// The token is replaced with a fresh one before being cancelled, so future
+/// local-player connections after the receiver tears down still work.
+pub async fn cancel_active_local_streams(state: &AppState) {
+    let old = {
+        let mut guard = state.local_stream_cancel.lock().await;
+        std::mem::replace(&mut *guard, CancellationToken::new())
+    };
+    old.cancel();
+    log::info!(
+        "[StreamProxy] Released upstream slot (waiting {}ms for server cleanup)",
+        LOCAL_STREAM_CANCEL_GRACE.as_millis()
+    );
+    tokio::time::sleep(LOCAL_STREAM_CANCEL_GRACE).await;
+}
+
+async fn current_local_stream_cancel(state: &AppState) -> CancellationToken {
+    state.local_stream_cancel.lock().await.clone()
+}
 
 /// Base64url-encode an original stream URL for the proxy scheme.
 pub fn encode_proxy_url(original: &str) -> String {
@@ -531,7 +565,6 @@ where
 /// Start a localhost HTTP proxy that streams upstream responses.
 /// Returns the port the server is listening on.
 pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
     let listener = TcpListener::bind("127.0.0.1:0").await?;
@@ -543,7 +576,7 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
 
     tokio::spawn(async move {
         loop {
-            let (mut socket, _addr) = match listener.accept().await {
+            let (socket, _addr) = match listener.accept().await {
                 Ok(conn) => conn,
                 Err(err) => {
                     log::warn!("[StreamProxy] Accept error: {}", err);
@@ -552,135 +585,158 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
             };
 
             let app_handle = app.clone();
+            // Snapshot the current cancel token so this connection dies if a
+            // receiver path (Chromecast / AirPlay) calls
+            // `cancel_active_local_streams` before we start its own upstream
+            // fetch. Future connections accepted after that grab the
+            // already-replaced fresh token, so they're unaffected.
+            let cancel = current_local_stream_cancel(
+                app_handle.state::<Arc<AppState>>().inner(),
+            )
+            .await;
             tokio::spawn(async move {
-                // Read the HTTP request line to extract the URL
-                let mut buf = vec![0u8; 8192];
-                let n = match socket.read(&mut buf).await {
-                    Ok(0) => return,
-                    Ok(n) => n,
-                    Err(_) => return,
-                };
-                let request_str = String::from_utf8_lossy(&buf[..n]);
-
-                // Parse GET /stream?url=ENCODED_URL HTTP/1.1
-                let url = match parse_stream_request(&request_str) {
-                    Some(url) => url,
-                    None => {
-                        let response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
-                        let _ = socket.write_all(response.as_bytes()).await;
-                        return;
-                    }
-                };
-
-                if !is_safe_upstream_url(&url).await {
-                    log::warn!("[StreamProxy] Blocked request to private/local target");
-                    let response = "HTTP/1.1 403 Forbidden\r\nContent-Length: 22\r\n\r\nTarget URL not allowed";
-                    let _ = socket.write_all(response.as_bytes()).await;
-                    return;
-                }
-
-                log::info!("[StreamProxy] Streaming {}", redact_url(&url));
-
-                // Fetch upstream with streaming body using settings-aware client
-                let state = app_handle.state::<Arc<AppState>>();
-                let (user_agent, accept_invalid_certs) = {
-                    let settings = state.settings.lock().await;
-                    (settings.user_agent.clone(), settings.accept_invalid_certs)
-                };
-
-                let client = get_or_create_proxy_client(state.inner(), accept_invalid_certs).await;
-
-                let response = match client
-                    .get(&url)
-                    .header(
-                        USER_AGENT,
-                        HeaderValue::from_str(&user_agent).unwrap_or_else(|_| {
-                            HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")
-                        }),
-                    )
-                    .send()
-                    .await
-                {
-                    Ok(resp) => resp,
-                    Err(err) => {
-                        log::warn!(
-                            "[StreamProxy] Upstream request failed for {} ({})",
-                            redact_url(&url),
-                            reqwest_error_kind(&err)
-                        );
-                        let (status_line, body) = if err.is_timeout() {
-                            ("HTTP/1.1 504 Gateway Timeout", "Upstream request timed out")
-                        } else {
-                            ("HTTP/1.1 502 Bad Gateway", "Upstream request failed")
-                        };
-                        let response = format!(
-                            "{status_line}\r\nContent-Length: {}\r\n\r\n{}",
-                            body.len(),
-                            body
-                        );
-                        let _ = socket.write_all(response.as_bytes()).await;
-                        return;
-                    }
-                };
-
-                let status = response.status();
-                let content_type = response
-                    .headers()
-                    .get(CONTENT_TYPE)
-                    .and_then(|v| v.to_str().ok())
-                    .unwrap_or("application/octet-stream")
-                    .to_string();
-
-                // Write HTTP response headers
-                let status_line = match status.canonical_reason() {
-                    Some(reason) => format!("HTTP/1.1 {} {}\r\n", status.as_u16(), reason),
-                    None => format!("HTTP/1.1 {}\r\n", status.as_u16()),
-                };
-                let header = format!(
-                    "{}Content-Type: {}\r\n\
-                     Access-Control-Allow-Origin: *\r\n\
-                     Transfer-Encoding: chunked\r\n\
-                     Cache-Control: no-cache\r\n\
-                     Connection: close\r\n\
-                     \r\n",
-                    status_line, content_type
-                );
-                if socket.write_all(header.as_bytes()).await.is_err() {
-                    return;
-                }
-
-                match forward_response_as_chunked_stream(&mut socket, response).await {
-                    StreamForwardOutcome::Completed => {
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => {
                         log::debug!(
-                            "[StreamProxy] Upstream stream ended normally for {}",
-                            redact_url(&url)
+                            "[StreamProxy] Connection cancelled (receiver took the upstream slot)"
                         );
                     }
-                    StreamForwardOutcome::UpstreamReadTimeout => {
-                        log::warn!(
-                            "[StreamProxy] Upstream stream stalled/timed out for {}",
-                            redact_url(&url)
-                        );
-                    }
-                    StreamForwardOutcome::UpstreamReadError(kind) => {
-                        log::warn!(
-                            "[StreamProxy] Upstream stream terminated for {} ({})",
-                            redact_url(&url),
-                            kind
-                        );
-                    }
-                    StreamForwardOutcome::DownstreamClosed => {
-                        log::debug!(
-                            "[StreamProxy] Downstream disconnected while streaming {}",
-                            redact_url(&url)
-                        );
-                    }
+                    _ = handle_streaming_connection(socket, app_handle) => {}
                 }
             });
         }
     });
 
     Ok(port)
+}
+
+async fn handle_streaming_connection(mut socket: tokio::net::TcpStream, app_handle: tauri::AppHandle) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // Read the HTTP request line to extract the URL
+    let mut buf = vec![0u8; 8192];
+    let n = match socket.read(&mut buf).await {
+        Ok(0) => return,
+        Ok(n) => n,
+        Err(_) => return,
+    };
+    let request_str = String::from_utf8_lossy(&buf[..n]);
+
+    // Parse GET /stream?url=ENCODED_URL HTTP/1.1
+    let url = match parse_stream_request(&request_str) {
+        Some(url) => url,
+        None => {
+            let response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
+            let _ = socket.write_all(response.as_bytes()).await;
+            return;
+        }
+    };
+
+    if !is_safe_upstream_url(&url).await {
+        log::warn!("[StreamProxy] Blocked request to private/local target");
+        let response =
+            "HTTP/1.1 403 Forbidden\r\nContent-Length: 22\r\n\r\nTarget URL not allowed";
+        let _ = socket.write_all(response.as_bytes()).await;
+        return;
+    }
+
+    log::info!("[StreamProxy] Streaming {}", redact_url(&url));
+
+    // Fetch upstream with streaming body using settings-aware client
+    let state = app_handle.state::<Arc<AppState>>();
+    let (user_agent, accept_invalid_certs) = {
+        let settings = state.settings.lock().await;
+        (settings.user_agent.clone(), settings.accept_invalid_certs)
+    };
+
+    let client = get_or_create_proxy_client(state.inner(), accept_invalid_certs).await;
+
+    let response = match client
+        .get(&url)
+        .header(
+            USER_AGENT,
+            HeaderValue::from_str(&user_agent)
+                .unwrap_or_else(|_| HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")),
+        )
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(err) => {
+            log::warn!(
+                "[StreamProxy] Upstream request failed for {} ({})",
+                redact_url(&url),
+                reqwest_error_kind(&err)
+            );
+            let (status_line, body) = if err.is_timeout() {
+                ("HTTP/1.1 504 Gateway Timeout", "Upstream request timed out")
+            } else {
+                ("HTTP/1.1 502 Bad Gateway", "Upstream request failed")
+            };
+            let response = format!(
+                "{status_line}\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
+            return;
+        }
+    };
+
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .to_string();
+
+    // Write HTTP response headers
+    let status_line = match status.canonical_reason() {
+        Some(reason) => format!("HTTP/1.1 {} {}\r\n", status.as_u16(), reason),
+        None => format!("HTTP/1.1 {}\r\n", status.as_u16()),
+    };
+    let header = format!(
+        "{}Content-Type: {}\r\n\
+             Access-Control-Allow-Origin: *\r\n\
+             Transfer-Encoding: chunked\r\n\
+             Cache-Control: no-cache\r\n\
+             Connection: close\r\n\
+             \r\n",
+        status_line, content_type
+    );
+    if socket.write_all(header.as_bytes()).await.is_err() {
+        return;
+    }
+
+    match forward_response_as_chunked_stream(&mut socket, response).await {
+        StreamForwardOutcome::Completed => {
+            log::debug!(
+                "[StreamProxy] Upstream stream ended normally for {}",
+                redact_url(&url)
+            );
+        }
+        StreamForwardOutcome::UpstreamReadTimeout => {
+            log::warn!(
+                "[StreamProxy] Upstream stream stalled/timed out for {}",
+                redact_url(&url)
+            );
+        }
+        StreamForwardOutcome::UpstreamReadError(kind) => {
+            log::warn!(
+                "[StreamProxy] Upstream stream terminated for {} ({})",
+                redact_url(&url),
+                kind
+            );
+        }
+        StreamForwardOutcome::DownstreamClosed => {
+            log::debug!(
+                "[StreamProxy] Downstream disconnected while streaming {}",
+                redact_url(&url)
+            );
+        }
+    }
 }
 
 fn parse_stream_request(request: &str) -> Option<String> {

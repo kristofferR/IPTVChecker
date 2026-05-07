@@ -5,6 +5,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::engine::chromecast;
 use crate::engine::media_proxy::{self, ReceiverProfile};
+use crate::engine::stream_proxy;
 use crate::error::AppError;
 use crate::models::chromecast::{CastMediaRequest, CastSession, ChromecastDevice};
 use crate::state::AppState;
@@ -73,6 +74,11 @@ pub async fn cast_to_device(
     };
 
     if let Some((mut active, prior_proxy)) = same_device_take {
+        // Same as the fresh-launch path below: drop any local-player upstream
+        // fetch so single-credential IPTV portals don't reject ffmpeg's load
+        // with HTTP 458.
+        stream_proxy::cancel_active_local_streams(state.inner()).await;
+
         match media_proxy::start(
             app.clone(),
             request.original_url.clone(),
@@ -141,6 +147,10 @@ pub async fn cast_to_device(
             active.stop_silent().await;
         }
     }
+
+    // Release the upstream slot before ffmpeg connects (HTTP 458 mitigation
+    // on single-credential IPTV portals — see comment in `start_airplay`).
+    stream_proxy::cancel_active_local_streams(state.inner()).await;
 
     let proxy_handle = media_proxy::start(
         app.clone(),

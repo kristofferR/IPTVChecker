@@ -97,6 +97,12 @@ pub struct AppState {
     pub proxy_client: Mutex<Option<(reqwest::Client, bool)>>,
     pub streaming_proxy_port: std::sync::atomic::AtomicU16,
     pub streaming_proxy_start_lock: Mutex<()>,
+    /// Shared cancel for in-flight local streaming-proxy connections.
+    /// Receiver paths (Chromecast / AirPlay) cancel + replace this so the
+    /// upstream slot is released before they start their own fetch — single-
+    /// credential IPTV providers reject the receiver with HTTP 458 if the
+    /// local player still holds the slot. See `stream_proxy::cancel_active_local_streams`.
+    pub local_stream_cancel: Mutex<CancellationToken>,
     pub cast_state: Mutex<CastState>,
     /// Held for the entire start/stop cast lifecycle so concurrent
     /// `cast_to_device` / `stop_cast` calls cannot interleave and corrupt
@@ -121,6 +127,7 @@ impl AppState {
             proxy_client: Mutex::new(None),
             streaming_proxy_port: std::sync::atomic::AtomicU16::new(0),
             streaming_proxy_start_lock: Mutex::new(()),
+            local_stream_cancel: Mutex::new(CancellationToken::new()),
             cast_state: Mutex::new(CastState::default()),
             cast_lifecycle_lock: Mutex::new(()),
             #[cfg(target_os = "macos")]
