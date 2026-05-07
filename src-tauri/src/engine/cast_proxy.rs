@@ -117,15 +117,38 @@ pub fn generate_token() -> String {
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
-/// Best-effort discovery of the LAN-facing local IP. Falls back to 0.0.0.0
-/// (the bind address) when nothing better is available; in that case the
-/// caller should prompt the user, since the Chromecast won't be able to reach
-/// the bind address by itself.
+/// Best-effort discovery of the LAN-facing local IPv4. The proxy binds on
+/// `0.0.0.0` (IPv4 only), so the address advertised back to the Chromecast
+/// must also be IPv4 — `http://[::1]:port` is not a valid authority and an
+/// IPv6-only host wouldn't be reachable from the IPv4-bound socket either.
+///
+/// `local_ip()` can return IPv6 on dual-stack hosts; in that case scan the
+/// interface list for the first non-loopback IPv4. Returns `None` when no
+/// usable IPv4 is available (the caller surfaces an error to the user).
 pub fn detect_lan_ip() -> Option<IpAddr> {
     match local_ip_address::local_ip() {
-        Ok(ip) => Some(ip),
+        Ok(ip @ IpAddr::V4(_)) => return Some(ip),
+        Ok(IpAddr::V6(_)) => {
+            // Fall through to interface scan.
+        }
         Err(err) => {
-            log::warn!("[CastProxy] Failed to detect LAN IP: {err}");
+            log::debug!("[CastProxy] local_ip() returned error: {err}");
+        }
+    }
+    match local_ip_address::list_afinet_netifas() {
+        Ok(list) => {
+            for (_, ip) in list {
+                if let IpAddr::V4(v4) = ip {
+                    if !v4.is_loopback() && !v4.is_unspecified() && !v4.is_link_local() {
+                        return Some(IpAddr::V4(v4));
+                    }
+                }
+            }
+            log::warn!("[CastProxy] No usable IPv4 interface found");
+            None
+        }
+        Err(err) => {
+            log::warn!("[CastProxy] Failed to enumerate network interfaces: {err}");
             None
         }
     }
@@ -858,7 +881,14 @@ async fn handle_connection(
             return Ok(());
         }
     };
-    log::info!("[CastProxy] {method} {path} from {peer}");
+    let range_header = parse_request_header(&request, "range").map(|s| s.to_string());
+    log::info!(
+        "[CastProxy] {method} {path}{range_suffix} from {peer}",
+        range_suffix = range_header
+            .as_deref()
+            .map(|r| format!(" range={r}"))
+            .unwrap_or_default()
+    );
 
     // Chromecast CAF receivers send a CORS preflight (OPTIONS) before fetching
     // adaptive media. Answer it directly with the same allow-* headers we
@@ -895,7 +925,14 @@ async fn handle_connection(
             let _ = write_simple(&mut socket, 503, "text/plain", b"Remux not ready").await;
             return Ok(());
         };
-        return serve_remux_file(&mut socket, &tmpdir, rest).await;
+        return serve_remux_file(
+            &mut socket,
+            &tmpdir,
+            rest,
+            &method,
+            range_header.as_deref(),
+        )
+        .await;
     }
 
     // Pass-through mode: entrypoint or rewritten manifest segment.
@@ -965,6 +1002,8 @@ async fn handle_connection(
         client,
         user_agent,
         resolved_origin,
+        &method,
+        range_header.as_deref(),
     )
     .await
 }
@@ -973,6 +1012,8 @@ async fn serve_remux_file(
     socket: &mut tokio::net::TcpStream,
     tmpdir: &Path,
     relative: &str,
+    method: &str,
+    range_header: Option<&str>,
 ) -> std::io::Result<()> {
     // Reject path traversal: allow only simple filenames, no slashes.
     if relative.contains('/') || relative.contains("..") || relative.is_empty() {
@@ -1006,10 +1047,47 @@ async fn serve_remux_file(
     } else {
         "application/octet-stream"
     };
+    let total_len = bytes.len() as u64;
+    let is_head = method.eq_ignore_ascii_case("HEAD");
+
+    // Honour byte-range requests so the receiver can resume a paused segment
+    // (Shaka issues 0-N range probes for fMP4 init segments). Falls back to
+    // 200/full body if the header is absent or malformed.
+    let (status_line, content_range_line, body_slice): (&str, String, &[u8]) =
+        if let Some(range) = range_header {
+            match parse_byte_range(range, total_len) {
+                Some((start, end_inclusive)) => (
+                    "HTTP/1.1 206 Partial Content\r\n",
+                    format!("Content-Range: bytes {start}-{end_inclusive}/{total_len}\r\n"),
+                    &bytes[start as usize..=end_inclusive as usize],
+                ),
+                None => {
+                    // Unsatisfiable: respond per RFC 7233 §4.4.
+                    let header = format!(
+                        "HTTP/1.1 416 Range Not Satisfiable\r\n\
+                         Content-Type: text/plain\r\n\
+                         Content-Length: 0\r\n\
+                         Content-Range: bytes */{total_len}\r\n\
+                         Accept-Ranges: bytes\r\n\
+                         Access-Control-Allow-Origin: *\r\n\
+                         Connection: close\r\n\
+                         \r\n"
+                    );
+                    socket.write_all(header.as_bytes()).await?;
+                    return Ok(());
+                }
+            }
+        } else {
+            ("HTTP/1.1 200 OK\r\n", String::new(), &bytes[..])
+        };
+
+    let body_len = body_slice.len();
     let header = format!(
-        "HTTP/1.1 200 OK\r\n\
+        "{status_line}\
          Content-Type: {content_type}\r\n\
-         Content-Length: {len}\r\n\
+         Content-Length: {body_len}\r\n\
+         {content_range_line}\
+         Accept-Ranges: bytes\r\n\
          Cache-Control: no-cache\r\n\
          Access-Control-Allow-Origin: *\r\n\
          Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n\
@@ -1017,10 +1095,11 @@ async fn serve_remux_file(
          Access-Control-Expose-Headers: Content-Length, Content-Range, Date\r\n\
          Connection: close\r\n\
          \r\n",
-        len = bytes.len()
     );
     socket.write_all(header.as_bytes()).await?;
-    socket.write_all(&bytes).await?;
+    if !is_head {
+        socket.write_all(body_slice).await?;
+    }
     Ok(())
 }
 
@@ -1032,19 +1111,31 @@ async fn serve_upstream(
     client: Arc<reqwest::Client>,
     user_agent: String,
     resolved_origin: Arc<Mutex<Option<Url>>>,
+    method: &str,
+    range_header: Option<&str>,
 ) -> std::io::Result<()> {
-    let response = match tokio::time::timeout(
-        MANIFEST_FETCH_TIMEOUT,
-        client
-            .get(&upstream_url)
-            .header(
-                USER_AGENT,
-                HeaderValue::from_str(&user_agent)
-                    .unwrap_or_else(|_| HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")),
-            )
-            .send(),
-    )
-    .await
+    let is_head = method.eq_ignore_ascii_case("HEAD");
+    // Forward HEAD as HEAD upstream so we don't pay for a full body fetch we'll
+    // discard. Range is forwarded as-is for both GET and HEAD; the upstream
+    // either honours it (returning 206) or falls back to 200 and we pass that
+    // through unchanged.
+    let mut request_builder = if is_head {
+        client.head(&upstream_url)
+    } else {
+        client.get(&upstream_url)
+    }
+    .header(
+        USER_AGENT,
+        HeaderValue::from_str(&user_agent)
+            .unwrap_or_else(|_| HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")),
+    );
+    if let Some(range) = range_header {
+        if let Ok(value) = HeaderValue::from_str(range) {
+            request_builder = request_builder.header(reqwest::header::RANGE, value);
+        }
+    }
+
+    let response = match tokio::time::timeout(MANIFEST_FETCH_TIMEOUT, request_builder.send()).await
     {
         Ok(Ok(resp)) => resp,
         Ok(Err(err)) => {
@@ -1108,18 +1199,62 @@ async fn serve_upstream(
             len = rewritten.len()
         );
         socket.write_all(header.as_bytes()).await?;
-        socket.write_all(rewritten.as_bytes()).await?;
+        // HEAD: headers only, no body. The receiver only ever HEAD-probes
+        // segments anyway, but defensive against a manifest HEAD too.
+        if !is_head {
+            socket.write_all(rewritten.as_bytes()).await?;
+        }
         return Ok(());
     }
 
-    // Otherwise stream the body through with chunked transfer.
+    // Otherwise pass the body through. If the upstream gave us Content-Length
+    // (typical for HEAD and Range responses), use it instead of chunked
+    // transfer so the receiver knows the byte count up front. Forward
+    // Content-Range and Accept-Ranges so byte-range responses pass through
+    // verbatim — the receiver requested them, we shouldn't strip them.
     let status_line = match status.canonical_reason() {
         Some(reason) => format!("HTTP/1.1 {} {}\r\n", status.as_u16(), reason),
         None => format!("HTTP/1.1 {}\r\n", status.as_u16()),
     };
+    let upstream_content_length = response
+        .headers()
+        .get(reqwest::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let upstream_content_range = response
+        .headers()
+        .get(reqwest::header::CONTENT_RANGE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let upstream_accept_ranges = response
+        .headers()
+        .get(reqwest::header::ACCEPT_RANGES)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    // Build the transfer framing line. If we know the body length, we use
+    // Content-Length and skip chunked encoding; otherwise fall back to
+    // chunked. HEAD always uses Content-Length (or the upstream's if known)
+    // and writes no body.
+    let mut framing = String::new();
+    if let Some(len) = upstream_content_length.as_deref() {
+        framing.push_str(&format!("Content-Length: {len}\r\n"));
+    } else if !is_head {
+        framing.push_str("Transfer-Encoding: chunked\r\n");
+    } else {
+        framing.push_str("Content-Length: 0\r\n");
+    }
+    if let Some(cr) = upstream_content_range.as_deref() {
+        framing.push_str(&format!("Content-Range: {cr}\r\n"));
+    }
+    framing.push_str(&format!(
+        "Accept-Ranges: {}\r\n",
+        upstream_accept_ranges.as_deref().unwrap_or("bytes")
+    ));
+
     let header = format!(
         "{status_line}Content-Type: {content_type}\r\n\
-         Transfer-Encoding: chunked\r\n\
+         {framing}\
          Cache-Control: no-cache\r\n\
          Access-Control-Allow-Origin: *\r\n\
          Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n\
@@ -1129,6 +1264,11 @@ async fn serve_upstream(
          \r\n"
     );
     socket.write_all(header.as_bytes()).await?;
+    if is_head {
+        // Headers-only response.
+        return Ok(());
+    }
+    let use_chunked = upstream_content_length.is_none();
 
     use futures::StreamExt;
     let mut stream = response.bytes_stream();
@@ -1142,14 +1282,18 @@ async fn serve_upstream(
                 let Some(item) = chunk else { break; };
                 match item {
                     Ok(bytes) => {
-                        let size_line = format!("{:x}\r\n", bytes.len());
-                        if socket.write_all(size_line.as_bytes()).await.is_err() {
-                            return Ok(());
-                        }
-                        if socket.write_all(&bytes).await.is_err() {
-                            return Ok(());
-                        }
-                        if socket.write_all(b"\r\n").await.is_err() {
+                        if use_chunked {
+                            let size_line = format!("{:x}\r\n", bytes.len());
+                            if socket.write_all(size_line.as_bytes()).await.is_err() {
+                                return Ok(());
+                            }
+                            if socket.write_all(&bytes).await.is_err() {
+                                return Ok(());
+                            }
+                            if socket.write_all(b"\r\n").await.is_err() {
+                                return Ok(());
+                            }
+                        } else if socket.write_all(&bytes).await.is_err() {
                             return Ok(());
                         }
                     }
@@ -1161,7 +1305,9 @@ async fn serve_upstream(
             }
         }
     }
-    let _ = socket.write_all(b"0\r\n\r\n").await;
+    if use_chunked {
+        let _ = socket.write_all(b"0\r\n\r\n").await;
+    }
     Ok(())
 }
 
@@ -1170,6 +1316,51 @@ fn parse_request_path(request: &str) -> Option<&str> {
     let mut parts = first.split_whitespace();
     let _method = parts.next()?;
     parts.next()
+}
+
+/// Look up a single request header by name (case-insensitive). Returns the
+/// trimmed value of the first matching header line, or `None` if absent. Only
+/// scans the header block — stops at the first blank line so request bodies
+/// don't pollute matches.
+fn parse_request_header<'a>(request: &'a str, name: &str) -> Option<&'a str> {
+    let mut lines = request.lines();
+    // Skip the request-line.
+    lines.next()?;
+    for line in lines {
+        if line.is_empty() {
+            return None;
+        }
+        let (key, value) = line.split_once(':')?;
+        if key.trim().eq_ignore_ascii_case(name) {
+            return Some(value.trim());
+        }
+    }
+    None
+}
+
+/// Parse an HTTP `Range` header of the form `bytes=START-END` (END optional)
+/// against a known content length. Returns `(start, end_inclusive)` clamped
+/// into bounds, or `None` if the header is malformed or unsatisfiable. We only
+/// support the single-range, byte-unit form — multi-range and suffix ranges
+/// (`bytes=-N`) are uncommon for media playback and would complicate the
+/// response framing.
+fn parse_byte_range(header: &str, total_len: u64) -> Option<(u64, u64)> {
+    if total_len == 0 {
+        return None;
+    }
+    let rest = header.strip_prefix("bytes=")?.trim();
+    let (start_s, end_s) = rest.split_once('-')?;
+    let start: u64 = start_s.trim().parse().ok()?;
+    let end_inclusive: u64 = if end_s.trim().is_empty() {
+        total_len - 1
+    } else {
+        end_s.trim().parse().ok()?
+    };
+    if start > end_inclusive || start >= total_len {
+        return None;
+    }
+    let end_clamped = end_inclusive.min(total_len - 1);
+    Some((start, end_clamped))
 }
 
 async fn write_simple(
@@ -1488,6 +1679,65 @@ http://iptv.example.com/live/720p/seg-2.ts
         // origins populated.
         let loopback = Url::parse("http://127.0.0.1:9000/x.ts").unwrap();
         assert!(!segment_accepted(Some(&resolved), Some(&upstream), &loopback));
+    }
+
+    #[test]
+    fn parse_request_header_finds_case_insensitive() {
+        let req = "GET /cast/x HTTP/1.1\r\nHost: 1.2.3.4:5500\r\nRange: bytes=0-100\r\nUser-Agent: t\r\n\r\n";
+        assert_eq!(parse_request_header(req, "range"), Some("bytes=0-100"));
+        assert_eq!(parse_request_header(req, "Range"), Some("bytes=0-100"));
+        assert_eq!(parse_request_header(req, "RANGE"), Some("bytes=0-100"));
+        assert_eq!(parse_request_header(req, "host"), Some("1.2.3.4:5500"));
+        assert_eq!(parse_request_header(req, "missing"), None);
+    }
+
+    #[test]
+    fn parse_request_header_stops_at_blank_line() {
+        // A header-shaped line that shows up after the blank line (i.e. in a
+        // body) must not be returned. Mostly defensive — the proxy only ever
+        // serves GET/HEAD/OPTIONS, but the parser should be honest about
+        // header boundaries.
+        let req = "POST /x HTTP/1.1\r\nHost: a\r\n\r\nRange: bytes=0-100\r\n";
+        assert_eq!(parse_request_header(req, "range"), None);
+    }
+
+    #[test]
+    fn parse_byte_range_full_range() {
+        assert_eq!(parse_byte_range("bytes=0-99", 1000), Some((0, 99)));
+        assert_eq!(parse_byte_range("bytes=100-199", 1000), Some((100, 199)));
+    }
+
+    #[test]
+    fn parse_byte_range_open_ended() {
+        assert_eq!(parse_byte_range("bytes=500-", 1000), Some((500, 999)));
+    }
+
+    #[test]
+    fn parse_byte_range_clamps_end() {
+        assert_eq!(parse_byte_range("bytes=900-99999", 1000), Some((900, 999)));
+    }
+
+    #[test]
+    fn parse_byte_range_rejects_out_of_bounds() {
+        assert_eq!(parse_byte_range("bytes=1000-1100", 1000), None);
+        assert_eq!(parse_byte_range("bytes=2000-3000", 1000), None);
+    }
+
+    #[test]
+    fn parse_byte_range_rejects_inverted() {
+        assert_eq!(parse_byte_range("bytes=200-100", 1000), None);
+    }
+
+    #[test]
+    fn parse_byte_range_rejects_malformed() {
+        assert_eq!(parse_byte_range("0-100", 1000), None); // missing unit
+        assert_eq!(parse_byte_range("bytes=", 1000), None);
+        assert_eq!(parse_byte_range("bytes=abc-def", 1000), None);
+    }
+
+    #[test]
+    fn parse_byte_range_rejects_zero_length() {
+        assert_eq!(parse_byte_range("bytes=0-0", 0), None);
     }
 
     #[test]
