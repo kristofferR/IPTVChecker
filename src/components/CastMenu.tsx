@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Cast, ChevronDown, RefreshCw, Square } from "lucide-react";
+import { AirVent, Cast, ChevronDown, RefreshCw, Square } from "lucide-react";
 import type {
+  AirPlayMediaRequest,
+  AirPlaySession,
   CastMediaRequest,
   CastSession,
   ChromecastDevice,
 } from "../lib/types";
-import { isCastSessionActive } from "../lib/cast";
+import { isAirPlaySessionActive, isCastSessionActive } from "../lib/cast";
 
 interface UseChromecastShape {
   devices: ChromecastDevice[];
@@ -17,12 +19,30 @@ interface UseChromecastShape {
   stop: () => Promise<void>;
 }
 
+interface UseAirPlayShape {
+  available: boolean;
+  session: AirPlaySession | null;
+  error: string | null;
+  start: (request: AirPlayMediaRequest) => Promise<void>;
+  stop: () => Promise<void>;
+}
+
 interface CastMenuProps {
   chromecast: UseChromecastShape;
   castRequest: CastMediaRequest;
   mode: "popover" | "inline";
+  /**
+   * Optional AirPlay hook. When provided AND `airplay.available` is true
+   * (macOS), an AirPlay control appears above the cast section. The
+   * route-picker UI lives in the AVPlayerView HUD that opens when AirPlay
+   * starts, so we just need a "Start AirPlay" / "Stop" affordance here.
+   */
+  airplay?: UseAirPlayShape;
+  airplayRequest?: AirPlayMediaRequest;
   /** Fired after a cast successfully starts — e.g. to pause the local player. */
   onCastStart?: () => void;
+  /** Fired after AirPlay successfully starts. Same purpose as onCastStart. */
+  onAirPlayStart?: () => void;
   /**
    * Popover-mode only: fired when the menu opens or closes so the parent can
    * suppress auto-hide of surrounding chrome while the picker is visible.
@@ -34,7 +54,10 @@ export function CastMenu({
   chromecast,
   castRequest,
   mode,
+  airplay,
+  airplayRequest,
   onCastStart,
+  onAirPlayStart,
   onOpenChange,
 }: CastMenuProps) {
   if (mode === "popover") {
@@ -42,7 +65,10 @@ export function CastMenu({
       <CastMenuPopover
         chromecast={chromecast}
         castRequest={castRequest}
+        airplay={airplay}
+        airplayRequest={airplayRequest}
         onCastStart={onCastStart}
+        onAirPlayStart={onAirPlayStart}
         onOpenChange={onOpenChange}
       />
     );
@@ -51,7 +77,10 @@ export function CastMenu({
     <CastMenuInline
       chromecast={chromecast}
       castRequest={castRequest}
+      airplay={airplay}
+      airplayRequest={airplayRequest}
       onCastStart={onCastStart}
+      onAirPlayStart={onAirPlayStart}
     />
   );
 }
@@ -61,13 +90,19 @@ export function CastMenu({
 function CastMenuPopover({
   chromecast,
   castRequest,
+  airplay,
+  airplayRequest,
   onCastStart,
+  onAirPlayStart,
   onOpenChange,
 }: Omit<CastMenuProps, "mode">) {
   const [open, setOpenState] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [airplayStarting, setAirplayStarting] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const isCasting = isCastSessionActive(chromecast.session);
+  const isAirPlaying = isAirPlaySessionActive(airplay?.session ?? null);
+  const airplayAvailable = !!airplay?.available && !!airplayRequest;
 
   const setOpen = useCallback(
     (next: boolean) => {
@@ -121,20 +156,85 @@ function CastMenuPopover({
     }
   }, [chromecast]);
 
+  const handleStartAirPlay = useCallback(async () => {
+    if (!airplay || !airplayRequest) return;
+    setAirplayStarting(true);
+    onAirPlayStart?.();
+    try {
+      await airplay.start(airplayRequest);
+      setOpen(false);
+    } catch {
+      // error surfaces via airplay.error; keep menu open
+    } finally {
+      setAirplayStarting(false);
+    }
+  }, [airplay, airplayRequest, onAirPlayStart, setOpen]);
+
+  const handleStopAirPlay = useCallback(async () => {
+    if (!airplay) return;
+    try {
+      await airplay.stop();
+    } finally {
+      setOpen(false);
+    }
+  }, [airplay, setOpen]);
+
+  const isReceiverActive = isCasting || isAirPlaying;
+  const buttonTitle = isCasting
+    ? `Casting to ${chromecast.session?.deviceName ?? "device"}`
+    : isAirPlaying
+    ? "AirPlay session active"
+    : "Cast or AirPlay";
+
   return (
     <div ref={ref} className="relative ml-1">
       <button
         type="button"
         onClick={() => (open ? setOpen(false) : openMenu())}
         className={`p-1 transition-colors ${
-          isCasting ? "text-blue-300 hover:text-blue-200" : "text-white hover:text-white/80"
+          isReceiverActive ? "text-blue-300 hover:text-blue-200" : "text-white hover:text-white/80"
         }`}
-        title={isCasting ? `Casting to ${chromecast.session?.deviceName ?? "device"}` : "Cast"}
+        title={buttonTitle}
       >
         <Cast className="w-4 h-4" />
       </button>
       {open && (
         <div className="absolute bottom-full right-0 mb-2 w-64 rounded-md border border-white/10 bg-black/90 backdrop-blur-sm shadow-xl text-white text-[12px] z-10">
+          {airplayAvailable && (
+            <div className="px-3 py-2 border-b border-white/10">
+              <div className="flex items-center gap-2">
+                <AirVent className="w-3.5 h-3.5 shrink-0 text-white/70" />
+                <span className="flex-1 font-medium">AirPlay</span>
+              </div>
+              {isAirPlaying && airplay?.session ? (
+                <>
+                  <div className="mt-1 text-[11px] text-white/55 capitalize">
+                    {airplay.session.state}
+                    {airplay.session.externalPlaybackActive ? " · external" : ""}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleStopAirPlay()}
+                    className="mt-2 w-full px-2 py-1 text-[11px] font-medium rounded bg-red-600/80 hover:bg-red-600 transition-colors"
+                  >
+                    Stop AirPlay
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void handleStartAirPlay()}
+                  disabled={airplayStarting}
+                  className="mt-2 w-full px-2 py-1 text-[11px] font-medium rounded bg-white/10 hover:bg-white/15 disabled:opacity-50 transition-colors"
+                >
+                  {airplayStarting ? "Starting…" : "Open AirPlay window"}
+                </button>
+              )}
+              {airplay?.error && (
+                <div className="mt-2 text-[11px] text-red-300 break-words">{airplay.error}</div>
+              )}
+            </div>
+          )}
           <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
             <span className="font-medium">{isCasting ? "Casting" : "Cast to device"}</span>
             <button
@@ -205,11 +305,17 @@ function CastMenuPopover({
 function CastMenuInline({
   chromecast,
   castRequest,
+  airplay,
+  airplayRequest,
   onCastStart,
+  onAirPlayStart,
 }: Omit<CastMenuProps, "mode">) {
   const [expanded, setExpanded] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [airplayStarting, setAirplayStarting] = useState(false);
   const isCasting = isCastSessionActive(chromecast.session);
+  const isAirPlaying = isAirPlaySessionActive(airplay?.session ?? null);
+  const airplayAvailable = !!airplay?.available && !!airplayRequest;
 
   // Auto-expand when casting so the active session is always visible without
   // an extra click; collapse back when it ends.
@@ -247,8 +353,75 @@ function CastMenuInline({
     void chromecast.stop();
   }, [chromecast]);
 
+  const handleStartAirPlay = useCallback(async () => {
+    if (!airplay || !airplayRequest) return;
+    setAirplayStarting(true);
+    onAirPlayStart?.();
+    try {
+      await airplay.start(airplayRequest);
+    } catch {
+      // error surfaces via airplay.error
+    } finally {
+      setAirplayStarting(false);
+    }
+  }, [airplay, airplayRequest, onAirPlayStart]);
+
+  const handleStopAirPlay = useCallback(() => {
+    if (!airplay) return;
+    void airplay.stop();
+  }, [airplay]);
+
+  const airplayRow = airplayAvailable ? (
+    <div className="flex flex-col gap-2 px-3 py-2.5">
+      {isAirPlaying && airplay?.session ? (
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="relative flex h-2 w-2 shrink-0">
+            <span className="absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75 animate-ping" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
+          </span>
+          <AirVent className="h-3.5 w-3.5 shrink-0 text-blue-500" />
+          <div className="flex-1 min-w-0">
+            <div className="text-[12px] font-medium text-text-primary truncate">
+              {airplay.session.externalPlaybackActive
+                ? "AirPlaying to receiver"
+                : "AirPlay window open"}
+            </div>
+            <div className="text-[11px] text-text-tertiary capitalize">
+              {airplay.session.state}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleStopAirPlay}
+            className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded bg-red-600 hover:bg-red-500 text-white transition-colors shrink-0"
+            title="Stop AirPlay"
+          >
+            <Square className="w-3 h-3" />
+            Stop
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void handleStartAirPlay()}
+          disabled={airplayStarting}
+          className="flex w-full items-center gap-2 text-left transition-colors hover:opacity-80 disabled:opacity-50"
+        >
+          <AirVent className="h-3.5 w-3.5 shrink-0 text-text-secondary" />
+          <span className="flex-1 text-[12px] font-medium text-text-primary">
+            {airplayStarting ? "Opening AirPlay…" : "Open AirPlay window"}
+          </span>
+        </button>
+      )}
+      {airplay?.error && (
+        <div className="text-[11px] text-red-500 break-words">{airplay.error}</div>
+      )}
+    </div>
+  ) : null;
+
   return (
-    <div className="rounded-md border border-border-subtle bg-panel-subtle">
+    <div className="rounded-md border border-border-subtle bg-panel-subtle divide-y divide-border-subtle">
+      {airplayRow}
       {isCasting && chromecast.session ? (
         <div className="flex flex-col gap-2 px-3 py-2.5">
           <div className="flex items-center gap-2 min-w-0">
