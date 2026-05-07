@@ -1127,6 +1127,12 @@ pub fn run() {
             commands::chromecast::cast_to_device,
             commands::chromecast::stop_cast,
             commands::chromecast::get_cast_status,
+            #[cfg(target_os = "macos")]
+            commands::airplay::start_airplay,
+            #[cfg(target_os = "macos")]
+            commands::airplay::stop_airplay,
+            #[cfg(target_os = "macos")]
+            commands::airplay::get_airplay_status,
             commands::scan::start_scan,
             commands::scan::pause_scan,
             commands::scan::resume_scan,

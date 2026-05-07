@@ -28,6 +28,25 @@ pub async fn cast_to_device(
     // cast_to_device / stop_cast calls cannot interleave and orphan a session.
     let _lifecycle = state.cast_lifecycle_lock.lock().await;
 
+    // Mutual exclusion with AirPlay (macOS only): a single upstream slot
+    // can't service both an Apple TV and a Chromecast, and the user only
+    // has eyes on one TV. Take the AirPlay lifecycle lock so we don't race
+    // a concurrent start_airplay.
+    #[cfg(target_os = "macos")]
+    {
+        let _airplay_lifecycle = state.airplay_lifecycle_lock.lock().await;
+        let (airplay_session, airplay_proxy) = {
+            let mut guard = state.airplay_state.lock().await;
+            (guard.session.take(), guard.proxy.take())
+        };
+        if let Some(handle) = airplay_proxy {
+            handle.shutdown();
+        }
+        if let Some(active) = airplay_session {
+            active.stop_silent(&app).await;
+        }
+    }
+
     // Same-device redirect? Try a seamless media swap on the live receiver
     // session — sends a fresh LOAD on the existing MediaController so the TV
     // doesn't flash back to its launcher between channel changes.

@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+pub mod airplay;
 pub mod chromecast;
 pub mod export;
 pub mod history;
