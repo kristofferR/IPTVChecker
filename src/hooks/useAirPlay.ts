@@ -63,8 +63,10 @@ export function useAirPlay(): UseAirPlayResult {
 
     (async () => {
       // Gate everything on macOS — start_airplay isn't even registered as a
-      // command on Windows/Linux, so calling it would reject anyway.
-      const platform = await detectPlatform();
+      // command on Windows/Linux, so calling it would reject anyway. A
+      // rejection here (e.g. tauri-plugin-os not yet ready) just means we
+      // stay un-`available` rather than crashing the effect.
+      const platform = await detectPlatform().catch(() => null);
       if (!mounted || cancelledRef.current) return;
       if (platform !== "macos") return;
       setAvailable(true);

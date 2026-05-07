@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { inferPlatformFromNavigator } from "./platform";
 import type {
   AirPlayMediaRequest,
   AirPlaySession,
@@ -310,16 +311,32 @@ export async function getCastStatus(): Promise<CastSession | null> {
   return invoke("get_cast_status");
 }
 
+// AirPlay commands are only registered on macOS (gated by
+// `#[cfg(target_os = "macos")]` in lib.rs). Calling `invoke` on a
+// non-existent command surfaces as a generic "command X not found" error
+// from the webview — we'd rather throw a clearly-named error from the
+// wrapper layer so any accidental non-mac call paths fail fast with a
+// useful message. `inferPlatformFromNavigator` is synchronous and good
+// enough for the Mac/non-Mac split (we only need to skip on Win/Linux).
+function ensureAirPlaySupported(): void {
+  if (inferPlatformFromNavigator() !== "macos") {
+    throw new Error("AirPlay is only available on macOS");
+  }
+}
+
 export async function startAirplay(
   request: AirPlayMediaRequest,
 ): Promise<AirPlaySession> {
+  ensureAirPlaySupported();
   return invoke("start_airplay", { request });
 }
 
 export async function stopAirplay(): Promise<void> {
+  if (inferPlatformFromNavigator() !== "macos") return;
   return invoke("stop_airplay");
 }
 
 export async function getAirplayStatus(): Promise<AirPlaySession | null> {
+  if (inferPlatformFromNavigator() !== "macos") return null;
   return invoke("get_airplay_status");
 }
