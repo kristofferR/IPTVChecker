@@ -1,6 +1,8 @@
 pub mod media_proxy;
 pub mod checker;
 pub mod chromecast;
+#[cfg(target_os = "macos")]
+pub mod airplay;
 pub mod connectivity;
 pub mod disk;
 pub mod ffmpeg;
