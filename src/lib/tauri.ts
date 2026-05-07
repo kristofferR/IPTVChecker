@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AirPlayMediaRequest,
+  AirPlaySession,
   AppSettings,
   CastMediaRequest,
   CastSession,
@@ -306,4 +308,18 @@ export async function stopCast(): Promise<void> {
 
 export async function getCastStatus(): Promise<CastSession | null> {
   return invoke("get_cast_status");
+}
+
+export async function startAirplay(
+  request: AirPlayMediaRequest,
+): Promise<AirPlaySession> {
+  return invoke("start_airplay", { request });
+}
+
+export async function stopAirplay(): Promise<void> {
+  return invoke("stop_airplay");
+}
+
+export async function getAirplayStatus(): Promise<AirPlaySession | null> {
+  return invoke("get_airplay_status");
 }

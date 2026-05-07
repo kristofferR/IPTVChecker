@@ -1,4 +1,6 @@
 import type {
+  AirPlayMediaRequest,
+  AirPlaySession,
   CastMediaRequest,
   CastSession,
   CastStreamKind,
@@ -36,5 +38,21 @@ export function buildCastRequest(channel: ChannelResult): CastMediaRequest {
 export function isCastSessionActive(
   session: CastSession | null,
 ): session is CastSession {
+  return !!session && session.state !== "stopped" && session.state !== "error";
+}
+
+export function buildAirPlayRequest(channel: ChannelResult): AirPlayMediaRequest {
+  const url = channel.stream_url?.trim() || channel.url;
+  return {
+    originalUrl: url,
+    channelName: channel.name || null,
+    channelLogo: channel.tvg_logo || null,
+    streamKind: detectStreamKind(url),
+  };
+}
+
+export function isAirPlaySessionActive(
+  session: AirPlaySession | null,
+): session is AirPlaySession {
   return !!session && session.state !== "stopped" && session.state !== "error";
 }
