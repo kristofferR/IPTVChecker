@@ -12,13 +12,15 @@ export function detectStreamKind(url: string): CastStreamKind {
   try {
     const path = new URL(url).pathname.toLowerCase();
     if (path.endsWith(".m3u8")) return "hls";
-    if (path.endsWith(".ts")) return "mpeg_ts";
   } catch {
     const path = stripQuery(url);
     if (path.endsWith(".m3u8")) return "hls";
-    if (path.endsWith(".ts")) return "mpeg_ts";
   }
-  return "other";
+  // IPTV endpoints frequently serve MPEG-TS without a `.ts` extension (e.g.
+  // `/live/<creds>/<id>` returning `video/mp2t`). Default unknown URLs to
+  // mpeg_ts so they go through the ffmpeg remux + probe path; the cast proxy
+  // gracefully falls back if the upstream isn't actually TS.
+  return "mpeg_ts";
 }
 
 export function buildCastRequest(channel: ChannelResult): CastMediaRequest {
