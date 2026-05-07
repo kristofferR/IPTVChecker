@@ -1,7 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppSettings,
+  CastMediaRequest,
+  CastSession,
   ChannelResult,
+  ChromecastDevice,
   PlaylistPreview,
   ScanPresetCollection,
   ScanPresetConfig,
@@ -284,4 +287,23 @@ export async function openChannelInPlayer(channel: {
 
 export async function getStreamingProxyPort(): Promise<number> {
   return invoke("get_streaming_proxy_port");
+}
+
+export async function discoverChromecasts(): Promise<ChromecastDevice[]> {
+  return invoke("discover_chromecasts");
+}
+
+export async function castToDevice(
+  device: ChromecastDevice,
+  request: CastMediaRequest,
+): Promise<CastSession> {
+  return invoke("cast_to_device", { device, request });
+}
+
+export async function stopCast(): Promise<void> {
+  return invoke("stop_cast");
+}
+
+export async function getCastStatus(): Promise<CastSession | null> {
+  return invoke("get_cast_status");
 }

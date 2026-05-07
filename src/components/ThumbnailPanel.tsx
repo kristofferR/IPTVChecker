@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CircleHelp, ExternalLink, Fullscreen, ImageOff, LoaderCircle, Play, RotateCw, Shrink, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { ChannelResult } from "../lib/types";
+import { buildCastRequest, isCastSessionActive } from "../lib/cast";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
 import { isScanActive, type ScanState } from "../lib/scanState";
 import { getThumbnailDisplayState } from "../lib/thumbnailState";
+import type { UseChromecastResult } from "../hooks/useChromecast";
+import { CastMenu } from "./CastMenu";
 import { StatusBadge } from "./StatusBadge";
 import { StreamPlayer } from "./StreamPlayer";
 
@@ -21,6 +24,12 @@ interface ThumbnailPanelProps {
   onLightboxChange: (open: boolean) => void;
   onPlayChannel?: (result: ChannelResult) => void;
   onScanChannel?: (indices: number[]) => void;
+  /**
+   * Shared chromecast hook lifted up from App.tsx so the play handler there
+   * can intercept channel selection and redirect the cast instead of starting
+   * a competing local stream.
+   */
+  chromecast: UseChromecastResult;
   // Stream player props
   isPlaying?: boolean;
   playerState?: "idle" | "loading" | "playing" | "error";
@@ -52,6 +61,7 @@ export function ThumbnailPanel({
   onLightboxChange,
   onPlayChannel,
   onScanChannel,
+  chromecast,
   isPlaying,
   playerState = "idle",
   errorMessage: playerErrorMessage,
@@ -192,6 +202,10 @@ export function ThumbnailPanel({
   const scanActive = isScanActive(scanState);
   const resolvedUrl = result.stream_url?.trim() || null;
   const showResolvedUrl = !!resolvedUrl && resolvedUrl !== result.url;
+  // Memoized so the prop identity is stable across renders — without this, any
+  // useEffect downstream of `castRequest` would tear down and re-fire on every
+  // parent re-render even when none of its inputs actually changed.
+  const castRequest = useMemo(() => buildCastRequest(result), [result]);
   const mediaFrameClass = "relative w-full aspect-video overflow-hidden rounded-lg border border-border-app";
   const lightboxPlaceholderClass =
     "w-[400px] max-w-[88vw] aspect-video rounded-xl border border-white/15 bg-black/60 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]";
@@ -245,6 +259,9 @@ export function ThumbnailPanel({
           onRetry={() => onRetryPlay?.(result)}
           onFullscreen={() => onLightboxChange(true)}
           onPip={onPip}
+          castRequest={castRequest}
+          compact
+          chromecast={chromecast}
         />
       ) : screenshotUrl ? (
         <button
@@ -364,6 +381,27 @@ export function ThumbnailPanel({
           )}
         </div>
       )}
+
+      {(() => {
+        // Keep the row visible while a session is active so the user can
+        // still hit Stop after we've torn down the local player. The
+        // lightbox-open carve-out matters for casts started from the
+        // lightbox: starting a cast unmounts the lightbox StreamPlayer
+        // (onStopPlayer fires), and without this fallback the user would
+        // have to manually close the lightbox to find a way to stop or
+        // retarget the cast.
+        const hasCastSession = isCastSessionActive(chromecast.session);
+        if (!isPlaying && !hasCastSession) return null;
+        if (lightboxOpen && !hasCastSession) return null;
+        return (
+          <CastMenu
+            chromecast={chromecast}
+            castRequest={castRequest}
+            mode="inline"
+            onCastStart={() => onStopPlayer?.()}
+          />
+        );
+      })()}
 
       <div className="grid grid-cols-2 gap-2 text-[11px]">
         <div>
@@ -524,6 +562,8 @@ export function ThumbnailPanel({
                   onOpenExternal={() => onOpenExternal?.(result)}
                   onRetry={() => onRetryPlay?.(result)}
                   onPip={onPip ? () => { onPip(); closeLightbox(); } : undefined}
+                  castRequest={castRequest}
+                  chromecast={chromecast}
                 />
                 <button
                   type="button"

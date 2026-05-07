@@ -4,6 +4,8 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
+use crate::engine::cast_proxy::CastProxyHandle;
+use crate::engine::chromecast::ActiveCastSession;
 use crate::models::backend_perf::BackendPerfSample;
 use crate::models::playlist::PlaylistPreview;
 use crate::models::scan_log::ScanDebugLog;
@@ -58,11 +60,30 @@ impl Default for WindowScanState {
     }
 }
 
+pub struct CastState {
+    pub session: Option<ActiveCastSession>,
+    pub proxy: Option<CastProxyHandle>,
+}
+
+impl Default for CastState {
+    fn default() -> Self {
+        Self {
+            session: None,
+            proxy: None,
+        }
+    }
+}
+
 pub struct AppState {
     pub settings: Mutex<AppSettings>,
     pub proxy_client: Mutex<Option<(reqwest::Client, bool)>>,
     pub streaming_proxy_port: std::sync::atomic::AtomicU16,
     pub streaming_proxy_start_lock: Mutex<()>,
+    pub cast_state: Mutex<CastState>,
+    /// Held for the entire start/stop cast lifecycle so concurrent
+    /// `cast_to_device` / `stop_cast` calls cannot interleave and corrupt
+    /// the stored session.
+    pub cast_lifecycle_lock: Mutex<()>,
     window_scan_states: Mutex<HashMap<String, WindowScanState>>,
     backend_perf_samples: Mutex<VecDeque<BackendPerfSample>>,
     playlist_preview_cache: Mutex<HashMap<String, CachedPlaylistPreview>>,
@@ -75,6 +96,8 @@ impl AppState {
             proxy_client: Mutex::new(None),
             streaming_proxy_port: std::sync::atomic::AtomicU16::new(0),
             streaming_proxy_start_lock: Mutex::new(()),
+            cast_state: Mutex::new(CastState::default()),
+            cast_lifecycle_lock: Mutex::new(()),
             window_scan_states: Mutex::new(HashMap::new()),
             backend_perf_samples: Mutex::new(VecDeque::new()),
             playlist_preview_cache: Mutex::new(HashMap::new()),

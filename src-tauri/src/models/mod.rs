@@ -1,5 +1,6 @@
 pub mod backend_perf;
 pub mod channel;
+pub mod chromecast;
 pub mod playlist;
 pub mod saved_playlist;
 pub mod scan;

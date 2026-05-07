@@ -1,5 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, LoaderCircle, Maximize, Pause, PictureInPicture2, Play, Square, Volume2, VolumeX } from "lucide-react";
+import {
+  AlertTriangle,
+  Cast,
+  LoaderCircle,
+  Maximize,
+  Pause,
+  PictureInPicture2,
+  Play,
+  Square,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
+import type { UseChromecastResult } from "../hooks/useChromecast";
+import type { CastMediaRequest } from "../lib/types";
+import { isCastSessionActive } from "../lib/cast";
+import { CastMenu } from "./CastMenu";
 
 interface StreamPlayerProps {
   playerState: "idle" | "loading" | "playing" | "error";
@@ -11,6 +26,19 @@ interface StreamPlayerProps {
   volume: number;
   muted: boolean;
   containerRef?: React.RefObject<HTMLDivElement | null>;
+  castRequest?: CastMediaRequest | null;
+  /**
+   * When the player renders in a narrow context (e.g. the sidebar), set this
+   * so the cast button + corner badge are skipped — the parent renders the
+   * cast UI inline below the player instead.
+   */
+  compact?: boolean;
+  /**
+   * Shared chromecast hook from the parent. Required for the in-overlay cast
+   * picker and the "Casting to ..." badge to render. When omitted, no cast
+   * UI is shown regardless of `castRequest`.
+   */
+  chromecast?: UseChromecastResult;
   onTogglePause: () => void;
   onStop: () => void;
   onSetVolume: (v: number) => void;
@@ -31,6 +59,9 @@ export function StreamPlayer({
   volume,
   muted,
   containerRef,
+  castRequest,
+  compact = false,
+  chromecast,
   onTogglePause,
   onStop,
   onSetVolume,
@@ -41,14 +72,21 @@ export function StreamPlayer({
   onPip,
 }: StreamPlayerProps) {
   const [controlsVisible, setControlsVisible] = useState(true);
+  const [castMenuPinned, setCastMenuPinned] = useState(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showCastUi = !compact && !!castRequest && !!chromecast;
+  const isCasting = isCastSessionActive(chromecast?.session ?? null);
 
   const scheduleHide = useCallback(() => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    // Don't auto-hide while the cast picker is open — the user may still be
+    // reading the device list when the timer would otherwise fire.
+    if (castMenuPinned) return;
     if (playerState === "playing" && !isPaused) {
       hideTimerRef.current = setTimeout(() => setControlsVisible(false), 3000);
     }
-  }, [playerState, isPaused]);
+  }, [playerState, isPaused, castMenuPinned]);
 
   const showControls = useCallback(() => {
     setControlsVisible(true);
@@ -56,6 +94,14 @@ export function StreamPlayer({
   }, [scheduleHide]);
 
   useEffect(() => {
+    if (castMenuPinned) {
+      setControlsVisible(true);
+      if (hideTimerRef.current) {
+        clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = null;
+      }
+      return;
+    }
     if (playerState === "playing" && !isPaused) {
       scheduleHide();
     } else {
@@ -65,7 +111,17 @@ export function StreamPlayer({
     return () => {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     };
-  }, [playerState, isPaused, scheduleHide]);
+  }, [playerState, isPaused, scheduleHide, castMenuPinned]);
+
+  const handleCastStart = useCallback(() => {
+    // Fully stop the local player (don't just pause). Most IPTV upstreams
+    // enforce a single-connection limit — a paused player still holds its
+    // upstream slot, which causes the server to kick the cast pipeline's
+    // ffmpeg every few seconds. Each reconnect introduces a DTS jump that
+    // the Chromecast HLS player can't recover from cleanly, so the cast
+    // session goes idle/error within seconds.
+    onStop();
+  }, [onStop]);
 
   return (
     <div
@@ -75,6 +131,15 @@ export function StreamPlayer({
       onMouseEnter={showControls}
     >
       {/* Video element is appended here by ThumbnailPanel */}
+
+      {showCastUi && isCasting && chromecast?.session && (
+        <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-1 rounded-md bg-blue-600/85 text-white text-[11px] font-medium shadow-md backdrop-blur-sm">
+          <Cast className="w-3 h-3" />
+          <span className="truncate max-w-[180px]">
+            Casting to {chromecast.session.deviceName}
+          </span>
+        </div>
+      )}
 
       {/* Loading overlay */}
       {playerState === "loading" && (
@@ -167,6 +232,15 @@ export function StreamPlayer({
             className="w-16 h-1 accent-white cursor-pointer"
             title={`Volume: ${Math.round((muted ? 0 : volume) * 100)}%`}
           />
+          {showCastUi && castRequest && chromecast && (
+            <CastMenu
+              chromecast={chromecast}
+              castRequest={castRequest}
+              mode="popover"
+              onCastStart={handleCastStart}
+              onOpenChange={setCastMenuPinned}
+            />
+          )}
           {onPip && (
             <button
               type="button"
