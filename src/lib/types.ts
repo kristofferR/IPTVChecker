@@ -211,6 +211,7 @@ export interface ScanConfig {
   group_filter: string | null;
   channel_search: string | null;
   selected_indices: number[] | null;
+  hide_vod_content: boolean;
   timeout: number;
   extended_timeout: number | null;
   concurrency: number;
