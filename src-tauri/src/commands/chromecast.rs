@@ -31,24 +31,29 @@ pub async fn cast_to_device(
     // Same-device redirect? Try a seamless media swap on the live receiver
     // session — sends a fresh LOAD on the existing MediaController so the TV
     // doesn't flash back to its launcher between channel changes.
-    let same_device = {
-        let guard = state.cast_state.lock().await;
-        guard
+    //
+    // Combine the device check and the take into one critical section: the
+    // worker self-cleanup (`clear_app_state_if_uid_matches`) only acquires
+    // `cast_state`, not `cast_lifecycle_lock`, so a 5s drive_session tick
+    // detecting a disconnect could otherwise null `guard.session` between a
+    // detached check and a follow-up `take().expect("checked above")` — and
+    // panic the command thread.
+    let same_device_take = {
+        let mut guard = state.cast_state.lock().await;
+        let matches = guard
             .session
             .as_ref()
             .map(|s| s.session.device_id == device.id)
-            .unwrap_or(false)
+            .unwrap_or(false);
+        if matches {
+            // unwrap is safe under the same lock that just observed `is_some`.
+            Some((guard.session.take().unwrap(), guard.proxy.take()))
+        } else {
+            None
+        }
     };
 
-    if same_device {
-        let (mut active, prior_proxy) = {
-            let mut guard = state.cast_state.lock().await;
-            (
-                guard.session.take().expect("checked above"),
-                guard.proxy.take(),
-            )
-        };
-
+    if let Some((mut active, prior_proxy)) = same_device_take {
         match cast_proxy::start(
             app.clone(),
             request.original_url.clone(),

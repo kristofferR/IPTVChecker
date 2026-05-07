@@ -384,9 +384,15 @@ export function ThumbnailPanel({
 
       {(() => {
         // Keep the row visible while a session is active so the user can
-        // still hit Stop after we've torn down the local player.
-        if (lightboxOpen) return null;
-        if (!isPlaying && !isCastSessionActive(chromecast.session)) return null;
+        // still hit Stop after we've torn down the local player. The
+        // lightbox-open carve-out matters for casts started from the
+        // lightbox: starting a cast unmounts the lightbox StreamPlayer
+        // (onStopPlayer fires), and without this fallback the user would
+        // have to manually close the lightbox to find a way to stop or
+        // retarget the cast.
+        const hasCastSession = isCastSessionActive(chromecast.session);
+        if (!isPlaying && !hasCastSession) return null;
+        if (lightboxOpen && !hasCastSession) return null;
         return (
           <CastMenu
             chromecast={chromecast}
