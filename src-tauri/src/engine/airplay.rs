@@ -17,15 +17,19 @@
 //! wrap the resulting `Retained<...>` handles in [`MainOnly`] so the session
 //! struct can live in `AppState` (which is shared across tokio workers).
 
+use std::mem::ManuallyDrop;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use objc2::rc::Retained;
-use objc2::MainThreadMarker;
-use objc2_app_kit::{NSBackingStoreType, NSWindow, NSWindowStyleMask};
+use objc2::runtime::ProtocolObject;
+use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly};
+use objc2_app_kit::{NSBackingStoreType, NSWindow, NSWindowDelegate, NSWindowStyleMask};
 use objc2_av_foundation::{AVPlayer, AVPlayerItem, AVURLAsset};
 use objc2_av_kit::{AVPlayerView, AVPlayerViewControlsStyle};
-use objc2_foundation::{NSPoint, NSRect, NSSize, NSString, NSURL};
+use objc2_foundation::{
+    NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString, NSURL,
+};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 
@@ -47,6 +51,10 @@ pub struct ActiveAirPlaySession {
     snapshot: AirPlaySession,
     window: MainOnly<Retained<NSWindow>>,
     player: MainOnly<Retained<AVPlayer>>,
+    /// Strong ref to the window delegate. `NSWindow.setDelegate` holds a
+    /// weak reference, so dropping this would leave the window with a
+    /// dangling delegate pointer the moment the user closes the window.
+    _delegate: MainOnly<Retained<AirPlayWindowDelegate>>,
     stopped: Arc<AtomicBool>,
 }
 
@@ -82,22 +90,87 @@ impl ActiveAirPlaySession {
             snapshot,
             window,
             player,
+            _delegate,
             stopped: _,
         } = self;
-        let _ = app.run_on_main_thread(move || {
-            // Move both into the closure so the Retained<...> handles drop
-            // here (on the main thread) after pause/close.
-            let player = player;
-            let window = window;
-            unsafe { player.0.pause() };
-            window.0.close();
-            // refs drop at end-of-scope on the main thread
-        });
+        // Wrap in ManuallyDrop so a `run_on_main_thread` failure (e.g. event
+        // loop already shutting down) doesn't drop the `Retained<...>`
+        // handles on this tokio worker — the ObjC release MUST run on the
+        // main thread per the `MainOnly` invariant.
+        let player = ManuallyDrop::new(player);
+        let window = ManuallyDrop::new(window);
+        let delegate = ManuallyDrop::new(_delegate);
+        if app
+            .run_on_main_thread(move || {
+                // Take ownership back so the handles drop here, on the main
+                // thread, after pause/close.
+                let player = ManuallyDrop::into_inner(player);
+                let window = ManuallyDrop::into_inner(window);
+                let _delegate = ManuallyDrop::into_inner(delegate);
+                unsafe { player.0.pause() };
+                window.0.close();
+            })
+            .is_err()
+        {
+            // Event loop is gone. Releasing the handles off-thread would
+            // violate the MainOnly contract; intentionally leak them and let
+            // the OS reclaim memory at process exit.
+            log::warn!(
+                "[AirPlay] run_on_main_thread failed during teardown; leaking Cocoa handles"
+            );
+        }
         if let Some(state) = terminal {
             let mut final_snapshot = snapshot;
             final_snapshot.state = state;
             let _ = app.emit(AIRPLAY_STATUS_EVENT, final_snapshot);
         }
+    }
+}
+
+/// Ivars for the window delegate: an `AppHandle` so we can spawn the
+/// async teardown when the user closes the window, plus a one-shot guard
+/// so a rapid close → re-close (or our own programmatic close from
+/// `stop_inner`) doesn't double-fire the teardown.
+struct AirPlayWindowDelegateIvars {
+    app: AppHandle,
+    fired: AtomicBool,
+}
+
+define_class!(
+    #[unsafe(super = NSObject)]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = AirPlayWindowDelegateIvars]
+    struct AirPlayWindowDelegate;
+
+    unsafe impl NSObjectProtocol for AirPlayWindowDelegate {}
+
+    unsafe impl NSWindowDelegate for AirPlayWindowDelegate {
+        // Fires on the main thread when the user clicks the title-bar
+        // close button (or any other path that closes the NSWindow). We
+        // spawn the same teardown the explicit `stop_airplay` command
+        // runs so the proxy is shut down and AppState is cleared — without
+        // this the session would stay "playing" in app state after the
+        // window vanished.
+        #[unsafe(method(windowWillClose:))]
+        fn window_will_close(&self, _notification: &NSNotification) {
+            if self.ivars().fired.swap(true, Ordering::SeqCst) {
+                return;
+            }
+            let app = self.ivars().app.clone();
+            tauri::async_runtime::spawn(async move {
+                crate::commands::airplay::teardown_airplay(&app).await;
+            });
+        }
+    }
+);
+
+impl AirPlayWindowDelegate {
+    fn new(mtm: MainThreadMarker, app: AppHandle) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(AirPlayWindowDelegateIvars {
+            app,
+            fired: AtomicBool::new(false),
+        });
+        unsafe { msg_send![super(this), init] }
     }
 }
 
@@ -117,18 +190,29 @@ pub async fn start_session(
     request: AirPlayMediaRequest,
     proxy_url: String,
 ) -> Result<ActiveAirPlaySession, AppError> {
-    let (tx, rx) = oneshot::channel::<
-        Result<(MainOnly<Retained<NSWindow>>, MainOnly<Retained<AVPlayer>>), String>,
-    >();
+    type SetupResult = Result<
+        (
+            MainOnly<Retained<NSWindow>>,
+            MainOnly<Retained<AVPlayer>>,
+            MainOnly<Retained<AirPlayWindowDelegate>>,
+        ),
+        String,
+    >;
+    let (tx, rx) = oneshot::channel::<SetupResult>();
 
     let proxy_url_for_setup = proxy_url.clone();
     let title = request
         .channel_name
         .clone()
         .unwrap_or_else(|| "AirPlay".to_string());
+    let app_for_setup = app.clone();
 
     app.run_on_main_thread(move || {
-        let _ = tx.send(build_session_on_main_thread(&proxy_url_for_setup, &title));
+        let _ = tx.send(build_session_on_main_thread(
+            app_for_setup,
+            &proxy_url_for_setup,
+            &title,
+        ));
     })
     .map_err(|err| {
         AppError::Other(format!(
@@ -136,7 +220,7 @@ pub async fn start_session(
         ))
     })?;
 
-    let (window, player) = rx
+    let (window, player, delegate) = rx
         .await
         .map_err(|_| {
             AppError::Other("AirPlay main-thread setup channel closed unexpectedly".to_string())
@@ -157,6 +241,7 @@ pub async fn start_session(
         snapshot,
         window,
         player,
+        _delegate: delegate,
         stopped: Arc::new(AtomicBool::new(false)),
     })
 }
@@ -166,9 +251,17 @@ pub async fn start_session(
 /// playback. Returns the `Retained<...>` window and player so the caller
 /// can keep them alive and tear them down on stop.
 fn build_session_on_main_thread(
+    app: AppHandle,
     url: &str,
     title: &str,
-) -> Result<(MainOnly<Retained<NSWindow>>, MainOnly<Retained<AVPlayer>>), String> {
+) -> Result<
+    (
+        MainOnly<Retained<NSWindow>>,
+        MainOnly<Retained<AVPlayer>>,
+        MainOnly<Retained<AirPlayWindowDelegate>>,
+    ),
+    String,
+> {
     let mtm = MainThreadMarker::new()
         .ok_or_else(|| "build_session_on_main_thread must run on the main thread".to_string())?;
 
@@ -210,10 +303,21 @@ fn build_session_on_main_thread(
         window.setTitle(&title_ns);
         window.setContentView(Some(&view));
         window.center();
+
+        // Attach a window delegate so user-driven closes (title-bar "×")
+        // route through the same teardown path as the explicit stop button,
+        // tearing down the proxy and clearing AppState. NSWindow's delegate
+        // ref is weak — the strong ref we return below keeps it alive for
+        // the lifetime of the session.
+        let delegate = AirPlayWindowDelegate::new(mtm, app);
+        let delegate_proto: &ProtocolObject<dyn NSWindowDelegate> =
+            ProtocolObject::from_ref(&*delegate);
+        window.setDelegate(Some(delegate_proto));
+
         window.makeKeyAndOrderFront(None);
 
         player.play();
 
-        Ok((MainOnly(window), MainOnly(player)))
+        Ok((MainOnly(window), MainOnly(player), MainOnly(delegate)))
     }
 }
