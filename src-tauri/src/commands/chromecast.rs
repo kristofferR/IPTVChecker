@@ -28,16 +28,92 @@ pub async fn cast_to_device(
     // cast_to_device / stop_cast calls cannot interleave and orphan a session.
     let _lifecycle = state.cast_lifecycle_lock.lock().await;
 
-    // Tear down any prior session before starting a new one.
-    let (prior_session, prior_proxy) = {
-        let mut guard = state.cast_state.lock().await;
-        (guard.session.take(), guard.proxy.take())
+    // Same-device redirect? Try a seamless media swap on the live receiver
+    // session — sends a fresh LOAD on the existing MediaController so the TV
+    // doesn't flash back to its launcher between channel changes.
+    let same_device = {
+        let guard = state.cast_state.lock().await;
+        guard
+            .session
+            .as_ref()
+            .map(|s| s.session.device_id == device.id)
+            .unwrap_or(false)
     };
-    if let Some(handle) = prior_proxy {
-        handle.shutdown();
-    }
-    if let Some(active) = prior_session {
-        active.stop().await;
+
+    if same_device {
+        let (mut active, prior_proxy) = {
+            let mut guard = state.cast_state.lock().await;
+            (
+                guard.session.take().expect("checked above"),
+                guard.proxy.take(),
+            )
+        };
+
+        match cast_proxy::start(
+            app.clone(),
+            request.original_url.clone(),
+            request.stream_kind,
+        )
+        .await
+        {
+            Ok(new_proxy) => {
+                let new_cast_url = new_proxy.url.clone();
+                match active
+                    .swap_media(&app, request.clone(), new_cast_url.clone())
+                    .await
+                {
+                    Ok(snapshot) => {
+                        {
+                            let mut guard = state.cast_state.lock().await;
+                            guard.session = Some(active);
+                            guard.proxy = Some(new_proxy);
+                        }
+                        if let Some(p) = prior_proxy {
+                            p.shutdown();
+                        }
+                        return Ok(snapshot);
+                    }
+                    Err(err) => {
+                        log::warn!(
+                            "[Chromecast] Hot-swap failed, falling back to fresh launch: {err}"
+                        );
+                        new_proxy.shutdown();
+                        // Silent stop: a fresh launch follows immediately, and
+                        // emitting `Stopped` here would race the new `Playing`
+                        // event in the renderer and flicker the cast UI.
+                        active.stop_silent().await;
+                        if let Some(p) = prior_proxy {
+                            p.shutdown();
+                        }
+                        // Fall through to the fresh-launch path below.
+                    }
+                }
+            }
+            Err(err) => {
+                // Couldn't start the new proxy — restore the live session and
+                // bail. Existing cast keeps playing on the old proxy.
+                {
+                    let mut guard = state.cast_state.lock().await;
+                    guard.session = Some(active);
+                    guard.proxy = prior_proxy;
+                }
+                return Err(err);
+            }
+        }
+    } else {
+        // Different device or no prior session — tear down whatever's there.
+        // Silent stop because a new session is starting immediately on the
+        // line below; the new `Playing` event is the source of truth.
+        let (prior_session, prior_proxy) = {
+            let mut guard = state.cast_state.lock().await;
+            (guard.session.take(), guard.proxy.take())
+        };
+        if let Some(handle) = prior_proxy {
+            handle.shutdown();
+        }
+        if let Some(active) = prior_session {
+            active.stop_silent().await;
+        }
     }
 
     let proxy_handle = cast_proxy::start(
