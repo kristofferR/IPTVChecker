@@ -110,6 +110,7 @@ fn resolved_to_device(info: &mdns_sd::ResolvedService) -> Option<ChromecastDevic
 struct SwapRequest {
     request: CastMediaRequest,
     cast_url: String,
+    is_dash: bool,
     response_tx: oneshot::Sender<Result<(), AppError>>,
 }
 
@@ -174,12 +175,14 @@ impl ActiveCastSession {
         app: &AppHandle,
         request: CastMediaRequest,
         cast_url: String,
+        is_dash: bool,
     ) -> Result<CastSession, AppError> {
         let (response_tx, response_rx) = oneshot::channel();
         self.swap_tx
             .send(SwapRequest {
                 request: request.clone(),
                 cast_url: cast_url.clone(),
+                is_dash,
                 response_tx,
             })
             .await
@@ -206,6 +209,7 @@ pub async fn start_session(
     device: ChromecastDevice,
     request: CastMediaRequest,
     cast_url: String,
+    is_dash: bool,
 ) -> Result<ActiveCastSession, AppError> {
     let (stop_tx, stop_rx) = oneshot::channel::<StopReason>();
     let (swap_tx, swap_rx) = mpsc::channel::<SwapRequest>(1);
@@ -224,6 +228,7 @@ pub async fn start_session(
             device_for_worker,
             request_for_worker,
             cast_url_for_worker,
+            is_dash,
             stop_rx,
             swap_rx,
             ready_tx,
@@ -266,6 +271,7 @@ async fn run_session_worker(
     device: ChromecastDevice,
     request: CastMediaRequest,
     cast_url: String,
+    is_dash: bool,
     mut stop_rx: oneshot::Receiver<StopReason>,
     mut swap_rx: mpsc::Receiver<SwapRequest>,
     ready_tx: oneshot::Sender<Result<(), AppError>>,
@@ -290,7 +296,7 @@ async fn run_session_worker(
         }
     };
 
-    let load_payload = build_load_payload(&request, &cast_url);
+    let load_payload = build_load_payload(&request, &cast_url, is_dash);
 
     if let Err(err) = send_load(&receiver, &cast_app, load_payload).await {
         let _ = receiver.stop_app(&cast_app).await;
@@ -343,20 +349,26 @@ async fn run_session_worker(
 ///
 /// Custom + flatten lets us hand-craft the LOAD JSON; cast-sender's
 /// `Receiver::send_request` still wraps it with the right `requestId`.
-fn build_load_payload(request: &CastMediaRequest, cast_url: &str) -> Custom {
+fn build_load_payload(request: &CastMediaRequest, cast_url: &str, is_dash: bool) -> Custom {
     log::debug!(
-        "[Chromecast] build_load_payload: channel_name={:?} channel_logo_present={} stream_kind={:?}",
+        "[Chromecast] build_load_payload: channel_name={:?} channel_logo_present={} stream_kind={:?} is_dash={}",
         request.channel_name,
         request.channel_logo.is_some(),
         request.stream_kind,
+        is_dash,
     );
 
-    // The cast proxy always serves HLS to the Chromecast — direct pass-through
-    // for HLS upstreams, ffmpeg-remuxed HLS for MPEG-TS. So the receiver always
-    // sees an .m3u8 manifest regardless of the upstream's original wire format.
-    let content_type = match request.stream_kind {
-        CastStreamKind::Hls | CastStreamKind::MpegTs => "application/vnd.apple.mpegurl",
-        CastStreamKind::Other => "application/octet-stream",
+    // HEVC streams are remuxed into a DASH manifest (Shaka on the receiver
+    // handles fMP4+HEVC; the default HLS player can't render fMP4 segments).
+    // Everything else is HLS — either pass-through for HLS upstreams or
+    // ffmpeg-remuxed HLS+TS for H.264 MPEG-TS.
+    let content_type = if is_dash {
+        "application/dash+xml"
+    } else {
+        match request.stream_kind {
+            CastStreamKind::Hls | CastStreamKind::MpegTs => "application/vnd.apple.mpegurl",
+            CastStreamKind::Other => "application/octet-stream",
+        }
     };
 
     let mut metadata = serde_json::Map::new();
@@ -369,16 +381,15 @@ fn build_load_payload(request: &CastMediaRequest, cast_url: &str) -> Custom {
         metadata.insert("images".to_string(), json!([{ "url": logo }]));
     }
 
-    let media = json!({
-        "contentId": cast_url,
-        "contentType": content_type,
-        "streamType": "LIVE",
-        "metadata": Value::Object(metadata),
-    });
+    let mut media_obj = serde_json::Map::new();
+    media_obj.insert("contentId".to_string(), json!(cast_url));
+    media_obj.insert("contentType".to_string(), json!(content_type));
+    media_obj.insert("streamType".to_string(), json!("LIVE"));
+    media_obj.insert("metadata".to_string(), Value::Object(metadata));
 
     let mut fields = HashMap::new();
     fields.insert("type".to_string(), json!("LOAD"));
-    fields.insert("media".to_string(), media);
+    fields.insert("media".to_string(), Value::Object(media_obj));
     fields.insert("autoplay".to_string(), json!(true));
 
     Custom {
@@ -472,7 +483,7 @@ async fn drive_session(
                     // owning struct; just keep looping until stop_rx fires.
                     continue;
                 };
-                let load_payload = build_load_payload(&swap.request, &swap.cast_url);
+                let load_payload = build_load_payload(&swap.request, &swap.cast_url, swap.is_dash);
                 match send_load(receiver, cast_app, load_payload).await {
                     Ok(_) => {
                         log::info!(
