@@ -125,9 +125,7 @@ download_macos_evermeet() {
 
 download_btbn() {
     local platform="$1"
-    local btbn_tag
-    btbn_tag="$(curl -sI "https://github.com/BtbN/FFmpeg-Builds/releases/latest" | grep -i location | sed 's|.*/tag/||;s/\r//')"
-    local base="https://github.com/BtbN/FFmpeg-Builds/releases/download/${btbn_tag}"
+    local base="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest"
     local archive="ffmpeg-master-latest-${platform}-gpl"
 
     local ext_archive=".tar.xz"
