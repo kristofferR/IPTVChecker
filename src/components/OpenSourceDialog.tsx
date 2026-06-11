@@ -378,6 +378,27 @@ export default function OpenSourceDialog({
     return () => window.removeEventListener("keydown", handler);
   }, [handleClose, showServerTest]);
 
+  const parseXtreamM3ULink = (link: string) => {
+    try {
+      const url = new URL(link);
+      const u = url.searchParams.get("username");
+      const p = url.searchParams.get("password");
+
+      if (u && p) {
+        setXtreamServer(`${url.protocol}//${url.host}`);
+        setXtreamUsername(u);
+        setXtreamPassword(p);
+
+
+        // exit if we already set credentials
+        return;
+      }
+    } catch (_) {}
+
+    // fallback to setting the link as is
+    setXtreamServer(link);
+  };
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (submitting) return;
@@ -575,7 +596,7 @@ export default function OpenSourceDialog({
                     type="text"
                     autoFocus
                     value={xtreamServer}
-                    onChange={(event) => setXtreamServer(event.target.value)}
+                    onChange={(event) => parseXtreamM3ULink(event.target.value)}
                     placeholder="https://example.com:8080"
                     className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[14px] text-text-primary placeholder:text-text-muted focus:border-blue-500 focus:outline-none"
                   />

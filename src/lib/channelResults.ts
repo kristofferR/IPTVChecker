@@ -23,6 +23,7 @@ function pendingScanFields() {
     stream_url: null,
     retry_count: null,
     error_reason: null,
+    last_error_reason: null,
     drm_system: null,
   };
 }
@@ -42,9 +43,9 @@ export function getChannelIdFromUrl(url: string): string {
 }
 
 export function getChannelErrorReason(
-  result: Pick<ChannelResult, "error_reason">,
+  result: Pick<ChannelResult, "error_reason" | "last_error_reason">,
 ): string | null {
-  return result.error_reason?.trim() || null;
+  return result.error_reason?.trim() || result.last_error_reason?.trim() || null;
 }
 
 export function getScreenshotErrorReason(
