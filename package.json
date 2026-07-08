@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsgo --build && vite build",
+    "build": "tsc --build && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "test:frontend": "bun test tests",
     "perf:ui-filter": "bun run scripts/benchmark-ui-filter.ts",
     "perf:backend-scan": "cd src-tauri && cargo run --release --bin backend_bench --",
@@ -42,11 +42,10 @@
     "@tauri-apps/cli": "^2.10.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@typescript/native-preview": "7.0.0-dev.20260409.1",
     "@vitejs/plugin-react": "^6.0.1",
     "babel-plugin-react-compiler": "1.0.0",
     "tailwindcss": "^4.2.2",
-    "typescript": "^6.0.2",
+    "typescript": "^7.0.2",
     "vite": "^8.0.8"
   }
 }
