@@ -13,7 +13,7 @@ Ports all functionality from the CLI tool at `/Users/kristoffer/Code/Scripts/IPT
 - **Backend:** Tauri v2 (Rust) — handles HTTP stream checking, M3U parsing, ffmpeg integration, proxy support
 - **Frontend:** React 19 + TypeScript + Vite + Tailwind CSS v4
 - **Package manager:** bun
-- **Type checking:** tsgo (TypeScript 7 via `@typescript/native-preview`)
+- **Type checking:** tsc (TypeScript 7)
 - **Icons:** lucide-react
 - **Virtualization:** @tanstack/react-virtual
 
@@ -48,7 +48,7 @@ lib/        — Types, Tauri invoke wrappers, formatting helpers, sort/filter lo
 - `bun tauri dev` — run in dev mode (hot-reload frontend + Rust rebuild)
 - `bun tauri build` — production build
 - `cd src-tauri && cargo test` — run Rust tests
-- `bun run typecheck` — TypeScript type checking via tsgo
+- `bun run typecheck` — TypeScript type checking via tsc
 
 **IMPORTANT:** Before launching `bun tauri dev` after Rust code changes, always run `cargo clean -p iptv-checker && cargo build` in `src-tauri/` first to ensure a fresh binary. The dev server's file watcher does not always trigger a rebuild, leading to stale cached binaries.
 
