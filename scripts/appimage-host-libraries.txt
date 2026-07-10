@@ -1,0 +1,80 @@
+# Libraries that must come from the target Linux system rather than the build
+# host. Most are part of the base OS, graphics/audio driver stack, or another
+# host service with an ABI that must match the running system.
+#
+# Based on the AppImage community excludelist:
+# https://github.com/AppImageCommunity/pkg2appimage/blob/master/excludelist
+#
+# The final block adds stable host-service and hardware-driver ABIs used by
+# IPTV Checker. Bundling those clients cannot bundle the corresponding kernel
+# driver or system daemon, and can make a newer host load an older client ABI.
+
+ld-linux-aarch64.so.1
+ld-linux-armhf.so.3
+ld-linux-x86-64.so.2
+ld-linux.so.2
+libBrokenLocale.so.1
+libEGL.so.1
+libGL.so.1
+libGLX.so.0
+libGLdispatch.so.0
+libICE.so.6
+libOpenGL.so.0
+libSM.so.6
+libX11-xcb.so.1
+libX11.so.6
+libanl.so.1
+libasound.so.2
+libc.so.6
+libcidn.so.1
+libcom_err.so.2
+libdl.so.2
+libdrm.so.2
+libexpat.so.1
+libfontconfig.so.1
+libfreetype.so.6
+libfribidi.so.0
+libgbm.so.1
+libgcc_s.so.1
+libglapi.so.0
+libgmp.so.10
+libgpg-error.so.0
+libharfbuzz.so.0
+libjack.so.0
+libm.so.6
+libmvec.so.1
+libnss_compat.so.2
+libnss_dns.so.2
+libnss_files.so.2
+libnss_hesiod.so.2
+libnss_nis.so.2
+libnss_nisplus.so.2
+libpipewire-0.3.so.0
+libpthread.so.0
+libresolv.so.2
+librt.so.1
+libstdc++.so.6
+libthread_db.so.1
+libusb-1.0.so.0
+libutil.so.1
+libuuid.so.1
+libwayland-client.so.0
+libxcb-dri2.so.0
+libxcb-dri3.so.0
+libxcb.so.1
+libz.so.1
+
+# Additional target-system driver and service clients.
+libOpenCL.so.1
+libcuda.so.1
+libdbus-1.so.3
+libpulse-simple.so.0
+libpulse.so.0
+libpulsecommon-
+libsystemd.so.0
+libudev.so.1
+libva-drm.so.2
+libva-x11.so.2
+libva.so.2
+libvdpau.so.1
+libvulkan.so.1
