@@ -1676,6 +1676,7 @@ pub struct CombinedDiagnostics {
     pub screenshot_error_reason: Option<String>,
     pub profiled_bitrate_kbps: Option<u64>,
     pub diagnostics_output: String,
+    pub input_error_reason: Option<String>,
 }
 
 /// Parse stream metadata from ffmpeg verbose stderr output.
@@ -1948,11 +1949,24 @@ pub async fn run_combined_diagnostics(
 
     let stderr_buf = stderr_reader.await.unwrap_or_default();
     let stderr = String::from_utf8_lossy(&stderr_buf);
+    let stderr_has_output = !stderr.trim().is_empty();
     let stderr_summary = stderr_excerpt(&stderr);
 
     // Parse stream metadata from verbose output
     let (track_presence, video_info, audio_info, format_bitrate_kbps) =
         parse_ffmpeg_stderr(&stderr);
+    let input_error_reason = if track_presence.has_audio || track_presence.has_video {
+        None
+    } else if timed_out {
+        Some(format!(
+            "ffmpeg timed out after {:.1}s",
+            timeout_duration.as_secs_f64()
+        ))
+    } else if stderr_has_output {
+        Some(stderr_summary.clone())
+    } else {
+        Some("No decodable audio/video tracks reported by ffmpeg".to_string())
+    };
 
     // Parse bitrate from Statistics lines (if profiling)
     let profiled_bitrate_kbps = if profile_bitrate {
@@ -2061,6 +2075,7 @@ pub async fn run_combined_diagnostics(
         screenshot_error_reason,
         profiled_bitrate_kbps,
         diagnostics_output,
+        input_error_reason,
     })
 }
 
