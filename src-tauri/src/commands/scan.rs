@@ -177,8 +177,28 @@ async fn compute_shared_url_result(
     diagnostics_semaphore: &Arc<Semaphore>,
     single_connection_mode: bool,
 ) -> Result<(SharedUrlResult, WorkerTiming), AppError> {
+    let dispatcharr_single_pass = ffmpeg_ok && checker::is_dispatcharr_proxy_url(channel_url);
     let check_started_at = Instant::now();
-    let check_outcome = if checker::uses_ffprobe_liveness(channel_url) {
+    let check_outcome = if dispatcharr_single_pass {
+        // Dispatcharr returns 503 while tearing down a channel after its last
+        // client disconnects. Do not consume one connection for an HTTP byte
+        // check and then race teardown with a second ffmpeg connection. The
+        // combined diagnostics pass below is both the liveness check and the
+        // metadata/screenshot/bitrate probe.
+        Ok(checker::ChannelCheckOutcome {
+            status: "Alive".to_string(),
+            stream_url: Some(channel_url.to_string()),
+            latency_ms: None,
+            retries_used: 0,
+            last_error_reason: None,
+            drm_system: None,
+            debug_log: ChannelDebugLog {
+                channel_url: channel_url.to_string(),
+                final_verdict: "Alive".to_string(),
+                ..ChannelDebugLog::default()
+            },
+        })
+    } else if checker::uses_ffprobe_liveness(channel_url) {
         checker::check_channel_status_with_ffprobe_debug(
             app,
             channel_url,
@@ -346,14 +366,14 @@ async fn compute_shared_url_result(
         return Ok((shared, timing));
     }
     let diagnostics_started_at = Instant::now();
-    let diagnostics_permit = diagnostics_semaphore.clone().acquire_owned().await.ok();
+    let mut diagnostics_permit = diagnostics_semaphore.clone().acquire_owned().await.ok();
     let ffprobe_timeout_duration =
         std::time::Duration::from_secs_f64(ffprobe_timeout_secs.clamp(1.0, 300.0));
 
     let want_screenshot = !skip_screenshots && ffmpeg_ok && screenshots_dir.is_some();
     let mut format_bitrate_kbps: Option<u32> = None;
 
-    if single_connection_mode && ffmpeg_ok {
+    if (single_connection_mode || dispatcharr_single_pass) && ffmpeg_ok {
         // Single-provider: one ffmpeg process for metadata + screenshot + bitrate.
         // Avoids 5XX rejections from single-connection IPTV servers.
         let diag_timeout = if profile_bitrate_flag {
@@ -363,22 +383,76 @@ async fn compute_shared_url_result(
         } else {
             ffprobe_timeout_secs
         };
-        match ffmpeg::run_combined_diagnostics(
-            app,
-            &target_url,
-            Some(channel_url),
-            user_agent,
-            screenshots_dir.unwrap_or(&String::new()),
-            screenshot_file_name,
-            screenshot_format,
-            want_screenshot,
-            profile_bitrate_flag,
-            diag_timeout,
-            cancel,
-        )
-        .await
-        {
+        let mut combined_retries_used = 0u32;
+        let (combined_result, final_attempt_elapsed) = loop {
+            let attempt_started_at = Instant::now();
+            let result = ffmpeg::run_combined_diagnostics(
+                app,
+                &target_url,
+                Some(channel_url),
+                user_agent,
+                screenshots_dir.unwrap_or(&String::new()),
+                screenshot_file_name,
+                screenshot_format,
+                want_screenshot,
+                profile_bitrate_flag,
+                diag_timeout,
+                cancel,
+            )
+            .await;
+            let attempt_elapsed = attempt_started_at.elapsed();
+
+            let no_tracks_yet = matches!(
+                &result,
+                Ok(diag) if !(diag.track_presence.has_audio || diag.track_presence.has_video)
+            );
+            if !dispatcharr_single_pass || !no_tracks_yet || combined_retries_used >= retries {
+                break (result, attempt_elapsed);
+            }
+
+            combined_retries_used = combined_retries_used.saturating_add(1);
+            // The semaphore limits active diagnostics, not channels waiting for
+            // Dispatcharr's teardown window. Release it during the backoff.
+            drop(diagnostics_permit.take());
+            // Dispatcharr explicitly returns Retry-After: 1 while a channel is
+            // stopping. ffmpeg does not expose that header, so honor the same
+            // minimum here and retain the configured backoff behavior.
+            let delay_secs = match retry_backoff {
+                RetryBackoff::None => 1,
+                RetryBackoff::Linear => u64::from(combined_retries_used.min(10)),
+                RetryBackoff::Exponential => {
+                    (1u64 << combined_retries_used.saturating_sub(1).min(5)).min(30)
+                }
+            };
+            tokio::select! {
+                _ = cancel.cancelled() => {
+                    return Err(AppError::Cancelled);
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_secs(delay_secs.max(1))) => {}
+            }
+            diagnostics_permit = tokio::select! {
+                _ = cancel.cancelled() => return Err(AppError::Cancelled),
+                permit = diagnostics_semaphore.clone().acquire_owned() => permit.ok(),
+            };
+        };
+        if dispatcharr_single_pass {
+            shared.latency_ms =
+                Some(final_attempt_elapsed.as_millis().min(u128::from(u64::MAX)) as u64);
+            shared.retry_count = (combined_retries_used > 0).then_some(combined_retries_used);
+        }
+
+        match combined_result {
             Ok(diag) => {
+                let has_tracks = diag.track_presence.has_audio || diag.track_presence.has_video;
+                if dispatcharr_single_pass && !has_tracks {
+                    let reason = diag.input_error_reason.clone().unwrap_or_else(|| {
+                        "No decodable audio/video tracks reported by ffmpeg".to_string()
+                    });
+                    shared.status = ChannelStatus::Dead;
+                    shared.error_reason = Some(reason.clone());
+                    shared.channel_log.final_verdict = "Dead".to_string();
+                    shared.channel_log.final_reason = Some(reason);
+                }
                 shared.audio_only = diag.track_presence.has_audio && !diag.track_presence.has_video;
                 if let Some(info) = diag.video_info {
                     if !shared.audio_only {
@@ -407,6 +481,7 @@ async fn compute_shared_url_result(
 
                 let png_fallback_result = if diag.screenshot_path.is_none()
                     && want_screenshot
+                    && !dispatcharr_single_pass
                     && screenshot_format == ScreenshotFormat::Webp
                     && ffmpeg::should_retry_screenshot_as_png(
                         diag.screenshot_error_reason.as_deref(),
@@ -448,6 +523,12 @@ async fn compute_shared_url_result(
                 );
                 if want_screenshot {
                     set_screenshot_capture_error(&mut shared, err.to_string());
+                }
+                if dispatcharr_single_pass {
+                    shared.status = ChannelStatus::Dead;
+                    shared.error_reason = Some(err.to_string());
+                    shared.channel_log.final_verdict = "Dead".to_string();
+                    shared.channel_log.final_reason = Some(err.to_string());
                 }
             }
         }
