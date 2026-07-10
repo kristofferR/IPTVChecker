@@ -93,6 +93,26 @@ jobs:
           assetNamePattern: "IPTV.Checker_[version]_${{ env.ASSET_PLATFORM }}_${{ env.ASSET_ARCH }}[_setup][ext]"
           args: --target ${{ matrix.target }}
 
+      - name: Verify production binary set
+        shell: bash
+        env:
+          TARGET_TRIPLE: ${{ matrix.target }}
+        run: bash scripts/verify-production-binaries.sh "${TARGET_TRIPLE}"
+
+      - name: Harden and replace AppImage release asset
+        if: startsWith(matrix.target, 'x86_64-unknown-linux') || startsWith(matrix.target, 'aarch64-unknown-linux')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_TRIPLE: ${{ matrix.target }}
+        run: |
+          appimage="$(bash scripts/find-appimage.sh "${TARGET_TRIPLE}")"
+          bash scripts/harden-appimage-runtime.sh "${appimage}"
+
+          version="$(jq -r '.version' src-tauri/tauri.conf.json)"
+          release_asset="IPTV.Checker_${version}_lin_${ASSET_ARCH}.AppImage"
+          cp "${appimage}" "${release_asset}"
+          gh release upload "${GITHUB_REF_NAME}" "${release_asset}" --clobber
+
       - name: Create Windows portable zip
         if: startsWith(matrix.target, 'x86_64-pc-windows') || startsWith(matrix.target, 'aarch64-pc-windows')
         shell: pwsh
