@@ -10,14 +10,6 @@ default-run = "iptv-checker"
 name = "iptv_checker_lib"
 crate-type = ["lib"]
 
-[features]
-benchmark = []
-
-[[bin]]
-name = "backend_bench"
-path = "src/bin/backend_bench.rs"
-required-features = ["benchmark"]
-
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
