@@ -24,16 +24,21 @@ if [[ ! -f "${HOST_LIBRARY_LIST}" ]]; then
     exit 1
 fi
 
+# Immutable numbered release tags: unlike `continuous`, these assets are never
+# re-published, so the URLs stay valid for the pinned SHA256 values below.
+APPIMAGETOOL_VERSION="1.9.1"
+RUNTIME_VERSION="20251108"
+
 case "$(uname -m)" in
     x86_64)
         TOOL_ARCH="x86_64"
-        APPIMAGETOOL_SHA256="a6d71e2b6cd66f8e8d16c37ad164658985e0cf5fcaa950c90a482890cb9d13e0"
-        RUNTIME_SHA256="1cc49bcf1e2ccd593c379adb17c9f85a36d619088296504de95b1d06215aebbf"
+        APPIMAGETOOL_SHA256="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
+        RUNTIME_SHA256="2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d"
         ;;
     aarch64|arm64)
         TOOL_ARCH="aarch64"
-        APPIMAGETOOL_SHA256="1b00524ba8c6b678dc15ef88a5c25ec24def36cdfc7e3abb32ddcd068e8007fe"
-        RUNTIME_SHA256="7d5d772b7c32f0c84caf0a452a3072a5709027d7eac5856feb89a7a7a8881372"
+        APPIMAGETOOL_SHA256="f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158"
+        RUNTIME_SHA256="00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444"
         ;;
     *)
         echo "Error: unsupported AppImage build host architecture: $(uname -m)" >&2
@@ -100,14 +105,16 @@ for symlink in "${ABSOLUTE_SYMLINKS[@]}"; do
 done
 
 APPIMAGETOOL="${WORK_DIR}/appimagetool-${TOOL_ARCH}.AppImage"
-curl --fail --location --retry 3 --silent --show-error \
-    "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${TOOL_ARCH}.AppImage" \
+curl --fail --location --retry 3 --connect-timeout 20 --max-time 120 \
+    --silent --show-error \
+    "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-${TOOL_ARCH}.AppImage" \
     --output "${APPIMAGETOOL}"
 chmod +x "${APPIMAGETOOL}"
 
 RUNTIME_FILE="${WORK_DIR}/runtime-${TOOL_ARCH}"
-curl --fail --location --retry 3 --silent --show-error \
-    "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-${TOOL_ARCH}" \
+curl --fail --location --retry 3 --connect-timeout 20 --max-time 120 \
+    --silent --show-error \
+    "https://github.com/AppImage/type2-runtime/releases/download/${RUNTIME_VERSION}/runtime-${TOOL_ARCH}" \
     --output "${RUNTIME_FILE}"
 
 printf '%s  %s\n' "${APPIMAGETOOL_SHA256}" "${APPIMAGETOOL}" | sha256sum --check --status
@@ -187,7 +194,12 @@ for helper in WebKitNetworkProcess WebKitWebProcess; do
     fi
 done
 
+# Strip the trailing colon from find's output: an empty LD_LIBRARY_PATH
+# component would make the dynamic linker also search the current directory.
+# Denylisted libraries are expected to resolve from the build host's system
+# libraries here, exactly as they must on end-user systems.
 APPDIR_LIBRARY_PATH="$(find "${VERIFY_APP_DIR}/usr/lib" -type d -printf '%p:')"
+APPDIR_LIBRARY_PATH="${APPDIR_LIBRARY_PATH%:}"
 for executable in "${VERIFY_APP_DIR}/usr/bin/iptv-checker" "${WEBKIT_HELPERS[@]}"; do
     if [[ ! -x "${executable}" ]]; then
         continue
