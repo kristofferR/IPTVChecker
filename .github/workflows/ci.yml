@@ -137,7 +137,16 @@ jobs:
         with:
           args: --target ${{ matrix.target }}
 
-      - name: Verify AppImage Wayland compatibility patch
+      - name: Verify production binary set
+        shell: bash
+        run: |
+          if find "src-tauri/target/${{ matrix.target }}/release" -maxdepth 1 -type f \
+            \( -name 'backend_bench' -o -name 'backend_bench.exe' \) -print -quit | grep -q .; then
+            echo "Internal backend_bench binary was built for a production bundle" >&2
+            exit 1
+          fi
+
+      - name: Verify AppImage runtime hardening
         if: startsWith(matrix.target, 'x86_64-unknown-linux')
         run: |
           mapfile -d '' appimages < <(find "src-tauri/target/${{ matrix.target }}/release/bundle/appimage" -maxdepth 1 -name '*.AppImage' -print0)
@@ -145,7 +154,7 @@ jobs:
             echo "Expected exactly one AppImage, found ${#appimages[@]}" >&2
             exit 1
           fi
-          bash scripts/patch-appimage-wayland.sh "${appimages[0]}"
+          bash scripts/harden-appimage-runtime.sh "${appimages[0]}"
 
   parser-fuzz:
     name: Parser Fuzz Smoke

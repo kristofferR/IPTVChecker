@@ -93,7 +93,16 @@ jobs:
           assetNamePattern: "IPTV.Checker_[version]_${{ env.ASSET_PLATFORM }}_${{ env.ASSET_ARCH }}[_setup][ext]"
           args: --target ${{ matrix.target }}
 
-      - name: Patch and replace AppImage release asset
+      - name: Verify production binary set
+        shell: bash
+        run: |
+          if find "src-tauri/target/${{ matrix.target }}/release" -maxdepth 1 -type f \
+            \( -name 'backend_bench' -o -name 'backend_bench.exe' \) -print -quit | grep -q .; then
+            echo "Internal backend_bench binary was built for a production bundle" >&2
+            exit 1
+          fi
+
+      - name: Harden and replace AppImage release asset
         if: startsWith(matrix.target, 'x86_64-unknown-linux') || startsWith(matrix.target, 'aarch64-unknown-linux')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -104,7 +113,7 @@ jobs:
             exit 1
           fi
 
-          bash scripts/patch-appimage-wayland.sh "${appimages[0]}"
+          bash scripts/harden-appimage-runtime.sh "${appimages[0]}"
 
           version="$(jq -r '.version' src-tauri/tauri.conf.json)"
           release_asset="IPTV.Checker_${version}_lin_${ASSET_ARCH}.AppImage"
