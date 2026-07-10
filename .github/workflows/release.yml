@@ -93,6 +93,24 @@ jobs:
           assetNamePattern: "IPTV.Checker_[version]_${{ env.ASSET_PLATFORM }}_${{ env.ASSET_ARCH }}[_setup][ext]"
           args: --target ${{ matrix.target }}
 
+      - name: Patch and replace AppImage release asset
+        if: startsWith(matrix.target, 'x86_64-unknown-linux') || startsWith(matrix.target, 'aarch64-unknown-linux')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mapfile -d '' appimages < <(find "src-tauri/target/${{ matrix.target }}/release/bundle/appimage" -maxdepth 1 -name '*.AppImage' -print0)
+          if [ "${#appimages[@]}" -ne 1 ]; then
+            echo "Expected exactly one AppImage, found ${#appimages[@]}" >&2
+            exit 1
+          fi
+
+          bash scripts/patch-appimage-wayland.sh "${appimages[0]}"
+
+          version="$(jq -r '.version' src-tauri/tauri.conf.json)"
+          release_asset="IPTV.Checker_${version}_lin_${ASSET_ARCH}.AppImage"
+          cp "${appimages[0]}" "${release_asset}"
+          gh release upload "${GITHUB_REF_NAME}" "${release_asset}" --clobber
+
       - name: Create Windows portable zip
         if: startsWith(matrix.target, 'x86_64-pc-windows') || startsWith(matrix.target, 'aarch64-pc-windows')
         shell: pwsh
