@@ -13,7 +13,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOST_LIBRARY_LIST="${SCRIPT_DIR}/appimage-host-libraries.txt"
-APPIMAGE="$(realpath "$1")"
+APPIMAGE="$(realpath -m "$1")"
 
 if [[ ! -f "${APPIMAGE}" ]]; then
     echo "Error: AppImage not found: ${APPIMAGE}" >&2
@@ -27,9 +27,13 @@ fi
 case "$(uname -m)" in
     x86_64)
         TOOL_ARCH="x86_64"
+        APPIMAGETOOL_SHA256="a6d71e2b6cd66f8e8d16c37ad164658985e0cf5fcaa950c90a482890cb9d13e0"
+        RUNTIME_SHA256="1cc49bcf1e2ccd593c379adb17c9f85a36d619088296504de95b1d06215aebbf"
         ;;
     aarch64|arm64)
         TOOL_ARCH="aarch64"
+        APPIMAGETOOL_SHA256="1b00524ba8c6b678dc15ef88a5c25ec24def36cdfc7e3abb32ddcd068e8007fe"
+        RUNTIME_SHA256="7d5d772b7c32f0c84caf0a452a3072a5709027d7eac5856feb89a7a7a8881372"
         ;;
     *)
         echo "Error: unsupported AppImage build host architecture: $(uname -m)" >&2
@@ -76,9 +80,18 @@ curl --fail --location --retry 3 --silent --show-error \
     --output "${APPIMAGETOOL}"
 chmod +x "${APPIMAGETOOL}"
 
+RUNTIME_FILE="${WORK_DIR}/runtime-${TOOL_ARCH}"
+curl --fail --location --retry 3 --silent --show-error \
+    "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-${TOOL_ARCH}" \
+    --output "${RUNTIME_FILE}"
+
+printf '%s  %s\n' "${APPIMAGETOOL_SHA256}" "${APPIMAGETOOL}" | sha256sum --check --status
+printf '%s  %s\n' "${RUNTIME_SHA256}" "${RUNTIME_FILE}" | sha256sum --check --status
+
 PATCHED_APPIMAGE="${WORK_DIR}/hardened.AppImage"
 ARCH="${TOOL_ARCH}" APPIMAGE_EXTRACT_AND_RUN=1 \
-    "${APPIMAGETOOL}" "${APP_DIR}" "${PATCHED_APPIMAGE}" > /dev/null
+    "${APPIMAGETOOL}" --runtime-file "${RUNTIME_FILE}" \
+    "${APP_DIR}" "${PATCHED_APPIMAGE}" > /dev/null
 
 VERIFY_DIR="${WORK_DIR}/verify"
 mkdir "${VERIFY_DIR}"
@@ -151,11 +164,17 @@ done
 
 APPDIR_LIBRARY_PATH="$(find "${VERIFY_APP_DIR}/usr/lib" -type d -printf '%p:')"
 for executable in "${VERIFY_APP_DIR}/usr/bin/iptv-checker" "${WEBKIT_HELPERS[@]}"; do
-    if [[ -x "${executable}" ]] && LD_LIBRARY_PATH="${APPDIR_LIBRARY_PATH}" \
-        ldd "${executable}" 2>&1 | grep -q 'not found'; then
+    if [[ ! -x "${executable}" ]]; then
+        continue
+    fi
+
+    if ! ldd_output="$(LD_LIBRARY_PATH="${APPDIR_LIBRARY_PATH}" ldd "${executable}" 2>&1)"; then
+        echo "Error: failed to inspect runtime dependencies for ${executable}:" >&2
+        echo "${ldd_output}" >&2
+        validation_failed=1
+    elif grep -q 'not found' <<< "${ldd_output}"; then
         echo "Error: hardened AppImage has unresolved runtime dependencies for ${executable}:" >&2
-        LD_LIBRARY_PATH="${APPDIR_LIBRARY_PATH}" ldd "${executable}" 2>&1 \
-            | grep 'not found' >&2
+        grep 'not found' <<< "${ldd_output}" >&2
         validation_failed=1
     fi
 done
