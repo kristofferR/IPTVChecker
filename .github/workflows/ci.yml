@@ -137,6 +137,16 @@ jobs:
         with:
           args: --target ${{ matrix.target }}
 
+      - name: Verify AppImage Wayland compatibility patch
+        if: startsWith(matrix.target, 'x86_64-unknown-linux')
+        run: |
+          mapfile -d '' appimages < <(find "src-tauri/target/${{ matrix.target }}/release/bundle/appimage" -maxdepth 1 -name '*.AppImage' -print0)
+          if [ "${#appimages[@]}" -ne 1 ]; then
+            echo "Expected exactly one AppImage, found ${#appimages[@]}" >&2
+            exit 1
+          fi
+          bash scripts/patch-appimage-wayland.sh "${appimages[0]}"
+
   parser-fuzz:
     name: Parser Fuzz Smoke
     if: github.event_name == 'pull_request'
