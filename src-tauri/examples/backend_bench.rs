@@ -98,7 +98,7 @@ async fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         println!(
-            "Usage: cargo run --release --features benchmark --bin backend_bench -- [--channels N] [--concurrency N] [--timeout-secs F] [--payload-kb N]"
+            "Usage: cargo run --release --example backend_bench -- [--channels N] [--concurrency N] [--timeout-secs F] [--payload-kb N]"
         );
         return Ok(());
     }

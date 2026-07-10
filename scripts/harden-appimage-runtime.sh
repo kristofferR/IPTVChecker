@@ -66,8 +66,8 @@ for library in "${HOST_LIBRARIES[@]}"; do
     fi
 done
 
-# Cargo auto-discovers src/bin/backend_bench.rs, and Tauri otherwise packages
-# that internal benchmark as an additional production binary on every OS.
+# Defense in depth for artifacts created before backend_bench moved from an
+# auto-discovered Cargo binary target to an opt-in example.
 rm -f "${APP_DIR}/usr/bin/backend_bench"
 
 APPIMAGETOOL="${WORK_DIR}/appimagetool-${TOOL_ARCH}.AppImage"
