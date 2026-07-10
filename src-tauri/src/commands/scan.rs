@@ -366,7 +366,7 @@ async fn compute_shared_url_result(
         return Ok((shared, timing));
     }
     let diagnostics_started_at = Instant::now();
-    let diagnostics_permit = diagnostics_semaphore.clone().acquire_owned().await.ok();
+    let mut diagnostics_permit = diagnostics_semaphore.clone().acquire_owned().await.ok();
     let ffprobe_timeout_duration =
         std::time::Duration::from_secs_f64(ffprobe_timeout_secs.clamp(1.0, 300.0));
 
@@ -384,8 +384,8 @@ async fn compute_shared_url_result(
             ffprobe_timeout_secs
         };
         let mut combined_retries_used = 0u32;
-        let combined_started_at = Instant::now();
-        let combined_result = loop {
+        let (combined_result, final_attempt_elapsed) = loop {
+            let attempt_started_at = Instant::now();
             let result = ffmpeg::run_combined_diagnostics(
                 app,
                 &target_url,
@@ -400,16 +400,20 @@ async fn compute_shared_url_result(
                 cancel,
             )
             .await;
+            let attempt_elapsed = attempt_started_at.elapsed();
 
-            let has_tracks = matches!(
+            let no_tracks_yet = matches!(
                 &result,
-                Ok(diag) if diag.track_presence.has_audio || diag.track_presence.has_video
+                Ok(diag) if !(diag.track_presence.has_audio || diag.track_presence.has_video)
             );
-            if !dispatcharr_single_pass || has_tracks || combined_retries_used >= retries {
-                break result;
+            if !dispatcharr_single_pass || !no_tracks_yet || combined_retries_used >= retries {
+                break (result, attempt_elapsed);
             }
 
             combined_retries_used = combined_retries_used.saturating_add(1);
+            // The semaphore limits active diagnostics, not channels waiting for
+            // Dispatcharr's teardown window. Release it during the backoff.
+            drop(diagnostics_permit.take());
             // Dispatcharr explicitly returns Retry-After: 1 while a channel is
             // stopping. ffmpeg does not expose that header, so honor the same
             // minimum here and retain the configured backoff behavior.
@@ -422,19 +426,18 @@ async fn compute_shared_url_result(
             };
             tokio::select! {
                 _ = cancel.cancelled() => {
-                    drop(diagnostics_permit);
                     return Err(AppError::Cancelled);
                 }
                 _ = tokio::time::sleep(std::time::Duration::from_secs(delay_secs.max(1))) => {}
             }
+            diagnostics_permit = tokio::select! {
+                _ = cancel.cancelled() => return Err(AppError::Cancelled),
+                permit = diagnostics_semaphore.clone().acquire_owned() => permit.ok(),
+            };
         };
         if dispatcharr_single_pass {
-            shared.latency_ms = Some(
-                combined_started_at
-                    .elapsed()
-                    .as_millis()
-                    .min(u128::from(u64::MAX)) as u64,
-            );
+            shared.latency_ms =
+                Some(final_attempt_elapsed.as_millis().min(u128::from(u64::MAX)) as u64);
             shared.retry_count = (combined_retries_used > 0).then_some(combined_retries_used);
         }
 

@@ -1949,6 +1949,7 @@ pub async fn run_combined_diagnostics(
 
     let stderr_buf = stderr_reader.await.unwrap_or_default();
     let stderr = String::from_utf8_lossy(&stderr_buf);
+    let stderr_has_output = !stderr.trim().is_empty();
     let stderr_summary = stderr_excerpt(&stderr);
 
     // Parse stream metadata from verbose output
@@ -1961,7 +1962,7 @@ pub async fn run_combined_diagnostics(
             "ffmpeg timed out after {:.1}s",
             timeout_duration.as_secs_f64()
         ))
-    } else if stderr_summary != "no stderr output" {
+    } else if stderr_has_output {
         Some(stderr_summary.clone())
     } else {
         Some("No decodable audio/video tracks reported by ffmpeg".to_string())
