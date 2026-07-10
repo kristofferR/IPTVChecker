@@ -137,6 +137,20 @@ jobs:
         with:
           args: --target ${{ matrix.target }}
 
+      - name: Verify production binary set
+        shell: bash
+        env:
+          TARGET_TRIPLE: ${{ matrix.target }}
+        run: bash scripts/verify-production-binaries.sh "${TARGET_TRIPLE}"
+
+      - name: Verify AppImage runtime hardening
+        if: startsWith(matrix.target, 'x86_64-unknown-linux')
+        env:
+          TARGET_TRIPLE: ${{ matrix.target }}
+        run: |
+          appimage="$(bash scripts/find-appimage.sh "${TARGET_TRIPLE}")"
+          bash scripts/harden-appimage-runtime.sh "${appimage}"
+
   parser-fuzz:
     name: Parser Fuzz Smoke
     if: github.event_name == 'pull_request'
