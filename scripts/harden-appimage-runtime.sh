@@ -74,6 +74,31 @@ done
 # auto-discovered Cargo binary target to an opt-in example.
 rm -f "${APP_DIR}/usr/bin/backend_bench"
 
+# Tauri can emit .DirIcon as an absolute symlink to its original build AppDir.
+# Repoint absolute links only when their target can be mapped to a file in the
+# extracted AppDir; an external or ambiguous target is a packaging error.
+mapfile -d '' ABSOLUTE_SYMLINKS < <(
+    find "${APP_DIR}" -type l -lname '/*' -print0
+)
+for symlink in "${ABSOLUTE_SYMLINKS[@]}"; do
+    target="$(readlink "${symlink}")"
+    appdir_relative_target="${target#*.AppDir/}"
+
+    if [[ "${appdir_relative_target}" == "${target}" ]]; then
+        appdir_relative_target="${target#/}"
+    fi
+
+    candidate="${APP_DIR}/${appdir_relative_target}"
+    if [[ ! -e "${candidate}" && ! -L "${candidate}" ]]; then
+        echo "Error: absolute symlink does not resolve inside AppDir: ${symlink#"${APP_DIR}/"} -> ${target}" >&2
+        exit 1
+    fi
+
+    relative_target="$(realpath --relative-to="$(dirname "${symlink}")" "${candidate}")"
+    rm -f "${symlink}"
+    ln -s "${relative_target}" "${symlink}"
+done
+
 APPIMAGETOOL="${WORK_DIR}/appimagetool-${TOOL_ARCH}.AppImage"
 curl --fail --location --retry 3 --silent --show-error \
     "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${TOOL_ARCH}.AppImage" \
