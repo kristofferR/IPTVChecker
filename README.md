@@ -91,10 +91,12 @@ Liquid Glass vibrancy on macOS, platform menus, keyboard shortcuts, dark/light/s
 
 Tap repo: [kristofferR/homebrew-tap](https://github.com/kristofferR/homebrew-tap)
 
-Homebrew uses the same cask token on macOS and Linux:
+Homebrew uses the same cask token on macOS and Linux. Third-party casks must be
+trusted before installation:
 
 ```bash
 brew tap kristofferR/tap
+brew trust kristofferR/tap
 brew install iptv-checker
 ```
 
