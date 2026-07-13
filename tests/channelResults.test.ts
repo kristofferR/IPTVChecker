@@ -4,6 +4,7 @@ import {
   getChannelIdFromUrl,
   getScreenshotErrorReason,
   resetChannelResultForRescan,
+  toCommandChannelResult,
   toPendingChannelResult,
 } from "../src/lib/channelResults";
 import type { Channel, ChannelResult } from "../src/lib/types";
@@ -109,5 +110,19 @@ describe("channelResults helpers", () => {
       "ffmpeg exited with 1",
     );
     expect(getScreenshotErrorReason({ screenshot_error_reason: null })).toBeNull();
+  });
+
+  it("canonicalizes legacy error reasons for backend commands", () => {
+    const current = toCommandChannelResult(makeResult());
+    expect(current.error_reason).toBe("Timeout");
+    expect("last_error_reason" in current).toBe(false);
+
+    const legacy = toCommandChannelResult({
+      ...makeResult(),
+      error_reason: null,
+      last_error_reason: "Legacy timeout",
+    });
+    expect(legacy.error_reason).toBe("Legacy timeout");
+    expect("last_error_reason" in legacy).toBe(false);
   });
 });
