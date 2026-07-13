@@ -21,6 +21,11 @@ import type {
   XtreamOpenRequest,
   XtreamServerTestReport,
 } from "./types";
+import { toCommandChannelResult } from "./channelResults";
+
+function toCommandChannelResults(results: ChannelResult[]) {
+  return results.map(toCommandChannelResult);
+}
 
 export async function openPlaylist(
   path: string,
@@ -91,7 +96,7 @@ export async function resetScan(): Promise<void> {
 }
 
 export async function quickCheckChannel(channel: ChannelResult): Promise<ChannelResult> {
-  return invoke("quick_check_channel", { channel });
+  return invoke("quick_check_channel", { channel: toCommandChannelResult(channel) });
 }
 
 export async function exportCsv(
@@ -101,7 +106,7 @@ export async function exportCsv(
   includeLatency: boolean,
 ): Promise<void> {
   return invoke("export_csv", {
-    results,
+    results: toCommandChannelResults(results),
     path,
     playlistName,
     includeLatency,
@@ -112,21 +117,30 @@ export async function exportSplit(
   results: ChannelResult[],
   basePath: string,
 ): Promise<void> {
-  return invoke("export_split", { results, basePath });
+  return invoke("export_split", {
+    results: toCommandChannelResults(results),
+    basePath,
+  });
 }
 
 export async function exportRenamed(
   results: ChannelResult[],
   basePath: string,
 ): Promise<void> {
-  return invoke("export_renamed", { results, basePath });
+  return invoke("export_renamed", {
+    results: toCommandChannelResults(results),
+    basePath,
+  });
 }
 
 export async function exportM3u(
   results: ChannelResult[],
   path: string,
 ): Promise<void> {
-  return invoke("export_m3u", { results, path });
+  return invoke("export_m3u", {
+    results: toCommandChannelResults(results),
+    path,
+  });
 }
 
 export async function exportScanLogJson(path: string): Promise<void> {

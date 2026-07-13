@@ -54,6 +54,17 @@ export function getScreenshotErrorReason(
   return result.screenshot_error_reason?.trim() || null;
 }
 
+export function toCommandChannelResult(
+  result: ChannelResult,
+): Omit<ChannelResult, "last_error_reason"> {
+  const { last_error_reason, ...current } = result;
+
+  return {
+    ...current,
+    error_reason: result.error_reason ?? last_error_reason ?? null,
+  };
+}
+
 export function toPendingChannelResult(channel: Channel): ChannelResult {
   return {
     ...channel,
