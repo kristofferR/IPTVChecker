@@ -3,6 +3,7 @@ import {
   classifyStream,
   decidePlaybackRecovery,
   formatPlaybackRecoveryMessage,
+  getHlsFatalRecoveryAction,
   getNextPlaybackRecoveryAttempt,
   PLAYBACK_RECOVERY_WINDOW_MS,
   prunePlaybackRecoveryHistory,
@@ -60,6 +61,12 @@ describe("useStreamPlayer helpers", () => {
     expect(getNextPlaybackRecoveryAttempt([now - 5_000], now)).toBe(2);
     expect(
       getNextPlaybackRecoveryAttempt([now - 5_000, now - 10_000], now),
+    ).toBe(3);
+    expect(
+      getNextPlaybackRecoveryAttempt(
+        [now - 5_000, now - 10_000, now - 15_000, now - 20_000, now - 25_000],
+        now,
+      ),
     ).toBeNull();
   });
 
@@ -115,10 +122,17 @@ describe("useStreamPlayer helpers", () => {
 
   it("formats reconnect status messaging for the player UI", () => {
     expect(formatPlaybackRecoveryMessage(1)).toBe(
-      "Stream interrupted. Reconnecting (1/2)...",
+      "Stream interrupted. Reconnecting (1/5)...",
     );
-    expect(formatPlaybackRecoveryMessage(2)).toBe(
-      "Stream interrupted. Reconnecting (2/2)...",
+    expect(formatPlaybackRecoveryMessage(5)).toBe(
+      "Stream interrupted. Reconnecting (5/5)...",
     );
+  });
+
+  it("uses hls.js recovery before rebuilding the whole player", () => {
+    expect(getHlsFatalRecoveryAction("networkError")).toBe("restart_network");
+    expect(getHlsFatalRecoveryAction("mediaError")).toBe("recover_media");
+    expect(getHlsFatalRecoveryAction("otherError")).toBe("reconnect");
+    expect(getHlsFatalRecoveryAction()).toBe("reconnect");
   });
 });

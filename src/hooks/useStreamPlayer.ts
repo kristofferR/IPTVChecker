@@ -84,6 +84,8 @@ interface HlsErrorPayload {
   details?: string;
 }
 
+export type HlsFatalRecoveryAction = "restart_network" | "recover_media" | "reconnect";
+
 interface MpegtsPlayer {
   destroy(): void;
   attachMediaElement(el: HTMLMediaElement): void;
@@ -135,8 +137,9 @@ function tryConvertToXtreamHls(url: string): string | null {
   return `${origin}/live/${user}/${pass}/${id}.m3u8`;
 }
 
-function toStreamingProxyUrl(url: string, port: number): string {
-  return `http://127.0.0.1:${port}/stream?url=${encodeURIComponent(url)}`;
+function toStreamingProxyUrl(url: string, port: number, reconnect: boolean): string {
+  const reconnectParam = reconnect ? "&reconnect=1" : "";
+  return `http://127.0.0.1:${port}/stream?url=${encodeURIComponent(url)}${reconnectParam}`;
 }
 
 export function supportsNativeHlsPlayback(
@@ -188,17 +191,23 @@ function readMediaErrorMessage(mediaErr: MediaError | null): string | null {
   return codeMap[mediaErr.code] ?? mediaErr.message ?? "Unknown media error";
 }
 
-export const MAX_PLAYBACK_RECOVERY_ATTEMPTS = 2;
+export const MAX_PLAYBACK_RECOVERY_ATTEMPTS = 5;
 export const PLAYBACK_RECOVERY_WINDOW_MS = 2 * 60_000;
 const LOADING_TIMEOUT_MS = 15_000;
 const NATIVE_HLS_TIMEOUT_MS = 4_000;
 const PLAYBACK_RECOVERY_DELAY_MS = 900;
-const PLAYBACK_STALL_GRACE_MS = 4_000;
-const PLAYBACK_NO_PROGRESS_STALL_MS = 6_000;
+const PLAYBACK_STALL_GRACE_MS = 15_000;
+const PLAYBACK_NO_PROGRESS_STALL_MS = 20_000;
 const PLAYBACK_WATCHDOG_POLL_MS = 1_000;
 const MIN_PROGRESS_DELTA_SECS = 0.05;
 const HAVE_FUTURE_DATA = 3;
 const HLS_BUFFER_STALLED_ERROR = "bufferStalledError";
+
+export function getHlsFatalRecoveryAction(type?: string): HlsFatalRecoveryAction {
+  if (type === "networkError") return "restart_network";
+  if (type === "mediaError") return "recover_media";
+  return "reconnect";
+}
 
 export function getNextPlaybackRecoveryAttempt(
   recoveryTimestamps: number[],
@@ -707,6 +716,19 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           if (data.fatal) {
             const detail = data.details ?? "fatal hls.js error";
             const type = data.type ?? "hls.js";
+            const recoveryAction = getHlsFatalRecoveryAction(data.type);
+            if (recoveryAction === "restart_network") {
+              logger.warn("[Player] Restarting hls.js network loading after", detail);
+              hls.startLoad(-1);
+              markPotentialStall();
+              return;
+            }
+            if (recoveryAction === "recover_media") {
+              logger.warn("[Player] Recovering hls.js media pipeline after", detail);
+              hls.recoverMediaError();
+              markPotentialStall();
+              return;
+            }
             triggerRuntimeIssue("library_error", `${type}: ${detail}`);
           }
         };
@@ -921,11 +943,23 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
       return new Promise((resolve) => {
         let settled = false;
-        const player = mpegts.createPlayer({
-          type: "mpegts",
-          url,
-          isLive: true,
-        }) as unknown as MpegtsPlayer;
+        const player = mpegts.createPlayer(
+          {
+            type: "mpegts",
+            url,
+            isLive: true,
+          },
+          {
+            // Trade a small amount of live latency for enough network cushion
+            // to ride out the jitter common on IPTV provider connections.
+            enableStashBuffer: true,
+            stashInitialSize: 1024 * 1024,
+            lazyLoad: false,
+            autoCleanupSourceBuffer: true,
+            autoCleanupMaxBackwardDuration: 120,
+            autoCleanupMinBackwardDuration: 60,
+          },
+        ) as unknown as MpegtsPlayer;
         mpegtsPlayerRef.current = player;
 
         const finish = (value: boolean) => {
@@ -1112,7 +1146,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         } catch {
           logger.warn("[Player] Could not get streaming proxy port");
         }
-        const playbackUrl = proxyPort > 0 ? toStreamingProxyUrl(url, proxyPort) : url;
+        const playbackUrl = proxyPort > 0
+          ? toStreamingProxyUrl(url, proxyPort, result.content_type === "live")
+          : url;
         if (proxyPort > 0) {
           logger.info("[Player] Trying mpegts.js via streaming proxy for", result.name);
         } else {

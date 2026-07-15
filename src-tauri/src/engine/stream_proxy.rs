@@ -19,6 +19,12 @@ const PROXY_BUFFERED_RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration
 /// cap total stream duration. Only kills truly dead/stalled connections.
 const PROXY_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
+/// Short retry delay for a live MPEG-TS source that drops its upstream socket.
+/// The downstream connection stays open while the proxy reconnects, so the
+/// browser player can keep its MediaSource and buffered video intact.
+const STREAM_RECONNECT_BASE_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
+const STREAM_RECONNECT_MAX_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Base64url-encode an original stream URL for the proxy scheme.
 pub fn encode_proxy_url(original: &str) -> String {
     URL_SAFE_NO_PAD.encode(original.as_bytes())
@@ -478,10 +484,16 @@ enum StreamForwardOutcome {
     DownstreamClosed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StreamForwardResult {
+    outcome: StreamForwardOutcome,
+    bytes_forwarded: u64,
+}
+
 async fn forward_response_as_chunked_stream<W>(
     writer: &mut W,
     response: reqwest::Response,
-) -> StreamForwardOutcome
+) -> StreamForwardResult
 where
     W: tokio::io::AsyncWrite + Unpin,
 {
@@ -489,20 +501,31 @@ where
     use tokio::io::AsyncWriteExt;
 
     let mut outcome = StreamForwardOutcome::Completed;
+    let mut bytes_forwarded = 0u64;
     let mut stream = response.bytes_stream();
     while let Some(chunk_result) = stream.next().await {
         match chunk_result {
             Ok(chunk) => {
                 let size_line = format!("{:x}\r\n", chunk.len());
                 if writer.write_all(size_line.as_bytes()).await.is_err() {
-                    return StreamForwardOutcome::DownstreamClosed;
+                    return StreamForwardResult {
+                        outcome: StreamForwardOutcome::DownstreamClosed,
+                        bytes_forwarded,
+                    };
                 }
                 if writer.write_all(&chunk).await.is_err() {
-                    return StreamForwardOutcome::DownstreamClosed;
+                    return StreamForwardResult {
+                        outcome: StreamForwardOutcome::DownstreamClosed,
+                        bytes_forwarded,
+                    };
                 }
                 if writer.write_all(b"\r\n").await.is_err() {
-                    return StreamForwardOutcome::DownstreamClosed;
+                    return StreamForwardResult {
+                        outcome: StreamForwardOutcome::DownstreamClosed,
+                        bytes_forwarded,
+                    };
                 }
+                bytes_forwarded = bytes_forwarded.saturating_add(chunk.len() as u64);
             }
             Err(err) => {
                 outcome = if err.is_timeout() {
@@ -515,11 +538,42 @@ where
         }
     }
 
-    if writer.write_all(b"0\r\n\r\n").await.is_err() {
-        return StreamForwardOutcome::DownstreamClosed;
+    StreamForwardResult {
+        outcome,
+        bytes_forwarded,
     }
+}
 
-    outcome
+async fn finish_chunked_stream<W>(writer: &mut W) -> bool
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    use tokio::io::AsyncWriteExt;
+    writer.write_all(b"0\r\n\r\n").await.is_ok()
+}
+
+fn stream_reconnect_delay(consecutive_empty_attempts: u32) -> std::time::Duration {
+    let multiplier = 1u32 << consecutive_empty_attempts.min(4);
+    STREAM_RECONNECT_BASE_DELAY
+        .saturating_mul(multiplier)
+        .min(STREAM_RECONNECT_MAX_DELAY)
+}
+
+async fn wait_for_stream_reconnect(
+    socket: &mut tokio::net::TcpStream,
+    delay: std::time::Duration,
+) -> bool {
+    use tokio::io::AsyncReadExt;
+
+    let mut downstream_probe = [0u8; 1];
+    match tokio::time::timeout(delay, socket.read(&mut downstream_probe)).await {
+        Err(_) => true,
+        Ok(Ok(0)) | Ok(Err(_)) => false,
+        // The browser should not send another request on this Connection: close
+        // response, but consuming an unexpected byte is harmless and lets the
+        // reconnect proceed.
+        Ok(Ok(_)) => true,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -563,8 +617,8 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                 let request_str = String::from_utf8_lossy(&buf[..n]);
 
                 // Parse GET /stream?url=ENCODED_URL HTTP/1.1
-                let url = match parse_stream_request(&request_str) {
-                    Some(url) => url,
+                let (url, reconnect) = match parse_stream_request(&request_str) {
+                    Some(request) => request,
                     None => {
                         let response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
                         let _ = socket.write_all(response.as_bytes()).await;
@@ -590,14 +644,12 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
 
                 let client = get_or_create_proxy_client(state.inner(), accept_invalid_certs).await;
 
+                let user_agent = HeaderValue::from_str(&user_agent)
+                    .unwrap_or_else(|_| HeaderValue::from_static("TiviMate/5.1.6 (Android 12)"));
+
                 let response = match client
                     .get(&url)
-                    .header(
-                        USER_AGENT,
-                        HeaderValue::from_str(&user_agent).unwrap_or_else(|_| {
-                            HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")
-                        }),
-                    )
+                    .header(USER_AGENT, user_agent.clone())
                     .send()
                     .await
                 {
@@ -649,31 +701,95 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     return;
                 }
 
-                match forward_response_as_chunked_stream(&mut socket, response).await {
-                    StreamForwardOutcome::Completed => {
-                        log::debug!(
-                            "[StreamProxy] Upstream stream ended normally for {}",
-                            redact_url(&url)
-                        );
-                    }
-                    StreamForwardOutcome::UpstreamReadTimeout => {
-                        log::warn!(
-                            "[StreamProxy] Upstream stream stalled/timed out for {}",
-                            redact_url(&url)
-                        );
-                    }
-                    StreamForwardOutcome::UpstreamReadError(kind) => {
-                        log::warn!(
-                            "[StreamProxy] Upstream stream terminated for {} ({})",
-                            redact_url(&url),
-                            kind
-                        );
-                    }
-                    StreamForwardOutcome::DownstreamClosed => {
+                // Error responses are finite and should be delivered normally.
+                // Only successful live bodies are safe to concatenate after an
+                // upstream reconnect.
+                if !reconnect || !status.is_success() {
+                    let _ = forward_response_as_chunked_stream(&mut socket, response).await;
+                    let _ = finish_chunked_stream(&mut socket).await;
+                    return;
+                }
+
+                let mut response = response;
+                let mut reconnects = 0u32;
+                let mut consecutive_empty_attempts = 0u32;
+
+                loop {
+                    let forward = forward_response_as_chunked_stream(&mut socket, response).await;
+                    if forward.outcome == StreamForwardOutcome::DownstreamClosed {
                         log::debug!(
                             "[StreamProxy] Downstream disconnected while streaming {}",
                             redact_url(&url)
                         );
+                        return;
+                    }
+
+                    if forward.bytes_forwarded > 0 {
+                        consecutive_empty_attempts = 0;
+                    } else {
+                        consecutive_empty_attempts = consecutive_empty_attempts.saturating_add(1);
+                    }
+                    reconnects = reconnects.saturating_add(1);
+
+                    match forward.outcome {
+                        StreamForwardOutcome::Completed => log::warn!(
+                            "[StreamProxy] Upstream stream ended for {}; reconnecting (#{})",
+                            redact_url(&url),
+                            reconnects
+                        ),
+                        StreamForwardOutcome::UpstreamReadTimeout => log::warn!(
+                            "[StreamProxy] Upstream stream stalled/timed out for {}; reconnecting (#{})",
+                            redact_url(&url),
+                            reconnects
+                        ),
+                        StreamForwardOutcome::UpstreamReadError(kind) => log::warn!(
+                            "[StreamProxy] Upstream stream terminated for {} ({}); reconnecting (#{})",
+                            redact_url(&url),
+                            kind,
+                            reconnects
+                        ),
+                        StreamForwardOutcome::DownstreamClosed => unreachable!(),
+                    }
+
+                    loop {
+                        let delay = stream_reconnect_delay(consecutive_empty_attempts);
+                        if !wait_for_stream_reconnect(&mut socket, delay).await {
+                            log::debug!(
+                                "[StreamProxy] Downstream closed while reconnecting {}",
+                                redact_url(&url)
+                            );
+                            return;
+                        }
+
+                        match client
+                            .get(&url)
+                            .header(USER_AGENT, user_agent.clone())
+                            .send()
+                            .await
+                        {
+                            Ok(next_response) if next_response.status().is_success() => {
+                                response = next_response;
+                                break;
+                            }
+                            Ok(next_response) => {
+                                consecutive_empty_attempts =
+                                    consecutive_empty_attempts.saturating_add(1);
+                                log::warn!(
+                                    "[StreamProxy] Reconnect for {} returned HTTP {}; retrying",
+                                    redact_url(&url),
+                                    next_response.status()
+                                );
+                            }
+                            Err(err) => {
+                                consecutive_empty_attempts =
+                                    consecutive_empty_attempts.saturating_add(1);
+                                log::warn!(
+                                    "[StreamProxy] Reconnect failed for {} ({}); retrying",
+                                    redact_url(&url),
+                                    reqwest_error_kind(&err)
+                                );
+                            }
+                        }
                     }
                 }
             });
@@ -683,13 +799,21 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
     Ok(port)
 }
 
-fn parse_stream_request(request: &str) -> Option<String> {
+fn parse_stream_request(request: &str) -> Option<(String, bool)> {
     let first_line = request.lines().next()?;
     // GET /stream?url=ENCODED HTTP/1.1
     let path = first_line.split_whitespace().nth(1)?;
     let url = Url::parse(&format!("http://localhost{path}")).ok()?;
-    url.query_pairs()
-        .find_map(|(key, value)| (key == "url").then(|| value.into_owned()))
+    let mut upstream_url = None;
+    let mut reconnect = false;
+    for (key, value) in url.query_pairs() {
+        match key.as_ref() {
+            "url" => upstream_url = Some(value.into_owned()),
+            "reconnect" => reconnect = value == "1" || value.eq_ignore_ascii_case("true"),
+            _ => {}
+        }
+    }
+    upstream_url.map(|url| (url, reconnect))
 }
 
 #[cfg(test)]
@@ -950,8 +1074,17 @@ segment.ts
         let request =
             "GET /stream?url=https%3A%2F%2Fexample.com%2Fstr%C3%B8m%3Ftoken%3Dabc%2B123 HTTP/1.1\r\nHost: localhost\r\n\r\n";
         assert_eq!(
-            parse_stream_request(request).as_deref(),
-            Some("https://example.com/strøm?token=abc+123")
+            parse_stream_request(request),
+            Some(("https://example.com/strøm?token=abc+123".to_string(), false))
+        );
+    }
+
+    #[test]
+    fn parse_stream_request_enables_opt_in_reconnect() {
+        let request = "GET /stream?url=https%3A%2F%2Fexample.com%2Flive.ts&reconnect=1 HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert_eq!(
+            parse_stream_request(request),
+            Some(("https://example.com/live.ts".to_string(), true))
         );
     }
 
@@ -983,10 +1116,11 @@ segment.ts
 
         let started = Instant::now();
         let mut sink = tokio::io::sink();
-        let outcome = forward_response_as_chunked_stream(&mut sink, response).await;
+        let result = forward_response_as_chunked_stream(&mut sink, response).await;
         let elapsed = started.elapsed();
 
-        assert_eq!(outcome, StreamForwardOutcome::Completed);
+        assert_eq!(result.outcome, StreamForwardOutcome::Completed);
+        assert_eq!(result.bytes_forwarded, 192);
         assert!(
             elapsed > simulated_old_total_timeout,
             "stream completed too quickly to cover the old timeout window: {:?}",
@@ -1012,11 +1146,59 @@ segment.ts
             .expect("stream request should succeed");
 
         let mut sink = tokio::io::sink();
-        let outcome = forward_response_as_chunked_stream(&mut sink, response).await;
+        let result = forward_response_as_chunked_stream(&mut sink, response).await;
 
-        assert_eq!(outcome, StreamForwardOutcome::UpstreamReadTimeout);
+        assert_eq!(result.outcome, StreamForwardOutcome::UpstreamReadTimeout);
+        assert_eq!(result.bytes_forwarded, 64);
 
         server_handle.await.expect("server task should finish");
+    }
+
+    #[tokio::test]
+    async fn reconnected_upstreams_share_one_downstream_chunked_response() {
+        let (first_url, first_server) = spawn_chunked_upstream(
+            vec![TestStreamChunk {
+                body: vec![0x01, 0x02],
+                delay_after: Duration::ZERO,
+            }],
+            Duration::ZERO,
+        )
+        .await;
+        let (second_url, second_server) = spawn_chunked_upstream(
+            vec![TestStreamChunk {
+                body: vec![0x03, 0x04, 0x05],
+                delay_after: Duration::ZERO,
+            }],
+            Duration::ZERO,
+        )
+        .await;
+        let client = build_proxy_client(false, Duration::from_secs(1), Duration::from_secs(1));
+        let first_response = client.get(&first_url).send().await.unwrap();
+        let second_response = client.get(&second_url).send().await.unwrap();
+        let mut downstream = Vec::new();
+
+        let first = forward_response_as_chunked_stream(&mut downstream, first_response).await;
+        let second = forward_response_as_chunked_stream(&mut downstream, second_response).await;
+        assert!(finish_chunked_stream(&mut downstream).await);
+
+        assert_eq!(first.bytes_forwarded, 2);
+        assert_eq!(second.bytes_forwarded, 3);
+        assert_eq!(
+            downstream,
+            b"2\r\n\x01\x02\r\n3\r\n\x03\x04\x05\r\n0\r\n\r\n"
+        );
+        first_server.await.expect("first server task should finish");
+        second_server
+            .await
+            .expect("second server task should finish");
+    }
+
+    #[test]
+    fn reconnect_delay_backs_off_and_caps() {
+        assert_eq!(stream_reconnect_delay(0), Duration::from_millis(500));
+        assert_eq!(stream_reconnect_delay(1), Duration::from_secs(1));
+        assert_eq!(stream_reconnect_delay(3), Duration::from_secs(4));
+        assert_eq!(stream_reconnect_delay(8), Duration::from_secs(5));
     }
 
     #[tokio::test]
