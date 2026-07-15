@@ -17,6 +17,7 @@
         "hiddenTitle": true,
         "titleBarStyle": "Overlay",
         "transparent": true,
+        "additionalBrowserArgs": "--disable-features=SuspendMutedAudio --autoplay-policy=no-user-gesture-required --disable-background-media-suspend",
         "width": 1200,
         "height": 800,
         "minWidth": 800,
