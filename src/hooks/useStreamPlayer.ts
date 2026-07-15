@@ -243,6 +243,8 @@ const PLAYBACK_NO_PROGRESS_STALL_MS = 20_000;
 const PLAYBACK_WATCHDOG_POLL_MS = 1_000;
 const MIN_PROGRESS_DELTA_SECS = 0.05;
 const HLS_BUFFER_STALLED_ERROR = "bufferStalledError";
+const HLS_FATAL_RECOVERY_MAX_ATTEMPTS = 2;
+const HLS_FATAL_RECOVERY_WINDOW_MS = 30_000;
 const LIVE_RESYNC_MIN_SEEK_SECS = 1;
 const LIVE_RESYNC_MAX_SEEK_SECS = 3;
 const LIVE_RESYNC_MAX_JUMP_SECS = 30;
@@ -781,6 +783,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         lastResyncAt: Number.NEGATIVE_INFINITY,
       };
       let resyncTimer: ReturnType<typeof setTimeout> | null = null;
+      let hlsFatalRecoveryTimestamps: number[] = [];
 
       const handlers: Array<{ target: EventTarget; event: string; handler: EventListener }> = [];
       const addHandler = (target: EventTarget, event: string, handler: EventListener) => {
@@ -920,6 +923,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
       addHandler(videoElement, "playing", () => {
         clearResyncTimer();
+        hlsFatalRecoveryTimestamps = [];
         monitor.lastProgressAt = performance.now();
         monitor.lastCurrentTime = videoElement.currentTime;
         monitor.stallStartedAt = null;
@@ -929,6 +933,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       });
       addHandler(videoElement, "canplay", () => {
         clearResyncTimer();
+        hlsFatalRecoveryTimestamps = [];
         markProgress();
         monitor.stallStartedAt = null;
       });
@@ -983,6 +988,27 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             const detail = data.details ?? "fatal hls.js error";
             const type = data.type ?? "hls.js";
             const recoveryAction = getHlsFatalRecoveryAction(data.type);
+            if (recoveryAction !== "reconnect") {
+              const now = performance.now();
+              const attempt = getNextPlaybackRecoveryAttempt(
+                hlsFatalRecoveryTimestamps,
+                now,
+                HLS_FATAL_RECOVERY_MAX_ATTEMPTS,
+                HLS_FATAL_RECOVERY_WINDOW_MS,
+              );
+              if (attempt === null) {
+                triggerRuntimeIssue(
+                  "library_error",
+                  `${type}: repeated fatal recovery failed (${detail})`,
+                );
+                return;
+              }
+              hlsFatalRecoveryTimestamps = recordPlaybackRecoveryAttempt(
+                hlsFatalRecoveryTimestamps,
+                now,
+                HLS_FATAL_RECOVERY_WINDOW_MS,
+              );
+            }
             if (recoveryAction === "restart_network") {
               logger.warn("[Player] Restarting hls.js network loading after", detail);
               hls.startLoad(-1);
@@ -999,6 +1025,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           }
         };
         const onHlsStallResolved = () => {
+          hlsFatalRecoveryTimestamps = [];
           markProgress();
           monitor.stallStartedAt = null;
         };
