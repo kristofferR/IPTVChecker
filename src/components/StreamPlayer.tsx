@@ -12,6 +12,7 @@ import {
   VolumeX,
 } from "lucide-react";
 import type { UseChromecastResult } from "../hooks/useChromecast";
+import { MAX_PLAYBACK_RECOVERY_ATTEMPTS } from "../hooks/useStreamPlayer";
 import type { CastMediaRequest } from "../lib/types";
 import { isCastSessionActive } from "../lib/cast";
 import { CastMenu } from "./CastMenu";
@@ -156,7 +157,10 @@ export function StreamPlayer({
             <div className="flex items-center gap-1.5 text-[11px] text-amber-100/85">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
               <span>
-                Trying a clean reconnect{recoveryAttempt ? ` (${recoveryAttempt}/2)` : ""}
+                Trying a clean reconnect
+                {recoveryAttempt
+                  ? ` (${recoveryAttempt}/${MAX_PLAYBACK_RECOVERY_ATTEMPTS})`
+                  : ""}
               </span>
             </div>
           )}

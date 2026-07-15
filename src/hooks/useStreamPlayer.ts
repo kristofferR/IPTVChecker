@@ -45,6 +45,25 @@ export interface StreamMetadata {
   audioOnly: boolean;
 }
 
+export function areStreamMetadataEqual(
+  left: StreamMetadata | null,
+  right: StreamMetadata | null,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return (
+    left.width === right.width &&
+    left.height === right.height &&
+    left.resolution === right.resolution &&
+    left.codec === right.codec &&
+    left.fps === right.fps &&
+    left.videoBitrate === right.videoBitrate &&
+    left.audioCodec === right.audioCodec &&
+    left.audioBitrate === right.audioBitrate &&
+    left.audioOnly === right.audioOnly
+  );
+}
+
 export interface UseStreamPlayerReturn {
   playerState: PlayerState;
   errorMessage: string | null;
@@ -126,20 +145,43 @@ export function classifyStream(url: string): StreamType {
 }
 
 /**
- * Try to convert an Xtream MPEG-TS URL to HLS format.
- * Xtream pattern: http://host:port/username/password/stream_id
- * HLS variant:    http://host:port/live/username/password/stream_id.m3u8
+ * Convert the common Xtream live URL forms to their HLS equivalent.
+ * Providers frequently return `/live/user/pass/id.ts`; treating that as a
+ * generic MPEG-TS endpoint can let a bursty response fill WebView's MSE quota.
  */
-function tryConvertToXtreamHls(url: string): string | null {
-  const match = url.match(/^(https?:\/\/[^/]+)\/([^/]+)\/([^/]+)\/(\d+)$/);
-  if (!match) return null;
-  const [, origin, user, pass, id] = match;
-  return `${origin}/live/${user}/${pass}/${id}.m3u8`;
+export function tryConvertToXtreamHls(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+
+  const segments = parsed.pathname.split("/").filter(Boolean);
+  const firstSegment = segments[0]?.toLowerCase();
+  const offset = firstSegment === "live" ? 1 : 0;
+  if (segments.length - offset !== 3) return null;
+
+  const user = segments[offset];
+  const password = segments[offset + 1];
+  const streamPart = segments[offset + 2];
+  const streamMatch = streamPart?.match(/^(\d+)(?:\.(?:ts|m2ts|mpegts))?$/i);
+  if (!user || !password || !streamMatch) return null;
+
+  parsed.pathname = `/live/${user}/${password}/${streamMatch[1]}.m3u8`;
+  return parsed.toString();
 }
 
-function toStreamingProxyUrl(url: string, port: number, reconnect: boolean): string {
+function toStreamingProxyUrl(
+  url: string,
+  port: number,
+  reconnect: boolean,
+  remux: boolean,
+): string {
   const reconnectParam = reconnect ? "&reconnect=1" : "";
-  return `http://127.0.0.1:${port}/stream?url=${encodeURIComponent(url)}${reconnectParam}`;
+  const remuxParam = remux ? "&remux=1" : "";
+  return `http://127.0.0.1:${port}/stream?url=${encodeURIComponent(url)}${reconnectParam}${remuxParam}`;
 }
 
 export function supportsNativeHlsPlayback(
@@ -200,8 +242,117 @@ const PLAYBACK_STALL_GRACE_MS = 15_000;
 const PLAYBACK_NO_PROGRESS_STALL_MS = 20_000;
 const PLAYBACK_WATCHDOG_POLL_MS = 1_000;
 const MIN_PROGRESS_DELTA_SECS = 0.05;
-const HAVE_FUTURE_DATA = 3;
 const HLS_BUFFER_STALLED_ERROR = "bufferStalledError";
+const LIVE_RESYNC_MIN_SEEK_SECS = 1;
+const LIVE_RESYNC_MAX_SEEK_SECS = 3;
+const LIVE_RESYNC_MAX_JUMP_SECS = 30;
+const LIVE_RESYNC_COOLDOWN_MS = 3_000;
+const LIVE_RESYNC_WAIT_CONFIRM_MS = 750;
+const LIVE_RESYNC_SILENT_STALL_MS = 3_000;
+const LIVE_BUFFER_SLOWDOWN_THRESHOLD_SECS = 12;
+const LIVE_BUFFER_RECOVERED_THRESHOLD_SECS = 20;
+const LIVE_BUFFER_RECOVERY_RATE = 0.97;
+const LIVE_BUFFER_CATCHUP_THRESHOLD_SECS = 30;
+const LIVE_BUFFER_CATCHUP_RATE = 1.08;
+const LIVE_BUFFER_MAX_LATENCY_SECS = 60;
+const LIVE_BUFFER_TARGET_LATENCY_SECS = 20;
+
+export interface BufferedTimeRange {
+  start: number;
+  end: number;
+}
+
+export function chooseLiveBufferPlaybackRate(
+  currentRate: number,
+  bufferedAhead: number,
+): number {
+  if (!Number.isFinite(bufferedAhead)) return 1;
+  if (currentRate < 1) {
+    return bufferedAhead < LIVE_BUFFER_RECOVERED_THRESHOLD_SECS
+      ? LIVE_BUFFER_RECOVERY_RATE
+      : 1;
+  }
+  if (currentRate > 1) {
+    return bufferedAhead > LIVE_BUFFER_RECOVERED_THRESHOLD_SECS
+      ? LIVE_BUFFER_CATCHUP_RATE
+      : 1;
+  }
+  if (bufferedAhead > LIVE_BUFFER_CATCHUP_THRESHOLD_SECS) {
+    return LIVE_BUFFER_CATCHUP_RATE;
+  }
+  return bufferedAhead < LIVE_BUFFER_SLOWDOWN_THRESHOLD_SECS
+    ? LIVE_BUFFER_RECOVERY_RATE
+    : 1;
+}
+
+function bufferedSecondsAhead(currentTime: number, ranges: BufferedTimeRange[]): number {
+  const currentRange = ranges.find(
+    (range) => currentTime >= range.start && currentTime < range.end,
+  );
+  return currentRange ? Math.max(0, currentRange.end - currentTime) : 0;
+}
+
+export function findLiveLatencyCatchUpTarget(
+  currentTime: number,
+  ranges: BufferedTimeRange[],
+  maxLatency = LIVE_BUFFER_MAX_LATENCY_SECS,
+  targetLatency = LIVE_BUFFER_TARGET_LATENCY_SECS,
+): number | null {
+  if (!Number.isFinite(currentTime)) return null;
+  const currentRange = ranges.find(
+    (range) => currentTime >= range.start && currentTime < range.end,
+  );
+  if (!currentRange || currentRange.end - currentTime <= maxLatency) {
+    return null;
+  }
+  const target = Math.max(
+    currentRange.start + MIN_PROGRESS_DELTA_SECS,
+    currentRange.end - targetLatency,
+  );
+  return target > currentTime + MIN_PROGRESS_DELTA_SECS ? target : null;
+}
+
+/**
+ * Choose a safe point already buffered by MSE when a live stream stops at a
+ * timestamp/keyframe discontinuity. Some IPTV MPEG-TS sources keep delivering
+ * data while leaving the playhead on an undecodable boundary; rebuilding the
+ * whole player loses far more video than moving to the next buffered keyframe.
+ */
+export function findLiveBufferResyncTarget(
+  currentTime: number,
+  ranges: BufferedTimeRange[],
+  maxJump = LIVE_RESYNC_MAX_JUMP_SECS,
+): number | null {
+  if (!Number.isFinite(currentTime) || ranges.length === 0) return null;
+
+  for (const range of ranges) {
+    if (!Number.isFinite(range.start) || !Number.isFinite(range.end) || range.end <= range.start) {
+      continue;
+    }
+
+    if (range.start > currentTime + MIN_PROGRESS_DELTA_SECS) {
+      const gap = range.start - currentTime;
+      if (gap > maxJump) return null;
+      return Math.min(range.end - 0.01, range.start + MIN_PROGRESS_DELTA_SECS);
+    }
+
+    if (
+      currentTime >= range.start - MIN_PROGRESS_DELTA_SECS &&
+      currentTime < range.end - MIN_PROGRESS_DELTA_SECS
+    ) {
+      const availableAdvance = range.end - currentTime - MIN_PROGRESS_DELTA_SECS;
+      const advance = Math.min(
+        LIVE_RESYNC_MAX_SEEK_SECS,
+        maxJump,
+        Math.max(LIVE_RESYNC_MIN_SEEK_SECS, availableAdvance),
+      );
+      const target = Math.min(range.end - MIN_PROGRESS_DELTA_SECS, currentTime + advance);
+      return target > currentTime + MIN_PROGRESS_DELTA_SECS ? target : null;
+    }
+  }
+
+  return null;
+}
 
 export function getHlsFatalRecoveryAction(type?: string): HlsFatalRecoveryAction {
   if (type === "networkError") return "restart_network";
@@ -436,7 +587,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     }
 
     if (meta.width || meta.codec || meta.audioCodec) {
-      setStreamMetadata(meta);
+      setStreamMetadata((previous) =>
+        areStreamMetadataEqual(previous, meta) ? previous : meta,
+      );
     }
   }, [videoElement]);
 
@@ -464,12 +617,10 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       };
       hlsEvents.on("hlsLevelSwitched", hlsHandler);
       hlsEvents.on("hlsManifestParsed", hlsHandler);
-      hlsEvents.on("hlsFragLoaded", hlsHandler);
       libCleanups.push(() => {
         try {
           hlsEvents.off("hlsLevelSwitched", hlsHandler);
           hlsEvents.off("hlsManifestParsed", hlsHandler);
-          hlsEvents.off("hlsFragLoaded", hlsHandler);
         } catch {}
       });
     }
@@ -478,11 +629,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     if (mpegts?.on && mpegts.off) {
       const mpegtsHandler = () => collectMetadata();
       mpegts.on("media_info", mpegtsHandler);
-      mpegts.on("statistics_info", mpegtsHandler);
       libCleanups.push(() => {
         try {
           mpegts.off?.("media_info", mpegtsHandler);
-          mpegts.off?.("statistics_info", mpegtsHandler);
         } catch {}
       });
     }
@@ -629,7 +778,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         lastProgressAt: performance.now(),
         lastCurrentTime: videoElement.currentTime,
         stallStartedAt: null as number | null,
+        lastResyncAt: Number.NEGATIVE_INFINITY,
       };
+      let resyncTimer: ReturnType<typeof setTimeout> | null = null;
 
       const handlers: Array<{ target: EventTarget; event: string; handler: EventListener }> = [];
       const addHandler = (target: EventTarget, event: string, handler: EventListener) => {
@@ -657,6 +808,105 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       };
 
+      const tryLiveBufferResync = () => {
+        if (
+          closed ||
+          !mpegtsPlayerRef.current ||
+          isPausedRef.current ||
+          videoElement.paused ||
+          performance.now() - monitor.lastResyncAt < LIVE_RESYNC_COOLDOWN_MS
+        ) {
+          return false;
+        }
+
+        const ranges: BufferedTimeRange[] = [];
+        for (let index = 0; index < videoElement.buffered.length; index += 1) {
+          ranges.push({
+            start: videoElement.buffered.start(index),
+            end: videoElement.buffered.end(index),
+          });
+        }
+        const from = videoElement.currentTime;
+        const target = findLiveBufferResyncTarget(from, ranges);
+        if (target === null || target <= from + MIN_PROGRESS_DELTA_SECS) {
+          return false;
+        }
+
+        monitor.lastResyncAt = performance.now();
+        monitor.lastCurrentTime = target;
+        monitor.lastProgressAt = monitor.lastResyncAt;
+        monitor.stallStartedAt = null;
+        logger.warn(
+          `[Player] Skipping ${(target - from).toFixed(2)}s buffered timestamp gap`,
+        );
+        videoElement.currentTime = target;
+        void videoElement.play().catch(() => {});
+        return true;
+      };
+
+      const adjustLiveBufferPlaybackRate = () => {
+        if (!mpegtsPlayerRef.current) return;
+        const ranges: BufferedTimeRange[] = [];
+        for (let index = 0; index < videoElement.buffered.length; index += 1) {
+          ranges.push({
+            start: videoElement.buffered.start(index),
+            end: videoElement.buffered.end(index),
+          });
+        }
+        const bufferedAhead = bufferedSecondsAhead(videoElement.currentTime, ranges);
+        const nextRate = chooseLiveBufferPlaybackRate(videoElement.playbackRate, bufferedAhead);
+        if (Math.abs(videoElement.playbackRate - nextRate) < 0.001) return;
+        videoElement.playbackRate = nextRate;
+        logger.info(
+          nextRate < 1
+            ? `[Player] Slowing live playback to ${nextRate.toFixed(2)}x to rebuild buffer`
+            : nextRate > 1
+              ? `[Player] Increasing live playback to ${nextRate.toFixed(2)}x to reduce latency`
+            : "[Player] Restored live playback to 1.00x",
+        );
+      };
+
+      const trimExcessiveLiveLatency = () => {
+        if (!mpegtsPlayerRef.current || videoElement.buffered.length === 0) return false;
+        const ranges: BufferedTimeRange[] = [];
+        for (let index = 0; index < videoElement.buffered.length; index += 1) {
+          ranges.push({
+            start: videoElement.buffered.start(index),
+            end: videoElement.buffered.end(index),
+          });
+        }
+        const from = videoElement.currentTime;
+        const target = findLiveLatencyCatchUpTarget(from, ranges);
+        if (target === null) return false;
+
+        const now = performance.now();
+        monitor.lastResyncAt = now;
+        monitor.lastCurrentTime = target;
+        monitor.lastProgressAt = now;
+        monitor.stallStartedAt = null;
+        logger.warn(
+          `[Player] Trimming ${(target - from).toFixed(1)}s accumulated live latency`,
+        );
+        videoElement.currentTime = target;
+        void videoElement.play().catch(() => {});
+        return true;
+      };
+
+      const clearResyncTimer = () => {
+        if (!resyncTimer) return;
+        clearTimeout(resyncTimer);
+        resyncTimer = null;
+      };
+
+      const scheduleLiveBufferResync = () => {
+        markPotentialStall();
+        if (resyncTimer) return;
+        resyncTimer = setTimeout(() => {
+          resyncTimer = null;
+          tryLiveBufferResync();
+        }, LIVE_RESYNC_WAIT_CONFIRM_MS);
+      };
+
       const triggerRuntimeIssue = (
         issue: PlaybackRecoveryIssue,
         reason: string,
@@ -669,6 +919,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       };
 
       addHandler(videoElement, "playing", () => {
+        clearResyncTimer();
         monitor.lastProgressAt = performance.now();
         monitor.lastCurrentTime = videoElement.currentTime;
         monitor.stallStartedAt = null;
@@ -677,14 +928,29 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         markProgress();
       });
       addHandler(videoElement, "canplay", () => {
+        clearResyncTimer();
         markProgress();
         monitor.stallStartedAt = null;
       });
       addHandler(videoElement, "waiting", () => {
-        markPotentialStall();
+        scheduleLiveBufferResync();
       });
       addHandler(videoElement, "stalled", () => {
-        markPotentialStall();
+        scheduleLiveBufferResync();
+      });
+      addHandler(videoElement, "pause", () => {
+        if (closed || isPausedRef.current || videoElement.ended) return;
+        logger.warn("[Player] Resuming an unexpected media pause");
+        window.setTimeout(() => {
+          if (
+            !closed &&
+            !isPausedRef.current &&
+            videoElement.paused &&
+            !videoElement.ended
+          ) {
+            void videoElement.play().catch(() => {});
+          }
+        }, 100);
       });
       addHandler(videoElement, "error", () => {
         const reason = readMediaErrorMessage(videoElement.error) ?? "Media error during playback";
@@ -777,13 +1043,16 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           isPausedRef.current ||
           videoElement.paused ||
           videoElement.seeking ||
-          videoElement.ended ||
-          document.visibilityState === "hidden"
+          videoElement.ended
         ) {
           return;
         }
 
         const now = performance.now();
+        if (trimExcessiveLiveLatency()) {
+          return;
+        }
+        adjustLiveBufferPlaybackRate();
         const currentTime = videoElement.currentTime;
         if (currentTime > monitor.lastCurrentTime + MIN_PROGRESS_DELTA_SECS) {
           monitor.lastCurrentTime = currentTime;
@@ -793,16 +1062,27 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
 
         if (monitor.stallStartedAt !== null) {
+          if (
+            now - monitor.stallStartedAt >= LIVE_RESYNC_WAIT_CONFIRM_MS &&
+            tryLiveBufferResync()
+          ) {
+            return;
+          }
           if (now - monitor.stallStartedAt >= PLAYBACK_STALL_GRACE_MS) {
             triggerRuntimeIssue("watchdog_stall", "Stream stalled during playback");
           }
           return;
         }
 
+        const noProgressDuration = now - monitor.lastProgressAt;
         if (
-          videoElement.readyState < HAVE_FUTURE_DATA &&
-          now - monitor.lastProgressAt >= PLAYBACK_NO_PROGRESS_STALL_MS
+          noProgressDuration >= LIVE_RESYNC_SILENT_STALL_MS &&
+          tryLiveBufferResync()
         ) {
+          return;
+        }
+
+        if (noProgressDuration >= PLAYBACK_NO_PROGRESS_STALL_MS) {
           triggerRuntimeIssue("watchdog_stall", "Playback stopped progressing");
         }
       }, PLAYBACK_WATCHDOG_POLL_MS);
@@ -810,6 +1090,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       runtimeMonitorCleanupRef.current = () => {
         closed = true;
         clearInterval(watchdog);
+        clearResyncTimer();
+        videoElement.playbackRate = 1;
         for (const h of handlers) {
           h.target.removeEventListener(h.event, h.handler);
         }
@@ -952,6 +1234,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           {
             // Trade a small amount of live latency for enough network cushion
             // to ride out the jitter common on IPTV provider connections.
+            enableWorker: true,
             enableStashBuffer: true,
             stashInitialSize: 1024 * 1024,
             lazyLoad: false,
@@ -1147,7 +1430,12 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           logger.warn("[Player] Could not get streaming proxy port");
         }
         const playbackUrl = proxyPort > 0
-          ? toStreamingProxyUrl(url, proxyPort, result.content_type === "live")
+          ? toStreamingProxyUrl(
+              url,
+              proxyPort,
+              result.content_type === "live",
+              result.content_type === "live",
+            )
           : url;
         if (proxyPort > 0) {
           logger.info("[Player] Trying mpegts.js via streaming proxy for", result.name);
@@ -1200,6 +1488,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
   const play = useCallback((result: ChannelResult) => {
     playbackSessionIdRef.current += 1;
+    isPausedRef.current = false;
     const sessionId = playbackSessionIdRef.current;
     clearRecoveryTimer();
     currentChannelRef.current = result;
@@ -1211,6 +1500,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
   const stop = useCallback(() => {
     playbackSessionIdRef.current += 1;
+    isPausedRef.current = false;
     clearRecoveryTimer();
     currentChannelRef.current = null;
     recoveryTimestampsRef.current = [];
@@ -1225,9 +1515,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
   const togglePause = useCallback(() => {
     if (videoElement.paused) {
+      isPausedRef.current = false;
       videoElement.play().catch(() => {});
       setIsPaused(false);
     } else {
+      isPausedRef.current = true;
       videoElement.pause();
       setIsPaused(true);
     }
