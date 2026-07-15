@@ -184,6 +184,27 @@ function toStreamingProxyUrl(
   return `http://127.0.0.1:${port}/stream?url=${encodeURIComponent(url)}${reconnectParam}${remuxParam}`;
 }
 
+export function getMpegtsPlaybackUrls(
+  url: string,
+  proxyPort: number,
+  isLive: boolean,
+): string[] {
+  if (proxyPort <= 0) {
+    return [url];
+  }
+
+  const proxyUrl = toStreamingProxyUrl(url, proxyPort, isLive, false);
+  return isLive
+    ? [toStreamingProxyUrl(url, proxyPort, true, true), proxyUrl]
+    : [proxyUrl];
+}
+
+export function shouldSuspendPlaybackWatchdog(
+  visibilityState: DocumentVisibilityState,
+): boolean {
+  return visibilityState === "hidden";
+}
+
 export function supportsNativeHlsPlayback(
   mediaElement: Pick<HTMLMediaElement, "canPlayType">,
 ): boolean {
@@ -1063,6 +1084,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         if (closed || playbackSessionIdRef.current !== sessionId) {
           return;
         }
+        if (shouldSuspendPlaybackWatchdog(document.visibilityState)) {
+          monitor.lastProgressAt = performance.now();
+          monitor.stallStartedAt = null;
+          return;
+        }
         if (playerStateRef.current !== "playing") {
           return;
         }
@@ -1456,25 +1482,29 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         } catch {
           logger.warn("[Player] Could not get streaming proxy port");
         }
-        const playbackUrl = proxyPort > 0
-          ? toStreamingProxyUrl(
-              url,
-              proxyPort,
-              result.content_type === "live",
-              result.content_type === "live",
-            )
-          : url;
+        const playbackUrls = getMpegtsPlaybackUrls(
+          url,
+          proxyPort,
+          result.content_type === "live",
+        );
         if (proxyPort > 0) {
           logger.info("[Player] Trying mpegts.js via streaming proxy for", result.name);
         } else {
           logger.info("[Player] Trying mpegts.js (raw URL) for", result.name);
         }
-        const mpegtsOk = await tryMpegtsPlayback(playbackUrl, abortController.signal);
-        if (!isCurrentPlayback()) {
-          return;
-        }
-        if (mpegtsOk && await handleSuccessfulStart()) {
-          return;
+        for (const [index, playbackUrl] of playbackUrls.entries()) {
+          if (index > 0) {
+            logger.warn(
+              "[Player] Remux playback failed; retrying live stream without ffmpeg",
+            );
+          }
+          const mpegtsOk = await tryMpegtsPlayback(playbackUrl, abortController.signal);
+          if (!isCurrentPlayback()) {
+            return;
+          }
+          if (mpegtsOk && await handleSuccessfulStart()) {
+            return;
+          }
         }
       }
 

@@ -19,6 +19,11 @@ const PROXY_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_sec
 /// proxy. These responses are finite and should stay bounded.
 const PROXY_BUFFERED_RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Buffered HLS manifests and segments can legitimately remain idle while an
+/// upstream finishes producing the next segment. Keep their per-read timeout
+/// aligned with the bounded response timeout.
+const PROXY_BUFFERED_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Per-read inactivity timeout — resets on every successful read, so it does NOT
 /// cap total stream duration. Only kills truly dead/stalled connections.
 const PROXY_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
@@ -535,7 +540,7 @@ async fn get_or_create_proxy_client(
     let client = build_proxy_client(
         accept_invalid_certs,
         PROXY_CONNECT_TIMEOUT,
-        PROXY_READ_TIMEOUT,
+        PROXY_BUFFERED_READ_TIMEOUT,
     );
 
     *guard = Some((client.clone(), accept_invalid_certs));
@@ -1100,7 +1105,15 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     (settings.user_agent.clone(), settings.accept_invalid_certs)
                 };
 
-                let client = get_or_create_proxy_client(state.inner(), accept_invalid_certs).await;
+                // Infinite live bodies need a much shorter inactivity timeout
+                // than buffered HLS responses so reconnects happen promptly.
+                // Keep this client local to the downstream playback session so
+                // its cookie jar is retained across upstream reconnects.
+                let client = build_proxy_client(
+                    accept_invalid_certs,
+                    PROXY_CONNECT_TIMEOUT,
+                    PROXY_READ_TIMEOUT,
+                );
 
                 let user_agent = HeaderValue::from_str(&user_agent)
                     .unwrap_or_else(|_| HeaderValue::from_static("TiviMate/5.1.6 (Android 12)"));

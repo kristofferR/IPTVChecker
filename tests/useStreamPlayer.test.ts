@@ -8,11 +8,13 @@ import {
   findLiveLatencyCatchUpTarget,
   formatPlaybackRecoveryMessage,
   getHlsFatalRecoveryAction,
+  getMpegtsPlaybackUrls,
   getNextPlaybackRecoveryAttempt,
   PLAYBACK_RECOVERY_WINDOW_MS,
   prunePlaybackRecoveryHistory,
   recordPlaybackRecoveryAttempt,
   shouldResetPlaybackRecoveryAttempts,
+  shouldSuspendPlaybackWatchdog,
   supportsNativeHlsPlayback,
   tryConvertToXtreamHls,
   type StreamMetadata,
@@ -59,6 +61,31 @@ describe("useStreamPlayer helpers", () => {
     ).toBe(true);
 
     expect(supportsNativeHlsPlayback(canPlayTypes({}))).toBe(false);
+  });
+
+  it("falls back to the reconnecting proxy when live remux is unavailable", () => {
+    const urls = getMpegtsPlaybackUrls("https://example.com/live.ts", 3210, true);
+
+    expect(urls).toHaveLength(2);
+    expect(urls[0]).toContain("reconnect=1");
+    expect(urls[0]).toContain("remux=1");
+    expect(urls[1]).toContain("reconnect=1");
+    expect(urls[1]).not.toContain("remux=1");
+  });
+
+  it("uses one non-remux URL for VOD and direct playback without a proxy", () => {
+    const vodUrls = getMpegtsPlaybackUrls("https://example.com/movie.ts", 3210, false);
+
+    expect(vodUrls).toHaveLength(1);
+    expect(vodUrls[0]).not.toContain("remux=1");
+    expect(getMpegtsPlaybackUrls("https://example.com/live.ts", 0, true)).toEqual([
+      "https://example.com/live.ts",
+    ]);
+  });
+
+  it("suspends playback watchdog recovery while the app is hidden", () => {
+    expect(shouldSuspendPlaybackWatchdog("hidden")).toBe(true);
+    expect(shouldSuspendPlaybackWatchdog("visible")).toBe(false);
   });
 
   it("converts common Xtream MPEG-TS URL forms to HLS", () => {
