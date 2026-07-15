@@ -876,7 +876,9 @@ export default function App() {
     [baseChromecast, wrappedCast],
   );
   const chromecastRef = useRef(chromecast);
-  chromecastRef.current = chromecast;
+  useEffect(() => {
+    chromecastRef.current = chromecast;
+  }, [chromecast]);
   const castSession = chromecast.session;
   const isCasting = isCastSessionActive(castSession);
 
@@ -2417,6 +2419,7 @@ export default function App() {
     const baseUrl = import.meta.env.DEV ? devUrl : window.location.origin;
     new WebviewWindow("settings", {
       url: `${baseUrl}?window=settings`,
+      ...(platform === "windows" ? { dataDirectory: "settings-webview" } : {}),
       title: "Settings",
       width: 620,
       height: 680,
@@ -2429,7 +2432,7 @@ export default function App() {
       hiddenTitle: true,
       titleBarStyle: "overlay",
     });
-  }, []);
+  }, [platform]);
   useEffect(() => {
     handleOpenSettingsRef.current = handleOpenSettings;
   }, [handleOpenSettings]);
@@ -2447,6 +2450,7 @@ export default function App() {
     const baseUrl = import.meta.env.DEV ? devUrl : window.location.origin;
     new WebviewWindow("log", {
       url: `${baseUrl}?window=log`,
+      ...(platform === "windows" ? { dataDirectory: "log-webview" } : {}),
       title: "Log",
       width: 900,
       height: 600,
@@ -2459,7 +2463,7 @@ export default function App() {
       hiddenTitle: true,
       titleBarStyle: "overlay",
     });
-  }, []);
+  }, [platform]);
   useEffect(() => {
     handleOpenLogRef.current = handleOpenLog;
   }, [handleOpenLog]);

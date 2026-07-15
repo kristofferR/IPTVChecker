@@ -7,7 +7,8 @@ use tauri::Manager;
 use url::{Host, Url};
 
 use crate::engine::ffmpeg::{
-    configure_background_process, graceful_kill, resolve_binary, GRACEFUL_KILL_TIMEOUT,
+    configure_background_process, graceful_kill, resolve_binary, sanitize_ffmpeg_stderr_line,
+    GRACEFUL_KILL_TIMEOUT,
 };
 use crate::state::AppState;
 
@@ -34,7 +35,7 @@ const STREAM_PACER_MAX_LEAD: std::time::Duration = std::time::Duration::from_sec
 /// A reqwest body chunk is small enough that it cannot legitimately span more
 /// than a few seconds of broadcast time. Larger PCR steps usually mean the
 /// provider switched clocks/PIDs or sent a corrupt timestamp.
-const STREAM_PACER_MAX_PCR_STEP: std::time::Duration = std::time::Duration::from_millis(250);
+const STREAM_PACER_MAX_PCR_STEP: std::time::Duration = std::time::Duration::from_secs(5);
 /// Never let a suspect transport clock put the proxy to sleep long enough for
 /// the browser's starvation watchdog to fire. Normal pacing delays stay well
 /// below this because the proxy sleeps after every body chunk.
@@ -754,7 +755,11 @@ where
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                log::debug!("[StreamProxy/remux] {}", line.replace(&original, &redacted));
+                let sanitized = sanitize_ffmpeg_stderr_line(&line);
+                log::debug!(
+                    "[StreamProxy/remux] {}",
+                    sanitized.replace(&original, &redacted)
+                );
             }
         });
     }
@@ -764,9 +769,10 @@ where
     let reader = tokio::spawn(async move {
         loop {
             let mut chunk = vec![0u8; 64 * 1024];
-            match stdout.read(&mut chunk).await {
-                Ok(0) => return StreamForwardOutcome::Completed,
-                Ok(read) => {
+            match tokio::time::timeout(PROXY_READ_TIMEOUT, stdout.read(&mut chunk)).await {
+                Err(_) => return StreamForwardOutcome::UpstreamReadTimeout,
+                Ok(Ok(0)) => return StreamForwardOutcome::Completed,
+                Ok(Ok(read)) => {
                     chunk.truncate(read);
                     let permits = read.min(STREAM_PROXY_READ_AHEAD_BYTES) as u32;
                     let permit = match budget.clone().acquire_many_owned(permits).await {
@@ -777,7 +783,9 @@ where
                         return StreamForwardOutcome::DownstreamClosed;
                     }
                 }
-                Err(_) => return StreamForwardOutcome::UpstreamReadError("ffmpeg stdout failed"),
+                Ok(Err(_)) => {
+                    return StreamForwardOutcome::UpstreamReadError("ffmpeg stdout failed")
+                }
             }
         }
     });
