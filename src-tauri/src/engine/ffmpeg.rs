@@ -343,7 +343,7 @@ fn stderr_excerpt(stderr: &str) -> String {
     truncate_stderr_summary(&tail)
 }
 
-fn sanitize_ffmpeg_stderr_line(line: &str) -> String {
+pub(crate) fn sanitize_ffmpeg_stderr_line(line: &str) -> String {
     let trimmed = strip_ffmpeg_log_prefix(line);
     if trimmed.contains("Input #") {
         if let Some((prefix, remainder)) = trimmed.split_once(" from '") {
