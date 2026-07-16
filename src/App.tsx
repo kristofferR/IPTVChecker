@@ -851,6 +851,12 @@ export default function App() {
   const streamPlayer = useStreamPlayer({
     onPlaybackFailed: (result) => handlePlaybackFailedRef.current?.(result),
   });
+  const {
+    activeChannelIndex: playbackChannelIndex,
+    play: playStream,
+    stop: stopStream,
+    videoElement: playbackVideoElement,
+  } = streamPlayer;
 
   const baseChromecast = useChromecast();
   // mDNS discovery is best-effort; the device list can drop a device between
@@ -869,6 +875,10 @@ export default function App() {
     () => ({ ...baseChromecast, cast: wrappedCast }),
     [baseChromecast, wrappedCast],
   );
+  const chromecastRef = useRef(chromecast);
+  useEffect(() => {
+    chromecastRef.current = chromecast;
+  }, [chromecast]);
   const castSession = chromecast.session;
   const isCasting = isCastSessionActive(castSession);
 
@@ -2409,6 +2419,7 @@ export default function App() {
     const baseUrl = import.meta.env.DEV ? devUrl : window.location.origin;
     new WebviewWindow("settings", {
       url: `${baseUrl}?window=settings`,
+      ...(platform === "windows" ? { dataDirectory: "settings-webview" } : {}),
       title: "Settings",
       width: 620,
       height: 680,
@@ -2421,7 +2432,7 @@ export default function App() {
       hiddenTitle: true,
       titleBarStyle: "overlay",
     });
-  }, []);
+  }, [platform]);
   useEffect(() => {
     handleOpenSettingsRef.current = handleOpenSettings;
   }, [handleOpenSettings]);
@@ -2439,6 +2450,7 @@ export default function App() {
     const baseUrl = import.meta.env.DEV ? devUrl : window.location.origin;
     new WebviewWindow("log", {
       url: `${baseUrl}?window=log`,
+      ...(platform === "windows" ? { dataDirectory: "log-webview" } : {}),
       title: "Log",
       width: 900,
       height: 600,
@@ -2451,7 +2463,7 @@ export default function App() {
       hiddenTitle: true,
       titleBarStyle: "overlay",
     });
-  }, []);
+  }, [platform]);
   useEffect(() => {
     handleOpenLogRef.current = handleOpenLog;
   }, [handleOpenLog]);
@@ -2505,48 +2517,49 @@ export default function App() {
       // instead of starting a competing local stream. Single-connection IPTV
       // upstreams can only feed one consumer; starting local play would kick
       // the cast pipeline's ffmpeg off the upstream.
-      if (isCastSessionActive(chromecast.session)) {
-        const session = chromecast.session;
+      const currentChromecast = chromecastRef.current;
+      if (isCastSessionActive(currentChromecast.session)) {
+        const session = currentChromecast.session;
         const device =
-          chromecast.devices.find((d) => d.id === session.deviceId) ??
+          currentChromecast.devices.find((d) => d.id === session.deviceId) ??
           (lastCastDeviceRef.current?.id === session.deviceId
             ? lastCastDeviceRef.current
             : null);
         if (device) {
-          void chromecast.cast(device, buildCastRequest(result));
+          void currentChromecast.cast(device, buildCastRequest(result));
           return;
         }
         // Fall through to local play if we can't resolve the device — better
         // than silently doing nothing.
       }
       getStore().setPlayIntentActive(true);
-      streamPlayer.play(result);
+      playStream(result);
     },
-    [chromecast, streamPlayer],
+    [playStream],
   );
 
   const handleStopPlayer = useCallback(() => {
     getStore().setPlayIntentActive(false);
-    streamPlayer.stop();
-  }, [streamPlayer]);
+    stopStream();
+  }, [stopStream]);
 
   const handlePip = useCallback(() => {
-    const video = streamPlayer.videoElement;
+    const video = playbackVideoElement;
     if (!video) return;
     if (document.pictureInPictureElement) {
       document.exitPictureInPicture().catch(() => {});
     } else if (document.pictureInPictureEnabled) {
       video.requestPictureInPicture().catch(() => {});
     }
-  }, [streamPlayer.videoElement]);
+  }, [playbackVideoElement]);
 
   const handleProceedPlayback = useCallback(() => {
     if (!pendingPlaybackChannel) return;
     const channel = pendingPlaybackChannel;
     getStore().setPendingPlaybackChannel(null);
     getStore().setPlayIntentActive(true);
-    streamPlayer.play(channel);
-  }, [pendingPlaybackChannel, streamPlayer]);
+    playStream(channel);
+  }, [pendingPlaybackChannel, playStream]);
 
   // Merge player-derived metadata into ChannelResult for unscanned channels
   const lastMergedMetaRef = useRef<{ index: number; meta: typeof streamPlayer.streamMetadata } | null>(null);
@@ -2620,14 +2633,14 @@ export default function App() {
   );
   // Auto-stop player when selected channel changes or is deselected
   useEffect(() => {
-    if (streamPlayer.activeChannelIndex === null) return;
+    if (playbackChannelIndex === null) return;
     if (!liveSelectedChannel) {
       getStore().setPlayIntentActive(false);
-      streamPlayer.stop();
-    } else if (liveSelectedChannel.index !== streamPlayer.activeChannelIndex) {
-      streamPlayer.stop();
+      stopStream();
+    } else if (liveSelectedChannel.index !== playbackChannelIndex) {
+      stopStream();
     }
-  }, [liveSelectedChannel, streamPlayer]);
+  }, [liveSelectedChannel, playbackChannelIndex, stopStream]);
 
   const headerPortalRef = useRef<HTMLDivElement>(null);
   const [toolbarHeight, setToolbarHeight] = useState(0);

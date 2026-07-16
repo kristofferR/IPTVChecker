@@ -6,6 +6,10 @@ use std::sync::Arc;
 use tauri::Manager;
 use url::{Host, Url};
 
+use crate::engine::ffmpeg::{
+    configure_background_process, graceful_kill, resolve_binary, sanitize_ffmpeg_stderr_line,
+    GRACEFUL_KILL_TIMEOUT,
+};
 use crate::state::AppState;
 
 /// Fail fast if upstream's TCP/TLS handshake stalls.
@@ -15,9 +19,42 @@ const PROXY_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_sec
 /// proxy. These responses are finite and should stay bounded.
 const PROXY_BUFFERED_RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Buffered HLS manifests and segments can legitimately remain idle while an
+/// upstream finishes producing the next segment. Keep their per-read timeout
+/// aligned with the bounded response timeout.
+const PROXY_BUFFERED_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Per-read inactivity timeout — resets on every successful read, so it does NOT
 /// cap total stream duration. Only kills truly dead/stalled connections.
-const PROXY_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+const PROXY_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
+
+/// Short retry delay for a live MPEG-TS source that drops its upstream socket.
+/// The downstream connection stays open while the proxy reconnects, so the
+/// browser player can keep its MediaSource and buffered video intact.
+const STREAM_RECONNECT_BASE_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
+const STREAM_RECONNECT_MAX_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
+const MPEG_TS_PACKET_SIZE: usize = 188;
+const MPEG_TS_PCR_TICKS_PER_SECOND: u64 = 27_000_000;
+const MPEG_TS_PCR_WRAP_TICKS: u64 = (1u64 << 33) * 300;
+const STREAM_PACER_MAX_LEAD: std::time::Duration = std::time::Duration::from_secs(90);
+/// A reqwest body chunk is small enough that it cannot legitimately span more
+/// than a few seconds of broadcast time. Larger PCR steps usually mean the
+/// provider switched clocks/PIDs or sent a corrupt timestamp.
+const STREAM_PACER_MAX_PCR_STEP: std::time::Duration = std::time::Duration::from_secs(5);
+/// Never let a suspect transport clock put the proxy to sleep long enough for
+/// the browser's starvation watchdog to fire. Normal pacing delays stay well
+/// below this because the proxy sleeps after every body chunk.
+const STREAM_PACER_MAX_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
+/// Read live providers eagerly into a bounded queue so downstream pacing does
+/// not apply TCP backpressure to bursty servers and make them skip TS packets.
+const STREAM_PROXY_READ_AHEAD_BYTES: usize = 64 * 1024 * 1024;
+const STREAM_PROXY_READ_AHEAD_CHUNKS: usize = 4_096;
+const REMUX_PACER_MAX_LEAD: std::time::Duration = std::time::Duration::from_secs(12);
+/// Rebuild a monotonic packet clock from each encoded stream's packet
+/// durations. This preserves video composition offsets (PTS-DTS), including
+/// B-frames, while removing every provider timestamp hole without decoding.
+const CONTIGUOUS_VIDEO_TIMESTAMPS: &str = "setts=dts=if(eq(N\\,0)\\,0\\,PREV_OUTDTS+if(gt(PREV_OUTDURATION\\,0)\\,PREV_OUTDURATION\\,if(gt(DURATION\\,0)\\,DURATION\\,1))):pts=if(eq(N\\,0)\\,PTS-STARTDTS\\,PREV_OUTDTS+if(gt(PREV_OUTDURATION\\,0)\\,PREV_OUTDURATION\\,if(gt(DURATION\\,0)\\,DURATION\\,1))+PTS-DTS)";
+const CONTIGUOUS_AUDIO_TIMESTAMPS: &str = "setts=ts=if(eq(N\\,0)\\,0\\,PREV_OUTDTS+if(gt(PREV_OUTDURATION\\,0)\\,PREV_OUTDURATION\\,if(gt(DURATION\\,0)\\,DURATION\\,1)))";
 
 /// Base64url-encode an original stream URL for the proxy scheme.
 pub fn encode_proxy_url(original: &str) -> String {
@@ -213,6 +250,46 @@ pub(crate) fn redact_url(url: &str) -> String {
             if !parsed.username().is_empty() || parsed.password().is_some() {
                 let _ = parsed.set_username("***");
                 let _ = parsed.set_password(None);
+            }
+            // Xtream credentials live in path segments rather than URL userinfo:
+            // /live/{username}/{password}/{stream-id}.ts. Those URLs are the
+            // most common source of playback diagnostics, so query/userinfo
+            // redaction alone would still leak both credentials.
+            let segments = parsed
+                .path_segments()
+                .map(|segments| segments.map(str::to_string).collect::<Vec<_>>())
+                .unwrap_or_default();
+            let credential_start = if segments.len() >= 4
+                && matches!(
+                    segments[0].to_ascii_lowercase().as_str(),
+                    "live" | "movie" | "series"
+                ) {
+                Some(1)
+            } else if segments.len() == 3
+                && segments[2]
+                    .split('.')
+                    .next()
+                    .is_some_and(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()))
+            {
+                Some(0)
+            } else {
+                None
+            };
+            if let Some(start) = credential_start {
+                let redacted_segments = segments
+                    .iter()
+                    .enumerate()
+                    .map(|(index, segment)| {
+                        if index == start || index == start + 1 {
+                            "***"
+                        } else {
+                            segment.as_str()
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                if let Ok(mut path) = parsed.path_segments_mut() {
+                    path.clear().extend(redacted_segments);
+                }
             }
             parsed.to_string()
         }
@@ -463,7 +540,7 @@ async fn get_or_create_proxy_client(
     let client = build_proxy_client(
         accept_invalid_certs,
         PROXY_CONNECT_TIMEOUT,
-        PROXY_READ_TIMEOUT,
+        PROXY_BUFFERED_READ_TIMEOUT,
     );
 
     *guard = Some((client.clone(), accept_invalid_certs));
@@ -478,48 +555,486 @@ enum StreamForwardOutcome {
     DownstreamClosed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StreamForwardResult {
+    outcome: StreamForwardOutcome,
+    bytes_forwarded: u64,
+}
+
+struct TransportStreamPacer {
+    scan_tail: Vec<u8>,
+    pcr_pid: Option<u16>,
+    last_pcr: Option<u64>,
+    media_elapsed_ticks: u64,
+    wall_anchor: Option<std::time::Instant>,
+    announced: bool,
+    reanchor_count: u32,
+    max_lead: std::time::Duration,
+}
+
+impl TransportStreamPacer {
+    fn new() -> Self {
+        Self::with_max_lead(STREAM_PACER_MAX_LEAD)
+    }
+
+    fn with_max_lead(max_lead: std::time::Duration) -> Self {
+        Self {
+            scan_tail: Vec::with_capacity(MPEG_TS_PACKET_SIZE * 4),
+            pcr_pid: None,
+            last_pcr: None,
+            media_elapsed_ticks: 0,
+            wall_anchor: None,
+            announced: false,
+            reanchor_count: 0,
+            max_lead,
+        }
+    }
+
+    fn delay_for_payload(&mut self, payload: &[u8]) -> std::time::Duration {
+        let mut scan = Vec::with_capacity(self.scan_tail.len() + payload.len());
+        scan.extend_from_slice(&self.scan_tail);
+        scan.extend_from_slice(payload);
+
+        let latest_pcr = latest_transport_stream_pcr(&scan, self.pcr_pid);
+        let tail_start = scan.len().saturating_sub(MPEG_TS_PACKET_SIZE * 4);
+        self.scan_tail.clear();
+        self.scan_tail.extend_from_slice(&scan[tail_start..]);
+
+        let Some((pcr_pid, pcr)) = latest_pcr else {
+            return std::time::Duration::ZERO;
+        };
+        self.pcr_pid.get_or_insert(pcr_pid);
+
+        let Some(previous_pcr) = self.last_pcr else {
+            self.last_pcr = Some(pcr);
+            self.wall_anchor = Some(std::time::Instant::now());
+            return std::time::Duration::ZERO;
+        };
+
+        let delta = if pcr >= previous_pcr {
+            pcr - previous_pcr
+        } else {
+            MPEG_TS_PCR_WRAP_TICKS - previous_pcr + pcr
+        };
+        let discontinuity_ticks = duration_to_pcr_ticks(STREAM_PACER_MAX_PCR_STEP);
+        if delta > discontinuity_ticks {
+            self.last_pcr = Some(pcr);
+            // The broadcaster may reset or jump its PCR at a program boundary.
+            // Keep the accumulated wall-clock budget so each discontinuity
+            // cannot grant another full forward-buffer allowance.
+            return std::time::Duration::ZERO;
+        }
+
+        self.last_pcr = Some(pcr);
+        self.media_elapsed_ticks = self.media_elapsed_ticks.saturating_add(delta);
+        let media_elapsed = duration_from_pcr_ticks(self.media_elapsed_ticks);
+        let target_wall_elapsed = media_elapsed.saturating_sub(self.max_lead);
+        let wall_elapsed = self
+            .wall_anchor
+            .map(|anchor| anchor.elapsed())
+            .unwrap_or_default();
+        let delay = target_wall_elapsed.saturating_sub(wall_elapsed);
+        if delay > STREAM_PACER_MAX_DELAY {
+            // A bad-but-plausible PCR series can otherwise accumulate into one
+            // very long sleep. Re-anchor at real-time pacing without granting
+            // another forward-buffer allowance; the browser keeps the buffer
+            // it already has and the next payload is paced normally.
+            self.media_elapsed_ticks = duration_to_pcr_ticks(self.max_lead);
+            self.wall_anchor = Some(std::time::Instant::now());
+            self.reanchor_count = self.reanchor_count.saturating_add(1);
+            log::warn!(
+                "[StreamProxy] Re-anchored transport clock after an implausible pacing delay"
+            );
+            return std::time::Duration::ZERO;
+        }
+        delay
+    }
+}
+
+fn spawn_playback_remux(
+    app: &tauri::AppHandle,
+    upstream_url: &str,
+    user_agent: &str,
+    accept_invalid_certs: bool,
+) -> std::io::Result<tokio::process::Child> {
+    let ffmpeg = resolve_binary(app, "ffmpeg");
+    let mut command = tokio::process::Command::new(&ffmpeg);
+    configure_background_process(&mut command);
+    command
+        .kill_on_drop(true)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .arg("-hide_banner")
+        .arg("-nostdin")
+        .arg("-loglevel")
+        .arg("warning")
+        .arg("-fflags")
+        .arg("+genpts+discardcorrupt")
+        // MPEG-TS is marked as timestamp-discontinuous, so ffmpeg can remove
+        // jumps by shifting subsequent DTS/PTS. Its 10-second default misses
+        // the 2-5 second holes that repeatedly freeze WebView's MediaSource.
+        .arg("-dts_delta_threshold")
+        .arg("0.5")
+        .arg("-thread_queue_size")
+        .arg("4096")
+        .arg("-user_agent")
+        .arg(user_agent);
+
+    if accept_invalid_certs && upstream_url.to_ascii_lowercase().starts_with("https://") {
+        command.arg("-tls_verify").arg("0");
+    }
+
+    command
+        .arg("-reconnect")
+        .arg("1")
+        .arg("-reconnect_at_eof")
+        .arg("1")
+        .arg("-reconnect_streamed")
+        .arg("1")
+        .arg("-reconnect_delay_max")
+        .arg("5")
+        .arg("-i")
+        .arg(upstream_url)
+        .arg("-map")
+        .arg("0:v:0?")
+        .arg("-map")
+        .arg("0:a:0?")
+        .arg("-sn")
+        .arg("-dn")
+        .arg("-c")
+        .arg("copy")
+        // Some providers reconnect in short finite bursts whose timestamps
+        // have small holes. Even ffmpeg's discontinuity correction can leave
+        // those holes at the MSE boundary. setts is a bitstream filter, so it
+        // repairs the packet clock without the CPU/quality cost of transcoding.
+        .arg("-bsf:v")
+        .arg(CONTIGUOUS_VIDEO_TIMESTAMPS)
+        .arg("-bsf:a")
+        .arg(CONTIGUOUS_AUDIO_TIMESTAMPS)
+        .arg("-avoid_negative_ts")
+        .arg("make_zero")
+        .arg("-max_interleave_delta")
+        .arg("1000000")
+        .arg("-muxdelay")
+        .arg("0")
+        .arg("-muxpreload")
+        .arg("0")
+        .arg("-mpegts_flags")
+        .arg("+resend_headers+initial_discontinuity")
+        .arg("-flush_packets")
+        .arg("1")
+        .arg("-f")
+        .arg("mpegts")
+        .arg("pipe:1");
+
+    command.spawn().map_err(|error| {
+        std::io::Error::new(
+            error.kind(),
+            format!("failed to start playback remux with {ffmpeg}: {error}"),
+        )
+    })
+}
+
+async fn forward_playback_remux_as_chunked_stream<W>(
+    writer: &mut W,
+    mut child: tokio::process::Child,
+    upstream_url: &str,
+) -> StreamForwardResult
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+    let Some(mut stdout) = child.stdout.take() else {
+        graceful_kill(&mut child, GRACEFUL_KILL_TIMEOUT).await;
+        return StreamForwardResult {
+            outcome: StreamForwardOutcome::UpstreamReadError("ffmpeg stdout unavailable"),
+            bytes_forwarded: 0,
+        };
+    };
+
+    if let Some(stderr) = child.stderr.take() {
+        let redacted = redact_url(upstream_url);
+        let original = upstream_url.to_string();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let sanitized = sanitize_ffmpeg_stderr_line(&line);
+                log::debug!(
+                    "[StreamProxy/remux] {}",
+                    sanitized.replace(&original, &redacted)
+                );
+            }
+        });
+    }
+
+    let budget = Arc::new(tokio::sync::Semaphore::new(STREAM_PROXY_READ_AHEAD_BYTES));
+    let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel(STREAM_PROXY_READ_AHEAD_CHUNKS);
+    let reader = tokio::spawn(async move {
+        loop {
+            let mut chunk = vec![0u8; 64 * 1024];
+            match tokio::time::timeout(PROXY_READ_TIMEOUT, stdout.read(&mut chunk)).await {
+                Err(_) => return StreamForwardOutcome::UpstreamReadTimeout,
+                Ok(Ok(0)) => return StreamForwardOutcome::Completed,
+                Ok(Ok(read)) => {
+                    chunk.truncate(read);
+                    let permits = read.min(STREAM_PROXY_READ_AHEAD_BYTES) as u32;
+                    let permit = match budget.clone().acquire_many_owned(permits).await {
+                        Ok(permit) => permit,
+                        Err(_) => return StreamForwardOutcome::DownstreamClosed,
+                    };
+                    if chunk_tx.send((chunk, permit)).await.is_err() {
+                        return StreamForwardOutcome::DownstreamClosed;
+                    }
+                }
+                Ok(Err(_)) => {
+                    return StreamForwardOutcome::UpstreamReadError("ffmpeg stdout failed")
+                }
+            }
+        }
+    });
+
+    let mut bytes_forwarded = 0u64;
+    let mut pacer = TransportStreamPacer::with_max_lead(REMUX_PACER_MAX_LEAD);
+    while let Some((chunk, _budget_permit)) = chunk_rx.recv().await {
+        let delay = pacer.delay_for_payload(&chunk);
+        if !pacer.announced && pacer.wall_anchor.is_some() {
+            pacer.announced = true;
+            log::info!("[StreamProxy/remux] Enabled normalized transport-clock pacing");
+        }
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
+
+        let size_line = format!("{:x}\r\n", chunk.len());
+        if writer.write_all(size_line.as_bytes()).await.is_err()
+            || writer.write_all(&chunk).await.is_err()
+            || writer.write_all(b"\r\n").await.is_err()
+        {
+            reader.abort();
+            graceful_kill(&mut child, GRACEFUL_KILL_TIMEOUT).await;
+            return StreamForwardResult {
+                outcome: StreamForwardOutcome::DownstreamClosed,
+                bytes_forwarded,
+            };
+        }
+        bytes_forwarded = bytes_forwarded.saturating_add(chunk.len() as u64);
+    }
+
+    let outcome = match reader.await {
+        Ok(outcome) => outcome,
+        Err(_) => StreamForwardOutcome::UpstreamReadError("ffmpeg reader task failed"),
+    };
+    let status = match tokio::time::timeout(GRACEFUL_KILL_TIMEOUT, child.wait()).await {
+        Ok(Ok(status)) => Some(status),
+        _ => {
+            graceful_kill(&mut child, GRACEFUL_KILL_TIMEOUT).await;
+            None
+        }
+    };
+    if status.is_some_and(|status| !status.success()) {
+        log::warn!(
+            "[StreamProxy/remux] ffmpeg stopped while streaming {}",
+            redact_url(upstream_url)
+        );
+    }
+
+    StreamForwardResult {
+        outcome,
+        bytes_forwarded,
+    }
+}
+
+fn duration_to_pcr_ticks(duration: std::time::Duration) -> u64 {
+    duration
+        .as_secs()
+        .saturating_mul(MPEG_TS_PCR_TICKS_PER_SECOND)
+        .saturating_add(
+            u64::from(duration.subsec_nanos()).saturating_mul(MPEG_TS_PCR_TICKS_PER_SECOND)
+                / 1_000_000_000,
+        )
+}
+
+fn duration_from_pcr_ticks(ticks: u64) -> std::time::Duration {
+    let seconds = ticks / MPEG_TS_PCR_TICKS_PER_SECOND;
+    let remainder = ticks % MPEG_TS_PCR_TICKS_PER_SECOND;
+    let nanos = remainder.saturating_mul(1_000_000_000) / MPEG_TS_PCR_TICKS_PER_SECOND;
+    std::time::Duration::new(seconds, nanos as u32)
+}
+
+fn latest_transport_stream_pcr(data: &[u8], preferred_pid: Option<u16>) -> Option<(u16, u64)> {
+    if data.len() < MPEG_TS_PACKET_SIZE * 3 {
+        return None;
+    }
+
+    // Lock onto one packet boundary using three sync bytes. Scanning every
+    // 0x47 byte can mistake H.264 payload data for a TS header and feed bogus
+    // PCR jumps into the pacer.
+    let max_offset = MPEG_TS_PACKET_SIZE.min(data.len() - MPEG_TS_PACKET_SIZE * 2);
+    let sync_offset = (0..max_offset).find(|offset| {
+        data[*offset] == 0x47
+            && data[*offset + MPEG_TS_PACKET_SIZE] == 0x47
+            && data[*offset + MPEG_TS_PACKET_SIZE * 2] == 0x47
+    })?;
+
+    let mut latest = None;
+    let mut offset = sync_offset;
+    while offset + MPEG_TS_PACKET_SIZE <= data.len() {
+        let packet = &data[offset..offset + MPEG_TS_PACKET_SIZE];
+        if let Some(pid) = transport_stream_packet_pid(packet) {
+            if preferred_pid.map_or(true, |preferred| preferred == pid) {
+                if let Some(pcr) = transport_stream_packet_pcr(packet) {
+                    latest = Some((pid, pcr));
+                }
+            }
+        }
+        offset += MPEG_TS_PACKET_SIZE;
+    }
+    latest
+}
+
+fn transport_stream_packet_pid(packet: &[u8]) -> Option<u16> {
+    if packet.len() < MPEG_TS_PACKET_SIZE || packet[0] != 0x47 {
+        return None;
+    }
+    Some((u16::from(packet[1] & 0x1f) << 8) | u16::from(packet[2]))
+}
+
+fn transport_stream_packet_pcr(packet: &[u8]) -> Option<u64> {
+    if packet.len() < MPEG_TS_PACKET_SIZE || packet[0] != 0x47 {
+        return None;
+    }
+    let adaptation_control = (packet[3] >> 4) & 0x03;
+    if adaptation_control != 0x02 && adaptation_control != 0x03 {
+        return None;
+    }
+    let adaptation_length = packet[4] as usize;
+    if adaptation_length < 7 || 5 + adaptation_length > MPEG_TS_PACKET_SIZE {
+        return None;
+    }
+    if packet[5] & 0x10 == 0 {
+        return None;
+    }
+
+    let pcr_base = (u64::from(packet[6]) << 25)
+        | (u64::from(packet[7]) << 17)
+        | (u64::from(packet[8]) << 9)
+        | (u64::from(packet[9]) << 1)
+        | (u64::from(packet[10]) >> 7);
+    let pcr_extension = (u64::from(packet[10] & 0x01) << 8) | u64::from(packet[11]);
+    Some(pcr_base * 300 + pcr_extension)
+}
+
 async fn forward_response_as_chunked_stream<W>(
     writer: &mut W,
     response: reqwest::Response,
-) -> StreamForwardOutcome
+    mut pacer: Option<&mut TransportStreamPacer>,
+) -> StreamForwardResult
 where
     W: tokio::io::AsyncWrite + Unpin,
 {
     use futures::StreamExt;
     use tokio::io::AsyncWriteExt;
 
-    let mut outcome = StreamForwardOutcome::Completed;
-    let mut stream = response.bytes_stream();
-    while let Some(chunk_result) = stream.next().await {
-        match chunk_result {
-            Ok(chunk) => {
-                let size_line = format!("{:x}\r\n", chunk.len());
-                if writer.write_all(size_line.as_bytes()).await.is_err() {
-                    return StreamForwardOutcome::DownstreamClosed;
+    let mut bytes_forwarded = 0u64;
+    let budget = Arc::new(tokio::sync::Semaphore::new(STREAM_PROXY_READ_AHEAD_BYTES));
+    let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel(STREAM_PROXY_READ_AHEAD_CHUNKS);
+    let reader = tokio::spawn(async move {
+        let mut stream = response.bytes_stream();
+        while let Some(chunk_result) = stream.next().await {
+            match chunk_result {
+                Ok(chunk) => {
+                    if chunk.is_empty() {
+                        continue;
+                    }
+                    let permits = chunk.len().min(STREAM_PROXY_READ_AHEAD_BYTES) as u32;
+                    let permit = match budget.clone().acquire_many_owned(permits).await {
+                        Ok(permit) => permit,
+                        Err(_) => return StreamForwardOutcome::DownstreamClosed,
+                    };
+                    if chunk_tx.send((chunk, permit)).await.is_err() {
+                        return StreamForwardOutcome::DownstreamClosed;
+                    }
                 }
-                if writer.write_all(&chunk).await.is_err() {
-                    return StreamForwardOutcome::DownstreamClosed;
+                Err(err) => {
+                    return if err.is_timeout() {
+                        StreamForwardOutcome::UpstreamReadTimeout
+                    } else {
+                        StreamForwardOutcome::UpstreamReadError(reqwest_error_kind(&err))
+                    };
                 }
-                if writer.write_all(b"\r\n").await.is_err() {
-                    return StreamForwardOutcome::DownstreamClosed;
-                }
-            }
-            Err(err) => {
-                outcome = if err.is_timeout() {
-                    StreamForwardOutcome::UpstreamReadTimeout
-                } else {
-                    StreamForwardOutcome::UpstreamReadError(reqwest_error_kind(&err))
-                };
-                break;
             }
         }
+        StreamForwardOutcome::Completed
+    });
+
+    while let Some((chunk, _budget_permit)) = chunk_rx.recv().await {
+        if let Some(pacer) = pacer.as_deref_mut() {
+            let delay = pacer.delay_for_payload(&chunk);
+            if !pacer.announced && pacer.wall_anchor.is_some() {
+                pacer.announced = true;
+                log::info!("[StreamProxy] Enabled transport-clock pacing for bursty live stream");
+            }
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+        }
+        let size_line = format!("{:x}\r\n", chunk.len());
+        if writer.write_all(size_line.as_bytes()).await.is_err()
+            || writer.write_all(&chunk).await.is_err()
+            || writer.write_all(b"\r\n").await.is_err()
+        {
+            reader.abort();
+            return StreamForwardResult {
+                outcome: StreamForwardOutcome::DownstreamClosed,
+                bytes_forwarded,
+            };
+        }
+        bytes_forwarded = bytes_forwarded.saturating_add(chunk.len() as u64);
     }
 
-    if writer.write_all(b"0\r\n\r\n").await.is_err() {
-        return StreamForwardOutcome::DownstreamClosed;
-    }
+    let outcome = match reader.await {
+        Ok(outcome) => outcome,
+        Err(_) => StreamForwardOutcome::UpstreamReadError("reader task failed"),
+    };
 
-    outcome
+    StreamForwardResult {
+        outcome,
+        bytes_forwarded,
+    }
+}
+
+async fn finish_chunked_stream<W>(writer: &mut W) -> bool
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    use tokio::io::AsyncWriteExt;
+    writer.write_all(b"0\r\n\r\n").await.is_ok()
+}
+
+fn stream_reconnect_delay(consecutive_empty_attempts: u32) -> std::time::Duration {
+    let multiplier = 1u32 << consecutive_empty_attempts.min(4);
+    STREAM_RECONNECT_BASE_DELAY
+        .saturating_mul(multiplier)
+        .min(STREAM_RECONNECT_MAX_DELAY)
+}
+
+async fn wait_for_stream_reconnect(
+    socket: &mut tokio::net::TcpStream,
+    delay: std::time::Duration,
+) -> bool {
+    use tokio::io::AsyncReadExt;
+
+    let mut downstream_probe = [0u8; 1];
+    match tokio::time::timeout(delay, socket.read(&mut downstream_probe)).await {
+        Err(_) => true,
+        Ok(Ok(0)) | Ok(Err(_)) => false,
+        // The browser should not send another request on this Connection: close
+        // response, but consuming an unexpected byte is harmless and lets the
+        // reconnect proceed.
+        Ok(Ok(_)) => true,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -563,14 +1078,16 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                 let request_str = String::from_utf8_lossy(&buf[..n]);
 
                 // Parse GET /stream?url=ENCODED_URL HTTP/1.1
-                let url = match parse_stream_request(&request_str) {
-                    Some(url) => url,
+                let request = match parse_stream_request(&request_str) {
+                    Some(request) => request,
                     None => {
                         let response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
                         let _ = socket.write_all(response.as_bytes()).await;
                         return;
                     }
                 };
+                let url = request.url;
+                let reconnect = request.reconnect;
 
                 if !is_safe_upstream_url(&url).await {
                     log::warn!("[StreamProxy] Blocked request to private/local target");
@@ -588,16 +1105,76 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     (settings.user_agent.clone(), settings.accept_invalid_certs)
                 };
 
-                let client = get_or_create_proxy_client(state.inner(), accept_invalid_certs).await;
+                // Infinite live bodies need a much shorter inactivity timeout
+                // than buffered HLS responses so reconnects happen promptly.
+                // Keep this client local to the downstream playback session so
+                // its cookie jar is retained across upstream reconnects.
+                let client = build_proxy_client(
+                    accept_invalid_certs,
+                    PROXY_CONNECT_TIMEOUT,
+                    PROXY_READ_TIMEOUT,
+                );
+
+                let user_agent = HeaderValue::from_str(&user_agent)
+                    .unwrap_or_else(|_| HeaderValue::from_static("TiviMate/5.1.6 (Android 12)"));
+
+                if request.remux {
+                    let user_agent_text =
+                        user_agent.to_str().unwrap_or("TiviMate/5.1.6 (Android 12)");
+                    let child = match spawn_playback_remux(
+                        &app_handle,
+                        &url,
+                        user_agent_text,
+                        accept_invalid_certs,
+                    ) {
+                        Ok(child) => child,
+                        Err(error) => {
+                            log::warn!(
+                                "[StreamProxy/remux] Could not start for {}: {}",
+                                redact_url(&url),
+                                error
+                            );
+                            let body = "Playback remux unavailable";
+                            let response = format!(
+                                "HTTP/1.1 502 Bad Gateway\r\nContent-Length: {}\r\n\r\n{}",
+                                body.len(),
+                                body
+                            );
+                            let _ = socket.write_all(response.as_bytes()).await;
+                            return;
+                        }
+                    };
+
+                    let header = concat!(
+                        "HTTP/1.1 200 OK\r\n",
+                        "Content-Type: video/mp2t\r\n",
+                        "Access-Control-Allow-Origin: *\r\n",
+                        "Transfer-Encoding: chunked\r\n",
+                        "Cache-Control: no-cache\r\n",
+                        "Connection: close\r\n",
+                        "\r\n"
+                    );
+                    if socket.write_all(header.as_bytes()).await.is_err() {
+                        let mut child = child;
+                        graceful_kill(&mut child, GRACEFUL_KILL_TIMEOUT).await;
+                        return;
+                    }
+
+                    log::info!(
+                        "[StreamProxy/remux] Normalizing live MPEG-TS timestamps for {}",
+                        redact_url(&url)
+                    );
+                    let forward =
+                        forward_playback_remux_as_chunked_stream(&mut socket, child, &url).await;
+                    if forward.outcome != StreamForwardOutcome::DownstreamClosed {
+                        let _ = finish_chunked_stream(&mut socket).await;
+                    }
+                    return;
+                }
 
                 let response = match client
                     .get(&url)
-                    .header(
-                        USER_AGENT,
-                        HeaderValue::from_str(&user_agent).unwrap_or_else(|_| {
-                            HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")
-                        }),
-                    )
+                    .header(USER_AGENT, user_agent.clone())
                     .send()
                     .await
                 {
@@ -649,31 +1226,98 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     return;
                 }
 
-                match forward_response_as_chunked_stream(&mut socket, response).await {
-                    StreamForwardOutcome::Completed => {
-                        log::debug!(
-                            "[StreamProxy] Upstream stream ended normally for {}",
-                            redact_url(&url)
-                        );
-                    }
-                    StreamForwardOutcome::UpstreamReadTimeout => {
-                        log::warn!(
-                            "[StreamProxy] Upstream stream stalled/timed out for {}",
-                            redact_url(&url)
-                        );
-                    }
-                    StreamForwardOutcome::UpstreamReadError(kind) => {
-                        log::warn!(
-                            "[StreamProxy] Upstream stream terminated for {} ({})",
-                            redact_url(&url),
-                            kind
-                        );
-                    }
-                    StreamForwardOutcome::DownstreamClosed => {
+                // Error responses are finite and should be delivered normally.
+                // Only successful live bodies are safe to concatenate after an
+                // upstream reconnect.
+                if !reconnect || !status.is_success() {
+                    let _ = forward_response_as_chunked_stream(&mut socket, response, None).await;
+                    let _ = finish_chunked_stream(&mut socket).await;
+                    return;
+                }
+
+                let mut response = response;
+                let mut pacer = TransportStreamPacer::new();
+                let mut reconnects = 0u32;
+                let mut consecutive_empty_attempts = 0u32;
+
+                loop {
+                    let forward =
+                        forward_response_as_chunked_stream(&mut socket, response, Some(&mut pacer))
+                            .await;
+                    if forward.outcome == StreamForwardOutcome::DownstreamClosed {
                         log::debug!(
                             "[StreamProxy] Downstream disconnected while streaming {}",
                             redact_url(&url)
                         );
+                        return;
+                    }
+
+                    if forward.bytes_forwarded > 0 {
+                        consecutive_empty_attempts = 0;
+                    } else {
+                        consecutive_empty_attempts = consecutive_empty_attempts.saturating_add(1);
+                    }
+                    reconnects = reconnects.saturating_add(1);
+
+                    match forward.outcome {
+                        StreamForwardOutcome::Completed => log::warn!(
+                            "[StreamProxy] Upstream stream ended for {}; reconnecting (#{})",
+                            redact_url(&url),
+                            reconnects
+                        ),
+                        StreamForwardOutcome::UpstreamReadTimeout => log::warn!(
+                            "[StreamProxy] Upstream stream stalled/timed out for {}; reconnecting (#{})",
+                            redact_url(&url),
+                            reconnects
+                        ),
+                        StreamForwardOutcome::UpstreamReadError(kind) => log::warn!(
+                            "[StreamProxy] Upstream stream terminated for {} ({}); reconnecting (#{})",
+                            redact_url(&url),
+                            kind,
+                            reconnects
+                        ),
+                        StreamForwardOutcome::DownstreamClosed => unreachable!(),
+                    }
+
+                    loop {
+                        let delay = stream_reconnect_delay(consecutive_empty_attempts);
+                        if !wait_for_stream_reconnect(&mut socket, delay).await {
+                            log::debug!(
+                                "[StreamProxy] Downstream closed while reconnecting {}",
+                                redact_url(&url)
+                            );
+                            return;
+                        }
+
+                        match client
+                            .get(&url)
+                            .header(USER_AGENT, user_agent.clone())
+                            .send()
+                            .await
+                        {
+                            Ok(next_response) if next_response.status().is_success() => {
+                                response = next_response;
+                                break;
+                            }
+                            Ok(next_response) => {
+                                consecutive_empty_attempts =
+                                    consecutive_empty_attempts.saturating_add(1);
+                                log::warn!(
+                                    "[StreamProxy] Reconnect for {} returned HTTP {}; retrying",
+                                    redact_url(&url),
+                                    next_response.status()
+                                );
+                            }
+                            Err(err) => {
+                                consecutive_empty_attempts =
+                                    consecutive_empty_attempts.saturating_add(1);
+                                log::warn!(
+                                    "[StreamProxy] Reconnect failed for {} ({}); retrying",
+                                    redact_url(&url),
+                                    reqwest_error_kind(&err)
+                                );
+                            }
+                        }
                     }
                 }
             });
@@ -683,13 +1327,34 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
     Ok(port)
 }
 
-fn parse_stream_request(request: &str) -> Option<String> {
+#[derive(Debug, PartialEq, Eq)]
+struct StreamRequest {
+    url: String,
+    reconnect: bool,
+    remux: bool,
+}
+
+fn parse_stream_request(request: &str) -> Option<StreamRequest> {
     let first_line = request.lines().next()?;
     // GET /stream?url=ENCODED HTTP/1.1
     let path = first_line.split_whitespace().nth(1)?;
     let url = Url::parse(&format!("http://localhost{path}")).ok()?;
-    url.query_pairs()
-        .find_map(|(key, value)| (key == "url").then(|| value.into_owned()))
+    let mut upstream_url = None;
+    let mut reconnect = false;
+    let mut remux = false;
+    for (key, value) in url.query_pairs() {
+        match key.as_ref() {
+            "url" => upstream_url = Some(value.into_owned()),
+            "reconnect" => reconnect = value == "1" || value.eq_ignore_ascii_case("true"),
+            "remux" => remux = value == "1" || value.eq_ignore_ascii_case("true"),
+            _ => {}
+        }
+    }
+    upstream_url.map(|url| StreamRequest {
+        url,
+        reconnect,
+        remux,
+    })
 }
 
 #[cfg(test)]
@@ -779,6 +1444,18 @@ mod tests {
     #[test]
     fn decode_invalid_base64_returns_none() {
         assert!(decode_proxy_url("!!!invalid!!!").is_none());
+    }
+
+    #[test]
+    fn redact_url_hides_xtream_path_credentials() {
+        assert_eq!(
+            redact_url("http://provider.example/live/user-name/pass-word/12345.ts"),
+            "http://provider.example/live/***/***/12345.ts"
+        );
+        assert_eq!(
+            redact_url("https://provider.example/user/pass/67890?token=secret"),
+            "https://provider.example/***/***/67890?***"
+        );
     }
 
     #[test]
@@ -950,8 +1627,38 @@ segment.ts
         let request =
             "GET /stream?url=https%3A%2F%2Fexample.com%2Fstr%C3%B8m%3Ftoken%3Dabc%2B123 HTTP/1.1\r\nHost: localhost\r\n\r\n";
         assert_eq!(
-            parse_stream_request(request).as_deref(),
-            Some("https://example.com/strøm?token=abc+123")
+            parse_stream_request(request),
+            Some(StreamRequest {
+                url: "https://example.com/strøm?token=abc+123".to_string(),
+                reconnect: false,
+                remux: false,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_stream_request_enables_opt_in_reconnect() {
+        let request = "GET /stream?url=https%3A%2F%2Fexample.com%2Flive.ts&reconnect=1 HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert_eq!(
+            parse_stream_request(request),
+            Some(StreamRequest {
+                url: "https://example.com/live.ts".to_string(),
+                reconnect: true,
+                remux: false,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_stream_request_enables_opt_in_remux() {
+        let request = "GET /stream?url=https%3A%2F%2Fexample.com%2Flive.ts&reconnect=1&remux=true HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert_eq!(
+            parse_stream_request(request),
+            Some(StreamRequest {
+                url: "https://example.com/live.ts".to_string(),
+                reconnect: true,
+                remux: true,
+            })
         );
     }
 
@@ -983,10 +1690,11 @@ segment.ts
 
         let started = Instant::now();
         let mut sink = tokio::io::sink();
-        let outcome = forward_response_as_chunked_stream(&mut sink, response).await;
+        let result = forward_response_as_chunked_stream(&mut sink, response, None).await;
         let elapsed = started.elapsed();
 
-        assert_eq!(outcome, StreamForwardOutcome::Completed);
+        assert_eq!(result.outcome, StreamForwardOutcome::Completed);
+        assert_eq!(result.bytes_forwarded, 192);
         assert!(
             elapsed > simulated_old_total_timeout,
             "stream completed too quickly to cover the old timeout window: {:?}",
@@ -1012,11 +1720,206 @@ segment.ts
             .expect("stream request should succeed");
 
         let mut sink = tokio::io::sink();
-        let outcome = forward_response_as_chunked_stream(&mut sink, response).await;
+        let result = forward_response_as_chunked_stream(&mut sink, response, None).await;
 
-        assert_eq!(outcome, StreamForwardOutcome::UpstreamReadTimeout);
+        assert_eq!(result.outcome, StreamForwardOutcome::UpstreamReadTimeout);
+        assert_eq!(result.bytes_forwarded, 64);
 
         server_handle.await.expect("server task should finish");
+    }
+
+    #[tokio::test]
+    async fn reconnected_upstreams_share_one_downstream_chunked_response() {
+        let (first_url, first_server) = spawn_chunked_upstream(
+            vec![TestStreamChunk {
+                body: vec![0x01, 0x02],
+                delay_after: Duration::ZERO,
+            }],
+            Duration::ZERO,
+        )
+        .await;
+        let (second_url, second_server) = spawn_chunked_upstream(
+            vec![TestStreamChunk {
+                body: vec![0x03, 0x04, 0x05],
+                delay_after: Duration::ZERO,
+            }],
+            Duration::ZERO,
+        )
+        .await;
+        let client = build_proxy_client(false, Duration::from_secs(1), Duration::from_secs(1));
+        let first_response = client.get(&first_url).send().await.unwrap();
+        let second_response = client.get(&second_url).send().await.unwrap();
+        let mut downstream = Vec::new();
+
+        let first = forward_response_as_chunked_stream(&mut downstream, first_response, None).await;
+        let second =
+            forward_response_as_chunked_stream(&mut downstream, second_response, None).await;
+        assert!(finish_chunked_stream(&mut downstream).await);
+
+        assert_eq!(first.bytes_forwarded, 2);
+        assert_eq!(second.bytes_forwarded, 3);
+        assert_eq!(
+            downstream,
+            b"2\r\n\x01\x02\r\n3\r\n\x03\x04\x05\r\n0\r\n\r\n"
+        );
+        first_server.await.expect("first server task should finish");
+        second_server
+            .await
+            .expect("second server task should finish");
+    }
+
+    #[test]
+    fn reconnect_delay_backs_off_and_caps() {
+        assert_eq!(stream_reconnect_delay(0), Duration::from_millis(500));
+        assert_eq!(stream_reconnect_delay(1), Duration::from_secs(1));
+        assert_eq!(stream_reconnect_delay(3), Duration::from_secs(4));
+        assert_eq!(stream_reconnect_delay(8), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn parses_mpeg_ts_program_clock_reference() {
+        let pcr_base = 123_456_789u64;
+        let pcr_extension = 42u64;
+        let mut packet = vec![0xff; MPEG_TS_PACKET_SIZE];
+        packet[0] = 0x47;
+        packet[1] = 0x01;
+        packet[2] = 0x00;
+        packet[3] = 0x20;
+        packet[4] = 7;
+        packet[5] = 0x10;
+        packet[6] = (pcr_base >> 25) as u8;
+        packet[7] = (pcr_base >> 17) as u8;
+        packet[8] = (pcr_base >> 9) as u8;
+        packet[9] = (pcr_base >> 1) as u8;
+        packet[10] = (((pcr_base & 1) << 7) | 0x7e | (pcr_extension >> 8)) as u8;
+        packet[11] = pcr_extension as u8;
+
+        assert_eq!(
+            transport_stream_packet_pcr(&packet),
+            Some(pcr_base * 300 + pcr_extension)
+        );
+        assert_eq!(
+            duration_from_pcr_ticks(MPEG_TS_PCR_TICKS_PER_SECOND),
+            Duration::from_secs(1)
+        );
+    }
+
+    #[test]
+    fn pcr_discontinuity_preserves_accumulated_pacing_budget() {
+        let make_payload = |milliseconds: &[u64]| {
+            let mut payload = Vec::with_capacity(milliseconds.len() * MPEG_TS_PACKET_SIZE);
+            for millisecond in milliseconds {
+                let pcr_base = millisecond * 90;
+                let mut packet = vec![0xff; MPEG_TS_PACKET_SIZE];
+                packet[0] = 0x47;
+                packet[1] = 0x01;
+                packet[2] = 0x00;
+                packet[3] = 0x20;
+                packet[4] = 7;
+                packet[5] = 0x10;
+                packet[6] = (pcr_base >> 25) as u8;
+                packet[7] = (pcr_base >> 17) as u8;
+                packet[8] = (pcr_base >> 9) as u8;
+                packet[9] = (pcr_base >> 1) as u8;
+                packet[10] = (((pcr_base & 1) << 7) | 0x7e) as u8;
+                packet[11] = 0;
+                payload.extend_from_slice(&packet);
+            }
+            payload
+        };
+
+        let mut pacer = TransportStreamPacer::new();
+        assert_eq!(
+            pacer.delay_for_payload(&make_payload(&[0, 0, 0])),
+            Duration::ZERO
+        );
+        for step in 1..=360 {
+            let milliseconds = step * 250;
+            assert_eq!(
+                pacer
+                    .delay_for_payload(&make_payload(&[milliseconds, milliseconds, milliseconds,])),
+                Duration::ZERO
+            );
+        }
+        let first_delay = pacer.delay_for_payload(&make_payload(&[90_250, 90_250, 90_250]));
+        assert!(first_delay > Duration::from_millis(200));
+        pacer.wall_anchor = pacer.wall_anchor.map(|anchor| anchor - first_delay);
+
+        let second_delay = pacer.delay_for_payload(&make_payload(&[90_500, 90_500, 90_500]));
+        assert!(second_delay > Duration::from_millis(200));
+        pacer.wall_anchor = pacer.wall_anchor.map(|anchor| anchor - second_delay);
+
+        assert_eq!(
+            pacer.delay_for_payload(&make_payload(&[200_000, 200_000, 200_000])),
+            Duration::ZERO
+        );
+        assert!(
+            pacer.delay_for_payload(&make_payload(&[200_250, 200_250, 200_250]))
+                > Duration::from_millis(200)
+        );
+        assert_eq!(pacer.reanchor_count, 0);
+    }
+
+    #[test]
+    fn pcr_pacer_reanchors_instead_of_returning_a_starvation_delay() {
+        let make_payload = |milliseconds: &[u64]| {
+            let mut payload = Vec::with_capacity(milliseconds.len() * MPEG_TS_PACKET_SIZE);
+            for millisecond in milliseconds {
+                let pcr_base = millisecond * 90;
+                let mut packet = vec![0xff; MPEG_TS_PACKET_SIZE];
+                packet[0] = 0x47;
+                packet[1] = 0x01;
+                packet[2] = 0x00;
+                packet[3] = 0x20;
+                packet[4] = 7;
+                packet[5] = 0x10;
+                packet[6] = (pcr_base >> 25) as u8;
+                packet[7] = (pcr_base >> 17) as u8;
+                packet[8] = (pcr_base >> 9) as u8;
+                packet[9] = (pcr_base >> 1) as u8;
+                packet[10] = (((pcr_base & 1) << 7) | 0x7e) as u8;
+                packet[11] = 0;
+                payload.extend_from_slice(&packet);
+            }
+            payload
+        };
+
+        let mut pacer = TransportStreamPacer::new();
+        assert_eq!(
+            pacer.delay_for_payload(&make_payload(&[0, 0, 0])),
+            Duration::ZERO
+        );
+        for step in 1..=360 {
+            let milliseconds = step * 250;
+            assert_eq!(
+                pacer
+                    .delay_for_payload(&make_payload(&[milliseconds, milliseconds, milliseconds,])),
+                Duration::ZERO
+            );
+        }
+        assert!(
+            pacer.delay_for_payload(&make_payload(&[90_250, 90_250, 90_250]))
+                > Duration::from_millis(200)
+        );
+        for step in 362..=380 {
+            let milliseconds = step * 250;
+            assert!(!pacer
+                .delay_for_payload(&make_payload(&[milliseconds, milliseconds, milliseconds,]))
+                .is_zero());
+        }
+        assert_eq!(
+            pacer.delay_for_payload(&make_payload(&[95_250, 95_250, 95_250])),
+            Duration::ZERO
+        );
+        assert_eq!(pacer.reanchor_count, 1);
+        assert_eq!(
+            pacer.media_elapsed_ticks,
+            duration_to_pcr_ticks(pacer.max_lead)
+        );
+
+        let resumed_delay = pacer.delay_for_payload(&make_payload(&[95_500, 95_500, 95_500]));
+        assert!(resumed_delay > Duration::from_millis(200));
+        assert!(resumed_delay <= STREAM_PACER_MAX_DELAY);
     }
 
     #[tokio::test]
