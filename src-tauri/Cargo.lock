@@ -2514,7 +2514,7 @@ checksum = "d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2"
 
 [[package]]
 name = "iptv-checker"
-version = "1.5.3"
+version = "1.6.0"
 dependencies = [
  "base64 0.22.1",
  "cast-sender",
