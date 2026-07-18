@@ -876,12 +876,14 @@ async fn handle_connection(
     user_agent: String,
     resolved_origin: Arc<Mutex<Option<Url>>>,
 ) -> std::io::Result<()> {
-    let mut buf = vec![0u8; 8192];
-    let n = socket.read(&mut buf).await?;
-    if n == 0 {
-        return Ok(());
-    }
-    let request = String::from_utf8_lossy(&buf[..n]);
+    // Read the full request head — some Cast receivers split the request
+    // line and Range header across TCP segments.
+    let request_bytes =
+        match crate::engine::proxy_common::read_http_request_head(&mut socket, 8192).await? {
+            Some(bytes) => bytes,
+            None => return Ok(()),
+        };
+    let request = String::from_utf8_lossy(&request_bytes);
     let method = request
         .lines()
         .next()
