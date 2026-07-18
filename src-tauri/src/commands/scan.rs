@@ -294,15 +294,18 @@ async fn compute_shared_url_result(
         diagnostics_ms: 0.0,
     };
 
-    if !matches!(status, ChannelStatus::Alive | ChannelStatus::Drm) || cancel.is_cancelled() {
-        let effective_status = if cancel.is_cancelled() {
-            ChannelStatus::Dead
-        } else {
-            status
-        };
+    // A cancel that lands after the check finished must not rewrite a
+    // completed verdict (possibly Alive) to Dead — that would emit and
+    // checkpoint a lie. Bail with Cancelled so the channel stays unscanned
+    // and resume re-checks it, matching the diagnostics cancel paths.
+    if cancel.is_cancelled() {
+        return Err(AppError::Cancelled);
+    }
+
+    if !matches!(status, ChannelStatus::Alive | ChannelStatus::Drm) {
         return Ok((
             SharedUrlResult {
-                status: effective_status,
+                status,
                 drm_system: None,
                 latency_ms,
                 codec: None,
