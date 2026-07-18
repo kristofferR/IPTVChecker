@@ -33,7 +33,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use reqwest::header::{HeaderValue, CONTENT_TYPE, USER_AGENT};
 use tauri::{AppHandle, Manager};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -1623,6 +1623,7 @@ fn decode_segment(encoded: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use tokio::io::AsyncReadExt;
     use super::*;
 
     #[test]

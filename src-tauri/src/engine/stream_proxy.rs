@@ -1147,7 +1147,7 @@ async fn wait_for_stream_reconnect(
 /// Start a localhost HTTP proxy that streams upstream responses.
 /// Returns the port the server is listening on.
 pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncWriteExt;
     use tokio::net::TcpListener;
 
     let listener = TcpListener::bind("127.0.0.1:0").await?;
@@ -1488,9 +1488,10 @@ fn parse_stream_request(request: &str) -> Option<StreamRequest> {
 
 #[cfg(test)]
 mod tests {
+    use tokio::io::AsyncReadExt;
     use super::*;
     use std::time::{Duration, Instant};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncWriteExt;
     use tokio::net::TcpListener;
 
     #[derive(Clone)]
