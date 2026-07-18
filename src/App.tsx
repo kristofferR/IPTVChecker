@@ -303,14 +303,8 @@ function SelectedChannelSidebar({
 
 function ScanRuntimeEffects({
   refreshHistory,
-  reportAutoRevealBlockedRef,
-  reportAutoRevealDoneRef,
-  reportWasAutoShownRef,
 }: {
   refreshHistory: () => Promise<void>;
-  reportAutoRevealBlockedRef: { current: boolean };
-  reportAutoRevealDoneRef: { current: boolean };
-  reportWasAutoShownRef: { current: boolean };
 }) {
   const playlist = useAppStore((s) => s.playlist);
   const progress = useAppStore((s) => s.progress);
@@ -327,11 +321,8 @@ function ScanRuntimeEffects({
   const lastOsProgressUpdateMsRef = useRef(0);
 
   useEffect(() => {
-    reportAutoRevealBlockedRef.current = false;
-    reportAutoRevealDoneRef.current = false;
-    reportWasAutoShownRef.current = false;
-    getStore().setShowReportPanel(false);
-  }, [playlist, reportAutoRevealBlockedRef, reportAutoRevealDoneRef, reportWasAutoShownRef]);
+    getStore().resetReportAutoReveal();
+  }, [playlist]);
 
   useEffect(() => {
     const previous = reportAutoRevealPreviousScanStateRef.current;
@@ -340,22 +331,11 @@ function ScanRuntimeEffects({
       !isScanActive(previous);
 
     if (scanJustStarted) {
-      reportAutoRevealBlockedRef.current = false;
-      reportAutoRevealDoneRef.current = false;
-      if (reportWasAutoShownRef.current && showReportPanel) {
-        getStore().setShowReportPanel(false);
-      }
-      reportWasAutoShownRef.current = false;
+      getStore().prepareReportAutoRevealForScanStart();
     }
 
     reportAutoRevealPreviousScanStateRef.current = scanState;
-  }, [
-    reportAutoRevealBlockedRef,
-    reportAutoRevealDoneRef,
-    reportWasAutoShownRef,
-    scanState,
-    showReportPanel,
-  ]);
+  }, [scanState, showReportPanel]);
 
   useEffect(() => {
     if (!playlist || showReportPanel) {
@@ -364,7 +344,8 @@ function ScanRuntimeEffects({
     if (!reportAutoReveal) {
       return;
     }
-    if (reportAutoRevealBlockedRef.current || reportAutoRevealDoneRef.current) {
+    const { reportAutoRevealBlocked, reportAutoRevealDone } = getStore();
+    if (reportAutoRevealBlocked || reportAutoRevealDone) {
       return;
     }
 
@@ -379,19 +360,8 @@ function ScanRuntimeEffects({
       return;
     }
 
-    reportAutoRevealDoneRef.current = true;
-    reportWasAutoShownRef.current = true;
-    getStore().setShowReportPanel(true);
-  }, [
-    playlist,
-    progress,
-    reportAutoReveal,
-    reportAutoRevealBlockedRef,
-    reportAutoRevealDoneRef,
-    reportWasAutoShownRef,
-    scanState,
-    showReportPanel,
-  ]);
+    getStore().autoRevealReportPanel();
+  }, [playlist, progress, reportAutoReveal, scanState, showReportPanel]);
 
   useEffect(() => {
     const previousScanState = previousScanStateRef.current;
@@ -644,9 +614,6 @@ export default function App() {
     savedXtreamTestEntry,
     setSavedXtreamTestEntry,
   } = usePlaylistSources({ initFromPlaylist, syncFromPlaylist });
-  const reportAutoRevealBlockedRef = useRef(false);
-  const reportAutoRevealDoneRef = useRef(false);
-  const reportWasAutoShownRef = useRef(false);
 
   useEffect(() => {
     document.documentElement.dataset.platform = platform;
@@ -1112,30 +1079,13 @@ export default function App() {
     });
   }, [platform]);
 
-  const markManualReportVisibility = useCallback((nextVisible: boolean) => {
-    reportWasAutoShownRef.current = false;
-    const isActiveScan = isScanActive(getStore().scanState);
-    if (!isActiveScan) {
-      return;
-    }
-    if (nextVisible) {
-      reportAutoRevealBlockedRef.current = false;
-      reportAutoRevealDoneRef.current = true;
-      return;
-    }
-    reportAutoRevealBlockedRef.current = true;
+  const handleToggleReport = useCallback(() => {
+    getStore().toggleReportPanel();
   }, []);
 
-  const handleToggleReport = useCallback(() => {
-    const next = !showReportPanel;
-    markManualReportVisibility(next);
-    getStore().setShowReportPanel(next);
-  }, [showReportPanel, markManualReportVisibility]);
-
   const handleCloseReport = useCallback(() => {
-    markManualReportVisibility(false);
-    getStore().setShowReportPanel(false);
-  }, [markManualReportVisibility]);
+    getStore().setReportPanelManually(false);
+  }, []);
 
   const handleOpenExternal = useCallback(async (result: ChannelResult) => {
     try {
@@ -1454,9 +1404,6 @@ export default function App() {
     <div className="flex flex-col h-screen bg-surface">
       <ScanRuntimeEffects
         refreshHistory={refreshHistory}
-        reportAutoRevealBlockedRef={reportAutoRevealBlockedRef}
-        reportAutoRevealDoneRef={reportAutoRevealDoneRef}
-        reportWasAutoShownRef={reportWasAutoShownRef}
       />
       <div
         ref={toolbarMeasureRef}
