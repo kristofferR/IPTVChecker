@@ -660,26 +660,39 @@ export default function App() {
 
   // Sync settings changes from the settings window
   useEffect(() => {
+    let cancelled = false;
     let off: (() => void) | undefined;
     listen<AppSettings>("settings-changed", (event) => {
       applyExternalSettings(event.payload);
     }).then((unlisten) => {
+      // Release immediately if cleanup ran while listen() was in flight.
+      if (cancelled) {
+        unlisten();
+        return;
+      }
       off = unlisten;
     });
-    return () => off?.();
+    return () => {
+      cancelled = true;
+      off?.();
+    };
   }, [applyExternalSettings]);
 
   useEffect(() => {
     startLongTaskObserver();
   }, []);
 
-  // Check ffmpeg on mount
+  // Check ffmpeg on mount. A failed IPC check counts as unavailable.
   useEffect(() => {
-    checkFfmpegAvailable().then(([ffmpeg, ffprobe]) => {
-      if (!ffmpeg || !ffprobe) {
+    checkFfmpegAvailable()
+      .then(([ffmpeg, ffprobe]) => {
+        if (!ffmpeg || !ffprobe) {
+          getStore().setFfmpegWarning(true);
+        }
+      })
+      .catch(() => {
         getStore().setFfmpegWarning(true);
-      }
-    });
+      });
   }, []);
 
   const openSourceDialog = useCallback((state: OpenSourceDialogState) => {
