@@ -36,7 +36,6 @@ export const createUiSlice: StateCreator<AppStore, [], [], UiSlice> = (set, get)
 
   setPlatform: (platform) => set({ platform, isMac: platform === "macos" }),
   setSidebarHidden: (sidebarHidden) => set({ sidebarHidden }),
-  toggleSidebar: () => set((state) => ({ sidebarHidden: !state.sidebarHidden })),
   setSidebarWidth: (sidebarWidth) => set({ sidebarWidth }),
   // Manual visibility changes own the auto-reveal bookkeeping so every
   // entry point (toolbar, menu, stats bar) behaves identically: during an
