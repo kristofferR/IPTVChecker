@@ -186,7 +186,7 @@ async fn compute_shared_url_result(
         // combined diagnostics pass below is both the liveness check and the
         // metadata/screenshot/bitrate probe.
         Ok(checker::ChannelCheckOutcome {
-            status: "Alive".to_string(),
+            status: ChannelStatus::Alive,
             stream_url: Some(channel_url.to_string()),
             latency_ms: None,
             retries_used: 0,
@@ -225,7 +225,7 @@ async fn compute_shared_url_result(
     };
 
     let (
-        status_str,
+        checked_status,
         stream_url,
         latency_ms,
         retry_count,
@@ -244,7 +244,7 @@ async fn compute_shared_url_result(
         ),
         Err(AppError::Cancelled) => return Err(AppError::Cancelled),
         Err(error) => (
-            "Dead".to_string(),
+            ChannelStatus::Dead,
             None,
             None,
             0,
@@ -260,31 +260,21 @@ async fn compute_shared_url_result(
     };
     let check_ms = check_started_at.elapsed().as_secs_f64() * 1000.0;
 
-    let final_status_str = if status_str == "Geoblocked" && test_geoblock {
+    let status = if checked_status == ChannelStatus::Geoblocked && test_geoblock {
         if let Some(proxies) = proxy_list {
             if !proxies.is_empty() {
                 proxy::confirm_geoblock(channel_url, proxies, timeout).await
             } else {
-                status_str
+                checked_status
             }
         } else {
-            status_str
+            checked_status
         }
     } else {
-        status_str
+        checked_status
     };
 
-    let status = match final_status_str.as_str() {
-        "Alive" => ChannelStatus::Alive,
-        "DRM" => ChannelStatus::Drm,
-        "Dead" => ChannelStatus::Dead,
-        "Placeholder" => ChannelStatus::Placeholder,
-        "Geoblocked" => ChannelStatus::Geoblocked,
-        "Geoblocked (Confirmed)" => ChannelStatus::GeoblockedConfirmed,
-        "Geoblocked (Unconfirmed)" => ChannelStatus::GeoblockedUnconfirmed,
-        _ => ChannelStatus::Dead,
-    };
-    channel_log.final_verdict = final_status_str;
+    channel_log.final_verdict = status.to_string();
     if channel_log.final_reason.is_none() {
         channel_log.final_reason = error_reason.clone();
     }
@@ -2578,17 +2568,7 @@ pub async fn quick_check_channel(
     };
 
     let (status, stream_url, latency_ms, error_reason) = match outcome {
-        Ok(o) => {
-            let status = match o.status.as_str() {
-                "Alive" => ChannelStatus::Alive,
-                "DRM" => ChannelStatus::Drm,
-                "Geoblocked" => ChannelStatus::Geoblocked,
-                "Geoblocked (Confirmed)" => ChannelStatus::GeoblockedConfirmed,
-                "Geoblocked (Unconfirmed)" => ChannelStatus::GeoblockedUnconfirmed,
-                _ => ChannelStatus::Dead,
-            };
-            (status, o.stream_url, o.latency_ms, o.last_error_reason)
-        }
+        Ok(o) => (o.status, o.stream_url, o.latency_ms, o.last_error_reason),
         Err(_) => (ChannelStatus::Dead, None, None, None),
     };
 

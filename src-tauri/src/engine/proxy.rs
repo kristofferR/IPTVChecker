@@ -193,7 +193,11 @@ pub async fn test_with_proxy(url: &str, proxy: &str, timeout: f64, retries: u32)
 }
 
 /// Confirm geoblock by testing with up to 3 random proxies.
-pub async fn confirm_geoblock(url: &str, proxy_list: &[String], timeout: f64) -> String {
+pub async fn confirm_geoblock(
+    url: &str,
+    proxy_list: &[String],
+    timeout: f64,
+) -> crate::models::channel::ChannelStatus {
     use rand::seq::IndexedRandom;
 
     // Collect sample before any await to avoid Send issues with rng
@@ -206,11 +210,11 @@ pub async fn confirm_geoblock(url: &str, proxy_list: &[String], timeout: f64) ->
     for proxy in &sample {
         log::debug!("Testing geoblock via proxy: {}", proxy);
         if test_with_proxy(url, proxy, timeout, 3).await {
-            return "Geoblocked (Confirmed)".to_string();
+            return crate::models::channel::ChannelStatus::GeoblockedConfirmed;
         }
     }
 
-    "Geoblocked (Unconfirmed)".to_string()
+    crate::models::channel::ChannelStatus::GeoblockedUnconfirmed
 }
 
 #[cfg(test)]

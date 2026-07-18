@@ -178,7 +178,7 @@ async fn checker_retries_transient_503_then_marks_alive() {
     .await
     .expect("checker request should succeed");
 
-    assert_eq!(outcome.status, "Alive");
+    assert_eq!(outcome.status, ChannelStatus::Alive);
     assert_eq!(outcome.retries_used, 1);
     assert_eq!(request_count.load(Ordering::SeqCst), 2);
     server_handle.abort();
@@ -213,7 +213,7 @@ async fn geoblock_confirmation_unconfirmed_when_proxy_candidates_fail_fast() {
     )
     .await;
 
-    assert_eq!(result, "Geoblocked (Unconfirmed)");
+    assert_eq!(result, ChannelStatus::GeoblockedUnconfirmed);
 }
 
 #[test]
