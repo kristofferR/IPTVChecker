@@ -357,7 +357,11 @@ export function ChannelTable({
     getScrollElement: () => parentRef.current,
     getItemKey: getVirtualItemKey,
     estimateSize: () => estimatedRowHeight,
-    overscan: 250,
+    // Rows rendered beyond each viewport edge. Keep this small — it's a row
+    // count, and every mounted row gets reconciled on each scan batch flush.
+    // The mac header-reveal band only needs a few rows above the viewport
+    // (it filters virtualItems to within toolbarHeight of the top edge).
+    overscan: 20,
     isScrollingResetDelay: 300,
     useFlushSync: false,
   });
