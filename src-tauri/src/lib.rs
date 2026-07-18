@@ -1039,7 +1039,7 @@ pub fn run() {
             commands::saved::delete_saved_playlist,
             commands::saved::open_saved_playlist,
             commands::saved::rename_playlist_source,
-            commands::playlist::test_xtream_servers,
+            commands::server_test::test_xtream_servers,
         ])
         .on_page_load(|webview, payload| {
             if payload.event() != PageLoadEvent::Finished {
