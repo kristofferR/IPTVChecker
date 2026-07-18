@@ -662,11 +662,20 @@ fn spawn_upstream_pump(
 ) {
     tokio::spawn(async move {
         use futures::StreamExt;
-        // Short fixed backoff between reconnects: long enough to avoid pinning
-        // a CPU on a permanently-broken upstream, short enough that the gap
-        // doesn't starve ffmpeg's demuxer of bytes through a real reconnect.
-        const RECONNECT_BACKOFF: Duration = Duration::from_millis(200);
+        // Exponential backoff between reconnects: the base stays short so a
+        // real hiccup doesn't starve ffmpeg's demuxer, but consecutive
+        // failures grow the delay (capped at 5s) so a permanently-broken
+        // upstream isn't hammered 5x per second for the whole session —
+        // IPTV providers ban clients for exactly that pattern.
+        const RECONNECT_BASE_BACKOFF: Duration = Duration::from_millis(200);
+        const RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(5);
+        fn reconnect_backoff(consecutive_failures: u32) -> Duration {
+            RECONNECT_BASE_BACKOFF
+                .saturating_mul(1u32 << consecutive_failures.min(5))
+                .min(RECONNECT_MAX_BACKOFF)
+        }
         let mut reconnects: u32 = 0;
+        let mut consecutive_failures: u32 = 0;
 
         'session: loop {
             if cancel.is_cancelled() {
@@ -702,18 +711,20 @@ fn spawn_upstream_pump(
                         "[CastProxy/pump] Upstream returned {} ({label})",
                         r.status()
                     );
+                    consecutive_failures = consecutive_failures.saturating_add(1);
                     tokio::select! {
                         _ = cancel.cancelled() => break 'session,
-                        _ = tokio::time::sleep(RECONNECT_BACKOFF) => {}
+                        _ = tokio::time::sleep(reconnect_backoff(consecutive_failures)) => {}
                     }
                     reconnects += 1;
                     continue;
                 }
                 Err(err) => {
                     log::warn!("[CastProxy/pump] Upstream connect failed ({label}): {err}");
+                    consecutive_failures = consecutive_failures.saturating_add(1);
                     tokio::select! {
                         _ = cancel.cancelled() => break 'session,
-                        _ = tokio::time::sleep(RECONNECT_BACKOFF) => {}
+                        _ = tokio::time::sleep(reconnect_backoff(consecutive_failures)) => {}
                     }
                     reconnects += 1;
                     continue;
@@ -721,12 +732,14 @@ fn spawn_upstream_pump(
             };
 
             let mut stream = response.bytes_stream();
+            let mut got_bytes = false;
             loop {
                 tokio::select! {
                     _ = cancel.cancelled() => break 'session,
                     chunk = stream.next() => {
                         match chunk {
                             Some(Ok(bytes)) => {
+                                got_bytes = true;
                                 if let Err(err) = stdin.write_all(&bytes).await {
                                     // ffmpeg closed its stdin (likely died).
                                     // Nothing more we can do — exit the pump
@@ -754,9 +767,17 @@ fn spawn_upstream_pump(
                 }
             }
 
+            // A connection that produced data was a real session — reconnect
+            // quickly. One that broke without a single byte counts as a
+            // failure and escalates the backoff.
+            if got_bytes {
+                consecutive_failures = 0;
+            } else {
+                consecutive_failures = consecutive_failures.saturating_add(1);
+            }
             tokio::select! {
                 _ = cancel.cancelled() => break 'session,
-                _ = tokio::time::sleep(RECONNECT_BACKOFF) => {}
+                _ = tokio::time::sleep(reconnect_backoff(consecutive_failures)) => {}
             }
             reconnects += 1;
         }
