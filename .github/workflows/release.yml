@@ -261,7 +261,7 @@ jobs:
     steps:
       - name: Checkout
         if: env.HAS_AUR_KEY == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
 
@@ -290,10 +290,11 @@ jobs:
 
       - name: Publish to AUR
         if: env.HAS_AUR_KEY == 'true'
-        uses: KSXGitHub/github-actions-deploy-aur@v4.2.0
+        uses: KSXGitHub/github-actions-deploy-aur@084b0d9b15415bf9cdb65d44dad1efe37a354050 # v4.2.0
         with:
           pkgname: iptv-checker-gui
           pkgbuild: ./aur/PKGBUILD
+          test: true
           commit_username: kristofferR
           commit_email: 481270+kristofferR@users.noreply.github.com
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
