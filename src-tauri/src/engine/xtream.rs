@@ -1,0 +1,684 @@
+//! Xtream Codes API client.
+//!
+//! Server URL normalization, endpoint/URL builders, account-info retrieval,
+//! and a JSON-API fallback that builds an M3U playlist when /get.php fails.
+
+use crate::engine::remote_cache::{
+    parse_http_url, PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT, PLAYLIST_DOWNLOAD_USER_AGENT,
+};
+use crate::error::AppError;
+use crate::models::playlist::XtreamAccountInfo;
+use std::collections::HashMap;
+use std::time::Duration;
+use url::Url;
+
+pub(crate) const XTREAM_PLAYER_API_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// Timeout for the (potentially large) JSON stream list downloads.
+pub(crate) const XTREAM_JSON_API_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// "host:port" (or bare host) display label for an Xtream server URL.
+pub(crate) fn xtream_host_label(server: &str) -> String {
+    let Ok(parsed) = Url::parse(server) else {
+        return server.to_string();
+    };
+    match (parsed.host_str(), parsed.port()) {
+        (Some(host), Some(port)) => format!("{}:{}", host, port),
+        (Some(host), None) => host.to_string(),
+        _ => server.to_string(),
+    }
+}
+
+pub(crate) fn normalize_xtream_server(server: &str) -> Result<Url, AppError> {
+    let mut parsed = parse_http_url(server, "Invalid Xtream server URL")?;
+    if parsed.host_str().is_none() {
+        return Err(AppError::Parse(
+            "Invalid Xtream server URL: missing host".to_string(),
+        ));
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(AppError::Parse(
+            "Xtream server URL must not include credentials".to_string(),
+        ));
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err(AppError::Parse(
+            "Xtream server URL must not include query parameters or fragments".to_string(),
+        ));
+    }
+
+    let path = parsed.path().trim_end_matches('/');
+    let normalized_path = if path.is_empty() || path == "/get.php" {
+        "/".to_string()
+    } else if path.to_ascii_lowercase().ends_with("/get.php") {
+        let base = &path[..path.len() - "/get.php".len()];
+        if base.is_empty() {
+            "/".to_string()
+        } else {
+            base.to_string()
+        }
+    } else {
+        path.to_string()
+    };
+    parsed.set_path(&normalized_path);
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+    Ok(parsed)
+}
+
+fn xtream_server_identity(server: &Url) -> String {
+    let mut cleaned = server.clone();
+    let _ = cleaned.set_username("");
+    let _ = cleaned.set_password(None);
+    cleaned.set_query(None);
+    cleaned.set_fragment(None);
+    cleaned.to_string().trim_end_matches('/').to_string()
+}
+
+pub(crate) fn build_xtream_download_url(server: &Url, username: &str, password: &str) -> Url {
+    let mut playlist_url = server.clone();
+    let mut endpoint_path = playlist_url.path().trim_end_matches('/').to_string();
+    if endpoint_path.is_empty() || endpoint_path == "/" {
+        endpoint_path = "/get.php".to_string();
+    } else {
+        endpoint_path.push_str("/get.php");
+    }
+    playlist_url.set_path(&endpoint_path);
+    playlist_url.set_query(None);
+    playlist_url.set_fragment(None);
+    playlist_url
+        .query_pairs_mut()
+        .append_pair("username", username)
+        .append_pair("password", password)
+        .append_pair("type", "m3u_plus")
+        .append_pair("output", "ts");
+    playlist_url
+}
+
+pub(crate) fn build_xtream_player_api_url(server: &Url, username: &str, password: &str) -> Url {
+    let mut api_url = server.clone();
+    let mut endpoint_path = api_url.path().trim_end_matches('/').to_string();
+    if endpoint_path.is_empty() || endpoint_path == "/" {
+        endpoint_path = "/player_api.php".to_string();
+    } else {
+        endpoint_path.push_str("/player_api.php");
+    }
+    api_url.set_path(&endpoint_path);
+    api_url.set_query(None);
+    api_url.set_fragment(None);
+    api_url
+        .query_pairs_mut()
+        .append_pair("username", username)
+        .append_pair("password", password);
+    api_url
+}
+
+pub(crate) fn build_xtream_player_api_action_url(
+    server: &Url,
+    username: &str,
+    password: &str,
+    action: &str,
+) -> Url {
+    let mut api_url = build_xtream_player_api_url(server, username, password);
+    api_url.query_pairs_mut().append_pair("action", action);
+    api_url
+}
+
+pub(crate) fn build_xtream_source_key(server: &Url, username: &str) -> String {
+    format!(
+        "xtream:{}|{}|m3u_plus|ts",
+        xtream_server_identity(server),
+        username
+    )
+}
+
+/// Direct live stream URL for a given stream id (used by the server tester).
+pub(crate) fn build_xtream_stream_url(
+    server: &Url,
+    username: &str,
+    password: &str,
+    stream_id: &str,
+) -> String {
+    let mut base = server.clone();
+    let mut path = base.path().trim_end_matches('/').to_string();
+    path.push_str(&format!("/live/{}/{}/{}.ts", username, password, stream_id));
+    base.set_path(&path);
+    base.set_query(None);
+    base.set_fragment(None);
+    base.to_string()
+}
+
+fn parse_max_connections_value(value: &serde_json::Value) -> Option<u32> {
+    match value {
+        serde_json::Value::Number(number) => number.as_u64().and_then(|value| {
+            if value == 0 {
+                None
+            } else {
+                u32::try_from(value).ok()
+            }
+        }),
+        serde_json::Value::String(raw) => {
+            let parsed = raw.trim().parse::<u32>().ok()?;
+            (parsed > 0).then_some(parsed)
+        }
+        _ => None,
+    }
+}
+
+fn parse_bool_like(value: &serde_json::Value) -> Option<bool> {
+    match value {
+        serde_json::Value::Bool(flag) => Some(*flag),
+        serde_json::Value::Number(number) => number.as_i64().map(|raw| raw != 0),
+        serde_json::Value::String(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            if let Ok(parsed) = trimmed.parse::<i64>() {
+                return Some(parsed != 0);
+            }
+            match trimmed.to_ascii_lowercase().as_str() {
+                "true" | "yes" | "active" => Some(true),
+                "false" | "no" | "inactive" => Some(false),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn parse_epoch_value(value: &serde_json::Value) -> Option<u64> {
+    match value {
+        serde_json::Value::Number(number) => number.as_u64().filter(|epoch| *epoch > 0),
+        serde_json::Value::String(raw) => raw.trim().parse::<u64>().ok().filter(|epoch| *epoch > 0),
+        _ => None,
+    }
+}
+
+fn parse_optional_string(value: Option<&serde_json::Value>) -> Option<String> {
+    value
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty())
+        .map(ToString::to_string)
+}
+
+pub(crate) fn extract_xtream_account_info(
+    payload: &serde_json::Value,
+) -> Option<XtreamAccountInfo> {
+    let user = payload.get("user_info").unwrap_or(payload);
+    let info = XtreamAccountInfo {
+        status: parse_optional_string(user.get("status")),
+        expires_at_epoch: user
+            .get("exp_date")
+            .and_then(parse_epoch_value)
+            .or_else(|| user.get("expiration").and_then(parse_epoch_value)),
+        created_at_epoch: user.get("created_at").and_then(parse_epoch_value),
+        is_trial: user.get("is_trial").and_then(parse_bool_like),
+        active_connections: user
+            .get("active_cons")
+            .and_then(parse_max_connections_value),
+        max_connections: user
+            .get("max_connections")
+            .and_then(parse_max_connections_value),
+    };
+
+    let has_any = info.status.is_some()
+        || info.expires_at_epoch.is_some()
+        || info.created_at_epoch.is_some()
+        || info.is_trial.is_some()
+        || info.active_connections.is_some()
+        || info.max_connections.is_some();
+    has_any.then_some(info)
+}
+
+#[cfg(test)]
+fn extract_xtream_max_connections(payload: &serde_json::Value) -> Option<u32> {
+    extract_xtream_account_info(payload)
+        .and_then(|account| account.max_connections)
+        .or_else(|| {
+            payload
+                .get("max_connections")
+                .and_then(parse_max_connections_value)
+        })
+}
+
+/// Fetch a single Xtream JSON API endpoint, returning parsed JSON array.
+/// Returns an empty Vec on non-2xx or parse failures (best-effort for optional content).
+async fn fetch_xtream_json_array(
+    client: &reqwest::Client,
+    url: reqwest::Url,
+    label: &str,
+) -> Vec<serde_json::Value> {
+    match client
+        .get(url)
+        .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => match resp.bytes().await {
+            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+                log::warn!("Failed to parse Xtream {} JSON response: {}", label, e);
+                Vec::new()
+            }),
+            Err(e) => {
+                log::warn!("Failed to read Xtream {} response: {}", label, e);
+                Vec::new()
+            }
+        },
+        Ok(resp) => {
+            log::warn!("Xtream {} API returned HTTP {}", label, resp.status());
+            Vec::new()
+        }
+        Err(e) => {
+            log::warn!("Failed to fetch Xtream {}: {}", label, e);
+            Vec::new()
+        }
+    }
+}
+
+/// Build category_id -> category_name lookup from a JSON categories array.
+fn build_category_map(categories: &[serde_json::Value]) -> HashMap<String, String> {
+    categories
+        .iter()
+        .filter_map(|cat| {
+            let id = cat.get("category_id")?.as_str()?.to_string();
+            let name = cat.get("category_name")?.as_str()?.to_string();
+            Some((id, name))
+        })
+        .collect()
+}
+
+/// Build base stream URL for a given content type path segment.
+fn build_xtream_stream_base(server: &Url, segment: &str, username: &str, password: &str) -> String {
+    let mut base = server.clone();
+    let mut path = base.path().trim_end_matches('/').to_string();
+    path.push_str(&format!("/{}/{}/{}/", segment, username, password));
+    base.set_path(&path);
+    base.set_query(None);
+    base.set_fragment(None);
+    base.to_string()
+}
+
+/// Append M3U entries for a list of Xtream streams.
+fn append_xtream_streams_to_m3u(
+    m3u: &mut String,
+    streams: &[serde_json::Value],
+    cat_map: &HashMap<String, String>,
+    stream_base: &str,
+    extension: &str,
+) -> usize {
+    let mut count = 0;
+    for entry in streams {
+        let name = entry
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown");
+        let stream_id = match entry.get("stream_id") {
+            Some(serde_json::Value::Number(n)) => n.to_string(),
+            Some(serde_json::Value::String(s)) => s.clone(),
+            _ => continue,
+        };
+        let tvg_id = entry
+            .get("epg_channel_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let tvg_logo = entry
+            .get("stream_icon")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let group = entry
+            .get("category_id")
+            .and_then(|v| {
+                v.as_str().or_else(|| {
+                    // Some servers return category_id as a number
+                    None
+                })
+            })
+            .and_then(|id| cat_map.get(id))
+            .map(|s| s.as_str())
+            .unwrap_or("");
+
+        // Also try category_id as number
+        let group = if group.is_empty() {
+            match entry.get("category_id") {
+                Some(serde_json::Value::Number(n)) => cat_map
+                    .get(&n.to_string())
+                    .map(|s| s.as_str())
+                    .unwrap_or(""),
+                _ => "",
+            }
+        } else {
+            group
+        };
+
+        m3u.push_str(&format!(
+            "#EXTINF:-1 tvg-id=\"{}\" tvg-logo=\"{}\" group-title=\"{}\",{}\n",
+            tvg_id, tvg_logo, group, name
+        ));
+        m3u.push_str(&format!("{}{}.{}\n", stream_base, stream_id, extension));
+        count += 1;
+    }
+    count
+}
+
+/// Build an M3U playlist from the Xtream JSON API. Fetches live streams,
+/// VOD (movies), and series using structured JSON endpoints. Falls back
+/// gracefully — if VOD/series endpoints fail, the playlist still contains
+/// live channels.
+pub(crate) async fn fetch_xtream_playlist_via_json_api(
+    server: &Url,
+    username: &str,
+    password: &str,
+) -> Result<Vec<u8>, AppError> {
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
+        .timeout(XTREAM_JSON_API_TIMEOUT)
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| AppError::Other(format!("Failed to build HTTP client: {}", e)))?;
+
+    // Fetch all content types in parallel
+    let live_cats_url =
+        build_xtream_player_api_action_url(server, username, password, "get_live_categories");
+    let live_streams_url =
+        build_xtream_player_api_action_url(server, username, password, "get_live_streams");
+    let vod_cats_url =
+        build_xtream_player_api_action_url(server, username, password, "get_vod_categories");
+    let vod_streams_url =
+        build_xtream_player_api_action_url(server, username, password, "get_vod_streams");
+    let series_cats_url =
+        build_xtream_player_api_action_url(server, username, password, "get_series_categories");
+    let series_url = build_xtream_player_api_action_url(server, username, password, "get_series");
+
+    let (live_cats, live_streams, vod_cats, vod_streams, series_cats, series_list) = tokio::join!(
+        fetch_xtream_json_array(&client, live_cats_url, "live categories"),
+        fetch_xtream_json_array(&client, live_streams_url, "live streams"),
+        fetch_xtream_json_array(&client, vod_cats_url, "VOD categories"),
+        fetch_xtream_json_array(&client, vod_streams_url, "VOD streams"),
+        fetch_xtream_json_array(&client, series_cats_url, "series categories"),
+        fetch_xtream_json_array(&client, series_url, "series"),
+    );
+
+    if live_streams.is_empty() && vod_streams.is_empty() && series_list.is_empty() {
+        return Err(AppError::Other(
+            "Xtream server returned no content (no live, VOD, or series entries)".to_string(),
+        ));
+    }
+
+    // Build category lookups
+    let live_cat_map = build_category_map(&live_cats);
+    let vod_cat_map = build_category_map(&vod_cats);
+    let series_cat_map = build_category_map(&series_cats);
+
+    // Build base URLs for each content type
+    let live_base = build_xtream_stream_base(server, "live", username, password);
+    let movie_base = build_xtream_stream_base(server, "movie", username, password);
+    let series_base = build_xtream_stream_base(server, "series", username, password);
+
+    let estimated_total = live_streams.len() + vod_streams.len() + series_list.len();
+    let mut m3u = String::with_capacity(estimated_total * 200);
+    m3u.push_str("#EXTM3U\n");
+
+    // Live streams → .ts extension
+    let live_count =
+        append_xtream_streams_to_m3u(&mut m3u, &live_streams, &live_cat_map, &live_base, "ts");
+
+    // VOD streams → container extension from API or default .mp4
+    let mut vod_count = 0;
+    for entry in &vod_streams {
+        let name = entry
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown");
+        let stream_id = match entry.get("stream_id") {
+            Some(serde_json::Value::Number(n)) => n.to_string(),
+            Some(serde_json::Value::String(s)) => s.clone(),
+            _ => continue,
+        };
+        let tvg_logo = entry
+            .get("stream_icon")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let container_extension = entry
+            .get("container_extension")
+            .and_then(|v| v.as_str())
+            .unwrap_or("mp4");
+        let group = entry
+            .get("category_id")
+            .and_then(|v| match v {
+                serde_json::Value::String(s) => vod_cat_map.get(s.as_str()),
+                serde_json::Value::Number(n) => vod_cat_map.get(&n.to_string()),
+                _ => None,
+            })
+            .map(|s| s.as_str())
+            .unwrap_or("");
+
+        m3u.push_str(&format!(
+            "#EXTINF:-1 tvg-logo=\"{}\" group-title=\"VOD: {}\",{}\n",
+            tvg_logo, group, name
+        ));
+        m3u.push_str(&format!(
+            "{}{}.{}\n",
+            movie_base, stream_id, container_extension
+        ));
+        vod_count += 1;
+    }
+
+    // Series → each series entry gets a representative URL
+    let mut series_count = 0;
+    for entry in &series_list {
+        let name = entry
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown");
+        let series_id = match entry.get("series_id") {
+            Some(serde_json::Value::Number(n)) => n.to_string(),
+            Some(serde_json::Value::String(s)) => s.clone(),
+            _ => continue,
+        };
+        let tvg_logo = entry.get("cover").and_then(|v| v.as_str()).unwrap_or("");
+        let group = entry
+            .get("category_id")
+            .and_then(|v| match v {
+                serde_json::Value::String(s) => series_cat_map.get(s.as_str()),
+                serde_json::Value::Number(n) => series_cat_map.get(&n.to_string()),
+                _ => None,
+            })
+            .map(|s| s.as_str())
+            .unwrap_or("");
+
+        m3u.push_str(&format!(
+            "#EXTINF:-1 tvg-logo=\"{}\" group-title=\"Series: {}\",{}\n",
+            tvg_logo, group, name
+        ));
+        // Series entries use the series path with series_id
+        m3u.push_str(&format!("{}{}.ts\n", series_base, series_id));
+        series_count += 1;
+    }
+
+    log::info!(
+        "Built M3U from Xtream JSON API: {} live, {} VOD, {} series ({} total)",
+        live_count,
+        vod_count,
+        series_count,
+        live_count + vod_count + series_count
+    );
+
+    Ok(m3u.into_bytes())
+}
+
+pub(crate) async fn fetch_xtream_account_info(
+    server: &Url,
+    username: &str,
+    password: &str,
+) -> Option<XtreamAccountInfo> {
+    let api_url = build_xtream_player_api_url(server, username, password);
+    let account_info_url =
+        build_xtream_player_api_action_url(server, username, password, "get_account_info");
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
+        .timeout(XTREAM_PLAYER_API_TIMEOUT)
+        .danger_accept_invalid_certs(true)
+        .build()
+        .ok()?;
+
+    // Errors on one endpoint must not abort the loop — the plain player_api.php
+    // fallback exists precisely for servers where get_account_info misbehaves.
+    for endpoint in [account_info_url, api_url.clone()] {
+        let response = match client
+            .get(endpoint.clone())
+            .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(err) => {
+                log::debug!("Xtream player_api request failed for {endpoint}: {err}");
+                continue;
+            }
+        };
+
+        if !response.status().is_success() {
+            log::debug!(
+                "Xtream player_api request returned HTTP {} for {}",
+                response.status(),
+                endpoint
+            );
+            continue;
+        }
+
+        let payload = match response.bytes().await {
+            Ok(bytes) => match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                Ok(payload) => payload,
+                Err(err) => {
+                    log::debug!("Xtream player_api returned invalid JSON for {endpoint}: {err}");
+                    continue;
+                }
+            },
+            Err(err) => {
+                log::debug!("Xtream player_api body read failed for {endpoint}: {err}");
+                continue;
+            }
+        };
+        if let Some(info) = extract_xtream_account_info(&payload) {
+            return Some(info);
+        }
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        build_xtream_download_url, build_xtream_player_api_action_url, build_xtream_player_api_url,
+        build_xtream_source_key, extract_xtream_account_info, extract_xtream_max_connections,
+        normalize_xtream_server,
+    };
+
+    #[test]
+    fn normalize_xtream_server_trims_get_php_and_trailing_slash() {
+        let server = normalize_xtream_server("https://demo.example.com:8080/get.php/")
+            .expect("server should normalize");
+        assert_eq!(server.to_string(), "https://demo.example.com:8080/");
+    }
+
+    #[test]
+    fn normalize_xtream_server_rejects_invalid_scheme() {
+        let error = normalize_xtream_server("ftp://demo.example.com")
+            .expect_err("invalid scheme should fail");
+        assert!(error.to_string().contains("must use http:// or https://"));
+    }
+
+    #[test]
+    fn build_xtream_download_url_uses_expected_query() {
+        let server =
+            normalize_xtream_server("https://demo.example.com:8080/").expect("valid server");
+        let url = build_xtream_download_url(&server, "demo_user", "demo_pass");
+        assert_eq!(
+            url.as_str(),
+            "https://demo.example.com:8080/get.php?username=demo_user&password=demo_pass&type=m3u_plus&output=ts"
+        );
+    }
+
+    #[test]
+    fn build_xtream_player_api_url_uses_expected_query() {
+        let server =
+            normalize_xtream_server("https://demo.example.com:8080/").expect("valid server");
+        let url = build_xtream_player_api_url(&server, "demo_user", "demo_pass");
+        assert_eq!(
+            url.as_str(),
+            "https://demo.example.com:8080/player_api.php?username=demo_user&password=demo_pass"
+        );
+    }
+
+    #[test]
+    fn build_xtream_player_api_action_url_appends_action_query() {
+        let server =
+            normalize_xtream_server("https://demo.example.com:8080/").expect("valid server");
+        let url = build_xtream_player_api_action_url(
+            &server,
+            "demo_user",
+            "demo_pass",
+            "get_account_info",
+        );
+        assert_eq!(
+            url.as_str(),
+            "https://demo.example.com:8080/player_api.php?username=demo_user&password=demo_pass&action=get_account_info"
+        );
+    }
+
+    #[test]
+    fn build_xtream_source_key_excludes_password() {
+        let server =
+            normalize_xtream_server("https://demo.example.com:8080/").expect("valid server");
+        let key = build_xtream_source_key(&server, "demo_user");
+        assert_eq!(
+            key,
+            "xtream:https://demo.example.com:8080|demo_user|m3u_plus|ts"
+        );
+        assert!(!key.contains("demo_pass"));
+    }
+
+    #[test]
+    fn extract_xtream_max_connections_parses_user_info_string() {
+        let payload = serde_json::json!({
+            "user_info": {
+                "max_connections": "4"
+            }
+        });
+        assert_eq!(extract_xtream_max_connections(&payload), Some(4));
+    }
+
+    #[test]
+    fn extract_xtream_max_connections_parses_numeric_fallback() {
+        let payload = serde_json::json!({
+            "max_connections": 2
+        });
+        assert_eq!(extract_xtream_max_connections(&payload), Some(2));
+    }
+
+    #[test]
+    fn extract_xtream_account_info_parses_subscription_fields() {
+        let payload = serde_json::json!({
+            "user_info": {
+                "status": "Active",
+                "exp_date": "1735689600",
+                "created_at": "1704067200",
+                "is_trial": "1",
+                "active_cons": "2",
+                "max_connections": "4"
+            }
+        });
+        let info = extract_xtream_account_info(&payload).expect("account info should parse");
+        assert_eq!(info.status.as_deref(), Some("Active"));
+        assert_eq!(info.expires_at_epoch, Some(1_735_689_600));
+        assert_eq!(info.created_at_epoch, Some(1_704_067_200));
+        assert_eq!(info.is_trial, Some(true));
+        assert_eq!(info.active_connections, Some(2));
+        assert_eq!(info.max_connections, Some(4));
+    }
+}
