@@ -83,17 +83,6 @@ export interface ScanSlice {
   screenshotsPaused: boolean;
   networkPaused: boolean;
 
-  setResults: (results: ScanResultLookup) => void;
-  setFlatResults: (results: ChannelResult[]) => void;
-  setUiMetrics: (metrics: ScanUiMetrics) => void;
-  setDuplicateIndices: (indices: Set<number>) => void;
-  setProgress: (progress: ScanProgress | null) => void;
-  setSummary: (summary: ScanSummary | null) => void;
-  setScanState: (state: ScanState) => void;
-  setScanError: (error: string | null) => void;
-  setTelemetry: (telemetry: ScanTelemetry) => void;
-  setScreenshotsPaused: (paused: boolean) => void;
-  setNetworkPaused: (paused: boolean) => void;
   applyScanCollections: (update: ScanCollectionsUpdate) => void;
   applyScanRuntime: (update: ScanRuntimeUpdate) => void;
 }
@@ -176,7 +165,6 @@ export interface UiSlice {
 
   setPlatform: (platform: Platform) => void;
   setSidebarHidden: (hidden: boolean) => void;
-  toggleSidebar: () => void;
   setSidebarWidth: (width: number) => void;
   toggleReportPanel: () => void;
   setReportPanelManually: (visible: boolean) => void;
