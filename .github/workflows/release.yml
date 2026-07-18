@@ -252,3 +252,54 @@ jobs:
             -f content="$CONTENT" \
             -f sha="$EXISTING_SHA" \
             -f branch="main"
+
+  aur:
+    needs: publish
+    runs-on: ubuntu-latest
+    env:
+      HAS_AUR_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY != '' }}
+    steps:
+      - name: Checkout
+        if: env.HAS_AUR_KEY == 'true'
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Generate PKGBUILD from template
+        if: env.HAS_AUR_KEY == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p /tmp/aur
+          gh release download "${GITHUB_REF_NAME}" --pattern "IPTV.Checker_${VERSION}_lin_x64.deb" --dir /tmp/aur
+          gh release download "${GITHUB_REF_NAME}" --pattern "IPTV.Checker_${VERSION}_lin_arm.deb" --dir /tmp/aur
+
+          SHA_X64=$(sha256sum "/tmp/aur/IPTV.Checker_${VERSION}_lin_x64.deb" | cut -d' ' -f1)
+          SHA_ARM=$(sha256sum "/tmp/aur/IPTV.Checker_${VERSION}_lin_arm.deb" | cut -d' ' -f1)
+          SHA_LICENSE=$(sha256sum LICENSE | cut -d' ' -f1)
+
+          # Must land inside the workspace: the deploy action below runs in a
+          # Docker container that only gets the workspace mounted, not /tmp.
+          mkdir -p aur
+          sed -e "s/@PKGVER@/${VERSION}/" \
+              -e "s/@SHA_LICENSE@/${SHA_LICENSE}/" \
+              -e "s/@SHA_X64@/${SHA_X64}/" \
+              -e "s/@SHA_ARM@/${SHA_ARM}/" \
+              packaging/aur/PKGBUILD.tpl > aur/PKGBUILD
+
+      - name: Publish to AUR
+        if: env.HAS_AUR_KEY == 'true'
+        uses: KSXGitHub/github-actions-deploy-aur@084b0d9b15415bf9cdb65d44dad1efe37a354050 # v4.2.0
+        with:
+          pkgname: iptv-checker-gui
+          pkgbuild: ./aur/PKGBUILD
+          test: true
+          commit_username: kristofferR
+          commit_email: 481270+kristofferR@users.noreply.github.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to ${{ github.ref_name }}"
+
+      - name: Skip notice
+        if: env.HAS_AUR_KEY != 'true'
+        run: echo "AUR_SSH_PRIVATE_KEY not configured, skipping AUR publish"
