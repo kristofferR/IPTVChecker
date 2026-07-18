@@ -704,7 +704,18 @@ pub(crate) async fn open_playlist_xtream_inner(
             );
             let m3u_bytes =
                 fetch_xtream_playlist_via_json_api(&server, &username, &password).await?;
-            write_bytes_to_cache(&cache_path, &m3u_bytes)?;
+            // Same rule as the normal download path: a potentially large
+            // synchronous cache write belongs on a blocking thread.
+            {
+                let cache_path = cache_path.clone();
+                tokio::task::spawn_blocking(move || {
+                    write_bytes_to_cache(&cache_path, &m3u_bytes)
+                })
+                .await
+                .map_err(|err| {
+                    AppError::Other(format!("Playlist cache write task failed: {err}"))
+                })??;
+            }
             cache_path.to_string_lossy().to_string()
         }
     };
