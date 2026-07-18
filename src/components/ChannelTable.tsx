@@ -2,8 +2,8 @@ import { useRef, useState, useMemo, useCallback, useEffect, useDeferredValue, ty
 import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ChannelResult } from "../lib/types";
-import type { SearchTextCache, SortDirection, SortField } from "../lib/filters";
-import { filterResults, sortResults } from "../lib/filters";
+import type { SortDirection, SortField } from "../lib/filters";
+import { filterResultsShared, sortResults } from "../lib/filters";
 import {
   COLUMN_ORDER_STORAGE_KEY,
   COLUMN_WIDTH_STORAGE_KEY,
@@ -192,7 +192,6 @@ export function ChannelTable({
   const [columnWidths, setColumnWidths] = useState<Record<ColumnKey, number>>(
     () => parseStoredColumnWidths(localStorage.getItem(COLUMN_WIDTH_STORAGE_KEY)),
   );
-  const searchTextCacheRef = useRef<SearchTextCache>(new WeakMap());
   const filteredResultsRef = useRef<ChannelResult[]>([]);
   const selectedIndicesRef = useRef(selectedIndices);
   const contextMenuOpenRef = useRef(contextMenuState !== null);
@@ -315,13 +314,12 @@ export function ChannelTable({
       measureUiPerf(
         "table.filter-sort",
         () => {
-          const filtered = filterResults(
+          const filtered = filterResultsShared(
             completedResults,
             search,
             groupFilter,
             statusFilter,
             duplicateIndices,
-            searchTextCacheRef.current,
             separatePlaceholder,
           );
           return sortResults(filtered, sortField, sortDir);
