@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   castToDevice,
@@ -126,5 +126,10 @@ export function useChromecast(): UseChromecastResult {
     };
   }, []);
 
-  return { devices, discovering, session, error, refreshDevices, cast, stop };
+  // Memoize so consumers keyed on this object (ThumbnailPanel, CastMenu)
+  // don't see a new identity on every render of the owning component.
+  return useMemo(
+    () => ({ devices, discovering, session, error, refreshDevices, cast, stop }),
+    [devices, discovering, session, error, refreshDevices, cast, stop],
+  );
 }
