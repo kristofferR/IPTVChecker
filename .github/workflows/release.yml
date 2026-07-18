@@ -279,18 +279,21 @@ jobs:
           SHA_ARM=$(sha256sum "/tmp/aur/IPTV.Checker_${VERSION}_lin_arm.deb" | cut -d' ' -f1)
           SHA_LICENSE=$(sha256sum LICENSE | cut -d' ' -f1)
 
+          # Must land inside the workspace: the deploy action below runs in a
+          # Docker container that only gets the workspace mounted, not /tmp.
+          mkdir -p aur
           sed -e "s/@PKGVER@/${VERSION}/" \
               -e "s/@SHA_LICENSE@/${SHA_LICENSE}/" \
               -e "s/@SHA_X64@/${SHA_X64}/" \
               -e "s/@SHA_ARM@/${SHA_ARM}/" \
-              packaging/aur/PKGBUILD.tpl > /tmp/aur/PKGBUILD
+              packaging/aur/PKGBUILD.tpl > aur/PKGBUILD
 
       - name: Publish to AUR
         if: env.HAS_AUR_KEY == 'true'
         uses: KSXGitHub/github-actions-deploy-aur@v4.2.0
         with:
           pkgname: iptv-checker-gui
-          pkgbuild: /tmp/aur/PKGBUILD
+          pkgbuild: ./aur/PKGBUILD
           commit_username: kristofferR
           commit_email: 481270+kristofferR@users.noreply.github.com
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
