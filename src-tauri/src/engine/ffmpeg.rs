@@ -751,6 +751,10 @@ async fn run_resolved_tool_command(
         .args(args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
+        // Insurance beyond token-driven graceful_kill: if the enclosing
+        // future is dropped (task aborted, runtime shutdown, app exit), the
+        // child must not outlive us.
+        .kill_on_drop(true)
         .spawn()
         .map_err(|err| {
             log::warn!("Failed to spawn {} using '{}': {}", name, resolved_bin, err);
@@ -1550,6 +1554,7 @@ pub async fn profile_bitrate(
         ])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
         .spawn()
         .map_err(|err| {
             log::warn!("Failed to spawn ffmpeg using '{}': {}", resolved_bin, err);
@@ -1893,6 +1898,7 @@ pub async fn run_combined_diagnostics(
         .args(&args)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
         .spawn()
         .map_err(|err| {
             log::warn!("Failed to spawn ffmpeg using '{}': {}", resolved_bin, err);
