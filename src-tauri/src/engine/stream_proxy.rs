@@ -672,14 +672,34 @@ impl TransportStreamPacer {
     }
 
     fn delay_for_payload(&mut self, payload: &[u8]) -> std::time::Duration {
-        let mut scan = Vec::with_capacity(self.scan_tail.len() + payload.len());
-        scan.extend_from_slice(&self.scan_tail);
-        scan.extend_from_slice(payload);
+        // Scan the payload in place — copying tail+payload wholesale would
+        // re-copy every chunk on the playback hot path. Only the boundary
+        // window (previous tail + the first packets of this payload) needs
+        // stitching, to catch a PCR packet straddling two chunks. Any PCR
+        // found in the payload scan is later in stream order than one in the
+        // boundary window, so payload wins when both hit.
+        let latest_pcr = latest_transport_stream_pcr(payload, self.pcr_pid).or_else(|| {
+            if self.scan_tail.is_empty() {
+                return None;
+            }
+            let boundary_len = payload.len().min(MPEG_TS_PACKET_SIZE * 4);
+            let mut boundary = Vec::with_capacity(self.scan_tail.len() + boundary_len);
+            boundary.extend_from_slice(&self.scan_tail);
+            boundary.extend_from_slice(&payload[..boundary_len]);
+            latest_transport_stream_pcr(&boundary, self.pcr_pid)
+        });
 
-        let latest_pcr = latest_transport_stream_pcr(&scan, self.pcr_pid);
-        let tail_start = scan.len().saturating_sub(MPEG_TS_PACKET_SIZE * 4);
-        self.scan_tail.clear();
-        self.scan_tail.extend_from_slice(&scan[tail_start..]);
+        if payload.len() >= MPEG_TS_PACKET_SIZE * 4 {
+            self.scan_tail.clear();
+            self.scan_tail
+                .extend_from_slice(&payload[payload.len() - MPEG_TS_PACKET_SIZE * 4..]);
+        } else {
+            let mut combined = std::mem::take(&mut self.scan_tail);
+            combined.extend_from_slice(payload);
+            let tail_start = combined.len().saturating_sub(MPEG_TS_PACKET_SIZE * 4);
+            combined.drain(..tail_start);
+            self.scan_tail = combined;
+        }
 
         let Some((pcr_pid, pcr)) = latest_pcr else {
             return std::time::Duration::ZERO;
