@@ -48,7 +48,6 @@ function makeResult(
     stream_url: null,
     retry_count: null,
     error_reason: null,
-    last_error_reason: null,
     drm_system: null,
     ...overrides,
   };
