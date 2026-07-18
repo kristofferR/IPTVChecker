@@ -877,30 +877,20 @@ pub fn run() {
                 emit_open_paths_to_focused_window(&app.handle(), &launch_open_paths);
             }
 
-            // Start the localhost streaming proxy for MPEG-TS playback.
-            // Use a oneshot channel so we block until the port is known,
-            // preventing a race where the user clicks Play before the proxy
-            // is ready (get_streaming_proxy_port would return 0).
+            // Warm up the localhost streaming proxy in the background. Play
+            // paths go through ensure_streaming_proxy_port (same start lock,
+            // with a liveness probe), so an early click can't double-start a
+            // listener — and setup no longer blocks window creation on the
+            // bind, which previously had no timeout.
             {
-                let state = app.state::<Arc<AppState>>().inner().clone();
-                let (port_tx, port_rx) = tokio::sync::oneshot::channel();
                 let handle_for_proxy = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    match engine::stream_proxy::start_streaming_proxy(handle_for_proxy).await {
-                        Ok(port) => {
-                            let _ = port_tx.send(port);
-                        }
-                        Err(error) => {
-                            log::error!("Failed to start streaming proxy: {}", error);
-                            let _ = port_tx.send(0);
-                        }
+                    let port =
+                        engine::stream_proxy::ensure_streaming_proxy_port(handle_for_proxy).await;
+                    if port == 0 {
+                        log::error!("Failed to start streaming proxy at startup");
                     }
                 });
-                if let Ok(port) = port_rx.blocking_recv() {
-                    if port > 0 {
-                        state.streaming_proxy_port.store(port, Ordering::Relaxed);
-                    }
-                }
             }
 
             // Background cleanup: evict old screenshot dirs per retention policy
