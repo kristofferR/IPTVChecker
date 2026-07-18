@@ -3,7 +3,6 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use tauri_plugin_store::StoreExt;
-use url::Url;
 
 use crate::error::AppError;
 use crate::models::saved_playlist::{SavedPlaylistEntry as SavedSourceEntry, SavedPlaylistSource};
@@ -34,30 +33,11 @@ struct XtreamRecentValue {
 }
 
 fn normalize_xtream_server(server: &str) -> Option<String> {
-    let trimmed = server.trim();
-    let mut parsed = Url::parse(trimmed).ok()?;
-    if parsed.scheme() != "http" && parsed.scheme() != "https" {
-        return None;
-    }
-    if parsed.host_str().is_none() {
-        return None;
-    }
-    if !parsed.username().is_empty() || parsed.password().is_some() {
-        return None;
-    }
-
-    parsed.set_query(None);
-    parsed.set_fragment(None);
-    let normalized_path = {
-        let path = parsed.path().trim_end_matches('/');
-        if path.is_empty() {
-            "/".to_string()
-        } else {
-            path.to_string()
-        }
-    };
-    parsed.set_path(&normalized_path);
-    Some(parsed.to_string().trim_end_matches('/').to_string())
+    // Delegate to the canonical normalizer (it also strips /get.php) so
+    // recent-entry dedup keys can't drift from the saved-playlist and
+    // source-identity keys built in playlist.rs.
+    let url = crate::commands::playlist::normalize_xtream_server(server).ok()?;
+    Some(url.to_string().trim_end_matches('/').to_string())
 }
 
 fn parse_xtream_recent_value(value: &str) -> Option<XtreamRecentValue> {
@@ -83,17 +63,6 @@ fn serialize_xtream_recent_value(value: &XtreamRecentValue) -> Option<String> {
 fn xtream_dedup_key(value: &str) -> Option<(String, String)> {
     let parsed = parse_xtream_recent_value(value)?;
     Some((parsed.server, parsed.username))
-}
-
-fn xtream_host_label(server: &str) -> String {
-    let Ok(parsed) = Url::parse(server) else {
-        return server.to_string();
-    };
-    match (parsed.host_str(), parsed.port()) {
-        (Some(host), Some(port)) => format!("{}:{}", host, port),
-        (Some(host), None) => host.to_string(),
-        _ => server.to_string(),
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,7 +96,7 @@ fn build_label(kind: &RecentPlaylistKind, value: &str) -> String {
             .map(|source| {
                 format!(
                     "{} ({})",
-                    xtream_host_label(&source.server),
+                    crate::commands::playlist::xtream_host_label(&source.server),
                     source.username
                 )
             })
