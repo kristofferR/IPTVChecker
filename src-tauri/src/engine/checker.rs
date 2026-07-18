@@ -838,6 +838,59 @@ fn summarize_ffprobe_error(error: &AppError) -> String {
 }
 
 /// Check RTSP/RTMP channel liveness using ffprobe.
+/// Outcome of one attempt-loop pass (a full retry cycle at one timeout).
+struct AttemptOutcome {
+    status: ChannelStatus,
+    stream_url: Option<String>,
+    latency_ms: Option<u64>,
+    retries_used: u32,
+    last_error_reason: Option<String>,
+    drm_system: Option<String>,
+    successful_attempt: Option<u32>,
+    attempts: Vec<ChannelAttemptDebugLog>,
+    ffprobe_output: Option<String>,
+}
+
+/// Shared retry orchestration: run the attempt loop at the base timeout and,
+/// if the verdict is Dead and an extended timeout is configured, run a second
+/// pass and merge the outcomes. Only the probe body differs between the
+/// HTTP and ffprobe checkers.
+async fn run_attempts_with_extended_timeout<F, Fut>(
+    timeout: f64,
+    extended_timeout: Option<f64>,
+    attempt_check: F,
+) -> Result<AttemptOutcome, AppError>
+where
+    F: Fn(f64, u32) -> Fut,
+    Fut: std::future::Future<Output = Result<AttemptOutcome, AppError>>,
+{
+    let mut final_outcome = attempt_check(timeout, 0).await?;
+
+    if final_outcome.status == ChannelStatus::Dead {
+        if let Some(ext_timeout) = extended_timeout {
+            let second = attempt_check(ext_timeout, final_outcome.attempts.len() as u32).await?;
+            let mut combined_attempts = final_outcome.attempts;
+            combined_attempts.extend(second.attempts);
+
+            final_outcome = AttemptOutcome {
+                status: second.status,
+                stream_url: second.stream_url,
+                latency_ms: second.latency_ms,
+                retries_used: final_outcome
+                    .retries_used
+                    .saturating_add(second.retries_used),
+                last_error_reason: second.last_error_reason.or(final_outcome.last_error_reason),
+                drm_system: second.drm_system.or(final_outcome.drm_system),
+                successful_attempt: second.successful_attempt,
+                attempts: combined_attempts,
+                ffprobe_output: second.ffprobe_output.or(final_outcome.ffprobe_output),
+            };
+        }
+    }
+
+    Ok(final_outcome)
+}
+
 pub async fn check_channel_status_with_ffprobe_debug(
     app: &tauri::AppHandle,
     url: &str,
@@ -913,18 +966,6 @@ pub async fn check_channel_status_with_ffprobe_debug(
 
     let retries = retries.clamp(MIN_RETRIES, MAX_RETRIES);
     let attempts = total_attempts(retries);
-
-    struct AttemptOutcome {
-        status: ChannelStatus,
-        stream_url: Option<String>,
-        latency_ms: Option<u64>,
-        retries_used: u32,
-        last_error_reason: Option<String>,
-        drm_system: Option<String>,
-        successful_attempt: Option<u32>,
-        attempts: Vec<ChannelAttemptDebugLog>,
-        ffprobe_output: Option<String>,
-    }
 
     let attempt_check = |current_timeout: f64, attempt_offset: u32| {
         let app = app.clone();
@@ -1050,30 +1091,8 @@ pub async fn check_channel_status_with_ffprobe_debug(
         }
     };
 
-    let first = attempt_check(timeout, 0).await?;
-    let mut final_outcome = first;
-
-    if final_outcome.status == ChannelStatus::Dead {
-        if let Some(ext_timeout) = extended_timeout {
-            let second = attempt_check(ext_timeout, final_outcome.attempts.len() as u32).await?;
-            let mut combined_attempts = final_outcome.attempts;
-            combined_attempts.extend(second.attempts);
-
-            final_outcome = AttemptOutcome {
-                status: second.status,
-                stream_url: second.stream_url,
-                latency_ms: second.latency_ms,
-                retries_used: final_outcome
-                    .retries_used
-                    .saturating_add(second.retries_used),
-                last_error_reason: second.last_error_reason.or(final_outcome.last_error_reason),
-                drm_system: second.drm_system.or(final_outcome.drm_system),
-                successful_attempt: second.successful_attempt,
-                attempts: combined_attempts,
-                ffprobe_output: second.ffprobe_output.or(final_outcome.ffprobe_output),
-            };
-        }
-    }
+    let final_outcome =
+        run_attempts_with_extended_timeout(timeout, extended_timeout, attempt_check).await?;
 
     let check_started_at_epoch_ms = final_outcome
         .attempts
@@ -1157,17 +1176,6 @@ pub async fn check_channel_status_with_debug(
     );
 
     log::info!("Checking channel: {}", url);
-
-    struct AttemptOutcome {
-        status: ChannelStatus,
-        stream_url: Option<String>,
-        latency_ms: Option<u64>,
-        retries_used: u32,
-        last_error_reason: Option<String>,
-        drm_system: Option<String>,
-        successful_attempt: Option<u32>,
-        attempts: Vec<ChannelAttemptDebugLog>,
-    }
 
     let attempt_check = |current_timeout: f64, attempt_offset: u32| {
         let client = client.clone();
@@ -1268,6 +1276,7 @@ pub async fn check_channel_status_with_debug(
                             drm_system,
                             successful_attempt: Some(attempt_number),
                             attempts: attempt_logs,
+                            ffprobe_output: None,
                         });
                     }
                     VerifyResult::Placeholder {
@@ -1284,6 +1293,7 @@ pub async fn check_channel_status_with_debug(
                             drm_system: None,
                             successful_attempt: None,
                             attempts: attempt_logs,
+                            ffprobe_output: None,
                         });
                     }
                     VerifyResult::Dead { latency_ms, reason } => {
@@ -1297,6 +1307,7 @@ pub async fn check_channel_status_with_debug(
                             drm_system: None,
                             successful_attempt: None,
                             attempts: attempt_logs,
+                            ffprobe_output: None,
                         });
                     }
                     VerifyResult::Geoblocked { latency_ms, reason } => {
@@ -1310,6 +1321,7 @@ pub async fn check_channel_status_with_debug(
                             drm_system: None,
                             successful_attempt: None,
                             attempts: attempt_logs,
+                            ffprobe_output: None,
                         });
                     }
                     VerifyResult::Retry { reason } => {
@@ -1336,34 +1348,13 @@ pub async fn check_channel_status_with_debug(
                 drm_system: None,
                 successful_attempt: None,
                 attempts: attempt_logs,
+                ffprobe_output: None,
             })
         }
     };
 
-    let first = attempt_check(timeout, 0).await?;
-    let mut final_outcome = first;
-
-    // If dead and extended timeout enabled, retry
-    if final_outcome.status == ChannelStatus::Dead {
-        if let Some(ext_timeout) = extended_timeout {
-            let second = attempt_check(ext_timeout, final_outcome.attempts.len() as u32).await?;
-            let mut combined_attempts = final_outcome.attempts;
-            combined_attempts.extend(second.attempts);
-
-            final_outcome = AttemptOutcome {
-                status: second.status,
-                stream_url: second.stream_url,
-                latency_ms: second.latency_ms,
-                retries_used: final_outcome
-                    .retries_used
-                    .saturating_add(second.retries_used),
-                last_error_reason: second.last_error_reason.or(final_outcome.last_error_reason),
-                drm_system: second.drm_system.or(final_outcome.drm_system),
-                successful_attempt: second.successful_attempt,
-                attempts: combined_attempts,
-            };
-        }
-    }
+    let final_outcome =
+        run_attempts_with_extended_timeout(timeout, extended_timeout, attempt_check).await?;
 
     let mut http_status_codes = Vec::<u16>::new();
     let mut redirect_chain = Vec::<String>::new();
