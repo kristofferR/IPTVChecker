@@ -2,6 +2,33 @@ use std::path::Path;
 
 use fs2::available_space;
 
+use crate::error::AppError;
+
+/// Write `bytes` to `path` atomically: write a sibling temp file, then rename
+/// it over the target. Windows can't rename over an existing file, so a
+/// failed rename falls back to remove-then-rename when the target exists.
+/// The temp file is cleaned up on any failure.
+pub fn atomic_write(path: &Path, tmp_path: &Path, bytes: &[u8]) -> Result<(), AppError> {
+    let result = (|| -> Result<(), AppError> {
+        std::fs::write(tmp_path, bytes).map_err(AppError::Io)?;
+        match std::fs::rename(tmp_path, path) {
+            Ok(()) => Ok(()),
+            Err(first_error) => {
+                if path.exists() {
+                    std::fs::remove_file(path).map_err(AppError::Io)?;
+                    std::fs::rename(tmp_path, path).map_err(AppError::Io)
+                } else {
+                    Err(AppError::Io(first_error))
+                }
+            }
+        }
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(tmp_path);
+    }
+    result
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiskSpaceTier {

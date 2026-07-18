@@ -714,33 +714,7 @@ async fn download_playlist_to_cache(
             detail: "Writing to disk",
         },
     );
-    let persist_result = (|| -> Result<(), AppError> {
-        std::fs::write(&tmp_path, &bytes).map_err(AppError::Io)?;
-
-        emit_load_progress(
-            app,
-            PlaylistLoadProgress::Saving {
-                detail: "Finalizing cache entry",
-            },
-        );
-        match std::fs::rename(&tmp_path, &cache_path) {
-            Ok(()) => {}
-            Err(first_error) => {
-                if cache_path.exists() {
-                    std::fs::remove_file(&cache_path).map_err(AppError::Io)?;
-                    std::fs::rename(&tmp_path, &cache_path).map_err(AppError::Io)?;
-                } else {
-                    return Err(AppError::Io(first_error));
-                }
-            }
-        }
-        Ok(())
-    })();
-
-    if let Err(error) = persist_result {
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(error);
-    }
+    crate::engine::disk::atomic_write(&cache_path, &tmp_path, &bytes)?;
     if let Err(error) = save_cache_metadata(&cache_path, &response_metadata) {
         log::warn!(
             "Failed to persist remote playlist cache metadata for {}: {}",
@@ -1257,26 +1231,7 @@ fn write_bytes_to_cache(cache_path: &std::path::Path, bytes: &[u8]) -> Result<()
         tmp_suffix
     ));
 
-    let result = (|| -> Result<(), AppError> {
-        std::fs::write(&tmp_path, bytes).map_err(AppError::Io)?;
-        match std::fs::rename(&tmp_path, cache_path) {
-            Ok(()) => {}
-            Err(first_error) => {
-                if cache_path.exists() {
-                    std::fs::remove_file(cache_path).map_err(AppError::Io)?;
-                    std::fs::rename(&tmp_path, cache_path).map_err(AppError::Io)?;
-                } else {
-                    return Err(AppError::Io(first_error));
-                }
-            }
-        }
-        Ok(())
-    })();
-
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp_path);
-    }
-    result
+    crate::engine::disk::atomic_write(cache_path, &tmp_path, bytes)
 }
 
 async fn fetch_xtream_account_info(
