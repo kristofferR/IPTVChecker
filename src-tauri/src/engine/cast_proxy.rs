@@ -719,6 +719,7 @@ fn spawn_upstream_pump(
             };
 
             let mut stream = response.bytes_stream();
+            let session_started = std::time::Instant::now();
             let mut got_bytes = false;
             loop {
                 tokio::select! {
@@ -754,10 +755,12 @@ fn spawn_upstream_pump(
                 }
             }
 
-            // A connection that produced data was a real session — reconnect
-            // quickly. One that broke without a single byte counts as a
-            // failure and escalates the backoff.
-            if got_bytes {
+            // Only a session that both produced data and survived for a
+            // while counts as healthy — an upstream that hands out one chunk
+            // and dies would otherwise reset the backoff on every loop and
+            // keep the reconnect rate at the fast base delay.
+            const HEALTHY_SESSION_MIN: Duration = Duration::from_secs(3);
+            if got_bytes && session_started.elapsed() >= HEALTHY_SESSION_MIN {
                 consecutive_failures = 0;
             } else {
                 consecutive_failures = consecutive_failures.saturating_add(1);
