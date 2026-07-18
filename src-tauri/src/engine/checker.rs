@@ -1112,7 +1112,9 @@ pub async fn check_channel_status_with_ffprobe_debug(
             final_verdict: final_outcome.status.to_string(),
             final_reason: final_outcome.last_error_reason,
             screenshot_error_reason: None,
-            diagnostics_output: final_outcome.ffprobe_output,
+            diagnostics_output: final_outcome
+                .ffprobe_output
+                .map(crate::models::scan_log::cap_diagnostics_output),
             attempts: final_outcome.attempts,
         },
     })

@@ -456,7 +456,10 @@ async fn compute_shared_url_result(
                     shared.video_bitrate = Some(format!("{kbps} kbps"));
                 }
                 format_bitrate_kbps = diag.format_bitrate_kbps;
-                shared.channel_log.diagnostics_output = Some(diag.diagnostics_output);
+                shared.channel_log.diagnostics_output =
+                    Some(crate::models::scan_log::cap_diagnostics_output(
+                        diag.diagnostics_output,
+                    ));
 
                 let png_fallback_result = if diag.screenshot_path.is_none()
                     && want_screenshot
@@ -577,7 +580,9 @@ async fn compute_shared_url_result(
                 shared.audio_channel_layout = audio.channel_layout;
             }
             format_bitrate_kbps = snapshot.format_bitrate_kbps;
-            shared.channel_log.diagnostics_output = Some(snapshot.ffprobe_output);
+            shared.channel_log.diagnostics_output = Some(
+                crate::models::scan_log::cap_diagnostics_output(snapshot.ffprobe_output),
+            );
         }
 
         apply_parallel_screenshot_outcome(&mut shared, screenshot_result);

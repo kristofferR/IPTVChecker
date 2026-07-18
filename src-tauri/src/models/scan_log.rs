@@ -35,6 +35,25 @@ pub struct ChannelDebugLog {
     pub attempts: Vec<ChannelAttemptDebugLog>,
 }
 
+/// Per-channel cap on retained ffprobe/ffmpeg diagnostics text. Channel logs
+/// live in memory for the whole scan and are persisted to history, so an
+/// unbounded tool dump (which can reach MBs on some streams) multiplies
+/// across tens of thousands of channels.
+pub const MAX_DIAGNOSTICS_OUTPUT_BYTES: usize = 64 * 1024;
+
+/// Truncate diagnostics text to [`MAX_DIAGNOSTICS_OUTPUT_BYTES`], keeping the
+/// tail (errors conclude a tool run) and prepending a marker when trimmed.
+pub fn cap_diagnostics_output(output: String) -> String {
+    if output.len() <= MAX_DIAGNOSTICS_OUTPUT_BYTES {
+        return output;
+    }
+    let mut start = output.len() - MAX_DIAGNOSTICS_OUTPUT_BYTES;
+    while !output.is_char_boundary(start) {
+        start += 1;
+    }
+    format!("[... truncated {} bytes ...]\n{}", start, &output[start..])
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChannelAttemptDebugLog {
     pub attempt: u32,
