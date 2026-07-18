@@ -9,9 +9,7 @@ import {
   useState,
   type ProfilerOnRenderCallback,
 } from "react";
-import { emit, listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { setLiquidGlassEffect } from "tauri-plugin-liquid-glass-api";
@@ -21,46 +19,26 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
-import type {
-  ChannelResult,
-  CurrentSourceDescriptor,
-  RecentPlaylistEntry,
-  ScanConfig,
-  PlaylistPreview,
-  SavedPlaylistDraft,
-  SavedPlaylistEntry,
-  StalkerOpenRequest,
-  XtreamOpenRequest,
-  XtreamRecentSource,
-  AppSettings,
-} from "./lib/types";
+import type { AppSettings, ChannelResult, ScanConfig } from "./lib/types";
 import {
-  addRecentPlaylist,
-  clearRecentPlaylists,
   clearScanHistory,
-  deleteSavedPlaylist,
-  getSavedPlaylists,
-  getRecentPlaylists,
   getScanHistory,
-  openPlaylist,
-  openSavedPlaylist,
-  openPlaylistStalker,
-  openPlaylistXtream,
-  openPlaylistUrl,
   checkFfmpegAvailable,
   readScreenshot,
   openChannelInPlayer,
   quickCheckChannel,
-  upsertSavedPlaylist,
 } from "./lib/tauri";
 import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
 import { useChromecast, type UseChromecastResult } from "./hooks/useChromecast";
 import { useStreamPlayer } from "./hooks/useStreamPlayer";
+import { usePlaylistSources } from "./hooks/usePlaylistSources";
+import { useUpdateCheck } from "./hooks/useUpdateCheck";
+import { useMenuEventBridge } from "./hooks/useMenuEventBridge";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
 import type { ChromecastDevice } from "./lib/types";
 import { useAppStore } from "./store";
-import type { AppStore, OpenSourceDialogState, UpdateNotice } from "./store/types";
+import type { AppStore, OpenSourceDialogState } from "./store/types";
 import { Toolbar } from "./components/Toolbar";
 import { FilterBar } from "./components/FilterBar";
 import { ChannelTable } from "./components/ChannelTable";
@@ -68,6 +46,8 @@ import { PlaylistReportPanel } from "./components/PlaylistReportPanel";
 import { ThumbnailPanel } from "./components/ThumbnailPanel";
 import { StatsPanel } from "./components/StatsPanel";
 import { ProgressBar } from "./components/ProgressBar";
+import { AppBanners } from "./components/AppBanners";
+import { StartScreen } from "./components/StartScreen";
 const KeyboardShortcutsDialog = lazy(() => import("./components/KeyboardShortcutsDialog"));
 const HistoryPanel = lazy(() => import("./components/HistoryPanel"));
 const OpenSourceDialog = lazy(() => import("./components/OpenSourceDialog"));
@@ -80,10 +60,10 @@ const SavedPlaylistsDialog = lazy(() => import("./components/SavedPlaylistsDialo
 const SavedPlaylistEditorDialog = lazy(
   () => import("./components/SavedPlaylistEditorDialog"),
 );
-import { AlertTriangle, ExternalLink, FolderOpen, Info, Loader2, X } from "lucide-react";
-import { getVersion } from "@tauri-apps/api/app";
+import { AlertTriangle } from "lucide-react";
 import { detectPlatform } from "./lib/platform";
 import { logger } from "./lib/logger";
+import { errorToString } from "./lib/errors";
 import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/haptics";
 import { toPendingChannelResult } from "./lib/channelResults";
 import { isScanActive } from "./lib/scanState";
@@ -91,60 +71,9 @@ import { isInputLikeTarget, isPrimaryModifierPressed } from "./lib/shortcuts";
 import { recordUiPerf, startLongTaskObserver, uiPerfEnabled } from "./lib/perf";
 import { shouldAutoRevealReportPanel } from "./lib/playlistReportVisibility";
 import {
-  applyContentVisibilityToPreview,
-  applySourceFilterToPreview,
-  hasDirtySourceFilter,
   normalizeSourceFilter,
-  resolvePreservedGroupFilter,
   validateSourceFilterPattern,
 } from "./lib/sourceFilter";
-import {
-  buildSavedPlaylistDraftFromSource,
-  findSavedPlaylistForCurrentSource,
-  savedPlaylistSecondaryLabel,
-  savedEntryToSourceDescriptor,
-} from "./lib/savedPlaylists";
-
-function errorToString(err: unknown): string {
-  if (typeof err === "string") {
-    return err;
-  }
-  if (err instanceof Error) {
-    return err.message;
-  }
-  if (
-    typeof err === "object" &&
-    err !== null &&
-    "message" in err &&
-    typeof (err as { message?: unknown }).message === "string"
-  ) {
-    return (err as { message: string }).message;
-  }
-  return String(err);
-}
-
-function formatPlaylistOpenError(err: unknown): string {
-  const raw = errorToString(err).replace(/^error:\s*/i, "").trim();
-  if (!raw || raw === "[object Object]") {
-    return "Failed to open playlist. Please verify the file path and playlist format.";
-  }
-  return raw.toLowerCase().startsWith("failed to open playlist")
-    ? raw
-    : `Failed to open playlist: ${raw}`;
-}
-
-function formatSourceReloadError(err: unknown): string {
-  const raw = errorToString(err).replace(/^error:\s*/i, "").trim();
-  const normalized = raw.replace(/^failed to open playlist:\s*/i, "").trim();
-
-  if (!normalized || normalized === "[object Object]") {
-    return "Failed to reload source. Please verify the source settings and filter.";
-  }
-
-  return raw.toLowerCase().startsWith("failed to reload source")
-    ? raw
-    : `Failed to reload source: ${normalized}`;
-}
 
 async function restoreAndFocusWindow(window: {
   unminimize: () => Promise<void>;
@@ -161,71 +90,8 @@ function isPlaylistLikePath(path: string): boolean {
   return normalized.endsWith(".m3u") || normalized.endsWith(".m3u8");
 }
 
-const UPDATE_CHECK_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const OS_PROGRESS_UPDATE_INTERVAL_MS = 2000;
-const UPDATE_LAST_CHECK_KEY = "updates:last-check-epoch-ms";
-const UPDATE_CACHE_KEY = "updates:last-available-release";
-const START_SCREEN_RECENT_LIMIT = 5;
 const TABLE_PROFILER_ROW_LIMIT = 50_000;
-const GITHUB_LATEST_RELEASE_API =
-  "https://api.github.com/repos/kristofferR/IPTVChecker/releases/latest";
-const GITHUB_RELEASES_PAGE =
-  "https://github.com/kristofferR/IPTVChecker/releases";
-
-type SourceLoadMode = "freshOpen" | "reapplySourceFilter";
-
-type LoadAndCommitSourceResult =
-  | {
-      ok: true;
-      preview: PlaylistPreview;
-    }
-  | {
-      ok: false;
-      error: string;
-    };
-
-function normalizeVersion(version: string): string {
-  return version.trim().replace(/^v/i, "");
-}
-
-function parseVersionParts(version: string): number[] {
-  const numeric = normalizeVersion(version)
-    .split(".")
-    .map((part) => {
-      const matched = part.match(/^\d+/);
-      return matched ? Number.parseInt(matched[0], 10) : 0;
-    });
-  return numeric.length > 0 ? numeric : [0];
-}
-
-function compareVersions(left: string, right: string): number {
-  const leftParts = parseVersionParts(left);
-  const rightParts = parseVersionParts(right);
-  const maxLength = Math.max(leftParts.length, rightParts.length);
-
-  for (let index = 0; index < maxLength; index += 1) {
-    const a = leftParts[index] ?? 0;
-    const b = rightParts[index] ?? 0;
-    if (a > b) return 1;
-    if (a < b) return -1;
-  }
-
-  return 0;
-}
-
-function readCachedUpdateNotice(): UpdateNotice | null {
-  const raw = localStorage.getItem(UPDATE_CACHE_KEY);
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as UpdateNotice;
-    if (!parsed.latest_version || !parsed.release_url) {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-}
 
 // Non-reactive store access for writes inside callbacks/effects.
 const getStore = () => useAppStore.getState();
@@ -263,141 +129,6 @@ async function canSendNotifications(requiresPermission: boolean): Promise<boolea
     return permission === "granted";
   } catch {
     return false;
-  }
-}
-
-function shouldSkipUpdateCheck(
-  force: boolean,
-  now: number,
-  lastCheckedRaw: string | null,
-): boolean {
-  const lastChecked = lastCheckedRaw
-    ? Number.parseInt(lastCheckedRaw, 10)
-    : Number.NaN;
-  return (
-    !force &&
-    Number.isFinite(lastChecked) &&
-    now - lastChecked < UPDATE_CHECK_COOLDOWN_MS
-  );
-}
-
-function serializeXtreamRecent(source: XtreamRecentSource): string {
-  const obj: Record<string, string> = {
-    server: source.server.trim(),
-    username: source.username.trim(),
-  };
-  if (source.password) {
-    obj.password = source.password;
-  }
-  return JSON.stringify(obj);
-}
-
-function parseXtreamRecent(value: string): XtreamRecentSource | null {
-  try {
-    const parsed = JSON.parse(value) as Partial<XtreamRecentSource>;
-    const server = typeof parsed.server === "string" ? parsed.server.trim() : "";
-    const username =
-      typeof parsed.username === "string" ? parsed.username.trim() : "";
-    if (!server || !username) {
-      return null;
-    }
-    const password =
-      typeof parsed.password === "string" && parsed.password
-        ? parsed.password
-        : undefined;
-    return { server, username, password };
-  } catch {
-    return null;
-  }
-}
-
-function recentValueLabel(entry: RecentPlaylistEntry): string {
-  if (entry.kind === "file") {
-    return `Path - ${entry.value}`;
-  }
-  if (entry.kind === "url") {
-    return `URL - ${entry.value}`;
-  }
-  const source = parseXtreamRecent(entry.value);
-  if (!source) {
-    return "Xtream - Invalid source";
-  }
-  return `Xtream - ${source.server} (${source.username})`;
-}
-
-function recentTitle(entry: RecentPlaylistEntry): string {
-  if (entry.kind !== "xtream") {
-    return entry.value;
-  }
-  const source = parseXtreamRecent(entry.value);
-  if (!source) {
-    return entry.value;
-  }
-  return `${source.server} (${source.username})`;
-}
-
-function applyDisplayNameToPreview(
-  preview: PlaylistPreview,
-  displayName: string,
-  savedPlaylistId?: string | null,
-): PlaylistPreview {
-  const uniquePlaylistLabels = new Set(
-    preview.channels
-      .map((channel) => channel.playlist.trim())
-      .filter((value) => value.length > 0),
-  );
-  const shouldRewriteChannelPlaylists = uniquePlaylistLabels.size <= 1;
-
-  return {
-    ...preview,
-    file_name: displayName,
-    saved_playlist_id: savedPlaylistId ?? null,
-    channels: shouldRewriteChannelPlaylists
-      ? preview.channels.map((channel) => ({
-          ...channel,
-          playlist: displayName,
-        }))
-      : preview.channels,
-  };
-}
-
-function buildVisiblePlaylistPreview(
-  preview: PlaylistPreview,
-  sourceFilter: string,
-  hideVodContent: boolean,
-): PlaylistPreview {
-  return applyContentVisibilityToPreview(
-    applySourceFilterToPreview(preview, sourceFilter),
-    hideVodContent,
-  );
-}
-
-function savedEntryToDraft(entry: SavedPlaylistEntry): SavedPlaylistDraft {
-  switch (entry.kind) {
-    case "file":
-      return {
-        id: entry.id,
-        kind: "file",
-        display_name: entry.display_name,
-        path: entry.path,
-      };
-    case "url":
-      return {
-        id: entry.id,
-        kind: "url",
-        display_name: entry.display_name,
-        url: entry.url,
-      };
-    case "xtream":
-      return {
-        id: entry.id,
-        kind: "xtream",
-        display_name: entry.display_name,
-        servers: [...entry.servers],
-        preferred_server: entry.preferred_server,
-        username: entry.username,
-        password: entry.password,
-      };
   }
 }
 
@@ -805,43 +536,26 @@ export default function App() {
   const playlist = useAppStore((s) => s.playlist);
   const playlistLoading = useAppStore((s) => s.playlistLoading);
   const playlistLoadProgress = useAppStore((s) => s.playlistLoadProgress);
-  const playlistOpenError = useAppStore((s) => s.playlistOpenError);
   const recentPlaylists = useAppStore((s) => s.recentPlaylists);
   const savedPlaylists = useAppStore((s) => s.savedPlaylists);
-  const channelSearch = useAppStore((s) => s.channelSearch);
   const platform = useAppStore((s) => s.platform);
   const isMac = useAppStore((s) => s.isMac);
   const sidebarHidden = useAppStore((s) => s.sidebarHidden);
   const sidebarWidth = useAppStore((s) => s.sidebarWidth);
   const showReportPanel = useAppStore((s) => s.showReportPanel);
   const reportSidebarWidth = useAppStore((s) => s.reportSidebarWidth);
-  const lightboxOpen = useAppStore((s) => s.lightboxOpen);
   const showKeyboardShortcuts = useAppStore((s) => s.showKeyboardShortcuts);
   const isDragOver = useAppStore((s) => s.isDragOver);
   const ffmpegWarning = useAppStore((s) => s.ffmpegWarning);
-  const errorDismissed = useAppStore((s) => s.errorDismissed);
-  const playbackError = useAppStore((s) => s.playbackError);
-  const scanInputError = useAppStore((s) => s.scanInputError);
-  const menuInfo = useAppStore((s) => s.menuInfo);
-  const updateNotice = useAppStore((s) => s.updateNotice);
-  const appVersion = useAppStore((s) => s.appVersion);
   const openSourceDialogState = useAppStore((s) => s.openSourceDialogState);
   const pendingPlaybackChannel = useAppStore((s) => s.pendingPlaybackChannel);
   const liveSelectedChannel = useAppStore(selectLiveSelectedChannel);
-  const scanError = useAppStore((s) => s.scanError);
   const showHistory = useAppStore((s) => s.showHistory);
   const historyEntries = useAppStore((s) => s.historyEntries);
   const historyLoading = useAppStore((s) => s.historyLoading);
   const historyError = useAppStore((s) => s.historyError);
   const historyClearing = useAppStore((s) => s.historyClearing);
-  const settingsHydrated = useAppStore((s) => s.settingsHydrated);
-  const hideVodContent = useAppStore((s) => s.settings.hide_vod_content);
   const modKey = isMac ? "Cmd" : "Ctrl";
-  const [savedPlaylistsDialogOpen, setSavedPlaylistsDialogOpen] = useState(false);
-  const [savedPlaylistEditorDraft, setSavedPlaylistEditorDraft] =
-    useState<SavedPlaylistDraft | null>(null);
-  const [savedXtreamTestEntry, setSavedXtreamTestEntry] =
-    useState<SavedPlaylistEntry | null>(null);
 
   const sidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const reportSidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
@@ -883,10 +597,6 @@ export default function App() {
   const isCasting = isCastSessionActive(castSession);
 
   const { settings, save: saveSettings, applyExternal: applyExternalSettings } = useSettings();
-  const settingsRef = useRef(settings);
-  settingsRef.current = settings;
-  const saveSettingsRef = useRef(saveSettings);
-  saveSettingsRef.current = saveSettings;
   const {
     start,
     cancel,
@@ -896,10 +606,32 @@ export default function App() {
     syncFromPlaylist,
     updateResult,
   } = useScan();
-  const channelSearchError = useMemo(
-    () => validateSourceFilterPattern(channelSearch),
-    [channelSearch],
-  );
+  const { checkForUpdates } = useUpdateCheck();
+  const {
+    handleClearRecentPlaylists,
+    handleOpen,
+    handleOpenFolder,
+    openPlaylistPath,
+    openPlaylistUrlValue,
+    openPlaylistXtreamValue,
+    openPlaylistStalkerValue,
+    handleOpenSaved,
+    handleOpenRecent,
+    handleManageSavedPlaylists,
+    editSavedPlaylist,
+    handleSaveCurrentPlaylist,
+    handleSavePlaylistDraft,
+    handleDeleteSavedPlaylistById,
+    handlePreferSavedXtreamServer,
+    ensureSourceFilterApplied,
+    handleApplySourceFilter,
+    savedPlaylistsDialogOpen,
+    setSavedPlaylistsDialogOpen,
+    savedPlaylistEditorDraft,
+    setSavedPlaylistEditorDraft,
+    savedXtreamTestEntry,
+    setSavedXtreamTestEntry,
+  } = usePlaylistSources({ initFromPlaylist, syncFromPlaylist });
   const reportAutoRevealBlockedRef = useRef(false);
   const reportAutoRevealDoneRef = useRef(false);
   const reportWasAutoShownRef = useRef(false);
@@ -971,802 +703,6 @@ export default function App() {
     });
   }, []);
 
-  // Auto-dismiss error banner after 10 seconds
-  useEffect(() => {
-    if (scanError) {
-      getStore().setErrorDismissed(false);
-      const timer = setTimeout(() => getStore().setErrorDismissed(true), 10000);
-      return () => clearTimeout(timer);
-    }
-  }, [scanError]);
-
-  useEffect(() => {
-    if (!playbackError) return;
-    const timer = setTimeout(() => getStore().setPlaybackError(null), 10000);
-    return () => clearTimeout(timer);
-  }, [playbackError]);
-
-  useEffect(() => {
-    if (!playlistOpenError) return;
-    const timer = setTimeout(() => getStore().setPlaylistOpenError(null), 10000);
-    return () => clearTimeout(timer);
-  }, [playlistOpenError]);
-
-  useEffect(() => {
-    if (!scanInputError) return;
-    const timer = setTimeout(() => getStore().setScanInputError(null), 8000);
-    return () => clearTimeout(timer);
-  }, [scanInputError]);
-
-  useEffect(() => {
-    if (!channelSearchError) {
-      getStore().setScanInputError(null);
-    }
-  }, [channelSearchError]);
-
-  useEffect(() => {
-    if (!menuInfo) return;
-    const timer = setTimeout(() => getStore().setMenuInfo(null), 8000);
-    return () => clearTimeout(timer);
-  }, [menuInfo]);
-
-  const refreshRecentPlaylists = useCallback(async () => {
-    try {
-      const entries = await getRecentPlaylists();
-      getStore().setRecentPlaylists(entries);
-    } catch {
-      // Ignore recent-list load failures.
-    }
-  }, []);
-
-  const refreshSavedPlaylists = useCallback(async (): Promise<SavedPlaylistEntry[]> => {
-    try {
-      const entries = await getSavedPlaylists();
-      getStore().setSavedPlaylists(entries);
-      return entries;
-    } catch {
-      return [];
-    }
-  }, []);
-
-  const handleClearRecentPlaylists = useCallback(async () => {
-    try {
-      const entries = await clearRecentPlaylists();
-      getStore().setRecentPlaylists(entries);
-    } catch {
-      // Ignore clear failures.
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshRecentPlaylists();
-  }, [refreshRecentPlaylists]);
-
-  useEffect(() => {
-    void refreshSavedPlaylists();
-  }, [refreshSavedPlaylists]);
-
-  const checkForUpdates = useCallback(
-    async (force: boolean, knownCurrentVersion?: string) => {
-      const now = Date.now();
-      const lastCheckedRaw = localStorage.getItem(UPDATE_LAST_CHECK_KEY);
-      if (shouldSkipUpdateCheck(force, now, lastCheckedRaw)) {
-        return;
-      }
-
-      try {
-        const currentVersion = normalizeVersion(
-          knownCurrentVersion ?? (await getVersion()),
-        );
-        getStore().setAppVersion(currentVersion);
-
-        const response = await fetch(GITHUB_LATEST_RELEASE_API, {
-          headers: {
-            Accept: "application/vnd.github+json",
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        const release = (await response.json()) as {
-          tag_name?: string;
-          html_url?: string;
-        };
-
-        const latestVersion = normalizeVersion(release.tag_name ?? "");
-        if (!latestVersion) {
-          throw new Error("Latest release version is missing");
-        }
-
-        localStorage.setItem(UPDATE_LAST_CHECK_KEY, String(now));
-
-        if (compareVersions(latestVersion, currentVersion) > 0) {
-          const notice: UpdateNotice = {
-            latest_version: latestVersion,
-            release_url: release.html_url || GITHUB_RELEASES_PAGE,
-            checked_at_epoch_ms: now,
-          };
-          getStore().setUpdateNotice(notice);
-          localStorage.setItem(UPDATE_CACHE_KEY, JSON.stringify(notice));
-          return;
-        }
-
-        getStore().setUpdateNotice(null);
-        localStorage.removeItem(UPDATE_CACHE_KEY);
-        if (force) {
-          getStore().setMenuInfo(`You're up to date (v${currentVersion}).`);
-        }
-      } catch (err) {
-        if (force) {
-          getStore().setMenuInfo(`Update check failed: ${errorToString(err)}`);
-        }
-      }
-    },
-    [],
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const runInitialUpdateCheck = async () => {
-      let currentVersion = "";
-      try {
-        currentVersion = normalizeVersion(await getVersion());
-        if (!cancelled) {
-          getStore().setAppVersion(currentVersion);
-        }
-      } catch {
-        currentVersion = "";
-      }
-
-      if (cancelled) return;
-
-      const cachedNotice = readCachedUpdateNotice();
-      if (
-        cachedNotice &&
-        currentVersion &&
-        compareVersions(cachedNotice.latest_version, currentVersion) > 0
-      ) {
-        getStore().setUpdateNotice(cachedNotice);
-      } else if (cachedNotice) {
-        localStorage.removeItem(UPDATE_CACHE_KEY);
-      }
-
-      await checkForUpdates(false, currentVersion || undefined);
-    };
-
-    void runInitialUpdateCheck();
-    return () => {
-      cancelled = true;
-    };
-  }, [checkForUpdates]);
-
-  const commitLoadedPlaylist = useCallback(
-    async (
-      preview: PlaylistPreview,
-      cachedPreview: PlaylistPreview,
-      descriptor: CurrentSourceDescriptor,
-      mode: SourceLoadMode,
-      appliedSourceFilter: string,
-    ) => {
-      const state = getStore();
-      state.setPlaylist(preview);
-      state.setCachedSourcePreview(cachedPreview);
-      state.setCurrentSourceDescriptor(descriptor);
-      state.setLastAppliedSourceFilter(appliedSourceFilter);
-      state.setPlaylistOpenError(null);
-
-      if (mode === "freshOpen") {
-        state.setSearch("");
-        state.setGroupFilter("all");
-        state.setStatusFilter("all");
-        state.setShowHistory(false);
-      } else {
-        state.setGroupFilter(
-          resolvePreservedGroupFilter(state.groupFilter, preview.groups),
-        );
-      }
-
-      state.setSelectedChannel(null);
-      state.setSelectedChannelIndices([]);
-      state.setPendingPlaybackChannel(null);
-
-      const initStartedAt = performance.now();
-      logger.info(
-        `[App] Preparing scan cache for ${preview.channels.length} visible channels`,
-      );
-      await initFromPlaylist(preview.channels);
-      logger.info(
-        `[App] Scan cache ready in ${(performance.now() - initStartedAt).toFixed(1)}ms`,
-      );
-    },
-    [initFromPlaylist],
-  );
-
-  const loadFullSourcePreview = useCallback(
-    async (descriptor: CurrentSourceDescriptor): Promise<PlaylistPreview> => {
-      switch (descriptor.kind) {
-        case "path":
-          return openPlaylist(descriptor.path, undefined, undefined);
-        case "url":
-          return openPlaylistUrl(descriptor.url, undefined, undefined);
-        case "saved":
-          return openSavedPlaylist(descriptor.id, undefined, undefined);
-        case "xtream":
-          return openPlaylistXtream(
-            {
-              server: descriptor.server,
-              username: descriptor.username,
-              password: descriptor.password,
-            },
-            undefined,
-            undefined,
-          );
-        case "stalker":
-          return openPlaylistStalker(
-            {
-              portal: descriptor.portal,
-              mac: descriptor.mac,
-            },
-            undefined,
-            undefined,
-          );
-      }
-    },
-    [],
-  );
-
-  const buildVisiblePreview = useCallback(
-    (preview: PlaylistPreview, sourceFilter: string) =>
-      buildVisiblePlaylistPreview(preview, sourceFilter, hideVodContent),
-    [hideVodContent],
-  );
-
-  const loadAndCommitSource = useCallback(
-    async (
-      descriptor: CurrentSourceDescriptor,
-      mode: SourceLoadMode,
-    ): Promise<LoadAndCommitSourceResult> => {
-      const normalizedSourceFilter = normalizeSourceFilter(channelSearch);
-      const currentSourceFilterError = validateSourceFilterPattern(
-        normalizedSourceFilter,
-      );
-      if (currentSourceFilterError) {
-        const error =
-          mode === "reapplySourceFilter"
-            ? formatSourceReloadError(currentSourceFilterError)
-            : formatPlaylistOpenError(currentSourceFilterError);
-        getStore().setPlaylistOpenError(error);
-        return { ok: false, error };
-      }
-
-      const sourceLabel = (() => {
-        switch (descriptor.kind) {
-          case "path":
-            return `path=${descriptor.path}`;
-          case "url":
-            return `url=${descriptor.url}`;
-          case "saved":
-            return `saved id=${descriptor.id}`;
-          case "xtream":
-            return `xtream server=${descriptor.server}, username=${descriptor.username}`;
-          case "stalker":
-            return `stalker portal=${descriptor.portal}, mac=${descriptor.mac}`;
-        }
-      })();
-      const loadingAction =
-        mode === "reapplySourceFilter"
-          ? "Reloading source with source filter"
-          : "Opening source";
-
-      getStore().setPlaylistOpenError(null);
-      getStore().setPlaylistLoadProgress(null);
-      getStore().setPlaylistLoading(true);
-      const safeLabel = sourceLabel.replace(/username=\S+/g, "username=***").replace(/password=\S+/g, "password=***");
-      logger.info(`[App] ${loadingAction}: ${safeLabel}`);
-
-      try {
-        const state = getStore();
-        const canReuseCachedPreview =
-          mode === "reapplySourceFilter" && state.cachedSourcePreview != null;
-
-        const cachedPreview = canReuseCachedPreview
-          ? state.cachedSourcePreview!
-          : await loadFullSourcePreview(descriptor);
-        if (!canReuseCachedPreview) {
-          logger.debug(
-            `[App] ${loadingAction}: ${sourceLabel}, channelSearch="${normalizedSourceFilter}"`,
-          );
-          logger.debug(
-            `[App] Source loaded: ${cachedPreview.file_name}, channels=${cachedPreview.total_channels}, groups=${cachedPreview.groups.length}`,
-            cachedPreview.groups,
-          );
-        } else {
-          logger.debug(
-            `[App] ${loadingAction} from cached preview: ${sourceLabel}, channelSearch="${normalizedSourceFilter}", cachedChannels=${cachedPreview.total_channels}`,
-          );
-        }
-
-        const preview = buildVisiblePreview(cachedPreview, normalizedSourceFilter);
-        await commitLoadedPlaylist(
-          preview,
-          cachedPreview,
-          descriptor,
-          mode,
-          normalizedSourceFilter,
-        );
-        return { ok: true, preview };
-      } catch (err) {
-        logger.error(
-          mode === "reapplySourceFilter"
-            ? "[App] Failed to reload source with source filter"
-            : "[App] Failed to open source",
-          err,
-        );
-        const message =
-          mode === "reapplySourceFilter"
-            ? formatSourceReloadError(err)
-            : formatPlaylistOpenError(err);
-        getStore().setPlaylistOpenError(message);
-
-        if (mode === "freshOpen") {
-          // Keep app interaction predictable after a failed fresh open attempt.
-          getStore().setSelectedChannel(null);
-          getStore().setSelectedChannelIndices([]);
-          getStore().setPendingPlaybackChannel(null);
-          getStore().setShowHistory(false);
-          void refreshRecentPlaylists();
-        }
-
-        return { ok: false, error: message };
-      } finally {
-        getStore().setPlaylistLoading(false);
-        getStore().setPlaylistLoadProgress(null);
-      }
-    },
-    [
-      buildVisiblePreview,
-      channelSearch,
-      commitLoadedPlaylist,
-      loadFullSourcePreview,
-      refreshRecentPlaylists,
-    ],
-  );
-
-  const previousHideVodContentRef = useRef(hideVodContent);
-
-  useEffect(() => {
-    if (!settingsHydrated) {
-      previousHideVodContentRef.current = hideVodContent;
-      return;
-    }
-
-    if (previousHideVodContentRef.current === hideVodContent) {
-      return;
-    }
-    previousHideVodContentRef.current = hideVodContent;
-
-    const state = getStore();
-    if (!state.cachedSourcePreview) {
-      return;
-    }
-
-    const nextPreview = buildVisiblePreview(
-      state.cachedSourcePreview,
-      state.lastAppliedSourceFilter,
-    );
-    const visibleIndices = new Set(
-      nextPreview.channels.map((channel) => channel.index),
-    );
-    const selectedIndex = state.selectedChannel?.index ?? null;
-    const pendingPlaybackIndex = state.pendingPlaybackChannel?.index ?? null;
-    const nextSelectedIndices = state.selectedChannelIndices.filter((index) =>
-      visibleIndices.has(index),
-    );
-
-    state.setPlaylist(nextPreview);
-    state.setGroupFilter(
-      resolvePreservedGroupFilter(state.groupFilter, nextPreview.groups),
-    );
-    state.setSelectedChannelIndices(nextSelectedIndices);
-
-    if (selectedIndex == null || !visibleIndices.has(selectedIndex)) {
-      state.setSelectedChannel(null);
-    }
-    if (pendingPlaybackIndex == null || !visibleIndices.has(pendingPlaybackIndex)) {
-      state.setPendingPlaybackChannel(null);
-    }
-
-    void syncFromPlaylist(nextPreview.channels, true).then(() => {
-      if (selectedIndex == null || !visibleIndices.has(selectedIndex)) {
-        return;
-      }
-
-      const refreshed = getStore().results[selectedIndex];
-      if (refreshed) {
-        getStore().setSelectedChannel(refreshed);
-      }
-    });
-  }, [
-    buildVisiblePreview,
-    hideVodContent,
-    settingsHydrated,
-    syncFromPlaylist,
-  ]);
-
-  const patchCurrentPlaylistMetadata = useCallback(
-    (displayName: string, savedPlaylistId?: string | null) => {
-      const state = getStore();
-      if (state.playlist) {
-        state.setPlaylist(
-          applyDisplayNameToPreview(state.playlist, displayName, savedPlaylistId),
-        );
-      }
-      if (state.cachedSourcePreview) {
-        state.setCachedSourcePreview(
-          applyDisplayNameToPreview(
-            state.cachedSourcePreview,
-            displayName,
-            savedPlaylistId,
-          ),
-        );
-      }
-    },
-    [],
-  );
-
-  const openSavedPlaylistById = useCallback(
-    async (id: string): Promise<string | true> => {
-      const result = await loadAndCommitSource(
-        {
-          kind: "saved",
-          id,
-        },
-        "freshOpen",
-      );
-      if (!result.ok) {
-        return result.error;
-      }
-
-      const nextSaved = await refreshSavedPlaylists();
-      const savedEntry = nextSaved.find((entry) => entry.id === id);
-      if (!savedEntry) {
-        void refreshRecentPlaylists();
-        return true;
-      }
-
-      try {
-        const recentPayload =
-          savedEntry.kind === "file"
-            ? {
-                kind: "file" as const,
-                value: savedEntry.path,
-              }
-            : savedEntry.kind === "url"
-              ? {
-                  kind: "url" as const,
-                  value: savedEntry.url,
-                }
-              : {
-                  kind: "xtream" as const,
-                  value: serializeXtreamRecent({
-                    server:
-                      savedEntry.preferred_server ?? savedEntry.servers[0] ?? "",
-                    username: savedEntry.username,
-                    password: savedEntry.password ?? undefined,
-                  }),
-                };
-
-        const entries = await addRecentPlaylist(
-          recentPayload.kind,
-          recentPayload.value,
-          savedEntry.display_name,
-          savedEntry.id,
-        );
-        getStore().setRecentPlaylists(entries);
-      } catch {
-        // Ignore recent-list update failures.
-      }
-
-      return true;
-    },
-    [loadAndCommitSource, refreshRecentPlaylists, refreshSavedPlaylists],
-  );
-
-  const openPlaylistPath = useCallback(async (selectedPath: string) => {
-    const result = await loadAndCommitSource(
-      {
-        kind: "path",
-        path: selectedPath,
-      },
-      "freshOpen",
-    );
-    if (!result.ok) {
-      return;
-    }
-
-    try {
-      const entries = await addRecentPlaylist("file", selectedPath, null, null);
-      getStore().setRecentPlaylists(entries);
-    } catch {
-      // Ignore recent-list update failures.
-    }
-  }, [loadAndCommitSource]);
-
-  const handleOpen = useCallback(async () => {
-    const path = await open({
-      multiple: false,
-      filters: [
-        { name: "M3U Playlists", extensions: ["m3u", "m3u8"] },
-      ],
-      directory: false,
-    });
-    if (!path) return;
-
-    const selectedPath = Array.isArray(path) ? path[0] : path;
-    if (!selectedPath) return;
-
-    await openPlaylistPath(selectedPath);
-  }, [openPlaylistPath]);
-
-  const handleOpenFolder = useCallback(async () => {
-    const path = await open({
-      multiple: false,
-      directory: true,
-    });
-    if (!path) return;
-
-    const selectedPath = Array.isArray(path) ? path[0] : path;
-    if (!selectedPath) return;
-
-    await openPlaylistPath(selectedPath);
-  }, [openPlaylistPath]);
-
-  const openPlaylistUrlValue = useCallback(async (url: string): Promise<string | true> => {
-    const result = await loadAndCommitSource(
-      {
-        kind: "url",
-        url,
-      },
-      "freshOpen",
-    );
-    if (!result.ok) {
-      return result.error;
-    }
-
-    try {
-      const entries = await addRecentPlaylist("url", url, null, null);
-      getStore().setRecentPlaylists(entries);
-    } catch {
-      // Ignore recent-list update failures.
-    }
-
-    return true;
-  }, [loadAndCommitSource]);
-
-  const openPlaylistXtreamValue = useCallback(
-    async (source: XtreamOpenRequest, savePassword?: boolean): Promise<string | true> => {
-      const result = await loadAndCommitSource(
-        {
-          kind: "xtream",
-          server: source.server,
-          username: source.username,
-          password: source.password,
-        },
-        "freshOpen",
-      );
-      if (!result.ok) {
-        return result.error;
-      }
-
-      if (
-        typeof result.preview.xtream_max_connections === "number" &&
-        Number.isFinite(result.preview.xtream_max_connections) &&
-        result.preview.xtream_max_connections > 0
-      ) {
-        const effectiveConcurrency = Math.max(
-          1,
-          Math.min(20, Math.round(result.preview.xtream_max_connections)),
-        );
-        getStore().setMenuInfo(
-          `Xtream max connections detected: ${result.preview.xtream_max_connections}. Scan concurrency will use ${effectiveConcurrency}.`,
-        );
-      }
-
-      try {
-        const entries = await addRecentPlaylist(
-          "xtream",
-          serializeXtreamRecent({
-            server: source.server,
-            username: source.username,
-            password: savePassword ? source.password : undefined,
-          }),
-          null,
-          null,
-        );
-        getStore().setRecentPlaylists(entries);
-      } catch {
-        // Ignore recent-list update failures.
-      }
-
-      return true;
-    },
-    [loadAndCommitSource],
-  );
-
-  const openPlaylistStalkerValue = useCallback(
-    async (source: StalkerOpenRequest): Promise<string | true> => {
-      const result = await loadAndCommitSource(
-        {
-          kind: "stalker",
-          portal: source.portal,
-          mac: source.mac,
-        },
-        "freshOpen",
-      );
-      return result.ok ? true : result.error;
-    },
-    [loadAndCommitSource],
-  );
-
-  const handleOpenSaved = useCallback((id: string) => {
-    void openSavedPlaylistById(id);
-  }, [openSavedPlaylistById]);
-
-  const handleManageSavedPlaylists = useCallback(() => {
-    setSavedPlaylistsDialogOpen(true);
-  }, []);
-
-  const handleSaveCurrentPlaylist = useCallback(() => {
-    const state = getStore();
-    const currentPlaylist = state.playlist;
-    const descriptor = state.currentSourceDescriptor;
-    const existing = findSavedPlaylistForCurrentSource(
-      state.savedPlaylists,
-      descriptor,
-      currentPlaylist?.saved_playlist_id,
-    );
-
-    if (existing) {
-      setSavedPlaylistEditorDraft(savedEntryToDraft(existing));
-      return;
-    }
-
-    const draft = buildSavedPlaylistDraftFromSource(
-      descriptor,
-      currentPlaylist?.file_name ?? "",
-      null,
-    );
-    if (!draft) {
-      state.setMenuInfo("Open a file, URL, or Xtream source first.");
-      return;
-    }
-    setSavedPlaylistEditorDraft(draft);
-  }, []);
-
-  const handleSavePlaylistDraft = useCallback(
-    async (draft: SavedPlaylistDraft) => {
-      const result = await upsertSavedPlaylist(draft);
-      getStore().setSavedPlaylists(result.entries);
-      setSavedPlaylistEditorDraft(null);
-      void refreshRecentPlaylists();
-
-      const state = getStore();
-      const currentPlaylist = state.playlist;
-      const currentSaved = currentPlaylist?.saved_playlist_id ?? null;
-      const currentMatch = findSavedPlaylistForCurrentSource(
-        result.entries,
-        state.currentSourceDescriptor,
-        currentSaved,
-      );
-      if (currentMatch && currentMatch.id === result.entry.id) {
-        await openSavedPlaylistById(result.entry.id);
-      }
-    },
-    [openSavedPlaylistById, refreshRecentPlaylists],
-  );
-
-  const handleDeleteSavedPlaylistById = useCallback(
-    async (id: string) => {
-      const confirmed = window.confirm("Delete this saved playlist?");
-      if (!confirmed) {
-        return;
-      }
-
-      try {
-        const currentState = getStore();
-        const deletedEntry =
-          currentState.savedPlaylists.find((entry) => entry.id === id) ?? null;
-        const fallbackDescriptor = deletedEntry
-          ? savedEntryToSourceDescriptor(deletedEntry)
-          : null;
-        const entries = await deleteSavedPlaylist(id);
-        getStore().setSavedPlaylists(entries);
-        void refreshRecentPlaylists();
-
-        const state = getStore();
-        if (state.playlist?.saved_playlist_id === id) {
-          state.setCurrentSourceDescriptor(fallbackDescriptor);
-          patchCurrentPlaylistMetadata(state.playlist.file_name, null);
-        }
-      } catch (err) {
-        getStore().setMenuInfo(errorToString(err));
-      }
-    },
-    [patchCurrentPlaylistMetadata, refreshRecentPlaylists],
-  );
-
-  const handlePreferSavedXtreamServer = useCallback(
-    async (entry: SavedPlaylistEntry, server: string) => {
-      if (entry.kind !== "xtream") {
-        return;
-      }
-      try {
-        const result = await upsertSavedPlaylist({
-          id: entry.id,
-          kind: "xtream",
-          display_name: entry.display_name,
-          servers: [...entry.servers],
-          preferred_server: server,
-          username: entry.username,
-          password: entry.password,
-        });
-        getStore().setSavedPlaylists(result.entries);
-        setSavedXtreamTestEntry(null);
-
-        const state = getStore();
-        if (state.playlist?.saved_playlist_id === entry.id) {
-          await openSavedPlaylistById(entry.id);
-        }
-      } catch (err) {
-        getStore().setMenuInfo(errorToString(err));
-      }
-    },
-    [openSavedPlaylistById],
-  );
-
-  const ensureSourceFilterApplied = useCallback(async () => {
-    const state = getStore();
-    if (
-      !hasDirtySourceFilter(
-        state.channelSearch,
-        state.lastAppliedSourceFilter,
-        state.currentSourceDescriptor,
-      )
-    ) {
-      return { ok: true, reapplied: false };
-    }
-
-    if (!state.currentSourceDescriptor) {
-      return { ok: true, reapplied: false };
-    }
-
-    const result = await loadAndCommitSource(
-      state.currentSourceDescriptor,
-      "reapplySourceFilter",
-    );
-    return { ok: result.ok, reapplied: result.ok };
-  }, [loadAndCommitSource]);
-
-  const handleApplySourceFilter = useCallback(() => {
-    const state = getStore();
-    if (!state.currentSourceDescriptor) {
-      return;
-    }
-    if (
-      !hasDirtySourceFilter(
-        state.channelSearch,
-        state.lastAppliedSourceFilter,
-        state.currentSourceDescriptor,
-      )
-    ) {
-      return;
-    }
-    void loadAndCommitSource(state.currentSourceDescriptor, "reapplySourceFilter");
-  }, [loadAndCommitSource]);
-
   const openSourceDialog = useCallback((state: OpenSourceDialogState) => {
     getStore().setOpenSourceDialogState(state);
   }, []);
@@ -1834,67 +770,6 @@ export default function App() {
     getStore().setShowHistory(true);
     void refreshHistory();
   }, [playlist, refreshHistory]);
-
-  const handleOpenRecent = useCallback(
-    (entry: RecentPlaylistEntry) => {
-      if (entry.saved_playlist_id) {
-        void openSavedPlaylistById(entry.saved_playlist_id);
-        return;
-      }
-      if (entry.kind === "url") {
-        void openPlaylistUrlValue(entry.value);
-        return;
-      }
-      if (entry.kind === "xtream") {
-        const source = parseXtreamRecent(entry.value);
-        if (!source) {
-          getStore().setMenuInfo("This Xtream recent entry is invalid.");
-          void refreshRecentPlaylists();
-          return;
-        }
-        if (source.password) {
-          void openPlaylistXtreamValue(
-            { server: source.server, username: source.username, password: source.password },
-            true,
-          );
-          return;
-        }
-        openSourceDialog({
-          mode: "xtream",
-          initialUrl: "",
-          initialXtream: source,
-          initialStalker: null,
-        });
-        return;
-      }
-      void openPlaylistPath(entry.value);
-    },
-    [
-      openPlaylistPath,
-      openPlaylistUrlValue,
-      openPlaylistXtreamValue,
-      openSavedPlaylistById,
-      openSourceDialog,
-      refreshRecentPlaylists,
-    ],
-  );
-
-  const recentPlaylistsRef = useRef<RecentPlaylistEntry[]>(recentPlaylists);
-  useEffect(() => {
-    recentPlaylistsRef.current = recentPlaylists;
-  }, [recentPlaylists]);
-  const savedPlaylistsRef = useRef<SavedPlaylistEntry[]>(savedPlaylists);
-  useEffect(() => {
-    savedPlaylistsRef.current = savedPlaylists;
-  }, [savedPlaylists]);
-  const startScreenRecentPlaylists = useMemo(
-    () => recentPlaylists.slice(0, START_SCREEN_RECENT_LIMIT),
-    [recentPlaylists],
-  );
-  const startScreenSavedPlaylists = useMemo(
-    () => savedPlaylists.slice(0, 8),
-    [savedPlaylists],
-  );
 
   useEffect(() => {
     let active = true;
@@ -1996,122 +871,6 @@ export default function App() {
       unlisten?.();
     };
   }, [handleDroppedPaths]);
-
-  // Keyboard shortcuts
-  const showKeyboardShortcutsRef = useRef(showKeyboardShortcuts);
-  useEffect(() => {
-    showKeyboardShortcutsRef.current = showKeyboardShortcuts;
-  }, [showKeyboardShortcuts]);
-
-  const openSourceDialogRef = useRef(openSourceDialogState);
-  useEffect(() => {
-    openSourceDialogRef.current = openSourceDialogState;
-  }, [openSourceDialogState]);
-
-  const pendingPlaybackRef = useRef<ChannelResult | null>(pendingPlaybackChannel);
-  useEffect(() => {
-    pendingPlaybackRef.current = pendingPlaybackChannel;
-  }, [pendingPlaybackChannel]);
-
-  const showHistoryRef = useRef(showHistory);
-  useEffect(() => {
-    showHistoryRef.current = showHistory;
-  }, [showHistory]);
-
-  const lightboxOpenRef = useRef(lightboxOpen);
-  useEffect(() => {
-    lightboxOpenRef.current = lightboxOpen;
-  }, [lightboxOpen]);
-
-  const handleOpenShortcutRef = useRef(handleOpen);
-  useEffect(() => {
-    handleOpenShortcutRef.current = handleOpen;
-  }, [handleOpen]);
-
-  const handleOpenSettingsRef = useRef<() => void>(() => {});
-  const handleOpenLogRef = useRef<() => void>(() => {});
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const inputLikeTarget = isInputLikeTarget(e.target);
-      const hasPrimaryModifier = isPrimaryModifierPressed(e, isMac) && !e.altKey;
-      const lowerKey = e.key.toLowerCase();
-
-      if (hasPrimaryModifier && !e.shiftKey && lowerKey === "o") {
-        e.preventDefault();
-        handleOpenShortcutRef.current();
-      }
-      if (hasPrimaryModifier && !e.shiftKey && lowerKey === "f") {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-      }
-      if (hasPrimaryModifier && !e.shiftKey && (e.key === "," || e.code === "Comma")) {
-        e.preventDefault();
-        handleOpenSettingsRef.current();
-      }
-      if (hasPrimaryModifier && (e.key === "/" || e.code === "Slash")) {
-        e.preventDefault();
-        getStore().setShowKeyboardShortcuts(true);
-      }
-      if (e.altKey && isPrimaryModifierPressed(e, isMac) && lowerKey === "l") {
-        e.preventDefault();
-        handleOpenLogRef.current();
-      }
-      if (
-        !e.repeat &&
-        !inputLikeTarget &&
-        !hasPrimaryModifier &&
-        !e.shiftKey &&
-        !e.altKey &&
-        lowerKey === "s"
-      ) {
-        e.preventDefault();
-        if (isScanActive(getStore().scanState)) {
-          void cancelRef.current();
-        } else {
-          void handleStartScanRef.current();
-        }
-        return;
-      }
-      if (
-        !e.repeat &&
-        e.key === " " &&
-        !e.metaKey &&
-        !e.ctrlKey &&
-        !e.shiftKey &&
-        !e.altKey
-      ) {
-        if (inputLikeTarget) return;
-        e.preventDefault();
-        getStore().toggleLightboxOpen();
-      }
-      if (e.key === "Escape") {
-        if (lightboxOpenRef.current) {
-          getStore().setLightboxOpen(false);
-          return;
-        }
-        if (pendingPlaybackRef.current) {
-          getStore().setPendingPlaybackChannel(null);
-          return;
-        }
-        if (openSourceDialogRef.current) {
-          getStore().setOpenSourceDialogState(null);
-          return;
-        }
-        if (showKeyboardShortcutsRef.current) {
-          getStore().setShowKeyboardShortcuts(false);
-          return;
-        }
-        if (showHistoryRef.current) {
-          getStore().setShowHistory(false);
-          return;
-        }
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [isMac]);
 
   useEffect(() => {
     const handler = (event: MouseEvent) => {
@@ -2223,124 +982,6 @@ export default function App() {
     );
   };
 
-  // Refs for menu event handlers so listeners never need re-registration
-  const handleOpenRef = useRef(handleOpen);
-  handleOpenRef.current = handleOpen;
-  const handleOpenFolderRef = useRef(handleOpenFolder);
-  handleOpenFolderRef.current = handleOpenFolder;
-  const handleOpenUrlRef = useRef(handleOpenUrl);
-  handleOpenUrlRef.current = handleOpenUrl;
-  const handleOpenExternalPathsRef = useRef(handleExternalOpenPaths);
-  handleOpenExternalPathsRef.current = handleExternalOpenPaths;
-  const handleOpenRecentRef = useRef(handleOpenRecent);
-  handleOpenRecentRef.current = handleOpenRecent;
-  const handleOpenSavedRef = useRef(handleOpenSaved);
-  handleOpenSavedRef.current = handleOpenSaved;
-  const handleClearRecentRef = useRef(handleClearRecentPlaylists);
-  handleClearRecentRef.current = handleClearRecentPlaylists;
-  const handleManageSavedRef = useRef<() => void>(() => {});
-  const handleStartScanRef = useRef(handleStartScan);
-  handleStartScanRef.current = handleStartScan;
-  const pauseRef = useRef(pause);
-  pauseRef.current = pause;
-  const resumeRef = useRef(resume);
-  resumeRef.current = resume;
-  const cancelRef = useRef(cancel);
-  cancelRef.current = cancel;
-  const openHistoryPanelRef = useRef(openHistoryPanel);
-  openHistoryPanelRef.current = openHistoryPanel;
-  const checkForUpdatesRef = useRef(checkForUpdates);
-  checkForUpdatesRef.current = checkForUpdates;
-  const handleToggleReportRef = useRef<() => void>(() => {});
-  const handleToggleSidebarRef = useRef<() => void>(() => {});
-
-  useEffect(() => {
-    let cancelled = false;
-    const unlisten: Array<() => void> = [];
-    const queueExport = (action: "csv" | "split" | "renamed" | "m3u" | "scanlog") => {
-      getStore().queueMenuExportRequest(action);
-    };
-
-    const setup = async () => {
-      const listeners = await Promise.all([
-        listen("menu://open-playlist", () => void handleOpenRef.current()),
-        listen("menu://open-folder", () => void handleOpenFolderRef.current()),
-        listen("menu://open-url", () => void handleOpenUrlRef.current()),
-        listen<string[]>("app://open-paths", (event) => {
-          handleOpenExternalPathsRef.current(event.payload);
-        }),
-        ...Array.from({ length: 10 }, (_, i) =>
-          listen(`menu://open-recent-${i}`, () => {
-            const entry = recentPlaylistsRef.current[i];
-            if (entry) handleOpenRecentRef.current(entry);
-          }),
-        ),
-        ...Array.from({ length: 10 }, (_, i) =>
-          listen(`menu://open-saved-${i}`, () => {
-            const entry = savedPlaylistsRef.current[i];
-            if (entry) handleOpenSavedRef.current(entry.id);
-          }),
-        ),
-        listen("menu://clear-recent", () => void handleClearRecentRef.current()),
-        listen("menu://manage-saved", () => handleManageSavedRef.current()),
-        listen("menu://export-csv", () => queueExport("csv")),
-        listen("menu://export-split", () => queueExport("split")),
-        listen("menu://export-renamed", () => queueExport("renamed")),
-        listen("menu://export-filtered-m3u", () => queueExport("m3u")),
-        listen("menu://export-scan-log", () => queueExport("scanlog")),
-        listen("menu://toggle-sidebar", () => handleToggleSidebarRef.current()),
-        listen("menu://toggle-report", () => handleToggleReportRef.current()),
-        listen("menu://toggle-prescan-filter", () => {
-          const current = settingsRef.current;
-          void saveSettingsRef.current({ ...current, show_prescan_filter: !current.show_prescan_filter });
-        }),
-        listen("menu://toggle-header-button-text", () => {
-          const current = settingsRef.current;
-          void saveSettingsRef.current({
-            ...current,
-            show_header_button_text: !current.show_header_button_text,
-          });
-        }),
-        listen("menu://clear-filters", () => {
-          getStore().setSearch("");
-          getStore().setChannelSearch("");
-          getStore().setGroupFilter("all");
-          getStore().setStatusFilter("all");
-        }),
-        listen("menu://open-history", () => openHistoryPanelRef.current()),
-        listen("menu://start-scan", () => void handleStartScanRef.current()),
-        listen("menu://pause-scan", () => void pauseRef.current()),
-        listen("menu://resume-scan", () => void resumeRef.current()),
-        listen("menu://stop-scan", () => void cancelRef.current()),
-        listen("menu://open-settings", () => handleOpenSettingsRef.current()),
-        listen("menu://open-log", () => handleOpenLogRef.current()),
-        listen("menu://check-updates", () => void checkForUpdatesRef.current(true)),
-        listen("menu://keyboard-shortcuts", () => getStore().setShowKeyboardShortcuts(true)),
-        listen<import("./lib/types").PlaylistLoadProgress>(
-          "playlist://load-progress",
-          (event) => {
-            getStore().setPlaylistLoadProgress(event.payload);
-          },
-        ),
-      ]);
-      if (cancelled) {
-        for (const off of listeners) off();
-      } else {
-        unlisten.push(...listeners);
-        // Only declare this window ready after its menu listeners are mounted.
-        void emit("menu-ready", getCurrentWindow().label).catch(() => {});
-      }
-    };
-
-    void setup();
-    return () => {
-      cancelled = true;
-      for (const off of unlisten) {
-        off();
-      }
-    };
-  }, []);
-
   const handleSidebarDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     sidebarDragRef.current = { startX: e.clientX, startWidth: sidebarWidth };
@@ -2433,12 +1074,6 @@ export default function App() {
       titleBarStyle: "overlay",
     });
   }, [platform]);
-  useEffect(() => {
-    handleOpenSettingsRef.current = handleOpenSettings;
-  }, [handleOpenSettings]);
-  useEffect(() => {
-    handleManageSavedRef.current = handleManageSavedPlaylists;
-  }, [handleManageSavedPlaylists]);
 
   const handleOpenLog = useCallback(async () => {
     const existing = await WebviewWindow.getByLabel("log");
@@ -2464,9 +1099,6 @@ export default function App() {
       titleBarStyle: "overlay",
     });
   }, [platform]);
-  useEffect(() => {
-    handleOpenLogRef.current = handleOpenLog;
-  }, [handleOpenLog]);
 
   const markManualReportVisibility = useCallback((nextVisible: boolean) => {
     reportWasAutoShownRef.current = false;
@@ -2487,7 +1119,6 @@ export default function App() {
     markManualReportVisibility(next);
     getStore().setShowReportPanel(next);
   }, [showReportPanel, markManualReportVisibility]);
-  handleToggleReportRef.current = handleToggleReport;
 
   const handleCloseReport = useCallback(() => {
     markManualReportVisibility(false);
@@ -2598,7 +1229,7 @@ export default function App() {
     }
   }, [streamPlayer.streamMetadata, streamPlayer.activeChannelIndex, updateResult]);
 
-  handleToggleSidebarRef.current = () => {
+  const handleToggleSidebar = useCallback(() => {
     const state = getStore();
     const sidebarVisible = !state.sidebarHidden && !!state.selectedChannel;
     if (sidebarVisible) {
@@ -2615,7 +1246,127 @@ export default function App() {
       }
       getStore().setSidebarHidden(false);
     }
+  }, []);
+
+  // Native menu events dispatch through a single ref-mirrored handler object,
+  // so listeners register once and never miss a handler update.
+  useMenuEventBridge({
+    handleOpen,
+    handleOpenFolder,
+    handleOpenUrl,
+    handleExternalOpenPaths,
+    handleOpenRecent,
+    handleOpenSaved,
+    handleClearRecentPlaylists,
+    handleManageSavedPlaylists,
+    handleToggleSidebar,
+    handleToggleReport,
+    handleStartScan,
+    pause,
+    resume,
+    cancel,
+    openHistoryPanel,
+    handleOpenSettings,
+    handleOpenLog,
+    checkForUpdates,
+    settings,
+    saveSettings,
+  });
+
+  // Keyboard shortcuts. Handlers are mirrored into a single render-updated ref
+  // so the window listener registers once per platform change.
+  const shortcutHandlers = {
+    handleOpen,
+    handleOpenSettings,
+    handleOpenLog,
+    handleStartScan,
+    cancel,
   };
+  const shortcutHandlersRef = useRef(shortcutHandlers);
+  shortcutHandlersRef.current = shortcutHandlers;
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const inputLikeTarget = isInputLikeTarget(e.target);
+      const hasPrimaryModifier = isPrimaryModifierPressed(e, isMac) && !e.altKey;
+      const lowerKey = e.key.toLowerCase();
+
+      if (hasPrimaryModifier && !e.shiftKey && lowerKey === "o") {
+        e.preventDefault();
+        void shortcutHandlersRef.current.handleOpen();
+      }
+      if (hasPrimaryModifier && !e.shiftKey && lowerKey === "f") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+      if (hasPrimaryModifier && !e.shiftKey && (e.key === "," || e.code === "Comma")) {
+        e.preventDefault();
+        void shortcutHandlersRef.current.handleOpenSettings();
+      }
+      if (hasPrimaryModifier && (e.key === "/" || e.code === "Slash")) {
+        e.preventDefault();
+        getStore().setShowKeyboardShortcuts(true);
+      }
+      if (e.altKey && isPrimaryModifierPressed(e, isMac) && lowerKey === "l") {
+        e.preventDefault();
+        void shortcutHandlersRef.current.handleOpenLog();
+      }
+      if (
+        !e.repeat &&
+        !inputLikeTarget &&
+        !hasPrimaryModifier &&
+        !e.shiftKey &&
+        !e.altKey &&
+        lowerKey === "s"
+      ) {
+        e.preventDefault();
+        if (isScanActive(getStore().scanState)) {
+          void shortcutHandlersRef.current.cancel();
+        } else {
+          void shortcutHandlersRef.current.handleStartScan();
+        }
+        return;
+      }
+      if (
+        !e.repeat &&
+        e.key === " " &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.shiftKey &&
+        !e.altKey
+      ) {
+        if (inputLikeTarget) return;
+        e.preventDefault();
+        getStore().toggleLightboxOpen();
+      }
+      if (e.key === "Escape") {
+        const state = getStore();
+        if (state.lightboxOpen) {
+          state.setLightboxOpen(false);
+          return;
+        }
+        if (state.pendingPlaybackChannel) {
+          state.setPendingPlaybackChannel(null);
+          return;
+        }
+        if (state.openSourceDialogState) {
+          state.setOpenSourceDialogState(null);
+          return;
+        }
+        if (state.showKeyboardShortcuts) {
+          state.setShowKeyboardShortcuts(false);
+          return;
+        }
+        if (state.showHistory) {
+          state.setShowHistory(false);
+          return;
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isMac]);
 
   const handleTableProfilerRender = useCallback<ProfilerOnRenderCallback>(
     (id, phase, actualDuration, baseDuration) => {
@@ -2738,101 +1489,7 @@ export default function App() {
       )}
       <ScanPauseBanners />
 
-      {scanError && !errorDismissed && (
-        <div className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border-b border-red-500/20 text-red-400 text-[13px]">
-          <span className="flex-1">{scanError}</span>
-          <button
-            onClick={() => getStore().setErrorDismissed(true)}
-            className="p-1 hover:bg-red-500/20 rounded transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {playbackError && (
-        <div className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border-b border-red-500/20 text-red-400 text-[13px]">
-          <span className="flex-1">{playbackError}</span>
-          <button
-            onClick={() => getStore().setPlaybackError(null)}
-            className="p-1 hover:bg-red-500/20 rounded transition-colors"
-            type="button"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {playlistOpenError && (
-        <div className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border-b border-red-500/20 text-red-400 text-[13px]">
-          <span className="flex-1">{playlistOpenError}</span>
-          <button
-            onClick={() => getStore().setPlaylistOpenError(null)}
-            className="p-1 hover:bg-red-500/20 rounded transition-colors"
-            type="button"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {scanInputError && (
-        <div className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border-b border-red-500/20 text-red-400 text-[13px]">
-          <span className="flex-1">{scanInputError}</span>
-          <button
-            onClick={() => getStore().setScanInputError(null)}
-            className="p-1 hover:bg-red-500/20 rounded transition-colors"
-            type="button"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {menuInfo && (
-        <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-500/10 border-b border-blue-500/20 text-blue-400 text-[13px]">
-          <Info className="w-4 h-4" />
-          <span className="flex-1">{menuInfo}</span>
-          <button
-            onClick={() => getStore().setMenuInfo(null)}
-            className="p-1 hover:bg-blue-500/20 rounded transition-colors"
-            type="button"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {updateNotice && (
-        <div className="flex items-center gap-2 px-4 py-2.5 bg-emerald-500/10 border-b border-emerald-500/20 text-emerald-300 text-[13px]">
-          <span className="flex-1">
-            Update available: <strong>v{updateNotice.latest_version}</strong>
-            {appVersion ? ` (current v${appVersion})` : ""}.
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              void openUrl(updateNotice.release_url).catch((err) => {
-                logger.error("[Update] Failed to open release URL:", errorToString(err));
-              });
-            }}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-emerald-400/30 hover:bg-emerald-500/15 transition-colors"
-          >
-            Download
-            <ExternalLink className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => {
-              getStore().setUpdateNotice(null);
-              localStorage.removeItem(UPDATE_CACHE_KEY);
-            }}
-            className="p-1 hover:bg-emerald-500/20 rounded transition-colors"
-            type="button"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
+      <AppBanners />
 
       <div className="flex flex-col flex-1 min-h-0">
         <div className="flex flex-1 min-h-0 bg-content">
@@ -2860,196 +1517,22 @@ export default function App() {
                 channelTableElement
               )
             ) : (
-              <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden native-scroll text-text-tertiary">
-              <div className="min-h-full flex flex-col items-center justify-center text-center px-4 py-6">
-                {playlistLoading ? (
-                  <div className="select-none">
-                    <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-blue-500" />
-                    <p className="text-lg font-medium">
-                      {playlistLoadProgress?.stage === "Connecting"
-                        ? "Connecting…"
-                        : playlistLoadProgress?.stage === "Downloading"
-                          ? "Downloading playlist…"
-                          : playlistLoadProgress?.stage === "Saving"
-                            ? "Saving to cache…"
-                            : playlistLoadProgress?.stage === "Parsing"
-                              ? "Parsing playlist…"
-                              : playlistLoadProgress?.stage === "Processing"
-                                ? "Processing…"
-                                : "Loading playlist…"}
-                    </p>
-                    {(playlistLoadProgress?.stage === "Connecting" ||
-                      playlistLoadProgress?.stage === "Saving") && (
-                      <p className="text-sm mt-1 text-text-quaternary">
-                        {playlistLoadProgress.detail}
-                      </p>
-                    )}
-                    {playlistLoadProgress?.stage === "Downloading" && (
-                      <p className="text-sm mt-1 tabular-nums">
-                        {(playlistLoadProgress.bytes_downloaded / (1024 * 1024)).toFixed(1)} MB
-                        {playlistLoadProgress.elapsed_secs > 0 && (
-                          <span className="ml-2 text-text-quaternary">
-                            {(playlistLoadProgress.bytes_downloaded / playlistLoadProgress.elapsed_secs / (1024 * 1024)).toFixed(1)} MB/s
-                          </span>
-                        )}
-                      </p>
-                    )}
-                    {playlistLoadProgress?.stage === "Parsing" && (
-                      <div className="text-sm mt-1 tabular-nums">
-                        <p>
-                          {playlistLoadProgress.channels_found.toLocaleString()} entries found
-                        </p>
-                        <p className="text-text-quaternary">
-                          {playlistLoadProgress.live_found.toLocaleString()} channels
-                          <span className="mx-2">•</span>
-                          {(
-                            playlistLoadProgress.movie_found +
-                            playlistLoadProgress.series_found
-                          ).toLocaleString()}{" "}
-                          VOD
-                          {(playlistLoadProgress.movie_found > 0 ||
-                            playlistLoadProgress.series_found > 0) && (
-                            <span className="ml-2">
-                              ({playlistLoadProgress.movie_found.toLocaleString()} movies,{" "}
-                              {playlistLoadProgress.series_found.toLocaleString()} series)
-                            </span>
-                          )}
-                        </p>
-                      </div>
-                    )}
-                    {playlistLoadProgress?.stage === "Processing" && (
-                      <p className="text-sm mt-1 text-text-quaternary">
-                        {playlistLoadProgress.detail}
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex flex-col items-center">
-                      <div className="select-none pt-3">
-                        <p className="text-lg font-medium mb-2">
-                          No playlist loaded
-                        </p>
-                        <p className="text-[15px] mb-4">
-                          Click Open or press{" "}
-                          <kbd className="px-2 py-0.5 bg-input rounded text-[13px] border border-border-app">
-                            {modKey}+O
-                          </kbd>{" "}
-                          to load an M3U playlist
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap items-center justify-center gap-2">
-                        <button
-                          onClick={handleOpen}
-                          className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-600/25 transition-colors"
-                          type="button"
-                        >
-                          <FolderOpen className="w-4 h-4" />
-                          Open File
-                        </button>
-                        <button
-                          onClick={handleOpenFolder}
-                          className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
-                          type="button"
-                        >
-                          <FolderOpen className="w-4 h-4" />
-                          Open Folder
-                        </button>
-                        <button
-                          onClick={handleOpenUrl}
-                          className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
-                          type="button"
-                        >
-                          Add URL
-                        </button>
-                        <button
-                          onClick={handleOpenXtream}
-                          className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
-                          type="button"
-                        >
-                          Add Xtream
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="mt-6 w-full max-w-xl text-left">
-                      {startScreenSavedPlaylists.length > 0 && (
-                        <div>
-                          <div className="flex items-center justify-between mb-2">
-                            <p className="text-[12px] uppercase tracking-[0.08em] text-text-tertiary">
-                              Saved Playlists
-                            </p>
-                            <button
-                              onClick={handleManageSavedPlaylists}
-                              className="text-[12px] text-text-tertiary hover:text-text-primary transition-colors"
-                              type="button"
-                            >
-                              Manage…
-                            </button>
-                          </div>
-                          <div className="space-y-1">
-                            {startScreenSavedPlaylists.map((entry) => (
-                              <button
-                                key={entry.id}
-                                onClick={() => handleOpenSaved(entry.id)}
-                                className="w-full text-left px-3 py-2 rounded-lg border border-border-subtle hover:border-border-app hover:bg-panel-subtle transition-colors"
-                                type="button"
-                                title={savedPlaylistSecondaryLabel(entry)}
-                              >
-                                <span className="text-[13px] text-text-primary block truncate">
-                                  {entry.display_name}
-                                </span>
-                                <span className="text-[11px] text-text-tertiary block truncate mt-0.5">
-                                  {savedPlaylistSecondaryLabel(entry)}
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {startScreenRecentPlaylists.length > 0 && (
-                        <div className={startScreenSavedPlaylists.length > 0 ? "mt-6" : ""}>
-                          <div className="flex items-center justify-between mb-2">
-                            <p className="text-[12px] uppercase tracking-[0.08em] text-text-tertiary">
-                              Open Recent
-                            </p>
-                            <button
-                              onClick={() => {
-                                void handleClearRecentPlaylists();
-                              }}
-                              className="text-[12px] text-text-tertiary hover:text-text-primary transition-colors"
-                              type="button"
-                            >
-                              Clear
-                            </button>
-                          </div>
-                          <div className="space-y-1">
-                            {startScreenRecentPlaylists.map((entry) => (
-                              <button
-                                key={`${entry.kind}:${entry.value}`}
-                                onClick={() => handleOpenRecent(entry)}
-                                className="w-full text-left px-3 py-2 rounded-lg border border-border-subtle hover:border-border-app hover:bg-panel-subtle transition-colors"
-                                type="button"
-                                title={recentTitle(entry)}
-                              >
-                                <span className="text-[13px] text-text-primary block truncate">
-                                  {entry.label}
-                                </span>
-                                <span className="text-[11px] text-text-tertiary block truncate mt-0.5">
-                                  {recentValueLabel(entry)}
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          )}
+              <StartScreen
+                playlistLoading={playlistLoading}
+                playlistLoadProgress={playlistLoadProgress}
+                modKey={modKey}
+                recentPlaylists={recentPlaylists}
+                savedPlaylists={savedPlaylists}
+                onOpen={handleOpen}
+                onOpenFolder={handleOpenFolder}
+                onOpenUrl={handleOpenUrl}
+                onOpenXtream={handleOpenXtream}
+                onManageSavedPlaylists={handleManageSavedPlaylists}
+                onOpenSaved={handleOpenSaved}
+                onOpenRecent={handleOpenRecent}
+                onClearRecent={handleClearRecentPlaylists}
+              />
+            )}
         </div>
 
         {playlist && showReportPanel && (
@@ -3087,7 +1570,7 @@ export default function App() {
           <SavedPlaylistsDialog
             playlists={savedPlaylists}
             onOpen={(id) => handleOpenSaved(id)}
-            onEdit={(entry) => setSavedPlaylistEditorDraft(savedEntryToDraft(entry))}
+            onEdit={(entry) => editSavedPlaylist(entry)}
             onDelete={(id) => void handleDeleteSavedPlaylistById(id)}
             onTestServers={(entry) => setSavedXtreamTestEntry(entry)}
             onClose={() => setSavedPlaylistsDialogOpen(false)}
