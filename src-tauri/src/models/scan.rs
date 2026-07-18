@@ -71,7 +71,7 @@ impl ScanConfig {
             || self.timeout < MIN_TIMEOUT_SECS
             || self.timeout > MAX_TIMEOUT_SECS
         {
-            return Err(AppError::Other(format!(
+            return Err(AppError::Validation(format!(
                 "Invalid timeout: must be between {} and {} seconds",
                 MIN_TIMEOUT_SECS, MAX_TIMEOUT_SECS
             )));
@@ -82,7 +82,7 @@ impl ScanConfig {
                 || ext < MIN_EXTENDED_TIMEOUT_SECS
                 || ext > MAX_EXTENDED_TIMEOUT_SECS
             {
-                return Err(AppError::Other(format!(
+                return Err(AppError::Validation(format!(
                     "Invalid extended timeout: must be between {} and {} seconds",
                     MIN_EXTENDED_TIMEOUT_SECS, MAX_EXTENDED_TIMEOUT_SECS
                 )));
@@ -90,14 +90,14 @@ impl ScanConfig {
         }
 
         if self.concurrency < MIN_CONCURRENCY || self.concurrency > MAX_CONCURRENCY {
-            return Err(AppError::Other(format!(
+            return Err(AppError::Validation(format!(
                 "Invalid concurrency: must be between {} and {}",
                 MIN_CONCURRENCY, MAX_CONCURRENCY
             )));
         }
 
         if self.retries < MIN_RETRIES || self.retries > MAX_RETRIES {
-            return Err(AppError::Other(format!(
+            return Err(AppError::Validation(format!(
                 "Invalid retries: must be between {} and {}",
                 MIN_RETRIES, MAX_RETRIES
             )));
@@ -107,7 +107,7 @@ impl ScanConfig {
             || self.ffprobe_timeout_secs < MIN_FFPROBE_TIMEOUT_SECS
             || self.ffprobe_timeout_secs > MAX_FFPROBE_TIMEOUT_SECS
         {
-            return Err(AppError::Other(format!(
+            return Err(AppError::Validation(format!(
                 "Invalid ffprobe timeout: must be between {} and {} seconds",
                 MIN_FFPROBE_TIMEOUT_SECS, MAX_FFPROBE_TIMEOUT_SECS
             )));
@@ -117,7 +117,7 @@ impl ScanConfig {
             || self.ffmpeg_bitrate_timeout_secs < MIN_FFMPEG_BITRATE_TIMEOUT_SECS
             || self.ffmpeg_bitrate_timeout_secs > MAX_FFMPEG_BITRATE_TIMEOUT_SECS
         {
-            return Err(AppError::Other(format!(
+            return Err(AppError::Validation(format!(
                 "Invalid ffmpeg bitrate timeout: must be between {} and {} seconds",
                 MIN_FFMPEG_BITRATE_TIMEOUT_SECS, MAX_FFMPEG_BITRATE_TIMEOUT_SECS
             )));

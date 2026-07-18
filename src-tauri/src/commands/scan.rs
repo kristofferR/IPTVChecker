@@ -665,7 +665,7 @@ async fn compute_shared_url_result(
 
 fn try_mark_scan_started(scanning: &mut bool) -> Result<(), AppError> {
     if *scanning {
-        return Err(AppError::Other("A scan is already in progress".to_string()));
+        return Err(AppError::State("A scan is already in progress".to_string()));
     }
     *scanning = true;
     Ok(())
