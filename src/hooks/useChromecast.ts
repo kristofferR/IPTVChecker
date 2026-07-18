@@ -89,7 +89,7 @@ export function useChromecast(): UseChromecastResult {
         // ignore — no active session is the norm
       }
       try {
-        unlisten = await listen<CastSession>("cast://status", (event) => {
+        const off = await listen<CastSession>("cast://status", (event) => {
           if (!mounted || cancelledRef.current) return;
           const next = event.payload;
           if (next.state === "stopped") {
@@ -107,6 +107,13 @@ export function useChromecast(): UseChromecastResult {
             setError(null);
           }
         });
+        // If cleanup ran while listen() was in flight, release the listener
+        // immediately instead of leaving it orphaned on the Tauri side.
+        if (!mounted) {
+          off();
+          return;
+        }
+        unlisten = off;
       } catch (err) {
         if (mounted && !cancelledRef.current) setError(String(err));
       }
