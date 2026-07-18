@@ -42,7 +42,6 @@ function makeResult(index: number, url: string): ChannelResult {
     stream_url: null,
     retry_count: null,
     error_reason: null,
-    last_error_reason: null,
     drm_system: null,
   };
 }

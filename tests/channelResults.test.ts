@@ -51,7 +51,6 @@ function makeResult(): ChannelResult {
     stream_url: "https://cdn.example.com/live/123.m3u8",
     retry_count: 2,
     error_reason: "Timeout",
-    last_error_reason: "Legacy",
     drm_system: "Widevine",
   };
 }
@@ -73,7 +72,6 @@ describe("channelResults helpers", () => {
     expect(pending.status).toBe("pending");
     expect(pending.codec).toBeNull();
     expect(pending.error_reason).toBeNull();
-    expect(pending.last_error_reason).toBeNull();
     expect(pending.drm_system).toBeNull();
   });
 
@@ -90,19 +88,14 @@ describe("channelResults helpers", () => {
     expect(reset.label_mismatches).toEqual([]);
     expect(reset.retry_count).toBeNull();
     expect(reset.error_reason).toBeNull();
-    expect(reset.last_error_reason).toBeNull();
     expect(reset.drm_system).toBeNull();
     expect(reset.channel_id).toBe("123");
   });
 
-  it("prefers trimmed error_reason and falls back to legacy last_error_reason", () => {
-    expect(getChannelErrorReason({ error_reason: " Timeout ", last_error_reason: "Legacy" })).toBe(
-      "Timeout",
-    );
-    expect(getChannelErrorReason({ error_reason: " ", last_error_reason: " Legacy " })).toBe(
-      "Legacy",
-    );
-    expect(getChannelErrorReason({ error_reason: null, last_error_reason: null })).toBeNull();
+  it("returns a trimmed error_reason or null", () => {
+    expect(getChannelErrorReason({ error_reason: " Timeout " })).toBe("Timeout");
+    expect(getChannelErrorReason({ error_reason: " " })).toBeNull();
+    expect(getChannelErrorReason({ error_reason: null })).toBeNull();
   });
 
   it("returns a trimmed screenshot error reason when present", () => {
@@ -112,17 +105,14 @@ describe("channelResults helpers", () => {
     expect(getScreenshotErrorReason({ screenshot_error_reason: null })).toBeNull();
   });
 
-  it("canonicalizes legacy error reasons for backend commands", () => {
+  it("normalizes an absent error reason to null for backend commands", () => {
     const current = toCommandChannelResult(makeResult());
     expect(current.error_reason).toBe("Timeout");
-    expect("last_error_reason" in current).toBe(false);
 
-    const legacy = toCommandChannelResult({
+    const missing = toCommandChannelResult({
       ...makeResult(),
-      error_reason: null,
-      last_error_reason: "Legacy timeout",
+      error_reason: undefined,
     });
-    expect(legacy.error_reason).toBe("Legacy timeout");
-    expect("last_error_reason" in legacy).toBe(false);
+    expect(missing.error_reason).toBeNull();
   });
 });

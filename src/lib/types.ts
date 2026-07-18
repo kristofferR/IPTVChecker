@@ -63,7 +63,6 @@ export interface ChannelResult {
   stream_url: string | null;
   retry_count?: number | null;
   error_reason?: string | null;
-  last_error_reason?: string | null;
   drm_system?: string | null;
 }
 
