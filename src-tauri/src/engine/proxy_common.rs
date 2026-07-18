@@ -3,6 +3,12 @@
 
 use url::Url;
 
+/// Generous ceiling for JSON API responses (Xtream catalogs, Stalker portal
+/// replies). Large providers ship tens of MB of listing JSON; nothing
+/// legitimate approaches this, but a hostile or broken server must not be
+/// able to buffer unbounded data.
+pub const MAX_JSON_API_BYTES: u64 = 64 * 1024 * 1024;
+
 /// Whether a response is an HLS manifest, by content type or .m3u8 path.
 pub fn is_m3u8_response(content_type: &str, url: &str) -> bool {
     let ct = content_type.to_lowercase();
@@ -128,17 +134,31 @@ pub async fn read_http_request_head(
 ) -> std::io::Result<Option<Vec<u8>>> {
     use tokio::io::AsyncReadExt;
 
-    let mut buf = Vec::with_capacity(1024);
-    let mut chunk = [0u8; 1024];
-    loop {
-        let n = socket.read(&mut chunk).await?;
-        if n == 0 {
-            return Ok(if buf.is_empty() { None } else { Some(buf) });
+    // Absolute deadline for the whole header read: a peer trickling one byte
+    // at a time (or going silent mid-header) must not pin the task forever.
+    const REQUEST_HEAD_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+    let read_head = async {
+        let mut buf = Vec::with_capacity(1024);
+        let mut chunk = [0u8; 1024];
+        loop {
+            let n = socket.read(&mut chunk).await?;
+            if n == 0 {
+                return Ok(if buf.is_empty() { None } else { Some(buf) });
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            if buf.windows(4).any(|window| window == b"\r\n\r\n") || buf.len() >= max_bytes {
+                return Ok(Some(buf));
+            }
         }
-        buf.extend_from_slice(&chunk[..n]);
-        if buf.windows(4).any(|window| window == b"\r\n\r\n") || buf.len() >= max_bytes {
-            return Ok(Some(buf));
-        }
+    };
+
+    match tokio::time::timeout(REQUEST_HEAD_DEADLINE, read_head).await {
+        Ok(result) => result,
+        Err(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "timed out reading HTTP request head",
+        )),
     }
 }
 
