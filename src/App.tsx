@@ -192,6 +192,9 @@ function SelectedChannelSidebar({
   const [screenshotLoading, setScreenshotLoading] = useState(false);
   const [screenshotLoadError, setScreenshotLoadError] = useState(false);
   const screenshotPathRef = useRef<string | null>(null);
+  // LRU-capped: entries are 50-200 KB base64 data URLs, and a long browsing
+  // session would otherwise retain every screenshot ever viewed.
+  const SCREENSHOT_CACHE_LIMIT = 50;
   const screenshotCacheRef = useRef(new Map<string, string>());
 
   useEffect(() => {
@@ -212,6 +215,9 @@ function SelectedChannelSidebar({
 
     const cached = screenshotCacheRef.current.get(path);
     if (cached) {
+      // Re-insert to refresh recency (Map preserves insertion order).
+      screenshotCacheRef.current.delete(path);
+      screenshotCacheRef.current.set(path, cached);
       setScreenshotUrl(cached);
       setScreenshotLoading(false);
       setScreenshotLoadError(false);
@@ -224,7 +230,13 @@ function SelectedChannelSidebar({
     readScreenshot(path)
       .then((dataUrl) => {
         if (!stale) {
-          screenshotCacheRef.current.set(path, dataUrl);
+          const cache = screenshotCacheRef.current;
+          while (cache.size >= SCREENSHOT_CACHE_LIMIT) {
+            const oldest = cache.keys().next().value;
+            if (oldest === undefined) break;
+            cache.delete(oldest);
+          }
+          cache.set(path, dataUrl);
           setScreenshotUrl(dataUrl);
           setScreenshotLoading(false);
           setScreenshotLoadError(false);
