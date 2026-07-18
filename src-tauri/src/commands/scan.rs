@@ -1091,7 +1091,7 @@ pub(crate) async fn seed_cached_playlist_preview(
     );
     let source_mtime = source_mtime_ms(file_path);
     state
-        .put_cached_playlist_preview(cache_key, preview.clone(), source_mtime)
+        .put_cached_playlist_preview(cache_key, Arc::new(preview.clone()), source_mtime)
         .await;
 }
 
@@ -1100,7 +1100,7 @@ async fn parse_playlist_with_cache(
     state: &Arc<AppState>,
     config: &ScanConfig,
     run_id: &str,
-) -> Result<PlaylistPreview, AppError> {
+) -> Result<Arc<PlaylistPreview>, AppError> {
     let source_mtime = source_mtime_ms(&config.file_path);
     let cache_key = playlist_preview_cache_key(config);
     if let Some(cached) = state
@@ -1146,8 +1146,9 @@ async fn parse_playlist_with_cache(
         Some(run_id),
     )
     .await;
+    let preview = Arc::new(preview);
     state
-        .put_cached_playlist_preview(cache_key, preview.clone(), source_mtime)
+        .put_cached_playlist_preview(cache_key, Arc::clone(&preview), source_mtime)
         .await;
     Ok(preview)
 }
@@ -1338,7 +1339,7 @@ async fn execute_scan_run(
 
     let preview = parse_playlist_with_cache(&app, &state, &config, &run_id).await?;
     let preview_single_provider = preview.single_provider;
-    let mut channels = preview.channels;
+    let mut channels = preview.channels.clone();
     filter_channels_by_selection(&mut channels, &config.selected_indices);
     filter_channels_by_content_type(&mut channels, config.hide_vod_content);
     let total = channels.len();
