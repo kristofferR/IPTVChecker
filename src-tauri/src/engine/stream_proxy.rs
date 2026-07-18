@@ -24,6 +24,12 @@ const PROXY_BUFFERED_RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration
 /// aligned with the bounded response timeout.
 const PROXY_BUFFERED_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Hard byte cap for buffered scheme-handler responses. Generous enough for
+/// any real manifest or VOD segment, but stops a misclassified live stream
+/// (e.g. an endless MPEG-TS behind an .m3u8-looking URL) from pushing
+/// hundreds of MB into memory within the response timeout window.
+const PROXY_BUFFERED_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
 /// Per-read inactivity timeout — resets on every successful read, so it does NOT
 /// cap total stream duration. Only kills truly dead/stalled connections.
 const PROXY_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
@@ -501,9 +507,22 @@ pub async fn handle_proxy_request(
         .unwrap_or("")
         .to_string();
 
-    let body = match upstream_response.bytes().await {
-        Ok(bytes) => bytes.to_vec(),
-        Err(err) => {
+    let body = match crate::engine::proxy_common::read_capped(
+        upstream_response,
+        PROXY_BUFFERED_MAX_BYTES,
+    )
+    .await
+    {
+        Ok(bytes) => bytes,
+        Err(crate::engine::proxy_common::ReadCappedError::TooLarge) => {
+            log::warn!(
+                "Stream proxy: upstream body for {} exceeded {} bytes; refusing to buffer",
+                redact_url(&original_url),
+                PROXY_BUFFERED_MAX_BYTES
+            );
+            return error_response(502, "Upstream response too large");
+        }
+        Err(crate::engine::proxy_common::ReadCappedError::Read(err)) => {
             log::warn!(
                 "Stream proxy: failed to read buffered upstream body for {} ({})",
                 redact_url(&original_url),
