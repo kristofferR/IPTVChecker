@@ -29,10 +29,8 @@ struct RemotePlaylistCacheMetadata {
 #[derive(Debug)]
 enum PlaylistDownloadResult {
     NotModified,
-    Updated {
-        bytes: Vec<u8>,
-        metadata: RemotePlaylistCacheMetadata,
-    },
+    /// The body was streamed into the caller-supplied temp file.
+    Updated { metadata: RemotePlaylistCacheMetadata },
 }
 
 /// Parse and validate an http(s) URL, mapping failures to a friendly error.
@@ -138,7 +136,7 @@ fn map_download_error(
     ))
 }
 
-async fn download_playlist_bytes(
+async fn download_playlist_to_file(
     app: Option<&AppHandle>,
     download_url: &Url,
     error_label: &str,
@@ -146,6 +144,7 @@ async fn download_playlist_bytes(
     timeout: Duration,
     max_bytes: u64,
     cache_metadata: Option<&RemotePlaylistCacheMetadata>,
+    tmp_path: &std::path::Path,
 ) -> Result<PlaylistDownloadResult, AppError> {
     use futures::StreamExt;
 
@@ -214,50 +213,67 @@ async fn download_playlist_bytes(
     };
 
     log::info!("[playlist-load] Download started for {}", error_label);
-    let mut bytes = Vec::new();
-    let mut total = 0u64;
-    let mut stream = response.bytes_stream();
-    let download_start = Instant::now();
-    let mut last_progress = Instant::now() - PROGRESS_THROTTLE;
-    while let Some(chunk_result) = stream.next().await {
-        let chunk = chunk_result
-            .map_err(|error| map_download_error(error, error_label, timeout, "read"))?;
-        total = total.saturating_add(chunk.len() as u64);
-        if total > max_bytes {
-            return Err(AppError::Other(format!(
-                "Downloaded {} exceeds the maximum allowed size ({} MiB)",
-                error_label,
-                max_bytes / (1024 * 1024)
-            )));
-        }
-        bytes.extend_from_slice(&chunk);
-        if last_progress.elapsed() >= PROGRESS_THROTTLE {
-            emit_load_progress(
-                app,
-                PlaylistLoadProgress::Downloading {
-                    bytes_downloaded: total,
-                    elapsed_secs: download_start.elapsed().as_secs_f64(),
-                },
-            );
-            last_progress = Instant::now();
-        }
-    }
-    // Final progress emission to ensure the UI shows the complete size.
-    let elapsed = download_start.elapsed().as_secs_f64();
-    emit_load_progress(
-        app,
-        PlaylistLoadProgress::Downloading {
-            bytes_downloaded: total,
-            elapsed_secs: elapsed,
-        },
-    );
-    log::info!(
-        "[playlist-load] Download complete: {:.1} MB in {:.1}s",
-        total as f64 / (1024.0 * 1024.0),
-        elapsed,
-    );
+    // Stream chunks straight to the temp file so peak memory stays at chunk
+    // size instead of the full download (up to the 200 MiB cap).
+    let download_result = async {
+        use tokio::io::AsyncWriteExt;
 
-    Ok(PlaylistDownloadResult::Updated { bytes, metadata })
+        let mut file = tokio::fs::File::create(tmp_path)
+            .await
+            .map_err(AppError::Io)?;
+        let mut total = 0u64;
+        let mut stream = response.bytes_stream();
+        let download_start = Instant::now();
+        let mut last_progress = Instant::now() - PROGRESS_THROTTLE;
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result
+                .map_err(|error| map_download_error(error, error_label, timeout, "read"))?;
+            total = total.saturating_add(chunk.len() as u64);
+            if total > max_bytes {
+                return Err(AppError::Other(format!(
+                    "Downloaded {} exceeds the maximum allowed size ({} MiB)",
+                    error_label,
+                    max_bytes / (1024 * 1024)
+                )));
+            }
+            file.write_all(&chunk).await.map_err(AppError::Io)?;
+            if last_progress.elapsed() >= PROGRESS_THROTTLE {
+                emit_load_progress(
+                    app,
+                    PlaylistLoadProgress::Downloading {
+                        bytes_downloaded: total,
+                        elapsed_secs: download_start.elapsed().as_secs_f64(),
+                    },
+                );
+                last_progress = Instant::now();
+            }
+        }
+        file.flush().await.map_err(AppError::Io)?;
+
+        // Final progress emission to ensure the UI shows the complete size.
+        let elapsed = download_start.elapsed().as_secs_f64();
+        emit_load_progress(
+            app,
+            PlaylistLoadProgress::Downloading {
+                bytes_downloaded: total,
+                elapsed_secs: elapsed,
+            },
+        );
+        log::info!(
+            "[playlist-load] Download complete: {:.1} MB in {:.1}s",
+            total as f64 / (1024.0 * 1024.0),
+            elapsed,
+        );
+        Ok(())
+    }
+    .await;
+
+    if let Err(error) = download_result {
+        let _ = tokio::fs::remove_file(tmp_path).await;
+        return Err(error);
+    }
+
+    Ok(PlaylistDownloadResult::Updated { metadata })
 }
 
 async fn download_playlist_to_cache(
@@ -267,7 +283,10 @@ async fn download_playlist_to_cache(
     error_label: &str,
 ) -> Result<String, AppError> {
     let metadata = load_cache_metadata(&cache_path);
-    let download = download_playlist_bytes(
+    cleanup_stale_cache_temp_files(&cache_path);
+    let tmp_path = build_cache_tmp_path(&cache_path);
+
+    let download = download_playlist_to_file(
         app,
         download_url,
         error_label,
@@ -275,15 +294,16 @@ async fn download_playlist_to_cache(
         PLAYLIST_DOWNLOAD_TIMEOUT,
         PLAYLIST_DOWNLOAD_MAX_BYTES,
         metadata.as_ref(),
+        &tmp_path,
     )
     .await?;
 
-    let (bytes, response_metadata) = match download {
+    let response_metadata = match download {
         PlaylistDownloadResult::NotModified => {
             if cache_path.exists() {
                 return Ok(cache_path.to_string_lossy().to_string());
             }
-            match download_playlist_bytes(
+            match download_playlist_to_file(
                 app,
                 download_url,
                 error_label,
@@ -291,6 +311,7 @@ async fn download_playlist_to_cache(
                 PLAYLIST_DOWNLOAD_TIMEOUT,
                 PLAYLIST_DOWNLOAD_MAX_BYTES,
                 None,
+                &tmp_path,
             )
             .await?
             {
@@ -300,31 +321,11 @@ async fn download_playlist_to_cache(
                         error_label
                     )));
                 }
-                PlaylistDownloadResult::Updated { bytes, metadata } => (bytes, metadata),
+                PlaylistDownloadResult::Updated { metadata } => metadata,
             }
         }
-        PlaylistDownloadResult::Updated { bytes, metadata } => (bytes, metadata),
+        PlaylistDownloadResult::Updated { metadata } => metadata,
     };
-
-    emit_load_progress(
-        app,
-        PlaylistLoadProgress::Saving {
-            detail: "Cleaning up old cache files",
-        },
-    );
-    cleanup_stale_cache_temp_files(&cache_path);
-    let tmp_suffix = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let tmp_path = cache_path.with_file_name(format!(
-        "{}.{}.tmp",
-        cache_path
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| "playlist.m3u8".to_string()),
-        tmp_suffix
-    ));
 
     emit_load_progress(
         app,
@@ -332,12 +333,12 @@ async fn download_playlist_to_cache(
             detail: "Writing to disk",
         },
     );
-    // Up to 200 MB — write it on a blocking thread, not a runtime worker.
+    // The body already lives in the temp file; just rename it into place.
     {
         let cache_path = cache_path.clone();
         let tmp_path = tmp_path.clone();
         tokio::task::spawn_blocking(move || {
-            crate::engine::disk::atomic_write(&cache_path, &tmp_path, &bytes)
+            crate::engine::disk::atomic_rename(&cache_path, &tmp_path)
         })
         .await
         .map_err(|err| AppError::Other(format!("Playlist cache write task failed: {err}")))??;
@@ -364,6 +365,22 @@ pub(crate) async fn download_playlist_to_cache_in_data_dir(
     download_playlist_to_cache(app, cache_path, download_url, error_label).await
 }
 
+/// Timestamped sibling temp path for a cache file.
+fn build_cache_tmp_path(cache_path: &std::path::Path) -> std::path::PathBuf {
+    let tmp_suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    cache_path.with_file_name(format!(
+        "{}.{}.tmp",
+        cache_path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| "playlist.m3u8".to_string()),
+        tmp_suffix
+    ))
+}
+
 /// Write raw bytes to the playlist cache, using the same atomic-rename
 /// strategy as `download_playlist_to_cache`.
 pub(crate) fn write_bytes_to_cache(
@@ -371,25 +388,13 @@ pub(crate) fn write_bytes_to_cache(
     bytes: &[u8],
 ) -> Result<(), AppError> {
     cleanup_stale_cache_temp_files(cache_path);
-    let tmp_suffix = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let tmp_path = cache_path.with_file_name(format!(
-        "{}.{}.tmp",
-        cache_path
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| "playlist.m3u8".to_string()),
-        tmp_suffix
-    ));
-
+    let tmp_path = build_cache_tmp_path(cache_path);
     crate::engine::disk::atomic_write(cache_path, &tmp_path, bytes)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{cleanup_stale_cache_temp_files, download_playlist_bytes, source_cache_file_name};
+    use super::{cleanup_stale_cache_temp_files, download_playlist_to_file, source_cache_file_name};
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -467,7 +472,11 @@ mod tests {
 
         let url = Url::parse(&format!("http://{}/playlist.m3u8", address))
             .expect("test URL should parse");
-        let error = download_playlist_bytes(
+        let tmp_path = std::env::temp_dir().join(format!(
+            "iptv-download-cap-test-{}.tmp",
+            std::process::id()
+        ));
+        let error = download_playlist_to_file(
             None,
             &url,
             "playlist URL",
@@ -475,9 +484,11 @@ mod tests {
             Duration::from_secs(1),
             32,
             None,
+            &tmp_path,
         )
         .await
         .expect_err("oversized response should fail");
+        assert!(!tmp_path.exists(), "failed download should remove temp file");
 
         assert!(
             error
@@ -515,7 +526,11 @@ mod tests {
 
         let url = Url::parse(&format!("http://{}/playlist.m3u8", address))
             .expect("test URL should parse");
-        let error = download_playlist_bytes(
+        let tmp_path = std::env::temp_dir().join(format!(
+            "iptv-download-timeout-test-{}.tmp",
+            std::process::id()
+        ));
+        let error = download_playlist_to_file(
             None,
             &url,
             "playlist URL",
@@ -523,9 +538,11 @@ mod tests {
             Duration::from_millis(100),
             1024,
             None,
+            &tmp_path,
         )
         .await
         .expect_err("slow response should timeout");
+        assert!(!tmp_path.exists(), "failed download should remove temp file");
 
         assert!(
             error.to_string().contains("Timed out while downloading"),
