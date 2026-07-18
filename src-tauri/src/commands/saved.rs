@@ -54,17 +54,6 @@ fn sort_saved_playlists(entries: &mut [SavedPlaylistEntry]) {
     });
 }
 
-fn xtream_host_label(server: &str) -> String {
-    let Ok(parsed) = Url::parse(server) else {
-        return server.to_string();
-    };
-    match (parsed.host_str(), parsed.port()) {
-        (Some(host), Some(port)) => format!("{}:{}", host, port),
-        (Some(host), None) => host.to_string(),
-        _ => server.to_string(),
-    }
-}
-
 fn default_display_name(source: &SavedPlaylistSource) -> String {
     match source {
         SavedPlaylistSource::File { path } => Path::new(path)
@@ -88,7 +77,7 @@ fn default_display_name(source: &SavedPlaylistSource) -> String {
                 .as_deref()
                 .or_else(|| servers.first().map(String::as_str))
                 .unwrap_or("Xtream");
-            format!("{} ({})", xtream_host_label(server), username)
+            format!("{} ({})", crate::commands::playlist::xtream_host_label(server), username)
         }
     }
 }

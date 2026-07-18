@@ -772,6 +772,18 @@ async fn download_playlist_to_cache_in_data_dir(
     download_playlist_to_cache(app, cache_path, download_url, error_label).await
 }
 
+/// "host:port" (or bare host) display label for an Xtream server URL.
+pub(crate) fn xtream_host_label(server: &str) -> String {
+    let Ok(parsed) = Url::parse(server) else {
+        return server.to_string();
+    };
+    match (parsed.host_str(), parsed.port()) {
+        (Some(host), Some(port)) => format!("{}:{}", host, port),
+        (Some(host), None) => host.to_string(),
+        _ => server.to_string(),
+    }
+}
+
 pub(crate) fn normalize_xtream_server(server: &str) -> Result<Url, AppError> {
     let mut parsed = parse_http_url(server, "Invalid Xtream server URL")?;
     if parsed.host_str().is_none() {
