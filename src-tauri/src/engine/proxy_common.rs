@@ -1,6 +1,33 @@
 //! Helpers shared by the playback stream proxy, the cast proxy, and the
 //! checker for talking to untrusted upstream media servers.
 
+/// Read an HTTP request head from a raw socket until the `\r\n\r\n`
+/// terminator, bounded at `max_bytes`. A single `read()` is not enough: the
+/// request line and headers can arrive split across TCP segments (seen with
+/// some Cast receivers sending Range headers), which would silently drop
+/// headers or fail parsing. Returns `None` if the connection closed before
+/// any data arrived; otherwise returns what was read (callers parse it and
+/// reject if incomplete).
+pub async fn read_http_request_head(
+    socket: &mut tokio::net::TcpStream,
+    max_bytes: usize,
+) -> std::io::Result<Option<Vec<u8>>> {
+    use tokio::io::AsyncReadExt;
+
+    let mut buf = Vec::with_capacity(1024);
+    let mut chunk = [0u8; 1024];
+    loop {
+        let n = socket.read(&mut chunk).await?;
+        if n == 0 {
+            return Ok(if buf.is_empty() { None } else { Some(buf) });
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if buf.windows(4).any(|window| window == b"\r\n\r\n") || buf.len() >= max_bytes {
+            return Ok(Some(buf));
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ReadCappedError {
     TooLarge,

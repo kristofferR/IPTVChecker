@@ -1169,14 +1169,18 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
 
             let app_handle = app.clone();
             tokio::spawn(async move {
-                // Read the HTTP request line to extract the URL
-                let mut buf = vec![0u8; 8192];
-                let n = match socket.read(&mut buf).await {
-                    Ok(0) => return,
-                    Ok(n) => n,
-                    Err(_) => return,
+                // Read the full request head to extract the URL — the
+                // request line and headers can arrive split across segments.
+                let request_bytes = match crate::engine::proxy_common::read_http_request_head(
+                    &mut socket,
+                    8192,
+                )
+                .await
+                {
+                    Ok(Some(bytes)) => bytes,
+                    Ok(None) | Err(_) => return,
                 };
-                let request_str = String::from_utf8_lossy(&buf[..n]);
+                let request_str = String::from_utf8_lossy(&request_bytes);
 
                 // Parse GET /stream?url=ENCODED_URL HTTP/1.1
                 let request = match parse_stream_request(&request_str) {
