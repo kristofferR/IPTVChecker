@@ -35,7 +35,6 @@ use reqwest::header::{HeaderValue, CONTENT_TYPE, USER_AGENT};
 use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio::process::Child;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use url::Url;
@@ -95,23 +94,16 @@ impl Drop for CastProxyHandle {
 
 struct RemuxState {
     tmpdir: PathBuf,
-    /// ffmpeg child handle. We hold it for diagnostic logging; the worker task
-    /// is responsible for waiting on it.
-    child: Option<Child>,
+    // Note: the ffmpeg child is owned (and killed) by the remux worker task,
+    // not stored here — cleanup only removes the temp directory.
 }
 
 impl RemuxState {
     fn cleanup_blocking(self) {
         // Best-effort sync cleanup used in Drop. The async cleanup path in
-        // `cleanup` is preferred when available.
-        let RemuxState { tmpdir, mut child } = self;
-        if let Some(c) = child.as_mut() {
-            let _ = c.start_kill();
-        }
-        // We deliberately don't `wait()` here — the spawned worker task will.
-        // Just attempt to remove the directory; if files are still open it
-        // will be cleaned up by the OS on next reboot.
-        let _ = std::fs::remove_dir_all(&tmpdir);
+        // `cleanup` is preferred when available. If manifest/segment files
+        // are still open the directory is cleaned up by the OS temp reaper.
+        let _ = std::fs::remove_dir_all(&self.tmpdir);
     }
 }
 
@@ -583,7 +575,6 @@ async fn start_remux(
         let mut guard = remux_state.lock().await;
         *guard = Some(RemuxState {
             tmpdir: tmpdir.clone(),
-            child: None,
         });
     }
 
@@ -636,11 +627,7 @@ async fn wait_for_manifest(
 }
 
 async fn cleanup_remux_async(state: RemuxState) {
-    let RemuxState { tmpdir, mut child } = state;
-    if let Some(c) = child.as_mut() {
-        graceful_kill(c, GRACEFUL_KILL_TIMEOUT).await;
-    }
-    let _ = tokio::fs::remove_dir_all(&tmpdir).await;
+    let _ = tokio::fs::remove_dir_all(&state.tmpdir).await;
 }
 
 /// Pump bytes from the upstream IPTV URL into ffmpeg's stdin, transparently
