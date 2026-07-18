@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, OnceLock};
+use std::sync::{LazyLock, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
@@ -10,7 +10,6 @@ use url::Url;
 use crate::engine::stream_proxy::redact_url;
 use crate::error::AppError;
 use crate::models::settings::ScreenshotFormat;
-use crate::state::AppState;
 
 const MAX_SCREENSHOT_STEM_LEN: usize = 120;
 const FALLBACK_SCREENSHOT_STEM: &str = "channel";
@@ -395,44 +394,6 @@ fn proxy_upstream_source_url<'a>(url: &'a str, route_hint_url: Option<&'a str>) 
     }
 }
 
-async fn ensure_streaming_proxy_port(app: &AppHandle) -> u16 {
-    let state = app.state::<Arc<AppState>>();
-    let port = state
-        .streaming_proxy_port
-        .load(std::sync::atomic::Ordering::Relaxed);
-    if port > 0 {
-        return port;
-    }
-
-    let _guard = state.streaming_proxy_start_lock.lock().await;
-    let port = state
-        .streaming_proxy_port
-        .load(std::sync::atomic::Ordering::Relaxed);
-    if port > 0 {
-        return port;
-    }
-
-    match crate::engine::stream_proxy::start_streaming_proxy(app.clone()).await {
-        Ok(port) => {
-            state
-                .streaming_proxy_port
-                .store(port, std::sync::atomic::Ordering::Relaxed);
-            log::info!(
-                "[StreamProxy] Lazily started localhost streaming proxy on port {}",
-                port
-            );
-            port
-        }
-        Err(error) => {
-            log::warn!(
-                "[StreamProxy] Failed to lazily start localhost streaming proxy: {}",
-                error
-            );
-            0
-        }
-    }
-}
-
 async fn prepare_stream_tool_url(
     app: &AppHandle,
     url: &str,
@@ -443,7 +404,7 @@ async fn prepare_stream_tool_url(
     }
 
     let proxy_source_url = proxy_upstream_source_url(url, route_hint_url);
-    let port = ensure_streaming_proxy_port(app).await;
+    let port = crate::engine::stream_proxy::ensure_streaming_proxy_port(app.clone()).await;
     if port == 0 {
         log::debug!(
             "Streaming proxy unavailable for ffmpeg/ffprobe input, using raw URL: {}",
