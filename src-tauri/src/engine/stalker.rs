@@ -271,10 +271,12 @@ async fn stalker_request_json(
         )));
     }
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| AppError::Other(format!("Failed to read Stalker response: {}", error)))?;
+    let bytes = crate::engine::proxy_common::read_capped(
+        response,
+        crate::engine::proxy_common::MAX_JSON_API_BYTES,
+    )
+    .await
+    .map_err(|error| AppError::Other(format!("Failed to read Stalker response: {:?}", error)))?;
     serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|error| {
         AppError::Parse(format!(
             "Failed to parse Stalker response JSON at {}: {}",

@@ -110,10 +110,15 @@ async fn fetch_xtream_stream_ids(
             )));
         }
 
-        let bytes = match response.bytes().await {
+        let bytes = match crate::engine::proxy_common::read_capped(
+            response,
+            crate::engine::proxy_common::MAX_JSON_API_BYTES,
+        )
+        .await
+        {
             Ok(b) => b,
             Err(e) => {
-                last_error = Some(format!("Failed to read live streams response: {}", e));
+                last_error = Some(format!("Failed to read live streams response: {:?}", e));
                 continue;
             }
         };
@@ -394,7 +399,12 @@ async fn test_single_server_api(
                     Some(format!("HTTP {}", resp.status())),
                 );
             }
-            let bytes = resp.bytes().await.ok();
+            let bytes = crate::engine::proxy_common::read_capped(
+                resp,
+                crate::engine::proxy_common::MAX_JSON_API_BYTES,
+            )
+            .await
+            .ok();
             let (status, max_conn) = bytes
                 .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
                 .and_then(|payload| {
