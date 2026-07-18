@@ -157,6 +157,9 @@ export interface UiSlice {
   sidebarHidden: boolean;
   sidebarWidth: number;
   showReportPanel: boolean;
+  reportAutoRevealBlocked: boolean;
+  reportAutoRevealDone: boolean;
+  reportWasAutoShown: boolean;
   reportSidebarWidth: number;
   lightboxOpen: boolean;
   showKeyboardShortcuts: boolean;
@@ -176,6 +179,10 @@ export interface UiSlice {
   toggleSidebar: () => void;
   setSidebarWidth: (width: number) => void;
   toggleReportPanel: () => void;
+  setReportPanelManually: (visible: boolean) => void;
+  resetReportAutoReveal: () => void;
+  prepareReportAutoRevealForScanStart: () => void;
+  autoRevealReportPanel: () => void;
   setShowReportPanel: (show: boolean) => void;
   setReportSidebarWidth: (width: number) => void;
   setLightboxOpen: (open: boolean) => void;
