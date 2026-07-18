@@ -73,6 +73,8 @@ export function AppBanners() {
           <button
             onClick={() => getStore().setErrorDismissed(true)}
             className="p-1 hover:bg-red-500/20 rounded transition-colors"
+            type="button"
+            aria-label="Dismiss scan error"
           >
             <X className="w-4 h-4" />
           </button>
@@ -86,6 +88,7 @@ export function AppBanners() {
             onClick={() => getStore().setPlaybackError(null)}
             className="p-1 hover:bg-red-500/20 rounded transition-colors"
             type="button"
+            aria-label="Dismiss playback error"
           >
             <X className="w-4 h-4" />
           </button>
@@ -99,6 +102,7 @@ export function AppBanners() {
             onClick={() => getStore().setPlaylistOpenError(null)}
             className="p-1 hover:bg-red-500/20 rounded transition-colors"
             type="button"
+            aria-label="Dismiss playlist error"
           >
             <X className="w-4 h-4" />
           </button>
@@ -112,6 +116,7 @@ export function AppBanners() {
             onClick={() => getStore().setScanInputError(null)}
             className="p-1 hover:bg-red-500/20 rounded transition-colors"
             type="button"
+            aria-label="Dismiss input error"
           >
             <X className="w-4 h-4" />
           </button>
@@ -126,6 +131,7 @@ export function AppBanners() {
             onClick={() => getStore().setMenuInfo(null)}
             className="p-1 hover:bg-blue-500/20 rounded transition-colors"
             type="button"
+            aria-label="Dismiss notification"
           >
             <X className="w-4 h-4" />
           </button>
@@ -154,6 +160,7 @@ export function AppBanners() {
             onClick={dismissUpdateNotice}
             className="p-1 hover:bg-emerald-500/20 rounded transition-colors"
             type="button"
+            aria-label="Dismiss update notice"
           >
             <X className="w-4 h-4" />
           </button>
