@@ -5556,7 +5556,7 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-mcp"
 version = "0.1.0"
-source = "git+https://github.com/P3GLEG/tauri-plugin-mcp#ac709a71d30ac2f167dd79c4f803500a236262f6"
+source = "git+https://github.com/P3GLEG/tauri-plugin-mcp?rev=ac709a71d30ac2f167dd79c4f803500a236262f6#ac709a71d30ac2f167dd79c4f803500a236262f6"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
