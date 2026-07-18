@@ -1,6 +1,6 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use reqwest::header::{HeaderValue, CONTENT_TYPE, RANGE, USER_AGENT};
+use reqwest::header::{HeaderValue, CONTENT_TYPE, LOCATION, RANGE, USER_AGENT};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::Manager;
@@ -372,6 +372,55 @@ async fn is_safe_upstream_url(url: &str) -> bool {
     }
 }
 
+/// Hard cap on manually-followed redirect hops per upstream fetch.
+const MAX_REDIRECT_HOPS: usize = 10;
+
+enum SafeFetchError {
+    /// A hop targeted localhost/private networks/metadata endpoints.
+    Blocked,
+    TooManyRedirects,
+    Request(reqwest::Error),
+}
+
+/// Fetch a URL, following redirects manually and re-validating every hop with
+/// is_safe_upstream_url. A public upstream that 302s to 127.0.0.1 or
+/// 169.254.169.254 would otherwise bypass the private-network guard, since
+/// reqwest's built-in redirect policy only lets us validate the first URL.
+/// `build_request` receives each hop's URL and must produce the request
+/// (method, headers, timeout) using a client built with Policy::none().
+async fn fetch_with_hop_validation<F>(
+    url: &str,
+    build_request: F,
+) -> Result<reqwest::Response, SafeFetchError>
+where
+    F: Fn(&str) -> reqwest::RequestBuilder,
+{
+    let mut current = url.to_string();
+    for _ in 0..=MAX_REDIRECT_HOPS {
+        if !is_safe_upstream_url(&current).await {
+            return Err(SafeFetchError::Blocked);
+        }
+        let response = build_request(&current)
+            .send()
+            .await
+            .map_err(SafeFetchError::Request)?;
+        if !response.status().is_redirection() {
+            return Ok(response);
+        }
+        let Some(next) = response
+            .headers()
+            .get(LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|location| response.url().join(location).ok())
+        else {
+            // Redirect status without a usable Location — pass it through.
+            return Ok(response);
+        };
+        current = next.to_string();
+    }
+    Err(SafeFetchError::TooManyRedirects)
+}
+
 /// Handle an incoming proxy request: decode the URL, fetch upstream, return response.
 pub async fn handle_proxy_request(
     app: &tauri::AppHandle,
@@ -388,11 +437,6 @@ pub async fn handle_proxy_request(
         }
     };
 
-    if !is_safe_upstream_url(&original_url).await {
-        log::warn!("Stream proxy: blocked request to private/local target");
-        return error_response(403, "Target URL not allowed");
-    }
-
     log::debug!("Stream proxy: fetching {}", redact_url(&original_url));
 
     let state = app.state::<Arc<AppState>>();
@@ -403,23 +447,38 @@ pub async fn handle_proxy_request(
 
     let client = get_or_create_proxy_client(state.inner(), accept_invalid_certs).await;
 
-    let mut req_builder = client
-        .get(&original_url)
-        .header(
-            USER_AGENT,
-            HeaderValue::from_str(&user_agent)
-                .unwrap_or_else(|_| HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")),
-        )
-        .timeout(PROXY_BUFFERED_RESPONSE_TIMEOUT);
+    let range = request.headers().get(RANGE).cloned();
+    let upstream_response = match fetch_with_hop_validation(&original_url, |target| {
+        let mut req_builder = client
+            .get(target)
+            .header(
+                USER_AGENT,
+                HeaderValue::from_str(&user_agent)
+                    .unwrap_or_else(|_| HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")),
+            )
+            .timeout(PROXY_BUFFERED_RESPONSE_TIMEOUT);
 
-    // Forward Range header for partial content requests
-    if let Some(range) = request.headers().get(RANGE) {
-        req_builder = req_builder.header(RANGE, range.clone());
-    }
-
-    let upstream_response = match req_builder.send().await {
+        // Forward Range header for partial content requests
+        if let Some(range) = &range {
+            req_builder = req_builder.header(RANGE, range.clone());
+        }
+        req_builder
+    })
+    .await
+    {
         Ok(resp) => resp,
-        Err(err) => {
+        Err(SafeFetchError::Blocked) => {
+            log::warn!("Stream proxy: blocked request to private/local target");
+            return error_response(403, "Target URL not allowed");
+        }
+        Err(SafeFetchError::TooManyRedirects) => {
+            log::warn!(
+                "Stream proxy: too many redirects for {}",
+                redact_url(&original_url)
+            );
+            return error_response(502, "Too many upstream redirects");
+        }
+        Err(SafeFetchError::Request(err)) => {
             log::warn!(
                 "Stream proxy: upstream request failed for {} ({})",
                 redact_url(&original_url),
@@ -518,7 +577,10 @@ fn build_proxy_client(
     reqwest::Client::builder()
         .danger_accept_invalid_certs(accept_invalid_certs)
         .cookie_store(true)
-        .redirect(reqwest::redirect::Policy::limited(10))
+        // Redirects are followed manually in fetch_with_hop_validation so each
+        // hop is re-checked against the private-network blocklist. Built-in
+        // following would validate only the first URL.
+        .redirect(reqwest::redirect::Policy::none())
         .pool_max_idle_per_host(0)
         .connect_timeout(connect_timeout)
         .read_timeout(read_timeout)
@@ -1172,23 +1234,40 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     return;
                 }
 
-                let response = match client
-                    .get(&url)
-                    .header(USER_AGENT, user_agent.clone())
-                    .send()
-                    .await
+                let response = match fetch_with_hop_validation(&url, |target| {
+                    client.get(target).header(USER_AGENT, user_agent.clone())
+                })
+                .await
                 {
                     Ok(resp) => resp,
                     Err(err) => {
-                        log::warn!(
-                            "[StreamProxy] Upstream request failed for {} ({})",
-                            redact_url(&url),
-                            reqwest_error_kind(&err)
-                        );
-                        let (status_line, body) = if err.is_timeout() {
-                            ("HTTP/1.1 504 Gateway Timeout", "Upstream request timed out")
-                        } else {
-                            ("HTTP/1.1 502 Bad Gateway", "Upstream request failed")
+                        let (status_line, body) = match &err {
+                            SafeFetchError::Blocked => {
+                                log::warn!(
+                                    "[StreamProxy] Blocked redirect to private/local target for {}",
+                                    redact_url(&url)
+                                );
+                                ("HTTP/1.1 403 Forbidden", "Target URL not allowed")
+                            }
+                            SafeFetchError::TooManyRedirects => {
+                                log::warn!(
+                                    "[StreamProxy] Too many redirects for {}",
+                                    redact_url(&url)
+                                );
+                                ("HTTP/1.1 502 Bad Gateway", "Too many upstream redirects")
+                            }
+                            SafeFetchError::Request(err) => {
+                                log::warn!(
+                                    "[StreamProxy] Upstream request failed for {} ({})",
+                                    redact_url(&url),
+                                    reqwest_error_kind(err)
+                                );
+                                if err.is_timeout() {
+                                    ("HTTP/1.1 504 Gateway Timeout", "Upstream request timed out")
+                                } else {
+                                    ("HTTP/1.1 502 Bad Gateway", "Upstream request failed")
+                                }
+                            }
                         };
                         let response = format!(
                             "{status_line}\r\nContent-Length: {}\r\n\r\n{}",
@@ -1289,11 +1368,10 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                             return;
                         }
 
-                        match client
-                            .get(&url)
-                            .header(USER_AGENT, user_agent.clone())
-                            .send()
-                            .await
+                        match fetch_with_hop_validation(&url, |target| {
+                            client.get(target).header(USER_AGENT, user_agent.clone())
+                        })
+                        .await
                         {
                             Ok(next_response) if next_response.status().is_success() => {
                                 response = next_response;
@@ -1311,10 +1389,18 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                             Err(err) => {
                                 consecutive_empty_attempts =
                                     consecutive_empty_attempts.saturating_add(1);
+                                let kind = match &err {
+                                    SafeFetchError::Blocked => "blocked target".to_string(),
+                                    SafeFetchError::TooManyRedirects => {
+                                        "too many redirects".to_string()
+                                    }
+                                    SafeFetchError::Request(err) => {
+                                        reqwest_error_kind(err).to_string()
+                                    }
+                                };
                                 log::warn!(
-                                    "[StreamProxy] Reconnect failed for {} ({}); retrying",
-                                    redact_url(&url),
-                                    reqwest_error_kind(&err)
+                                    "[StreamProxy] Reconnect failed for {} ({kind}); retrying",
+                                    redact_url(&url)
                                 );
                             }
                         }
