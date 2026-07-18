@@ -697,14 +697,35 @@ async fn verify(
     let is_dash_manifest = is_dash_manifest_content_type(&content_type, &final_url);
 
     if is_hls_manifest || is_dash_manifest {
-        let manifest_text = match resp.text().await {
-            Ok(t) if !t.is_empty() => t,
-            _ => {
-                return VerifyResult::Retry {
-                    reason: Some("Empty manifest body".to_string()),
-                };
-            }
-        };
+        // Real manifests are tiny; a body blowing past the cap is almost
+        // certainly raw stream data behind a manifest-looking URL. Cap the
+        // read so a fast (or hostile) server can't push tens of MB per
+        // channel into memory across the whole scan concurrency.
+        const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
+        let manifest_bytes =
+            match crate::engine::proxy_common::read_capped(resp, MAX_MANIFEST_BYTES).await {
+                Ok(bytes) => bytes,
+                Err(crate::engine::proxy_common::ReadCappedError::TooLarge) => {
+                    return VerifyResult::Dead {
+                        latency_ms: effective_root_latency,
+                        reason: Some(format!(
+                            "Manifest body exceeded {} MiB cap",
+                            MAX_MANIFEST_BYTES / (1024 * 1024)
+                        )),
+                    };
+                }
+                Err(crate::engine::proxy_common::ReadCappedError::Read(_)) => {
+                    return VerifyResult::Retry {
+                        reason: Some("Failed to read manifest body".to_string()),
+                    };
+                }
+            };
+        let manifest_text = String::from_utf8_lossy(&manifest_bytes).into_owned();
+        if manifest_text.is_empty() {
+            return VerifyResult::Retry {
+                reason: Some("Empty manifest body".to_string()),
+            };
+        }
 
         if is_hls_manifest {
             if let Some(drm_system) = detect_hls_drm_system(&manifest_text) {

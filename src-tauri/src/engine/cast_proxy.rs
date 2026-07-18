@@ -41,6 +41,7 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use crate::engine::ffmpeg::{configure_background_process, graceful_kill, resolve_binary, GRACEFUL_KILL_TIMEOUT};
+use crate::engine::proxy_common::{read_capped, ReadCappedError};
 use crate::engine::stream_proxy::redact_url;
 use crate::error::AppError;
 use crate::models::chromecast::CastStreamKind;
@@ -1443,36 +1444,6 @@ fn parse_byte_range(header: &str, total_len: u64) -> Option<(u64, u64)> {
     }
     let end_clamped = end_inclusive.min(total_len - 1);
     Some((start, end_clamped))
-}
-
-#[derive(Debug)]
-enum ReadCappedError {
-    TooLarge,
-    Read(reqwest::Error),
-}
-
-/// Streams a reqwest response body into memory with a hard byte cap. Returns
-/// `TooLarge` as soon as accumulated bytes exceed `cap` so a malicious or
-/// misclassified upstream (chunked / no Content-Length / declared smaller than
-/// actual) can't OOM the proxy.
-async fn read_capped(
-    response: reqwest::Response,
-    cap: u64,
-) -> Result<Vec<u8>, ReadCappedError> {
-    use futures::StreamExt;
-
-    let mut buf: Vec<u8> = Vec::new();
-    let mut total: u64 = 0;
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(ReadCappedError::Read)?;
-        total = total.saturating_add(chunk.len() as u64);
-        if total > cap {
-            return Err(ReadCappedError::TooLarge);
-        }
-        buf.extend_from_slice(&chunk);
-    }
-    Ok(buf)
 }
 
 async fn write_simple(

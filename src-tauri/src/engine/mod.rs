@@ -6,6 +6,7 @@ pub mod disk;
 pub mod ffmpeg;
 pub mod parser;
 pub mod proxy;
+pub mod proxy_common;
 pub mod resume;
 pub mod search_pattern;
 pub mod stream_proxy;
