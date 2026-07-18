@@ -44,8 +44,8 @@ import type { ChannelResult } from "../lib/types";
 import type { ExportScope } from "../lib/exportScope";
 import {
   countStatusOptions,
-  filterResults,
-  type SearchTextCache,
+  filterResultsShared,
+  sharedSearchTextCache,
 } from "../lib/filters";
 import { measureUiPerf } from "../lib/perf";
 import { validateSourceFilterPattern } from "../lib/sourceFilter";
@@ -160,7 +160,6 @@ export const Toolbar = memo(function Toolbar({
   const showHeaderButtonText = useAppStore(
     (s) => s.settings.show_header_button_text,
   );
-  const searchTextCacheRef = useRef<SearchTextCache>(new WeakMap());
   const openMenuRef = useRef<HTMLDivElement | null>(null);
   const groupSelectRef = useRef<HTMLSelectElement | null>(null);
   const [openMenuVisible, setOpenMenuVisible] = useState(false);
@@ -171,13 +170,12 @@ export const Toolbar = memo(function Toolbar({
       measureUiPerf(
         "toolbar.export-filter",
         () =>
-          filterResults(
+          filterResultsShared(
             completedResults,
             deferredSearch,
             groupFilter,
             statusFilter,
             duplicateIndices,
-            searchTextCacheRef.current,
             separatePlaceholder,
           ),
         {
@@ -204,7 +202,7 @@ export const Toolbar = memo(function Toolbar({
         deferredSearch,
         groupFilter,
         duplicateIndices,
-        searchTextCacheRef.current,
+        sharedSearchTextCache,
         separatePlaceholder,
       ),
     [

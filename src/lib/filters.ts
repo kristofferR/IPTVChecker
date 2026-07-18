@@ -328,6 +328,67 @@ export function filterResults(
   });
 }
 
+// Single-entry memo shared by every component that filters the live result
+// set (ChannelTable, Toolbar). During a scan each rAF flush replaces
+// flatResults, and without this each consumer re-ran its own full filter
+// pass over the same inputs. The search-text cache is shared for the same
+// reason. Sort remains per-consumer (only the table sorts).
+export const sharedSearchTextCache: SearchTextCache = new WeakMap();
+
+type SharedFilterKey = {
+  results: ChannelResult[];
+  search: string;
+  groupFilter: string;
+  statusFilter: string;
+  duplicateIndices: Set<number> | undefined;
+  separatePlaceholder: boolean | undefined;
+};
+
+let sharedFilterKey: SharedFilterKey | null = null;
+let sharedFilterValue: ChannelResult[] = [];
+
+export function filterResultsShared(
+  results: ChannelResult[],
+  search: string,
+  groupFilter: string,
+  statusFilter: string,
+  duplicateIndices?: Set<number>,
+  separatePlaceholder?: boolean,
+): ChannelResult[] {
+  const key = sharedFilterKey;
+  if (
+    key &&
+    key.results === results &&
+    key.search === search &&
+    key.groupFilter === groupFilter &&
+    key.statusFilter === statusFilter &&
+    key.duplicateIndices === duplicateIndices &&
+    key.separatePlaceholder === separatePlaceholder
+  ) {
+    return sharedFilterValue;
+  }
+
+  const value = filterResults(
+    results,
+    search,
+    groupFilter,
+    statusFilter,
+    duplicateIndices,
+    sharedSearchTextCache,
+    separatePlaceholder,
+  );
+  sharedFilterKey = {
+    results,
+    search,
+    groupFilter,
+    statusFilter,
+    duplicateIndices,
+    separatePlaceholder,
+  };
+  sharedFilterValue = value;
+  return value;
+}
+
 export function countStatusOptions(
   results: ChannelResult[],
   search: string,
