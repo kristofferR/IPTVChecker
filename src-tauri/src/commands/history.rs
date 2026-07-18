@@ -282,20 +282,7 @@ fn save_v2_index(base_dir: &Path, index: &HistoryIndexV2) -> Result<(), AppError
     })?;
 
     let tmp_path = index_path.with_extension("json.tmp");
-    std::fs::write(&tmp_path, bytes).map_err(AppError::Io)?;
-    match std::fs::rename(&tmp_path, &index_path) {
-        Ok(()) => Ok(()),
-        Err(first_error) => {
-            if index_path.exists() {
-                std::fs::remove_file(&index_path).map_err(AppError::Io)?;
-                std::fs::rename(&tmp_path, &index_path).map_err(AppError::Io)?;
-                Ok(())
-            } else {
-                let _ = std::fs::remove_file(&tmp_path);
-                Err(AppError::Io(first_error))
-            }
-        }
-    }
+    crate::engine::disk::atomic_write(&index_path, &tmp_path, &bytes)
 }
 
 fn write_run_file(
