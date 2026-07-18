@@ -1292,13 +1292,21 @@ async fn fetch_xtream_account_info(
         .build()
         .ok()?;
 
+    // Errors on one endpoint must not abort the loop — the plain player_api.php
+    // fallback exists precisely for servers where get_account_info misbehaves.
     for endpoint in [account_info_url, api_url.clone()] {
-        let response = client
+        let response = match client
             .get(endpoint.clone())
             .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
             .send()
             .await
-            .ok()?;
+        {
+            Ok(response) => response,
+            Err(err) => {
+                log::debug!("Xtream player_api request failed for {endpoint}: {err}");
+                continue;
+            }
+        };
 
         if !response.status().is_success() {
             log::debug!(
@@ -1309,8 +1317,19 @@ async fn fetch_xtream_account_info(
             continue;
         }
 
-        let payload_bytes = response.bytes().await.ok()?;
-        let payload = serde_json::from_slice::<serde_json::Value>(&payload_bytes).ok()?;
+        let payload = match response.bytes().await {
+            Ok(bytes) => match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                Ok(payload) => payload,
+                Err(err) => {
+                    log::debug!("Xtream player_api returned invalid JSON for {endpoint}: {err}");
+                    continue;
+                }
+            },
+            Err(err) => {
+                log::debug!("Xtream player_api body read failed for {endpoint}: {err}");
+                continue;
+            }
+        };
         if let Some(info) = extract_xtream_account_info(&payload) {
             return Some(info);
         }
