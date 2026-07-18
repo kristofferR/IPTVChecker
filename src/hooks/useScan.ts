@@ -285,13 +285,17 @@ export function useScan() {
   }, []);
 
   useEffect(() => {
+    // Register all listeners in parallel and guard against cleanup running
+    // mid-registration (e.g. StrictMode remount) — sequential `await listen()`
+    // with synchronous cleanup orphans listeners that resolve after cleanup.
+    let cancelled = false;
     const unlisteners: (() => void)[] = [];
 
     const setup = async () => {
       logger.debug("[useScan] Setting up event listeners");
 
-      unlisteners.push(
-        await listen<ScanEvent<ScanResultBatchPayload>>(
+      const registered = await Promise.all([
+        listen<ScanEvent<ScanResultBatchPayload>>(
           "scan://channel-results-batch",
           (event) => {
             if (
@@ -310,10 +314,7 @@ export function useScan() {
             handleProgressUpdate(payload.progress);
           },
         ),
-      );
-
-      unlisteners.push(
-        await listen<ScanEvent<ChannelResult>>("scan://channel-result", (event) => {
+        listen<ScanEvent<ChannelResult>>("scan://channel-result", (event) => {
           if (
             cancelling.current ||
             !isRunScopedEventForActiveRun(
@@ -326,10 +327,7 @@ export function useScan() {
           queueResult(event.payload.payload);
           recordCompletions(1);
         }),
-      );
-
-      unlisteners.push(
-        await listen<ScanEvent<ScanProgress>>("scan://progress", (event) => {
+        listen<ScanEvent<ScanProgress>>("scan://progress", (event) => {
           if (
             cancelling.current ||
             !isRunScopedEventForActiveRun(
@@ -341,10 +339,7 @@ export function useScan() {
           }
           handleProgressUpdate(event.payload.payload);
         }),
-      );
-
-      unlisteners.push(
-        await listen<ScanEvent<ScanSummary>>("scan://complete", (event) => {
+        listen<ScanEvent<ScanSummary>>("scan://complete", (event) => {
           if (
             !isRunScopedEventForActiveRun(
               activeRunId.current,
@@ -363,10 +358,7 @@ export function useScan() {
           activeRunId.current = null;
           runClock.current = null;
         }),
-      );
-
-      unlisteners.push(
-        await listen<ScanEvent<ScanSummary>>("scan://cancelled", (event) => {
+        listen<ScanEvent<ScanSummary>>("scan://cancelled", (event) => {
           if (
             !isRunScopedEventForActiveRun(
               activeRunId.current,
@@ -386,10 +378,7 @@ export function useScan() {
           activeRunId.current = null;
           runClock.current = null;
         }),
-      );
-
-      unlisteners.push(
-        await listen<ScanEvent<null>>("scan://paused", (event) => {
+        listen<ScanEvent<null>>("scan://paused", (event) => {
           if (
             !isRunScopedEventForActiveRun(
               activeRunId.current,
@@ -404,10 +393,7 @@ export function useScan() {
           }
           getStore().applyScanRuntime({ scanState: "paused" });
         }),
-      );
-
-      unlisteners.push(
-        await listen<ScanEvent<null>>("scan://resumed", (event) => {
+        listen<ScanEvent<null>>("scan://resumed", (event) => {
           if (
             !isRunScopedEventForActiveRun(
               activeRunId.current,
@@ -428,10 +414,7 @@ export function useScan() {
           }
           getStore().applyScanRuntime({ scanState: "scanning" });
         }),
-      );
-
-      unlisteners.push(
-        await listen<ScanEvent<ScanErrorPayload>>("scan://error", (event) => {
+        listen<ScanEvent<ScanErrorPayload>>("scan://error", (event) => {
           logger.debug("[useScan] scan://error received", event.payload);
 
           const message = runScopedScanErrorMessage(
@@ -448,34 +431,33 @@ export function useScan() {
             pendingScanError.current = event.payload;
           }
         }),
-      );
-
-      unlisteners.push(
-        await listen<ScanEvent<null>>("scan://screenshots-paused", (event) => {
+        listen<ScanEvent<null>>("scan://screenshots-paused", (event) => {
           if (isRunScopedEventForActiveRun(activeRunId.current, event.payload.run_id)) {
             logger.debug("[useScan] scan://screenshots-paused received");
             getStore().applyScanRuntime({ screenshotsPaused: true });
           }
         }),
-      );
-
-      unlisteners.push(
-        await listen<ScanEvent<null>>("scan://network-paused", (event) => {
+        listen<ScanEvent<null>>("scan://network-paused", (event) => {
           if (isRunScopedEventForActiveRun(activeRunId.current, event.payload.run_id)) {
             logger.debug("[useScan] scan://network-paused received");
             getStore().applyScanRuntime({ networkPaused: true });
           }
         }),
-      );
-
-      unlisteners.push(
-        await listen<ScanEvent<null>>("scan://network-resumed", (event) => {
+        listen<ScanEvent<null>>("scan://network-resumed", (event) => {
           if (isRunScopedEventForActiveRun(activeRunId.current, event.payload.run_id)) {
             logger.debug("[useScan] scan://network-resumed received");
             getStore().applyScanRuntime({ networkPaused: false });
           }
         }),
-      );
+      ]);
+
+      if (cancelled) {
+        for (const off of registered) {
+          off();
+        }
+        return;
+      }
+      unlisteners.push(...registered);
 
       logger.debug("[useScan] All event listeners registered");
     };
@@ -483,6 +465,7 @@ export function useScan() {
     setup();
 
     return () => {
+      cancelled = true;
       for (const unlisten of unlisteners) {
         unlisten();
       }
