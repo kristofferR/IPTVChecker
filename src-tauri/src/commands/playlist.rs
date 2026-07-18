@@ -414,16 +414,7 @@ fn hash_source_key(source_key: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-pub(crate) fn normalize_url_identity(url: &Url) -> String {
-    let mut normalized = url.clone();
-    normalized.set_fragment(None);
-    if (normalized.scheme() == "http" && normalized.port() == Some(80))
-        || (normalized.scheme() == "https" && normalized.port() == Some(443))
-    {
-        let _ = normalized.set_port(None);
-    }
-    normalized.to_string()
-}
+pub(crate) use crate::urlnorm::normalize_url_identity;
 
 fn source_cache_file_name(source_key: &str) -> String {
     format!("{}.m3u8", hash_source_key(source_key))

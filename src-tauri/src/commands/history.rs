@@ -89,26 +89,7 @@ fn normalize_playlist_path_key(playlist_path: &str) -> String {
     trimmed.to_string()
 }
 
-fn normalize_url_identity(url_value: &str) -> Option<String> {
-    let trimmed = url_value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let mut parsed = reqwest::Url::parse(trimmed).ok()?;
-    if parsed.scheme() != "http" && parsed.scheme() != "https" {
-        return None;
-    }
-    parsed.set_fragment(None);
-
-    if (parsed.scheme() == "http" && parsed.port() == Some(80))
-        || (parsed.scheme() == "https" && parsed.port() == Some(443))
-    {
-        let _ = parsed.set_port(None);
-    }
-
-    Some(parsed.to_string())
-}
+use crate::urlnorm::normalize_http_url_identity;
 
 fn normalize_source_identity(source_identity: &str) -> Option<String> {
     let trimmed = source_identity.trim();
@@ -118,7 +99,7 @@ fn normalize_source_identity(source_identity: &str) -> Option<String> {
 
     if let Some(url_value) = trimmed.strip_prefix("url:") {
         return Some(
-            normalize_url_identity(url_value)
+            normalize_http_url_identity(url_value)
                 .map(|normalized| format!("url:{}", normalized))
                 .unwrap_or_else(|| trimmed.to_string()),
         );
@@ -181,21 +162,7 @@ fn clamp_history_limit(limit: usize) -> usize {
     limit.clamp(MIN_HISTORY_LIMIT, MAX_HISTORY_LIMIT)
 }
 
-fn canonicalize_stream_url(url: &str) -> String {
-    let trimmed = url.trim();
-    let Ok(mut parsed) = reqwest::Url::parse(trimmed) else {
-        return trimmed.to_string();
-    };
-    parsed.set_fragment(None);
-
-    if (parsed.scheme() == "http" && parsed.port() == Some(80))
-        || (parsed.scheme() == "https" && parsed.port() == Some(443))
-    {
-        let _ = parsed.set_port(None);
-    }
-
-    parsed.to_string()
-}
+use crate::urlnorm::canonicalize_stream_url;
 
 fn channel_identity_key(result: &ChannelResult) -> String {
     let base_url = result.stream_url.as_deref().unwrap_or(&result.url);
