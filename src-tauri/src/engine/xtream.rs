@@ -256,16 +256,23 @@ async fn fetch_xtream_json_array(
         .send()
         .await
     {
-        Ok(resp) if resp.status().is_success() => match resp.bytes().await {
-            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
-                log::warn!("Failed to parse Xtream {} JSON response: {}", label, e);
-                Vec::new()
-            }),
-            Err(e) => {
-                log::warn!("Failed to read Xtream {} response: {}", label, e);
-                Vec::new()
+        Ok(resp) if resp.status().is_success() => {
+            match crate::engine::proxy_common::read_capped(
+                resp,
+                crate::engine::proxy_common::MAX_JSON_API_BYTES,
+            )
+            .await
+            {
+                Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+                    log::warn!("Failed to parse Xtream {} JSON response: {}", label, e);
+                    Vec::new()
+                }),
+                Err(e) => {
+                    log::warn!("Failed to read Xtream {} response: {:?}", label, e);
+                    Vec::new()
+                }
             }
-        },
+        }
         Ok(resp) => {
             log::warn!("Xtream {} API returned HTTP {}", label, resp.status());
             Vec::new()
@@ -528,6 +535,9 @@ pub(crate) async fn fetch_xtream_account_info(
     // Errors on one endpoint must not abort the loop — the plain player_api.php
     // fallback exists precisely for servers where get_account_info misbehaves.
     for endpoint in [account_info_url, api_url.clone()] {
+        // Never log the raw endpoint — player_api URLs carry the username and
+        // password as query parameters.
+        let safe_endpoint = crate::engine::stream_proxy::redact_url(endpoint.as_str());
         let response = match client
             .get(endpoint.clone())
             .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
@@ -536,7 +546,7 @@ pub(crate) async fn fetch_xtream_account_info(
         {
             Ok(response) => response,
             Err(err) => {
-                log::debug!("Xtream player_api request failed for {endpoint}: {err}");
+                log::debug!("Xtream player_api request failed for {safe_endpoint}: {err}");
                 continue;
             }
         };
@@ -545,21 +555,28 @@ pub(crate) async fn fetch_xtream_account_info(
             log::debug!(
                 "Xtream player_api request returned HTTP {} for {}",
                 response.status(),
-                endpoint
+                safe_endpoint
             );
             continue;
         }
 
-        let payload = match response.bytes().await {
+        let payload = match crate::engine::proxy_common::read_capped(
+            response,
+            crate::engine::proxy_common::MAX_JSON_API_BYTES,
+        )
+        .await
+        {
             Ok(bytes) => match serde_json::from_slice::<serde_json::Value>(&bytes) {
                 Ok(payload) => payload,
                 Err(err) => {
-                    log::debug!("Xtream player_api returned invalid JSON for {endpoint}: {err}");
+                    log::debug!(
+                        "Xtream player_api returned invalid JSON for {safe_endpoint}: {err}"
+                    );
                     continue;
                 }
             },
             Err(err) => {
-                log::debug!("Xtream player_api body read failed for {endpoint}: {err}");
+                log::debug!("Xtream player_api body read failed for {safe_endpoint}: {err:?}");
                 continue;
             }
         };
