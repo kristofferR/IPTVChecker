@@ -19,7 +19,7 @@ import {
   tryConvertToXtreamHls,
   type StreamMetadata,
   type StreamType,
-} from "../src/hooks/useStreamPlayer";
+} from "../src/lib/playback";
 
 function canPlayTypes(
   supportByMime: Record<string, "" | "maybe" | "probably">,
