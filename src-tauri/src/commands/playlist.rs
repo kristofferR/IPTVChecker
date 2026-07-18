@@ -714,7 +714,16 @@ async fn download_playlist_to_cache(
             detail: "Writing to disk",
         },
     );
-    crate::engine::disk::atomic_write(&cache_path, &tmp_path, &bytes)?;
+    // Up to 200 MB — write it on a blocking thread, not a runtime worker.
+    {
+        let cache_path = cache_path.clone();
+        let tmp_path = tmp_path.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::engine::disk::atomic_write(&cache_path, &tmp_path, &bytes)
+        })
+        .await
+        .map_err(|err| AppError::Other(format!("Playlist cache write task failed: {err}")))??;
+    }
     if let Err(error) = save_cache_metadata(&cache_path, &response_metadata) {
         log::warn!(
             "Failed to persist remote playlist cache metadata for {}: {}",
@@ -1902,14 +1911,17 @@ pub async fn open_playlist(
     Ok(preview)
 }
 
-pub(crate) async fn open_playlist_path_inner(
-    app: &AppHandle,
+/// Parse a playlist file on a blocking thread, forwarding throttled Parsing
+/// progress events. Parsing a large (up to 200 MB) playlist is seconds of
+/// CPU-bound work that must not stall a tokio runtime worker.
+async fn parse_playlist_off_thread(
+    app: Option<&AppHandle>,
     path: String,
     group_filter: Option<String>,
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
     emit_load_progress(
-        Some(app),
+        app,
         PlaylistLoadProgress::Parsing {
             channels_found: 0,
             live_found: 0,
@@ -1917,12 +1929,13 @@ pub(crate) async fn open_playlist_path_inner(
             series_found: 0,
         },
     );
-    let mut preview = {
+    let app_for_progress = app.cloned();
+    tokio::task::spawn_blocking(move || {
         let last_emit = std::cell::Cell::new(Instant::now() - PROGRESS_THROTTLE);
         let on_progress = |progress: parser::ParseProgress| {
             if last_emit.get().elapsed() >= PROGRESS_THROTTLE {
                 emit_load_progress(
-                    Some(app),
+                    app_for_progress.as_ref(),
                     PlaylistLoadProgress::Parsing {
                         channels_found: progress.channels_found,
                         live_found: progress.live_found,
@@ -1933,13 +1946,25 @@ pub(crate) async fn open_playlist_path_inner(
                 last_emit.set(Instant::now());
             }
         };
-        parser::parse_playlist_with_progress(
-            &path,
-            &group_filter,
-            &channel_search,
-            Some(&on_progress),
-        )?
-    };
+        let cb: Option<&dyn Fn(parser::ParseProgress)> = if app_for_progress.is_some() {
+            Some(&on_progress)
+        } else {
+            None
+        };
+        parser::parse_playlist_with_progress(&path, &group_filter, &channel_search, cb)
+    })
+    .await
+    .map_err(|err| AppError::Other(format!("Playlist parse task failed: {err}")))?
+}
+
+pub(crate) async fn open_playlist_path_inner(
+    app: &AppHandle,
+    path: String,
+    group_filter: Option<String>,
+    channel_search: Option<String>,
+) -> Result<PlaylistPreview, AppError> {
+    let mut preview =
+        parse_playlist_off_thread(Some(app), path.clone(), group_filter, channel_search).await?;
     populate_server_metadata(Some(app), &mut preview).await;
     Ok(preview)
 }
@@ -1985,38 +2010,8 @@ pub(crate) async fn open_playlist_url_from_data_dir(
     let cached_path =
         download_playlist_to_cache_in_data_dir(app, data_dir, &source_key, &parsed, "playlist URL")
             .await?;
-    emit_load_progress(
-        app,
-        PlaylistLoadProgress::Parsing {
-            channels_found: 0,
-            live_found: 0,
-            movie_found: 0,
-            series_found: 0,
-        },
-    );
-    let mut preview = {
-        let last_emit = std::cell::Cell::new(Instant::now() - PROGRESS_THROTTLE);
-        let on_progress = |progress: parser::ParseProgress| {
-            if last_emit.get().elapsed() >= PROGRESS_THROTTLE {
-                emit_load_progress(
-                    app,
-                    PlaylistLoadProgress::Parsing {
-                        channels_found: progress.channels_found,
-                        live_found: progress.live_found,
-                        movie_found: progress.movie_found,
-                        series_found: progress.series_found,
-                    },
-                );
-                last_emit.set(Instant::now());
-            }
-        };
-        let cb: Option<&dyn Fn(parser::ParseProgress)> = if app.is_some() {
-            Some(&on_progress)
-        } else {
-            None
-        };
-        parser::parse_playlist_with_progress(&cached_path, &group_filter, &channel_search, cb)?
-    };
+    let mut preview =
+        parse_playlist_off_thread(app, cached_path.clone(), group_filter, channel_search).await?;
     preview.file_name = friendly_name_from_url(&parsed);
     preview.source_identity = Some(format!("url:{}", normalized_identity));
     populate_server_metadata(app, &mut preview).await;
@@ -2102,38 +2097,13 @@ pub(crate) async fn open_playlist_xtream_inner(
         }
     };
 
-    emit_load_progress(
+    let mut preview = parse_playlist_off_thread(
         Some(app),
-        PlaylistLoadProgress::Parsing {
-            channels_found: 0,
-            live_found: 0,
-            movie_found: 0,
-            series_found: 0,
-        },
-    );
-    let mut preview = {
-        let last_emit = std::cell::Cell::new(Instant::now() - PROGRESS_THROTTLE);
-        let on_progress = |progress: parser::ParseProgress| {
-            if last_emit.get().elapsed() >= PROGRESS_THROTTLE {
-                emit_load_progress(
-                    Some(app),
-                    PlaylistLoadProgress::Parsing {
-                        channels_found: progress.channels_found,
-                        live_found: progress.live_found,
-                        movie_found: progress.movie_found,
-                        series_found: progress.series_found,
-                    },
-                );
-                last_emit.set(Instant::now());
-            }
-        };
-        parser::parse_playlist_with_progress(
-            &cached_path,
-            &group_filter,
-            &channel_search,
-            Some(&on_progress),
-        )?
-    };
+        cached_path.clone(),
+        group_filter,
+        channel_search,
+    )
+    .await?;
     let server_host = server.host_str().unwrap_or("Xtream");
     preview.file_name = format!("{} ({})", server_host, username);
     preview.source_identity = Some(source_identity_override.unwrap_or(source_key));

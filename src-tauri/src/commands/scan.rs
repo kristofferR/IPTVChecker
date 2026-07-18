@@ -1116,11 +1116,18 @@ async fn parse_playlist_with_cache(
     }
 
     let parse_started_at = Instant::now();
-    let mut preview = parser::parse_playlist(
-        &config.file_path,
-        &config.group_filter,
-        &config.channel_search,
-    )?;
+    // Parsing a big playlist is seconds of CPU-bound work; keep it off the
+    // async runtime that is also driving proxies and event emission.
+    let mut preview = {
+        let file_path = config.file_path.clone();
+        let group_filter = config.group_filter.clone();
+        let channel_search = config.channel_search.clone();
+        tokio::task::spawn_blocking(move || {
+            parser::parse_playlist(&file_path, &group_filter, &channel_search)
+        })
+        .await
+        .map_err(|err| AppError::Other(format!("Playlist parse task failed: {err}")))??
+    };
     crate::commands::saved::apply_persisted_playlist_metadata(
         app,
         &mut preview,
@@ -1360,15 +1367,24 @@ async fn execute_scan_run(
             let settings = state.settings.lock().await;
             settings.scan_history_limit as usize
         };
-        if let Err(error) = history::append_scan_history(
-            &app,
-            &run_id,
-            &config,
-            &summary,
-            Vec::new(),
-            history_limit,
-        ) {
-            log::warn!("Failed to write scan history for {}: {}", run_id, error);
+        {
+            let app = app.clone();
+            let run_id = run_id.clone();
+            let config = config.clone();
+            let summary = summary.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                if let Err(error) = history::append_scan_history(
+                    &app,
+                    &run_id,
+                    &config,
+                    &summary,
+                    Vec::new(),
+                    history_limit,
+                ) {
+                    log::warn!("Failed to write scan history for {}: {}", run_id, error);
+                }
+            })
+            .await;
         }
         state
             .with_window_scan_state(&scan_scope, |scan_state| {
@@ -1420,7 +1436,13 @@ async fn execute_scan_run(
     );
 
     let channel_indices: HashSet<usize> = channels.iter().map(|channel| channel.index).collect();
-    let mut resumed_entries = resume::load_checkpoint_entries(&checkpoint_file)
+    let checkpoint_entries = {
+        let checkpoint_file = checkpoint_file.clone();
+        tokio::task::spawn_blocking(move || resume::load_checkpoint_entries(&checkpoint_file))
+            .await
+            .unwrap_or_default()
+    };
+    let mut resumed_entries = checkpoint_entries
         .into_iter()
         .filter(|entry| channel_indices.contains(&entry.result.index))
         .collect::<Vec<_>>();
@@ -2291,15 +2313,27 @@ async fn execute_scan_run(
         let settings = state.settings.lock().await;
         settings.scan_history_limit as usize
     };
-    if let Err(error) = history::append_scan_history(
-        &app,
-        &run_id,
-        &config,
-        &summary,
-        completed_scan.results,
-        history_limit,
-    ) {
-        log::warn!("Failed to write scan history for {}: {}", run_id, error);
+    // Serializing and writing the full results Vec (plus reading the previous
+    // run for the diff) is blocking file IO — keep it off the runtime.
+    {
+        let app = app.clone();
+        let run_id = run_id.clone();
+        let config = config.clone();
+        let summary = summary.clone();
+        let results = completed_scan.results;
+        let _ = tokio::task::spawn_blocking(move || {
+            if let Err(error) = history::append_scan_history(
+                &app,
+                &run_id,
+                &config,
+                &summary,
+                results,
+                history_limit,
+            ) {
+                log::warn!("Failed to write scan history for {}: {}", run_id, error);
+            }
+        })
+        .await;
     }
 
     let _ = app.emit(
