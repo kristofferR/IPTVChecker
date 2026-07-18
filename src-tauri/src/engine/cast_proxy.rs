@@ -1477,16 +1477,7 @@ async fn write_simple(
 }
 
 fn is_m3u8(content_type: &str, url: &str) -> bool {
-    let ct = content_type.to_lowercase();
-    if ct.contains("application/vnd.apple.mpegurl") || ct.contains("application/x-mpegurl") {
-        return true;
-    }
-    if let Ok(parsed) = Url::parse(url) {
-        if parsed.path().to_lowercase().ends_with(".m3u8") {
-            return true;
-        }
-    }
-    false
+    crate::engine::proxy_common::is_m3u8_response(content_type, url)
 }
 
 /// Reject non-HTTP(S) schemes and any target whose origin doesn't match the
@@ -1515,101 +1506,24 @@ fn is_target_allowed(base: &Url, target: &Url) -> bool {
 /// Cast device will then attempt them directly (and likely fail), but the
 /// proxy refuses to act as a confused-deputy fetcher for them.
 fn rewrite_manifest(body: &str, base_url: &str, token: &str) -> String {
-    let base = match Url::parse(base_url) {
-        Ok(u) => u,
-        Err(_) => return body.to_string(),
+    let Ok(base) = Url::parse(base_url) else {
+        return body.to_string();
     };
-    let mut out = String::with_capacity(body.len());
-    for line in body.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            out.push('\n');
-            continue;
-        }
-        if trimmed.starts_with('#') {
-            // Rewrite URI="..." in select tags
-            let upper = trimmed.to_ascii_uppercase();
-            if (upper.starts_with("#EXT-X-MAP:")
-                || upper.starts_with("#EXT-X-KEY:")
-                || upper.starts_with("#EXT-X-MEDIA:")
-                || upper.starts_with("#EXT-X-SESSION-KEY:"))
-                && trimmed.contains("URI=")
-            {
-                out.push_str(&rewrite_tag_uri(trimmed, &base, token));
-            } else {
-                out.push_str(line);
-            }
-            out.push('\n');
-            continue;
-        }
-        match base.join(trimmed) {
-            Ok(resolved) if is_target_allowed(&base, &resolved) => {
-                out.push_str(&format!("/cast/{token}/seg/{}", encode_segment(resolved.as_str())));
-            }
-            Ok(rejected) => {
-                log::warn!(
-                    "[CastProxy] Refusing to proxy out-of-origin segment {} (base {})",
-                    redact_url(rejected.as_str()),
-                    redact_url(base.as_str())
-                );
-                out.push_str(line);
-            }
-            Err(_) => out.push_str(line),
-        }
-        out.push('\n');
-    }
-    out
-}
-
-fn rewrite_tag_uri(line: &str, base: &Url, token: &str) -> String {
-    let upper = line.to_ascii_uppercase();
-    let Some(uri_pos) = upper.find("URI=") else {
-        return line.to_string();
-    };
-    let after = &line[uri_pos + 4..];
-    let (quote, start, end) = if after.starts_with('"') {
-        let inner = &after[1..];
-        let e = inner.find('"').unwrap_or(inner.len());
-        (Some('"'), 1, 1 + e)
-    } else if after.starts_with('\'') {
-        let inner = &after[1..];
-        let e = inner.find('\'').unwrap_or(inner.len());
-        (Some('\''), 1, 1 + e)
-    } else {
-        let e = after
-            .find(|c: char| c == ',' || c.is_whitespace())
-            .unwrap_or(after.len());
-        (None, 0, e)
-    };
-    let original = &after[start..end];
-    let resolved = match base.join(original) {
-        Ok(u) if is_target_allowed(base, &u) => u,
-        Ok(rejected) => {
+    crate::engine::proxy_common::rewrite_hls_manifest(body, base_url, &|resolved| {
+        if is_target_allowed(&base, resolved) {
+            Some(format!(
+                "/cast/{token}/seg/{}",
+                encode_segment(resolved.as_str())
+            ))
+        } else {
             log::warn!(
-                "[CastProxy] Refusing to proxy out-of-origin tag URI {} (base {})",
-                redact_url(rejected.as_str()),
+                "[CastProxy] Refusing to proxy out-of-origin reference {} (base {})",
+                redact_url(resolved.as_str()),
                 redact_url(base.as_str())
             );
-            return line.to_string();
+            None
         }
-        Err(_) => return line.to_string(),
-    };
-    let new_uri = format!("/cast/{token}/seg/{}", encode_segment(resolved.as_str()));
-
-    let mut result = String::with_capacity(line.len() + new_uri.len());
-    result.push_str(&line[..uri_pos + 4]);
-    if let Some(q) = quote {
-        result.push(q);
-        result.push_str(&new_uri);
-        result.push(q);
-    } else {
-        result.push_str(&new_uri);
-    }
-    let after_offset = uri_pos + 4 + end + if quote.is_some() { 1 } else { 0 };
-    if after_offset < line.len() {
-        result.push_str(&line[after_offset..]);
-    }
-    result
+    })
 }
 
 fn encode_segment(url: &str) -> String {

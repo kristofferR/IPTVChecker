@@ -132,118 +132,17 @@ pub async fn ensure_streaming_proxy_port(app: tauri::AppHandle) -> u16 {
 }
 
 fn is_m3u8_response(content_type: &str, url: &str) -> bool {
-    let ct = content_type.to_lowercase();
-    if ct.contains("application/vnd.apple.mpegurl") || ct.contains("application/x-mpegurl") {
-        return true;
-    }
-    if let Ok(parsed) = Url::parse(url) {
-        let path = parsed.path().to_lowercase();
-        if path.ends_with(".m3u8") {
-            return true;
-        }
-    }
-    false
+    crate::engine::proxy_common::is_m3u8_response(content_type, url)
 }
 
 /// Rewrite URIs in an HLS manifest so they go through the stream proxy.
-///
-/// Handles:
-/// - Bare URI lines (segment and playlist references)
-/// - URI="..." attributes in #EXT-X-MAP, #EXT-X-KEY, #EXT-X-MEDIA, #EXT-X-SESSION-KEY
 fn rewrite_m3u8_manifest(body: &str, base_url: &str) -> String {
-    let base = match Url::parse(base_url) {
-        Ok(u) => u,
-        Err(_) => return body.to_string(),
-    };
-
-    let mut output = String::with_capacity(body.len());
-    for line in body.lines() {
-        let trimmed = line.trim();
-
-        if trimmed.is_empty() {
-            output.push('\n');
-            continue;
-        }
-
-        // Rewrite URI="..." attributes in HLS tags
-        if trimmed.starts_with('#') {
-            let upper = trimmed.to_ascii_uppercase();
-            if (upper.starts_with("#EXT-X-MAP:")
-                || upper.starts_with("#EXT-X-KEY:")
-                || upper.starts_with("#EXT-X-MEDIA:")
-                || upper.starts_with("#EXT-X-SESSION-KEY:"))
-                && trimmed.contains("URI=")
-            {
-                output.push_str(&rewrite_tag_uri(trimmed, &base));
-            } else {
-                output.push_str(line);
-            }
-            output.push('\n');
-            continue;
-        }
-
-        // Non-comment, non-empty line: a URI reference
-        if let Ok(resolved) = base.join(trimmed) {
-            let encoded = encode_proxy_url(resolved.as_str());
-            output.push_str(&format!("streamproxy://localhost/{encoded}"));
-        } else {
-            output.push_str(line);
-        }
-        output.push('\n');
-    }
-
-    output
-}
-
-/// Rewrite the URI="..." value inside an HLS tag line.
-fn rewrite_tag_uri(line: &str, base: &Url) -> String {
-    // Find URI=" (case-insensitive)
-    let upper = line.to_ascii_uppercase();
-    let Some(uri_pos) = upper.find("URI=") else {
-        return line.to_string();
-    };
-
-    let after_uri_eq = &line[uri_pos + 4..];
-
-    // Determine quote character (or unquoted)
-    let (quote, uri_start, uri_end) = if after_uri_eq.starts_with('"') {
-        let inner = &after_uri_eq[1..];
-        let end = inner.find('"').unwrap_or(inner.len());
-        (Some('"'), 1, 1 + end)
-    } else if after_uri_eq.starts_with('\'') {
-        let inner = &after_uri_eq[1..];
-        let end = inner.find('\'').unwrap_or(inner.len());
-        (Some('\''), 1, 1 + end)
-    } else {
-        let end = after_uri_eq
-            .find(|c: char| c == ',' || c.is_whitespace())
-            .unwrap_or(after_uri_eq.len());
-        (None, 0, end)
-    };
-
-    let original_uri = &after_uri_eq[uri_start..uri_end];
-    let resolved = match base.join(original_uri) {
-        Ok(u) => u.to_string(),
-        Err(_) => return line.to_string(),
-    };
-    let encoded = encode_proxy_url(&resolved);
-    let proxy_uri = format!("streamproxy://localhost/{encoded}");
-
-    let mut result = String::with_capacity(line.len() + proxy_uri.len());
-    result.push_str(&line[..uri_pos + 4]); // everything up to and including "URI="
-    if let Some(q) = quote {
-        result.push(q);
-        result.push_str(&proxy_uri);
-        result.push(q);
-    } else {
-        result.push_str(&proxy_uri);
-    }
-    // Append the remainder after the original URI value
-    let remainder_offset = uri_pos + 4 + uri_end + if quote.is_some() { 1 } else { 0 };
-    if remainder_offset < line.len() {
-        result.push_str(&line[remainder_offset..]);
-    }
-    result
+    crate::engine::proxy_common::rewrite_hls_manifest(body, base_url, &|resolved| {
+        Some(format!(
+            "streamproxy://localhost/{}",
+            encode_proxy_url(resolved.as_str())
+        ))
+    })
 }
 
 /// Redact query parameters and userinfo from a URL for safe logging.
