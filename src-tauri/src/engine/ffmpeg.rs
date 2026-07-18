@@ -1470,6 +1470,39 @@ pub async fn capture_screenshot(
 /// - ffmpeg with `-t 10` on live streams normally exits non-zero (the stream is
 ///   still sending when the time limit is hit), which `run_tool_command` treats as error.
 /// - We only need the "Statistics:" line from stderr, regardless of exit code.
+/// Spawn a task that drains a child's stderr (so the child can't block on a
+/// full pipe) while retaining only the final 1 MB — the Statistics/error
+/// lines we parse are written near process exit.
+fn spawn_stderr_tail_reader(
+    stderr_pipe: Option<tokio::process::ChildStderr>,
+) -> tokio::task::JoinHandle<Vec<u8>> {
+    tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+        const MAX_RETAIN_BYTES: usize = 1_024 * 1_024;
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = stderr_pipe {
+            let mut chunk = [0u8; 8192];
+            loop {
+                match pipe.read(&mut chunk).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        buf.extend_from_slice(&chunk[..n]);
+                        if buf.len() > MAX_RETAIN_BYTES * 2 {
+                            let start = buf.len() - MAX_RETAIN_BYTES;
+                            buf.drain(..start);
+                        }
+                    }
+                }
+            }
+            if buf.len() > MAX_RETAIN_BYTES {
+                let start = buf.len() - MAX_RETAIN_BYTES;
+                buf.drain(..start);
+            }
+        }
+        buf
+    })
+}
+
 pub async fn profile_bitrate(
     app: &AppHandle,
     url: &str,
@@ -1522,35 +1555,7 @@ pub async fn profile_bitrate(
             AppError::FfmpegNotAvailable
         })?;
 
-    let stderr_pipe = child.stderr.take();
-    let stderr_reader = tokio::spawn(async move {
-        use tokio::io::AsyncReadExt;
-        const MAX_RETAIN_BYTES: usize = 1_024 * 1_024; // 1 MB
-        let mut buf = Vec::new();
-        if let Some(mut pipe) = stderr_pipe {
-            // Drain stderr fully to prevent the child from blocking on a full
-            // pipe. Keep the *tail* (last MAX_RETAIN_BYTES) since the
-            // Statistics line we parse is written near process exit.
-            let mut chunk = [0u8; 8192];
-            loop {
-                match pipe.read(&mut chunk).await {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        buf.extend_from_slice(&chunk[..n]);
-                        if buf.len() > MAX_RETAIN_BYTES * 2 {
-                            let start = buf.len() - MAX_RETAIN_BYTES;
-                            buf.drain(..start);
-                        }
-                    }
-                }
-            }
-            if buf.len() > MAX_RETAIN_BYTES {
-                let start = buf.len() - MAX_RETAIN_BYTES;
-                buf.drain(..start);
-            }
-        }
-        buf
-    });
+    let stderr_reader = spawn_stderr_tail_reader(child.stderr.take());
 
     // Wait for exit with cancellation and timeout, accepting any exit code.
     let (timed_out, _exit_code) = tokio::select! {
@@ -1573,34 +1578,10 @@ pub async fn profile_bitrate(
     let stderr_buf = stderr_reader.await.unwrap_or_default();
     let stderr = String::from_utf8_lossy(&stderr_buf);
 
-    // Parse Statistics lines regardless of exit code. For HLS streams, ffmpeg
-    // opens many HTTP connections (playlist + segments), each printing its own
-    // "Statistics: N bytes read" line. Sum all of them to get total bytes.
-    let mut total_bytes: u64 = 0;
-
-    for line in stderr.lines() {
-        if line.contains("Statistics:") && line.contains("bytes read") {
-            if let Some(parts) = line.split("bytes read").next() {
-                if let Some(size_str) = parts.split_whitespace().last() {
-                    if let Ok(bytes) = size_str.parse::<u64>() {
-                        total_bytes = total_bytes.saturating_add(bytes);
-                    }
-                }
-            }
-        }
-    }
-
-    // Fallback: regex scan for "<digits> bytes read" anywhere in stderr.
-    // Handles format variations across ffmpeg versions. Sum all matches.
-    if total_bytes == 0 {
-        for caps in BYTES_READ_RE.captures_iter(&stderr) {
-            if let Ok(bytes) = caps[1].parse::<u64>() {
-                total_bytes = total_bytes.saturating_add(bytes);
-            }
-        }
-    }
-
-    if total_bytes == 0 {
+    // Parse Statistics lines regardless of exit code (HLS opens many HTTP
+    // connections, each printing its own "Statistics: N bytes read" line;
+    // parse_bytes_read sums them and converts to kbps over the sample).
+    let Some(bitrate_kbps) = parse_bytes_read(&stderr, sample_secs) else {
         let tail: String = stderr
             .lines()
             .rev()
@@ -1621,9 +1602,8 @@ pub async fn profile_bitrate(
         }
         log::warn!("Bitrate profiling completed but no bytes-read data found in stderr. stderr tail: {tail}");
         return Ok("N/A".to_string());
-    }
+    };
 
-    let bitrate_kbps = (total_bytes * 8) / 1000 / sample_secs;
     Ok(format!("{} kbps", bitrate_kbps))
 }
 
@@ -1867,32 +1847,7 @@ pub async fn run_combined_diagnostics(
         })?;
 
     // Read stderr in a background task (same tail-buffer pattern as profile_bitrate)
-    let stderr_pipe = child.stderr.take();
-    let stderr_reader = tokio::spawn(async move {
-        use tokio::io::AsyncReadExt;
-        const MAX_RETAIN_BYTES: usize = 1_024 * 1_024;
-        let mut buf = Vec::new();
-        if let Some(mut pipe) = stderr_pipe {
-            let mut chunk = [0u8; 8192];
-            loop {
-                match pipe.read(&mut chunk).await {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        buf.extend_from_slice(&chunk[..n]);
-                        if buf.len() > MAX_RETAIN_BYTES * 2 {
-                            let start = buf.len() - MAX_RETAIN_BYTES;
-                            buf.drain(..start);
-                        }
-                    }
-                }
-            }
-            if buf.len() > MAX_RETAIN_BYTES {
-                let start = buf.len() - MAX_RETAIN_BYTES;
-                buf.drain(..start);
-            }
-        }
-        buf
-    });
+    let stderr_reader = spawn_stderr_tail_reader(child.stderr.take());
 
     // Wait for exit with cancellation and timeout, accepting any exit code.
     // Keep the exit code so screenshot validation can accept a valid frame even
