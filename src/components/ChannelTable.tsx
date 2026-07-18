@@ -378,14 +378,18 @@ export function ChannelTable({
     [onSelectionChange],
   );
 
+  // Compute the next selection outside the setState updater: updaters must be
+  // pure (StrictMode double-invokes them, which would double-emit selection).
+  // selectedIndicesRef mirrors state and is updated eagerly so back-to-back
+  // calls in the same frame see each other's result.
   const updateSelection = useCallback(
     (updater: (prev: Set<number>) => Set<number>) => {
-      setSelectedIndices((prev) => {
-        const next = updater(prev);
-        if (next === prev) return prev;
-        emitSelection(next);
-        return next;
-      });
+      const prev = selectedIndicesRef.current;
+      const next = updater(prev);
+      if (next === prev) return;
+      selectedIndicesRef.current = next;
+      setSelectedIndices(next);
+      emitSelection(next);
     },
     [emitSelection],
   );
@@ -673,47 +677,50 @@ export function ChannelTable({
     (delta: number) => {
       if (filteredResults.length === 0) return;
 
-      setFocusedRow((prev) => {
-        const selectedRow = filteredResults.findIndex((result) =>
-          selectedIndices.has(result.index),
-        );
-        const current = prev ?? (selectedRow >= 0 ? selectedRow : 0);
-        const next = Math.min(
-          filteredResults.length - 1,
-          Math.max(0, current + delta),
-        );
+      // All side effects (selection emit, playback/cast redirect, scroll) run
+      // outside the setFocusedRow updater — updaters must stay pure, and
+      // StrictMode double-invocation here used to double-start playback.
+      const selectedRow = filteredResults.findIndex((result) =>
+        selectedIndices.has(result.index),
+      );
+      const current = focusedRow ?? (selectedRow >= 0 ? selectedRow : 0);
+      const next = Math.min(
+        filteredResults.length - 1,
+        Math.max(0, current + delta),
+      );
 
-        const result = filteredResults[next];
-        if (result) {
-          const selected = new Set<number>([result.index]);
-          setSelectedIndices(selected);
-          emitSelection(selected);
-          setSelectionAnchor(result.index);
-          onSelectChannel(result);
-          if ((isPlaying || isCasting) && !isScanActive(scanState)) {
-            if (isCasting) {
-              // Coalesce key bursts so each press doesn't fire a full cast
-              // re-handshake (~300ms backend round-trip).
-              if (castRedirectTimerRef.current) {
-                clearTimeout(castRedirectTimerRef.current);
-              }
-              castRedirectTimerRef.current = setTimeout(() => {
-                castRedirectTimerRef.current = null;
-                onOpenChannel?.(result);
-              }, CAST_REDIRECT_DEBOUNCE_MS);
-            } else {
-              onOpenChannel?.(result);
+      const result = filteredResults[next];
+      if (result) {
+        const selected = new Set<number>([result.index]);
+        selectedIndicesRef.current = selected;
+        setSelectedIndices(selected);
+        emitSelection(selected);
+        setSelectionAnchor(result.index);
+        onSelectChannel(result);
+        if ((isPlaying || isCasting) && !isScanActive(scanState)) {
+          if (isCasting) {
+            // Coalesce key bursts so each press doesn't fire a full cast
+            // re-handshake (~300ms backend round-trip).
+            if (castRedirectTimerRef.current) {
+              clearTimeout(castRedirectTimerRef.current);
             }
+            castRedirectTimerRef.current = setTimeout(() => {
+              castRedirectTimerRef.current = null;
+              onOpenChannel?.(result);
+            }, CAST_REDIRECT_DEBOUNCE_MS);
+          } else {
+            onOpenChannel?.(result);
           }
         }
+      }
 
-        virtualizer.scrollToIndex(next, { align: "auto" });
-        return next;
-      });
+      virtualizer.scrollToIndex(next, { align: "auto" });
+      setFocusedRow(next);
     },
     [
       filteredResults,
       selectedIndices,
+      focusedRow,
       emitSelection,
       onSelectChannel,
       onOpenChannel,
