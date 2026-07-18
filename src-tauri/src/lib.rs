@@ -768,32 +768,30 @@ pub fn run() {
             return;
         }
 
-        let frontend_event = match event.id().as_ref() {
+        // Indexed recent/saved entries map by suffix rather than ten
+        // hand-written arms each.
+        let menu_id = event.id().as_ref();
+        let indexed_event = |prefix: &str, target: &str| -> Option<String> {
+            let index = menu_id.strip_prefix(prefix)?;
+            index
+                .parse::<u8>()
+                .ok()
+                .map(|index| format!("menu://{target}-{index}"))
+        };
+        if let Some(name) = indexed_event("menu.file.recent.", "open-recent")
+            .or_else(|| indexed_event("menu.file.saved.", "open-saved"))
+        {
+            log::debug!("menu event → frontend: {name}");
+            emit_menu_event_to_focused_window(app, &name);
+            return;
+        }
+
+        let frontend_event = match menu_id {
             "menu.app.settings" => Some("menu://open-settings"),
             "menu.file.open" => Some("menu://open-playlist"),
             "menu.file.open_folder" => Some("menu://open-folder"),
             "menu.file.open_url" => Some("menu://open-url"),
-            "menu.file.recent.0" => Some("menu://open-recent-0"),
-            "menu.file.recent.1" => Some("menu://open-recent-1"),
-            "menu.file.recent.2" => Some("menu://open-recent-2"),
-            "menu.file.recent.3" => Some("menu://open-recent-3"),
-            "menu.file.recent.4" => Some("menu://open-recent-4"),
-            "menu.file.recent.5" => Some("menu://open-recent-5"),
-            "menu.file.recent.6" => Some("menu://open-recent-6"),
-            "menu.file.recent.7" => Some("menu://open-recent-7"),
-            "menu.file.recent.8" => Some("menu://open-recent-8"),
-            "menu.file.recent.9" => Some("menu://open-recent-9"),
             "menu.file.recent.clear" => Some("menu://clear-recent"),
-            "menu.file.saved.0" => Some("menu://open-saved-0"),
-            "menu.file.saved.1" => Some("menu://open-saved-1"),
-            "menu.file.saved.2" => Some("menu://open-saved-2"),
-            "menu.file.saved.3" => Some("menu://open-saved-3"),
-            "menu.file.saved.4" => Some("menu://open-saved-4"),
-            "menu.file.saved.5" => Some("menu://open-saved-5"),
-            "menu.file.saved.6" => Some("menu://open-saved-6"),
-            "menu.file.saved.7" => Some("menu://open-saved-7"),
-            "menu.file.saved.8" => Some("menu://open-saved-8"),
-            "menu.file.saved.9" => Some("menu://open-saved-9"),
             "menu.file.manage_saved" => Some("menu://manage-saved"),
             "menu.file.export_csv" => Some("menu://export-csv"),
             "menu.file.export_split" => Some("menu://export-split"),
