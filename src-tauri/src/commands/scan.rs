@@ -136,21 +136,7 @@ fn apply_combined_screenshot_outcome(
     }
 }
 
-fn canonicalize_stream_url(url: &str) -> String {
-    let trimmed = url.trim();
-    let Ok(mut parsed) = reqwest::Url::parse(trimmed) else {
-        return trimmed.to_string();
-    };
-    parsed.set_fragment(None);
-
-    if (parsed.scheme() == "http" && parsed.port() == Some(80))
-        || (parsed.scheme() == "https" && parsed.port() == Some(443))
-    {
-        let _ = parsed.set_port(None);
-    }
-
-    parsed.to_string()
-}
+use crate::urlnorm::canonicalize_stream_url;
 
 async fn compute_shared_url_result(
     app: &AppHandle,

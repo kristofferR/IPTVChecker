@@ -3,6 +3,7 @@ pub mod engine;
 pub mod error;
 pub mod models;
 pub mod state;
+pub mod urlnorm;
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
