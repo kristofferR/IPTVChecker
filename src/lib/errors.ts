@@ -18,25 +18,61 @@ export function errorToString(err: unknown): string {
   return String(err);
 }
 
-export function formatPlaylistOpenError(err: unknown): string {
-  const raw = errorToString(err).replace(/^error:\s*/i, "").trim();
-  if (!raw || raw === "[object Object]") {
-    return "Failed to open playlist. Please verify the file path and playlist format.";
+function redactSensitiveQueryParameters(message: string): string {
+  return message.replace(
+    /([?&](?:username|password)=)[^&#)\]]*/gi,
+    "$1***",
+  );
+}
+
+/** Redact URL userinfo and Xtream-style credential query parameters in either
+ *  a standalone URL or a larger error/log message. */
+export function redactUrlCredentials(value: string): string {
+  const redactedUserInfo = value.replace(
+    /\b(https?:\/\/)[^/\s?#()[\]]+@/gi,
+    "$1***@",
+  );
+  return redactSensitiveQueryParameters(redactedUserInfo);
+}
+
+function formatUserFacingError(
+  err: unknown,
+  fallback: string,
+  prefix: string,
+  existingPrefix: RegExp,
+  normalizedPrefix?: RegExp,
+): string {
+  if (err === null || err === undefined) {
+    return fallback;
   }
-  return raw.toLowerCase().startsWith("failed to open playlist")
-    ? raw
-    : `Failed to open playlist: ${raw}`;
+  const raw = redactUrlCredentials(errorToString(err))
+    .replace(/^error:\s*/i, "")
+    .trim();
+  const normalized = normalizedPrefix
+    ? raw.replace(normalizedPrefix, "").trim()
+    : raw;
+
+  if (!normalized || normalized === "[object Object]") {
+    return fallback;
+  }
+  return existingPrefix.test(raw) ? raw : `${prefix}: ${normalized}`;
+}
+
+export function formatPlaylistOpenError(err: unknown): string {
+  return formatUserFacingError(
+    err,
+    "Failed to open playlist. Please verify the file path and playlist format.",
+    "Failed to open playlist",
+    /^failed to open playlist(?:\s*:|$)/i,
+  );
 }
 
 export function formatSourceReloadError(err: unknown): string {
-  const raw = errorToString(err).replace(/^error:\s*/i, "").trim();
-  const normalized = raw.replace(/^failed to open playlist:\s*/i, "").trim();
-
-  if (!normalized || normalized === "[object Object]") {
-    return "Failed to reload source. Please verify the source settings and filter.";
-  }
-
-  return raw.toLowerCase().startsWith("failed to reload source")
-    ? raw
-    : `Failed to reload source: ${normalized}`;
+  return formatUserFacingError(
+    err,
+    "Failed to reload source. Please verify the source settings and filter.",
+    "Failed to reload source",
+    /^failed to reload source(?:\s*:|$)/i,
+    /^failed to open playlist:\s*/i,
+  );
 }

@@ -104,6 +104,16 @@ If it is already there, use:
 brew install --cask --adopt kristofferR/tap/iptv-checker
 ```
 
+### Arch Linux (AUR)
+
+Package: [iptv-checker-gui](https://aur.archlinux.org/packages/iptv-checker-gui)
+
+```bash
+yay -S iptv-checker-gui
+```
+
+Uses the system `ffmpeg` package instead of the bundled sidecar binaries.
+
 ### All platforms
 
 The buttons above link to the default installer for each OS. Every architecture and package format is attached to each [GitHub release](https://github.com/kristofferR/IPTVChecker/releases/latest):

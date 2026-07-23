@@ -29,6 +29,7 @@ import {
   errorToString,
   formatPlaylistOpenError,
   formatSourceReloadError,
+  redactUrlCredentials,
 } from "../lib/errors";
 import {
   parseXtreamRecent,
@@ -294,13 +295,13 @@ export function usePlaylistSources({
           case "path":
             return `path=${descriptor.path}`;
           case "url":
-            return `url=${descriptor.url}`;
+            return `url=${redactUrlCredentials(descriptor.url)}`;
           case "saved":
             return `saved id=${descriptor.id}`;
           case "xtream":
-            return `xtream server=${descriptor.server}, username=${descriptor.username}`;
+            return `xtream server=${redactUrlCredentials(descriptor.server)}, username=***`;
           case "stalker":
-            return `stalker portal=${descriptor.portal}, mac=${descriptor.mac}`;
+            return `stalker portal=${redactUrlCredentials(descriptor.portal)}, mac=***`;
         }
       })();
       const loadingAction =
@@ -311,8 +312,7 @@ export function usePlaylistSources({
       getStore().setPlaylistOpenError(null);
       getStore().setPlaylistLoadProgress(null);
       getStore().setPlaylistLoading(true);
-      const safeLabel = sourceLabel.replace(/username=\S+/g, "username=***").replace(/password=\S+/g, "password=***");
-      logger.info(`[App] ${loadingAction}: ${safeLabel}`);
+      logger.info(`[App] ${loadingAction}: ${sourceLabel}`);
 
       try {
         const state = getStore();
@@ -322,12 +322,32 @@ export function usePlaylistSources({
         const cachedPreview = canReuseCachedPreview
           ? state.cachedSourcePreview!
           : await loadFullSourcePreview(descriptor);
+        const latestState = getStore();
+        const savedEntry =
+          descriptor.kind === "saved"
+            ? latestState.savedPlaylists.find(
+                (entry) => entry.id === descriptor.id,
+              )
+            : undefined;
+        const xtreamUsername = (() => {
+          if (descriptor.kind === "xtream") {
+            return descriptor.username;
+          }
+          return savedEntry?.kind === "xtream"
+            ? savedEntry.username
+            : undefined;
+        })();
+        const safeFileName = xtreamUsername
+          ? cachedPreview.file_name.replaceAll(xtreamUsername, "***")
+          : descriptor.kind === "saved" && !savedEntry
+            ? "Saved playlist"
+            : cachedPreview.file_name;
         if (!canReuseCachedPreview) {
           logger.debug(
             `[App] ${loadingAction}: ${sourceLabel}, channelSearch="${normalizedSourceFilter}"`,
           );
           logger.debug(
-            `[App] Source loaded: ${cachedPreview.file_name}, channels=${cachedPreview.total_channels}, groups=${cachedPreview.groups.length}`,
+            `[App] Source loaded: ${safeFileName}, channels=${cachedPreview.total_channels}, groups=${cachedPreview.groups.length}`,
             cachedPreview.groups,
           );
         } else {

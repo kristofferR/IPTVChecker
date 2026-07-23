@@ -23,10 +23,11 @@ use crate::engine::xtream::{
 use crate::error::AppError;
 use crate::models::channel::Channel;
 use crate::models::playlist::PlaylistPreview;
+use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use url::Url;
@@ -416,6 +417,17 @@ fn app_data_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, AppError> 
     })
 }
 
+async fn accepts_invalid_certs(app: Option<&AppHandle>) -> bool {
+    let Some(app) = app else {
+        return false;
+    };
+    app.state::<Arc<AppState>>()
+        .settings
+        .lock()
+        .await
+        .accept_invalid_certs
+}
+
 #[tauri::command]
 pub async fn open_playlist_stalker(
     app: AppHandle,
@@ -619,9 +631,15 @@ pub(crate) async fn open_playlist_url_from_data_dir(
     parsed.set_fragment(None);
     let normalized_identity = normalize_url_identity(&parsed);
     let source_key = format!("url:{}", normalized_identity);
-    let cached_path =
-        download_playlist_to_cache_in_data_dir(app, data_dir, &source_key, &parsed, "playlist URL")
-            .await?;
+    let cached_path = download_playlist_to_cache_in_data_dir(
+        app,
+        data_dir,
+        &source_key,
+        &parsed,
+        "playlist URL",
+        accepts_invalid_certs(app).await,
+    )
+    .await?;
     let mut preview =
         parse_playlist_off_thread(app, cached_path.clone(), group_filter, channel_search).await?;
     preview.file_name = friendly_name_from_url(&parsed);
@@ -681,16 +699,18 @@ pub(crate) async fn open_playlist_xtream_inner(
     let download_url = build_xtream_download_url(&server, &username, &password);
     let data_dir = app_data_dir(app)?;
     let cache_path = remote_playlist_cache_path_from_data_dir(&data_dir, &source_key)?;
+    let accept_invalid_certs = accepts_invalid_certs(Some(app)).await;
 
     // Try /get.php and account info in parallel.
     let (xtream_account_info, m3u_result) = tokio::join!(
-        fetch_xtream_account_info(&server, &username, &password),
+        fetch_xtream_account_info(&server, &username, &password, accept_invalid_certs),
         download_playlist_to_cache_in_data_dir(
             Some(app),
             &data_dir,
             &source_key,
             &download_url,
             "Xtream playlist",
+            accept_invalid_certs,
         )
     );
 
@@ -702,31 +722,30 @@ pub(crate) async fn open_playlist_xtream_inner(
                 "Xtream /get.php download failed ({}), falling back to JSON API",
                 get_php_error
             );
-            let m3u_bytes =
-                fetch_xtream_playlist_via_json_api(&server, &username, &password).await?;
+            let m3u_bytes = fetch_xtream_playlist_via_json_api(
+                &server,
+                &username,
+                &password,
+                accept_invalid_certs,
+            )
+            .await?;
             // Same rule as the normal download path: a potentially large
             // synchronous cache write belongs on a blocking thread.
             {
                 let cache_path = cache_path.clone();
-                tokio::task::spawn_blocking(move || {
-                    write_bytes_to_cache(&cache_path, &m3u_bytes)
-                })
-                .await
-                .map_err(|err| {
-                    AppError::Other(format!("Playlist cache write task failed: {err}"))
-                })??;
+                tokio::task::spawn_blocking(move || write_bytes_to_cache(&cache_path, &m3u_bytes))
+                    .await
+                    .map_err(|err| {
+                        AppError::Other(format!("Playlist cache write task failed: {err}"))
+                    })??;
             }
             cache_path.to_string_lossy().to_string()
         }
     };
 
-    let mut preview = parse_playlist_off_thread(
-        Some(app),
-        cached_path.clone(),
-        group_filter,
-        channel_search,
-    )
-    .await?;
+    let mut preview =
+        parse_playlist_off_thread(Some(app), cached_path.clone(), group_filter, channel_search)
+            .await?;
     let server_host = server.host_str().unwrap_or("Xtream");
     preview.file_name = format!("{} ({})", server_host, username);
     preview.source_identity = Some(source_identity_override.unwrap_or(source_key));

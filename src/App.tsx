@@ -4,6 +4,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -1248,7 +1249,7 @@ export default function App() {
     saveSettings,
   });
 
-  // Keyboard shortcuts. Handlers are mirrored into a single render-updated ref
+  // Keyboard shortcuts. Handlers are mirrored into a layout-synchronized ref
   // so the window listener registers once per platform change.
   const shortcutHandlers = {
     handleOpen,
@@ -1258,7 +1259,9 @@ export default function App() {
     cancel,
   };
   const shortcutHandlersRef = useRef(shortcutHandlers);
-  shortcutHandlersRef.current = shortcutHandlers;
+  useLayoutEffect(() => {
+    shortcutHandlersRef.current = shortcutHandlers;
+  }, [shortcutHandlers]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

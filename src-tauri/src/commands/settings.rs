@@ -165,10 +165,12 @@ fn collect_dir_stats(path: &Path) -> Result<(u64, usize), std::io::Error> {
 fn normalize_preset_name(name: &str) -> Result<String, AppError> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        return Err(AppError::Validation("Preset name cannot be empty".to_string()));
+        return Err(AppError::Validation(
+            "Preset name cannot be empty".to_string(),
+        ));
     }
     if trimmed.chars().count() > MAX_PRESET_NAME_LENGTH {
-        return Err(AppError::Other(format!(
+        return Err(AppError::Validation(format!(
             "Preset name must be {} characters or fewer",
             MAX_PRESET_NAME_LENGTH
         )));
@@ -1131,6 +1133,19 @@ mod tests {
             normalize_preset_name("  Fast Scan  ").expect("name should normalize"),
             "Fast Scan"
         );
+    }
+
+    #[test]
+    fn preset_name_validation_uses_validation_error_at_length_boundary() {
+        let maximum = "a".repeat(64);
+        assert_eq!(
+            normalize_preset_name(&maximum).expect("64 characters should be accepted"),
+            maximum
+        );
+
+        let error =
+            normalize_preset_name(&"a".repeat(65)).expect_err("65 characters should be rejected");
+        assert!(matches!(error, crate::error::AppError::Validation(_)));
     }
 
     #[test]

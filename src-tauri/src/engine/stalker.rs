@@ -172,10 +172,6 @@ fn extract_stalker_stream_url(command: &str) -> Option<String> {
     None
 }
 
-fn escape_extinf_attribute(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
 fn stalker_referer(endpoint: &Url) -> String {
     let path = endpoint.path().trim_end_matches('/');
     let base_path = path
@@ -462,9 +458,9 @@ pub(crate) fn build_stalker_preview(
             .unwrap_or_else(|| format!("stalker-{}", source_index));
         let extinf_line = format!(
             "#EXTINF:-1 tvg-id=\"{}\" group-title=\"{}\",{}",
-            escape_extinf_attribute(&channel_id),
-            escape_extinf_attribute(&group),
-            raw_name
+            parser::escape_extinf_value(&channel_id),
+            parser::escape_extinf_value(&group),
+            parser::flatten_extinf_title(&raw_name)
         );
 
         if include_group && include_search {
@@ -603,6 +599,31 @@ mod tests {
             .source_identity
             .expect("source identity should exist")
             .starts_with("stalker:"));
+    }
+
+    #[test]
+    fn build_stalker_preview_preserves_title_quotes_and_backslashes() {
+        let portal = normalize_stalker_portal("https://demo.example.com:8080/c")
+            .expect("portal URL should normalize");
+        let preview = build_stalker_preview(
+            &portal,
+            "00:1A:79:12:34:56",
+            vec![serde_json::json!({
+                "id": 10,
+                "name": "News \"HD\" \\ One\nToday",
+                "cmd": "http://streams.example.com/news.m3u8",
+                "tv_genre_title": "News"
+            })],
+            &std::collections::HashMap::new(),
+            &None,
+            &None,
+        )
+        .expect("preview should build");
+
+        assert_eq!(
+            preview.channels[0].extinf_line,
+            "#EXTINF:-1 tvg-id=\"10\" group-title=\"News\",News \"HD\" \\ One Today"
+        );
     }
 
     #[test]

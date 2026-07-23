@@ -1,10 +1,11 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { useAppStore } from "../store";
 import type { UpdateNotice } from "../store/types";
 import { errorToString } from "../lib/errors";
 
 const UPDATE_CHECK_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const UPDATE_CHECK_TIMEOUT_MS = 15_000;
 const UPDATE_LAST_CHECK_KEY = "updates:last-check-epoch-ms";
 const UPDATE_CACHE_KEY = "updates:last-available-release";
 const GITHUB_LATEST_RELEASE_API =
@@ -85,6 +86,9 @@ export function dismissUpdateNotice(): void {
 export function useUpdateCheck(): {
   checkForUpdates: (force: boolean, knownCurrentVersion?: string) => Promise<void>;
 } {
+  const requestIdRef = useRef(0);
+  const activeControllerRef = useRef<AbortController | null>(null);
+
   const checkForUpdates = useCallback(
     async (force: boolean, knownCurrentVersion?: string) => {
       const now = Date.now();
@@ -93,18 +97,32 @@ export function useUpdateCheck(): {
         return;
       }
 
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
+      activeControllerRef.current?.abort();
+      const controller = new AbortController();
+      activeControllerRef.current = controller;
+      const timeout = setTimeout(
+        () => controller.abort(),
+        UPDATE_CHECK_TIMEOUT_MS,
+      );
+      const isCurrentRequest = () => requestIdRef.current === requestId;
+
       try {
         const currentVersion = normalizeVersion(
           knownCurrentVersion ?? (await getVersion()),
         );
+        if (!isCurrentRequest() || controller.signal.aborted) return;
         getStore().setAppVersion(currentVersion);
 
         const response = await fetch(GITHUB_LATEST_RELEASE_API, {
           headers: {
             Accept: "application/vnd.github+json",
           },
+          signal: controller.signal,
         });
 
+        if (!isCurrentRequest() || controller.signal.aborted) return;
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
@@ -114,6 +132,7 @@ export function useUpdateCheck(): {
           html_url?: string;
         };
 
+        if (!isCurrentRequest() || controller.signal.aborted) return;
         const latestVersion = normalizeVersion(release.tag_name ?? "");
         if (!latestVersion) {
           throw new Error("Latest release version is missing");
@@ -138,8 +157,17 @@ export function useUpdateCheck(): {
           getStore().setMenuInfo(`You're up to date (v${currentVersion}).`);
         }
       } catch (err) {
+        if (!isCurrentRequest()) return;
         if (force) {
-          getStore().setMenuInfo(`Update check failed: ${errorToString(err)}`);
+          const detail = controller.signal.aborted
+            ? "Request timed out."
+            : errorToString(err);
+          getStore().setMenuInfo(`Update check failed: ${detail}`);
+        }
+      } finally {
+        clearTimeout(timeout);
+        if (activeControllerRef.current === controller) {
+          activeControllerRef.current = null;
         }
       }
     },
@@ -179,6 +207,9 @@ export function useUpdateCheck(): {
     void runInitialUpdateCheck();
     return () => {
       cancelled = true;
+      requestIdRef.current += 1;
+      activeControllerRef.current?.abort();
+      activeControllerRef.current = null;
     };
   }, [checkForUpdates]);
 
