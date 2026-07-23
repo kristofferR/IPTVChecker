@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -136,33 +136,21 @@ fn apply_combined_screenshot_outcome(
     }
 }
 
-fn canonicalize_stream_url(url: &str) -> String {
-    let trimmed = url.trim();
-    let Ok(mut parsed) = reqwest::Url::parse(trimmed) else {
-        return trimmed.to_string();
-    };
-    parsed.set_fragment(None);
+use crate::urlnorm::canonicalize_stream_url;
 
-    if (parsed.scheme() == "http" && parsed.port() == Some(80))
-        || (parsed.scheme() == "https" && parsed.port() == Some(443))
-    {
-        let _ = parsed.set_port(None);
-    }
-
-    parsed.to_string()
-}
-
-async fn compute_shared_url_result(
-    app: &AppHandle,
-    client: &reqwest::Client,
-    channel_url: &str,
+/// Per-run configuration and shared handles for checking a single stream URL.
+/// Bundles timeouts, retry policy, feature flags, and shared limits so the
+/// per-channel call site only adds the URL and screenshot destination.
+struct SharedCheckContext<'a> {
+    app: &'a AppHandle,
+    client: &'a reqwest::Client,
     timeout: f64,
     retries: u32,
     retry_backoff: RetryBackoff,
     extended_timeout: Option<f64>,
-    user_agent: &str,
-    cancel: &CancellationToken,
-    proxy_list: &Option<Vec<String>>,
+    user_agent: &'a str,
+    cancel: &'a CancellationToken,
+    proxy_list: &'a Option<Vec<String>>,
     test_geoblock: bool,
     ffmpeg_ok: bool,
     ffprobe_ok: bool,
@@ -170,13 +158,39 @@ async fn compute_shared_url_result(
     ffprobe_timeout_secs: f64,
     ffmpeg_bitrate_timeout_secs: f64,
     low_fps_threshold: f64,
+    screenshot_format: ScreenshotFormat,
+    diagnostics_semaphore: &'a Arc<Semaphore>,
+    single_connection_mode: bool,
+}
+
+async fn compute_shared_url_result(
+    ctx: &SharedCheckContext<'_>,
+    channel_url: &str,
     skip_screenshots: bool,
     screenshots_dir: Option<&String>,
     screenshot_file_name: &str,
-    screenshot_format: crate::models::settings::ScreenshotFormat,
-    diagnostics_semaphore: &Arc<Semaphore>,
-    single_connection_mode: bool,
 ) -> Result<(SharedUrlResult, WorkerTiming), AppError> {
+    let &SharedCheckContext {
+        app,
+        client,
+        timeout,
+        retries,
+        retry_backoff,
+        extended_timeout,
+        user_agent,
+        cancel,
+        proxy_list,
+        test_geoblock,
+        ffmpeg_ok,
+        ffprobe_ok,
+        profile_bitrate_flag,
+        ffprobe_timeout_secs,
+        ffmpeg_bitrate_timeout_secs,
+        low_fps_threshold,
+        screenshot_format,
+        diagnostics_semaphore,
+        single_connection_mode,
+    } = ctx;
     let dispatcharr_single_pass = ffmpeg_ok && checker::is_dispatcharr_proxy_url(channel_url);
     let check_started_at = Instant::now();
     let check_outcome = if dispatcharr_single_pass {
@@ -186,7 +200,7 @@ async fn compute_shared_url_result(
         // combined diagnostics pass below is both the liveness check and the
         // metadata/screenshot/bitrate probe.
         Ok(checker::ChannelCheckOutcome {
-            status: "Alive".to_string(),
+            status: ChannelStatus::Alive,
             stream_url: Some(channel_url.to_string()),
             latency_ms: None,
             retries_used: 0,
@@ -225,7 +239,7 @@ async fn compute_shared_url_result(
     };
 
     let (
-        status_str,
+        checked_status,
         stream_url,
         latency_ms,
         retry_count,
@@ -244,7 +258,7 @@ async fn compute_shared_url_result(
         ),
         Err(AppError::Cancelled) => return Err(AppError::Cancelled),
         Err(error) => (
-            "Dead".to_string(),
+            ChannelStatus::Dead,
             None,
             None,
             0,
@@ -260,31 +274,21 @@ async fn compute_shared_url_result(
     };
     let check_ms = check_started_at.elapsed().as_secs_f64() * 1000.0;
 
-    let final_status_str = if status_str == "Geoblocked" && test_geoblock {
+    let status = if checked_status == ChannelStatus::Geoblocked && test_geoblock {
         if let Some(proxies) = proxy_list {
             if !proxies.is_empty() {
                 proxy::confirm_geoblock(channel_url, proxies, timeout).await
             } else {
-                status_str
+                checked_status
             }
         } else {
-            status_str
+            checked_status
         }
     } else {
-        status_str
+        checked_status
     };
 
-    let status = match final_status_str.as_str() {
-        "Alive" => ChannelStatus::Alive,
-        "DRM" => ChannelStatus::Drm,
-        "Dead" => ChannelStatus::Dead,
-        "Placeholder" => ChannelStatus::Placeholder,
-        "Geoblocked" => ChannelStatus::Geoblocked,
-        "Geoblocked (Confirmed)" => ChannelStatus::GeoblockedConfirmed,
-        "Geoblocked (Unconfirmed)" => ChannelStatus::GeoblockedUnconfirmed,
-        _ => ChannelStatus::Dead,
-    };
-    channel_log.final_verdict = final_status_str;
+    channel_log.final_verdict = status.to_string();
     if channel_log.final_reason.is_none() {
         channel_log.final_reason = error_reason.clone();
     }
@@ -294,15 +298,18 @@ async fn compute_shared_url_result(
         diagnostics_ms: 0.0,
     };
 
-    if !matches!(status, ChannelStatus::Alive | ChannelStatus::Drm) || cancel.is_cancelled() {
-        let effective_status = if cancel.is_cancelled() {
-            ChannelStatus::Dead
-        } else {
-            status
-        };
+    // A cancel that lands after the check finished must not rewrite a
+    // completed verdict (possibly Alive) to Dead — that would emit and
+    // checkpoint a lie. Bail with Cancelled so the channel stays unscanned
+    // and resume re-checks it, matching the diagnostics cancel paths.
+    if cancel.is_cancelled() {
+        return Err(AppError::Cancelled);
+    }
+
+    if !matches!(status, ChannelStatus::Alive | ChannelStatus::Drm) {
         return Ok((
             SharedUrlResult {
-                status: effective_status,
+                status,
                 drm_system: None,
                 latency_ms,
                 codec: None,
@@ -477,7 +484,10 @@ async fn compute_shared_url_result(
                     shared.video_bitrate = Some(format!("{kbps} kbps"));
                 }
                 format_bitrate_kbps = diag.format_bitrate_kbps;
-                shared.channel_log.diagnostics_output = Some(diag.diagnostics_output);
+                shared.channel_log.diagnostics_output =
+                    Some(crate::models::scan_log::cap_diagnostics_output(
+                        diag.diagnostics_output,
+                    ));
 
                 let png_fallback_result = if diag.screenshot_path.is_none()
                     && want_screenshot
@@ -598,7 +608,9 @@ async fn compute_shared_url_result(
                 shared.audio_channel_layout = audio.channel_layout;
             }
             format_bitrate_kbps = snapshot.format_bitrate_kbps;
-            shared.channel_log.diagnostics_output = Some(snapshot.ffprobe_output);
+            shared.channel_log.diagnostics_output = Some(
+                crate::models::scan_log::cap_diagnostics_output(snapshot.ffprobe_output),
+            );
         }
 
         apply_parallel_screenshot_outcome(&mut shared, screenshot_result);
@@ -653,7 +665,7 @@ async fn compute_shared_url_result(
 
 fn try_mark_scan_started(scanning: &mut bool) -> Result<(), AppError> {
     if *scanning {
-        return Err(AppError::Other("A scan is already in progress".to_string()));
+        return Err(AppError::State("A scan is already in progress".to_string()));
     }
     *scanning = true;
     Ok(())
@@ -1112,7 +1124,7 @@ pub(crate) async fn seed_cached_playlist_preview(
     );
     let source_mtime = source_mtime_ms(file_path);
     state
-        .put_cached_playlist_preview(cache_key, preview.clone(), source_mtime)
+        .put_cached_playlist_preview(cache_key, Arc::new(preview.clone()), source_mtime)
         .await;
 }
 
@@ -1121,7 +1133,7 @@ async fn parse_playlist_with_cache(
     state: &Arc<AppState>,
     config: &ScanConfig,
     run_id: &str,
-) -> Result<PlaylistPreview, AppError> {
+) -> Result<Arc<PlaylistPreview>, AppError> {
     let source_mtime = source_mtime_ms(&config.file_path);
     let cache_key = playlist_preview_cache_key(config);
     if let Some(cached) = state
@@ -1137,11 +1149,18 @@ async fn parse_playlist_with_cache(
     }
 
     let parse_started_at = Instant::now();
-    let mut preview = parser::parse_playlist(
-        &config.file_path,
-        &config.group_filter,
-        &config.channel_search,
-    )?;
+    // Parsing a big playlist is seconds of CPU-bound work; keep it off the
+    // async runtime that is also driving proxies and event emission.
+    let mut preview = {
+        let file_path = config.file_path.clone();
+        let group_filter = config.group_filter.clone();
+        let channel_search = config.channel_search.clone();
+        tokio::task::spawn_blocking(move || {
+            parser::parse_playlist(&file_path, &group_filter, &channel_search)
+        })
+        .await
+        .map_err(|err| AppError::Other(format!("Playlist parse task failed: {err}")))??
+    };
     crate::commands::saved::apply_persisted_playlist_metadata(
         app,
         &mut preview,
@@ -1160,8 +1179,9 @@ async fn parse_playlist_with_cache(
         Some(run_id),
     )
     .await;
+    let preview = Arc::new(preview);
     state
-        .put_cached_playlist_preview(cache_key, preview.clone(), source_mtime)
+        .put_cached_playlist_preview(cache_key, Arc::clone(&preview), source_mtime)
         .await;
     Ok(preview)
 }
@@ -1331,83 +1351,26 @@ async fn run_checkpoint_writer(
     .await;
 }
 
-async fn execute_scan_run(
-    app: AppHandle,
-    state: Arc<AppState>,
-    scan_scope: String,
-    run_id: String,
-    scan_started_at_epoch_ms: u64,
-    config: ScanConfig,
-    cancel_token: CancellationToken,
-) -> Result<(), AppError> {
-    log::info!(
-        "Starting scan {} for window '{}': {} (concurrency: {}, retries: {}, retry_backoff: {:?})",
-        run_id,
-        scan_scope,
-        config.file_path,
-        config.concurrency,
-        config.retries,
-        config.retry_backoff
-    );
+/// Resume/checkpoint state derived from the on-disk files for a scan scope.
+struct ResumeState {
+    log_file: String,
+    checkpoint_file: String,
+    resumed_entries: Vec<resume::CheckpointResumeEntry>,
+    base_name: String,
+    scope_suffix: String,
+}
 
-    let preview = parse_playlist_with_cache(&app, &state, &config, &run_id).await?;
-    let preview_single_provider = preview.single_provider;
-    let mut channels = preview.channels;
-    filter_channels_by_selection(&mut channels, &config.selected_indices);
-    filter_channels_by_content_type(&mut channels, config.hide_vod_content);
-    let total = channels.len();
-
-    if total == 0 {
-        let summary = ScanSummary {
-            total: 0,
-            alive: 0,
-            dead: 0,
-            placeholder: 0,
-            geoblocked: 0,
-            drm: 0,
-            low_framerate: 0,
-            mislabeled: 0,
-            playlist_score: None,
-        };
-
-        let _ = app.emit(
-            "scan://complete",
-            ScanEvent {
-                run_id: run_id.clone(),
-                payload: summary.clone(),
-            },
-        );
-        let history_limit = {
-            let settings = state.settings.lock().await;
-            settings.scan_history_limit as usize
-        };
-        if let Err(error) = history::append_scan_history(
-            &app,
-            &run_id,
-            &config,
-            &summary,
-            Vec::new(),
-            history_limit,
-        ) {
-            log::warn!("Failed to write scan history for {}: {}", run_id, error);
-        }
-        state
-            .with_window_scan_state(&scan_scope, |scan_state| {
-                scan_state.scan_log = Some(ScanDebugLog {
-                    run_id: run_id.clone(),
-                    playlist_path: config.file_path.clone(),
-                    source_identity: config.source_identity.clone(),
-                    started_at_epoch_ms: scan_started_at_epoch_ms,
-                    finished_at_epoch_ms: now_epoch_ms(),
-                    summary,
-                    channels: Vec::new(),
-                });
-            })
-            .await;
-        return Ok(());
-    }
-
-    // Resume support
+/// Derive the resume file paths for this scan scope, load any checkpoint
+/// entries that match the current channel set, and prune already-checked
+/// channels from `channels`. Starts fresh (truncates the log and removes the
+/// checkpoint) when nothing is resumable.
+async fn load_resume_state(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    config: &ScanConfig,
+    run_id: &str,
+    channels: &mut Vec<Channel>,
+) -> ResumeState {
     let resume_started_at = Instant::now();
     let playlist_path = std::path::Path::new(&config.file_path);
     let base_name = playlist_path
@@ -1441,7 +1404,13 @@ async fn execute_scan_run(
     );
 
     let channel_indices: HashSet<usize> = channels.iter().map(|channel| channel.index).collect();
-    let mut resumed_entries = resume::load_checkpoint_entries(&checkpoint_file)
+    let checkpoint_entries = {
+        let checkpoint_file = checkpoint_file.clone();
+        tokio::task::spawn_blocking(move || resume::load_checkpoint_entries(&checkpoint_file))
+            .await
+            .unwrap_or_default()
+    };
+    let mut resumed_entries = checkpoint_entries
         .into_iter()
         .filter(|entry| channel_indices.contains(&entry.result.index))
         .collect::<Vec<_>>();
@@ -1470,13 +1439,746 @@ async fn execute_scan_run(
     }
     let resume_ms = resume_started_at.elapsed().as_secs_f64() * 1000.0;
     record_backend_perf(
-        &app,
-        &state,
+        app,
+        state,
         "scan.preflight.resume_load_ms",
         resume_ms,
-        Some(&run_id),
+        Some(run_id),
     )
     .await;
+
+    ResumeState {
+        log_file,
+        checkpoint_file,
+        resumed_entries,
+        base_name,
+        scope_suffix,
+    }
+}
+
+/// Load the proxy list when geoblock testing is enabled and a proxy file is
+/// configured. A configured-but-unreadable file aborts the scan.
+fn load_proxy_list_if_configured(config: &ScanConfig) -> Result<Option<Vec<String>>, AppError> {
+    if !config.test_geoblock {
+        return Ok(None);
+    }
+    let Some(ref proxy_file) = config.proxy_file else {
+        return Ok(None);
+    };
+    match proxy::load_proxy_list(proxy_file) {
+        Ok(proxy_list) => {
+            log::info!("Loaded {} proxies from {}", proxy_list.len(), proxy_file);
+            Ok(Some(proxy_list))
+        }
+        Err(error) => {
+            log::error!("Failed to load proxy file '{}': {}", proxy_file, error);
+            Err(AppError::Other(format!(
+                "Failed to load proxy file '{}': {}",
+                proxy_file, error
+            )))
+        }
+    }
+}
+
+/// Resolve and create the screenshots directory for this run (app temp cache
+/// by default, or a user-specified folder), write the eviction metadata, and
+/// evict old cached runs per the retention policy. Returns `None` when
+/// screenshots are disabled or ffmpeg is unavailable.
+async fn prepare_screenshots_dir(
+    app: &AppHandle,
+    config: &ScanConfig,
+    base_name: &str,
+    scope_suffix: &str,
+    scan_started_at_epoch_ms: u64,
+    screenshot_retention_count: u32,
+    ffmpeg_available: bool,
+) -> Result<Option<String>, AppError> {
+    if config.skip_screenshots || !ffmpeg_available {
+        return Ok(None);
+    }
+
+    let using_custom_screenshots_dir = config.screenshots_dir.is_some();
+    let dir = match config.screenshots_dir.clone() {
+        Some(d) => d,
+        None => {
+            let temp = app
+                .path()
+                .temp_dir()
+                .unwrap_or_else(|_| std::env::temp_dir());
+            temp.join("iptv-checker-screenshots")
+                .join(format!("{}_{}", base_name, scope_suffix))
+                .to_string_lossy()
+                .to_string()
+        }
+    };
+    {
+        let dir_clone = dir.clone();
+        tokio::task::spawn_blocking(move || std::fs::create_dir_all(&dir_clone))
+            .await
+            .map_err(|e| {
+                AppError::Other(format!("Failed to create screenshots directory: {}", e))
+            })?
+            .map_err(|e| {
+                AppError::Other(format!("Failed to create screenshots directory: {}", e))
+            })?;
+    }
+
+    // Write scan metadata for eviction logic
+    if !using_custom_screenshots_dir {
+        let meta = serde_json::json!({
+            "scan_started_at_epoch_ms": scan_started_at_epoch_ms,
+            "source_identity": config.source_identity.clone().unwrap_or_default(),
+            "playlist_file": config.file_path.clone(),
+        });
+        let meta_path = std::path::Path::new(&dir).join(".scan-meta.json");
+        let meta_str = meta.to_string();
+        match tokio::task::spawn_blocking(move || std::fs::write(&meta_path, meta_str)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => log::warn!("Failed to write scan metadata: {}", error),
+            Err(error) => log::warn!("Failed to write scan metadata (join): {}", error),
+        }
+
+        // Pre-scan eviction: remove old dirs per retention policy
+        let cache_root = std::path::Path::new(&dir)
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new(&dir));
+        let current_dir_name = std::path::Path::new(&dir)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let mut keep = HashSet::new();
+        keep.insert(current_dir_name);
+        let freed =
+            settings::evict_old_screenshot_dirs(cache_root, &keep, screenshot_retention_count);
+        if freed > 0 {
+            log::info!(
+                "Pre-scan eviction freed {} bytes of screenshot cache",
+                freed
+            );
+        }
+    }
+
+    Ok(Some(dir))
+}
+
+/// When enough consecutive network-level failures have accumulated, verify
+/// connectivity and, if offline, emit `scan://network-paused` and block until
+/// the network recovers (emitting `scan://network-resumed` afterwards).
+/// Returns false when cancelled while waiting for recovery.
+async fn pause_if_network_down(
+    app: &AppHandle,
+    run_id: &str,
+    cancel: &CancellationToken,
+    consecutive_net_failures: &AtomicU32,
+) -> bool {
+    if consecutive_net_failures.load(Ordering::Relaxed) < connectivity::CONSECUTIVE_FAILURE_THRESHOLD
+    {
+        return true;
+    }
+
+    if !connectivity::check_connectivity().await {
+        log::warn!("Network connectivity lost — pausing scan until recovery");
+        let _ = app.emit(
+            "scan://network-paused",
+            ScanEvent {
+                run_id: run_id.to_string(),
+                payload: (),
+            },
+        );
+        let recovered = connectivity::wait_for_connectivity_recovery(cancel).await;
+        if !recovered {
+            return false; // cancelled while waiting
+        }
+        log::info!("Network connectivity restored — resuming scan");
+        let _ = app.emit(
+            "scan://network-resumed",
+            ScanEvent {
+                run_id: run_id.to_string(),
+                payload: (),
+            },
+        );
+    }
+    consecutive_net_failures.store(0, Ordering::Relaxed);
+    true
+}
+
+/// Adaptive concurrency throttle — workers report pressure signals (timeouts,
+/// HTTP 429s, retries) versus clean successes, and the dispatch loop delays
+/// new work when the pressure ratio climbs. Emits `scan://adaptive-throttle`
+/// events on engage/disengage transitions.
+#[derive(Clone)]
+struct AdaptiveThrottle {
+    timeout_pressure: Arc<AtomicU32>,
+    success_count: Arc<AtomicU32>,
+    engaged: Arc<AtomicBool>,
+}
+
+impl AdaptiveThrottle {
+    fn new() -> Self {
+        Self {
+            timeout_pressure: Arc::new(AtomicU32::new(0)),
+            success_count: Arc::new(AtomicU32::new(0)),
+            engaged: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Worker-side: record whether a completed channel showed server pressure.
+    fn record_outcome(&self, pressure: bool) {
+        if pressure {
+            self.timeout_pressure.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.success_count.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Dispatcher-side: sleep before dispatching the next channel when servers
+    /// show pressure; decays the counters so the ratio tracks recent behavior.
+    async fn before_dispatch(&self, app: &AppHandle, run_id: &str) {
+        let pressure = self.timeout_pressure.load(Ordering::Relaxed);
+        let successes = self.success_count.load(Ordering::Relaxed);
+        let total_so_far = pressure + successes;
+        if total_so_far < 25 {
+            return;
+        }
+
+        let pressure_ratio = pressure as f64 / total_so_far as f64;
+        let delay_ms = if pressure_ratio > 0.5 {
+            1000u64
+        } else if pressure_ratio > 0.3 {
+            300
+        } else if pressure_ratio > 0.15 {
+            50
+        } else {
+            0
+        };
+
+        if delay_ms > 0 {
+            if !self.engaged.swap(true, Ordering::Relaxed) {
+                log::info!(
+                    "Adaptive throttle engaged: pressure_ratio={:.2} ({}/{} channels), delay={}ms",
+                    pressure_ratio, pressure, total_so_far, delay_ms
+                );
+                let _ = app.emit(
+                    "scan://adaptive-throttle",
+                    ScanEvent {
+                        run_id: run_id.to_string(),
+                        payload: serde_json::json!({
+                            "engaged": true,
+                            "pressure_ratio": pressure_ratio,
+                            "delay_ms": delay_ms,
+                        }),
+                    },
+                );
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+        } else if self.engaged.swap(false, Ordering::Relaxed) {
+            log::info!(
+                "Adaptive throttle disengaged: pressure_ratio={:.2}",
+                pressure_ratio
+            );
+            let _ = app.emit(
+                "scan://adaptive-throttle",
+                ScanEvent {
+                    run_id: run_id.to_string(),
+                    payload: serde_json::json!({
+                        "engaged": false,
+                        "pressure_ratio": pressure_ratio,
+                        "delay_ms": 0,
+                    }),
+                },
+            );
+        }
+
+        // Decay pressure counters periodically to make the system responsive to changes
+        if total_so_far > 100 {
+            self.timeout_pressure
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v / 2))
+                .ok();
+            self.success_count
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v / 2))
+                .ok();
+        }
+    }
+}
+
+/// Disk-space guard for screenshot capture. Every ~20 channels it re-checks
+/// free space on the screenshot volume, evicting old cached runs when space
+/// is low and pausing screenshots (emitting `scan://screenshots-paused` once)
+/// when space is critical. Cloned into each worker task.
+#[derive(Clone)]
+struct ScreenshotDiskGuard {
+    paused: Arc<AtomicBool>,
+    paused_emitted: Arc<AtomicBool>,
+    check_counter: Arc<AtomicUsize>,
+    eviction_in_progress: Arc<AtomicBool>,
+    using_custom_dir: bool,
+    low_space_threshold_gb: f64,
+}
+
+impl ScreenshotDiskGuard {
+    fn new(using_custom_dir: bool, low_space_threshold_gb: f64) -> Self {
+        Self {
+            paused: Arc::new(AtomicBool::new(false)),
+            paused_emitted: Arc::new(AtomicBool::new(false)),
+            check_counter: Arc::new(AtomicUsize::new(0)),
+            eviction_in_progress: Arc::new(AtomicBool::new(false)),
+            using_custom_dir,
+            low_space_threshold_gb,
+        }
+    }
+
+    fn pause_and_emit(&self, app: &AppHandle, run_id: &str) {
+        self.paused.store(true, Ordering::Relaxed);
+        if !self.paused_emitted.swap(true, Ordering::Relaxed) {
+            let _ = app.emit(
+                "scan://screenshots-paused",
+                ScanEvent {
+                    run_id: run_id.to_string(),
+                    payload: (),
+                },
+            );
+        }
+    }
+
+    /// Decide whether this channel should skip its screenshot, re-checking
+    /// disk space periodically (every ~20 channels).
+    fn effective_skip(
+        &self,
+        app: &AppHandle,
+        run_id: &str,
+        skip_screenshots: bool,
+        screenshots_dir: Option<&String>,
+    ) -> bool {
+        if skip_screenshots || self.paused.load(Ordering::Relaxed) {
+            return true;
+        }
+        if self.using_custom_dir {
+            return false;
+        }
+        let count = self.check_counter.fetch_add(1, Ordering::Relaxed);
+        if count % 20 != 0 {
+            return false;
+        }
+        let Some(dir) = screenshots_dir else {
+            return false;
+        };
+        let dir_path = std::path::Path::new(dir.as_str());
+        match disk::classify_space(dir_path, self.low_space_threshold_gb) {
+            disk::DiskSpaceTier::Critical => {
+                self.pause_and_emit(app, run_id);
+                true
+            }
+            disk::DiskSpaceTier::Low => {
+                // Try eviction if not already running
+                if self.eviction_in_progress.swap(true, Ordering::Relaxed) {
+                    return false;
+                }
+                let cache_root = dir_path.parent().unwrap_or(dir_path);
+                let freed = settings::evict_for_disk_space(
+                    cache_root,
+                    dir.as_str(),
+                    self.low_space_threshold_gb,
+                );
+                if freed > 0 {
+                    log::info!("Disk space eviction freed {} bytes", freed);
+                }
+                self.eviction_in_progress.store(false, Ordering::Relaxed);
+                // Re-check after eviction
+                let tier_after = disk::classify_space(dir_path, self.low_space_threshold_gb);
+                if matches!(tier_after, disk::DiskSpaceTier::Critical) {
+                    self.pause_and_emit(app, run_id);
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Accumulates channel results and forwards them to the frontend, batching
+/// `scan://channel-results-batch` events (when the client supports them) and
+/// throttling `scan://progress` emissions.
+struct ScanEventEmitter {
+    app: AppHandle,
+    state: Arc<AppState>,
+    run_id: String,
+    total: usize,
+    batch_events_enabled: bool,
+    counters: ScanCounters,
+    completed_results: Vec<ChannelResult>,
+    channel_logs: Vec<ChannelDebugLog>,
+    pending_batch: Vec<ChannelResult>,
+    last_progress_emit: Instant,
+}
+
+impl ScanEventEmitter {
+    fn new(
+        app: AppHandle,
+        state: Arc<AppState>,
+        run_id: String,
+        total: usize,
+        batch_events_enabled: bool,
+    ) -> Self {
+        Self {
+            app,
+            state,
+            run_id,
+            total,
+            batch_events_enabled,
+            counters: ScanCounters::default(),
+            completed_results: Vec::with_capacity(total),
+            channel_logs: Vec::with_capacity(total),
+            pending_batch: Vec::with_capacity(RESULT_BATCH_MAX_ITEMS),
+            last_progress_emit: Instant::now()
+                .checked_sub(std::time::Duration::from_millis(PROGRESS_EMIT_INTERVAL_MS))
+                .unwrap_or_else(Instant::now),
+        }
+    }
+
+    /// Record one completed channel and emit it (batched or as a single
+    /// `scan://channel-result`), plus a throttled progress event.
+    async fn ingest(&mut self, result: ChannelResult, channel_log: Option<ChannelDebugLog>) {
+        self.counters.apply(&result);
+        self.completed_results.push(result.clone());
+        if let Some(channel_log) = channel_log {
+            self.channel_logs.push(channel_log);
+        }
+        if self.batch_events_enabled {
+            self.pending_batch.push(result);
+            if self.pending_batch.len() >= RESULT_BATCH_MAX_ITEMS {
+                emit_result_batch_event(
+                    &self.app,
+                    &self.state,
+                    &self.run_id,
+                    std::mem::take(&mut self.pending_batch),
+                    self.counters.as_progress(self.total),
+                )
+                .await;
+            }
+        } else {
+            emit_channel_result_event(&self.app, &self.state, &self.run_id, result).await;
+        }
+
+        if self.last_progress_emit.elapsed().as_millis() as u64 >= PROGRESS_EMIT_INTERVAL_MS {
+            self.flush_pending_and_emit_progress().await;
+            self.last_progress_emit = Instant::now();
+        }
+    }
+
+    /// Flush any pending result batch, then emit a progress event.
+    async fn flush_pending_and_emit_progress(&mut self) {
+        // pending_batch is only ever filled when batch events are enabled.
+        if !self.pending_batch.is_empty() {
+            emit_result_batch_event(
+                &self.app,
+                &self.state,
+                &self.run_id,
+                std::mem::take(&mut self.pending_batch),
+                self.counters.as_progress(self.total),
+            )
+            .await;
+        }
+        emit_progress_event(
+            &self.app,
+            &self.state,
+            &self.run_id,
+            self.counters.as_progress(self.total),
+        )
+        .await;
+    }
+
+    /// Emit the trailing batch plus a final progress event and hand back the
+    /// accumulated scan data.
+    async fn finish(mut self) -> CompletedScanData {
+        self.flush_pending_and_emit_progress().await;
+        CompletedScanData {
+            summary: self.counters.as_summary(self.total),
+            results: self.completed_results,
+            channel_logs: self.channel_logs,
+        }
+    }
+}
+
+/// Event-emitter task body: replay resumed checkpoint entries, then stream
+/// worker outputs until the channel closes, and return the completed data.
+async fn run_event_emitter(
+    app: AppHandle,
+    state: Arc<AppState>,
+    run_id: String,
+    total: usize,
+    scan_started_at_epoch_ms: u64,
+    batch_events_enabled: bool,
+    resumed_entries: Vec<resume::CheckpointResumeEntry>,
+    mut rx: tokio::sync::mpsc::Receiver<WorkerOutput>,
+) -> CompletedScanData {
+    let mut emitter = ScanEventEmitter::new(app, state, run_id, total, batch_events_enabled);
+    let mut first_result_emitted = false;
+
+    for resumed_entry in resumed_entries {
+        emitter
+            .ingest(resumed_entry.result, resumed_entry.channel_log)
+            .await;
+    }
+
+    while let Some(worker) = rx.recv().await {
+        if !first_result_emitted {
+            first_result_emitted = true;
+            let time_to_first_ms = now_epoch_ms().saturating_sub(scan_started_at_epoch_ms) as f64;
+            record_backend_perf(
+                &emitter.app,
+                &emitter.state,
+                "scan.time_to_first_result_ms",
+                time_to_first_ms,
+                Some(&emitter.run_id),
+            )
+            .await;
+        }
+
+        emitter.ingest(worker.result, Some(worker.channel_log)).await;
+    }
+
+    emitter.finish().await
+}
+
+/// Feed a finished channel's outcome into the connectivity and adaptive
+/// throttle trackers.
+fn track_worker_signals(
+    shared: &SharedUrlResult,
+    consecutive_net_failures: &AtomicU32,
+    adaptive_throttle: &AdaptiveThrottle,
+) {
+    // Track consecutive network-level failures for connectivity detection
+    let is_network_failure = shared.status == ChannelStatus::Dead
+        && shared
+            .error_reason
+            .as_deref()
+            .map(connectivity::is_network_level_error)
+            .unwrap_or(false);
+    if is_network_failure {
+        consecutive_net_failures.fetch_add(1, Ordering::Relaxed);
+    } else {
+        consecutive_net_failures.store(0, Ordering::Relaxed);
+    }
+
+    // Adaptive concurrency — track pressure signals
+    let is_pressure_signal = if shared.status == ChannelStatus::Dead {
+        // Timeout or rate limit errors are pressure signals
+        shared.error_reason.as_deref().map_or(false, |reason| {
+            reason == "Timeout" || reason.starts_with("HTTP 429")
+        })
+    } else {
+        false
+    };
+    // Retries indicate the server is under strain even if the channel eventually succeeded
+    let had_retries = shared.retry_count.map_or(false, |count| count > 0);
+
+    adaptive_throttle.record_outcome(is_pressure_signal || had_retries);
+}
+
+/// Combine a channel's playlist metadata with its shared check outcome into
+/// the `ChannelResult` emitted to the frontend and checkpoint file.
+fn build_channel_result(channel: &Channel, shared: &SharedUrlResult) -> ChannelResult {
+    let mut result = ChannelResult {
+        index: channel.index,
+        playlist: channel.playlist.clone(),
+        name: channel.name.clone(),
+        group: channel.group.clone(),
+        language: channel.language.clone(),
+        tvg_id: channel.tvg_id.clone(),
+        tvg_name: channel.tvg_name.clone(),
+        tvg_logo: channel.tvg_logo.clone(),
+        tvg_chno: channel.tvg_chno.clone(),
+        url: channel.url.clone(),
+        content_type: channel.content_type,
+        status: shared.status.clone(),
+        codec: shared.codec.clone(),
+        resolution: shared.resolution.clone(),
+        width: shared.width,
+        height: shared.height,
+        fps: shared.fps,
+        latency_ms: shared.latency_ms,
+        hdr_format: shared.hdr_format.clone(),
+        video_bitrate: shared.video_bitrate.clone(),
+        audio_bitrate: shared.audio_bitrate.clone(),
+        audio_codec: shared.audio_codec.clone(),
+        audio_channel_layout: shared.audio_channel_layout.clone(),
+        audio_only: shared.audio_only,
+        screenshot_path: shared.screenshot_path.clone(),
+        screenshot_error_reason: shared.screenshot_error_reason.clone(),
+        label_mismatches: Vec::new(),
+        low_framerate: shared.low_framerate,
+        error_message: None,
+        channel_id: parser::get_channel_id(&channel.url),
+        extinf_line: channel.extinf_line.clone(),
+        metadata_lines: channel.metadata_lines.clone(),
+        stream_url: shared.stream_url.clone(),
+        retry_count: shared.retry_count,
+        error_reason: shared.error_reason.clone(),
+        drm_system: shared.drm_system.clone(),
+    };
+
+    if result.status == ChannelStatus::Alive {
+        if let Some(ref resolution) = result.resolution {
+            result.label_mismatches = ffmpeg::check_label_mismatch(&channel.name, resolution);
+        }
+    }
+
+    result
+}
+
+/// Read the history limit from settings and append this run to scan history
+/// on a blocking thread — serializing and writing the full results Vec (plus
+/// reading the previous run for the diff) is blocking file IO.
+async fn append_history_blocking(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    run_id: &str,
+    config: &ScanConfig,
+    summary: &ScanSummary,
+    results: Vec<ChannelResult>,
+) {
+    let history_limit = {
+        let settings = state.settings.lock().await;
+        settings.scan_history_limit as usize
+    };
+    let app = app.clone();
+    let run_id = run_id.to_string();
+    let config = config.clone();
+    let summary = summary.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        if let Err(error) = history::append_scan_history(
+            &app,
+            &run_id,
+            &config,
+            &summary,
+            results,
+            history_limit,
+        ) {
+            log::warn!("Failed to write scan history for {}: {}", run_id, error);
+        }
+    })
+    .await;
+}
+
+/// Store the finished scan's debug log on the window scan state.
+async fn store_scan_log(
+    state: &Arc<AppState>,
+    scan_scope: &str,
+    run_id: &str,
+    config: &ScanConfig,
+    started_at_epoch_ms: u64,
+    summary: ScanSummary,
+    channel_logs: Vec<ChannelDebugLog>,
+) {
+    let run_id = run_id.to_string();
+    let playlist_path = config.file_path.clone();
+    let source_identity = config.source_identity.clone();
+    state
+        .with_window_scan_state(scan_scope, |scan_state| {
+            scan_state.scan_log = Some(ScanDebugLog {
+                run_id,
+                playlist_path,
+                source_identity,
+                started_at_epoch_ms,
+                finished_at_epoch_ms: now_epoch_ms(),
+                summary,
+                channels: channel_logs,
+            });
+        })
+        .await;
+}
+
+/// Emit completion events and record history/debug state for a scan whose
+/// filtered channel set is empty.
+async fn finish_empty_scan(
+    app: &AppHandle,
+    state: &Arc<AppState>,
+    scan_scope: &str,
+    run_id: &str,
+    scan_started_at_epoch_ms: u64,
+    config: &ScanConfig,
+) {
+    let summary = ScanSummary {
+        total: 0,
+        alive: 0,
+        dead: 0,
+        placeholder: 0,
+        geoblocked: 0,
+        drm: 0,
+        low_framerate: 0,
+        mislabeled: 0,
+        playlist_score: None,
+    };
+
+    let _ = app.emit(
+        "scan://complete",
+        ScanEvent {
+            run_id: run_id.to_string(),
+            payload: summary.clone(),
+        },
+    );
+    append_history_blocking(app, state, run_id, config, &summary, Vec::new()).await;
+    store_scan_log(
+        state,
+        scan_scope,
+        run_id,
+        config,
+        scan_started_at_epoch_ms,
+        summary,
+        Vec::new(),
+    )
+    .await;
+}
+
+async fn execute_scan_run(
+    app: AppHandle,
+    state: Arc<AppState>,
+    scan_scope: String,
+    run_id: String,
+    scan_started_at_epoch_ms: u64,
+    config: ScanConfig,
+    cancel_token: CancellationToken,
+) -> Result<(), AppError> {
+    log::info!(
+        "Starting scan {} for window '{}': {} (concurrency: {}, retries: {}, retry_backoff: {:?})",
+        run_id,
+        scan_scope,
+        config.file_path,
+        config.concurrency,
+        config.retries,
+        config.retry_backoff
+    );
+
+    let preview = parse_playlist_with_cache(&app, &state, &config, &run_id).await?;
+    let preview_single_provider = preview.single_provider;
+    let mut channels = preview.channels.clone();
+    filter_channels_by_selection(&mut channels, &config.selected_indices);
+    filter_channels_by_content_type(&mut channels, config.hide_vod_content);
+    let total = channels.len();
+
+    if total == 0 {
+        finish_empty_scan(
+            &app,
+            &state,
+            &scan_scope,
+            &run_id,
+            scan_started_at_epoch_ms,
+            &config,
+        )
+        .await;
+        return Ok(());
+    }
+
+    // Resume support
+    let ResumeState {
+        log_file,
+        checkpoint_file,
+        resumed_entries,
+        base_name,
+        scope_suffix,
+    } = load_resume_state(&app, &state, &config, &run_id, &mut channels).await;
 
     // Compute single_provider from the filtered (and resume-pruned) channel set.
     let single_provider = if preview_single_provider {
@@ -1494,27 +2196,7 @@ async fn execute_scan_run(
     );
 
     // Load proxies if configured
-    let proxy_list = if config.test_geoblock {
-        if let Some(ref proxy_file) = config.proxy_file {
-            match proxy::load_proxy_list(proxy_file) {
-                Ok(proxy_list) => {
-                    log::info!("Loaded {} proxies from {}", proxy_list.len(), proxy_file);
-                    Some(proxy_list)
-                }
-                Err(error) => {
-                    log::error!("Failed to load proxy file '{}': {}", proxy_file, error);
-                    return Err(AppError::Other(format!(
-                        "Failed to load proxy file '{}': {}",
-                        proxy_file, error
-                    )));
-                }
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    let proxy_list = load_proxy_list_if_configured(&config)?;
 
     // Check ffmpeg availability
     let ffmpeg_check_started_at = Instant::now();
@@ -1536,71 +2218,16 @@ async fn execute_scan_run(
         (s.screenshot_retention_count, s.low_space_threshold_gb)
     };
     let using_custom_screenshots_dir = config.screenshots_dir.is_some();
-    let screenshots_dir = if !config.skip_screenshots && ffmpeg_available {
-        let dir = match config.screenshots_dir.clone() {
-            Some(d) => d,
-            None => {
-                let temp = app
-                    .path()
-                    .temp_dir()
-                    .unwrap_or_else(|_| std::env::temp_dir());
-                temp.join("iptv-checker-screenshots")
-                    .join(format!("{}_{}", base_name, scope_suffix))
-                    .to_string_lossy()
-                    .to_string()
-            }
-        };
-        {
-            let dir_clone = dir.clone();
-            tokio::task::spawn_blocking(move || std::fs::create_dir_all(&dir_clone))
-                .await
-                .map_err(|e| {
-                    AppError::Other(format!("Failed to create screenshots directory: {}", e))
-                })?
-                .map_err(|e| {
-                    AppError::Other(format!("Failed to create screenshots directory: {}", e))
-                })?;
-        }
-
-        // Write scan metadata for eviction logic
-        if !using_custom_screenshots_dir {
-            let meta = serde_json::json!({
-                "scan_started_at_epoch_ms": scan_started_at_epoch_ms,
-                "source_identity": config.source_identity.clone().unwrap_or_default(),
-                "playlist_file": config.file_path.clone(),
-            });
-            let meta_path = std::path::Path::new(&dir).join(".scan-meta.json");
-            let meta_str = meta.to_string();
-            match tokio::task::spawn_blocking(move || std::fs::write(&meta_path, meta_str)).await {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => log::warn!("Failed to write scan metadata: {}", error),
-                Err(error) => log::warn!("Failed to write scan metadata (join): {}", error),
-            }
-
-            // Pre-scan eviction: remove old dirs per retention policy
-            let cache_root = std::path::Path::new(&dir)
-                .parent()
-                .unwrap_or_else(|| std::path::Path::new(&dir));
-            let current_dir_name = std::path::Path::new(&dir)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let mut keep = HashSet::new();
-            keep.insert(current_dir_name);
-            let freed =
-                settings::evict_old_screenshot_dirs(cache_root, &keep, screenshot_retention_count);
-            if freed > 0 {
-                log::info!(
-                    "Pre-scan eviction freed {} bytes of screenshot cache",
-                    freed
-                );
-            }
-        }
-
-        Some(dir)
-    } else {
-        None
-    };
+    let screenshots_dir = prepare_screenshots_dir(
+        &app,
+        &config,
+        &base_name,
+        &scope_suffix,
+        scan_started_at_epoch_ms,
+        screenshot_retention_count,
+        ffmpeg_available,
+    )
+    .await?;
 
     let client = Arc::new({
         let mut builder = reqwest::Client::builder()
@@ -1626,7 +2253,7 @@ async fn execute_scan_run(
         let settings = state.settings.lock().await;
         (settings.low_fps_threshold, settings.screenshot_format)
     };
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<WorkerOutput>(256);
+    let (tx, rx) = tokio::sync::mpsc::channel::<WorkerOutput>(256);
     let (checkpoint_tx, checkpoint_rx) =
         tokio::sync::mpsc::channel::<resume::CheckpointWriteEntryWithLog>(1024);
 
@@ -1639,161 +2266,21 @@ async fn execute_scan_run(
         run_id.clone(),
     ));
 
-    let app_for_events = app.clone();
-    let state_for_events = state.clone();
-    let run_id_for_events = run_id.clone();
     let batch_events_enabled = config
         .client_capabilities
         .as_ref()
         .map(|caps| caps.event_batch_v1)
         .unwrap_or(false);
-    let event_task = tokio::spawn(async move {
-        let mut counters = ScanCounters::default();
-        let mut completed_results = Vec::with_capacity(total);
-        let mut channel_logs = Vec::<ChannelDebugLog>::with_capacity(total);
-        let mut pending_batch_results = Vec::<ChannelResult>::with_capacity(RESULT_BATCH_MAX_ITEMS);
-        let mut first_result_emitted = false;
-        let mut last_progress_emit = Instant::now()
-            .checked_sub(std::time::Duration::from_millis(PROGRESS_EMIT_INTERVAL_MS))
-            .unwrap_or_else(Instant::now);
-
-        for resumed_entry in resumed_entries {
-            let result = resumed_entry.result;
-            counters.apply(&result);
-            completed_results.push(result.clone());
-            if let Some(channel_log) = resumed_entry.channel_log {
-                channel_logs.push(channel_log);
-            }
-            if batch_events_enabled {
-                pending_batch_results.push(result);
-                if pending_batch_results.len() >= RESULT_BATCH_MAX_ITEMS {
-                    emit_result_batch_event(
-                        &app_for_events,
-                        &state_for_events,
-                        &run_id_for_events,
-                        std::mem::take(&mut pending_batch_results),
-                        counters.as_progress(total),
-                    )
-                    .await;
-                }
-            } else {
-                emit_channel_result_event(
-                    &app_for_events,
-                    &state_for_events,
-                    &run_id_for_events,
-                    result,
-                )
-                .await;
-            }
-
-            if last_progress_emit.elapsed().as_millis() as u64 >= PROGRESS_EMIT_INTERVAL_MS {
-                if batch_events_enabled && !pending_batch_results.is_empty() {
-                    emit_result_batch_event(
-                        &app_for_events,
-                        &state_for_events,
-                        &run_id_for_events,
-                        std::mem::take(&mut pending_batch_results),
-                        counters.as_progress(total),
-                    )
-                    .await;
-                }
-                emit_progress_event(
-                    &app_for_events,
-                    &state_for_events,
-                    &run_id_for_events,
-                    counters.as_progress(total),
-                )
-                .await;
-                last_progress_emit = Instant::now();
-            }
-        }
-
-        while let Some(worker) = rx.recv().await {
-            if !first_result_emitted {
-                first_result_emitted = true;
-                let time_to_first_ms =
-                    now_epoch_ms().saturating_sub(scan_started_at_epoch_ms) as f64;
-                record_backend_perf(
-                    &app_for_events,
-                    &state_for_events,
-                    "scan.time_to_first_result_ms",
-                    time_to_first_ms,
-                    Some(&run_id_for_events),
-                )
-                .await;
-            }
-
-            counters.apply(&worker.result);
-            completed_results.push(worker.result.clone());
-            channel_logs.push(worker.channel_log);
-            if batch_events_enabled {
-                pending_batch_results.push(worker.result);
-                if pending_batch_results.len() >= RESULT_BATCH_MAX_ITEMS {
-                    emit_result_batch_event(
-                        &app_for_events,
-                        &state_for_events,
-                        &run_id_for_events,
-                        std::mem::take(&mut pending_batch_results),
-                        counters.as_progress(total),
-                    )
-                    .await;
-                }
-            } else {
-                emit_channel_result_event(
-                    &app_for_events,
-                    &state_for_events,
-                    &run_id_for_events,
-                    worker.result,
-                )
-                .await;
-            }
-
-            if last_progress_emit.elapsed().as_millis() as u64 >= PROGRESS_EMIT_INTERVAL_MS {
-                if batch_events_enabled && !pending_batch_results.is_empty() {
-                    emit_result_batch_event(
-                        &app_for_events,
-                        &state_for_events,
-                        &run_id_for_events,
-                        std::mem::take(&mut pending_batch_results),
-                        counters.as_progress(total),
-                    )
-                    .await;
-                }
-                emit_progress_event(
-                    &app_for_events,
-                    &state_for_events,
-                    &run_id_for_events,
-                    counters.as_progress(total),
-                )
-                .await;
-                last_progress_emit = Instant::now();
-            }
-        }
-
-        if batch_events_enabled && !pending_batch_results.is_empty() {
-            emit_result_batch_event(
-                &app_for_events,
-                &state_for_events,
-                &run_id_for_events,
-                std::mem::take(&mut pending_batch_results),
-                counters.as_progress(total),
-            )
-            .await;
-        }
-        emit_progress_event(
-            &app_for_events,
-            &state_for_events,
-            &run_id_for_events,
-            counters.as_progress(total),
-        )
-        .await;
-
-        CompletedScanData {
-            summary: counters.as_summary(total),
-            results: completed_results,
-            channel_logs,
-        }
-    });
+    let event_task = tokio::spawn(run_event_emitter(
+        app.clone(),
+        state.clone(),
+        run_id.clone(),
+        total,
+        scan_started_at_epoch_ms,
+        batch_events_enabled,
+        resumed_entries,
+        rx,
+    ));
 
     let proxy_list = Arc::new(proxy_list);
     let shared_url_results: Arc<
@@ -1806,18 +2293,14 @@ async fn execute_scan_run(
     > = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
     // Disk space tracking for screenshot pause
-    let screenshots_paused = Arc::new(AtomicBool::new(false));
-    let screenshots_paused_emitted = Arc::new(AtomicBool::new(false));
-    let disk_check_counter = Arc::new(AtomicUsize::new(0));
-    let eviction_in_progress = Arc::new(AtomicBool::new(false));
+    let disk_guard =
+        ScreenshotDiskGuard::new(using_custom_screenshots_dir, low_space_threshold_gb);
 
     // Network connectivity tracking — consecutive network-level failures trigger a check
-    let consecutive_net_failures = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let consecutive_net_failures = Arc::new(AtomicU32::new(0));
 
     // Adaptive concurrency — track pressure signals and successes to throttle dispatch
-    let timeout_pressure = Arc::new(std::sync::atomic::AtomicU32::new(0));
-    let adaptive_success_count = Arc::new(std::sync::atomic::AtomicU32::new(0));
-    let adaptive_throttle_engaged = Arc::new(AtomicBool::new(false));
+    let adaptive_throttle = AdaptiveThrottle::new();
 
     let mut handles = Vec::new();
 
@@ -1843,99 +2326,12 @@ async fn execute_scan_run(
         }
 
         // Check if enough consecutive network failures have occurred to warrant a connectivity check
-        if consecutive_net_failures.load(Ordering::Relaxed)
-            >= connectivity::CONSECUTIVE_FAILURE_THRESHOLD
-        {
-            if !connectivity::check_connectivity().await {
-                log::warn!("Network connectivity lost — pausing scan until recovery");
-                let _ = app.emit(
-                    "scan://network-paused",
-                    ScanEvent {
-                        run_id: run_id.clone(),
-                        payload: (),
-                    },
-                );
-                let recovered = connectivity::wait_for_connectivity_recovery(&cancel_token).await;
-                if !recovered {
-                    break; // cancelled while waiting
-                }
-                log::info!("Network connectivity restored — resuming scan");
-                let _ = app.emit(
-                    "scan://network-resumed",
-                    ScanEvent {
-                        run_id: run_id.clone(),
-                        payload: (),
-                    },
-                );
-            }
-            consecutive_net_failures.store(0, Ordering::Relaxed);
+        if !pause_if_network_down(&app, &run_id, &cancel_token, &consecutive_net_failures).await {
+            break; // cancelled while waiting for connectivity
         }
 
         // Adaptive concurrency throttle — slow down dispatch when servers show pressure
-        {
-            let pressure = timeout_pressure.load(Ordering::Relaxed);
-            let successes = adaptive_success_count.load(Ordering::Relaxed);
-            let total_so_far = pressure + successes;
-            if total_so_far >= 25 {
-                let pressure_ratio = pressure as f64 / total_so_far as f64;
-                let delay_ms = if pressure_ratio > 0.5 {
-                    1000u64
-                } else if pressure_ratio > 0.3 {
-                    300
-                } else if pressure_ratio > 0.15 {
-                    50
-                } else {
-                    0
-                };
-
-                if delay_ms > 0 {
-                    if !adaptive_throttle_engaged.swap(true, Ordering::Relaxed) {
-                        log::info!(
-                            "Adaptive throttle engaged: pressure_ratio={:.2} ({}/{} channels), delay={}ms",
-                            pressure_ratio, pressure, total_so_far, delay_ms
-                        );
-                        let _ = app.emit(
-                            "scan://adaptive-throttle",
-                            ScanEvent {
-                                run_id: run_id.clone(),
-                                payload: serde_json::json!({
-                                    "engaged": true,
-                                    "pressure_ratio": pressure_ratio,
-                                    "delay_ms": delay_ms,
-                                }),
-                            },
-                        );
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
-                } else if adaptive_throttle_engaged.swap(false, Ordering::Relaxed) {
-                    log::info!(
-                        "Adaptive throttle disengaged: pressure_ratio={:.2}",
-                        pressure_ratio
-                    );
-                    let _ = app.emit(
-                        "scan://adaptive-throttle",
-                        ScanEvent {
-                            run_id: run_id.clone(),
-                            payload: serde_json::json!({
-                                "engaged": false,
-                                "pressure_ratio": pressure_ratio,
-                                "delay_ms": 0,
-                            }),
-                        },
-                    );
-                }
-
-                // Decay pressure counters periodically to make the system responsive to changes
-                if total_so_far > 100 {
-                    timeout_pressure
-                        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v / 2))
-                        .ok();
-                    adaptive_success_count
-                        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v / 2))
-                        .ok();
-                }
-            }
-        }
+        adaptive_throttle.before_dispatch(&app, &run_id).await;
 
         let permit = semaphore.clone().acquire_owned().await;
         let permit = match permit {
@@ -1969,15 +2365,9 @@ async fn execute_scan_run(
         let shared_url_results = Arc::clone(&shared_url_results);
         let diagnostics_semaphore = Arc::clone(&diagnostics_semaphore);
         let single_connection_mode = single_provider;
-        let screenshots_paused = Arc::clone(&screenshots_paused);
-        let screenshots_paused_emitted = Arc::clone(&screenshots_paused_emitted);
-        let disk_check_counter = Arc::clone(&disk_check_counter);
-        let eviction_in_progress = Arc::clone(&eviction_in_progress);
-        let using_custom_dir = using_custom_screenshots_dir;
-        let low_space_threshold_gb = low_space_threshold_gb;
+        let disk_guard = disk_guard.clone();
         let consecutive_net_failures = Arc::clone(&consecutive_net_failures);
-        let timeout_pressure = Arc::clone(&timeout_pressure);
-        let adaptive_success_count = Arc::clone(&adaptive_success_count);
+        let adaptive_throttle = adaptive_throttle.clone();
 
         let handle = tokio::spawn(async move {
             let _permit = permit;
@@ -1998,104 +2388,42 @@ async fn execute_scan_run(
                 ffmpeg::build_screenshot_file_name(channel.index, &channel.name);
 
             // Check disk space periodically (every ~20 channels)
-            let effective_skip_screenshots = if skip_screenshots
-                || screenshots_paused.load(Ordering::Relaxed)
-            {
-                skip_screenshots || screenshots_paused.load(Ordering::Relaxed)
-            } else if !using_custom_dir {
-                let count = disk_check_counter.fetch_add(1, Ordering::Relaxed);
-                if count % 20 == 0 {
-                    if let Some(ref dir) = screenshots_dir {
-                        let dir_path = std::path::Path::new(dir.as_str());
-                        let tier = disk::classify_space(dir_path, low_space_threshold_gb);
-                        match tier {
-                            disk::DiskSpaceTier::Critical => {
-                                screenshots_paused.store(true, Ordering::Relaxed);
-                                if !screenshots_paused_emitted.swap(true, Ordering::Relaxed) {
-                                    let _ = task_app.emit(
-                                        "scan://screenshots-paused",
-                                        ScanEvent {
-                                            run_id: run_id_for_perf.clone(),
-                                            payload: (),
-                                        },
-                                    );
-                                }
-                                true
-                            }
-                            disk::DiskSpaceTier::Low => {
-                                // Try eviction if not already running
-                                if !eviction_in_progress.swap(true, Ordering::Relaxed) {
-                                    let cache_root = dir_path.parent().unwrap_or(dir_path);
-                                    let freed = settings::evict_for_disk_space(
-                                        cache_root,
-                                        dir.as_str(),
-                                        low_space_threshold_gb,
-                                    );
-                                    if freed > 0 {
-                                        log::info!("Disk space eviction freed {} bytes", freed);
-                                    }
-                                    eviction_in_progress.store(false, Ordering::Relaxed);
-                                    // Re-check after eviction
-                                    let tier_after =
-                                        disk::classify_space(dir_path, low_space_threshold_gb);
-                                    if matches!(tier_after, disk::DiskSpaceTier::Critical) {
-                                        screenshots_paused.store(true, Ordering::Relaxed);
-                                        if !screenshots_paused_emitted.swap(true, Ordering::Relaxed)
-                                        {
-                                            let _ = task_app.emit(
-                                                "scan://screenshots-paused",
-                                                ScanEvent {
-                                                    run_id: run_id_for_perf.clone(),
-                                                    payload: (),
-                                                },
-                                            );
-                                        }
-                                        true
-                                    } else {
-                                        false
-                                    }
-                                } else {
-                                    false
-                                }
-                            }
-                            _ => false,
-                        }
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
+            let effective_skip_screenshots = disk_guard.effective_skip(
+                &task_app,
+                &run_id_for_perf,
+                skip_screenshots,
+                screenshots_dir.as_ref(),
+            );
 
+            let check_ctx = SharedCheckContext {
+                app: &task_app,
+                client: &client,
+                timeout,
+                retries,
+                retry_backoff,
+                extended_timeout,
+                user_agent: &user_agent,
+                cancel: &cancel,
+                proxy_list: &proxy_list,
+                test_geoblock,
+                ffmpeg_ok,
+                ffprobe_ok,
+                profile_bitrate_flag,
+                ffprobe_timeout_secs,
+                ffmpeg_bitrate_timeout_secs,
+                low_fps_threshold,
+                screenshot_format,
+                diagnostics_semaphore: &diagnostics_semaphore,
+                single_connection_mode,
+            };
             let shared_result = result_cell
                 .get_or_init(|| async {
                     compute_shared_url_result(
-                        &task_app,
-                        &client,
+                        &check_ctx,
                         &channel.url,
-                        timeout,
-                        retries,
-                        retry_backoff,
-                        extended_timeout,
-                        &user_agent,
-                        &cancel,
-                        &proxy_list,
-                        test_geoblock,
-                        ffmpeg_ok,
-                        ffprobe_ok,
-                        profile_bitrate_flag,
-                        ffprobe_timeout_secs,
-                        ffmpeg_bitrate_timeout_secs,
-                        low_fps_threshold,
                         effective_skip_screenshots,
                         screenshots_dir.as_ref(),
                         &screenshot_file_name,
-                        screenshot_format,
-                        &diagnostics_semaphore,
-                        single_connection_mode,
                     )
                     .await
                 })
@@ -2123,38 +2451,7 @@ async fn execute_scan_run(
                 }
             };
 
-            // Track consecutive network-level failures for connectivity detection
-            if shared.status == ChannelStatus::Dead {
-                if let Some(ref reason) = shared.error_reason {
-                    if connectivity::is_network_level_error(reason) {
-                        consecutive_net_failures.fetch_add(1, Ordering::Relaxed);
-                    } else {
-                        consecutive_net_failures.store(0, Ordering::Relaxed);
-                    }
-                } else {
-                    consecutive_net_failures.store(0, Ordering::Relaxed);
-                }
-            } else {
-                consecutive_net_failures.store(0, Ordering::Relaxed);
-            }
-
-            // Adaptive concurrency — track pressure signals
-            let is_pressure_signal = if shared.status == ChannelStatus::Dead {
-                // Timeout or rate limit errors are pressure signals
-                shared.error_reason.as_deref().map_or(false, |reason| {
-                    reason == "Timeout" || reason.starts_with("HTTP 429")
-                })
-            } else {
-                false
-            };
-            // Retries indicate the server is under strain even if the channel eventually succeeded
-            let had_retries = shared.retry_count.map_or(false, |count| count > 0);
-
-            if is_pressure_signal || had_retries {
-                timeout_pressure.fetch_add(1, Ordering::Relaxed);
-            } else {
-                adaptive_success_count.fetch_add(1, Ordering::Relaxed);
-            }
+            track_worker_signals(&shared, &consecutive_net_failures, &adaptive_throttle);
 
             if timing.check_ms > 0.0 {
                 record_backend_perf(
@@ -2193,51 +2490,7 @@ async fn execute_scan_run(
             shared.channel_log.channel_name = channel.name.clone();
             shared.channel_log.channel_url = channel.url.clone();
 
-            let mut result = ChannelResult {
-                index: channel.index,
-                playlist: channel.playlist.clone(),
-                name: channel.name.clone(),
-                group: channel.group.clone(),
-                language: channel.language.clone(),
-                tvg_id: channel.tvg_id.clone(),
-                tvg_name: channel.tvg_name.clone(),
-                tvg_logo: channel.tvg_logo.clone(),
-                tvg_chno: channel.tvg_chno.clone(),
-                url: channel.url.clone(),
-                content_type: channel.content_type,
-                status: shared.status.clone(),
-                codec: shared.codec.clone(),
-                resolution: shared.resolution.clone(),
-                width: shared.width,
-                height: shared.height,
-                fps: shared.fps,
-                latency_ms: shared.latency_ms,
-                hdr_format: shared.hdr_format.clone(),
-                video_bitrate: shared.video_bitrate.clone(),
-                audio_bitrate: shared.audio_bitrate.clone(),
-                audio_codec: shared.audio_codec.clone(),
-                audio_channel_layout: shared.audio_channel_layout.clone(),
-                audio_only: shared.audio_only,
-                screenshot_path: shared.screenshot_path.clone(),
-                screenshot_error_reason: shared.screenshot_error_reason.clone(),
-                label_mismatches: Vec::new(),
-                low_framerate: shared.low_framerate,
-                error_message: None,
-                channel_id: parser::get_channel_id(&channel.url),
-                extinf_line: channel.extinf_line.clone(),
-                metadata_lines: channel.metadata_lines.clone(),
-                stream_url: shared.stream_url.clone(),
-                retry_count: shared.retry_count,
-                error_reason: shared.error_reason.clone(),
-                drm_system: shared.drm_system.clone(),
-            };
-
-            if result.status == ChannelStatus::Alive {
-                if let Some(ref resolution) = result.resolution {
-                    result.label_mismatches =
-                        ffmpeg::check_label_mismatch(&channel.name, resolution);
-                }
-            }
+            let result = build_channel_result(&channel, &shared);
 
             let _ = checkpoint_tx
                 .send(resume::CheckpointWriteEntryWithLog {
@@ -2308,20 +2561,17 @@ async fn execute_scan_run(
         return Ok(());
     }
 
-    let history_limit = {
-        let settings = state.settings.lock().await;
-        settings.scan_history_limit as usize
-    };
-    if let Err(error) = history::append_scan_history(
+    // Serializing and writing the full results Vec (plus reading the previous
+    // run for the diff) is blocking file IO — keep it off the runtime.
+    append_history_blocking(
         &app,
+        &state,
         &run_id,
         &config,
         &summary,
         completed_scan.results,
-        history_limit,
-    ) {
-        log::warn!("Failed to write scan history for {}: {}", run_id, error);
-    }
+    )
+    .await;
 
     let _ = app.emit(
         "scan://complete",
@@ -2333,19 +2583,16 @@ async fn execute_scan_run(
 
     let mut channel_logs = completed_scan.channel_logs;
     channel_logs.sort_by_key(|entry| entry.channel_index);
-    state
-        .with_window_scan_state(&scan_scope, |scan_state| {
-            scan_state.scan_log = Some(ScanDebugLog {
-                run_id: run_id.clone(),
-                playlist_path: config.file_path.clone(),
-                source_identity: config.source_identity.clone(),
-                started_at_epoch_ms: scan_started_at_epoch_ms,
-                finished_at_epoch_ms: now_epoch_ms(),
-                summary,
-                channels: channel_logs,
-            });
-        })
-        .await;
+    store_scan_log(
+        &state,
+        &scan_scope,
+        &run_id,
+        &config,
+        scan_started_at_epoch_ms,
+        summary,
+        channel_logs,
+    )
+    .await;
     cleanup_resume_files(&log_file, &checkpoint_file);
     Ok(())
 }
@@ -2575,17 +2822,7 @@ pub async fn quick_check_channel(
     };
 
     let (status, stream_url, latency_ms, error_reason) = match outcome {
-        Ok(o) => {
-            let status = match o.status.as_str() {
-                "Alive" => ChannelStatus::Alive,
-                "DRM" => ChannelStatus::Drm,
-                "Geoblocked" => ChannelStatus::Geoblocked,
-                "Geoblocked (Confirmed)" => ChannelStatus::GeoblockedConfirmed,
-                "Geoblocked (Unconfirmed)" => ChannelStatus::GeoblockedUnconfirmed,
-                _ => ChannelStatus::Dead,
-            };
-            (status, o.stream_url, o.latency_ms, o.last_error_reason)
-        }
+        Ok(o) => (o.status, o.stream_url, o.latency_ms, o.last_error_reason),
         Err(_) => (ChannelStatus::Dead, None, None, None),
     };
 

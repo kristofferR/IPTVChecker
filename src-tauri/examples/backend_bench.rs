@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use iptv_checker_lib::engine::checker::check_channel_status_with_debug;
+use iptv_checker_lib::models::channel::ChannelStatus;
 use iptv_checker_lib::models::scan::RetryBackoff;
 use serde::Serialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -123,7 +124,7 @@ async fn main() -> Result<(), String> {
         .map_err(|error| format!("failed to build HTTP client: {}", error))?;
     let cancel = CancellationToken::new();
     let semaphore = Arc::new(Semaphore::new(concurrency));
-    let (tx, mut rx) = mpsc::unbounded_channel::<Result<String, String>>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<Result<ChannelStatus, String>>();
 
     let first_result_ms = Arc::new(AtomicU64::new(FIRST_RESULT_UNSET));
     let started_at = Instant::now();
@@ -177,12 +178,12 @@ async fn main() -> Result<(), String> {
 
     while let Some(status_result) = rx.recv().await {
         match status_result {
-            Ok(status) => match status.as_str() {
-                "Alive" => alive += 1,
-                "DRM" => drm += 1,
-                "Geoblocked" | "Geoblocked (Confirmed)" | "Geoblocked (Unconfirmed)" => {
-                    geoblocked += 1
-                }
+            Ok(status) => match status {
+                ChannelStatus::Alive => alive += 1,
+                ChannelStatus::Drm => drm += 1,
+                ChannelStatus::Geoblocked
+                | ChannelStatus::GeoblockedConfirmed
+                | ChannelStatus::GeoblockedUnconfirmed => geoblocked += 1,
                 _ => dead += 1,
             },
             Err(_) => errors += 1,

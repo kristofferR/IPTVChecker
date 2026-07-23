@@ -21,17 +21,6 @@ export function isRunScopedEventForActiveRun(
   return activeRunId != null && activeRunId === eventRunId;
 }
 
-export function applyResultBatch(
-  previous: ScanResultLookup,
-  batch: ChannelResult[],
-): ScanResultLookup {
-  const updated = { ...previous };
-  for (const result of batch) {
-    updated[result.index] = result;
-  }
-  return updated;
-}
-
 export function applyResultUpdates(
   previous: ScanResultCollections,
   batch: ChannelResult[],

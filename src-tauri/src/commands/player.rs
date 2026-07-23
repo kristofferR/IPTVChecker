@@ -1,14 +1,11 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
-use tauri::Manager;
 
 use crate::error::AppError;
-use crate::state::AppState;
 
 static NEXT_TEMP_PLAYLIST_ID: AtomicU64 = AtomicU64::new(0);
 const TEMP_PLAYLIST_PREFIX: &str = "iptv-checker-single-channel-";
@@ -182,35 +179,7 @@ pub async fn open_channel_in_player(channel: PlayerChannel) -> Result<(), AppErr
 
 #[tauri::command]
 pub async fn get_streaming_proxy_port(app: tauri::AppHandle) -> u16 {
-    let state = app.state::<Arc<AppState>>();
-    let port = state.streaming_proxy_port.load(Ordering::Relaxed);
-    if port > 0 {
-        return port;
-    }
-
-    let _guard = state.streaming_proxy_start_lock.lock().await;
-    let port = state.streaming_proxy_port.load(Ordering::Relaxed);
-    if port > 0 {
-        return port;
-    }
-
-    match crate::engine::stream_proxy::start_streaming_proxy(app.clone()).await {
-        Ok(port) => {
-            state.streaming_proxy_port.store(port, Ordering::Relaxed);
-            log::info!(
-                "[StreamProxy] Lazily started localhost streaming proxy on port {}",
-                port
-            );
-            port
-        }
-        Err(error) => {
-            log::warn!(
-                "[StreamProxy] Failed to lazily start localhost streaming proxy from player command: {}",
-                error
-            );
-            0
-        }
-    }
+    crate::engine::stream_proxy::ensure_streaming_proxy_port(app).await
 }
 
 #[cfg(test)]

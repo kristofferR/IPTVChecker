@@ -3,6 +3,7 @@ pub mod engine;
 pub mod error;
 pub mod models;
 pub mod state;
+pub mod urlnorm;
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -574,16 +575,22 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     let builder = builder.plugin(tauri_plugin_macos_haptics::init());
 
-    #[cfg(target_os = "macos")]
+    // One menu builder for all desktop platforms; only the modifier key,
+    // the macOS app/Window menus, and where Settings/Quit live differ.
     let builder = builder.menu(|app| {
-        use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+        use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+
+        let is_macos = cfg!(target_os = "macos");
+        let modifier = if is_macos { "Cmd" } else { "Ctrl" };
+        let accel = |keys: &str| format!("{modifier}+{keys}");
 
         let settings_item = MenuItemBuilder::with_id("menu.app.settings", "Settings...")
-            .accelerator("Cmd+,")
+            .accelerator(accel(","))
             .build(app)?;
 
+        #[cfg(target_os = "macos")]
         let app_menu = SubmenuBuilder::new(app, "IPTV Checker")
-            .about(Some(AboutMetadata::default()))
+            .about(Some(tauri::menu::AboutMetadata::default()))
             .separator()
             .item(&settings_item)
             .separator()
@@ -597,47 +604,54 @@ pub fn run() {
             .build()?;
 
         let new_window_item = MenuItemBuilder::with_id("menu.file.new_window", "New Window")
-            .accelerator("Cmd+N")
+            .accelerator(accel("N"))
             .build(app)?;
         let open_item = MenuItemBuilder::with_id("menu.file.open", "Open Playlist...")
-            .accelerator("Cmd+O")
+            .accelerator(accel("O"))
             .build(app)?;
         let open_folder_item = MenuItemBuilder::with_id("menu.file.open_folder", "Open Folder...")
-            .accelerator("Cmd+Shift+O")
+            .accelerator(accel("Shift+O"))
             .build(app)?;
         let open_url_item = MenuItemBuilder::with_id("menu.file.open_url", "Open URL...")
-            .accelerator("Cmd+Shift+U")
+            .accelerator(accel("Shift+U"))
             .build(app)?;
         let export_csv_item = MenuItemBuilder::with_id("menu.file.export_csv", "Export CSV")
-            .accelerator("Cmd+Shift+E")
+            .accelerator(accel("Shift+E"))
             .build(app)?;
 
-        let file_menu = SubmenuBuilder::with_id(app, "menu.file", "File")
-            .item(&new_window_item)
-            .separator()
-            .item(&open_item)
-            .item(&open_folder_item)
-            .item(&open_url_item)
-            .item(
-                &SubmenuBuilder::with_id(app, "menu.file.open_recent", "Open Recent")
-                    .text("menu.file.recent.0", "No recent playlists")
-                    .separator()
-                    .text("menu.file.recent.clear", "Clear Recent")
-                    .build()?,
-            )
-            .item(
-                &SubmenuBuilder::with_id(app, "menu.file.open_saved", "Open Saved")
-                    .text("menu.file.saved.0", "No saved playlists")
-                    .build()?,
-            )
-            .text("menu.file.manage_saved", "Manage Saved Playlists…")
-            .separator()
-            .item(&export_csv_item)
-            .text("menu.file.export_split", "Export Split Playlists")
-            .text("menu.file.export_renamed", "Export Renamed Playlist")
-            .text("menu.file.export_filtered_m3u", "Export Filtered M3U/M3U8")
-            .text("menu.file.export_scan_log", "Export Scan Log (JSON)")
-            .build()?;
+        let file_menu = {
+            let file_builder = SubmenuBuilder::with_id(app, "menu.file", "File")
+                .item(&new_window_item)
+                .separator()
+                .item(&open_item)
+                .item(&open_folder_item)
+                .item(&open_url_item)
+                .item(
+                    &SubmenuBuilder::with_id(app, "menu.file.open_recent", "Open Recent")
+                        .text("menu.file.recent.0", "No recent playlists")
+                        .separator()
+                        .text("menu.file.recent.clear", "Clear Recent")
+                        .build()?,
+                )
+                .item(
+                    &SubmenuBuilder::with_id(app, "menu.file.open_saved", "Open Saved")
+                        .text("menu.file.saved.0", "No saved playlists")
+                        .build()?,
+                )
+                .text("menu.file.manage_saved", "Manage Saved Playlists…")
+                .separator()
+                .item(&export_csv_item)
+                .text("menu.file.export_split", "Export Split Playlists")
+                .text("menu.file.export_renamed", "Export Renamed Playlist")
+                .text("menu.file.export_filtered_m3u", "Export Filtered M3U/M3U8")
+                .text("menu.file.export_scan_log", "Export Scan Log (JSON)");
+
+            // Settings and Quit live in the app menu on macOS, in File elsewhere.
+            #[cfg(not(target_os = "macos"))]
+            let file_builder = file_builder.separator().item(&settings_item).quit();
+
+            file_builder.build()?
+        };
 
         let edit_menu = SubmenuBuilder::new(app, "Edit")
             .undo()
@@ -650,15 +664,15 @@ pub fn run() {
 
         let toggle_sidebar_item =
             MenuItemBuilder::with_id("menu.view.toggle_sidebar", "Toggle Sidebar")
-                .accelerator("Cmd+Shift+L")
+                .accelerator(accel("Shift+L"))
                 .build(app)?;
         let toggle_report_item =
             MenuItemBuilder::with_id("menu.view.toggle_report", "Toggle Report")
-                .accelerator("Cmd+Shift+R")
+                .accelerator(accel("Shift+R"))
                 .build(app)?;
         let toggle_prescan_item =
             MenuItemBuilder::with_id("menu.view.toggle_prescan_filter", "Show Source Filter")
-                .accelerator("Cmd+Shift+F")
+                .accelerator(accel("Shift+F"))
                 .build(app)?;
         let toggle_header_button_text_item = MenuItemBuilder::with_id(
             "menu.view.toggle_header_button_text",
@@ -667,11 +681,11 @@ pub fn run() {
         .build(app)?;
         let clear_filters_item =
             MenuItemBuilder::with_id("menu.view.clear_filters", "Clear Filters")
-                .accelerator("Cmd+Shift+X")
+                .accelerator(accel("Shift+X"))
                 .build(app)?;
 
         let log_window_item = MenuItemBuilder::with_id("menu.view.log_window", "Log")
-            .accelerator("Alt+Cmd+L")
+            .accelerator(if is_macos { "Alt+Cmd+L" } else { "Ctrl+Alt+L" })
             .build(app)?;
 
         let view_menu = SubmenuBuilder::new(app, "View")
@@ -686,13 +700,13 @@ pub fn run() {
             .build()?;
 
         let start_scan_item = MenuItemBuilder::with_id("menu.scan.start", "Start Scan")
-            .accelerator("Cmd+R")
+            .accelerator(accel("R"))
             .build(app)?;
         let pause_scan_item = MenuItemBuilder::with_id("menu.scan.pause", "Pause Scan")
-            .accelerator("Cmd+P")
+            .accelerator(accel("P"))
             .build(app)?;
         let stop_scan_item = MenuItemBuilder::with_id("menu.scan.stop", "Stop Scan")
-            .accelerator("Cmd+.")
+            .accelerator(accel("."))
             .build(app)?;
 
         let scan_menu = SubmenuBuilder::new(app, "Scan")
@@ -705,16 +719,8 @@ pub fn run() {
             .build()?;
 
         let shortcuts_item = MenuItemBuilder::with_id("menu.help.shortcuts", "Keyboard Shortcuts")
-            .accelerator("Cmd+/")
+            .accelerator(accel("/"))
             .build(app)?;
-
-        let window_menu = SubmenuBuilder::with_id(app, tauri::menu::WINDOW_SUBMENU_ID, "Window")
-            .minimize()
-            .maximize()
-            .fullscreen()
-            .separator()
-            .close_window()
-            .build()?;
 
         let help_menu = SubmenuBuilder::new(app, "Help")
             .item(&shortcuts_item)
@@ -722,152 +728,37 @@ pub fn run() {
             .text("menu.help.check_updates", "Check for Updates")
             .build()?;
 
-        MenuBuilder::new(app)
-            .item(&app_menu)
-            .item(&file_menu)
-            .item(&edit_menu)
-            .item(&scan_menu)
-            .item(&view_menu)
-            .item(&window_menu)
-            .item(&help_menu)
-            .build()
-    });
-
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    let builder = builder.menu(|app| {
-        use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
-
-        let new_window_item = MenuItemBuilder::with_id("menu.file.new_window", "New Window")
-            .accelerator("Ctrl+N")
-            .build(app)?;
-        let open_item = MenuItemBuilder::with_id("menu.file.open", "Open Playlist...")
-            .accelerator("Ctrl+O")
-            .build(app)?;
-        let open_folder_item = MenuItemBuilder::with_id("menu.file.open_folder", "Open Folder...")
-            .accelerator("Ctrl+Shift+O")
-            .build(app)?;
-        let open_url_item = MenuItemBuilder::with_id("menu.file.open_url", "Open URL...")
-            .accelerator("Ctrl+Shift+U")
-            .build(app)?;
-        let export_csv_item = MenuItemBuilder::with_id("menu.file.export_csv", "Export CSV")
-            .accelerator("Ctrl+Shift+E")
-            .build(app)?;
-        let settings_item = MenuItemBuilder::with_id("menu.app.settings", "Settings...")
-            .accelerator("Ctrl+,")
-            .build(app)?;
-
-        let file_menu = SubmenuBuilder::with_id(app, "menu.file", "File")
-            .item(&new_window_item)
-            .separator()
-            .item(&open_item)
-            .item(&open_folder_item)
-            .item(&open_url_item)
-            .item(
-                &SubmenuBuilder::with_id(app, "menu.file.open_recent", "Open Recent")
-                    .text("menu.file.recent.0", "No recent playlists")
+        #[cfg(target_os = "macos")]
+        {
+            let window_menu =
+                SubmenuBuilder::with_id(app, tauri::menu::WINDOW_SUBMENU_ID, "Window")
+                    .minimize()
+                    .maximize()
+                    .fullscreen()
                     .separator()
-                    .text("menu.file.recent.clear", "Clear Recent")
-                    .build()?,
-            )
-            .item(
-                &SubmenuBuilder::with_id(app, "menu.file.open_saved", "Open Saved")
-                    .text("menu.file.saved.0", "No saved playlists")
-                    .build()?,
-            )
-            .text("menu.file.manage_saved", "Manage Saved Playlists…")
-            .separator()
-            .item(&export_csv_item)
-            .text("menu.file.export_split", "Export Split Playlists")
-            .text("menu.file.export_renamed", "Export Renamed Playlist")
-            .text("menu.file.export_filtered_m3u", "Export Filtered M3U/M3U8")
-            .text("menu.file.export_scan_log", "Export Scan Log (JSON)")
-            .separator()
-            .item(&settings_item)
-            .quit()
-            .build()?;
+                    .close_window()
+                    .build()?;
 
-        let edit_menu = SubmenuBuilder::new(app, "Edit")
-            .undo()
-            .redo()
-            .separator()
-            .cut()
-            .copy()
-            .paste()
-            .build()?;
-
-        let toggle_sidebar_item =
-            MenuItemBuilder::with_id("menu.view.toggle_sidebar", "Toggle Sidebar")
-                .accelerator("Ctrl+Shift+L")
-                .build(app)?;
-        let toggle_report_item =
-            MenuItemBuilder::with_id("menu.view.toggle_report", "Toggle Report")
-                .accelerator("Ctrl+Shift+R")
-                .build(app)?;
-        let toggle_prescan_item =
-            MenuItemBuilder::with_id("menu.view.toggle_prescan_filter", "Show Source Filter")
-                .accelerator("Ctrl+Shift+F")
-                .build(app)?;
-        let toggle_header_button_text_item = MenuItemBuilder::with_id(
-            "menu.view.toggle_header_button_text",
-            "Show Header Button Text",
-        )
-        .build(app)?;
-        let clear_filters_item =
-            MenuItemBuilder::with_id("menu.view.clear_filters", "Clear Filters")
-                .accelerator("Ctrl+Shift+X")
-                .build(app)?;
-
-        let log_window_item = MenuItemBuilder::with_id("menu.view.log_window", "Log")
-            .accelerator("Ctrl+Alt+L")
-            .build(app)?;
-
-        let view_menu = SubmenuBuilder::new(app, "View")
-            .item(&toggle_sidebar_item)
-            .item(&toggle_report_item)
-            .item(&toggle_prescan_item)
-            .item(&toggle_header_button_text_item)
-            .item(&clear_filters_item)
-            .text("menu.view.history", "Scan History")
-            .separator()
-            .item(&log_window_item)
-            .build()?;
-
-        let start_scan_item = MenuItemBuilder::with_id("menu.scan.start", "Start Scan")
-            .accelerator("Ctrl+R")
-            .build(app)?;
-        let pause_scan_item = MenuItemBuilder::with_id("menu.scan.pause", "Pause Scan")
-            .accelerator("Ctrl+P")
-            .build(app)?;
-        let stop_scan_item = MenuItemBuilder::with_id("menu.scan.stop", "Stop Scan")
-            .accelerator("Ctrl+.")
-            .build(app)?;
-
-        let scan_menu = SubmenuBuilder::new(app, "Scan")
-            .item(&start_scan_item)
-            .item(&pause_scan_item)
-            .text("menu.scan.resume", "Resume Scan")
-            .item(&stop_scan_item)
-            .separator()
-            .text("menu.scan.settings", "Scan Settings")
-            .build()?;
-
-        let shortcuts_item = MenuItemBuilder::with_id("menu.help.shortcuts", "Keyboard Shortcuts")
-            .accelerator("Ctrl+/")
-            .build(app)?;
-
-        let help_menu = SubmenuBuilder::new(app, "Help")
-            .item(&shortcuts_item)
-            .separator()
-            .text("menu.help.check_updates", "Check for Updates")
-            .build()?;
-
-        MenuBuilder::new(app)
-            .item(&file_menu)
-            .item(&edit_menu)
-            .item(&scan_menu)
-            .item(&view_menu)
-            .item(&help_menu)
-            .build()
+            MenuBuilder::new(app)
+                .item(&app_menu)
+                .item(&file_menu)
+                .item(&edit_menu)
+                .item(&scan_menu)
+                .item(&view_menu)
+                .item(&window_menu)
+                .item(&help_menu)
+                .build()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            MenuBuilder::new(app)
+                .item(&file_menu)
+                .item(&edit_menu)
+                .item(&scan_menu)
+                .item(&view_menu)
+                .item(&help_menu)
+                .build()
+        }
     });
 
     let builder = builder.on_menu_event(|app, event| {
@@ -877,32 +768,30 @@ pub fn run() {
             return;
         }
 
-        let frontend_event = match event.id().as_ref() {
+        // Indexed recent/saved entries map by suffix rather than ten
+        // hand-written arms each.
+        let menu_id = event.id().as_ref();
+        let indexed_event = |prefix: &str, target: &str| -> Option<String> {
+            let index = menu_id.strip_prefix(prefix)?;
+            index
+                .parse::<u8>()
+                .ok()
+                .map(|index| format!("menu://{target}-{index}"))
+        };
+        if let Some(name) = indexed_event("menu.file.recent.", "open-recent")
+            .or_else(|| indexed_event("menu.file.saved.", "open-saved"))
+        {
+            log::debug!("menu event → frontend: {name}");
+            emit_menu_event_to_focused_window(app, &name);
+            return;
+        }
+
+        let frontend_event = match menu_id {
             "menu.app.settings" => Some("menu://open-settings"),
             "menu.file.open" => Some("menu://open-playlist"),
             "menu.file.open_folder" => Some("menu://open-folder"),
             "menu.file.open_url" => Some("menu://open-url"),
-            "menu.file.recent.0" => Some("menu://open-recent-0"),
-            "menu.file.recent.1" => Some("menu://open-recent-1"),
-            "menu.file.recent.2" => Some("menu://open-recent-2"),
-            "menu.file.recent.3" => Some("menu://open-recent-3"),
-            "menu.file.recent.4" => Some("menu://open-recent-4"),
-            "menu.file.recent.5" => Some("menu://open-recent-5"),
-            "menu.file.recent.6" => Some("menu://open-recent-6"),
-            "menu.file.recent.7" => Some("menu://open-recent-7"),
-            "menu.file.recent.8" => Some("menu://open-recent-8"),
-            "menu.file.recent.9" => Some("menu://open-recent-9"),
             "menu.file.recent.clear" => Some("menu://clear-recent"),
-            "menu.file.saved.0" => Some("menu://open-saved-0"),
-            "menu.file.saved.1" => Some("menu://open-saved-1"),
-            "menu.file.saved.2" => Some("menu://open-saved-2"),
-            "menu.file.saved.3" => Some("menu://open-saved-3"),
-            "menu.file.saved.4" => Some("menu://open-saved-4"),
-            "menu.file.saved.5" => Some("menu://open-saved-5"),
-            "menu.file.saved.6" => Some("menu://open-saved-6"),
-            "menu.file.saved.7" => Some("menu://open-saved-7"),
-            "menu.file.saved.8" => Some("menu://open-saved-8"),
-            "menu.file.saved.9" => Some("menu://open-saved-9"),
             "menu.file.manage_saved" => Some("menu://manage-saved"),
             "menu.file.export_csv" => Some("menu://export-csv"),
             "menu.file.export_split" => Some("menu://export-split"),
@@ -988,30 +877,20 @@ pub fn run() {
                 emit_open_paths_to_focused_window(&app.handle(), &launch_open_paths);
             }
 
-            // Start the localhost streaming proxy for MPEG-TS playback.
-            // Use a oneshot channel so we block until the port is known,
-            // preventing a race where the user clicks Play before the proxy
-            // is ready (get_streaming_proxy_port would return 0).
+            // Warm up the localhost streaming proxy in the background. Play
+            // paths go through ensure_streaming_proxy_port (same start lock,
+            // with a liveness probe), so an early click can't double-start a
+            // listener — and setup no longer blocks window creation on the
+            // bind, which previously had no timeout.
             {
-                let state = app.state::<Arc<AppState>>().inner().clone();
-                let (port_tx, port_rx) = tokio::sync::oneshot::channel();
                 let handle_for_proxy = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    match engine::stream_proxy::start_streaming_proxy(handle_for_proxy).await {
-                        Ok(port) => {
-                            let _ = port_tx.send(port);
-                        }
-                        Err(error) => {
-                            log::error!("Failed to start streaming proxy: {}", error);
-                            let _ = port_tx.send(0);
-                        }
+                    let port =
+                        engine::stream_proxy::ensure_streaming_proxy_port(handle_for_proxy).await;
+                    if port == 0 {
+                        log::error!("Failed to start streaming proxy at startup");
                     }
                 });
-                if let Ok(port) = port_rx.blocking_recv() {
-                    if port > 0 {
-                        state.streaming_proxy_port.store(port, Ordering::Relaxed);
-                    }
-                }
             }
 
             // Background cleanup: evict old screenshot dirs per retention policy
@@ -1160,7 +1039,7 @@ pub fn run() {
             commands::saved::delete_saved_playlist,
             commands::saved::open_saved_playlist,
             commands::saved::rename_playlist_source,
-            commands::playlist::test_xtream_servers,
+            commands::server_test::test_xtream_servers,
         ])
         .on_page_load(|webview, payload| {
             if payload.event() != PageLoadEvent::Finished {

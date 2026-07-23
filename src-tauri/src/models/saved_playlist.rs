@@ -8,6 +8,13 @@ pub enum SavedPlaylistKind {
     Xtream,
 }
 
+/// Saved playlist sources, persisted in settings.json in the app data dir.
+///
+/// Deliberate trade-off: Xtream credentials are stored in plaintext rather
+/// than the OS keychain. IPTV portal credentials are low-sensitivity (shared
+/// provider logins already embedded in M3U URLs), and keychain prompts on
+/// every launch would hurt more than they protect. Revisit if the app ever
+/// stores credentials that unlock anything beyond the playlists themselves.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SavedPlaylistSource {

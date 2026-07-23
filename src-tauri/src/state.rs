@@ -24,12 +24,14 @@ fn now_epoch_ms() -> u64 {
 #[derive(Clone)]
 pub struct CachedPlaylistPreview {
     pub source_mtime_ms: Option<u64>,
-    pub preview: PlaylistPreview,
+    // Arc so cache hits hand out a reference instead of deep-copying a
+    // potentially 100k-channel preview on every open/scan start.
+    pub preview: Arc<PlaylistPreview>,
     pub cached_at_epoch_ms: u64,
 }
 
 impl CachedPlaylistPreview {
-    fn new(preview: PlaylistPreview, source_mtime_ms: Option<u64>) -> Self {
+    fn new(preview: Arc<PlaylistPreview>, source_mtime_ms: Option<u64>) -> Self {
         Self {
             source_mtime_ms,
             preview,
@@ -138,11 +140,11 @@ impl AppState {
         &self,
         cache_key: &str,
         source_mtime_ms: Option<u64>,
-    ) -> Option<PlaylistPreview> {
+    ) -> Option<Arc<PlaylistPreview>> {
         let cache = self.playlist_preview_cache.lock().await;
         cache.get(cache_key).and_then(|cached| {
             if cached.source_mtime_ms == source_mtime_ms {
-                Some(cached.preview.clone())
+                Some(Arc::clone(&cached.preview))
             } else {
                 None
             }
@@ -152,7 +154,7 @@ impl AppState {
     pub async fn put_cached_playlist_preview(
         &self,
         cache_key: String,
-        preview: PlaylistPreview,
+        preview: Arc<PlaylistPreview>,
         source_mtime_ms: Option<u64>,
     ) {
         let mut cache = self.playlist_preview_cache.lock().await;

@@ -1,10 +1,11 @@
 import type { StateCreator } from "zustand";
 import type { AppStore, UiSlice } from "../types";
 import { inferPlatformFromNavigator } from "../../lib/platform";
+import { isScanActive } from "../../lib/scanState";
 
 const initialPlatform = inferPlatformFromNavigator();
 
-export const createUiSlice: StateCreator<AppStore, [], [], UiSlice> = (set) => ({
+export const createUiSlice: StateCreator<AppStore, [], [], UiSlice> = (set, get) => ({
   platform: initialPlatform,
   isMac: initialPlatform === "macos",
   sidebarHidden: false,
@@ -13,6 +14,9 @@ export const createUiSlice: StateCreator<AppStore, [], [], UiSlice> = (set) => (
     return saved ? Math.max(100, Math.min(600, Number(saved))) : 288;
   })(),
   showReportPanel: false,
+  reportAutoRevealBlocked: false,
+  reportAutoRevealDone: false,
+  reportWasAutoShown: false,
   reportSidebarWidth: (() => {
     const saved = localStorage.getItem("report-sidebar-width");
     return saved ? Math.max(260, Math.min(700, Number(saved))) : 330;
@@ -32,9 +36,51 @@ export const createUiSlice: StateCreator<AppStore, [], [], UiSlice> = (set) => (
 
   setPlatform: (platform) => set({ platform, isMac: platform === "macos" }),
   setSidebarHidden: (sidebarHidden) => set({ sidebarHidden }),
-  toggleSidebar: () => set((state) => ({ sidebarHidden: !state.sidebarHidden })),
   setSidebarWidth: (sidebarWidth) => set({ sidebarWidth }),
-  toggleReportPanel: () => set((state) => ({ showReportPanel: !state.showReportPanel })),
+  // Manual visibility changes own the auto-reveal bookkeeping so every
+  // entry point (toolbar, menu, stats bar) behaves identically: during an
+  // active scan, manually opening marks auto-reveal done and manually
+  // closing blocks it from popping the panel back open.
+  setReportPanelManually: (visible) =>
+    set((state) => {
+      const active = isScanActive(state.scanState);
+      return {
+        showReportPanel: visible,
+        reportWasAutoShown: false,
+        ...(active
+          ? visible
+            ? { reportAutoRevealBlocked: false, reportAutoRevealDone: true }
+            : { reportAutoRevealBlocked: true }
+          : {}),
+      };
+    }),
+  toggleReportPanel: () => {
+    const state = get();
+    state.setReportPanelManually(!state.showReportPanel);
+  },
+  resetReportAutoReveal: () =>
+    set({
+      showReportPanel: false,
+      reportAutoRevealBlocked: false,
+      reportAutoRevealDone: false,
+      reportWasAutoShown: false,
+    }),
+  prepareReportAutoRevealForScanStart: () =>
+    set((state) => ({
+      reportAutoRevealBlocked: false,
+      reportAutoRevealDone: false,
+      reportWasAutoShown: false,
+      showReportPanel:
+        state.reportWasAutoShown && state.showReportPanel
+          ? false
+          : state.showReportPanel,
+    })),
+  autoRevealReportPanel: () =>
+    set({
+      reportAutoRevealDone: true,
+      reportWasAutoShown: true,
+      showReportPanel: true,
+    }),
   setShowReportPanel: (showReportPanel) => set({ showReportPanel }),
   setReportSidebarWidth: (reportSidebarWidth) => set({ reportSidebarWidth }),
   setLightboxOpen: (lightboxOpen) => set({ lightboxOpen }),

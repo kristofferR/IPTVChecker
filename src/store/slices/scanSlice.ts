@@ -25,17 +25,6 @@ export const createScanSlice: StateCreator<AppStore, [], [], ScanSlice> = (set) 
   screenshotsPaused: false,
   networkPaused: false,
 
-  setResults: (results) => set({ results }),
-  setFlatResults: (flatResults) => set({ flatResults }),
-  setUiMetrics: (uiMetrics) => set({ uiMetrics }),
-  setDuplicateIndices: (duplicateIndices) => set({ duplicateIndices }),
-  setProgress: (progress) => set({ progress }),
-  setSummary: (summary) => set({ summary }),
-  setScanState: (scanState) => set({ scanState }),
-  setScanError: (scanError) => set({ scanError }),
-  setTelemetry: (telemetry) => set({ telemetry }),
-  setScreenshotsPaused: (screenshotsPaused) => set({ screenshotsPaused }),
-  setNetworkPaused: (networkPaused) => set({ networkPaused }),
   applyScanCollections: (update: ScanCollectionsUpdate) =>
     set({
       results: update.results,

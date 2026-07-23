@@ -1,6 +1,6 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use reqwest::header::{HeaderValue, CONTENT_TYPE, RANGE, USER_AGENT};
+use reqwest::header::{HeaderValue, CONTENT_TYPE, LOCATION, RANGE, USER_AGENT};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::Manager;
@@ -23,6 +23,12 @@ const PROXY_BUFFERED_RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration
 /// upstream finishes producing the next segment. Keep their per-read timeout
 /// aligned with the bounded response timeout.
 const PROXY_BUFFERED_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Hard byte cap for buffered scheme-handler responses. Generous enough for
+/// any real manifest or VOD segment, but stops a misclassified live stream
+/// (e.g. an endless MPEG-TS behind an .m3u8-looking URL) from pushing
+/// hundreds of MB into memory within the response timeout window.
+const PROXY_BUFFERED_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Per-read inactivity timeout — resets on every successful read, so it does NOT
 /// cap total stream duration. Only kills truly dead/stalled connections.
@@ -129,118 +135,17 @@ pub async fn ensure_streaming_proxy_port(app: tauri::AppHandle) -> u16 {
 }
 
 fn is_m3u8_response(content_type: &str, url: &str) -> bool {
-    let ct = content_type.to_lowercase();
-    if ct.contains("application/vnd.apple.mpegurl") || ct.contains("application/x-mpegurl") {
-        return true;
-    }
-    if let Ok(parsed) = Url::parse(url) {
-        let path = parsed.path().to_lowercase();
-        if path.ends_with(".m3u8") {
-            return true;
-        }
-    }
-    false
+    crate::engine::proxy_common::is_m3u8_response(content_type, url)
 }
 
 /// Rewrite URIs in an HLS manifest so they go through the stream proxy.
-///
-/// Handles:
-/// - Bare URI lines (segment and playlist references)
-/// - URI="..." attributes in #EXT-X-MAP, #EXT-X-KEY, #EXT-X-MEDIA, #EXT-X-SESSION-KEY
 fn rewrite_m3u8_manifest(body: &str, base_url: &str) -> String {
-    let base = match Url::parse(base_url) {
-        Ok(u) => u,
-        Err(_) => return body.to_string(),
-    };
-
-    let mut output = String::with_capacity(body.len());
-    for line in body.lines() {
-        let trimmed = line.trim();
-
-        if trimmed.is_empty() {
-            output.push('\n');
-            continue;
-        }
-
-        // Rewrite URI="..." attributes in HLS tags
-        if trimmed.starts_with('#') {
-            let upper = trimmed.to_ascii_uppercase();
-            if (upper.starts_with("#EXT-X-MAP:")
-                || upper.starts_with("#EXT-X-KEY:")
-                || upper.starts_with("#EXT-X-MEDIA:")
-                || upper.starts_with("#EXT-X-SESSION-KEY:"))
-                && trimmed.contains("URI=")
-            {
-                output.push_str(&rewrite_tag_uri(trimmed, &base));
-            } else {
-                output.push_str(line);
-            }
-            output.push('\n');
-            continue;
-        }
-
-        // Non-comment, non-empty line: a URI reference
-        if let Ok(resolved) = base.join(trimmed) {
-            let encoded = encode_proxy_url(resolved.as_str());
-            output.push_str(&format!("streamproxy://localhost/{encoded}"));
-        } else {
-            output.push_str(line);
-        }
-        output.push('\n');
-    }
-
-    output
-}
-
-/// Rewrite the URI="..." value inside an HLS tag line.
-fn rewrite_tag_uri(line: &str, base: &Url) -> String {
-    // Find URI=" (case-insensitive)
-    let upper = line.to_ascii_uppercase();
-    let Some(uri_pos) = upper.find("URI=") else {
-        return line.to_string();
-    };
-
-    let after_uri_eq = &line[uri_pos + 4..];
-
-    // Determine quote character (or unquoted)
-    let (quote, uri_start, uri_end) = if after_uri_eq.starts_with('"') {
-        let inner = &after_uri_eq[1..];
-        let end = inner.find('"').unwrap_or(inner.len());
-        (Some('"'), 1, 1 + end)
-    } else if after_uri_eq.starts_with('\'') {
-        let inner = &after_uri_eq[1..];
-        let end = inner.find('\'').unwrap_or(inner.len());
-        (Some('\''), 1, 1 + end)
-    } else {
-        let end = after_uri_eq
-            .find(|c: char| c == ',' || c.is_whitespace())
-            .unwrap_or(after_uri_eq.len());
-        (None, 0, end)
-    };
-
-    let original_uri = &after_uri_eq[uri_start..uri_end];
-    let resolved = match base.join(original_uri) {
-        Ok(u) => u.to_string(),
-        Err(_) => return line.to_string(),
-    };
-    let encoded = encode_proxy_url(&resolved);
-    let proxy_uri = format!("streamproxy://localhost/{encoded}");
-
-    let mut result = String::with_capacity(line.len() + proxy_uri.len());
-    result.push_str(&line[..uri_pos + 4]); // everything up to and including "URI="
-    if let Some(q) = quote {
-        result.push(q);
-        result.push_str(&proxy_uri);
-        result.push(q);
-    } else {
-        result.push_str(&proxy_uri);
-    }
-    // Append the remainder after the original URI value
-    let remainder_offset = uri_pos + 4 + uri_end + if quote.is_some() { 1 } else { 0 };
-    if remainder_offset < line.len() {
-        result.push_str(&line[remainder_offset..]);
-    }
-    result
+    crate::engine::proxy_common::rewrite_hls_manifest(body, base_url, &|resolved| {
+        Some(format!(
+            "streamproxy://localhost/{}",
+            encode_proxy_url(resolved.as_str())
+        ))
+    })
 }
 
 /// Redact query parameters and userinfo from a URL for safe logging.
@@ -375,6 +280,65 @@ async fn is_safe_upstream_url(url: &str) -> bool {
     }
 }
 
+/// Hard cap on manually-followed redirect hops per upstream fetch.
+const MAX_REDIRECT_HOPS: usize = 10;
+
+pub(crate) enum SafeFetchError {
+    /// A hop targeted localhost/private networks/metadata endpoints.
+    Blocked,
+    TooManyRedirects,
+    Request(reqwest::Error),
+}
+
+impl SafeFetchError {
+    pub(crate) fn into_message(self) -> String {
+        match self {
+            Self::Blocked => "request targeted a private or local network address".to_string(),
+            Self::TooManyRedirects => "request exceeded the redirect limit".to_string(),
+            Self::Request(error) => error.without_url().to_string(),
+        }
+    }
+}
+
+/// Fetch a URL, following redirects manually and re-validating every hop with
+/// is_safe_upstream_url. A public upstream that 302s to 127.0.0.1 or
+/// 169.254.169.254 would otherwise bypass the private-network guard, since
+/// reqwest's built-in redirect policy only lets us validate the first URL.
+/// `build_request` receives each hop's URL and must produce the request
+/// (method, headers, timeout) using a client built with Policy::none().
+pub(crate) async fn fetch_with_hop_validation<F>(
+    url: &str,
+    build_request: F,
+) -> Result<reqwest::Response, SafeFetchError>
+where
+    F: Fn(&str) -> reqwest::RequestBuilder,
+{
+    let mut current = url.to_string();
+    for _ in 0..=MAX_REDIRECT_HOPS {
+        if !is_safe_upstream_url(&current).await {
+            return Err(SafeFetchError::Blocked);
+        }
+        let response = build_request(&current)
+            .send()
+            .await
+            .map_err(SafeFetchError::Request)?;
+        if !response.status().is_redirection() {
+            return Ok(response);
+        }
+        let Some(next) = response
+            .headers()
+            .get(LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|location| response.url().join(location).ok())
+        else {
+            // Redirect status without a usable Location — pass it through.
+            return Ok(response);
+        };
+        current = next.to_string();
+    }
+    Err(SafeFetchError::TooManyRedirects)
+}
+
 /// Handle an incoming proxy request: decode the URL, fetch upstream, return response.
 pub async fn handle_proxy_request(
     app: &tauri::AppHandle,
@@ -391,11 +355,6 @@ pub async fn handle_proxy_request(
         }
     };
 
-    if !is_safe_upstream_url(&original_url).await {
-        log::warn!("Stream proxy: blocked request to private/local target");
-        return error_response(403, "Target URL not allowed");
-    }
-
     log::debug!("Stream proxy: fetching {}", redact_url(&original_url));
 
     let state = app.state::<Arc<AppState>>();
@@ -406,23 +365,38 @@ pub async fn handle_proxy_request(
 
     let client = get_or_create_proxy_client(state.inner(), accept_invalid_certs).await;
 
-    let mut req_builder = client
-        .get(&original_url)
-        .header(
-            USER_AGENT,
-            HeaderValue::from_str(&user_agent)
-                .unwrap_or_else(|_| HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")),
-        )
-        .timeout(PROXY_BUFFERED_RESPONSE_TIMEOUT);
+    let range = request.headers().get(RANGE).cloned();
+    let upstream_response = match fetch_with_hop_validation(&original_url, |target| {
+        let mut req_builder = client
+            .get(target)
+            .header(
+                USER_AGENT,
+                HeaderValue::from_str(&user_agent)
+                    .unwrap_or_else(|_| HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")),
+            )
+            .timeout(PROXY_BUFFERED_RESPONSE_TIMEOUT);
 
-    // Forward Range header for partial content requests
-    if let Some(range) = request.headers().get(RANGE) {
-        req_builder = req_builder.header(RANGE, range.clone());
-    }
-
-    let upstream_response = match req_builder.send().await {
+        // Forward Range header for partial content requests
+        if let Some(range) = &range {
+            req_builder = req_builder.header(RANGE, range.clone());
+        }
+        req_builder
+    })
+    .await
+    {
         Ok(resp) => resp,
-        Err(err) => {
+        Err(SafeFetchError::Blocked) => {
+            log::warn!("Stream proxy: blocked request to private/local target");
+            return error_response(403, "Target URL not allowed");
+        }
+        Err(SafeFetchError::TooManyRedirects) => {
+            log::warn!(
+                "Stream proxy: too many redirects for {}",
+                redact_url(&original_url)
+            );
+            return error_response(502, "Too many upstream redirects");
+        }
+        Err(SafeFetchError::Request(err)) => {
             log::warn!(
                 "Stream proxy: upstream request failed for {} ({})",
                 redact_url(&original_url),
@@ -445,9 +419,22 @@ pub async fn handle_proxy_request(
         .unwrap_or("")
         .to_string();
 
-    let body = match upstream_response.bytes().await {
-        Ok(bytes) => bytes.to_vec(),
-        Err(err) => {
+    let body = match crate::engine::proxy_common::read_capped(
+        upstream_response,
+        PROXY_BUFFERED_MAX_BYTES,
+    )
+    .await
+    {
+        Ok(bytes) => bytes,
+        Err(crate::engine::proxy_common::ReadCappedError::TooLarge) => {
+            log::warn!(
+                "Stream proxy: upstream body for {} exceeded {} bytes; refusing to buffer",
+                redact_url(&original_url),
+                PROXY_BUFFERED_MAX_BYTES
+            );
+            return error_response(502, "Upstream response too large");
+        }
+        Err(crate::engine::proxy_common::ReadCappedError::Read(err)) => {
             log::warn!(
                 "Stream proxy: failed to read buffered upstream body for {} ({})",
                 redact_url(&original_url),
@@ -521,7 +508,10 @@ fn build_proxy_client(
     reqwest::Client::builder()
         .danger_accept_invalid_certs(accept_invalid_certs)
         .cookie_store(true)
-        .redirect(reqwest::redirect::Policy::limited(10))
+        // Redirects are followed manually in fetch_with_hop_validation so each
+        // hop is re-checked against the private-network blocklist. Built-in
+        // following would validate only the first URL.
+        .redirect(reqwest::redirect::Policy::none())
         .pool_max_idle_per_host(0)
         .connect_timeout(connect_timeout)
         .read_timeout(read_timeout)
@@ -594,14 +584,34 @@ impl TransportStreamPacer {
     }
 
     fn delay_for_payload(&mut self, payload: &[u8]) -> std::time::Duration {
-        let mut scan = Vec::with_capacity(self.scan_tail.len() + payload.len());
-        scan.extend_from_slice(&self.scan_tail);
-        scan.extend_from_slice(payload);
+        // Scan the payload in place — copying tail+payload wholesale would
+        // re-copy every chunk on the playback hot path. Only the boundary
+        // window (previous tail + the first packets of this payload) needs
+        // stitching, to catch a PCR packet straddling two chunks. Any PCR
+        // found in the payload scan is later in stream order than one in the
+        // boundary window, so payload wins when both hit.
+        let latest_pcr = latest_transport_stream_pcr(payload, self.pcr_pid).or_else(|| {
+            if self.scan_tail.is_empty() {
+                return None;
+            }
+            let boundary_len = payload.len().min(MPEG_TS_PACKET_SIZE * 4);
+            let mut boundary = Vec::with_capacity(self.scan_tail.len() + boundary_len);
+            boundary.extend_from_slice(&self.scan_tail);
+            boundary.extend_from_slice(&payload[..boundary_len]);
+            latest_transport_stream_pcr(&boundary, self.pcr_pid)
+        });
 
-        let latest_pcr = latest_transport_stream_pcr(&scan, self.pcr_pid);
-        let tail_start = scan.len().saturating_sub(MPEG_TS_PACKET_SIZE * 4);
-        self.scan_tail.clear();
-        self.scan_tail.extend_from_slice(&scan[tail_start..]);
+        if payload.len() >= MPEG_TS_PACKET_SIZE * 4 {
+            self.scan_tail.clear();
+            self.scan_tail
+                .extend_from_slice(&payload[payload.len() - MPEG_TS_PACKET_SIZE * 4..]);
+        } else {
+            let mut combined = std::mem::take(&mut self.scan_tail);
+            combined.extend_from_slice(payload);
+            let tail_start = combined.len().saturating_sub(MPEG_TS_PACKET_SIZE * 4);
+            combined.drain(..tail_start);
+            self.scan_tail = combined;
+        }
 
         let Some((pcr_pid, pcr)) = latest_pcr else {
             return std::time::Duration::ZERO;
@@ -1079,7 +1089,7 @@ async fn wait_for_stream_reconnect(
 /// Start a localhost HTTP proxy that streams upstream responses.
 /// Returns the port the server is listening on.
 pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncWriteExt;
     use tokio::net::TcpListener;
 
     let listener = TcpListener::bind("127.0.0.1:0").await?;
@@ -1101,14 +1111,18 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
 
             let app_handle = app.clone();
             tokio::spawn(async move {
-                // Read the HTTP request line to extract the URL
-                let mut buf = vec![0u8; 8192];
-                let n = match socket.read(&mut buf).await {
-                    Ok(0) => return,
-                    Ok(n) => n,
-                    Err(_) => return,
+                // Read the full request head to extract the URL — the
+                // request line and headers can arrive split across segments.
+                let request_bytes = match crate::engine::proxy_common::read_http_request_head(
+                    &mut socket,
+                    8192,
+                )
+                .await
+                {
+                    Ok(Some(bytes)) => bytes,
+                    Ok(None) | Err(_) => return,
                 };
-                let request_str = String::from_utf8_lossy(&buf[..n]);
+                let request_str = String::from_utf8_lossy(&request_bytes);
 
                 // Parse GET /stream?url=ENCODED_URL HTTP/1.1
                 let request = match parse_stream_request(&request_str) {
@@ -1205,23 +1219,40 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     return;
                 }
 
-                let response = match client
-                    .get(&url)
-                    .header(USER_AGENT, user_agent.clone())
-                    .send()
-                    .await
+                let response = match fetch_with_hop_validation(&url, |target| {
+                    client.get(target).header(USER_AGENT, user_agent.clone())
+                })
+                .await
                 {
                     Ok(resp) => resp,
                     Err(err) => {
-                        log::warn!(
-                            "[StreamProxy] Upstream request failed for {} ({})",
-                            redact_url(&url),
-                            reqwest_error_kind(&err)
-                        );
-                        let (status_line, body) = if err.is_timeout() {
-                            ("HTTP/1.1 504 Gateway Timeout", "Upstream request timed out")
-                        } else {
-                            ("HTTP/1.1 502 Bad Gateway", "Upstream request failed")
+                        let (status_line, body) = match &err {
+                            SafeFetchError::Blocked => {
+                                log::warn!(
+                                    "[StreamProxy] Blocked redirect to private/local target for {}",
+                                    redact_url(&url)
+                                );
+                                ("HTTP/1.1 403 Forbidden", "Target URL not allowed")
+                            }
+                            SafeFetchError::TooManyRedirects => {
+                                log::warn!(
+                                    "[StreamProxy] Too many redirects for {}",
+                                    redact_url(&url)
+                                );
+                                ("HTTP/1.1 502 Bad Gateway", "Too many upstream redirects")
+                            }
+                            SafeFetchError::Request(err) => {
+                                log::warn!(
+                                    "[StreamProxy] Upstream request failed for {} ({})",
+                                    redact_url(&url),
+                                    reqwest_error_kind(err)
+                                );
+                                if err.is_timeout() {
+                                    ("HTTP/1.1 504 Gateway Timeout", "Upstream request timed out")
+                                } else {
+                                    ("HTTP/1.1 502 Bad Gateway", "Upstream request failed")
+                                }
+                            }
                         };
                         let response = format!(
                             "{status_line}\r\nContent-Length: {}\r\n\r\n{}",
@@ -1322,11 +1353,10 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                             return;
                         }
 
-                        match client
-                            .get(&url)
-                            .header(USER_AGENT, user_agent.clone())
-                            .send()
-                            .await
+                        match fetch_with_hop_validation(&url, |target| {
+                            client.get(target).header(USER_AGENT, user_agent.clone())
+                        })
+                        .await
                         {
                             Ok(next_response) if next_response.status().is_success() => {
                                 response = next_response;
@@ -1344,10 +1374,18 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                             Err(err) => {
                                 consecutive_empty_attempts =
                                     consecutive_empty_attempts.saturating_add(1);
+                                let kind = match &err {
+                                    SafeFetchError::Blocked => "blocked target".to_string(),
+                                    SafeFetchError::TooManyRedirects => {
+                                        "too many redirects".to_string()
+                                    }
+                                    SafeFetchError::Request(err) => {
+                                        reqwest_error_kind(err).to_string()
+                                    }
+                                };
                                 log::warn!(
-                                    "[StreamProxy] Reconnect failed for {} ({}); retrying",
-                                    redact_url(&url),
-                                    reqwest_error_kind(&err)
+                                    "[StreamProxy] Reconnect failed for {} ({kind}); retrying",
+                                    redact_url(&url)
                                 );
                             }
                         }
@@ -1392,9 +1430,10 @@ fn parse_stream_request(request: &str) -> Option<StreamRequest> {
 
 #[cfg(test)]
 mod tests {
+    use tokio::io::AsyncReadExt;
     use super::*;
     use std::time::{Duration, Instant};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncWriteExt;
     use tokio::net::TcpListener;
 
     #[derive(Clone)]
