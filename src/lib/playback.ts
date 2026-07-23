@@ -141,19 +141,42 @@ function toStreamingProxyUrl(
   return `http://127.0.0.1:${port}/stream?url=${encodeURIComponent(url)}${reconnectParam}${remuxParam}`;
 }
 
-export function getMpegtsPlaybackUrls(
+export type MpegtsPlaybackRouteKind = "direct" | "remux";
+
+export interface MpegtsPlaybackRoute {
+  kind: MpegtsPlaybackRouteKind;
+  url: string;
+}
+
+export function getMpegtsPlaybackRoutes(
   url: string,
   proxyPort: number,
   isLive: boolean,
-): string[] {
+  preferRemux: boolean,
+): MpegtsPlaybackRoute[] {
   if (proxyPort <= 0) {
-    return [url];
+    return [{ kind: "direct", url }];
   }
 
-  const proxyUrl = toStreamingProxyUrl(url, proxyPort, isLive, false);
-  return isLive
-    ? [toStreamingProxyUrl(url, proxyPort, true, true), proxyUrl]
-    : [proxyUrl];
+  const direct = {
+    kind: "direct",
+    url: toStreamingProxyUrl(url, proxyPort, isLive, false),
+  } satisfies MpegtsPlaybackRoute;
+  if (!isLive) {
+    return [direct];
+  }
+
+  const remux = {
+    kind: "remux",
+    url: toStreamingProxyUrl(url, proxyPort, true, true),
+  } satisfies MpegtsPlaybackRoute;
+  return preferRemux ? [remux, direct] : [direct, remux];
+}
+
+export function shouldTryXtreamHlsBeforeMpegts(
+  startMode: PlaybackStartMode,
+): boolean {
+  return startMode === "recovery";
 }
 
 export function shouldSuspendPlaybackWatchdog(
