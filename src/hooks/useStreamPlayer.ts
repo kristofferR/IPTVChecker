@@ -275,7 +275,8 @@ export const PLAYBACK_RECOVERY_WINDOW_MS = 2 * 60_000;
 // Bound each route independently so a failed speculative route cannot consume
 // the startup budget of a fallback that may still work.
 const PLAYBACK_ROUTE_TIMEOUT_MS = 15_000;
-const LOADING_TIMEOUT_MS = 75_000;
+const MPEGTS_PLAYBACK_ROUTE_TIMEOUT_MS = 25_000;
+const LOADING_TIMEOUT_MS = 90_000;
 const PLAYBACK_RECOVERY_DELAY_MS = 900;
 const PLAYBACK_STALL_GRACE_MS = 15_000;
 const PLAYBACK_NO_PROGRESS_STALL_MS = 20_000;
@@ -1314,7 +1315,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     async (
       url: string,
       signal: AbortSignal,
-      timeoutMs = PLAYBACK_ROUTE_TIMEOUT_MS,
+      timeoutMs = MPEGTS_PLAYBACK_ROUTE_TIMEOUT_MS,
     ): Promise<boolean> => {
       try {
         const mpegtsModule = await import("mpegts.js");
