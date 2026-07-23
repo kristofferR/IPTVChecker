@@ -165,10 +165,12 @@ fn collect_dir_stats(path: &Path) -> Result<(u64, usize), std::io::Error> {
 fn normalize_preset_name(name: &str) -> Result<String, AppError> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        return Err(AppError::Other("Preset name cannot be empty".to_string()));
+        return Err(AppError::Validation(
+            "Preset name cannot be empty".to_string(),
+        ));
     }
     if trimmed.chars().count() > MAX_PRESET_NAME_LENGTH {
-        return Err(AppError::Other(format!(
+        return Err(AppError::Validation(format!(
             "Preset name must be {} characters or fewer",
             MAX_PRESET_NAME_LENGTH
         )));
@@ -676,7 +678,7 @@ pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Re
     if settings.scan_history_limit < MIN_SCAN_HISTORY_LIMIT
         || settings.scan_history_limit > MAX_SCAN_HISTORY_LIMIT
     {
-        return Err(AppError::Other(format!(
+        return Err(AppError::Validation(format!(
             "Invalid scan history limit: must be between {} and {}",
             MIN_SCAN_HISTORY_LIMIT, MAX_SCAN_HISTORY_LIMIT
         )));
@@ -685,7 +687,7 @@ pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Re
         || settings.low_fps_threshold < MIN_LOW_FPS_THRESHOLD
         || settings.low_fps_threshold > MAX_LOW_FPS_THRESHOLD
     {
-        return Err(AppError::Other(format!(
+        return Err(AppError::Validation(format!(
             "Invalid low FPS threshold: must be between {} and {}",
             MIN_LOW_FPS_THRESHOLD, MAX_LOW_FPS_THRESHOLD
         )));
@@ -694,7 +696,7 @@ pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Re
         || settings.ffprobe_timeout_secs < MIN_FFPROBE_TIMEOUT_SECS
         || settings.ffprobe_timeout_secs > MAX_FFPROBE_TIMEOUT_SECS
     {
-        return Err(AppError::Other(format!(
+        return Err(AppError::Validation(format!(
             "Invalid ffprobe timeout: must be between {} and {} seconds",
             MIN_FFPROBE_TIMEOUT_SECS, MAX_FFPROBE_TIMEOUT_SECS
         )));
@@ -703,13 +705,13 @@ pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Re
         || settings.ffmpeg_bitrate_timeout_secs < MIN_FFMPEG_BITRATE_TIMEOUT_SECS
         || settings.ffmpeg_bitrate_timeout_secs > MAX_FFMPEG_BITRATE_TIMEOUT_SECS
     {
-        return Err(AppError::Other(format!(
+        return Err(AppError::Validation(format!(
             "Invalid ffmpeg bitrate timeout: must be between {} and {} seconds",
             MIN_FFMPEG_BITRATE_TIMEOUT_SECS, MAX_FFMPEG_BITRATE_TIMEOUT_SECS
         )));
     }
     if settings.screenshot_retention_count > MAX_RETENTION_COUNT {
-        return Err(AppError::Other(format!(
+        return Err(AppError::Validation(format!(
             "Invalid screenshot retention count: must be between {} and {}",
             MIN_RETENTION_COUNT, MAX_RETENTION_COUNT
         )));
@@ -718,7 +720,7 @@ pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Re
         || settings.low_space_threshold_gb < MIN_LOW_SPACE_THRESHOLD_GB
         || settings.low_space_threshold_gb > MAX_LOW_SPACE_THRESHOLD_GB
     {
-        return Err(AppError::Other(format!(
+        return Err(AppError::Validation(format!(
             "Invalid low space threshold: must be between {} and {} GB",
             MIN_LOW_SPACE_THRESHOLD_GB, MAX_LOW_SPACE_THRESHOLD_GB
         )));
@@ -1131,6 +1133,19 @@ mod tests {
             normalize_preset_name("  Fast Scan  ").expect("name should normalize"),
             "Fast Scan"
         );
+    }
+
+    #[test]
+    fn preset_name_validation_uses_validation_error_at_length_boundary() {
+        let maximum = "a".repeat(64);
+        assert_eq!(
+            normalize_preset_name(&maximum).expect("64 characters should be accepted"),
+            maximum
+        );
+
+        let error =
+            normalize_preset_name(&"a".repeat(65)).expect_err("65 characters should be rejected");
+        assert!(matches!(error, crate::error::AppError::Validation(_)));
     }
 
     #[test]

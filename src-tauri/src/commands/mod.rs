@@ -6,4 +6,5 @@ pub mod playlist;
 pub mod recent;
 pub mod saved;
 pub mod scan;
+pub mod server_test;
 pub mod settings;

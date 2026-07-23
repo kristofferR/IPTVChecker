@@ -33,14 +33,14 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use reqwest::header::{HeaderValue, CONTENT_TYPE, USER_AGENT};
 use tauri::{AppHandle, Manager};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
-use tokio::process::Child;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use crate::engine::ffmpeg::{configure_background_process, graceful_kill, resolve_binary, GRACEFUL_KILL_TIMEOUT};
+use crate::engine::proxy_common::{read_capped, ReadCappedError};
 use crate::engine::stream_proxy::redact_url;
 use crate::error::AppError;
 use crate::models::chromecast::CastStreamKind;
@@ -94,23 +94,16 @@ impl Drop for CastProxyHandle {
 
 struct RemuxState {
     tmpdir: PathBuf,
-    /// ffmpeg child handle. We hold it for diagnostic logging; the worker task
-    /// is responsible for waiting on it.
-    child: Option<Child>,
+    // Note: the ffmpeg child is owned (and killed) by the remux worker task,
+    // not stored here — cleanup only removes the temp directory.
 }
 
 impl RemuxState {
     fn cleanup_blocking(self) {
         // Best-effort sync cleanup used in Drop. The async cleanup path in
-        // `cleanup` is preferred when available.
-        let RemuxState { tmpdir, mut child } = self;
-        if let Some(c) = child.as_mut() {
-            let _ = c.start_kill();
-        }
-        // We deliberately don't `wait()` here — the spawned worker task will.
-        // Just attempt to remove the directory; if files are still open it
-        // will be cleaned up by the OS on next reboot.
-        let _ = std::fs::remove_dir_all(&tmpdir);
+        // `cleanup` is preferred when available. If manifest/segment files
+        // are still open the directory is cleaned up by the OS temp reaper.
+        let _ = std::fs::remove_dir_all(&self.tmpdir);
     }
 }
 
@@ -582,7 +575,6 @@ async fn start_remux(
         let mut guard = remux_state.lock().await;
         *guard = Some(RemuxState {
             tmpdir: tmpdir.clone(),
-            child: None,
         });
     }
 
@@ -635,11 +627,7 @@ async fn wait_for_manifest(
 }
 
 async fn cleanup_remux_async(state: RemuxState) {
-    let RemuxState { tmpdir, mut child } = state;
-    if let Some(c) = child.as_mut() {
-        graceful_kill(c, GRACEFUL_KILL_TIMEOUT).await;
-    }
-    let _ = tokio::fs::remove_dir_all(&tmpdir).await;
+    let _ = tokio::fs::remove_dir_all(&state.tmpdir).await;
 }
 
 /// Pump bytes from the upstream IPTV URL into ffmpeg's stdin, transparently
@@ -661,11 +649,20 @@ fn spawn_upstream_pump(
 ) {
     tokio::spawn(async move {
         use futures::StreamExt;
-        // Short fixed backoff between reconnects: long enough to avoid pinning
-        // a CPU on a permanently-broken upstream, short enough that the gap
-        // doesn't starve ffmpeg's demuxer of bytes through a real reconnect.
-        const RECONNECT_BACKOFF: Duration = Duration::from_millis(200);
+        // Exponential backoff between reconnects: the base stays short so a
+        // real hiccup doesn't starve ffmpeg's demuxer, but consecutive
+        // failures grow the delay (capped at 5s) so a permanently-broken
+        // upstream isn't hammered 5x per second for the whole session —
+        // IPTV providers ban clients for exactly that pattern.
+        const RECONNECT_BASE_BACKOFF: Duration = Duration::from_millis(200);
+        const RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(5);
+        fn reconnect_backoff(consecutive_failures: u32) -> Duration {
+            RECONNECT_BASE_BACKOFF
+                .saturating_mul(1u32 << consecutive_failures.min(5))
+                .min(RECONNECT_MAX_BACKOFF)
+        }
         let mut reconnects: u32 = 0;
+        let mut consecutive_failures: u32 = 0;
 
         'session: loop {
             if cancel.is_cancelled() {
@@ -701,18 +698,20 @@ fn spawn_upstream_pump(
                         "[CastProxy/pump] Upstream returned {} ({label})",
                         r.status()
                     );
+                    consecutive_failures = consecutive_failures.saturating_add(1);
                     tokio::select! {
                         _ = cancel.cancelled() => break 'session,
-                        _ = tokio::time::sleep(RECONNECT_BACKOFF) => {}
+                        _ = tokio::time::sleep(reconnect_backoff(consecutive_failures)) => {}
                     }
                     reconnects += 1;
                     continue;
                 }
                 Err(err) => {
                     log::warn!("[CastProxy/pump] Upstream connect failed ({label}): {err}");
+                    consecutive_failures = consecutive_failures.saturating_add(1);
                     tokio::select! {
                         _ = cancel.cancelled() => break 'session,
-                        _ = tokio::time::sleep(RECONNECT_BACKOFF) => {}
+                        _ = tokio::time::sleep(reconnect_backoff(consecutive_failures)) => {}
                     }
                     reconnects += 1;
                     continue;
@@ -720,12 +719,15 @@ fn spawn_upstream_pump(
             };
 
             let mut stream = response.bytes_stream();
+            let session_started = std::time::Instant::now();
+            let mut got_bytes = false;
             loop {
                 tokio::select! {
                     _ = cancel.cancelled() => break 'session,
                     chunk = stream.next() => {
                         match chunk {
                             Some(Ok(bytes)) => {
+                                got_bytes = true;
                                 if let Err(err) = stdin.write_all(&bytes).await {
                                     // ffmpeg closed its stdin (likely died).
                                     // Nothing more we can do — exit the pump
@@ -753,9 +755,19 @@ fn spawn_upstream_pump(
                 }
             }
 
+            // Only a session that both produced data and survived for a
+            // while counts as healthy — an upstream that hands out one chunk
+            // and dies would otherwise reset the backoff on every loop and
+            // keep the reconnect rate at the fast base delay.
+            const HEALTHY_SESSION_MIN: Duration = Duration::from_secs(3);
+            if got_bytes && session_started.elapsed() >= HEALTHY_SESSION_MIN {
+                consecutive_failures = 0;
+            } else {
+                consecutive_failures = consecutive_failures.saturating_add(1);
+            }
             tokio::select! {
                 _ = cancel.cancelled() => break 'session,
-                _ = tokio::time::sleep(RECONNECT_BACKOFF) => {}
+                _ = tokio::time::sleep(reconnect_backoff(consecutive_failures)) => {}
             }
             reconnects += 1;
         }
@@ -867,12 +879,14 @@ async fn handle_connection(
     user_agent: String,
     resolved_origin: Arc<Mutex<Option<Url>>>,
 ) -> std::io::Result<()> {
-    let mut buf = vec![0u8; 8192];
-    let n = socket.read(&mut buf).await?;
-    if n == 0 {
-        return Ok(());
-    }
-    let request = String::from_utf8_lossy(&buf[..n]);
+    // Read the full request head — some Cast receivers split the request
+    // line and Range header across TCP segments.
+    let request_bytes =
+        match crate::engine::proxy_common::read_http_request_head(&mut socket, 8192).await? {
+            Some(bytes) => bytes,
+            None => return Ok(()),
+        };
+    let request = String::from_utf8_lossy(&request_bytes);
     let method = request
         .lines()
         .next()
@@ -1445,36 +1459,6 @@ fn parse_byte_range(header: &str, total_len: u64) -> Option<(u64, u64)> {
     Some((start, end_clamped))
 }
 
-#[derive(Debug)]
-enum ReadCappedError {
-    TooLarge,
-    Read(reqwest::Error),
-}
-
-/// Streams a reqwest response body into memory with a hard byte cap. Returns
-/// `TooLarge` as soon as accumulated bytes exceed `cap` so a malicious or
-/// misclassified upstream (chunked / no Content-Length / declared smaller than
-/// actual) can't OOM the proxy.
-async fn read_capped(
-    response: reqwest::Response,
-    cap: u64,
-) -> Result<Vec<u8>, ReadCappedError> {
-    use futures::StreamExt;
-
-    let mut buf: Vec<u8> = Vec::new();
-    let mut total: u64 = 0;
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(ReadCappedError::Read)?;
-        total = total.saturating_add(chunk.len() as u64);
-        if total > cap {
-            return Err(ReadCappedError::TooLarge);
-        }
-        buf.extend_from_slice(&chunk);
-    }
-    Ok(buf)
-}
-
 async fn write_simple(
     socket: &mut tokio::net::TcpStream,
     status: u16,
@@ -1496,16 +1480,7 @@ async fn write_simple(
 }
 
 fn is_m3u8(content_type: &str, url: &str) -> bool {
-    let ct = content_type.to_lowercase();
-    if ct.contains("application/vnd.apple.mpegurl") || ct.contains("application/x-mpegurl") {
-        return true;
-    }
-    if let Ok(parsed) = Url::parse(url) {
-        if parsed.path().to_lowercase().ends_with(".m3u8") {
-            return true;
-        }
-    }
-    false
+    crate::engine::proxy_common::is_m3u8_response(content_type, url)
 }
 
 /// Reject non-HTTP(S) schemes and any target whose origin doesn't match the
@@ -1534,101 +1509,24 @@ fn is_target_allowed(base: &Url, target: &Url) -> bool {
 /// Cast device will then attempt them directly (and likely fail), but the
 /// proxy refuses to act as a confused-deputy fetcher for them.
 fn rewrite_manifest(body: &str, base_url: &str, token: &str) -> String {
-    let base = match Url::parse(base_url) {
-        Ok(u) => u,
-        Err(_) => return body.to_string(),
+    let Ok(base) = Url::parse(base_url) else {
+        return body.to_string();
     };
-    let mut out = String::with_capacity(body.len());
-    for line in body.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            out.push('\n');
-            continue;
-        }
-        if trimmed.starts_with('#') {
-            // Rewrite URI="..." in select tags
-            let upper = trimmed.to_ascii_uppercase();
-            if (upper.starts_with("#EXT-X-MAP:")
-                || upper.starts_with("#EXT-X-KEY:")
-                || upper.starts_with("#EXT-X-MEDIA:")
-                || upper.starts_with("#EXT-X-SESSION-KEY:"))
-                && trimmed.contains("URI=")
-            {
-                out.push_str(&rewrite_tag_uri(trimmed, &base, token));
-            } else {
-                out.push_str(line);
-            }
-            out.push('\n');
-            continue;
-        }
-        match base.join(trimmed) {
-            Ok(resolved) if is_target_allowed(&base, &resolved) => {
-                out.push_str(&format!("/cast/{token}/seg/{}", encode_segment(resolved.as_str())));
-            }
-            Ok(rejected) => {
-                log::warn!(
-                    "[CastProxy] Refusing to proxy out-of-origin segment {} (base {})",
-                    redact_url(rejected.as_str()),
-                    redact_url(base.as_str())
-                );
-                out.push_str(line);
-            }
-            Err(_) => out.push_str(line),
-        }
-        out.push('\n');
-    }
-    out
-}
-
-fn rewrite_tag_uri(line: &str, base: &Url, token: &str) -> String {
-    let upper = line.to_ascii_uppercase();
-    let Some(uri_pos) = upper.find("URI=") else {
-        return line.to_string();
-    };
-    let after = &line[uri_pos + 4..];
-    let (quote, start, end) = if after.starts_with('"') {
-        let inner = &after[1..];
-        let e = inner.find('"').unwrap_or(inner.len());
-        (Some('"'), 1, 1 + e)
-    } else if after.starts_with('\'') {
-        let inner = &after[1..];
-        let e = inner.find('\'').unwrap_or(inner.len());
-        (Some('\''), 1, 1 + e)
-    } else {
-        let e = after
-            .find(|c: char| c == ',' || c.is_whitespace())
-            .unwrap_or(after.len());
-        (None, 0, e)
-    };
-    let original = &after[start..end];
-    let resolved = match base.join(original) {
-        Ok(u) if is_target_allowed(base, &u) => u,
-        Ok(rejected) => {
+    crate::engine::proxy_common::rewrite_hls_manifest(body, base_url, &|resolved| {
+        if is_target_allowed(&base, resolved) {
+            Some(format!(
+                "/cast/{token}/seg/{}",
+                encode_segment(resolved.as_str())
+            ))
+        } else {
             log::warn!(
-                "[CastProxy] Refusing to proxy out-of-origin tag URI {} (base {})",
-                redact_url(rejected.as_str()),
+                "[CastProxy] Refusing to proxy out-of-origin reference {} (base {})",
+                redact_url(resolved.as_str()),
                 redact_url(base.as_str())
             );
-            return line.to_string();
+            None
         }
-        Err(_) => return line.to_string(),
-    };
-    let new_uri = format!("/cast/{token}/seg/{}", encode_segment(resolved.as_str()));
-
-    let mut result = String::with_capacity(line.len() + new_uri.len());
-    result.push_str(&line[..uri_pos + 4]);
-    if let Some(q) = quote {
-        result.push(q);
-        result.push_str(&new_uri);
-        result.push(q);
-    } else {
-        result.push_str(&new_uri);
-    }
-    let after_offset = uri_pos + 4 + end + if quote.is_some() { 1 } else { 0 };
-    if after_offset < line.len() {
-        result.push_str(&line[after_offset..]);
-    }
-    result
+    })
 }
 
 fn encode_segment(url: &str) -> String {
@@ -1642,6 +1540,7 @@ fn decode_segment(encoded: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use tokio::io::AsyncReadExt;
     use super::*;
 
     #[test]

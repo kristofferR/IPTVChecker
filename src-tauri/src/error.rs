@@ -20,6 +20,15 @@ pub enum AppError {
     #[error("ffmpeg/ffprobe not available")]
     FfmpegNotAvailable,
 
+    /// User-supplied input failed validation (bad URL, out-of-range setting).
+    #[error("{0}")]
+    Validation(String),
+
+    /// The operation conflicts with current app state (e.g. a scan is
+    /// already running). Not a failure of the operation itself.
+    #[error("{0}")]
+    State(String),
+
     #[error("{0}")]
     Other(String),
 }

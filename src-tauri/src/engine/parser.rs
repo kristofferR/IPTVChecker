@@ -10,6 +10,21 @@ use crate::models::playlist::PlaylistPreview;
 const PLAYLIST_GROUP_PREFIX: &str = "Playlist: ";
 const MAX_PLAYLIST_DISCOVERY_DEPTH: usize = 64;
 
+/// Escape provider-supplied text before embedding it in a generated EXTINF
+/// line. Newlines are flattened so a value cannot inject extra playlist tags.
+pub(crate) fn escape_extinf_value(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace(['\r', '\n'], " ")
+}
+
+/// Flatten line breaks in an EXTINF display title without changing visible
+/// quotes or backslashes, which are not special after the metadata comma.
+pub(crate) fn flatten_extinf_title(value: &str) -> String {
+    value.replace(['\r', '\n'], " ")
+}
+
 pub fn find_unquoted_comma(input: &str) -> Option<usize> {
     let bytes = input.as_bytes();
     let mut quoted_by: Option<u8> = None;
@@ -157,29 +172,53 @@ pub fn get_channel_name(extinf_line: &str) -> String {
     "Unknown Channel".to_string()
 }
 
-/// Extract group-title attribute from #EXTINF line.
-pub fn get_group_name(extinf_line: &str) -> String {
+/// Parse a line's attributes once (or return empty for non-EXTINF lines).
+/// The per-channel helpers below all take this pre-parsed list — the parse
+/// hot loop must not re-walk the EXTINF line once per extracted field.
+fn extinf_attributes_for(extinf_line: &str) -> Vec<(String, String)> {
     if extinf_line.starts_with("#EXTINF") {
-        for (key, value) in parse_extinf_attributes(extinf_line) {
-            if key == "group-title" {
-                return value;
-            }
-        }
+        parse_extinf_attributes(extinf_line)
+    } else {
+        Vec::new()
     }
-    "Unknown Group".to_string()
 }
 
-fn extinf_attribute_value(extinf_line: &str, key: &str) -> Option<String> {
-    if !extinf_line.starts_with("#EXTINF") {
-        return None;
-    }
+fn group_name_from_attrs(attrs: &[(String, String)]) -> String {
+    attrs
+        .iter()
+        .find(|(key, _)| key == "group-title")
+        .map(|(_, value)| value.clone())
+        .unwrap_or_else(|| "Unknown Group".to_string())
+}
 
-    parse_extinf_attributes(extinf_line)
-        .into_iter()
+/// Extract group-title attribute from #EXTINF line.
+pub fn get_group_name(extinf_line: &str) -> String {
+    group_name_from_attrs(&extinf_attributes_for(extinf_line))
+}
+
+fn attr_value(attrs: &[(String, String)], key: &str) -> Option<String> {
+    attrs
+        .iter()
         .find_map(|(candidate_key, candidate_value)| {
-            (candidate_key == key).then_some(candidate_value.trim().to_string())
+            (candidate_key == key).then(|| candidate_value.trim().to_string())
         })
         .filter(|value| !value.is_empty())
+}
+
+fn tvg_metadata_from_attrs(
+    attrs: &[(String, String)],
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
+    (
+        attr_value(attrs, "tvg-id"),
+        attr_value(attrs, "tvg-name"),
+        attr_value(attrs, "tvg-logo"),
+        attr_value(attrs, "tvg-chno"),
+    )
 }
 
 pub fn extract_tvg_metadata(
@@ -190,12 +229,7 @@ pub fn extract_tvg_metadata(
     Option<String>,
     Option<String>,
 ) {
-    (
-        extinf_attribute_value(extinf_line, "tvg-id"),
-        extinf_attribute_value(extinf_line, "tvg-name"),
-        extinf_attribute_value(extinf_line, "tvg-logo"),
-        extinf_attribute_value(extinf_line, "tvg-chno"),
-    )
+    tvg_metadata_from_attrs(&extinf_attributes_for(extinf_line))
 }
 
 fn normalize_language_candidate(raw: &str) -> Option<String> {
@@ -295,21 +329,23 @@ fn extract_prefixed_language(text: &str) -> Option<String> {
     normalize_language_candidate(&token)
 }
 
-pub fn detect_channel_language(group: &str, name: &str, extinf_line: &str) -> Option<String> {
-    if extinf_line.starts_with("#EXTINF") {
-        for (key, value) in parse_extinf_attributes(extinf_line) {
-            if matches!(
-                key.as_str(),
-                "tvg-language" | "tvg-lang" | "language" | "lang" | "tvg-country"
-            ) {
-                if let Some(language) = normalize_language_candidate(&value) {
-                    return Some(language);
-                }
+fn language_from_attrs(attrs: &[(String, String)], group: &str, name: &str) -> Option<String> {
+    for (key, value) in attrs {
+        if matches!(
+            key.as_str(),
+            "tvg-language" | "tvg-lang" | "language" | "lang" | "tvg-country"
+        ) {
+            if let Some(language) = normalize_language_candidate(value) {
+                return Some(language);
             }
         }
     }
 
     extract_prefixed_language(group).or_else(|| extract_prefixed_language(name))
+}
+
+pub fn detect_channel_language(group: &str, name: &str, extinf_line: &str) -> Option<String> {
+    language_from_attrs(&extinf_attributes_for(extinf_line), group, name)
 }
 
 /// Extract channel ID from the stream URL (last path segment, minus .ts extension).
@@ -327,6 +363,7 @@ pub fn get_channel_id(url: &str) -> String {
 /// Check if an #EXTINF line matches the group filter and channel name pattern.
 fn is_line_needed(
     line: &str,
+    group_name: &str,
     group_filter: &Option<String>,
     pattern: &Option<ChannelSearchPattern>,
 ) -> Result<bool, AppError> {
@@ -334,7 +371,6 @@ fn is_line_needed(
         return Ok(false);
     }
     if let Some(ref group) = group_filter {
-        let group_name = get_group_name(line);
         if group_name.trim().to_lowercase() != group.trim().to_lowercase() {
             return Ok(false);
         }
@@ -393,7 +429,8 @@ fn parse_playlist_reader<R: BufRead>(
     let mut movie_found = 0usize;
     let mut series_found = 0usize;
     let mut pending_channel = false;
-    let mut pending_extinf: Option<String> = None;
+    // (extinf line, parsed attributes, group name) — parsed once per EXTINF.
+    let mut pending_extinf: Option<(String, Vec<(String, String)>, String)> = None;
     let mut pending_metadata: Vec<String> = Vec::new();
     let mut orphaned_extinf = 0u32;
 
@@ -414,11 +451,13 @@ fn parse_playlist_reader<R: BufRead>(
             pending_extinf = None;
             pending_metadata.clear();
 
+            let attrs = parse_extinf_attributes(&line);
+            let group = group_name_from_attrs(&attrs);
             // Always collect groups for the filter dropdown, even for skipped channels.
-            groups.insert(get_group_name(&line));
+            groups.insert(group.clone());
 
-            if is_line_needed(&line, group_filter, pattern)? {
-                pending_extinf = Some(line);
+            if is_line_needed(&line, &group, group_filter, pattern)? {
+                pending_extinf = Some((line, attrs, group));
             }
             continue;
         }
@@ -438,11 +477,10 @@ fn parse_playlist_reader<R: BufRead>(
                 ContentType::Series => series_found += 1,
             }
 
-            if let Some(extinf_line) = pending_extinf.take() {
+            if let Some((extinf_line, attrs, group)) = pending_extinf.take() {
                 let name = get_channel_name(&extinf_line);
-                let group = get_group_name(&extinf_line);
-                let language = detect_channel_language(&group, &name, &extinf_line);
-                let (tvg_id, tvg_name, tvg_logo, tvg_chno) = extract_tvg_metadata(&extinf_line);
+                let language = language_from_attrs(&attrs, &group, &name);
+                let (tvg_id, tvg_name, tvg_logo, tvg_chno) = tvg_metadata_from_attrs(&attrs);
                 channels.push(Channel {
                     index: source_index,
                     playlist: playlist_name.clone(),
@@ -727,6 +765,14 @@ fn collect_playlists_recursive(
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn escape_extinf_value_flattens_injected_lines_and_escapes_quotes() {
+        assert_eq!(
+            escape_extinf_value("News \\ \"HD\"\r\n#EXT-X-KEY"),
+            "News \\\\ \\\"HD\\\"  #EXT-X-KEY"
+        );
+    }
 
     #[test]
     fn test_get_channel_name() {

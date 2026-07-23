@@ -2,8 +2,8 @@ import { useRef, useState, useMemo, useCallback, useEffect, useDeferredValue, ty
 import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ChannelResult } from "../lib/types";
-import type { SearchTextCache, SortDirection, SortField } from "../lib/filters";
-import { filterResults, sortResults } from "../lib/filters";
+import type { SortDirection, SortField } from "../lib/filters";
+import { filterResultsShared, sortResults } from "../lib/filters";
 import {
   COLUMN_ORDER_STORAGE_KEY,
   COLUMN_WIDTH_STORAGE_KEY,
@@ -157,6 +157,11 @@ export function ChannelTable({
   const [sortField, setSortField] = useState<SortField>("index");
   const [sortDir, setSortDir] = useState<SortDirection>("asc");
   const [focusedRow, setFocusedRow] = useState<number | null>(null);
+  const focusedRowRef = useRef<number | null>(null);
+  const updateFocusedRow = useCallback((next: number | null) => {
+    focusedRowRef.current = next;
+    setFocusedRow(next);
+  }, []);
   const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(
     () => new Set(),
@@ -192,7 +197,6 @@ export function ChannelTable({
   const [columnWidths, setColumnWidths] = useState<Record<ColumnKey, number>>(
     () => parseStoredColumnWidths(localStorage.getItem(COLUMN_WIDTH_STORAGE_KEY)),
   );
-  const searchTextCacheRef = useRef<SearchTextCache>(new WeakMap());
   const filteredResultsRef = useRef<ChannelResult[]>([]);
   const selectedIndicesRef = useRef(selectedIndices);
   const contextMenuOpenRef = useRef(contextMenuState !== null);
@@ -315,13 +319,12 @@ export function ChannelTable({
       measureUiPerf(
         "table.filter-sort",
         () => {
-          const filtered = filterResults(
+          const filtered = filterResultsShared(
             completedResults,
             search,
             groupFilter,
             statusFilter,
             duplicateIndices,
-            searchTextCacheRef.current,
             separatePlaceholder,
           );
           return sortResults(filtered, sortField, sortDir);
@@ -357,7 +360,11 @@ export function ChannelTable({
     getScrollElement: () => parentRef.current,
     getItemKey: getVirtualItemKey,
     estimateSize: () => estimatedRowHeight,
-    overscan: 250,
+    // Rows rendered beyond each viewport edge. Keep this small — it's a row
+    // count, and every mounted row gets reconciled on each scan batch flush.
+    // The mac header-reveal band only needs a few rows above the viewport
+    // (it filters virtualItems to within toolbarHeight of the top edge).
+    overscan: 20,
     isScrollingResetDelay: 300,
     useFlushSync: false,
   });
@@ -378,14 +385,18 @@ export function ChannelTable({
     [onSelectionChange],
   );
 
+  // Compute the next selection outside the setState updater: updaters must be
+  // pure (StrictMode double-invokes them, which would double-emit selection).
+  // selectedIndicesRef mirrors state and is updated eagerly so back-to-back
+  // calls in the same frame see each other's result.
   const updateSelection = useCallback(
     (updater: (prev: Set<number>) => Set<number>) => {
-      setSelectedIndices((prev) => {
-        const next = updater(prev);
-        if (next === prev) return prev;
-        emitSelection(next);
-        return next;
-      });
+      const prev = selectedIndicesRef.current;
+      const next = updater(prev);
+      if (next === prev) return;
+      selectedIndicesRef.current = next;
+      setSelectedIndices(next);
+      emitSelection(next);
     },
     [emitSelection],
   );
@@ -403,12 +414,13 @@ export function ChannelTable({
       prev !== null && visible.has(prev) ? prev : null,
     );
 
-    setFocusedRow((prev) => {
-      if (filteredResults.length === 0) return null;
-      if (prev === null) return 0;
-      return Math.min(prev, filteredResults.length - 1);
-    });
-  }, [filteredResults, updateSelection]);
+    const previous = focusedRowRef.current;
+    const next =
+      filteredResults.length === 0
+        ? null
+        : Math.min(previous ?? 0, filteredResults.length - 1);
+    if (next !== previous) updateFocusedRow(next);
+  }, [filteredResults, updateFocusedRow, updateSelection]);
 
   useEffect(() => {
     if (!contextMenuState) {
@@ -523,10 +535,10 @@ export function ChannelTable({
       setSelectedIndices(next);
       emitSelection(next);
       setSelectionAnchor(result.index);
-      setFocusedRow(rowIndex);
+      updateFocusedRow(rowIndex);
       onSelectChannel(result);
     },
-    [emitSelection, onSelectChannel],
+    [emitSelection, onSelectChannel, updateFocusedRow],
   );
 
   const selectRange = useCallback(
@@ -553,10 +565,17 @@ export function ChannelTable({
 
       setSelectedIndices(next);
       emitSelection(next);
-      setFocusedRow(clickedRow);
+      updateFocusedRow(clickedRow);
       onSelectChannel(clickedResult);
     },
-    [selectionAnchor, filteredResults, selectSingle, emitSelection, onSelectChannel],
+    [
+      selectionAnchor,
+      filteredResults,
+      selectSingle,
+      emitSelection,
+      onSelectChannel,
+      updateFocusedRow,
+    ],
   );
 
   const selectAllVisible = useCallback(() => {
@@ -565,9 +584,9 @@ export function ChannelTable({
     setSelectedIndices(next);
     emitSelection(next);
     setSelectionAnchor(filteredResults[0].index);
-    setFocusedRow(0);
+    updateFocusedRow(0);
     onSelectChannel(filteredResults[0]);
-  }, [filteredResults, emitSelection, onSelectChannel]);
+  }, [filteredResults, emitSelection, onSelectChannel, updateFocusedRow]);
 
   const clearSelection = useCallback(() => {
     const next = new Set<number>();
@@ -673,43 +692,46 @@ export function ChannelTable({
     (delta: number) => {
       if (filteredResults.length === 0) return;
 
-      setFocusedRow((prev) => {
-        const selectedRow = filteredResults.findIndex((result) =>
-          selectedIndices.has(result.index),
-        );
-        const current = prev ?? (selectedRow >= 0 ? selectedRow : 0);
-        const next = Math.min(
-          filteredResults.length - 1,
-          Math.max(0, current + delta),
-        );
+      // All side effects (selection emit, playback/cast redirect, scroll) run
+      // outside the focused-row state update — updaters must stay pure, and
+      // StrictMode double-invocation here used to double-start playback.
+      const selectedRow = filteredResults.findIndex((result) =>
+        selectedIndices.has(result.index),
+      );
+      const current =
+        focusedRowRef.current ?? (selectedRow >= 0 ? selectedRow : 0);
+      const next = Math.min(
+        filteredResults.length - 1,
+        Math.max(0, current + delta),
+      );
 
-        const result = filteredResults[next];
-        if (result) {
-          const selected = new Set<number>([result.index]);
-          setSelectedIndices(selected);
-          emitSelection(selected);
-          setSelectionAnchor(result.index);
-          onSelectChannel(result);
-          if ((isPlaying || isCasting) && !isScanActive(scanState)) {
-            if (isCasting) {
-              // Coalesce key bursts so each press doesn't fire a full cast
-              // re-handshake (~300ms backend round-trip).
-              if (castRedirectTimerRef.current) {
-                clearTimeout(castRedirectTimerRef.current);
-              }
-              castRedirectTimerRef.current = setTimeout(() => {
-                castRedirectTimerRef.current = null;
-                onOpenChannel?.(result);
-              }, CAST_REDIRECT_DEBOUNCE_MS);
-            } else {
-              onOpenChannel?.(result);
+      const result = filteredResults[next];
+      if (result) {
+        const selected = new Set<number>([result.index]);
+        selectedIndicesRef.current = selected;
+        setSelectedIndices(selected);
+        emitSelection(selected);
+        setSelectionAnchor(result.index);
+        onSelectChannel(result);
+        if ((isPlaying || isCasting) && !isScanActive(scanState)) {
+          if (isCasting) {
+            // Coalesce key bursts so each press doesn't fire a full cast
+            // re-handshake (~300ms backend round-trip).
+            if (castRedirectTimerRef.current) {
+              clearTimeout(castRedirectTimerRef.current);
             }
+            castRedirectTimerRef.current = setTimeout(() => {
+              castRedirectTimerRef.current = null;
+              onOpenChannel?.(result);
+            }, CAST_REDIRECT_DEBOUNCE_MS);
+          } else {
+            onOpenChannel?.(result);
           }
         }
+      }
 
-        virtualizer.scrollToIndex(next, { align: "auto" });
-        return next;
-      });
+      virtualizer.scrollToIndex(next, { align: "auto" });
+      updateFocusedRow(next);
     },
     [
       filteredResults,
@@ -720,6 +742,7 @@ export function ChannelTable({
       isPlaying,
       isCasting,
       scanState,
+      updateFocusedRow,
       virtualizer,
     ],
   );
@@ -755,12 +778,12 @@ export function ChannelTable({
       } else if (event.key === "ArrowUp") {
         event.preventDefault();
         moveFocusBy(-1);
-      } else if (event.key === "Enter" && focusedRow !== null) {
-        const result = filteredResults[focusedRow];
+      } else if (event.key === "Enter" && focusedRowRef.current !== null) {
+        const result = filteredResults[focusedRowRef.current];
         if (result) onSelectChannel(result);
       }
     },
-    [filteredResults, focusedRow, onSelectChannel, moveFocusBy],
+    [filteredResults, onSelectChannel, moveFocusBy],
   );
 
   const handleRowClickAt = useCallback(
@@ -788,7 +811,7 @@ export function ChannelTable({
           return next;
         });
         setSelectionAnchor(result.index);
-        setFocusedRow(rowIndex);
+        updateFocusedRow(rowIndex);
         onSelectChannel(result);
         return;
       }
@@ -797,7 +820,7 @@ export function ChannelTable({
       const currentSelection = selectedIndicesRef.current;
       if (currentSelection.size === 1 && currentSelection.has(result.index)) {
         clearSelection();
-        setFocusedRow(rowIndex);
+        updateFocusedRow(rowIndex);
         return;
       }
 
@@ -826,6 +849,7 @@ export function ChannelTable({
       selectSingle,
       isCasting,
       scanState,
+      updateFocusedRow,
     ],
   );
 

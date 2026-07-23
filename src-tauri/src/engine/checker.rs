@@ -5,6 +5,7 @@ use reqwest::header::{HeaderMap, HeaderValue, LOCATION, USER_AGENT};
 use url::Url;
 
 use crate::error::AppError;
+use crate::models::channel::ChannelStatus;
 use crate::models::scan::{RetryBackoff, MAX_RETRIES, MIN_RETRIES};
 use crate::models::scan_log::{ChannelAttemptDebugLog, ChannelDebugLog};
 
@@ -130,7 +131,7 @@ struct VerifyMetrics {
 
 #[derive(Debug, Clone)]
 pub struct ChannelCheckOutcome {
-    pub status: String,
+    pub status: ChannelStatus,
     pub stream_url: Option<String>,
     pub latency_ms: Option<u64>,
     pub retries_used: u32,
@@ -696,14 +697,35 @@ async fn verify(
     let is_dash_manifest = is_dash_manifest_content_type(&content_type, &final_url);
 
     if is_hls_manifest || is_dash_manifest {
-        let manifest_text = match resp.text().await {
-            Ok(t) if !t.is_empty() => t,
-            _ => {
-                return VerifyResult::Retry {
-                    reason: Some("Empty manifest body".to_string()),
-                };
-            }
-        };
+        // Real manifests are tiny; a body blowing past the cap is almost
+        // certainly raw stream data behind a manifest-looking URL. Cap the
+        // read so a fast (or hostile) server can't push tens of MB per
+        // channel into memory across the whole scan concurrency.
+        const MAX_MANIFEST_BYTES: u64 = 8 * 1024 * 1024;
+        let manifest_bytes =
+            match crate::engine::proxy_common::read_capped(resp, MAX_MANIFEST_BYTES).await {
+                Ok(bytes) => bytes,
+                Err(crate::engine::proxy_common::ReadCappedError::TooLarge) => {
+                    return VerifyResult::Dead {
+                        latency_ms: effective_root_latency,
+                        reason: Some(format!(
+                            "Manifest body exceeded {} MiB cap",
+                            MAX_MANIFEST_BYTES / (1024 * 1024)
+                        )),
+                    };
+                }
+                Err(crate::engine::proxy_common::ReadCappedError::Read(_)) => {
+                    return VerifyResult::Retry {
+                        reason: Some("Failed to read manifest body".to_string()),
+                    };
+                }
+            };
+        let manifest_text = String::from_utf8_lossy(&manifest_bytes).into_owned();
+        if manifest_text.is_empty() {
+            return VerifyResult::Retry {
+                reason: Some("Empty manifest body".to_string()),
+            };
+        }
 
         if is_hls_manifest {
             if let Some(drm_system) = detect_hls_drm_system(&manifest_text) {
@@ -816,6 +838,59 @@ fn summarize_ffprobe_error(error: &AppError) -> String {
 }
 
 /// Check RTSP/RTMP channel liveness using ffprobe.
+/// Outcome of one attempt-loop pass (a full retry cycle at one timeout).
+struct AttemptOutcome {
+    status: ChannelStatus,
+    stream_url: Option<String>,
+    latency_ms: Option<u64>,
+    retries_used: u32,
+    last_error_reason: Option<String>,
+    drm_system: Option<String>,
+    successful_attempt: Option<u32>,
+    attempts: Vec<ChannelAttemptDebugLog>,
+    ffprobe_output: Option<String>,
+}
+
+/// Shared retry orchestration: run the attempt loop at the base timeout and,
+/// if the verdict is Dead and an extended timeout is configured, run a second
+/// pass and merge the outcomes. Only the probe body differs between the
+/// HTTP and ffprobe checkers.
+async fn run_attempts_with_extended_timeout<F, Fut>(
+    timeout: f64,
+    extended_timeout: Option<f64>,
+    attempt_check: F,
+) -> Result<AttemptOutcome, AppError>
+where
+    F: Fn(f64, u32) -> Fut,
+    Fut: std::future::Future<Output = Result<AttemptOutcome, AppError>>,
+{
+    let mut final_outcome = attempt_check(timeout, 0).await?;
+
+    if final_outcome.status == ChannelStatus::Dead {
+        if let Some(ext_timeout) = extended_timeout {
+            let second = attempt_check(ext_timeout, final_outcome.attempts.len() as u32).await?;
+            let mut combined_attempts = final_outcome.attempts;
+            combined_attempts.extend(second.attempts);
+
+            final_outcome = AttemptOutcome {
+                status: second.status,
+                stream_url: second.stream_url,
+                latency_ms: second.latency_ms,
+                retries_used: final_outcome
+                    .retries_used
+                    .saturating_add(second.retries_used),
+                last_error_reason: second.last_error_reason.or(final_outcome.last_error_reason),
+                drm_system: second.drm_system.or(final_outcome.drm_system),
+                successful_attempt: second.successful_attempt,
+                attempts: combined_attempts,
+                ffprobe_output: second.ffprobe_output.or(final_outcome.ffprobe_output),
+            };
+        }
+    }
+
+    Ok(final_outcome)
+}
+
 pub async fn check_channel_status_with_ffprobe_debug(
     app: &tauri::AppHandle,
     url: &str,
@@ -851,7 +926,7 @@ pub async fn check_channel_status_with_ffprobe_debug(
             .to_string();
         let timestamp = now_epoch_ms();
         return Ok(ChannelCheckOutcome {
-            status: "Dead".to_string(),
+            status: ChannelStatus::Dead,
             stream_url: None,
             latency_ms: None,
             retries_used: 0,
@@ -891,18 +966,6 @@ pub async fn check_channel_status_with_ffprobe_debug(
 
     let retries = retries.clamp(MIN_RETRIES, MAX_RETRIES);
     let attempts = total_attempts(retries);
-
-    struct AttemptOutcome {
-        status: String,
-        stream_url: Option<String>,
-        latency_ms: Option<u64>,
-        retries_used: u32,
-        last_error_reason: Option<String>,
-        drm_system: Option<String>,
-        successful_attempt: Option<u32>,
-        attempts: Vec<ChannelAttemptDebugLog>,
-        ffprobe_output: Option<String>,
-    }
 
     let attempt_check = |current_timeout: f64, attempt_offset: u32| {
         let app = app.clone();
@@ -955,7 +1018,7 @@ pub async fn check_channel_status_with_ffprobe_debug(
                                 ttfb_ms: latency_ms,
                             });
                             return Ok(AttemptOutcome {
-                                status: "Alive".to_string(),
+                                status: ChannelStatus::Alive,
                                 stream_url: Some(url.clone()),
                                 latency_ms,
                                 retries_used,
@@ -1015,7 +1078,7 @@ pub async fn check_channel_status_with_ffprobe_debug(
             }
 
             Ok(AttemptOutcome {
-                status: "Dead".to_string(),
+                status: ChannelStatus::Dead,
                 stream_url: None,
                 latency_ms: None,
                 retries_used,
@@ -1028,30 +1091,8 @@ pub async fn check_channel_status_with_ffprobe_debug(
         }
     };
 
-    let first = attempt_check(timeout, 0).await?;
-    let mut final_outcome = first;
-
-    if final_outcome.status == "Dead" {
-        if let Some(ext_timeout) = extended_timeout {
-            let second = attempt_check(ext_timeout, final_outcome.attempts.len() as u32).await?;
-            let mut combined_attempts = final_outcome.attempts;
-            combined_attempts.extend(second.attempts);
-
-            final_outcome = AttemptOutcome {
-                status: second.status,
-                stream_url: second.stream_url,
-                latency_ms: second.latency_ms,
-                retries_used: final_outcome
-                    .retries_used
-                    .saturating_add(second.retries_used),
-                last_error_reason: second.last_error_reason.or(final_outcome.last_error_reason),
-                drm_system: second.drm_system.or(final_outcome.drm_system),
-                successful_attempt: second.successful_attempt,
-                attempts: combined_attempts,
-                ffprobe_output: second.ffprobe_output.or(final_outcome.ffprobe_output),
-            };
-        }
-    }
+    let final_outcome =
+        run_attempts_with_extended_timeout(timeout, extended_timeout, attempt_check).await?;
 
     let check_started_at_epoch_ms = final_outcome
         .attempts
@@ -1069,7 +1110,7 @@ pub async fn check_channel_status_with_ffprobe_debug(
         .find_map(|attempt| attempt.ttfb_ms);
 
     Ok(ChannelCheckOutcome {
-        status: final_outcome.status.clone(),
+        status: final_outcome.status,
         stream_url: final_outcome.stream_url,
         latency_ms: final_outcome.latency_ms,
         retries_used: final_outcome.retries_used,
@@ -1087,10 +1128,12 @@ pub async fn check_channel_status_with_ffprobe_debug(
             redirect_chain: Vec::new(),
             bytes_transferred: 0,
             ttfb_ms,
-            final_verdict: final_outcome.status,
+            final_verdict: final_outcome.status.to_string(),
             final_reason: final_outcome.last_error_reason,
             screenshot_error_reason: None,
-            diagnostics_output: final_outcome.ffprobe_output,
+            diagnostics_output: final_outcome
+                .ffprobe_output
+                .map(crate::models::scan_log::cap_diagnostics_output),
             attempts: final_outcome.attempts,
         },
     })
@@ -1133,17 +1176,6 @@ pub async fn check_channel_status_with_debug(
     );
 
     log::info!("Checking channel: {}", url);
-
-    struct AttemptOutcome {
-        status: String,
-        stream_url: Option<String>,
-        latency_ms: Option<u64>,
-        retries_used: u32,
-        last_error_reason: Option<String>,
-        drm_system: Option<String>,
-        successful_attempt: Option<u32>,
-        attempts: Vec<ChannelAttemptDebugLog>,
-    }
 
     let attempt_check = |current_timeout: f64, attempt_offset: u32| {
         let client = client.clone();
@@ -1230,10 +1262,10 @@ pub async fn check_channel_status_with_debug(
                     } => {
                         let status = if drm_system.is_some() {
                             log::info!("Channel DRM-protected: {}", url);
-                            "DRM".to_string()
+                            ChannelStatus::Drm
                         } else {
                             log::info!("Channel alive: {}", url);
-                            "Alive".to_string()
+                            ChannelStatus::Alive
                         };
                         return Ok(AttemptOutcome {
                             status,
@@ -1244,6 +1276,7 @@ pub async fn check_channel_status_with_debug(
                             drm_system,
                             successful_attempt: Some(attempt_number),
                             attempts: attempt_logs,
+                            ffprobe_output: None,
                         });
                     }
                     VerifyResult::Placeholder {
@@ -1252,7 +1285,7 @@ pub async fn check_channel_status_with_debug(
                     } => {
                         log::info!("Channel placeholder: {}", url);
                         return Ok(AttemptOutcome {
-                            status: "Placeholder".to_string(),
+                            status: ChannelStatus::Placeholder,
                             stream_url,
                             latency_ms,
                             retries_used,
@@ -1260,12 +1293,13 @@ pub async fn check_channel_status_with_debug(
                             drm_system: None,
                             successful_attempt: None,
                             attempts: attempt_logs,
+                            ffprobe_output: None,
                         });
                     }
                     VerifyResult::Dead { latency_ms, reason } => {
                         log::info!("Channel dead: {}", url);
                         return Ok(AttemptOutcome {
-                            status: "Dead".to_string(),
+                            status: ChannelStatus::Dead,
                             stream_url: None,
                             latency_ms,
                             retries_used,
@@ -1273,12 +1307,13 @@ pub async fn check_channel_status_with_debug(
                             drm_system: None,
                             successful_attempt: None,
                             attempts: attempt_logs,
+                            ffprobe_output: None,
                         });
                     }
                     VerifyResult::Geoblocked { latency_ms, reason } => {
                         log::info!("Channel geoblocked: {}", url);
                         return Ok(AttemptOutcome {
-                            status: "Geoblocked".to_string(),
+                            status: ChannelStatus::Geoblocked,
                             stream_url: None,
                             latency_ms,
                             retries_used,
@@ -1286,6 +1321,7 @@ pub async fn check_channel_status_with_debug(
                             drm_system: None,
                             successful_attempt: None,
                             attempts: attempt_logs,
+                            ffprobe_output: None,
                         });
                     }
                     VerifyResult::Retry { reason } => {
@@ -1304,7 +1340,7 @@ pub async fn check_channel_status_with_debug(
                 }
             }
             Ok(AttemptOutcome {
-                status: "Dead".to_string(),
+                status: ChannelStatus::Dead,
                 stream_url: None,
                 latency_ms: None,
                 retries_used,
@@ -1312,34 +1348,13 @@ pub async fn check_channel_status_with_debug(
                 drm_system: None,
                 successful_attempt: None,
                 attempts: attempt_logs,
+                ffprobe_output: None,
             })
         }
     };
 
-    let first = attempt_check(timeout, 0).await?;
-    let mut final_outcome = first;
-
-    // If dead and extended timeout enabled, retry
-    if final_outcome.status == "Dead" {
-        if let Some(ext_timeout) = extended_timeout {
-            let second = attempt_check(ext_timeout, final_outcome.attempts.len() as u32).await?;
-            let mut combined_attempts = final_outcome.attempts;
-            combined_attempts.extend(second.attempts);
-
-            final_outcome = AttemptOutcome {
-                status: second.status,
-                stream_url: second.stream_url,
-                latency_ms: second.latency_ms,
-                retries_used: final_outcome
-                    .retries_used
-                    .saturating_add(second.retries_used),
-                last_error_reason: second.last_error_reason.or(final_outcome.last_error_reason),
-                drm_system: second.drm_system.or(final_outcome.drm_system),
-                successful_attempt: second.successful_attempt,
-                attempts: combined_attempts,
-            };
-        }
-    }
+    let final_outcome =
+        run_attempts_with_extended_timeout(timeout, extended_timeout, attempt_check).await?;
 
     let mut http_status_codes = Vec::<u16>::new();
     let mut redirect_chain = Vec::<String>::new();
@@ -1374,7 +1389,7 @@ pub async fn check_channel_status_with_debug(
         .unwrap_or_else(now_epoch_ms);
 
     Ok(ChannelCheckOutcome {
-        status: final_outcome.status.clone(),
+        status: final_outcome.status,
         stream_url: final_outcome.stream_url,
         latency_ms: final_outcome.latency_ms,
         retries_used: final_outcome.retries_used,
@@ -1392,7 +1407,7 @@ pub async fn check_channel_status_with_debug(
             redirect_chain,
             bytes_transferred,
             ttfb_ms,
-            final_verdict: final_outcome.status,
+            final_verdict: final_outcome.status.to_string(),
             final_reason: final_outcome.last_error_reason,
             screenshot_error_reason: None,
             diagnostics_output: None,
@@ -1411,7 +1426,16 @@ pub async fn check_channel_status(
     extended_timeout: Option<f64>,
     user_agent: &str,
     cancel_token: &tokio_util::sync::CancellationToken,
-) -> Result<(String, Option<String>, Option<u64>, u32, Option<String>), AppError> {
+) -> Result<
+    (
+        ChannelStatus,
+        Option<String>,
+        Option<u64>,
+        u32,
+        Option<String>,
+    ),
+    AppError,
+> {
     let outcome = check_channel_status_with_debug(
         client,
         url,
@@ -1847,7 +1871,7 @@ encrypted.ts
         .await
         .expect("checker request should succeed");
 
-        assert_eq!(outcome.status, "Alive");
+        assert_eq!(outcome.status, ChannelStatus::Alive);
         assert_eq!(outcome.stream_url, Some(format!("{base_url}/stream")));
         server_handle.abort();
     }
@@ -1876,7 +1900,7 @@ encrypted.ts
         .await
         .expect("checker request should succeed");
 
-        assert_eq!(outcome.status, "Geoblocked");
+        assert_eq!(outcome.status, ChannelStatus::Geoblocked);
         assert_eq!(outcome.last_error_reason.as_deref(), Some("HTTP 403"));
         server_handle.abort();
     }
@@ -1905,7 +1929,7 @@ encrypted.ts
         .await
         .expect("checker request should succeed");
 
-        assert_eq!(outcome.status, "Dead");
+        assert_eq!(outcome.status, ChannelStatus::Dead);
         assert!(outcome
             .last_error_reason
             .as_deref()
@@ -1938,7 +1962,7 @@ encrypted.ts
         .await
         .expect("checker request should succeed");
 
-        assert_eq!(outcome.status, "Dead");
+        assert_eq!(outcome.status, ChannelStatus::Dead);
         assert_eq!(outcome.last_error_reason.as_deref(), Some("Timeout"));
         server_handle.abort();
     }
@@ -1977,7 +2001,7 @@ segment.ts
         .await
         .expect("checker request should succeed");
 
-        assert_eq!(outcome.status, "DRM");
+        assert_eq!(outcome.status, ChannelStatus::Drm);
         assert_eq!(outcome.drm_system.as_deref(), Some("FairPlay"));
         assert_eq!(
             outcome.stream_url,
@@ -2020,7 +2044,7 @@ segment.ts
         .await
         .expect("checker request should succeed");
 
-        assert_eq!(outcome.status, "DRM");
+        assert_eq!(outcome.status, ChannelStatus::Drm);
         assert_eq!(outcome.drm_system.as_deref(), Some("Widevine"));
         assert_eq!(outcome.stream_url, Some(format!("{base_url}/manifest.mpd")));
         server_handle.abort();
@@ -2060,7 +2084,7 @@ segment.ts
         .await
         .expect("checker request should succeed");
 
-        assert_eq!(outcome.status, "Alive");
+        assert_eq!(outcome.status, ChannelStatus::Alive);
         assert_eq!(outcome.drm_system, None);
         assert_eq!(outcome.stream_url, Some(format!("{base_url}/clear.mpd")));
         server_handle.abort();
