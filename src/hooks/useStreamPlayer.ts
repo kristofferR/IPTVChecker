@@ -1559,17 +1559,19 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       }
 
-      lastErrorRef.current = null;
-      const nativeOk = await tryNativePlayback(
-        url,
-        abortController.signal,
-        PLAYBACK_ROUTE_TIMEOUT_MS,
-      );
-      if (!isCurrentPlayback()) {
-        return;
-      }
-      if (nativeOk && await handleSuccessfulStart()) {
-        return;
+      if (streamType !== "hls") {
+        lastErrorRef.current = null;
+        const nativeOk = await tryNativePlayback(
+          url,
+          abortController.signal,
+          PLAYBACK_ROUTE_TIMEOUT_MS,
+        );
+        if (!isCurrentPlayback()) {
+          return;
+        }
+        if (nativeOk && await handleSuccessfulStart()) {
+          return;
+        }
       }
 
       clearLoadingTimer();

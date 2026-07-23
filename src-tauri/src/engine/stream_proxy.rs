@@ -973,13 +973,14 @@ where
     let reader = tokio::spawn(async move {
         let mut stream = response.bytes_stream();
         let mut received_data = false;
+        let startup_deadline = tokio::time::Instant::now() + startup_read_timeout;
         loop {
-            let read_timeout = if received_data {
-                steady_read_timeout
+            let next_chunk = if received_data {
+                tokio::time::timeout(steady_read_timeout, stream.next()).await
             } else {
-                startup_read_timeout
+                tokio::time::timeout_at(startup_deadline, stream.next()).await
             };
-            match tokio::time::timeout(read_timeout, stream.next()).await {
+            match next_chunk {
                 Err(_) => return StreamForwardOutcome::UpstreamReadTimeout,
                 Ok(Some(Ok(chunk))) => {
                     if chunk.is_empty() {
