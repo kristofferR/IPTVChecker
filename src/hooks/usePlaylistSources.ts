@@ -62,6 +62,7 @@ type LoadAndCommitSourceResult =
   | {
       ok: false;
       error: string;
+      superseded: boolean;
     };
 
 function applyDisplayNameToPreview(
@@ -131,12 +132,16 @@ function savedEntryToDraft(entry: SavedPlaylistEntry): SavedPlaylistDraft {
 
 export interface UsePlaylistSourcesParams {
   /** From useScan: rebuilds the scan cache when a source is (re)loaded. */
-  initFromPlaylist: (channels: Channel[]) => Promise<void>;
+  initFromPlaylist: (
+    channels: Channel[],
+    shouldApply?: () => boolean,
+  ) => Promise<boolean>;
   /** From useScan: re-syncs the scan cache, optionally preserving results. */
   syncFromPlaylist: (
     channels: Channel[],
     preserveExistingResults?: boolean,
-  ) => Promise<void>;
+    shouldApply?: () => boolean,
+  ) => Promise<boolean>;
 }
 
 /** Playlist source management: opening file/URL/Xtream/Stalker sources,
@@ -154,6 +159,7 @@ export function usePlaylistSources({
     useState<SavedPlaylistDraft | null>(null);
   const [savedXtreamTestEntry, setSavedXtreamTestEntry] =
     useState<SavedPlaylistEntry | null>(null);
+  const sourceLoadGenerationRef = useRef(0);
 
   const refreshRecentPlaylists = useCallback(async () => {
     try {
@@ -198,7 +204,23 @@ export function usePlaylistSources({
       descriptor: CurrentSourceDescriptor,
       mode: SourceLoadMode,
       appliedSourceFilter: string,
-    ) => {
+      shouldApply: () => boolean,
+    ): Promise<boolean> => {
+      const initStartedAt = performance.now();
+      logger.info(
+        `[App] Preparing scan cache for ${preview.channels.length} visible channels`,
+      );
+      const initialized = await initFromPlaylist(
+        preview.channels,
+        shouldApply,
+      );
+      if (!initialized || !shouldApply()) {
+        return false;
+      }
+      logger.info(
+        `[App] Scan cache ready in ${(performance.now() - initStartedAt).toFixed(1)}ms`,
+      );
+
       const state = getStore();
       state.setPlaylist(preview);
       state.setCachedSourcePreview(cachedPreview);
@@ -221,14 +243,7 @@ export function usePlaylistSources({
       state.setSelectedChannelIndices([]);
       state.setPendingPlaybackChannel(null);
 
-      const initStartedAt = performance.now();
-      logger.info(
-        `[App] Preparing scan cache for ${preview.channels.length} visible channels`,
-      );
-      await initFromPlaylist(preview.channels);
-      logger.info(
-        `[App] Scan cache ready in ${(performance.now() - initStartedAt).toFixed(1)}ms`,
-      );
+      return true;
     },
     [initFromPlaylist],
   );
@@ -277,6 +292,16 @@ export function usePlaylistSources({
       descriptor: CurrentSourceDescriptor,
       mode: SourceLoadMode,
     ): Promise<LoadAndCommitSourceResult> => {
+      const loadGeneration = sourceLoadGenerationRef.current + 1;
+      sourceLoadGenerationRef.current = loadGeneration;
+      const isCurrentLoad = () =>
+        sourceLoadGenerationRef.current === loadGeneration;
+      const supersededResult = (): LoadAndCommitSourceResult => ({
+        ok: false,
+        error: "",
+        superseded: true,
+      });
+
       const normalizedSourceFilter = normalizeSourceFilter(channelSearch);
       const currentSourceFilterError = validateSourceFilterPattern(
         normalizedSourceFilter,
@@ -287,7 +312,9 @@ export function usePlaylistSources({
             ? formatSourceReloadError(currentSourceFilterError)
             : formatPlaylistOpenError(currentSourceFilterError);
         getStore().setPlaylistOpenError(error);
-        return { ok: false, error };
+        getStore().setPlaylistLoading(false);
+        getStore().setPlaylistLoadProgress(null);
+        return { ok: false, error, superseded: false };
       }
 
       const sourceLabel = (() => {
@@ -322,6 +349,10 @@ export function usePlaylistSources({
         const cachedPreview = canReuseCachedPreview
           ? state.cachedSourcePreview!
           : await loadFullSourcePreview(descriptor);
+        if (!isCurrentLoad()) {
+          return supersededResult();
+        }
+
         const latestState = getStore();
         const savedEntry =
           descriptor.kind === "saved"
@@ -357,15 +388,23 @@ export function usePlaylistSources({
         }
 
         const preview = buildVisiblePreview(cachedPreview, normalizedSourceFilter);
-        await commitLoadedPlaylist(
+        const committed = await commitLoadedPlaylist(
           preview,
           cachedPreview,
           descriptor,
           mode,
           normalizedSourceFilter,
+          isCurrentLoad,
         );
+        if (!committed) {
+          return supersededResult();
+        }
         return { ok: true, preview };
       } catch (err) {
+        if (!isCurrentLoad()) {
+          return supersededResult();
+        }
+
         logger.error(
           mode === "reapplySourceFilter"
             ? "[App] Failed to reload source with source filter"
@@ -387,10 +426,12 @@ export function usePlaylistSources({
           void refreshRecentPlaylists();
         }
 
-        return { ok: false, error: message };
+        return { ok: false, error: message, superseded: false };
       } finally {
-        getStore().setPlaylistLoading(false);
-        getStore().setPlaylistLoadProgress(null);
+        if (isCurrentLoad()) {
+          getStore().setPlaylistLoading(false);
+          getStore().setPlaylistLoadProgress(null);
+        }
       }
     },
     [
@@ -494,7 +535,7 @@ export function usePlaylistSources({
         "freshOpen",
       );
       if (!result.ok) {
-        return result.error;
+        return result.superseded ? true : result.error;
       }
 
       const nextSaved = await refreshSavedPlaylists();
@@ -600,7 +641,7 @@ export function usePlaylistSources({
       "freshOpen",
     );
     if (!result.ok) {
-      return result.error;
+      return result.superseded ? true : result.error;
     }
 
     try {
@@ -625,7 +666,7 @@ export function usePlaylistSources({
         "freshOpen",
       );
       if (!result.ok) {
-        return result.error;
+        return result.superseded ? true : result.error;
       }
 
       if (
@@ -673,7 +714,7 @@ export function usePlaylistSources({
         },
         "freshOpen",
       );
-      return result.ok ? true : result.error;
+      return result.ok || result.superseded ? true : result.error;
     },
     [loadAndCommitSource],
   );

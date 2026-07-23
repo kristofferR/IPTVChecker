@@ -42,6 +42,11 @@ describe("user-facing source errors", () => {
     expect(
       formatSourceReloadError("Failed to open playlist: connection refused"),
     ).toBe("Failed to reload source: connection refused");
+    expect(
+      formatSourceReloadError(
+        "Failed to open playlist: Failed to reload source: connection refused",
+      ),
+    ).toBe("Failed to reload source: connection refused");
   });
 
   test("nullish errors use the contextual fallback", () => {

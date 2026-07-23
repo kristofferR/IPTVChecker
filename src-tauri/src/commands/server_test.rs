@@ -9,6 +9,7 @@ use crate::engine::ffmpeg;
 use crate::engine::remote_cache::{
     PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT, PLAYLIST_DOWNLOAD_USER_AGENT,
 };
+use crate::engine::stream_proxy::{fetch_with_hop_validation, SafeFetchError};
 use crate::engine::xtream::{
     build_xtream_player_api_action_url, build_xtream_player_api_url, build_xtream_stream_url,
     extract_xtream_account_info, normalize_xtream_server, XTREAM_JSON_API_TIMEOUT,
@@ -16,6 +17,7 @@ use crate::engine::xtream::{
 };
 use crate::error::AppError;
 use crate::state::AppState;
+use futures::stream::{self, StreamExt};
 use rand::seq::SliceRandom;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -32,18 +34,26 @@ const SERVER_TEST_MAX_CHANNEL_CANDIDATES: usize = 15;
 const SERVER_TEST_TARGET_WORKING_CHANNELS: usize = 3;
 const SERVER_TEST_MAX_SCREENSHOTS: usize = 2;
 const SERVER_TEST_PROBE_CHANNELS: usize = 2;
+const SERVER_TEST_MAX_CONCURRENT_SERVERS: usize = 4;
 
 fn build_server_test_client(
     timeout: Duration,
     accept_invalid_certs: bool,
 ) -> Result<reqwest::Client, reqwest::Error> {
     reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(10))
+        .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
         .timeout(timeout)
         .danger_accept_invalid_certs(accept_invalid_certs)
         .user_agent(PLAYLIST_DOWNLOAD_USER_AGENT)
         .build()
+}
+
+async fn server_test_get(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<reqwest::Response, SafeFetchError> {
+    fetch_with_hop_validation(url, |target| client.get(target)).await
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -77,6 +87,15 @@ pub struct XtreamServerTestReport {
     pub channels_probed: u32,
 }
 
+fn stream_probe_succeeded(probe: &XtreamChannelProbe) -> bool {
+    probe.latency_ms.is_some()
+        || probe.resolved_url.is_some()
+        || probe.codec.is_some()
+        || probe.resolution.is_some()
+        || probe.fps.is_some()
+        || probe.screenshot.is_some()
+}
+
 fn emit_server_test_progress(app: &tauri::AppHandle, message: &str) {
     let _ = app.emit("scan://server-test-progress", message.to_string());
 }
@@ -101,10 +120,13 @@ async fn fetch_xtream_stream_ids(
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
 
-        let response = match client.get(streams_url.clone()).send().await {
+        let response = match server_test_get(&client, streams_url.as_str()).await {
             Ok(resp) => resp,
-            Err(e) => {
-                last_error = Some(format!("Failed to fetch live streams: {}", e.without_url()));
+            Err(error) => {
+                last_error = Some(format!(
+                    "Failed to fetch live streams: {}",
+                    error.into_message()
+                ));
                 continue;
             }
         };
@@ -213,7 +235,7 @@ async fn discover_working_channels(
 
         // HTTP-only check: verify the stream responds with 200 and isn't a placeholder.
         // No ffprobe here — quality probing happens per-server in Phase 3.
-        match client.get(&stream_url).send().await {
+        match server_test_get(&client, &stream_url).await {
             Ok(resp) if resp.status().is_success() => {
                 let final_url = resp.url().to_string();
                 if is_placeholder_url(&final_url) {
@@ -282,43 +304,51 @@ async fn probe_server_channels(
 
         // Measure TTFB + get resolved URL
         let started = Instant::now();
-        let http_result = client.get(&stream_url).send().await;
+        let http_result = server_test_get(&client, &stream_url).await;
 
         let (latency_ms, resolved_url) = match http_result {
-            Ok(resp) => {
+            Ok(resp) if resp.status().is_success() => {
                 let ttfb = started.elapsed().as_millis() as u64;
                 let final_url = resp.url().to_string();
                 (Some(ttfb), Some(final_url))
             }
-            Err(_) => (None, None),
+            Ok(_) | Err(_) => (None, None),
         };
 
-        // Run ffprobe for codec/resolution/FPS
-        let (codec, resolution, fps) = match ffmpeg::collect_probe_snapshot_with_timeout(
-            app,
-            &stream_url,
-            None,
-            &cancel,
-            Some(SERVER_TEST_FFPROBE_TIMEOUT),
-        )
-        .await
-        {
-            Ok(snapshot) => {
-                if let Some(video) = snapshot.video_info {
-                    (Some(video.codec), Some(video.resolution), video.fps)
-                } else {
-                    (None, None, None)
+        // Probe the already validated final hop so ffmpeg cannot independently
+        // follow the original URL into a private redirect target.
+        let probe_url = resolved_url.as_deref();
+        let (codec, resolution, fps) = if let Some(probe_url) = probe_url {
+            match ffmpeg::collect_probe_snapshot_with_timeout(
+                app,
+                probe_url,
+                None,
+                &cancel,
+                Some(SERVER_TEST_FFPROBE_TIMEOUT),
+            )
+            .await
+            {
+                Ok(snapshot) => {
+                    if let Some(video) = snapshot.video_info {
+                        (Some(video.codec), Some(video.resolution), video.fps)
+                    } else {
+                        (None, None, None)
+                    }
                 }
+                Err(_) => (None, None, None),
             }
-            Err(_) => (None, None, None),
+        } else {
+            (None, None, None)
         };
 
         // Capture screenshot (limited to avoid excessive time)
-        let screenshot = if screenshots_taken < SERVER_TEST_MAX_SCREENSHOTS {
+        let screenshot = if let Some(probe_url) =
+            probe_url.filter(|_| screenshots_taken < SERVER_TEST_MAX_SCREENSHOTS)
+        {
             let file_name = format!("{}-{}", server_host, stream_id);
             match ffmpeg::capture_screenshot(
                 app,
-                &stream_url,
+                probe_url,
                 None,
                 &screenshot_dir.to_string_lossy(),
                 &file_name,
@@ -375,7 +405,7 @@ async fn test_single_server_api(
     };
 
     let started = Instant::now();
-    let response = client.get(api_url).send().await;
+    let response = server_test_get(&client, api_url.as_str()).await;
 
     match response {
         Ok(resp) => {
@@ -403,7 +433,7 @@ async fn test_single_server_api(
                 .unwrap_or((None, None));
             (Some(latency), status, max_conn, None)
         }
-        Err(e) => (None, None, None, Some(e.without_url().to_string())),
+        Err(error) => (None, None, None, Some(error.into_message())),
     }
 }
 
@@ -492,22 +522,18 @@ async fn test_xtream_servers_inner(
         &format!("Testing API on {} servers...", normalized.len()),
     );
 
-    let api_futures: Vec<_> = normalized
-        .iter()
-        .map(|(raw, url)| {
-            let url = url.clone();
-            let u = username.clone();
-            let p = password.clone();
-            let raw = raw.clone();
-            async move {
-                let (api_latency, status, max_conn, error) =
-                    test_single_server_api(&url, &u, &p, accept_invalid_certs).await;
-                (raw, url, api_latency, status, max_conn, error)
-            }
-        })
-        .collect();
-
-    let api_results = futures::future::join_all(api_futures).await;
+    let api_results = stream::iter(normalized.into_iter().map(|(raw, url)| {
+        let u = username.clone();
+        let p = password.clone();
+        async move {
+            let (api_latency, status, max_conn, error) =
+                test_single_server_api(&url, &u, &p, accept_invalid_certs).await;
+            (raw, url, api_latency, status, max_conn, error)
+        }
+    }))
+    .buffered(SERVER_TEST_MAX_CONCURRENT_SERVERS)
+    .collect::<Vec<_>>()
+    .await;
 
     let successful_count = api_results
         .iter()
@@ -604,9 +630,8 @@ async fn test_xtream_servers_inner(
         ),
     );
 
-    let probe_futures: Vec<_> = api_results
-        .into_iter()
-        .map(|(raw, url, api_latency, status, max_conn, api_error)| {
+    let mut results = stream::iter(api_results.into_iter().map(
+        |(raw, url, api_latency, status, max_conn, api_error)| {
             let app = app.clone();
             let u = username.clone();
             let p = password.clone();
@@ -648,23 +673,28 @@ async fn test_xtream_servers_inner(
                     Some(latencies.iter().sum::<u64>() / latencies.len() as u64)
                 };
                 let resolved_host = most_common_resolved_host(&probes);
+                let stream_probe_succeeded = probes.iter().any(stream_probe_succeeded);
 
                 XtreamServerTestResult {
                     server: raw,
-                    success: true,
+                    success: stream_probe_succeeded,
                     api_latency_ms: api_latency,
                     avg_stream_latency_ms: avg_latency,
                     resolved_host,
                     channel_probes: probes,
-                    error: None,
+                    error: (!stream_probe_succeeded).then(|| {
+                        "The API responded, but none of the sampled streams could be reached"
+                            .to_string()
+                    }),
                     account_status: status,
                     max_connections: max_conn,
                 }
             }
-        })
-        .collect();
-
-    let mut results = futures::future::join_all(probe_futures).await;
+        },
+    ))
+    .buffered(SERVER_TEST_MAX_CONCURRENT_SERVERS)
+    .collect::<Vec<_>>()
+    .await;
 
     // Phase 4: Analyze
     let same_cdn = detect_same_cdn(&results);
@@ -712,4 +742,50 @@ async fn test_xtream_servers_inner(
         same_cdn,
         channels_probed,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        build_server_test_client, server_test_get, stream_probe_succeeded, XtreamChannelProbe,
+        SERVER_TEST_STREAM_TIMEOUT,
+    };
+
+    fn empty_probe() -> XtreamChannelProbe {
+        XtreamChannelProbe {
+            stream_id: "1".to_string(),
+            latency_ms: None,
+            resolved_url: None,
+            codec: None,
+            resolution: None,
+            fps: None,
+            screenshot: None,
+        }
+    }
+
+    #[test]
+    fn empty_stream_probe_is_not_successful() {
+        assert!(!stream_probe_succeeded(&empty_probe()));
+    }
+
+    #[test]
+    fn any_stream_probe_evidence_is_successful() {
+        let mut probe = empty_probe();
+        probe.codec = Some("h264".to_string());
+        assert!(stream_probe_succeeded(&probe));
+    }
+
+    #[tokio::test]
+    async fn server_test_rejects_private_network_targets() {
+        let client = build_server_test_client(SERVER_TEST_STREAM_TIMEOUT, false)
+            .expect("client should build");
+        let url =
+            url::Url::parse("http://169.254.169.254/latest/meta-data/").expect("URL should parse");
+
+        let error = server_test_get(&client, url.as_str())
+            .await
+            .expect_err("metadata endpoint should be blocked");
+
+        assert!(error.into_message().contains("private or local"));
+    }
 }

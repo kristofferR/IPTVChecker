@@ -55,7 +55,9 @@ function formatUserFacingError(
   if (!normalized || normalized === "[object Object]") {
     return fallback;
   }
-  return existingPrefix.test(raw) ? raw : `${prefix}: ${normalized}`;
+  return existingPrefix.test(normalized)
+    ? normalized
+    : `${prefix}: ${normalized}`;
 }
 
 export function formatPlaylistOpenError(err: unknown): string {

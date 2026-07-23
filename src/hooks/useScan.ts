@@ -606,13 +606,20 @@ export function useScan() {
   }, []);
 
   const syncFromPlaylist = useCallback(
-    async (channels: Channel[], preserveExistingResults = false) => {
+    async (
+      channels: Channel[],
+      preserveExistingResults = false,
+      shouldApply: () => boolean = () => true,
+    ) => {
       const syncStartedAt = performance.now();
       const duplicateVersion = duplicateComputeVersion.current + 1;
       duplicateComputeVersion.current = duplicateVersion;
 
       // Cancel any running scan and reset backend state
       await resetScan().catch(() => {});
+      if (!shouldApply()) {
+        return false;
+      }
 
       const synced = channels.map((channel) => {
         const existing = resultsRef.current[channel.index];
@@ -673,13 +680,14 @@ export function useScan() {
       logger.info(
         `[useScan] playlist sync complete: ${channels.length} channels ready in ${(performance.now() - syncStartedAt).toFixed(1)}ms`,
       );
+      return true;
     },
     [commitCollections],
   );
 
   const initFromPlaylist = useCallback(
-    async (channels: Channel[]) => {
-      await syncFromPlaylist(channels, false);
+    async (channels: Channel[], shouldApply?: () => boolean) => {
+      return syncFromPlaylist(channels, false, shouldApply);
     },
     [syncFromPlaylist],
   );

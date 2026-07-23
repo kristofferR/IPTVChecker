@@ -157,6 +157,11 @@ export function ChannelTable({
   const [sortField, setSortField] = useState<SortField>("index");
   const [sortDir, setSortDir] = useState<SortDirection>("asc");
   const [focusedRow, setFocusedRow] = useState<number | null>(null);
+  const focusedRowRef = useRef<number | null>(null);
+  const updateFocusedRow = useCallback((next: number | null) => {
+    focusedRowRef.current = next;
+    setFocusedRow(next);
+  }, []);
   const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(
     () => new Set(),
@@ -409,12 +414,13 @@ export function ChannelTable({
       prev !== null && visible.has(prev) ? prev : null,
     );
 
-    setFocusedRow((prev) => {
-      if (filteredResults.length === 0) return null;
-      if (prev === null) return 0;
-      return Math.min(prev, filteredResults.length - 1);
-    });
-  }, [filteredResults, updateSelection]);
+    const previous = focusedRowRef.current;
+    const next =
+      filteredResults.length === 0
+        ? null
+        : Math.min(previous ?? 0, filteredResults.length - 1);
+    if (next !== previous) updateFocusedRow(next);
+  }, [filteredResults, updateFocusedRow, updateSelection]);
 
   useEffect(() => {
     if (!contextMenuState) {
@@ -529,10 +535,10 @@ export function ChannelTable({
       setSelectedIndices(next);
       emitSelection(next);
       setSelectionAnchor(result.index);
-      setFocusedRow(rowIndex);
+      updateFocusedRow(rowIndex);
       onSelectChannel(result);
     },
-    [emitSelection, onSelectChannel],
+    [emitSelection, onSelectChannel, updateFocusedRow],
   );
 
   const selectRange = useCallback(
@@ -559,10 +565,17 @@ export function ChannelTable({
 
       setSelectedIndices(next);
       emitSelection(next);
-      setFocusedRow(clickedRow);
+      updateFocusedRow(clickedRow);
       onSelectChannel(clickedResult);
     },
-    [selectionAnchor, filteredResults, selectSingle, emitSelection, onSelectChannel],
+    [
+      selectionAnchor,
+      filteredResults,
+      selectSingle,
+      emitSelection,
+      onSelectChannel,
+      updateFocusedRow,
+    ],
   );
 
   const selectAllVisible = useCallback(() => {
@@ -571,9 +584,9 @@ export function ChannelTable({
     setSelectedIndices(next);
     emitSelection(next);
     setSelectionAnchor(filteredResults[0].index);
-    setFocusedRow(0);
+    updateFocusedRow(0);
     onSelectChannel(filteredResults[0]);
-  }, [filteredResults, emitSelection, onSelectChannel]);
+  }, [filteredResults, emitSelection, onSelectChannel, updateFocusedRow]);
 
   const clearSelection = useCallback(() => {
     const next = new Set<number>();
@@ -680,12 +693,13 @@ export function ChannelTable({
       if (filteredResults.length === 0) return;
 
       // All side effects (selection emit, playback/cast redirect, scroll) run
-      // outside the setFocusedRow updater — updaters must stay pure, and
+      // outside the focused-row state update — updaters must stay pure, and
       // StrictMode double-invocation here used to double-start playback.
       const selectedRow = filteredResults.findIndex((result) =>
         selectedIndices.has(result.index),
       );
-      const current = focusedRow ?? (selectedRow >= 0 ? selectedRow : 0);
+      const current =
+        focusedRowRef.current ?? (selectedRow >= 0 ? selectedRow : 0);
       const next = Math.min(
         filteredResults.length - 1,
         Math.max(0, current + delta),
@@ -717,18 +731,18 @@ export function ChannelTable({
       }
 
       virtualizer.scrollToIndex(next, { align: "auto" });
-      setFocusedRow(next);
+      updateFocusedRow(next);
     },
     [
       filteredResults,
       selectedIndices,
-      focusedRow,
       emitSelection,
       onSelectChannel,
       onOpenChannel,
       isPlaying,
       isCasting,
       scanState,
+      updateFocusedRow,
       virtualizer,
     ],
   );
@@ -764,12 +778,12 @@ export function ChannelTable({
       } else if (event.key === "ArrowUp") {
         event.preventDefault();
         moveFocusBy(-1);
-      } else if (event.key === "Enter" && focusedRow !== null) {
-        const result = filteredResults[focusedRow];
+      } else if (event.key === "Enter" && focusedRowRef.current !== null) {
+        const result = filteredResults[focusedRowRef.current];
         if (result) onSelectChannel(result);
       }
     },
-    [filteredResults, focusedRow, onSelectChannel, moveFocusBy],
+    [filteredResults, onSelectChannel, moveFocusBy],
   );
 
   const handleRowClickAt = useCallback(
@@ -797,7 +811,7 @@ export function ChannelTable({
           return next;
         });
         setSelectionAnchor(result.index);
-        setFocusedRow(rowIndex);
+        updateFocusedRow(rowIndex);
         onSelectChannel(result);
         return;
       }
@@ -806,7 +820,7 @@ export function ChannelTable({
       const currentSelection = selectedIndicesRef.current;
       if (currentSelection.size === 1 && currentSelection.has(result.index)) {
         clearSelection();
-        setFocusedRow(rowIndex);
+        updateFocusedRow(rowIndex);
         return;
       }
 
@@ -835,6 +849,7 @@ export function ChannelTable({
       selectSingle,
       isCasting,
       scanState,
+      updateFocusedRow,
     ],
   );
 

@@ -280,11 +280,21 @@ async fn is_safe_upstream_url(url: &str) -> bool {
 /// Hard cap on manually-followed redirect hops per upstream fetch.
 const MAX_REDIRECT_HOPS: usize = 10;
 
-enum SafeFetchError {
+pub(crate) enum SafeFetchError {
     /// A hop targeted localhost/private networks/metadata endpoints.
     Blocked,
     TooManyRedirects,
     Request(reqwest::Error),
+}
+
+impl SafeFetchError {
+    pub(crate) fn into_message(self) -> String {
+        match self {
+            Self::Blocked => "request targeted a private or local network address".to_string(),
+            Self::TooManyRedirects => "request exceeded the redirect limit".to_string(),
+            Self::Request(error) => error.without_url().to_string(),
+        }
+    }
 }
 
 /// Fetch a URL, following redirects manually and re-validating every hop with
@@ -293,7 +303,7 @@ enum SafeFetchError {
 /// reqwest's built-in redirect policy only lets us validate the first URL.
 /// `build_request` receives each hop's URL and must produce the request
 /// (method, headers, timeout) using a client built with Policy::none().
-async fn fetch_with_hop_validation<F>(
+pub(crate) async fn fetch_with_hop_validation<F>(
     url: &str,
     build_request: F,
 ) -> Result<reqwest::Response, SafeFetchError>

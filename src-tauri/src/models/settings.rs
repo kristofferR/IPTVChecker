@@ -196,7 +196,7 @@ impl Default for AppSettings {
             profile_bitrate: false,
             ffprobe_timeout_secs: DEFAULT_FFPROBE_TIMEOUT_SECS,
             ffmpeg_bitrate_timeout_secs: DEFAULT_FFMPEG_BITRATE_TIMEOUT_SECS,
-            accept_invalid_certs: true,
+            accept_invalid_certs: false,
             proxy_file: None,
             test_geoblock: false,
             screenshots_dir: None,
@@ -226,7 +226,7 @@ mod tests {
     fn default_enables_scan_notifications() {
         let settings = AppSettings::default();
         assert!(settings.scan_notifications);
-        assert!(settings.accept_invalid_certs);
+        assert!(!settings.accept_invalid_certs);
     }
 
     #[test]
