@@ -15,6 +15,7 @@ import {
   recordPlaybackRecoveryAttempt,
   shouldResetPlaybackRecoveryAttempts,
   shouldSuspendPlaybackWatchdog,
+  shouldTryXtreamHlsBeforeMpegts,
   supportsNativeHlsPlayback,
   tryConvertToXtreamHls,
   type StreamMetadata,
@@ -88,6 +89,11 @@ describe("useStreamPlayer helpers", () => {
     );
 
     expect(routes.map((route) => route.kind)).toEqual(["remux", "direct"]);
+  });
+
+  it("tries Xtream HLS before MPEG-TS only during automatic recovery", () => {
+    expect(shouldTryXtreamHlsBeforeMpegts("manual")).toBe(false);
+    expect(shouldTryXtreamHlsBeforeMpegts("recovery")).toBe(true);
   });
 
   it("uses one non-remux URL for VOD and direct playback without a proxy", () => {

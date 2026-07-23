@@ -215,6 +215,10 @@ export function getMpegtsPlaybackRoutes(
   return preferRemux ? [remux, direct] : [direct, remux];
 }
 
+export function shouldTryXtreamHlsBeforeMpegts(startMode: PlaybackStartMode): boolean {
+  return startMode === "recovery";
+}
+
 export function shouldSuspendPlaybackWatchdog(
   visibilityState: DocumentVisibilityState,
 ): boolean {
@@ -1315,6 +1319,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     async (
       url: string,
       signal: AbortSignal,
+      isLive: boolean,
       timeoutMs = MPEGTS_PLAYBACK_ROUTE_TIMEOUT_MS,
     ): Promise<boolean> => {
       try {
@@ -1329,7 +1334,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             {
               type: "mpegts",
               url,
-              isLive: true,
+              isLive,
             },
             {
               // Trade a small amount of live latency for enough network cushion
@@ -1493,6 +1498,25 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       const url = result.url;
       const streamType = classifyStream(url);
       const preferNativeHls = streamType === "hls" && supportsNativeHlsPlayback(videoElement);
+      const preferXtreamHls = shouldTryXtreamHlsBeforeMpegts(startMode);
+      const xtreamHlsUrl = streamType === "hls" ? null : tryConvertToXtreamHls(url);
+      const tryXtreamHlsRoute = async (): Promise<boolean> => {
+        if (!xtreamHlsUrl) return false;
+
+        logger.info(
+          startMode === "recovery"
+            ? "[Player] Trying Xtream HLS recovery route for"
+            : "[Player] Trying Xtream HLS fallback for",
+          result.name,
+        );
+        lastErrorRef.current = null;
+        const hlsOk = await tryHlsPlayback(xtreamHlsUrl, abortController.signal);
+        if (!isCurrentPlayback() || !hlsOk) {
+          return false;
+        }
+        logger.info("[Player] Playing via Xtream HLS:", result.name);
+        return handleSuccessfulStart();
+      };
 
       if (preferNativeHls) {
         lastErrorRef.current = null;
@@ -1524,7 +1548,15 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       }
 
+      if (preferXtreamHls && await tryXtreamHlsRoute()) {
+        return;
+      }
+      if (!isCurrentPlayback()) {
+        return;
+      }
+
       if (streamType === "mpegts" || streamType === "unknown") {
+        const isLive = result.content_type === "live";
         let proxyPort = 0;
         try {
           proxyPort = await getStreamingProxyPort();
@@ -1534,7 +1566,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         const playbackRoutes = getMpegtsPlaybackRoutes(
           url,
           proxyPort,
-          result.content_type === "live",
+          isLive,
           startMode === "recovery",
         );
         for (const route of playbackRoutes) {
@@ -1547,7 +1579,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             result.name,
           );
           lastErrorRef.current = null;
-          const mpegtsOk = await tryMpegtsPlayback(route.url, abortController.signal);
+          const mpegtsOk = await tryMpegtsPlayback(
+            route.url,
+            abortController.signal,
+            isLive,
+          );
           if (!isCurrentPlayback()) {
             return;
           }
@@ -1557,22 +1593,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       }
 
-      if (streamType !== "hls") {
-        const xtreamHlsUrl = tryConvertToXtreamHls(url);
-        if (xtreamHlsUrl) {
-          logger.info("[Player] Trying Xtream HLS fallback for", result.name);
-          lastErrorRef.current = null;
-          const hlsOk = await tryHlsPlayback(xtreamHlsUrl, abortController.signal);
-          if (!isCurrentPlayback()) {
-            return;
-          }
-          if (hlsOk) {
-            logger.info("[Player] Playing via Xtream HLS fallback:", result.name);
-            if (await handleSuccessfulStart()) {
-              return;
-            }
-          }
-        }
+      if (!preferXtreamHls && await tryXtreamHlsRoute()) {
+        return;
+      }
+      if (!isCurrentPlayback()) {
+        return;
       }
 
       if (streamType !== "hls") {
