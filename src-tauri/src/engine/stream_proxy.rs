@@ -27,6 +27,9 @@ const PROXY_BUFFERED_READ_TIMEOUT: std::time::Duration = std::time::Duration::fr
 /// Per-read inactivity timeout — resets on every successful read, so it does NOT
 /// cap total stream duration. Only kills truly dead/stalled connections.
 const PROXY_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6);
+/// Slow IPTV servers and ffmpeg probing can legitimately take longer to emit
+/// their first media bytes. Steady-state reads still use the shorter timeout.
+const PROXY_STARTUP_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Short retry delay for a live MPEG-TS source that drops its upstream socket.
 /// The downstream connection stays open while the proxy reconnects, so the
@@ -772,12 +775,19 @@ where
     let budget = Arc::new(tokio::sync::Semaphore::new(STREAM_PROXY_READ_AHEAD_BYTES));
     let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel(STREAM_PROXY_READ_AHEAD_CHUNKS);
     let reader = tokio::spawn(async move {
+        let mut received_data = false;
         loop {
             let mut chunk = vec![0u8; 64 * 1024];
-            match tokio::time::timeout(PROXY_READ_TIMEOUT, stdout.read(&mut chunk)).await {
+            let read_timeout = if received_data {
+                PROXY_READ_TIMEOUT
+            } else {
+                PROXY_STARTUP_READ_TIMEOUT
+            };
+            match tokio::time::timeout(read_timeout, stdout.read(&mut chunk)).await {
                 Err(_) => return StreamForwardOutcome::UpstreamReadTimeout,
                 Ok(Ok(0)) => return StreamForwardOutcome::Completed,
                 Ok(Ok(read)) => {
+                    received_data = true;
                     chunk.truncate(read);
                     let permits = read.min(STREAM_PROXY_READ_AHEAD_BYTES) as u32;
                     let permit = match budget.clone().acquire_many_owned(permits).await {
@@ -929,7 +939,27 @@ fn transport_stream_packet_pcr(packet: &[u8]) -> Option<u64> {
 async fn forward_response_as_chunked_stream<W>(
     writer: &mut W,
     response: reqwest::Response,
+    pacer: Option<&mut TransportStreamPacer>,
+) -> StreamForwardResult
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    forward_response_as_chunked_stream_with_timeouts(
+        writer,
+        response,
+        pacer,
+        PROXY_STARTUP_READ_TIMEOUT,
+        PROXY_READ_TIMEOUT,
+    )
+    .await
+}
+
+async fn forward_response_as_chunked_stream_with_timeouts<W>(
+    writer: &mut W,
+    response: reqwest::Response,
     mut pacer: Option<&mut TransportStreamPacer>,
+    startup_read_timeout: std::time::Duration,
+    steady_read_timeout: std::time::Duration,
 ) -> StreamForwardResult
 where
     W: tokio::io::AsyncWrite + Unpin,
@@ -942,12 +972,20 @@ where
     let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel(STREAM_PROXY_READ_AHEAD_CHUNKS);
     let reader = tokio::spawn(async move {
         let mut stream = response.bytes_stream();
-        while let Some(chunk_result) = stream.next().await {
-            match chunk_result {
-                Ok(chunk) => {
+        let mut received_data = false;
+        loop {
+            let read_timeout = if received_data {
+                steady_read_timeout
+            } else {
+                startup_read_timeout
+            };
+            match tokio::time::timeout(read_timeout, stream.next()).await {
+                Err(_) => return StreamForwardOutcome::UpstreamReadTimeout,
+                Ok(Some(Ok(chunk))) => {
                     if chunk.is_empty() {
                         continue;
                     }
+                    received_data = true;
                     let permits = chunk.len().min(STREAM_PROXY_READ_AHEAD_BYTES) as u32;
                     let permit = match budget.clone().acquire_many_owned(permits).await {
                         Ok(permit) => permit,
@@ -957,16 +995,16 @@ where
                         return StreamForwardOutcome::DownstreamClosed;
                     }
                 }
-                Err(err) => {
+                Ok(Some(Err(err))) => {
                     return if err.is_timeout() {
                         StreamForwardOutcome::UpstreamReadTimeout
                     } else {
                         StreamForwardOutcome::UpstreamReadError(reqwest_error_kind(&err))
                     };
                 }
+                Ok(None) => return StreamForwardOutcome::Completed,
             }
         }
-        StreamForwardOutcome::Completed
     });
 
     while let Some((chunk, _budget_permit)) = chunk_rx.recv().await {
@@ -1112,7 +1150,7 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                 let client = build_proxy_client(
                     accept_invalid_certs,
                     PROXY_CONNECT_TIMEOUT,
-                    PROXY_READ_TIMEOUT,
+                    PROXY_STARTUP_READ_TIMEOUT,
                 );
 
                 let user_agent = HeaderValue::from_str(&user_agent)
@@ -1374,6 +1412,14 @@ mod tests {
         chunks: Vec<TestStreamChunk>,
         tail_delay: Duration,
     ) -> (String, tokio::task::JoinHandle<()>) {
+        spawn_delayed_chunked_upstream(Duration::ZERO, chunks, tail_delay).await
+    }
+
+    async fn spawn_delayed_chunked_upstream(
+        initial_delay: Duration,
+        chunks: Vec<TestStreamChunk>,
+        tail_delay: Duration,
+    ) -> (String, tokio::task::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .expect("test listener should bind");
@@ -1398,6 +1444,9 @@ mod tests {
                 .await
                 .expect("server should write headers");
 
+            if !initial_delay.is_zero() {
+                tokio::time::sleep(initial_delay).await;
+            }
             for chunk in chunks {
                 let size_line = format!("{:x}\r\n", chunk.body.len());
                 if socket.write_all(size_line.as_bytes()).await.is_err() {
@@ -1699,6 +1748,45 @@ segment.ts
             elapsed > simulated_old_total_timeout,
             "stream completed too quickly to cover the old timeout window: {:?}",
             elapsed
+        );
+
+        server_handle.await.expect("server task should finish");
+    }
+
+    #[tokio::test]
+    async fn forward_response_allows_slow_first_bytes_then_uses_steady_timeout() {
+        let steady_timeout = Duration::from_millis(80);
+        let startup_timeout = Duration::from_millis(250);
+        let initial_delay = Duration::from_millis(150);
+        let chunks = vec![TestStreamChunk {
+            body: vec![0xAA; 64],
+            delay_after: Duration::ZERO,
+        }];
+        let (url, server_handle) =
+            spawn_delayed_chunked_upstream(initial_delay, chunks, Duration::from_millis(150)).await;
+        let client = build_proxy_client(false, Duration::from_secs(1), Duration::from_secs(1));
+        let started = Instant::now();
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .expect("stream request should succeed");
+
+        let mut sink = tokio::io::sink();
+        let result = forward_response_as_chunked_stream_with_timeouts(
+            &mut sink,
+            response,
+            None,
+            startup_timeout,
+            steady_timeout,
+        )
+        .await;
+
+        assert_eq!(result.outcome, StreamForwardOutcome::UpstreamReadTimeout);
+        assert_eq!(result.bytes_forwarded, 64);
+        assert!(
+            started.elapsed() >= initial_delay + steady_timeout,
+            "first media bytes were rejected using the steady-state timeout"
         );
 
         server_handle.await.expect("server task should finish");

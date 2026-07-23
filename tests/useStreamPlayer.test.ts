@@ -8,7 +8,7 @@ import {
   findLiveLatencyCatchUpTarget,
   formatPlaybackRecoveryMessage,
   getHlsFatalRecoveryAction,
-  getMpegtsPlaybackUrls,
+  getMpegtsPlaybackRoutes,
   getNextPlaybackRecoveryAttempt,
   PLAYBACK_RECOVERY_WINDOW_MS,
   prunePlaybackRecoveryHistory,
@@ -63,23 +63,45 @@ describe("useStreamPlayer helpers", () => {
     expect(supportsNativeHlsPlayback(canPlayTypes({}))).toBe(false);
   });
 
-  it("falls back to the reconnecting proxy when live remux is unavailable", () => {
-    const urls = getMpegtsPlaybackUrls("https://example.com/live.ts", 3210, true);
+  it("uses the compatible direct route before remux for initial live playback", () => {
+    const routes = getMpegtsPlaybackRoutes(
+      "https://example.com/live.ts",
+      3210,
+      true,
+      false,
+    );
 
-    expect(urls).toHaveLength(2);
-    expect(urls[0]).toContain("reconnect=1");
-    expect(urls[0]).toContain("remux=1");
-    expect(urls[1]).toContain("reconnect=1");
-    expect(urls[1]).not.toContain("remux=1");
+    expect(routes).toHaveLength(2);
+    expect(routes[0]?.kind).toBe("direct");
+    expect(routes[0]?.url).toContain("reconnect=1");
+    expect(routes[0]?.url).not.toContain("remux=1");
+    expect(routes[1]?.kind).toBe("remux");
+    expect(routes[1]?.url).toContain("remux=1");
+  });
+
+  it("prefers timestamp-normalizing remux when recovering live playback", () => {
+    const routes = getMpegtsPlaybackRoutes(
+      "https://example.com/live.ts",
+      3210,
+      true,
+      true,
+    );
+
+    expect(routes.map((route) => route.kind)).toEqual(["remux", "direct"]);
   });
 
   it("uses one non-remux URL for VOD and direct playback without a proxy", () => {
-    const vodUrls = getMpegtsPlaybackUrls("https://example.com/movie.ts", 3210, false);
+    const vodRoutes = getMpegtsPlaybackRoutes(
+      "https://example.com/movie.ts",
+      3210,
+      false,
+      false,
+    );
 
-    expect(vodUrls).toHaveLength(1);
-    expect(vodUrls[0]).not.toContain("remux=1");
-    expect(getMpegtsPlaybackUrls("https://example.com/live.ts", 0, true)).toEqual([
-      "https://example.com/live.ts",
+    expect(vodRoutes).toHaveLength(1);
+    expect(vodRoutes[0]?.url).not.toContain("remux=1");
+    expect(getMpegtsPlaybackRoutes("https://example.com/live.ts", 0, true, false)).toEqual([
+      { kind: "direct", url: "https://example.com/live.ts" },
     ]);
   });
 
