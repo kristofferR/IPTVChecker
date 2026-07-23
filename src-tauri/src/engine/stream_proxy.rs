@@ -972,21 +972,14 @@ where
     let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel(STREAM_PROXY_READ_AHEAD_CHUNKS);
     let reader = tokio::spawn(async move {
         let mut stream = response.bytes_stream();
-        let mut received_data = false;
-        let startup_deadline = tokio::time::Instant::now() + startup_read_timeout;
+        let mut read_deadline = tokio::time::Instant::now() + startup_read_timeout;
         loop {
-            let next_chunk = if received_data {
-                tokio::time::timeout(steady_read_timeout, stream.next()).await
-            } else {
-                tokio::time::timeout_at(startup_deadline, stream.next()).await
-            };
-            match next_chunk {
+            match tokio::time::timeout_at(read_deadline, stream.next()).await {
                 Err(_) => return StreamForwardOutcome::UpstreamReadTimeout,
                 Ok(Some(Ok(chunk))) => {
                     if chunk.is_empty() {
                         continue;
                     }
-                    received_data = true;
                     let permits = chunk.len().min(STREAM_PROXY_READ_AHEAD_BYTES) as u32;
                     let permit = match budget.clone().acquire_many_owned(permits).await {
                         Ok(permit) => permit,
@@ -995,6 +988,7 @@ where
                     if chunk_tx.send((chunk, permit)).await.is_err() {
                         return StreamForwardOutcome::DownstreamClosed;
                     }
+                    read_deadline = tokio::time::Instant::now() + steady_read_timeout;
                 }
                 Ok(Some(Err(err))) => {
                     return if err.is_timeout() {

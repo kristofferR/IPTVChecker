@@ -276,7 +276,6 @@ export const PLAYBACK_RECOVERY_WINDOW_MS = 2 * 60_000;
 // the startup budget of a fallback that may still work.
 const PLAYBACK_ROUTE_TIMEOUT_MS = 15_000;
 const LOADING_TIMEOUT_MS = 75_000;
-const NATIVE_HLS_TIMEOUT_MS = 4_000;
 const PLAYBACK_RECOVERY_DELAY_MS = 900;
 const PLAYBACK_STALL_GRACE_MS = 15_000;
 const PLAYBACK_NO_PROGRESS_STALL_MS = 20_000;
@@ -1235,73 +1234,78 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       signal: AbortSignal,
       timeoutMs = PLAYBACK_ROUTE_TIMEOUT_MS,
     ): Promise<boolean> => {
-      const { default: Hls } = await import("hls.js");
-      if (signal.aborted || !Hls.isSupported()) return false;
+      try {
+        const { default: Hls } = await import("hls.js");
+        if (signal.aborted || !Hls.isSupported()) return false;
 
-      return new Promise((resolve) => {
-        let settled = false;
-        let timer: ReturnType<typeof setTimeout> | null = null;
-        const hls = new Hls({
-          maxBufferLength: 30,
-          maxMaxBufferLength: 60,
+        return await new Promise<boolean>((resolve) => {
+          let settled = false;
+          let timer: ReturnType<typeof setTimeout> | null = null;
+          const hls = new Hls({
+            maxBufferLength: 30,
+            maxMaxBufferLength: 60,
+          });
+          hlsInstanceRef.current = hls;
+
+          const finish = (value: boolean) => {
+            if (settled) return;
+            settled = true;
+            if (timer) clearTimeout(timer);
+            videoElement.removeEventListener("canplay", onCanPlay);
+            videoElement.removeEventListener("error", onVideoError);
+            signal.removeEventListener("abort", onAbort);
+            hls.off(Hls.Events.ERROR, onHlsError);
+            resolve(value);
+          };
+          const destroyPlayer = () => {
+            hls.destroy();
+            if (hlsInstanceRef.current === hls) {
+              hlsInstanceRef.current = null;
+            }
+          };
+          const fail = (reason?: string) => {
+            if (settled) return;
+            if (reason) {
+              lastErrorRef.current = reason;
+            }
+            finish(false);
+            destroyPlayer();
+          };
+          const onCanPlay = () => finish(true);
+          const onVideoError = () => {
+            fail(readMediaErrorMessage(videoElement.error) ?? "HLS media error");
+          };
+          const onHlsError = (_event: unknown, data: HlsErrorPayload) => {
+            if (data.fatal) {
+              const detail = data.details ?? "fatal hls.js error";
+              const type = data.type ?? "hls.js";
+              fail(`${type}: ${detail}`);
+            }
+          };
+          const onAbort = () => {
+            fail();
+          };
+
+          try {
+            timer = setTimeout(() => {
+              fail("HLS playback timed out");
+            }, timeoutMs);
+            videoElement.addEventListener("canplay", onCanPlay, { once: true });
+            videoElement.addEventListener("error", onVideoError, { once: true });
+            signal.addEventListener("abort", onAbort, { once: true });
+            hls.on(Hls.Events.ERROR, onHlsError);
+            hls.loadSource(toProxyUrl(url));
+            hls.attachMedia(videoElement);
+            applyVolume();
+          } catch (error) {
+            fail(error instanceof Error ? error.message : "Could not initialize HLS playback");
+          }
         });
-        hlsInstanceRef.current = hls;
-
-        const finish = (value: boolean) => {
-          if (settled) return;
-          settled = true;
-          if (timer) clearTimeout(timer);
-          videoElement.removeEventListener("canplay", onCanPlay);
-          videoElement.removeEventListener("error", onVideoError);
-          signal.removeEventListener("abort", onAbort);
-          hls.off(Hls.Events.ERROR, onHlsError);
-          resolve(value);
-        };
-        const destroyPlayer = () => {
-          hls.destroy();
-          if (hlsInstanceRef.current === hls) {
-            hlsInstanceRef.current = null;
-          }
-        };
-        const fail = (reason?: string) => {
-          if (settled) return;
-          if (reason) {
-            lastErrorRef.current = reason;
-          }
-          finish(false);
-          destroyPlayer();
-        };
-        const onCanPlay = () => finish(true);
-        const onVideoError = () => {
-          fail(readMediaErrorMessage(videoElement.error) ?? "HLS media error");
-        };
-        const onHlsError = (_event: unknown, data: HlsErrorPayload) => {
-          if (data.fatal) {
-            const detail = data.details ?? "fatal hls.js error";
-            const type = data.type ?? "hls.js";
-            fail(`${type}: ${detail}`);
-          }
-        };
-        const onAbort = () => {
-          fail();
-        };
-
-        timer = setTimeout(() => {
-          fail("HLS playback timed out");
-        }, timeoutMs);
-        videoElement.addEventListener("canplay", onCanPlay, { once: true });
-        videoElement.addEventListener("error", onVideoError, { once: true });
-        signal.addEventListener("abort", onAbort, { once: true });
-        hls.on(Hls.Events.ERROR, onHlsError);
-
-        try {
-          hls.loadSource(toProxyUrl(url));
-          hls.attachMedia(videoElement);
-          applyVolume();
-        } catch (error) {
-          fail(error instanceof Error ? error.message : "Could not initialize HLS playback");
-        }
-      });
+      } catch (error) {
+        lastErrorRef.current =
+          error instanceof Error ? error.message : "Could not initialize HLS playback";
+        return false;
+      }
     },
     [videoElement, applyVolume],
   );
@@ -1312,92 +1316,99 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       signal: AbortSignal,
       timeoutMs = PLAYBACK_ROUTE_TIMEOUT_MS,
     ): Promise<boolean> => {
-      const mpegtsModule = await import("mpegts.js");
-      const mpegts = mpegtsModule.default;
-      if (signal.aborted || !mpegts.isSupported()) return false;
+      try {
+        const mpegtsModule = await import("mpegts.js");
+        const mpegts = mpegtsModule.default;
+        if (signal.aborted || !mpegts.isSupported()) return false;
 
-      return new Promise((resolve) => {
-        let settled = false;
-        let timer: ReturnType<typeof setTimeout> | null = null;
-        const player = mpegts.createPlayer(
-          {
-            type: "mpegts",
-            url,
-            isLive: true,
-          },
-          {
-            // Trade a small amount of live latency for enough network cushion
-            // to ride out the jitter common on IPTV provider connections.
-            enableWorker: true,
-            enableStashBuffer: true,
-            stashInitialSize: 1024 * 1024,
-            lazyLoad: false,
-            autoCleanupSourceBuffer: true,
-            autoCleanupMaxBackwardDuration: 120,
-            autoCleanupMinBackwardDuration: 60,
-          },
-        ) as unknown as MpegtsPlayer;
-        mpegtsPlayerRef.current = player;
+        return await new Promise<boolean>((resolve) => {
+          let settled = false;
+          let timer: ReturnType<typeof setTimeout> | null = null;
+          const player = mpegts.createPlayer(
+            {
+              type: "mpegts",
+              url,
+              isLive: true,
+            },
+            {
+              // Trade a small amount of live latency for enough network cushion
+              // to ride out the jitter common on IPTV provider connections.
+              enableWorker: true,
+              enableStashBuffer: true,
+              stashInitialSize: 1024 * 1024,
+              lazyLoad: false,
+              autoCleanupSourceBuffer: true,
+              autoCleanupMaxBackwardDuration: 120,
+              autoCleanupMinBackwardDuration: 60,
+            },
+          ) as unknown as MpegtsPlayer;
+          mpegtsPlayerRef.current = player;
 
-        const finish = (value: boolean) => {
-          if (settled) return;
-          settled = true;
-          if (timer) clearTimeout(timer);
-          videoElement.removeEventListener("canplay", onCanPlay);
-          videoElement.removeEventListener("error", onError);
-          signal.removeEventListener("abort", onAbort);
-          player.off?.("error", onPlayerError);
-          resolve(value);
-        };
-        const destroyPlayer = () => {
-          player.destroy();
-          if (mpegtsPlayerRef.current === player) {
-            mpegtsPlayerRef.current = null;
+          const finish = (value: boolean) => {
+            if (settled) return;
+            settled = true;
+            if (timer) clearTimeout(timer);
+            videoElement.removeEventListener("canplay", onCanPlay);
+            videoElement.removeEventListener("error", onError);
+            signal.removeEventListener("abort", onAbort);
+            player.off?.("error", onPlayerError);
+            resolve(value);
+          };
+          const destroyPlayer = () => {
+            player.destroy();
+            if (mpegtsPlayerRef.current === player) {
+              mpegtsPlayerRef.current = null;
+            }
+          };
+          const fail = (reason?: string) => {
+            if (settled) return;
+            if (reason) {
+              lastErrorRef.current = reason;
+            }
+            finish(false);
+            destroyPlayer();
+          };
+          const onCanPlay = () => {
+            finish(true);
+          };
+          const onError = () => {
+            fail(readMediaErrorMessage(videoElement.error) ?? "MPEG-TS media error");
+          };
+          const onPlayerError = (
+            errorType?: unknown,
+            errorDetail?: unknown,
+            info?: unknown,
+          ) => {
+            const segments = [errorType, errorDetail, info]
+              .filter((value): value is string =>
+                typeof value === "string" && value.length > 0
+              );
+            fail(segments.join(": ") || "mpegts.js error");
+          };
+          const onAbort = () => {
+            fail();
+          };
+
+          try {
+            timer = setTimeout(() => {
+              fail("Stream startup timed out");
+            }, timeoutMs);
+            videoElement.addEventListener("canplay", onCanPlay, { once: true });
+            videoElement.addEventListener("error", onError, { once: true });
+            signal.addEventListener("abort", onAbort, { once: true });
+            player.on?.("error", onPlayerError);
+            player.attachMediaElement(videoElement);
+            player.load();
+            applyVolume();
+          } catch (error) {
+            fail(error instanceof Error ? error.message : "Could not initialize MPEG-TS playback");
           }
-        };
-        const fail = (reason?: string) => {
-          if (settled) return;
-          if (reason) {
-            lastErrorRef.current = reason;
-          }
-          finish(false);
-          destroyPlayer();
-        };
-        const onCanPlay = () => {
-          finish(true);
-        };
-        const onError = () => {
-          fail(readMediaErrorMessage(videoElement.error) ?? "MPEG-TS media error");
-        };
-        const onPlayerError = (
-          errorType?: unknown,
-          errorDetail?: unknown,
-          info?: unknown,
-        ) => {
-          const segments = [errorType, errorDetail, info]
-            .filter((value): value is string => typeof value === "string" && value.length > 0);
-          fail(segments.join(": ") || "mpegts.js error");
-        };
-        const onAbort = () => {
-          fail();
-        };
-
-        timer = setTimeout(() => {
-          fail("Stream startup timed out");
-        }, timeoutMs);
-        videoElement.addEventListener("canplay", onCanPlay, { once: true });
-        videoElement.addEventListener("error", onError, { once: true });
-        signal.addEventListener("abort", onAbort, { once: true });
-        player.on?.("error", onPlayerError);
-
-        try {
-          player.attachMediaElement(videoElement);
-          player.load();
-          applyVolume();
-        } catch (error) {
-          fail(error instanceof Error ? error.message : "Could not initialize MPEG-TS playback");
-        }
-      });
+        });
+      } catch (error) {
+        lastErrorRef.current =
+          error instanceof Error ? error.message : "Could not initialize MPEG-TS playback";
+        return false;
+      }
     },
     [videoElement, applyVolume],
   );
@@ -1484,7 +1495,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
       if (preferNativeHls) {
         lastErrorRef.current = null;
-        const nativeOk = await tryNativePlayback(url, abortController.signal, NATIVE_HLS_TIMEOUT_MS);
+        const nativeOk = await tryNativePlayback(
+          url,
+          abortController.signal,
+          PLAYBACK_ROUTE_TIMEOUT_MS,
+        );
         if (!isCurrentPlayback()) {
           return;
         }
