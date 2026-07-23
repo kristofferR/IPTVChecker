@@ -1251,17 +1251,28 @@ export default function App() {
 
   // Keyboard shortcuts. Handlers are mirrored into a layout-synchronized ref
   // so the window listener registers once per platform change.
-  const shortcutHandlers = {
+  const shortcutHandlersRef = useRef({
     handleOpen,
     handleOpenSettings,
     handleOpenLog,
     handleStartScan,
     cancel,
-  };
-  const shortcutHandlersRef = useRef(shortcutHandlers);
+  });
   useLayoutEffect(() => {
-    shortcutHandlersRef.current = shortcutHandlers;
-  }, [shortcutHandlers]);
+    shortcutHandlersRef.current = {
+      handleOpen,
+      handleOpenSettings,
+      handleOpenLog,
+      handleStartScan,
+      cancel,
+    };
+  }, [
+    handleOpen,
+    handleOpenSettings,
+    handleOpenLog,
+    handleStartScan,
+    cancel,
+  ]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

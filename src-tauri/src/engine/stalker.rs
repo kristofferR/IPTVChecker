@@ -10,11 +10,14 @@ use crate::error::AppError;
 use crate::models::channel::{Channel, ContentType};
 use crate::models::playlist::PlaylistPreview;
 use crate::urlnorm::normalize_url_identity;
-use std::collections::{BTreeSet, HashMap};
+use futures::stream::{self, StreamExt};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 use url::Url;
 
 pub(crate) const STALKER_API_TIMEOUT: Duration = Duration::from_secs(12);
+const STALKER_LINK_RESOLUTION_CONCURRENCY: usize = 16;
+const STALKER_MAX_ORDERED_LIST_PAGES: usize = 10_000;
 const STALKER_USER_AGENT: &str =
     "Mozilla/5.0 (QtEmbedded; U; Linux; C) MAG200 stbapp ver: 2 rev: 250 Safari/533.3";
 const STALKER_X_USER_AGENT: &str = "Model: MAG250; Link: WiFi";
@@ -138,6 +141,30 @@ fn value_field_string(value: &serde_json::Value, keys: &[&str]) -> Option<String
     None
 }
 
+fn value_field_usize(value: &serde_json::Value, keys: &[&str]) -> Option<usize> {
+    keys.iter().find_map(|key| {
+        let field = value.get(*key)?;
+        field
+            .as_u64()
+            .and_then(|number| usize::try_from(number).ok())
+            .or_else(|| field.as_str()?.trim().parse::<usize>().ok())
+    })
+}
+
+fn value_field_is_enabled(value: &serde_json::Value, keys: &[&str]) -> bool {
+    keys.iter().any(|key| match value.get(*key) {
+        Some(serde_json::Value::Bool(enabled)) => *enabled,
+        Some(serde_json::Value::Number(number)) => number.as_u64().is_some_and(|value| value != 0),
+        Some(serde_json::Value::String(raw)) => {
+            matches!(
+                raw.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes"
+            )
+        }
+        _ => false,
+    })
+}
+
 fn extract_stalker_items(payload: &serde_json::Value) -> Vec<serde_json::Value> {
     let root = payload.get("js").unwrap_or(payload);
     if let Some(array) = root.as_array() {
@@ -178,10 +205,13 @@ fn stalker_referer(endpoint: &Url) -> String {
         .strip_suffix("/portal.php")
         .or_else(|| path.strip_suffix("/server/load.php"))
         .unwrap_or(path);
-    let referer_path = if base_path.is_empty() {
+    let trimmed_base = base_path.trim_end_matches('/');
+    let referer_path = if trimmed_base.is_empty() {
         "/c/".to_string()
+    } else if trimmed_base.ends_with("/c") {
+        format!("{}/", trimmed_base)
     } else {
-        format!("{}/c/", base_path.trim_end_matches('/'))
+        format!("{}/c/", trimmed_base)
     };
 
     let mut referer = endpoint.clone();
@@ -348,42 +378,225 @@ pub(crate) async fn fetch_stalker_channels(
     mac: &str,
     token: &str,
 ) -> Result<Vec<serde_json::Value>, AppError> {
-    let requests: [&[(&str, &str)]; 2] = [
+    let get_all_channels = stalker_request_json(
+        client,
+        endpoint,
+        mac,
+        Some(token),
         &[
             ("type", "itv"),
             ("action", "get_all_channels"),
             ("JsHttpRequest", "1-xml"),
         ],
-        &[
-            ("type", "itv"),
-            ("action", "get_ordered_list"),
-            ("genre", "*"),
-            ("force_ch_link_check", ""),
-            ("JsHttpRequest", "1-xml"),
-        ],
-    ];
+    )
+    .await;
 
-    let mut last_error: Option<String> = None;
-    for request in requests {
-        match stalker_request_json(client, endpoint, mac, Some(token), request).await {
-            Ok(payload) => {
-                let items = extract_stalker_items(&payload);
-                if !items.is_empty() {
-                    return Ok(items);
-                }
-                last_error = Some("response returned no channels".to_string());
-            }
-            Err(error) => {
-                last_error = Some(error.to_string());
-            }
+    if let Ok(payload) = &get_all_channels {
+        let items = extract_stalker_items(payload);
+        if !items.is_empty() {
+            return resolve_stalker_channel_links(client, endpoint, mac, token, items).await;
         }
     }
 
-    Err(AppError::Other(format!(
-        "Failed to fetch channels from Stalker endpoint {}: {}",
+    let mut channels = Vec::new();
+    let mut seen_pages = HashSet::new();
+    let mut ordered_list_error = None;
+
+    for page in 1..=STALKER_MAX_ORDERED_LIST_PAGES {
+        let page_value = page.to_string();
+        let payload = match stalker_request_json(
+            client,
+            endpoint,
+            mac,
+            Some(token),
+            &[
+                ("type", "itv"),
+                ("action", "get_ordered_list"),
+                ("genre", "*"),
+                ("force_ch_link_check", ""),
+                ("p", page_value.as_str()),
+                ("JsHttpRequest", "1-xml"),
+            ],
+        )
+        .await
+        {
+            Ok(payload) => payload,
+            Err(error) => {
+                ordered_list_error = Some(error.to_string());
+                break;
+            }
+        };
+
+        let page_items = extract_stalker_items(&payload);
+        if page_items.is_empty() {
+            break;
+        }
+
+        // Some portals ignore `p` and return page one forever. Stop on a
+        // repeated page instead of duplicating channels until the safety cap.
+        let page_signature = serde_json::to_string(&page_items).unwrap_or_default();
+        if !seen_pages.insert(page_signature) {
+            break;
+        }
+
+        let page_item_count = page_items.len();
+        channels.extend(page_items);
+
+        let root = payload.get("js").unwrap_or(&payload);
+        let total_items = value_field_usize(root, &["total_items", "total"]);
+        let total_pages = value_field_usize(root, &["total_pages"]);
+        let max_page_items = value_field_usize(root, &["max_page_items"]);
+
+        if total_items.is_some_and(|total| channels.len() >= total)
+            || total_pages.is_some_and(|total| page >= total)
+            || max_page_items.is_some_and(|page_size| page_item_count < page_size)
+        {
+            break;
+        }
+    }
+
+    if channels.is_empty() {
+        let get_all_error = get_all_channels
+            .err()
+            .map(|error| error.to_string())
+            .unwrap_or_else(|| "response returned no channels".to_string());
+        return Err(AppError::Other(format!(
+            "Failed to fetch channels from Stalker endpoint {}: {}",
+            endpoint,
+            ordered_list_error.unwrap_or(get_all_error)
+        )));
+    }
+
+    resolve_stalker_channel_links(client, endpoint, mac, token, channels).await
+}
+
+fn original_stalker_command_is_playable(command: &str) -> bool {
+    let Some(stream_url) = extract_stalker_stream_url(command) else {
+        return false;
+    };
+    let Ok(parsed) = Url::parse(&stream_url) else {
+        return false;
+    };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return false;
+    }
+
+    let host_is_local = parsed
+        .host_str()
+        .is_some_and(|host| host.eq_ignore_ascii_case("localhost"))
+        || parsed
+            .host()
+            .and_then(|host| match host {
+                url::Host::Ipv4(address) => Some(address.is_loopback() || address.is_unspecified()),
+                url::Host::Ipv6(address) => Some(address.is_loopback() || address.is_unspecified()),
+                url::Host::Domain(_) => None,
+            })
+            .unwrap_or(false);
+    let path_is_placeholder =
+        parsed.path().contains("/ch/") && parsed.path().trim_end_matches('/').ends_with('_');
+
+    !host_is_local && !path_is_placeholder
+}
+
+async fn resolve_stalker_channel_link(
+    client: &reqwest::Client,
+    endpoint: &Url,
+    mac: &str,
+    token: &str,
+    mut item: serde_json::Value,
+) -> Option<serde_json::Value> {
+    let command = value_field_string(&item, &["cmd", "stream_url", "url"])?;
+    let original_is_playable = original_stalker_command_is_playable(&command);
+    let portal_requires_link = value_field_is_enabled(
+        &item,
+        &[
+            "use_http_tmp_link",
+            "use_load_balancing",
+            "force_ch_link_check",
+        ],
+    );
+
+    if original_is_playable && !portal_requires_link {
+        let stream_url = extract_stalker_stream_url(&command)?;
+        item.as_object_mut()?
+            .insert("cmd".to_string(), serde_json::Value::String(stream_url));
+        return Some(item);
+    }
+
+    let payload = stalker_request_json(
+        client,
         endpoint,
-        last_error.unwrap_or_else(|| "unknown error".to_string())
-    )))
+        mac,
+        Some(token),
+        &[
+            ("type", "itv"),
+            ("action", "create_link"),
+            ("cmd", command.as_str()),
+            ("series", ""),
+            ("forced_storage", ""),
+            ("disable_ad", ""),
+            ("download", ""),
+            ("JsHttpRequest", "1-xml"),
+        ],
+    )
+    .await;
+
+    let resolved_url = payload
+        .ok()
+        .and_then(|payload| {
+            let root = payload.get("js").unwrap_or(&payload);
+            value_field_string(root, &["cmd", "url", "link", "stream_url"])
+        })
+        .and_then(|resolved_command| extract_stalker_stream_url(&resolved_command))
+        .or_else(|| {
+            original_is_playable
+                .then(|| extract_stalker_stream_url(&command))
+                .flatten()
+        })?;
+
+    item.as_object_mut()?
+        .insert("cmd".to_string(), serde_json::Value::String(resolved_url));
+    Some(item)
+}
+
+async fn resolve_stalker_channel_links(
+    client: &reqwest::Client,
+    endpoint: &Url,
+    mac: &str,
+    token: &str,
+    channels: Vec<serde_json::Value>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let original_count = channels.len();
+    let mut resolved = stream::iter(channels.into_iter().enumerate().map(
+        |(index, item)| async move {
+            (
+                index,
+                resolve_stalker_channel_link(client, endpoint, mac, token, item).await,
+            )
+        },
+    ))
+    .buffer_unordered(STALKER_LINK_RESOLUTION_CONCURRENCY)
+    .collect::<Vec<_>>()
+    .await;
+    resolved.sort_unstable_by_key(|(index, _)| *index);
+
+    let channels = resolved
+        .into_iter()
+        .filter_map(|(_, item)| item)
+        .collect::<Vec<_>>();
+    if channels.is_empty() {
+        return Err(AppError::Other(
+            "The Stalker portal returned channels, but none had a playable stream link".to_string(),
+        ));
+    }
+    if channels.len() < original_count {
+        log::warn!(
+            "Omitted {} Stalker channels whose stream links could not be resolved",
+            original_count - channels.len()
+        );
+    }
+
+    Ok(channels)
 }
 
 fn content_type_totals(channels: &[Channel]) -> (usize, usize, usize) {
@@ -520,8 +733,12 @@ pub(crate) fn build_stalker_preview(
 mod tests {
     use super::{
         build_stalker_endpoint_candidates, build_stalker_preview, extract_stalker_stream_url,
-        normalize_stalker_mac, normalize_stalker_portal,
+        fetch_stalker_channels, normalize_stalker_mac, normalize_stalker_portal,
+        original_stalker_command_is_playable, stalker_referer,
     };
+    use std::collections::HashMap;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     #[test]
     fn normalize_stalker_mac_formats_compact_input() {
@@ -554,10 +771,158 @@ mod tests {
     }
 
     #[test]
+    fn stalker_referer_does_not_duplicate_existing_c_path() {
+        let endpoint = url::Url::parse("https://demo.example.com/c/portal.php").expect("valid URL");
+        assert_eq!(stalker_referer(&endpoint), "https://demo.example.com/c/");
+    }
+
+    #[test]
+    fn stalker_referer_adds_c_path_below_portal_root() {
+        let endpoint = url::Url::parse("https://demo.example.com/stalker_portal/server/load.php")
+            .expect("valid URL");
+        assert_eq!(
+            stalker_referer(&endpoint),
+            "https://demo.example.com/stalker_portal/c/"
+        );
+    }
+
+    #[test]
     fn extract_stalker_stream_url_handles_prefixed_commands() {
         let url = extract_stalker_stream_url("ffmpeg http://example.com/live/stream.m3u8")
             .expect("stream URL should be extracted");
         assert_eq!(url, "http://example.com/live/stream.m3u8");
+    }
+
+    #[test]
+    fn only_non_placeholder_http_commands_can_fall_back_without_create_link() {
+        assert!(original_stalker_command_is_playable(
+            "ffmpeg https://streams.example.com/live/123.m3u8"
+        ));
+        assert!(!original_stalker_command_is_playable(
+            "ffmpeg http://localhost/ch/123_"
+        ));
+        assert!(!original_stalker_command_is_playable(
+            "ffmpeg https://portal.example.com/ch/123_"
+        ));
+        assert!(!original_stalker_command_is_playable("ffrt4://123"));
+    }
+
+    #[tokio::test]
+    async fn fetch_stalker_channels_pages_and_resolves_commands() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("mock server should bind");
+        let address = listener.local_addr().expect("mock address should exist");
+        let server = tokio::spawn(async move {
+            for _ in 0..6 {
+                let (mut socket, _) = listener.accept().await.expect("request should arrive");
+                let mut request = Vec::new();
+                let mut buffer = [0_u8; 4096];
+                loop {
+                    let bytes_read = socket.read(&mut buffer).await.expect("request should read");
+                    if bytes_read == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&buffer[..bytes_read]);
+                    if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+
+                let request = String::from_utf8(request).expect("request should be UTF-8");
+                let target = request
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .expect("request target should exist");
+                let url =
+                    url::Url::parse(&format!("http://localhost{}", target)).expect("valid target");
+                let query = url
+                    .query_pairs()
+                    .map(|(key, value)| (key.into_owned(), value.into_owned()))
+                    .collect::<HashMap<_, _>>();
+
+                let body = match query.get("action").map(String::as_str) {
+                    Some("get_all_channels") => serde_json::json!({
+                        "js": { "data": [] }
+                    }),
+                    Some("get_ordered_list") if query.get("p").map(String::as_str) == Some("1") => {
+                        serde_json::json!({
+                            "js": {
+                                "data": [
+                                    { "id": "1", "name": "One", "cmd": "ffrt4://1" },
+                                    { "id": "2", "name": "Two", "cmd": "ffrt4://2" }
+                                ],
+                                "total_items": "3",
+                                "max_page_items": "2",
+                                "cur_page": "1",
+                                "total_pages": "2"
+                            }
+                        })
+                    }
+                    Some("get_ordered_list") => serde_json::json!({
+                        "js": {
+                            "data": [
+                                { "id": "3", "name": "Three", "cmd": "ffrt4://3" }
+                            ],
+                            "total_items": 3,
+                            "max_page_items": 2,
+                            "cur_page": 2,
+                            "total_pages": 2
+                        }
+                    }),
+                    Some("create_link") => {
+                        let id = query
+                            .get("cmd")
+                            .and_then(|command| command.rsplit('/').next())
+                            .expect("command id should exist");
+                        serde_json::json!({
+                            "js": {
+                                "cmd": format!("ffmpeg http://streams.example.com/{id}.m3u8")
+                            }
+                        })
+                    }
+                    action => panic!("unexpected action: {action:?}"),
+                }
+                .to_string();
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                socket
+                    .write_all(response.as_bytes())
+                    .await
+                    .expect("response should write");
+            }
+        });
+
+        let endpoint = url::Url::parse(&format!("http://{address}/portal.php"))
+            .expect("endpoint should parse");
+        let channels = fetch_stalker_channels(
+            &reqwest::Client::new(),
+            &endpoint,
+            "00:1A:79:12:34:56",
+            "test-token",
+        )
+        .await
+        .expect("channels should load");
+
+        assert_eq!(channels.len(), 3);
+        let commands = channels
+            .iter()
+            .map(|channel| channel["cmd"].as_str().expect("resolved command"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            commands,
+            vec![
+                "http://streams.example.com/1.m3u8",
+                "http://streams.example.com/2.m3u8",
+                "http://streams.example.com/3.m3u8",
+            ]
+        );
+        server.await.expect("mock server should finish");
     }
 
     #[test]

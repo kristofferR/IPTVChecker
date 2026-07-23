@@ -18,7 +18,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   profile_bitrate: false,
   ffprobe_timeout_secs: 8,
   ffmpeg_bitrate_timeout_secs: 30,
-  accept_invalid_certs: true,
+  accept_invalid_certs: false,
   proxy_file: null,
   test_geoblock: false,
   screenshots_dir: null,

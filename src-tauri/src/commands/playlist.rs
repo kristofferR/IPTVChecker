@@ -438,11 +438,13 @@ pub async fn open_playlist_stalker(
     let portal = normalize_stalker_portal(&source.portal)?;
     let mac = normalize_stalker_mac(&source.mac)?;
     let endpoints = build_stalker_endpoint_candidates(&portal);
+    let accept_invalid_certs = accepts_invalid_certs(Some(&app)).await;
 
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
         .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
         .timeout(STALKER_API_TIMEOUT)
+        .danger_accept_invalid_certs(accept_invalid_certs)
         .build()
         .map_err(|error| {
             AppError::Other(format!(

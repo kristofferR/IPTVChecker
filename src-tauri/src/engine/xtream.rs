@@ -245,6 +245,17 @@ fn extract_xtream_max_connections(payload: &serde_json::Value) -> Option<u32> {
 
 /// Fetch a single Xtream JSON API endpoint, returning parsed JSON array.
 /// Returns an empty Vec on non-2xx or parse failures (best-effort for optional content).
+fn describe_read_capped_error(error: crate::engine::proxy_common::ReadCappedError) -> String {
+    match error {
+        crate::engine::proxy_common::ReadCappedError::TooLarge => {
+            "response exceeded the size limit".to_string()
+        }
+        crate::engine::proxy_common::ReadCappedError::Read(error) => {
+            error.without_url().to_string()
+        }
+    }
+}
+
 async fn fetch_xtream_json_array(
     client: &reqwest::Client,
     url: reqwest::Url,
@@ -268,14 +279,7 @@ async fn fetch_xtream_json_array(
                     Vec::new()
                 }),
                 Err(e) => {
-                    let detail = match e {
-                        crate::engine::proxy_common::ReadCappedError::TooLarge => {
-                            "response exceeded the size limit".to_string()
-                        }
-                        crate::engine::proxy_common::ReadCappedError::Read(error) => {
-                            error.without_url().to_string()
-                        }
-                    };
+                    let detail = describe_read_capped_error(e);
                     log::warn!("Failed to read Xtream {} response: {}", label, detail);
                     Vec::new()
                 }
@@ -553,14 +557,7 @@ pub(crate) async fn fetch_xtream_account_info(
                 }
             },
             Err(err) => {
-                let detail = match err {
-                    crate::engine::proxy_common::ReadCappedError::TooLarge => {
-                        "response exceeded the size limit".to_string()
-                    }
-                    crate::engine::proxy_common::ReadCappedError::Read(error) => {
-                        error.without_url().to_string()
-                    }
-                };
+                let detail = describe_read_capped_error(err);
                 log::debug!("Xtream player_api body read failed for {safe_endpoint}: {detail}");
                 continue;
             }
