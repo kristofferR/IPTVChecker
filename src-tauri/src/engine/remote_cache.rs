@@ -17,6 +17,7 @@ use url::Url;
 pub(crate) const PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const PLAYLIST_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 const PLAYLIST_DOWNLOAD_MAX_BYTES: u64 = 200 * 1024 * 1024;
+const CACHE_TEMP_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 pub(crate) const PLAYLIST_DOWNLOAD_USER_AGENT: &str = "TiviMate/5.1.6 (Android 12)";
 
 /// Cached HTTP validators used for conditional re-downloads.
@@ -30,7 +31,9 @@ struct RemotePlaylistCacheMetadata {
 enum PlaylistDownloadResult {
     NotModified,
     /// The body was streamed into the caller-supplied temp file.
-    Updated { metadata: RemotePlaylistCacheMetadata },
+    Updated {
+        metadata: RemotePlaylistCacheMetadata,
+    },
 }
 
 /// Parse and validate an http(s) URL, mapping failures to a friendly error.
@@ -76,6 +79,10 @@ fn cleanup_stale_cache_temp_files(cache_path: &std::path::Path) {
         return;
     };
     let temp_prefix = format!("{}.", cache_name);
+    let now_nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
 
     let Ok(entries) = std::fs::read_dir(parent) else {
         return;
@@ -89,7 +96,14 @@ fn cleanup_stale_cache_temp_files(cache_path: &std::path::Path) {
         let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
             continue;
         };
-        if name.starts_with(&temp_prefix) && name.ends_with(".tmp") {
+        let Some(timestamp) = name
+            .strip_prefix(&temp_prefix)
+            .and_then(|value| value.strip_suffix(".tmp"))
+            .and_then(|value| value.parse::<u128>().ok())
+        else {
+            continue;
+        };
+        if now_nanos.saturating_sub(timestamp) >= CACHE_TEMP_MAX_AGE.as_nanos() {
             let _ = std::fs::remove_file(path);
         }
     }
@@ -132,7 +146,9 @@ fn map_download_error(
 
     AppError::Other(format!(
         "Failed to {} downloaded {}: {}",
-        when, error_label, error
+        when,
+        error_label,
+        error.without_url()
     ))
 }
 
@@ -143,6 +159,7 @@ async fn download_playlist_to_file(
     connect_timeout: Duration,
     timeout: Duration,
     max_bytes: u64,
+    accept_invalid_certs: bool,
     cache_metadata: Option<&RemotePlaylistCacheMetadata>,
     tmp_path: &std::path::Path,
 ) -> Result<PlaylistDownloadResult, AppError> {
@@ -152,7 +169,7 @@ async fn download_playlist_to_file(
         .redirect(reqwest::redirect::Policy::limited(10))
         .connect_timeout(connect_timeout)
         .timeout(timeout)
-        .danger_accept_invalid_certs(true)
+        .danger_accept_invalid_certs(accept_invalid_certs)
         .build()
         .map_err(|error| {
             AppError::Other(format!(
@@ -281,6 +298,7 @@ async fn download_playlist_to_cache(
     cache_path: std::path::PathBuf,
     download_url: &Url,
     error_label: &str,
+    accept_invalid_certs: bool,
 ) -> Result<String, AppError> {
     let metadata = load_cache_metadata(&cache_path);
     cleanup_stale_cache_temp_files(&cache_path);
@@ -293,6 +311,7 @@ async fn download_playlist_to_cache(
         PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT,
         PLAYLIST_DOWNLOAD_TIMEOUT,
         PLAYLIST_DOWNLOAD_MAX_BYTES,
+        accept_invalid_certs,
         metadata.as_ref(),
         &tmp_path,
     )
@@ -310,6 +329,7 @@ async fn download_playlist_to_cache(
                 PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT,
                 PLAYLIST_DOWNLOAD_TIMEOUT,
                 PLAYLIST_DOWNLOAD_MAX_BYTES,
+                accept_invalid_certs,
                 None,
                 &tmp_path,
             )
@@ -360,9 +380,17 @@ pub(crate) async fn download_playlist_to_cache_in_data_dir(
     source_key: &str,
     download_url: &Url,
     error_label: &str,
+    accept_invalid_certs: bool,
 ) -> Result<String, AppError> {
     let cache_path = remote_playlist_cache_path_from_data_dir(data_dir, source_key)?;
-    download_playlist_to_cache(app, cache_path, download_url, error_label).await
+    download_playlist_to_cache(
+        app,
+        cache_path,
+        download_url,
+        error_label,
+        accept_invalid_certs,
+    )
+    .await
 }
 
 /// Timestamped sibling temp path for a cache file.
@@ -394,7 +422,10 @@ pub(crate) fn write_bytes_to_cache(
 
 #[cfg(test)]
 mod tests {
-    use super::{cleanup_stale_cache_temp_files, download_playlist_to_file, source_cache_file_name};
+    use super::{
+        build_cache_tmp_path, cleanup_stale_cache_temp_files, download_playlist_to_file,
+        source_cache_file_name,
+    };
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -425,11 +456,13 @@ mod tests {
         let stale_b = root.join("playlist-cache.m3u8.222.tmp");
         let keep_other = root.join("other-file.tmp");
         let keep_cache = root.join("playlist-cache.m3u8");
+        let recent_tmp = build_cache_tmp_path(&cache_path);
 
         std::fs::write(&stale_a, b"stale").expect("stale file should be writable");
         std::fs::write(&stale_b, b"stale").expect("stale file should be writable");
         std::fs::write(&keep_other, b"keep").expect("other file should be writable");
         std::fs::write(&keep_cache, b"keep").expect("cache file should be writable");
+        std::fs::write(&recent_tmp, b"in flight").expect("recent temp file should be writable");
 
         cleanup_stale_cache_temp_files(&cache_path);
 
@@ -437,6 +470,7 @@ mod tests {
         assert!(!stale_b.exists());
         assert!(keep_other.exists());
         assert!(keep_cache.exists());
+        assert!(recent_tmp.exists());
 
         std::fs::remove_dir_all(root).expect("temp dir should be removable");
     }
@@ -472,10 +506,8 @@ mod tests {
 
         let url = Url::parse(&format!("http://{}/playlist.m3u8", address))
             .expect("test URL should parse");
-        let tmp_path = std::env::temp_dir().join(format!(
-            "iptv-download-cap-test-{}.tmp",
-            std::process::id()
-        ));
+        let tmp_path =
+            std::env::temp_dir().join(format!("iptv-download-cap-test-{}.tmp", std::process::id()));
         let error = download_playlist_to_file(
             None,
             &url,
@@ -483,12 +515,16 @@ mod tests {
             Duration::from_secs(1),
             Duration::from_secs(1),
             32,
+            false,
             None,
             &tmp_path,
         )
         .await
         .expect_err("oversized response should fail");
-        assert!(!tmp_path.exists(), "failed download should remove temp file");
+        assert!(
+            !tmp_path.exists(),
+            "failed download should remove temp file"
+        );
 
         assert!(
             error
@@ -537,12 +573,16 @@ mod tests {
             Duration::from_millis(100),
             Duration::from_millis(100),
             1024,
+            false,
             None,
             &tmp_path,
         )
         .await
         .expect_err("slow response should timeout");
-        assert!(!tmp_path.exists(), "failed download should remove temp file");
+        assert!(
+            !tmp_path.exists(),
+            "failed download should remove temp file"
+        );
 
         assert!(
             error.to_string().contains("Timed out while downloading"),

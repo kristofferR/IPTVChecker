@@ -36,8 +36,9 @@ tauri-plugin-os = "2"
 base64 = "0.22.1"
 sha2 = "0.10"
 tauri-plugin-notification = "2"
-# Pinned to a rev so `cargo update` can't pull breaking changes from an
-# unversioned git dependency.
+# rev-pinned: the fuzz crate resolves this git dep independently of the main
+# Cargo.lock, and upstream's newer revisions pull xcap 0.9+ (pipewire system
+# libs), which broke the fuzz CI job. Bump the rev deliberately, not implicitly.
 tauri-plugin-mcp = { git = "https://github.com/P3GLEG/tauri-plugin-mcp", rev = "ac709a71d30ac2f167dd79c4f803500a236262f6", features = ["devtools"] }
 fs2 = "0.4.3"
 tauri-plugin-window-state = "2"

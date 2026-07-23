@@ -10,6 +10,21 @@ use crate::models::playlist::PlaylistPreview;
 const PLAYLIST_GROUP_PREFIX: &str = "Playlist: ";
 const MAX_PLAYLIST_DISCOVERY_DEPTH: usize = 64;
 
+/// Escape provider-supplied text before embedding it in a generated EXTINF
+/// line. Newlines are flattened so a value cannot inject extra playlist tags.
+pub(crate) fn escape_extinf_value(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace(['\r', '\n'], " ")
+}
+
+/// Flatten line breaks in an EXTINF display title without changing visible
+/// quotes or backslashes, which are not special after the metadata comma.
+pub(crate) fn flatten_extinf_title(value: &str) -> String {
+    value.replace(['\r', '\n'], " ")
+}
+
 pub fn find_unquoted_comma(input: &str) -> Option<usize> {
     let bytes = input.as_bytes();
     let mut quoted_by: Option<u8> = None;
@@ -750,6 +765,14 @@ fn collect_playlists_recursive(
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn escape_extinf_value_flattens_injected_lines_and_escapes_quotes() {
+        assert_eq!(
+            escape_extinf_value("News \\ \"HD\"\r\n#EXT-X-KEY"),
+            "News \\\\ \\\"HD\\\"  #EXT-X-KEY"
+        );
+    }
 
     #[test]
     fn test_get_channel_name() {

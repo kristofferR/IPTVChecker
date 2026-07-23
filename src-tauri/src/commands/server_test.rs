@@ -15,11 +15,13 @@ use crate::engine::xtream::{
     XTREAM_PLAYER_API_TIMEOUT,
 };
 use crate::error::AppError;
+use crate::state::AppState;
 use rand::seq::SliceRandom;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
@@ -30,6 +32,19 @@ const SERVER_TEST_MAX_CHANNEL_CANDIDATES: usize = 15;
 const SERVER_TEST_TARGET_WORKING_CHANNELS: usize = 3;
 const SERVER_TEST_MAX_SCREENSHOTS: usize = 2;
 const SERVER_TEST_PROBE_CHANNELS: usize = 2;
+
+fn build_server_test_client(
+    timeout: Duration,
+    accept_invalid_certs: bool,
+) -> Result<reqwest::Client, reqwest::Error> {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
+        .timeout(timeout)
+        .danger_accept_invalid_certs(accept_invalid_certs)
+        .user_agent(PLAYLIST_DOWNLOAD_USER_AGENT)
+        .build()
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct XtreamChannelProbe {
@@ -70,16 +85,12 @@ async fn fetch_xtream_stream_ids(
     server: &Url,
     username: &str,
     password: &str,
+    accept_invalid_certs: bool,
 ) -> Result<Vec<String>, AppError> {
     let streams_url =
         build_xtream_player_api_action_url(server, username, password, "get_live_streams");
 
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
-        .timeout(XTREAM_JSON_API_TIMEOUT)
-        .danger_accept_invalid_certs(true)
-        .build()
+    let client = build_server_test_client(XTREAM_JSON_API_TIMEOUT, accept_invalid_certs)
         .map_err(|e| AppError::Other(format!("Failed to build HTTP client: {}", e)))?;
 
     // Retry once on body-read failures (chunked transfer can drop mid-stream)
@@ -90,15 +101,10 @@ async fn fetch_xtream_stream_ids(
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
 
-        let response = match client
-            .get(streams_url.clone())
-            .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
-            .send()
-            .await
-        {
+        let response = match client.get(streams_url.clone()).send().await {
             Ok(resp) => resp,
             Err(e) => {
-                last_error = Some(format!("Failed to fetch live streams: {}", e));
+                last_error = Some(format!("Failed to fetch live streams: {}", e.without_url()));
                 continue;
             }
         };
@@ -118,7 +124,15 @@ async fn fetch_xtream_stream_ids(
         {
             Ok(b) => b,
             Err(e) => {
-                last_error = Some(format!("Failed to read live streams response: {:?}", e));
+                let detail = match e {
+                    crate::engine::proxy_common::ReadCappedError::TooLarge => {
+                        "response exceeded the size limit".to_string()
+                    }
+                    crate::engine::proxy_common::ReadCappedError::Read(error) => {
+                        error.without_url().to_string()
+                    }
+                };
+                last_error = Some(format!("Failed to read live streams response: {detail}"));
                 continue;
             }
         };
@@ -164,11 +178,12 @@ async fn discover_working_channels(
     server: &Url,
     username: &str,
     password: &str,
+    accept_invalid_certs: bool,
 ) -> Result<Vec<String>, AppError> {
     use crate::engine::checker::is_placeholder_url;
 
     emit_server_test_progress(app, "Fetching channel list...");
-    let ids = fetch_xtream_stream_ids(server, username, password).await?;
+    let ids = fetch_xtream_stream_ids(server, username, password, accept_invalid_certs).await?;
     if ids.is_empty() {
         return Err(AppError::Other(
             "Server returned no live streams".to_string(),
@@ -177,12 +192,7 @@ async fn discover_working_channels(
 
     // ids are pre-shuffled with icon-having channels first (more likely real video)
 
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
-        .timeout(SERVER_TEST_DISCOVERY_HTTP_TIMEOUT)
-        .danger_accept_invalid_certs(true)
-        .build()
+    let client = build_server_test_client(SERVER_TEST_DISCOVERY_HTTP_TIMEOUT, accept_invalid_certs)
         .map_err(|e| AppError::Other(format!("Failed to build HTTP client: {}", e)))?;
 
     let mut working = Vec::new();
@@ -203,12 +213,7 @@ async fn discover_working_channels(
 
         // HTTP-only check: verify the stream responds with 200 and isn't a placeholder.
         // No ffprobe here — quality probing happens per-server in Phase 3.
-        match client
-            .get(&stream_url)
-            .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
-            .send()
-            .await
-        {
+        match client.get(&stream_url).send().await {
             Ok(resp) if resp.status().is_success() => {
                 let final_url = resp.url().to_string();
                 if is_placeholder_url(&final_url) {
@@ -258,14 +263,10 @@ async fn probe_server_channels(
     password: &str,
     stream_ids: &[String],
     screenshot_dir: &std::path::Path,
+    accept_invalid_certs: bool,
 ) -> Vec<XtreamChannelProbe> {
     let cancel = CancellationToken::new();
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
-        .timeout(SERVER_TEST_STREAM_TIMEOUT)
-        .danger_accept_invalid_certs(true)
-        .build();
+    let client = build_server_test_client(SERVER_TEST_STREAM_TIMEOUT, accept_invalid_certs);
 
     let client = match client {
         Ok(c) => c,
@@ -281,11 +282,7 @@ async fn probe_server_channels(
 
         // Measure TTFB + get resolved URL
         let started = Instant::now();
-        let http_result = client
-            .get(&stream_url)
-            .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
-            .send()
-            .await;
+        let http_result = client.get(&stream_url).send().await;
 
         let (latency_ms, resolved_url) = match http_result {
             Ok(resp) => {
@@ -367,14 +364,10 @@ async fn test_single_server_api(
     server: &Url,
     username: &str,
     password: &str,
+    accept_invalid_certs: bool,
 ) -> (Option<u64>, Option<String>, Option<u32>, Option<String>) {
     let api_url = build_xtream_player_api_url(server, username, password);
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
-        .timeout(XTREAM_PLAYER_API_TIMEOUT)
-        .danger_accept_invalid_certs(true)
-        .build();
+    let client = build_server_test_client(XTREAM_PLAYER_API_TIMEOUT, accept_invalid_certs);
 
     let client = match client {
         Ok(c) => c,
@@ -382,11 +375,7 @@ async fn test_single_server_api(
     };
 
     let started = Instant::now();
-    let response = client
-        .get(api_url)
-        .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
-        .send()
-        .await;
+    let response = client.get(api_url).send().await;
 
     match response {
         Ok(resp) => {
@@ -414,7 +403,7 @@ async fn test_single_server_api(
                 .unwrap_or((None, None));
             (Some(latency), status, max_conn, None)
         }
-        Err(e) => (None, None, None, Some(e.to_string())),
+        Err(e) => (None, None, None, Some(e.without_url().to_string())),
     }
 }
 
@@ -472,7 +461,13 @@ pub async fn test_xtream_servers(
         return Err(AppError::Parse("No servers provided".to_string()));
     }
 
-    test_xtream_servers_inner(&app, servers, username, password).await
+    let accept_invalid_certs = app
+        .state::<Arc<AppState>>()
+        .settings
+        .lock()
+        .await
+        .accept_invalid_certs;
+    test_xtream_servers_inner(&app, servers, username, password, accept_invalid_certs).await
 }
 
 async fn test_xtream_servers_inner(
@@ -480,6 +475,7 @@ async fn test_xtream_servers_inner(
     servers: Vec<String>,
     username: String,
     password: String,
+    accept_invalid_certs: bool,
 ) -> Result<XtreamServerTestReport, AppError> {
     // Normalize all servers
     let normalized: Vec<(String, Url)> = servers
@@ -505,7 +501,7 @@ async fn test_xtream_servers_inner(
             let raw = raw.clone();
             async move {
                 let (api_latency, status, max_conn, error) =
-                    test_single_server_api(&url, &u, &p).await;
+                    test_single_server_api(&url, &u, &p, accept_invalid_certs).await;
                 (raw, url, api_latency, status, max_conn, error)
             }
         })
@@ -562,7 +558,9 @@ async fn test_xtream_servers_inner(
 
     let mut working_channels = None;
     for server in &successful_servers {
-        match discover_working_channels(app, server, &username, &password).await {
+        match discover_working_channels(app, server, &username, &password, accept_invalid_certs)
+            .await
+        {
             Ok(channels) => {
                 working_channels = Some(channels);
                 break;
@@ -633,7 +631,16 @@ async fn test_xtream_servers_inner(
                     };
                 }
 
-                let probes = probe_server_channels(&app, &url, &u, &p, &channels, &ss_dir).await;
+                let probes = probe_server_channels(
+                    &app,
+                    &url,
+                    &u,
+                    &p,
+                    &channels,
+                    &ss_dir,
+                    accept_invalid_certs,
+                )
+                .await;
                 let latencies: Vec<u64> = probes.iter().filter_map(|p| p.latency_ms).collect();
                 let avg_latency = if latencies.is_empty() {
                     None
