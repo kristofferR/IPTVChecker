@@ -52,11 +52,9 @@ export interface ScanTelemetry {
   etaSeconds: number | null;
 }
 
-export type ScanResultLookup = Record<number, ChannelResult | undefined>;
-
 export interface ScanCollectionsUpdate {
-  results: ScanResultLookup;
   flatResults: ChannelResult[];
+  resultPositions: Map<number, number>;
   uiMetrics: ScanUiMetrics;
 }
 
@@ -72,8 +70,10 @@ export interface ScanRuntimeUpdate {
 }
 
 export interface ScanSlice {
-  results: ScanResultLookup;
   flatResults: ChannelResult[];
+  /** Channel index -> position in `flatResults`. Mutated in place as results
+   *  arrive, so subscribe to `flatResults` to observe changes. */
+  resultPositions: Map<number, number>;
   uiMetrics: ScanUiMetrics;
   duplicateIndices: Set<number>;
   progress: ScanProgress | null;

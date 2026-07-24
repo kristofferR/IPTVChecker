@@ -21,10 +21,11 @@ import type {
 } from "../lib/types";
 import { useAppStore } from "../store";
 import { EMPTY_TELEMETRY } from "../store/slices/scanSlice";
-import type { ScanResultLookup } from "../store/types";
 import {
   applyResultUpdates,
   isRunScopedEventForActiveRun,
+  resultAtIndex,
+  type ScanResultCollections,
   type ScanUiMetrics,
 } from "./useScan.helpers";
 
@@ -50,21 +51,14 @@ interface RunClockState {
   accumulatedPausedMs: number;
 }
 
-function buildFlatResultsAndMetrics(source: ChannelResult[]): {
-  resultsByIndex: ScanResultLookup;
-  flatResults: ChannelResult[];
-  indexToFlatPos: Map<number, number>;
-  metrics: ScanUiMetrics;
-} {
-  const resultsByIndex: ScanResultLookup = {};
+function buildFlatResultsAndMetrics(source: ChannelResult[]): ScanResultCollections {
   const flatResults: ChannelResult[] = [];
-  const indexToFlatPos = new Map<number, number>();
+  const positions = new Map<number, number>();
   let lowFpsCount = 0;
   let mislabeledCount = 0;
 
   for (const result of source) {
-    resultsByIndex[result.index] = result;
-    indexToFlatPos.set(result.index, flatResults.length);
+    positions.set(result.index, flatResults.length);
     flatResults.push(result);
     if (result.low_framerate) {
       lowFpsCount += 1;
@@ -75,9 +69,8 @@ function buildFlatResultsAndMetrics(source: ChannelResult[]): {
   }
 
   return {
-    resultsByIndex,
     flatResults,
-    indexToFlatPos,
+    positions,
     metrics: {
       presentCount: flatResults.length,
       lowFpsCount,
@@ -101,9 +94,8 @@ const getStore = () => useAppStore.getState();
 export function useScan() {
   // Batch incoming results with requestAnimationFrame
   const pendingResults = useRef<ChannelResult[]>([]);
-  const resultsRef = useRef<ScanResultLookup>({});
   const flatResultsRef = useRef<ChannelResult[]>([]);
-  const indexToFlatPosRef = useRef<Map<number, number>>(new Map());
+  const resultPositionsRef = useRef<Map<number, number>>(new Map());
   const uiMetricsRef = useRef<ScanUiMetrics>(EMPTY_UI_METRICS);
   const rafId = useRef<number | null>(null);
   const eventCount = useRef(0);
@@ -123,26 +115,17 @@ export function useScan() {
     resetScan().catch(() => {});
   }, []);
 
-  const commitCollections = useCallback(
-    (next: {
-      resultsByIndex: ScanResultLookup;
-      flatResults: ChannelResult[];
-      indexToFlatPos: Map<number, number>;
-      metrics: ScanUiMetrics;
-    }) => {
-      resultsRef.current = next.resultsByIndex;
-      flatResultsRef.current = next.flatResults;
-      indexToFlatPosRef.current = next.indexToFlatPos;
-      uiMetricsRef.current = next.metrics;
+  const commitCollections = useCallback((next: ScanResultCollections) => {
+    flatResultsRef.current = next.flatResults;
+    resultPositionsRef.current = next.positions;
+    uiMetricsRef.current = next.metrics;
 
-      getStore().applyScanCollections({
-        results: next.resultsByIndex,
-        flatResults: next.flatResults,
-        uiMetrics: next.metrics,
-      });
-    },
-    [],
-  );
+    getStore().applyScanCollections({
+      flatResults: next.flatResults,
+      resultPositions: next.positions,
+      uiMetrics: next.metrics,
+    });
+  }, []);
 
   const flushResults = useCallback(() => {
     if (pendingResults.current.length > 0) {
@@ -150,9 +133,8 @@ export function useScan() {
       pendingResults.current = [];
       const next = applyResultUpdates(
         {
-          resultsByIndex: resultsRef.current,
           flatResults: flatResultsRef.current,
-          indexToFlatPos: indexToFlatPosRef.current,
+          positions: resultPositionsRef.current,
           metrics: uiMetricsRef.current,
         },
         batch,
@@ -440,12 +422,7 @@ export function useScan() {
           : resetChannelResultForRescan(existing),
       );
       const rebuilt = buildFlatResultsAndMetrics(updated);
-      commitCollections({
-        resultsByIndex: rebuilt.resultsByIndex,
-        flatResults: rebuilt.flatResults,
-        indexToFlatPos: rebuilt.indexToFlatPos,
-        metrics: rebuilt.metrics,
-      });
+      commitCollections(rebuilt);
       getStore().applyScanRuntime({
         progress: {
           completed: 0,
@@ -559,7 +536,10 @@ export function useScan() {
       }
 
       const synced = channels.map((channel) => {
-        const existing = resultsRef.current[channel.index];
+        const existing = resultAtIndex(
+          { flatResults: flatResultsRef.current, positions: resultPositionsRef.current },
+          channel.index,
+        );
         if (preserveExistingResults && existing) {
           return mergeChannelIntoResult(channel, existing);
         }
@@ -572,12 +552,7 @@ export function useScan() {
       logger.debug(
         `[useScan] syncFromPlaylist: ${synced.length} channels, preserveExistingResults=${preserveExistingResults}, rebuild=${rebuildMs.toFixed(1)}ms`,
       );
-      commitCollections({
-        resultsByIndex: rebuilt.resultsByIndex,
-        flatResults: rebuilt.flatResults,
-        indexToFlatPos: rebuilt.indexToFlatPos,
-        metrics: rebuilt.metrics,
-      });
+      commitCollections(rebuilt);
       getStore().applyScanRuntime({
         duplicateIndices: new Set(),
         progress: null,
@@ -630,9 +605,8 @@ export function useScan() {
     (result: ChannelResult) => {
       const next = applyResultUpdates(
         {
-          resultsByIndex: resultsRef.current,
           flatResults: flatResultsRef.current,
-          indexToFlatPos: indexToFlatPosRef.current,
+          positions: resultPositionsRef.current,
           metrics: uiMetricsRef.current,
         },
         [result],

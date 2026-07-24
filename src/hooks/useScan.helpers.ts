@@ -1,5 +1,4 @@
 import type { ChannelResult } from "../lib/types";
-import type { ScanResultLookup } from "../store/types";
 
 export interface ScanUiMetrics {
   presentCount: number;
@@ -7,11 +6,44 @@ export interface ScanUiMetrics {
   mislabeledCount: number;
 }
 
+/**
+ * The scan results as the UI holds them.
+ *
+ * `flatResults` is the single store of record; `positions` only says where a
+ * channel index landed in it. There is deliberately no second copy of the
+ * results keyed by index — maintaining one meant spreading an N-key object on
+ * every batch, which made a whole scan quadratic (a 50k-channel playlist spent
+ * ~14s just folding results into the store).
+ */
 export interface ScanResultCollections {
-  resultsByIndex: ScanResultLookup;
   flatResults: ChannelResult[];
-  indexToFlatPos: Map<number, number>;
+  /**
+   * Channel index -> position in `flatResults`.
+   *
+   * Append-only and mutated in place: a result keeps its position for the
+   * lifetime of a scan, so this never needs copying. Readers must therefore
+   * depend on `flatResults` — whose identity does change per batch — rather
+   * than on this map's identity.
+   */
+  positions: Map<number, number>;
   metrics: ScanUiMetrics;
+}
+
+export function emptyResultCollections(): ScanResultCollections {
+  return {
+    flatResults: [],
+    positions: new Map(),
+    metrics: { presentCount: 0, lowFpsCount: 0, mislabeledCount: 0 },
+  };
+}
+
+/** The result for a channel index, or null if it has not been checked yet. */
+export function resultAtIndex(
+  collections: Pick<ScanResultCollections, "flatResults" | "positions">,
+  index: number,
+): ChannelResult | null {
+  const position = collections.positions.get(index);
+  return position == null ? null : (collections.flatResults[position] ?? null);
 }
 
 export function isRunScopedEventForActiveRun(
@@ -29,17 +61,25 @@ export function applyResultUpdates(
     return previous;
   }
 
-  const resultsByIndex = { ...previous.resultsByIndex };
+  const positions = previous.positions;
   let flatResults = previous.flatResults;
-  let indexToFlatPos = previous.indexToFlatPos;
   let presentCount = previous.metrics.presentCount;
   let lowFpsCount = previous.metrics.lowFpsCount;
   let mislabeledCount = previous.metrics.mislabeledCount;
   let metricsChanged = false;
 
+  // Copy once per batch, not once per result: React needs a fresh array
+  // identity to re-render, but only one per applied batch.
+  const ensureOwnFlatResults = () => {
+    if (flatResults === previous.flatResults) {
+      flatResults = [...previous.flatResults];
+    }
+    return flatResults;
+  };
+
   for (const result of batch) {
-    const previousResult = resultsByIndex[result.index] ?? null;
-    resultsByIndex[result.index] = result;
+    const position = positions.get(result.index);
+    const previousResult = position == null ? null : (previous.flatResults[position] ?? null);
 
     if (!previousResult) {
       presentCount += 1;
@@ -59,37 +99,21 @@ export function applyResultUpdates(
       metricsChanged = true;
     }
 
-    const flatPos = indexToFlatPos.get(result.index);
-    if (flatPos == null) {
-      if (flatResults === previous.flatResults) {
-        flatResults = [...previous.flatResults];
-      }
-      if (indexToFlatPos === previous.indexToFlatPos) {
-        indexToFlatPos = new Map(previous.indexToFlatPos);
-      }
-      indexToFlatPos.set(result.index, flatResults.length);
-      flatResults.push(result);
+    if (position == null) {
+      const next = ensureOwnFlatResults();
+      positions.set(result.index, next.length);
+      next.push(result);
       continue;
     }
 
-    if (flatResults[flatPos] !== result) {
-      if (flatResults === previous.flatResults) {
-        flatResults = [...previous.flatResults];
-      }
-      flatResults[flatPos] = result;
+    if (flatResults[position] !== result) {
+      ensureOwnFlatResults()[position] = result;
     }
   }
 
   return {
-    resultsByIndex,
     flatResults,
-    indexToFlatPos,
-    metrics: metricsChanged
-      ? {
-          presentCount,
-          lowFpsCount,
-          mislabeledCount,
-        }
-      : previous.metrics,
+    positions,
+    metrics: metricsChanged ? { presentCount, lowFpsCount, mislabeledCount } : previous.metrics,
   };
 }

@@ -46,7 +46,7 @@ import {
   readScreenshot,
 } from "./lib/tauri";
 import type { AppSettings, ChannelResult, ChromecastDevice, ScanConfig } from "./lib/types";
-import { useAppStore } from "./store";
+import { selectResultByIndex, useAppStore } from "./store";
 import type { AppStore, OpenSourceDialogState } from "./store/types";
 
 const KeyboardShortcutsDialog = lazy(() => import("./components/KeyboardShortcutsDialog"));
@@ -131,7 +131,7 @@ async function canSendNotifications(requiresPermission: boolean): Promise<boolea
 
 const selectLiveSelectedChannel = (state: AppStore): ChannelResult | null => {
   const selected = state.selectedChannel;
-  return selected ? (state.results[selected.index] ?? selected) : null;
+  return selected ? (selectResultByIndex(state, selected.index) ?? selected) : null;
 };
 
 type StreamPlayerController = ReturnType<typeof useStreamPlayer>;
@@ -1163,7 +1163,7 @@ export default function App() {
     lastMergedMetaRef.current = { index: idx, meta };
 
     const state = getStore();
-    const existing = state.results[idx];
+    const existing = selectResultByIndex(state, idx);
     if (!existing) return;
 
     let changed = false;
