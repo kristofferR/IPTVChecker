@@ -23,7 +23,7 @@ fn now_epoch_ms() -> u64 {
 
 #[derive(Clone)]
 pub struct CachedPlaylistPreview {
-    pub source_mtime_ms: Option<u64>,
+    pub source_fingerprint: Option<u64>,
     // Arc so cache hits hand out a reference instead of deep-copying a
     // potentially 100k-channel preview on every open/scan start.
     pub preview: Arc<PlaylistPreview>,
@@ -31,9 +31,9 @@ pub struct CachedPlaylistPreview {
 }
 
 impl CachedPlaylistPreview {
-    fn new(preview: Arc<PlaylistPreview>, source_mtime_ms: Option<u64>) -> Self {
+    fn new(preview: Arc<PlaylistPreview>, source_fingerprint: Option<u64>) -> Self {
         Self {
-            source_mtime_ms,
+            source_fingerprint,
             preview,
             cached_at_epoch_ms: now_epoch_ms(),
         }
@@ -139,11 +139,11 @@ impl AppState {
     pub async fn get_cached_playlist_preview(
         &self,
         cache_key: &str,
-        source_mtime_ms: Option<u64>,
+        source_fingerprint: Option<u64>,
     ) -> Option<Arc<PlaylistPreview>> {
         let cache = self.playlist_preview_cache.lock().await;
         cache.get(cache_key).and_then(|cached| {
-            if cached.source_mtime_ms == source_mtime_ms {
+            if cached.source_fingerprint == source_fingerprint {
                 Some(Arc::clone(&cached.preview))
             } else {
                 None
@@ -155,7 +155,7 @@ impl AppState {
         &self,
         cache_key: String,
         preview: Arc<PlaylistPreview>,
-        source_mtime_ms: Option<u64>,
+        source_fingerprint: Option<u64>,
     ) {
         let mut cache = self.playlist_preview_cache.lock().await;
         if cache.len() >= PLAYLIST_PREVIEW_CACHE_LIMIT && !cache.contains_key(&cache_key) {
@@ -169,7 +169,7 @@ impl AppState {
         }
         cache.insert(
             cache_key,
-            CachedPlaylistPreview::new(preview, source_mtime_ms),
+            CachedPlaylistPreview::new(preview, source_fingerprint),
         );
     }
 }

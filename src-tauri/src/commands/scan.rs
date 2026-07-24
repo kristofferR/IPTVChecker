@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -1072,11 +1073,35 @@ async fn record_backend_perf(
     let _ = app.emit("scan://backend-perf", sample);
 }
 
-fn source_mtime_ms(path: &str) -> Option<u64> {
+fn hash_source_metadata(
+    path: &str,
+    metadata: &std::fs::Metadata,
+    hasher: &mut DefaultHasher,
+) -> Option<()> {
+    path.hash(hasher);
+    metadata.len().hash(hasher);
+    metadata.modified().ok()?.hash(hasher);
+    Some(())
+}
+
+fn source_fingerprint(path: &str) -> Option<u64> {
     let metadata = std::fs::metadata(path).ok()?;
-    let modified = metadata.modified().ok()?;
-    let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
-    Some(duration.as_millis().min(u128::from(u64::MAX)) as u64)
+    let mut hasher = DefaultHasher::new();
+
+    if metadata.is_dir() {
+        "directory".hash(&mut hasher);
+        let playlist_paths = parser::find_playlists_in_dir(path).ok()?;
+        playlist_paths.len().hash(&mut hasher);
+        for playlist_path in playlist_paths {
+            let playlist_metadata = std::fs::metadata(&playlist_path).ok()?;
+            hash_source_metadata(&playlist_path, &playlist_metadata, &mut hasher)?;
+        }
+    } else {
+        "file".hash(&mut hasher);
+        hash_source_metadata(path, &metadata, &mut hasher)?;
+    }
+
+    Some(hasher.finish())
 }
 
 pub(crate) fn playlist_preview_cache_key_from_parts(
@@ -1122,9 +1147,9 @@ pub(crate) async fn seed_cached_playlist_preview(
         group_filter,
         channel_search,
     );
-    let source_mtime = source_mtime_ms(file_path);
+    let source_fingerprint = source_fingerprint(file_path);
     state
-        .put_cached_playlist_preview(cache_key, Arc::new(preview.clone()), source_mtime)
+        .put_cached_playlist_preview(cache_key, Arc::new(preview.clone()), source_fingerprint)
         .await;
 }
 
@@ -1134,10 +1159,10 @@ async fn parse_playlist_with_cache(
     config: &ScanConfig,
     run_id: &str,
 ) -> Result<Arc<PlaylistPreview>, AppError> {
-    let source_mtime = source_mtime_ms(&config.file_path);
+    let source_fingerprint = source_fingerprint(&config.file_path);
     let cache_key = playlist_preview_cache_key(config);
     if let Some(cached) = state
-        .get_cached_playlist_preview(&cache_key, source_mtime)
+        .get_cached_playlist_preview(&cache_key, source_fingerprint)
         .await
     {
         log::info!(
@@ -1157,7 +1182,7 @@ async fn parse_playlist_with_cache(
             None,
         );
         if let Some(full_preview) = state
-            .get_cached_playlist_preview(&full_preview_cache_key, source_mtime)
+            .get_cached_playlist_preview(&full_preview_cache_key, source_fingerprint)
             .await
         {
             let filter_started_at = Instant::now();
@@ -1187,11 +1212,9 @@ async fn parse_playlist_with_cache(
                 run_id,
                 config.file_path
             );
-            let filtered_preview = Arc::new(filtered_preview);
-            state
-                .put_cached_playlist_preview(cache_key, Arc::clone(&filtered_preview), source_mtime)
-                .await;
-            return Ok(filtered_preview);
+            // Derived previews are cheap to recreate and must not evict the
+            // reusable full preview, especially for in-memory provider sources.
+            return Ok(Arc::new(filtered_preview));
         }
     }
 
@@ -1228,7 +1251,7 @@ async fn parse_playlist_with_cache(
     .await;
     let preview = Arc::new(preview);
     state
-        .put_cached_playlist_preview(cache_key, Arc::clone(&preview), source_mtime)
+        .put_cached_playlist_preview(cache_key, Arc::clone(&preview), source_fingerprint)
         .await;
     Ok(preview)
 }
@@ -3013,6 +3036,52 @@ mod tests {
             ),
             "/tmp/playlist.m3u8|i:saved:abc|n:My Playlist|g:Sports|s:arsenal"
         );
+    }
+
+    #[test]
+    fn source_fingerprint_tracks_nested_playlist_changes() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be monotonic")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("iptv-scan-fingerprint-{unique}"));
+        let nested = root.join("nested");
+        std::fs::create_dir_all(&nested).expect("nested fixture dir should be created");
+
+        let first_playlist = nested.join("first.m3u8");
+        std::fs::write(
+            &first_playlist,
+            "#EXTM3U\n#EXTINF:-1,One\nhttp://example.com/one.m3u8\n",
+        )
+        .expect("first fixture should be writable");
+        let initial = source_fingerprint(&root.to_string_lossy())
+            .expect("directory fingerprint should be available");
+
+        std::fs::write(
+            &first_playlist,
+            "#EXTM3U\n#EXTINF:-1,One Updated\nhttp://example.com/one.m3u8\n",
+        )
+        .expect("nested fixture should be editable");
+        let after_edit = source_fingerprint(&root.to_string_lossy())
+            .expect("edited directory fingerprint should be available");
+        assert_ne!(initial, after_edit);
+
+        let second_playlist = root.join("second.m3u");
+        std::fs::write(
+            &second_playlist,
+            "#EXTM3U\n#EXTINF:-1,Two\nhttp://example.com/two.m3u8\n",
+        )
+        .expect("second fixture should be writable");
+        let after_add = source_fingerprint(&root.to_string_lossy())
+            .expect("expanded directory fingerprint should be available");
+        assert_ne!(after_edit, after_add);
+
+        std::fs::remove_file(&second_playlist).expect("second fixture should be removable");
+        let after_remove = source_fingerprint(&root.to_string_lossy())
+            .expect("reduced directory fingerprint should be available");
+        assert_ne!(after_add, after_remove);
+
+        std::fs::remove_dir_all(root).expect("fixture directory should be removable");
     }
 
     #[test]
