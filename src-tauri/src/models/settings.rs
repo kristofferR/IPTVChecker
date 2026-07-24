@@ -7,29 +7,21 @@ pub const DEFAULT_FFMPEG_BITRATE_TIMEOUT_SECS: f64 = 30.0;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ThemePreference {
+    #[default]
     System,
     Light,
     Dark,
 }
 
-impl Default for ThemePreference {
-    fn default() -> Self {
-        Self::System
-    }
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ScreenshotFormat {
+    #[default]
     Webp,
     Png,
-}
-
-impl Default for ScreenshotFormat {
-    fn default() -> Self {
-        Self::Webp
-    }
 }
 
 impl ScreenshotFormat {
@@ -43,17 +35,13 @@ impl ScreenshotFormat {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ChannelLogoSize {
+    #[default]
     Small,
     Medium,
     Large,
     Huge,
-}
-
-impl Default for ChannelLogoSize {
-    fn default() -> Self {
-        Self::Small
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -271,17 +259,21 @@ mod tests {
 
     #[test]
     fn preset_config_round_trip_updates_scan_fields_only() {
-        let mut base = AppSettings::default();
-        base.timeout = 22.5;
-        base.retries = 7;
-        base.user_agent = "PresetAgent/1.0".to_string();
-        base.screenshot_format = ScreenshotFormat::Png;
-        base.accept_invalid_certs = true;
+        let base = AppSettings {
+            timeout: 22.5,
+            retries: 7,
+            user_agent: "PresetAgent/1.0".to_string(),
+            screenshot_format: ScreenshotFormat::Png,
+            accept_invalid_certs: true,
+            ..AppSettings::default()
+        };
         let preset = ScanPresetConfig::from_settings(&base);
 
-        let mut destination = AppSettings::default();
-        destination.theme = super::ThemePreference::Dark;
-        destination.scan_history_limit = 99;
+        let mut destination = AppSettings {
+            theme: super::ThemePreference::Dark,
+            scan_history_limit: 99,
+            ..AppSettings::default()
+        };
         preset.apply_to_settings(&mut destination);
 
         assert_eq!(destination.timeout, 22.5);

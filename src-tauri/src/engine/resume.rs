@@ -75,6 +75,11 @@ struct PersistedCheckpointEntry {
     channel_log: Option<ChannelDebugLog>,
 }
 
+// Both variants wrap a ChannelResult, so they are inherently ~1 KB and the size
+// difference between them is just the optional log. Boxing to satisfy
+// `large_enum_variant` would add an allocation per checkpoint line for a value
+// that is destructured immediately after deserializing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(untagged)]
 enum PersistedCheckpointLine {
@@ -181,7 +186,7 @@ pub fn load_processed_channels(log_file: &str) -> (HashSet<String>, usize) {
         }
         // Extract index for last_index tracking
         if let Some((index_part, _)) = line.split_once(" - ") {
-            let index_str = index_part.trim().split_whitespace().next().unwrap_or("");
+            let index_str = index_part.split_whitespace().next().unwrap_or("");
             if let Ok(idx) = index_str.parse::<usize>() {
                 last_index = last_index.max(idx);
             }

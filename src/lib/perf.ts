@@ -34,6 +34,7 @@ export function recordUiPerf(sample: Omit<UiPerfSample, "atEpochMs">): void {
     atEpochMs: Date.now(),
   };
 
+  // biome-ignore lint/suspicious/noAssignInExpressions: lazy-init of the shared buffer; splitting it needs a redundant check.
   const buffer = (window.__iptvUiPerfSamples ??= []);
   buffer.push(nextSample);
   if (buffer.length > PERF_BUFFER_LIMIT) {

@@ -202,35 +202,15 @@ export function ThumbnailPanel({
     return () => window.removeEventListener("keydown", handler, true);
   }, [theaterMode]);
 
-  if (!result) {
-    return (
-      <div className="flex items-center justify-center h-full text-text-tertiary text-[12px]">
-        Select a channel to view details
-      </div>
-    );
-  }
+  // Every hook below must run unconditionally, so the "no selection" early
+  // return lives after them — bailing out first would change the hook count
+  // between renders as soon as a channel is selected.
+  const resolvedUrl = result?.stream_url?.trim() || null;
 
-  const retryCount = result.retry_count ?? 0;
-  const lastErrorReason = getChannelErrorReason(result);
-  const thumbnailState = getThumbnailDisplayState({
-    result,
-    screenshotUrl,
-    screenshotLoading,
-    screenshotLoadError,
-    screenshotsEnabled,
-    scanState,
-  });
-  const scanActive = isScanActive(scanState);
-  const resolvedUrl = result.stream_url?.trim() || null;
-  const showResolvedUrl = !!resolvedUrl && resolvedUrl !== result.url;
   // Memoized so the prop identity is stable across renders — without this, any
   // useEffect downstream of `castRequest` would tear down and re-fire on every
   // parent re-render even when none of its inputs actually changed.
-  const castRequest = useMemo(() => buildCastRequest(result), [result]);
-  const mediaFrameClass =
-    "relative w-full aspect-video overflow-hidden rounded-lg border border-border-app";
-  const lightboxPlaceholderClass =
-    "w-[400px] max-w-[88vw] aspect-video rounded-xl border border-white/15 bg-black/60 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]";
+  const castRequest = useMemo(() => (result ? buildCastRequest(result) : null), [result]);
 
   const handleCopyResolvedUrl = useCallback(async () => {
     if (!resolvedUrl) return;
@@ -250,7 +230,32 @@ export function ThumbnailPanel({
 
   useEffect(() => {
     setResolvedUrlCopied(false);
-  }, [result.index, result.stream_url, result.url]);
+  }, [result?.index, result?.stream_url, result?.url]);
+
+  if (!result || !castRequest) {
+    return (
+      <div className="flex items-center justify-center h-full text-text-tertiary text-[12px]">
+        Select a channel to view details
+      </div>
+    );
+  }
+
+  const retryCount = result.retry_count ?? 0;
+  const lastErrorReason = getChannelErrorReason(result);
+  const thumbnailState = getThumbnailDisplayState({
+    result,
+    screenshotUrl,
+    screenshotLoading,
+    screenshotLoadError,
+    screenshotsEnabled,
+    scanState,
+  });
+  const scanActive = isScanActive(scanState);
+  const showResolvedUrl = !!resolvedUrl && resolvedUrl !== result.url;
+  const mediaFrameClass =
+    "relative w-full aspect-video overflow-hidden rounded-lg border border-border-app";
+  const lightboxPlaceholderClass =
+    "w-[400px] max-w-[88vw] aspect-video rounded-xl border border-white/15 bg-black/60 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]";
 
   return (
     <div className="native-scroll flex flex-col gap-3 p-4 overflow-y-auto select-none">
@@ -494,6 +499,7 @@ export function ThumbnailPanel({
         <div className="p-2 rounded bg-orange-500/10 border border-orange-500/20">
           <p className="text-[12px] font-medium text-orange-400">Label Mismatch</p>
           {result.label_mismatches.map((m, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: plain-text list; mismatch strings can repeat, so index is the only stable key.
             <p key={i} className="text-[11px] text-orange-300">
               {m}
             </p>

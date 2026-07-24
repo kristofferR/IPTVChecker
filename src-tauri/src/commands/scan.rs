@@ -89,6 +89,18 @@ impl SharedUrlResult {
     }
 }
 
+/// Per-URL memo of check results, so channels that share a stream URL are only
+/// fetched once. The `OnceCell` lets the second waiter block on the first
+/// worker's result instead of racing it.
+type SharedUrlResultCache = Arc<
+    tokio::sync::Mutex<
+        HashMap<
+            String,
+            Arc<tokio::sync::OnceCell<Result<(SharedUrlResult, WorkerTiming), AppError>>>,
+        >,
+    >,
+>;
+
 fn set_screenshot_capture_success(shared: &mut SharedUrlResult, path: String) {
     shared.screenshot_path = Some(path);
     shared.screenshot_error_reason = None;
@@ -346,7 +358,7 @@ async fn compute_shared_url_result(
     };
     let redacted_target_url = stream_proxy::redact_url(&target_url);
     let mut shared = SharedUrlResult {
-        status: status.clone(),
+        status,
         drm_system,
         latency_ms,
         codec: None,
@@ -485,10 +497,9 @@ async fn compute_shared_url_result(
                     shared.video_bitrate = Some(format!("{kbps} kbps"));
                 }
                 format_bitrate_kbps = diag.format_bitrate_kbps;
-                shared.channel_log.diagnostics_output =
-                    Some(crate::models::scan_log::cap_diagnostics_output(
-                        diag.diagnostics_output,
-                    ));
+                shared.channel_log.diagnostics_output = Some(
+                    crate::models::scan_log::cap_diagnostics_output(diag.diagnostics_output),
+                );
 
                 let png_fallback_result = if diag.screenshot_path.is_none()
                     && want_screenshot
@@ -1033,7 +1044,10 @@ fn filter_channels_by_selection(
 fn filter_channels_by_content_type(channels: &mut Vec<Channel>, hide_vod_content: bool) {
     if hide_vod_content {
         channels.retain(|channel| {
-            matches!(channel.content_type, crate::models::channel::ContentType::Live)
+            matches!(
+                channel.content_type,
+                crate::models::channel::ContentType::Live
+            )
         });
     }
 }
@@ -1585,9 +1599,7 @@ async fn prepare_screenshots_dir(
         let dir_clone = dir.clone();
         tokio::task::spawn_blocking(move || std::fs::create_dir_all(&dir_clone))
             .await
-            .map_err(|e| {
-                AppError::Other(format!("Failed to create screenshots directory: {}", e))
-            })?
+            .map_err(|e| AppError::Other(format!("Failed to create screenshots directory: {}", e)))?
             .map_err(|e| {
                 AppError::Other(format!("Failed to create screenshots directory: {}", e))
             })?;
@@ -1641,7 +1653,8 @@ async fn pause_if_network_down(
     cancel: &CancellationToken,
     consecutive_net_failures: &AtomicU32,
 ) -> bool {
-    if consecutive_net_failures.load(Ordering::Relaxed) < connectivity::CONSECUTIVE_FAILURE_THRESHOLD
+    if consecutive_net_failures.load(Ordering::Relaxed)
+        < connectivity::CONSECUTIVE_FAILURE_THRESHOLD
     {
         return true;
     }
@@ -1726,7 +1739,10 @@ impl AdaptiveThrottle {
             if !self.engaged.swap(true, Ordering::Relaxed) {
                 log::info!(
                     "Adaptive throttle engaged: pressure_ratio={:.2} ({}/{} channels), delay={}ms",
-                    pressure_ratio, pressure, total_so_far, delay_ms
+                    pressure_ratio,
+                    pressure,
+                    total_so_far,
+                    delay_ms
                 );
                 let _ = app.emit(
                     "scan://adaptive-throttle",
@@ -1826,7 +1842,7 @@ impl ScreenshotDiskGuard {
             return false;
         }
         let count = self.check_counter.fetch_add(1, Ordering::Relaxed);
-        if count % 20 != 0 {
+        if !count.is_multiple_of(20) {
             return false;
         }
         let Some(dir) = screenshots_dir else {
@@ -2006,7 +2022,9 @@ async fn run_event_emitter(
             .await;
         }
 
-        emitter.ingest(worker.result, Some(worker.channel_log)).await;
+        emitter
+            .ingest(worker.result, Some(worker.channel_log))
+            .await;
     }
 
     emitter.finish().await
@@ -2035,14 +2053,15 @@ fn track_worker_signals(
     // Adaptive concurrency — track pressure signals
     let is_pressure_signal = if shared.status == ChannelStatus::Dead {
         // Timeout or rate limit errors are pressure signals
-        shared.error_reason.as_deref().map_or(false, |reason| {
-            reason == "Timeout" || reason.starts_with("HTTP 429")
-        })
+        shared
+            .error_reason
+            .as_deref()
+            .is_some_and(|reason| reason == "Timeout" || reason.starts_with("HTTP 429"))
     } else {
         false
     };
     // Retries indicate the server is under strain even if the channel eventually succeeded
-    let had_retries = shared.retry_count.map_or(false, |count| count > 0);
+    let had_retries = shared.retry_count.is_some_and(|count| count > 0);
 
     adaptive_throttle.record_outcome(is_pressure_signal || had_retries);
 }
@@ -2062,7 +2081,7 @@ fn build_channel_result(channel: &Channel, shared: &SharedUrlResult) -> ChannelR
         tvg_chno: channel.tvg_chno.clone(),
         url: channel.url.clone(),
         content_type: channel.content_type,
-        status: shared.status.clone(),
+        status: shared.status,
         codec: shared.codec.clone(),
         resolution: shared.resolution.clone(),
         width: shared.width,
@@ -2118,14 +2137,9 @@ async fn append_history_blocking(
     let config = config.clone();
     let summary = summary.clone();
     let _ = tokio::task::spawn_blocking(move || {
-        if let Err(error) = history::append_scan_history(
-            &app,
-            &run_id,
-            &config,
-            &summary,
-            results,
-            history_limit,
-        ) {
+        if let Err(error) =
+            history::append_scan_history(&app, &run_id, &config, &summary, results, history_limit)
+        {
             log::warn!("Failed to write scan history for {}: {}", run_id, error);
         }
     })
@@ -2353,18 +2367,11 @@ async fn execute_scan_run(
     ));
 
     let proxy_list = Arc::new(proxy_list);
-    let shared_url_results: Arc<
-        tokio::sync::Mutex<
-            HashMap<
-                String,
-                Arc<tokio::sync::OnceCell<Result<(SharedUrlResult, WorkerTiming), AppError>>>,
-            >,
-        >,
-    > = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let shared_url_results: SharedUrlResultCache =
+        Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
     // Disk space tracking for screenshot pause
-    let disk_guard =
-        ScreenshotDiskGuard::new(using_custom_screenshots_dir, low_space_threshold_gb);
+    let disk_guard = ScreenshotDiskGuard::new(using_custom_screenshots_dir, low_space_threshold_gb);
 
     // Network connectivity tracking — consecutive network-level failures trigger a check
     let consecutive_net_failures = Arc::new(AtomicU32::new(0));
@@ -2871,7 +2878,7 @@ pub async fn quick_check_channel(
             &channel.url,
             settings.ffprobe_timeout_secs,
             settings.retries,
-            settings.retry_backoff.clone(),
+            settings.retry_backoff,
             None,
             ffprobe_ok,
             &cancel_token,
@@ -2883,7 +2890,7 @@ pub async fn quick_check_channel(
             &channel.url,
             settings.timeout,
             settings.retries,
-            settings.retry_backoff.clone(),
+            settings.retry_backoff,
             settings.extended_timeout,
             &settings.user_agent,
             &cancel_token,

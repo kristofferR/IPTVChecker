@@ -531,6 +531,7 @@ body {
 }
 
 [data-platform="macos"] .glass-material {
+  /* biome-ignore lint/correctness/noUnknownProperty: real Safari/WebKit property. */
   -apple-visual-effect: -apple-system-glass-material;
   background: transparent !important;
   -webkit-backdrop-filter: blur(30px) saturate(180%);

@@ -349,7 +349,7 @@ fn append_xtream_streams_to_m3u(
         let group = entry
             .get("category_id")
             .and_then(|v| {
-                v.as_str().or_else(|| {
+                v.as_str().or({
                     // Some servers return category_id as a number
                     None
                 })

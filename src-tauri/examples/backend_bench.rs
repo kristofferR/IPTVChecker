@@ -140,7 +140,6 @@ async fn main() -> Result<(), String> {
         let cancel = cancel.clone();
         let first_result_ms = Arc::clone(&first_result_ms);
         let url = format!("{}/stream/{}", base_url, index);
-        let started_at = started_at;
 
         tokio::spawn(async move {
             let _permit = permit;
