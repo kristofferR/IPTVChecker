@@ -62,18 +62,10 @@ impl Default for WindowScanState {
     }
 }
 
+#[derive(Default)]
 pub struct CastState {
     pub session: Option<ActiveCastSession>,
     pub proxy: Option<CastProxyHandle>,
-}
-
-impl Default for CastState {
-    fn default() -> Self {
-        Self {
-            session: None,
-            proxy: None,
-        }
-    }
 }
 
 pub struct AppState {

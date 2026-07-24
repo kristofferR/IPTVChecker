@@ -197,7 +197,7 @@ fn save_scan_presets(app: &tauri::AppHandle, presets: &ScanPresetCollection) {
     }
 }
 
-fn sort_scan_presets(presets: &mut Vec<ScanSettingsPreset>) {
+fn sort_scan_presets(presets: &mut [ScanSettingsPreset]) {
     presets.sort_by(|left, right| {
         left.name
             .to_ascii_lowercase()
@@ -732,7 +732,8 @@ pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Re
         settings.level_filter() as usize,
         std::sync::atomic::Ordering::Relaxed,
     );
-    let update_checks_enabled = settings.automatic_update_checks && !current.automatic_update_checks;
+    let update_checks_enabled =
+        settings.automatic_update_checks && !current.automatic_update_checks;
     *current = settings.clone();
     drop(current);
 
@@ -925,7 +926,7 @@ pub fn evict_old_screenshot_dirs(
 
     for (_source, mut dirs) in by_source {
         // Sort newest first
-        dirs.sort_by(|a, b| b.1.cmp(&a.1));
+        dirs.sort_by_key(|entry| std::cmp::Reverse(entry.1));
         // Keep `retention_count`, evict the rest
         for (path, _ts) in dirs.into_iter().skip(retention_count as usize) {
             if let Ok((bytes, _)) = collect_dir_stats(&path) {
@@ -989,7 +990,7 @@ pub fn evict_for_disk_space(
             let ts = read_scan_meta(&path)
                 .map(|m| m.scan_started_at_epoch_ms)
                 .unwrap_or(0);
-            if oldest.as_ref().map_or(true, |o| ts < o.1) {
+            if oldest.as_ref().is_none_or(|o| ts < o.1) {
                 oldest = Some((path, ts));
             }
         }

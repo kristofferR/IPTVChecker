@@ -77,7 +77,11 @@ fn default_display_name(source: &SavedPlaylistSource) -> String {
                 .as_deref()
                 .or_else(|| servers.first().map(String::as_str))
                 .unwrap_or("Xtream");
-            format!("{} ({})", crate::commands::playlist::xtream_host_label(server), username)
+            format!(
+                "{} ({})",
+                crate::commands::playlist::xtream_host_label(server),
+                username
+            )
         }
     }
 }

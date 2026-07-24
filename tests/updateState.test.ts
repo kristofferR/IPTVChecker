@@ -1,12 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import {
   isManualInstall,
+  type UpdateInstallMode,
+  type UpdateNotice,
   updateActionLabel,
   updateBannerMessage,
   updateConfirmMessage,
   updateFailureDetail,
-  type UpdateInstallMode,
-  type UpdateNotice,
 } from "../src/lib/updateState";
 
 const builtIn: UpdateInstallMode = {

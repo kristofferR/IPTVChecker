@@ -1,3 +1,9 @@
+// The scan/ffmpeg/cast pipelines thread a lot of per-check configuration
+// through their worker functions. Bundling those into parameter structs is a
+// worthwhile refactor, but it is a behavioural change to the hottest code in
+// the app and does not belong to the lint gate that introduced this allow.
+#![allow(clippy::too_many_arguments)]
+
 pub mod commands;
 pub mod engine;
 pub mod error;
@@ -861,13 +867,13 @@ pub fn run() {
                 theme
             };
             if let Err(error) =
-                commands::settings::apply_theme_preference(&app.handle(), theme_preference)
+                commands::settings::apply_theme_preference(app.handle(), theme_preference)
             {
                 log::warn!("Failed to apply startup theme preference: {}", error);
             }
 
-            commands::recent::refresh_recent_menu(&app.handle());
-            commands::saved::refresh_saved_menu(&app.handle());
+            commands::recent::refresh_recent_menu(app.handle());
+            commands::saved::refresh_saved_menu(app.handle());
 
             let launch_open_paths = collect_launch_open_paths();
             if !launch_open_paths.is_empty() {
@@ -875,7 +881,7 @@ pub fn run() {
                     "Detected {} playlist path(s) from launch arguments",
                     launch_open_paths.len()
                 );
-                emit_open_paths_to_focused_window(&app.handle(), &launch_open_paths);
+                emit_open_paths_to_focused_window(app.handle(), &launch_open_paths);
             }
 
             // Warm up the localhost streaming proxy in the background. Play

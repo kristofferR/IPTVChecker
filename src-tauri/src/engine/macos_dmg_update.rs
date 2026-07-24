@@ -37,8 +37,10 @@ pub fn install_dmg(bytes: &[u8]) -> Result<PathBuf, String> {
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_millis();
-    let work_dir =
-        std::env::temp_dir().join(format!("iptv-checker-update-{}-{nonce}", std::process::id()));
+    let work_dir = std::env::temp_dir().join(format!(
+        "iptv-checker-update-{}-{nonce}",
+        std::process::id()
+    ));
 
     let result = (|| {
         fs::create_dir_all(&work_dir).map_err(|e| e.to_string())?;
@@ -97,7 +99,9 @@ pub fn schedule_relaunch(installed_app: &Path) -> Result<(), String> {
         .stderr(Stdio::null())
         .spawn()
         .map(|_| ())
-        .map_err(|error| format!("Could not schedule IPTV Checker to reopen after the update: {error}"))
+        .map_err(|error| {
+            format!("Could not schedule IPTV Checker to reopen after the update: {error}")
+        })
 }
 
 /// The `.app` bundle this process is running from.

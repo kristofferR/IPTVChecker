@@ -179,11 +179,11 @@ fn compute_history_diff_from_results(
 ) -> ScanHistoryDiff {
     let newer_map: HashMap<String, ChannelStatus> = newer_results
         .iter()
-        .map(|result| (channel_identity_key(result), result.status.clone()))
+        .map(|result| (channel_identity_key(result), result.status))
         .collect();
     let older_map: HashMap<String, ChannelStatus> = older_results
         .iter()
-        .map(|result| (channel_identity_key(result), result.status.clone()))
+        .map(|result| (channel_identity_key(result), result.status))
         .collect();
 
     let channels_gained = newer_map
@@ -381,7 +381,7 @@ fn migrate_v1_to_v2(base_dir: &Path) -> Result<(), AppError> {
 
     let mut index_entries = Vec::with_capacity(v1_store.entries.len());
     for (_playlist_key, mut entries) in by_playlist {
-        entries.sort_by(|a, b| b.scanned_at_epoch_ms.cmp(&a.scanned_at_epoch_ms));
+        entries.sort_by_key(|entry| std::cmp::Reverse(entry.scanned_at_epoch_ms));
 
         for i in 0..entries.len() {
             let diff = if i + 1 < entries.len() {
@@ -462,7 +462,7 @@ fn enforce_playlist_retention_v2(
         }
     }
 
-    matching.sort_by(|a, b| b.scanned_at_epoch_ms.cmp(&a.scanned_at_epoch_ms));
+    matching.sort_by_key(|entry| std::cmp::Reverse(entry.scanned_at_epoch_ms));
 
     // Delete per-run files for entries that will be removed
     if matching.len() > history_limit {
@@ -518,7 +518,7 @@ fn append_scan_history_at_dir(
         .iter()
         .filter(|e| e.playlist_key == playlist_key && e.scope_key == scope_key)
         .collect();
-    candidates.sort_by(|a, b| b.scanned_at_epoch_ms.cmp(&a.scanned_at_epoch_ms));
+    candidates.sort_by_key(|entry| std::cmp::Reverse(entry.scanned_at_epoch_ms));
 
     let diff = if let Some(prev_entry) = candidates.first() {
         match load_run_file(base_dir, &prev_entry.id) {
@@ -588,7 +588,7 @@ fn get_scan_history_from_dir(
         .iter()
         .filter(|entry| entry.playlist_key == playlist_key)
         .collect();
-    matching.sort_by(|a, b| b.scanned_at_epoch_ms.cmp(&a.scanned_at_epoch_ms));
+    matching.sort_by_key(|entry| std::cmp::Reverse(entry.scanned_at_epoch_ms));
 
     let items = matching
         .iter()

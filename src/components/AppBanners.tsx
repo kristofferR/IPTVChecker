@@ -1,14 +1,14 @@
-import { useEffect, useMemo } from "react";
 import { Download, ExternalLink, Info, X } from "lucide-react";
-import { useAppStore } from "../store";
+import { useEffect, useMemo } from "react";
 import { dismissUpdateNotice } from "../hooks/useUpdateCheck";
+import { validateSourceFilterPattern } from "../lib/sourceFilter";
 import {
   isManualInstall,
   updateActionLabel,
   updateBannerMessage,
   updateConfirmMessage,
 } from "../lib/updateState";
-import { validateSourceFilterPattern } from "../lib/sourceFilter";
+import { useAppStore } from "../store";
 
 // Non-reactive store access for writes inside callbacks/effects.
 const getStore = () => useAppStore.getState();
@@ -62,9 +62,7 @@ export function AppBanners({ onInstallUpdate }: AppBannersProps) {
     () => getStore().setErrorDismissed(false),
   );
   useAutoDismiss(playbackError, 10000, () => getStore().setPlaybackError(null));
-  useAutoDismiss(playlistOpenError, 10000, () =>
-    getStore().setPlaylistOpenError(null),
-  );
+  useAutoDismiss(playlistOpenError, 10000, () => getStore().setPlaylistOpenError(null));
   useAutoDismiss(scanInputError, 8000, () => getStore().setScanInputError(null));
   useAutoDismiss(menuInfo, 8000, () => getStore().setMenuInfo(null));
 

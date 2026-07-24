@@ -1,18 +1,18 @@
-import { useCallback, useEffect, useRef } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
-import { useAppStore } from "../store";
+import { useCallback, useEffect, useRef } from "react";
+import { errorToString } from "../lib/errors";
+import { logger } from "../lib/logger";
 import {
-  checkForUpdates as invokeCheckForUpdates,
   discoveredUpdate,
+  checkForUpdates as invokeCheckForUpdates,
   installUpdate as invokeInstallUpdate,
   openManualUpdate,
   updateInstallMode,
 } from "../lib/tauri";
 import type { UpdateInstallMode } from "../lib/updateState";
 import { isManualInstall, updateFailureDetail } from "../lib/updateState";
-import { errorToString } from "../lib/errors";
-import { logger } from "../lib/logger";
+import { useAppStore } from "../store";
 
 /** Emitted by the backend's periodic check when it finds a new version. */
 const UPDATE_AVAILABLE_EVENT = "updater://update-available";

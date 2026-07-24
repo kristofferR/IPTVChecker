@@ -552,10 +552,9 @@ pub fn sanitize_screenshot_stem(raw: &str) -> String {
 
     for ch in raw.chars() {
         let normalized = if ch.is_control()
+            || ch.is_whitespace()
             || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
         {
-            '-'
-        } else if ch.is_whitespace() {
             '-'
         } else {
             ch
@@ -1464,12 +1463,6 @@ pub async fn capture_screenshot(
     }
 }
 
-/// Profile approximate video bitrate by sampling the stream for 10 seconds.
-///
-/// This spawns ffmpeg directly instead of using `run_tool_command` because:
-/// - ffmpeg with `-t 10` on live streams normally exits non-zero (the stream is
-///   still sending when the time limit is hit), which `run_tool_command` treats as error.
-/// - We only need the "Statistics:" line from stderr, regardless of exit code.
 /// Spawn a task that drains a child's stderr (so the child can't block on a
 /// full pipe) while retaining only the final 1 MB — the Statistics/error
 /// lines we parse are written near process exit.
@@ -1503,6 +1496,13 @@ fn spawn_stderr_tail_reader(
     })
 }
 
+/// Profile approximate video bitrate by sampling the stream for 10 seconds.
+///
+/// This spawns ffmpeg directly instead of using `run_tool_command` because:
+/// - ffmpeg with `-t 10` on live streams normally exits non-zero (the stream is
+///   still sending when the time limit is hit), which `run_tool_command` treats
+///   as an error.
+/// - We only need the "Statistics:" line from stderr, regardless of exit code.
 pub async fn profile_bitrate(
     app: &AppHandle,
     url: &str,
@@ -1627,6 +1627,17 @@ pub struct CombinedDiagnostics {
 
 /// Parse stream metadata from ffmpeg verbose stderr output.
 ///
+/// The best video stream seen so far while scanning ffmpeg's stderr:
+/// `(codec, width, height, fps, pixels, hdr_format)`. Ranked by `pixels`.
+type BestVideoCandidate = (
+    String,
+    Option<u32>,
+    Option<u32>,
+    Option<u32>,
+    u64,
+    Option<String>,
+);
+
 /// Extracts codec, resolution, fps, audio info, and format bitrate from
 /// `Stream #` and `Duration:` lines that ffmpeg prints with `-v verbose`.
 fn parse_ffmpeg_stderr(
@@ -1638,14 +1649,7 @@ fn parse_ffmpeg_stderr(
     Option<u32>,
 ) {
     let mut presence = StreamTrackPresence::default();
-    let mut best_video: Option<(
-        String,
-        Option<u32>,
-        Option<u32>,
-        Option<u32>,
-        u64,
-        Option<String>,
-    )> = None; // (codec, w, h, fps, pixels, hdr)
+    let mut best_video: Option<BestVideoCandidate> = None;
     let mut audio_info: Option<AudioInfo> = None;
     let mut format_bitrate_kbps: Option<u32> = None;
 
@@ -2270,7 +2274,7 @@ mod tests {
 
         assert!(args.windows(2).any(|pair| pair == ["-update", "1"]));
         assert!(args.windows(2).any(|pair| pair == ["-pix_fmt", "rgb24"]));
-        assert!(!args.iter().any(|arg| *arg == "libwebp"));
+        assert!(!args.contains(&"libwebp"));
         assert_eq!(args.last(), Some(&"/tmp/frame.png"));
     }
 
@@ -2511,7 +2515,7 @@ mod tests {
     #[test]
     fn label_mismatch_hd_word_boundary() {
         // "HD" as standalone word should trigger mismatch
-        assert!(!check_label_mismatch("Sports HD", "1080p").is_empty() == false);
+        assert!(check_label_mismatch("Sports HD", "1080p").is_empty());
         assert!(check_label_mismatch("Sports HD", "480p").len() == 1);
 
         // "hd" as part of a name should NOT trigger mismatch

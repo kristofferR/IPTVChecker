@@ -160,10 +160,10 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
   const progress = useAppStore((s) => s.progress);
   const summary = useAppStore((s) => s.summary);
   const scanState = useAppStore((s) => s.scanState);
-  if (!playlist) {
-    return null;
-  }
-  const statusSnapshot = summary ?? progress;
+  // Every hook below must run unconditionally: the "no playlist" early return
+  // lives after them, because bailing out first would change the hook count
+  // between renders as soon as a playlist loads.
+  const channels = playlist?.channels;
 
   const latencyStats = useMemo(() => {
     const aliveLatencies = results
@@ -180,27 +180,21 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
   const languageSummary = useMemo(
     () =>
       summarizeLanguageDistribution(
-        playlist.channels.map((channel) => ({ language: channel.language })),
+        (channels ?? []).map((channel) => ({ language: channel.language })),
         5,
       ),
-    [playlist.channels],
-  );
-
-  const showHealthScore = hasScanStarted(scanState);
-  const showContentCounts = shouldShowContentCounts(playlist.movie_count, playlist.series_count);
-  const showLanguageDistribution = shouldShowLanguageDistribution(
-    playlist.channels.map((channel) => ({ language: channel.language })),
+    [channels],
   );
 
   const epgSummary = useMemo(
-    () => summarizeEpgCoverage(playlist.channels.map((channel) => ({ tvg_id: channel.tvg_id }))),
-    [playlist.channels],
+    () => summarizeEpgCoverage((channels ?? []).map((channel) => ({ tvg_id: channel.tvg_id }))),
+    [channels],
   );
 
   const protocolSummary = useMemo(() => {
     let http = 0;
     let https = 0;
-    for (const channel of playlist.channels) {
+    for (const channel of channels ?? []) {
       const lower = channel.url.trim().toLowerCase();
       if (lower.startsWith("https://")) {
         https += 1;
@@ -211,7 +205,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
     const total = http + https;
     const httpsPct = total > 0 ? (https / total) * 100 : 0;
     return { http, https, total, httpsPct };
-  }, [playlist.channels]);
+  }, [channels]);
 
   const quality = useMemo(() => {
     const alive = results.filter(isAliveResult);
@@ -232,8 +226,19 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
   }, [results]);
 
   const computedScore = useMemo(
-    () => computeLiveScore(results, playlist.total_channels),
-    [results, playlist.total_channels],
+    () => computeLiveScore(results, playlist?.total_channels ?? 0),
+    [results, playlist?.total_channels],
+  );
+
+  if (!playlist) {
+    return null;
+  }
+
+  const statusSnapshot = summary ?? progress;
+  const showHealthScore = hasScanStarted(scanState);
+  const showContentCounts = shouldShowContentCounts(playlist.movie_count, playlist.series_count);
+  const showLanguageDistribution = shouldShowLanguageDistribution(
+    playlist.channels.map((channel) => ({ language: channel.language })),
   );
   const displayScore = summary?.playlist_score ?? computedScore;
   const ringScore = displayScore?.overall ?? 0;
