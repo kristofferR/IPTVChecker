@@ -1,16 +1,6 @@
-import { listen } from "@tauri-apps/api/event";
-import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
-import {
-  isPermissionGranted,
-  onAction,
-  requestPermission,
-  sendNotification,
-} from "@tauri-apps/plugin-notification";
 import {
   lazy,
   Profiler,
-  type ProfilerOnRenderCallback,
   Suspense,
   useCallback,
   useEffect,
@@ -18,37 +8,47 @@ import {
   useMemo,
   useRef,
   useState,
+  type ProfilerOnRenderCallback,
 } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow, ProgressBarStatus } from "@tauri-apps/api/window";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { setLiquidGlassEffect } from "tauri-plugin-liquid-glass-api";
-import { AppBanners } from "./components/AppBanners";
-import { ChannelTable } from "./components/ChannelTable";
-import { FilterBar } from "./components/FilterBar";
-import { PlaylistReportPanel } from "./components/PlaylistReportPanel";
-import { ProgressBar } from "./components/ProgressBar";
-import { StartScreen } from "./components/StartScreen";
-import { StatsPanel } from "./components/StatsPanel";
-import { ThumbnailPanel } from "./components/ThumbnailPanel";
-import { Toolbar } from "./components/Toolbar";
-import { type UseChromecastResult, useChromecast } from "./hooks/useChromecast";
-import { useMenuEventBridge } from "./hooks/useMenuEventBridge";
-import { usePlaylistSources } from "./hooks/usePlaylistSources";
-import { useScan } from "./hooks/useScan";
-import { useSettings } from "./hooks/useSettings";
-import { useStreamPlayer } from "./hooks/useStreamPlayer";
-import { useUpdateCheck } from "./hooks/useUpdateCheck";
-import { buildCastRequest, isCastSessionActive } from "./lib/cast";
 import {
-  checkFfmpegAvailable,
+  isPermissionGranted,
+  onAction,
+  requestPermission,
+  sendNotification,
+} from "@tauri-apps/plugin-notification";
+import type { AppSettings, ChannelResult, ScanConfig } from "./lib/types";
+import {
   clearScanHistory,
   getScanHistory,
+  checkFfmpegAvailable,
+  readScreenshot,
   openChannelInPlayer,
   quickCheckChannel,
-  readScreenshot,
 } from "./lib/tauri";
-import type { AppSettings, ChannelResult, ChromecastDevice, ScanConfig } from "./lib/types";
+import { useScan } from "./hooks/useScan";
+import { useSettings } from "./hooks/useSettings";
+import { useChromecast, type UseChromecastResult } from "./hooks/useChromecast";
+import { useStreamPlayer } from "./hooks/useStreamPlayer";
+import { usePlaylistSources } from "./hooks/usePlaylistSources";
+import { useUpdateCheck } from "./hooks/useUpdateCheck";
+import { useMenuEventBridge } from "./hooks/useMenuEventBridge";
+import { buildCastRequest, isCastSessionActive } from "./lib/cast";
+import type { ChromecastDevice } from "./lib/types";
 import { useAppStore } from "./store";
 import type { AppStore, OpenSourceDialogState } from "./store/types";
-
+import { Toolbar } from "./components/Toolbar";
+import { FilterBar } from "./components/FilterBar";
+import { ChannelTable } from "./components/ChannelTable";
+import { PlaylistReportPanel } from "./components/PlaylistReportPanel";
+import { ThumbnailPanel } from "./components/ThumbnailPanel";
+import { StatsPanel } from "./components/StatsPanel";
+import { ProgressBar } from "./components/ProgressBar";
+import { AppBanners } from "./components/AppBanners";
+import { StartScreen } from "./components/StartScreen";
 const KeyboardShortcutsDialog = lazy(() => import("./components/KeyboardShortcutsDialog"));
 const HistoryPanel = lazy(() => import("./components/HistoryPanel"));
 const OpenSourceDialog = lazy(() => import("./components/OpenSourceDialog"));
@@ -58,19 +58,23 @@ const XtreamServerTestDialog = lazy(() =>
   })),
 );
 const SavedPlaylistsDialog = lazy(() => import("./components/SavedPlaylistsDialog"));
-const SavedPlaylistEditorDialog = lazy(() => import("./components/SavedPlaylistEditorDialog"));
-
+const SavedPlaylistEditorDialog = lazy(
+  () => import("./components/SavedPlaylistEditorDialog"),
+);
 import { AlertTriangle } from "lucide-react";
-import { toPendingChannelResult } from "./lib/channelResults";
+import { detectPlatform } from "./lib/platform";
+import { logger } from "./lib/logger";
 import { errorToString } from "./lib/errors";
 import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/haptics";
-import { logger } from "./lib/logger";
-import { recordUiPerf, startLongTaskObserver, uiPerfEnabled } from "./lib/perf";
-import { detectPlatform } from "./lib/platform";
-import { shouldAutoRevealReportPanel } from "./lib/playlistReportVisibility";
+import { toPendingChannelResult } from "./lib/channelResults";
 import { isScanActive } from "./lib/scanState";
 import { isInputLikeTarget, isPrimaryModifierPressed } from "./lib/shortcuts";
-import { normalizeSourceFilter, validateSourceFilterPattern } from "./lib/sourceFilter";
+import { recordUiPerf, startLongTaskObserver, uiPerfEnabled } from "./lib/perf";
+import { shouldAutoRevealReportPanel } from "./lib/playlistReportVisibility";
+import {
+  normalizeSourceFilter,
+  validateSourceFilterPattern,
+} from "./lib/sourceFilter";
 
 async function restoreAndFocusWindow(window: {
   unminimize: () => Promise<void>;
@@ -152,9 +156,7 @@ function ScanPauseBanners() {
       {networkPaused && isScanActive(scanState) && (
         <div className="flex items-center gap-2 px-4 py-2 bg-orange-500/10 border-b border-orange-500/20 text-orange-400 text-[13px]">
           <AlertTriangle className="w-4 h-4 shrink-0" />
-          <span className="flex-1">
-            Scan paused — network connectivity lost. Waiting for recovery...
-          </span>
+          <span className="flex-1">Scan paused — network connectivity lost. Waiting for recovery...</span>
         </div>
       )}
     </>
@@ -300,7 +302,11 @@ function SelectedChannelSidebar({
   );
 }
 
-function ScanRuntimeEffects({ refreshHistory }: { refreshHistory: () => Promise<void> }) {
+function ScanRuntimeEffects({
+  refreshHistory,
+}: {
+  refreshHistory: () => Promise<void>;
+}) {
   const playlist = useAppStore((s) => s.playlist);
   const progress = useAppStore((s) => s.progress);
   const summary = useAppStore((s) => s.summary);
@@ -321,7 +327,9 @@ function ScanRuntimeEffects({ refreshHistory }: { refreshHistory: () => Promise<
 
   useEffect(() => {
     const previous = reportAutoRevealPreviousScanStateRef.current;
-    const scanJustStarted = scanState === "scanning" && !isScanActive(previous);
+    const scanJustStarted =
+      scanState === "scanning" &&
+      !isScanActive(previous);
 
     if (scanJustStarted) {
       getStore().prepareReportAutoRevealForScanStart();
@@ -342,7 +350,10 @@ function ScanRuntimeEffects({ refreshHistory }: { refreshHistory: () => Promise<
       return;
     }
 
-    const active = scanState === "scanning" || scanState === "paused" || scanState === "complete";
+    const active =
+      scanState === "scanning" ||
+      scanState === "paused" ||
+      scanState === "complete";
     if (!active) {
       return;
     }
@@ -365,7 +376,10 @@ function ScanRuntimeEffects({ refreshHistory }: { refreshHistory: () => Promise<
     if (!justFinished) return;
 
     if (scanState === "complete") {
-      void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.DrawCompleted);
+      void triggerHaptic(
+        HapticFeedbackPattern.Generic,
+        PerformanceTime.DrawCompleted,
+      );
     }
 
     if (!scanNotifications || !summary) return;
@@ -404,13 +418,14 @@ function ScanRuntimeEffects({ refreshHistory }: { refreshHistory: () => Promise<
         progress && progress.total > 0
           ? Math.min(100, Math.max(0, (progress.completed / progress.total) * 100))
           : 0;
-      const status = networkPaused
-        ? ProgressBarStatus.Error
-        : scanState === "paused"
-          ? ProgressBarStatus.Paused
-          : progress
-            ? ProgressBarStatus.Normal
-            : ProgressBarStatus.Indeterminate;
+      const status =
+        networkPaused
+          ? ProgressBarStatus.Error
+          : scanState === "paused"
+            ? ProgressBarStatus.Paused
+            : progress
+              ? ProgressBarStatus.Normal
+              : ProgressBarStatus.Indeterminate;
 
       void appWindow
         .setProgressBar({
@@ -420,7 +435,9 @@ function ScanRuntimeEffects({ refreshHistory }: { refreshHistory: () => Promise<
         .catch(() => {});
 
       if (isMac) {
-        const badgeLabel = progress ? `${progress.alive + progress.drm}/${progress.dead}` : "...";
+        const badgeLabel = progress
+          ? `${progress.alive + progress.drm}/${progress.dead}`
+          : "...";
         void appWindow.setBadgeLabel(badgeLabel).catch(() => {});
       }
     };
@@ -444,7 +461,8 @@ function ScanRuntimeEffects({ refreshHistory }: { refreshHistory: () => Promise<
       const now = Date.now();
       const elapsed = now - lastOsProgressUpdateMsRef.current;
       const shouldUpdateNow =
-        lastOsProgressUpdateMsRef.current === 0 || elapsed >= OS_PROGRESS_UPDATE_INTERVAL_MS;
+        lastOsProgressUpdateMsRef.current === 0 ||
+        elapsed >= OS_PROGRESS_UPDATE_INTERVAL_MS;
 
       clearScheduledUpdate();
       if (shouldUpdateNow) {
@@ -562,9 +580,16 @@ export default function App() {
   const isCasting = isCastSessionActive(castSession);
 
   const { settings, save: saveSettings, applyExternal: applyExternalSettings } = useSettings();
-  const { start, cancel, pause, resume, initFromPlaylist, syncFromPlaylist, updateResult } =
-    useScan();
-  const { checkForUpdates } = useUpdateCheck();
+  const {
+    start,
+    cancel,
+    pause,
+    resume,
+    initFromPlaylist,
+    syncFromPlaylist,
+    updateResult,
+  } = useScan();
+  const { checkForUpdates, installUpdate } = useUpdateCheck();
   const {
     handleClearRecentPlaylists,
     handleOpen,
@@ -612,9 +637,7 @@ export default function App() {
   useEffect(() => {
     const title = playlist ? `${playlist.file_name} | IPTV Checker` : "IPTV Checker";
     document.title = title;
-    void getCurrentWindow()
-      .setTitle(title)
-      .catch(() => {});
+    void getCurrentWindow().setTitle(title).catch(() => {});
   }, [playlist]);
 
   // Detect platform via native plugin and refresh the initial fallback.
@@ -705,7 +728,10 @@ export default function App() {
     getStore().setHistoryLoading(true);
     getStore().setHistoryError(null);
     try {
-      const items = await getScanHistory(playlist.file_path, playlist.source_identity);
+      const items = await getScanHistory(
+        playlist.file_path,
+        playlist.source_identity,
+      );
       getStore().setHistoryEntries(items);
     } catch (err) {
       getStore().setHistoryError(errorToString(err));
@@ -779,36 +805,32 @@ export default function App() {
     void refreshHistory();
   }, [playlist, refreshHistory]);
 
-  const handleExternalOpenPaths = useCallback(
-    (paths: string[]) => {
-      const targetPath = paths.find((path) => path.trim().length > 0) ?? null;
-      if (!targetPath) {
-        return;
-      }
+  const handleExternalOpenPaths = useCallback((paths: string[]) => {
+    const targetPath = paths.find((path) => path.trim().length > 0) ?? null;
+    if (!targetPath) {
+      return;
+    }
 
-      if (paths.length > 1) {
-        getStore().setMenuInfo(`Opened ${paths.length} items. Loaded the first one.`);
-      }
+    if (paths.length > 1) {
+      getStore().setMenuInfo(`Opened ${paths.length} items. Loaded the first one.`);
+    }
 
-      void restoreAndFocusWindow(getCurrentWindow()).catch(() => {});
-      void openPlaylistPath(targetPath);
-    },
-    [openPlaylistPath],
-  );
+    void restoreAndFocusWindow(getCurrentWindow()).catch(() => {});
+    void openPlaylistPath(targetPath);
+  }, [openPlaylistPath]);
 
-  const handleDroppedPaths = useCallback(
-    (paths: string[]) => {
-      const playlistPath = paths.find((path) => isPlaylistLikePath(path));
+  const handleDroppedPaths = useCallback((paths: string[]) => {
+    const playlistPath = paths.find((path) =>
+      isPlaylistLikePath(path),
+    );
 
-      if (!playlistPath) {
-        getStore().setMenuInfo("Dropped file is not an M3U/M3U8 playlist.");
-        return;
-      }
+    if (!playlistPath) {
+      getStore().setMenuInfo("Dropped file is not an M3U/M3U8 playlist.");
+      return;
+    }
 
-      void openPlaylistPath(playlistPath);
-    },
-    [openPlaylistPath],
-  );
+    void openPlaylistPath(playlistPath);
+  }, [openPlaylistPath]);
 
   useEffect(() => {
     let mounted = true;
@@ -860,66 +882,69 @@ export default function App() {
     return () => window.removeEventListener("contextmenu", handler);
   }, []);
 
-  const startScanWithSelection = useCallback(
-    async (selection: number[]) => {
-      const state = getStore();
-      const currentChannelSearchError = validateSourceFilterPattern(state.channelSearch);
+  const startScanWithSelection = useCallback(async (selection: number[]) => {
+    const state = getStore();
+    const currentChannelSearchError = validateSourceFilterPattern(
+      state.channelSearch,
+    );
 
-      if (currentChannelSearchError) {
-        state.setScanInputError(`Invalid source filter regex: ${currentChannelSearchError}`);
-        return false;
-      }
+    if (currentChannelSearchError) {
+      state.setScanInputError(
+        `Invalid source filter regex: ${currentChannelSearchError}`,
+      );
+      return false;
+    }
 
-      const applyResult = await ensureSourceFilterApplied();
-      if (!applyResult.ok) {
-        return false;
-      }
+    const applyResult = await ensureSourceFilterApplied();
+    if (!applyResult.ok) {
+      return false;
+    }
 
-      const refreshedState = getStore();
-      const currentPlaylist = refreshedState.playlist;
-      const currentChannelSearch = normalizeSourceFilter(refreshedState.channelSearch);
-      const currentGroupFilter = refreshedState.groupFilter;
-      const currentSettings = refreshedState.settings;
-      const effectiveSelection = applyResult.reapplied ? [] : selection;
+    const refreshedState = getStore();
+    const currentPlaylist = refreshedState.playlist;
+    const currentChannelSearch = normalizeSourceFilter(
+      refreshedState.channelSearch,
+    );
+    const currentGroupFilter = refreshedState.groupFilter;
+    const currentSettings = refreshedState.settings;
+    const effectiveSelection = applyResult.reapplied ? [] : selection;
 
-      if (!currentPlaylist) return false;
+    if (!currentPlaylist) return false;
 
-      const config: ScanConfig = {
-        file_path: currentPlaylist.file_path,
-        source_identity: currentPlaylist.source_identity ?? null,
-        playlist_display_name: currentPlaylist.file_name,
-        group_filter: currentGroupFilter !== "all" ? currentGroupFilter : null,
-        channel_search: currentChannelSearch || null,
-        selected_indices: effectiveSelection.length > 0 ? effectiveSelection : null,
-        hide_vod_content: currentSettings.hide_vod_content,
-        timeout: currentSettings.timeout,
-        extended_timeout: currentSettings.extended_timeout,
-        concurrency: resolveSmartConcurrency(
-          currentSettings.concurrency,
-          currentPlaylist.single_provider,
-          currentPlaylist.xtream_max_connections ?? null,
-        ),
-        retries: currentSettings.retries,
-        retry_backoff: currentSettings.retry_backoff,
-        user_agent: currentSettings.user_agent,
-        skip_screenshots: currentSettings.skip_screenshots,
-        profile_bitrate: currentSettings.profile_bitrate,
-        ffprobe_timeout_secs: currentSettings.ffprobe_timeout_secs,
-        ffmpeg_bitrate_timeout_secs: currentSettings.ffmpeg_bitrate_timeout_secs,
-        accept_invalid_certs: currentSettings.accept_invalid_certs,
-        proxy_file: currentSettings.proxy_file,
-        test_geoblock: currentSettings.test_geoblock,
-        screenshots_dir: currentSettings.screenshots_dir,
-        client_capabilities: {
-          event_batch_v1: true,
-        },
-      };
+    const config: ScanConfig = {
+      file_path: currentPlaylist.file_path,
+      source_identity: currentPlaylist.source_identity ?? null,
+      playlist_display_name: currentPlaylist.file_name,
+      group_filter: currentGroupFilter !== "all" ? currentGroupFilter : null,
+      channel_search: currentChannelSearch || null,
+      selected_indices: effectiveSelection.length > 0 ? effectiveSelection : null,
+      hide_vod_content: currentSettings.hide_vod_content,
+      timeout: currentSettings.timeout,
+      extended_timeout: currentSettings.extended_timeout,
+      concurrency: resolveSmartConcurrency(
+        currentSettings.concurrency,
+        currentPlaylist.single_provider,
+        currentPlaylist.xtream_max_connections ?? null,
+      ),
+      retries: currentSettings.retries,
+      retry_backoff: currentSettings.retry_backoff,
+      user_agent: currentSettings.user_agent,
+      skip_screenshots: currentSettings.skip_screenshots,
+      profile_bitrate: currentSettings.profile_bitrate,
+      ffprobe_timeout_secs: currentSettings.ffprobe_timeout_secs,
+      ffmpeg_bitrate_timeout_secs: currentSettings.ffmpeg_bitrate_timeout_secs,
+      accept_invalid_certs: currentSettings.accept_invalid_certs,
+      proxy_file: currentSettings.proxy_file,
+      test_geoblock: currentSettings.test_geoblock,
+      screenshots_dir: currentSettings.screenshots_dir,
+      client_capabilities: {
+        event_batch_v1: true,
+      },
+    };
 
-      await start(config, currentPlaylist.total_channels, effectiveSelection);
-      return true;
-    },
-    [ensureSourceFilterApplied, start],
-  );
+    await start(config, currentPlaylist.total_channels, effectiveSelection);
+    return true;
+  }, [ensureSourceFilterApplied, start]);
 
   const handleStartScan = useCallback(async () => {
     const started = await startScanWithSelection(getStore().selectedChannelIndices);
@@ -950,67 +975,61 @@ export default function App() {
     );
   };
 
-  const handleSidebarDragStart = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      sidebarDragRef.current = { startX: e.clientX, startWidth: sidebarWidth };
+  const handleSidebarDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    sidebarDragRef.current = { startX: e.clientX, startWidth: sidebarWidth };
 
-      const onMouseMove = (ev: MouseEvent) => {
-        if (!sidebarDragRef.current) return;
-        const delta = ev.clientX - sidebarDragRef.current.startX;
-        const newWidth = Math.max(100, Math.min(600, sidebarDragRef.current.startWidth + delta));
-        getStore().setSidebarWidth(newWidth);
-      };
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!sidebarDragRef.current) return;
+      const delta = ev.clientX - sidebarDragRef.current.startX;
+      const newWidth = Math.max(100, Math.min(600, sidebarDragRef.current.startWidth + delta));
+      getStore().setSidebarWidth(newWidth);
+    };
 
-      const onMouseUp = () => {
-        document.removeEventListener("mousemove", onMouseMove);
-        document.removeEventListener("mouseup", onMouseUp);
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-        sidebarDragRef.current = null;
-      };
+    const onMouseUp = () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      sidebarDragRef.current = null;
+    };
 
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
-    },
-    [sidebarWidth],
-  );
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, [sidebarWidth]);
 
-  const handleReportSidebarDragStart = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      reportSidebarDragRef.current = {
-        startX: e.clientX,
-        startWidth: reportSidebarWidth,
-      };
+  const handleReportSidebarDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    reportSidebarDragRef.current = {
+      startX: e.clientX,
+      startWidth: reportSidebarWidth,
+    };
 
-      const onMouseMove = (ev: MouseEvent) => {
-        if (!reportSidebarDragRef.current) return;
-        const delta = reportSidebarDragRef.current.startX - ev.clientX;
-        const newWidth = Math.max(
-          260,
-          Math.min(700, reportSidebarDragRef.current.startWidth + delta),
-        );
-        getStore().setReportSidebarWidth(newWidth);
-      };
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!reportSidebarDragRef.current) return;
+      const delta = reportSidebarDragRef.current.startX - ev.clientX;
+      const newWidth = Math.max(
+        260,
+        Math.min(700, reportSidebarDragRef.current.startWidth + delta),
+      );
+      getStore().setReportSidebarWidth(newWidth);
+    };
 
-      const onMouseUp = () => {
-        document.removeEventListener("mousemove", onMouseMove);
-        document.removeEventListener("mouseup", onMouseUp);
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-        reportSidebarDragRef.current = null;
-      };
+    const onMouseUp = () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      reportSidebarDragRef.current = null;
+    };
 
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
-    },
-    [reportSidebarWidth],
-  );
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, [reportSidebarWidth]);
 
   useEffect(() => {
     localStorage.setItem("sidebar-width", String(sidebarWidth));
@@ -1110,7 +1129,9 @@ export default function App() {
         const session = currentChromecast.session;
         const device =
           currentChromecast.devices.find((d) => d.id === session.deviceId) ??
-          (lastCastDeviceRef.current?.id === session.deviceId ? lastCastDeviceRef.current : null);
+          (lastCastDeviceRef.current?.id === session.deviceId
+            ? lastCastDeviceRef.current
+            : null);
         if (device) {
           void currentChromecast.cast(device, buildCastRequest(result));
           return;
@@ -1148,10 +1169,7 @@ export default function App() {
   }, [pendingPlaybackChannel, playStream]);
 
   // Merge player-derived metadata into ChannelResult for unscanned channels
-  const lastMergedMetaRef = useRef<{
-    index: number;
-    meta: typeof streamPlayer.streamMetadata;
-  } | null>(null);
+  const lastMergedMetaRef = useRef<{ index: number; meta: typeof streamPlayer.streamMetadata } | null>(null);
   useEffect(() => {
     const meta = streamPlayer.streamMetadata;
     const idx = streamPlayer.activeChannelIndex;
@@ -1169,38 +1187,14 @@ export default function App() {
     let changed = false;
     const updated = { ...existing };
 
-    if (meta.width != null && existing.width == null) {
-      updated.width = meta.width;
-      changed = true;
-    }
-    if (meta.height != null && existing.height == null) {
-      updated.height = meta.height;
-      changed = true;
-    }
-    if (meta.resolution && !existing.resolution) {
-      updated.resolution = meta.resolution;
-      changed = true;
-    }
-    if (meta.codec && !existing.codec) {
-      updated.codec = meta.codec;
-      changed = true;
-    }
-    if (meta.fps != null && existing.fps == null) {
-      updated.fps = meta.fps;
-      changed = true;
-    }
-    if (meta.videoBitrate && !existing.video_bitrate) {
-      updated.video_bitrate = meta.videoBitrate;
-      changed = true;
-    }
-    if (meta.audioCodec && !existing.audio_codec) {
-      updated.audio_codec = meta.audioCodec;
-      changed = true;
-    }
-    if (meta.audioBitrate && !existing.audio_bitrate) {
-      updated.audio_bitrate = meta.audioBitrate;
-      changed = true;
-    }
+    if (meta.width != null && existing.width == null) { updated.width = meta.width; changed = true; }
+    if (meta.height != null && existing.height == null) { updated.height = meta.height; changed = true; }
+    if (meta.resolution && !existing.resolution) { updated.resolution = meta.resolution; changed = true; }
+    if (meta.codec && !existing.codec) { updated.codec = meta.codec; changed = true; }
+    if (meta.fps != null && existing.fps == null) { updated.fps = meta.fps; changed = true; }
+    if (meta.videoBitrate && !existing.video_bitrate) { updated.video_bitrate = meta.videoBitrate; changed = true; }
+    if (meta.audioCodec && !existing.audio_codec) { updated.audio_codec = meta.audioCodec; changed = true; }
+    if (meta.audioBitrate && !existing.audio_bitrate) { updated.audio_bitrate = meta.audioBitrate; changed = true; }
 
     if (changed) {
       updateResult(updated);
@@ -1221,7 +1215,9 @@ export default function App() {
         if (state.flatResults.length > 0) {
           getStore().setSelectedChannel(state.flatResults[0]);
         } else if (state.playlist && state.playlist.channels.length > 0) {
-          getStore().setSelectedChannel(toPendingChannelResult(state.playlist.channels[0]));
+          getStore().setSelectedChannel(
+            toPendingChannelResult(state.playlist.channels[0]),
+          );
         }
       }
       getStore().setSidebarHidden(false);
@@ -1270,7 +1266,13 @@ export default function App() {
       handleStartScan,
       cancel,
     };
-  }, [handleOpen, handleOpenSettings, handleOpenLog, handleStartScan, cancel]);
+  }, [
+    handleOpen,
+    handleOpenSettings,
+    handleOpenLog,
+    handleStartScan,
+    cancel,
+  ]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1315,7 +1317,14 @@ export default function App() {
         }
         return;
       }
-      if (!e.repeat && e.key === " " && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+      if (
+        !e.repeat &&
+        e.key === " " &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.shiftKey &&
+        !e.altKey
+      ) {
         if (inputLikeTarget) return;
         e.preventDefault();
         getStore().toggleLightboxOpen();
@@ -1376,7 +1385,8 @@ export default function App() {
   const headerPortalRef = useRef<HTMLDivElement>(null);
   const [toolbarHeight, setToolbarHeight] = useState(0);
   const tableProfilerEnabled =
-    uiPerfEnabled() && (playlist?.channels.length ?? 0) <= TABLE_PROFILER_ROW_LIMIT;
+    uiPerfEnabled() &&
+    (playlist?.channels.length ?? 0) <= TABLE_PROFILER_ROW_LIMIT;
   const channelTableElement = (
     <ChannelTable
       onSelectChannel={handleSelectChannel}
@@ -1394,7 +1404,9 @@ export default function App() {
     if (!el) return;
     const update = () => {
       const nextToolbarHeight = el.offsetHeight;
-      setToolbarHeight((prev) => (prev === nextToolbarHeight ? prev : nextToolbarHeight));
+      setToolbarHeight((prev) =>
+        prev === nextToolbarHeight ? prev : nextToolbarHeight,
+      );
     };
     update();
     const observer = new ResizeObserver(update);
@@ -1404,14 +1416,22 @@ export default function App() {
 
   const tableChromeStyle = isMac
     ? {
-        marginLeft: liveSelectedChannel && !sidebarHidden ? `${sidebarWidth}px` : undefined,
-        marginRight: playlist && showReportPanel ? `${reportSidebarWidth}px` : undefined,
+        marginLeft:
+          liveSelectedChannel && !sidebarHidden
+            ? `${sidebarWidth}px`
+            : undefined,
+        marginRight:
+          playlist && showReportPanel
+            ? `${reportSidebarWidth}px`
+            : undefined,
       }
     : undefined;
 
   return (
     <div className="flex flex-col h-screen bg-surface">
-      <ScanRuntimeEffects refreshHistory={refreshHistory} />
+      <ScanRuntimeEffects
+        refreshHistory={refreshHistory}
+      />
       <div
         ref={toolbarMeasureRef}
         className={`relative z-20 ${isMac && playlist ? "glass-material bg-panel" : ""} ${isMac && !playlist ? "pb-4" : ""}`}
@@ -1447,73 +1467,73 @@ export default function App() {
       </div>
 
       <div className="flex flex-col flex-1 min-h-0">
-        {ffmpegWarning && (
-          <div className="flex items-center gap-2 px-4 py-2.5 bg-yellow-500/10 border-b border-yellow-500/20 text-yellow-400 text-[13px]">
-            <AlertTriangle className="w-4 h-4" />
-            ffmpeg/ffprobe not found. Screenshots and media info will be disabled.
-          </div>
-        )}
-        <ScanPauseBanners />
-
-        <AppBanners />
-
-        <div className="flex flex-col flex-1 min-h-0">
-          <div className="flex flex-1 min-h-0 bg-content">
-            {liveSelectedChannel && !sidebarHidden && (
-              <SelectedChannelSidebar
-                sidebarWidth={sidebarWidth}
-                onResizeStart={handleSidebarDragStart}
-                streamPlayer={streamPlayer}
-                chromecast={chromecast}
-                onPlayChannel={handlePlayInApp}
-                onScanChannel={handleScanSelected}
-                onStopPlayer={handleStopPlayer}
-                onOpenExternal={handleOpenExternal}
-                onPip={handlePip}
-              />
-            )}
-            <div className="flex flex-col flex-1 min-w-0">
-              {!isMac && <FilterBar onApply={handleApplySourceFilter} />}
-              {playlist ? (
-                tableProfilerEnabled ? (
-                  <Profiler id="ChannelTable" onRender={handleTableProfilerRender}>
-                    {channelTableElement}
-                  </Profiler>
-                ) : (
-                  channelTableElement
-                )
-              ) : (
-                <StartScreen
-                  playlistLoading={playlistLoading}
-                  playlistLoadProgress={playlistLoadProgress}
-                  modKey={modKey}
-                  recentPlaylists={recentPlaylists}
-                  savedPlaylists={savedPlaylists}
-                  onOpen={handleOpen}
-                  onOpenFolder={handleOpenFolder}
-                  onOpenUrl={handleOpenUrl}
-                  onOpenXtream={handleOpenXtream}
-                  onManageSavedPlaylists={handleManageSavedPlaylists}
-                  onOpenSaved={handleOpenSaved}
-                  onOpenRecent={handleOpenRecent}
-                  onClearRecent={handleClearRecentPlaylists}
-                />
-              )}
-            </div>
-
-            {playlist && showReportPanel && (
-              <PlaylistReportPanel
-                placement="right"
-                widthPx={reportSidebarWidth}
-                onResizeStart={handleReportSidebarDragStart}
-                onClose={handleCloseReport}
-              />
-            )}
-          </div>
-
-          <StatsPanel />
-          <ProgressBar />
+      {ffmpegWarning && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-yellow-500/10 border-b border-yellow-500/20 text-yellow-400 text-[13px]">
+          <AlertTriangle className="w-4 h-4" />
+          ffmpeg/ffprobe not found. Screenshots and media info will be disabled.
         </div>
+      )}
+      <ScanPauseBanners />
+
+      <AppBanners onInstallUpdate={installUpdate} />
+
+      <div className="flex flex-col flex-1 min-h-0">
+        <div className="flex flex-1 min-h-0 bg-content">
+          {liveSelectedChannel && !sidebarHidden && (
+            <SelectedChannelSidebar
+              sidebarWidth={sidebarWidth}
+              onResizeStart={handleSidebarDragStart}
+              streamPlayer={streamPlayer}
+              chromecast={chromecast}
+              onPlayChannel={handlePlayInApp}
+              onScanChannel={handleScanSelected}
+              onStopPlayer={handleStopPlayer}
+              onOpenExternal={handleOpenExternal}
+              onPip={handlePip}
+            />
+          )}
+          <div className="flex flex-col flex-1 min-w-0">
+            {!isMac && <FilterBar onApply={handleApplySourceFilter} />}
+            {playlist ? (
+              tableProfilerEnabled ? (
+                <Profiler id="ChannelTable" onRender={handleTableProfilerRender}>
+                  {channelTableElement}
+                </Profiler>
+              ) : (
+                channelTableElement
+              )
+            ) : (
+              <StartScreen
+                playlistLoading={playlistLoading}
+                playlistLoadProgress={playlistLoadProgress}
+                modKey={modKey}
+                recentPlaylists={recentPlaylists}
+                savedPlaylists={savedPlaylists}
+                onOpen={handleOpen}
+                onOpenFolder={handleOpenFolder}
+                onOpenUrl={handleOpenUrl}
+                onOpenXtream={handleOpenXtream}
+                onManageSavedPlaylists={handleManageSavedPlaylists}
+                onOpenSaved={handleOpenSaved}
+                onOpenRecent={handleOpenRecent}
+                onClearRecent={handleClearRecentPlaylists}
+              />
+            )}
+        </div>
+
+        {playlist && showReportPanel && (
+          <PlaylistReportPanel
+            placement="right"
+            widthPx={reportSidebarWidth}
+            onResizeStart={handleReportSidebarDragStart}
+            onClose={handleCloseReport}
+          />
+        )}
+      </div>
+
+      <StatsPanel />
+      <ProgressBar />
+      </div>
       </div>
 
       {openSourceDialogState && (
@@ -1615,10 +1635,13 @@ export default function App() {
       {pendingPlaybackChannel && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-xl rounded-xl border border-border-app bg-overlay p-5 shadow-2xl">
-            <h2 className="text-[16px] font-semibold mb-2">Scan currently running</h2>
+            <h2 className="text-[16px] font-semibold mb-2">
+              Scan currently running
+            </h2>
             <p className="text-[14px] text-text-secondary leading-relaxed">
-              A scan is currently running. Playing a channel while scanning may interfere with the
-              scan or cause playback issues if the server&apos;s max connection limit is exceeded.
+              A scan is currently running. Playing a channel while scanning may
+              interfere with the scan or cause playback issues if the server&apos;s
+              max connection limit is exceeded.
             </p>
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
@@ -1639,6 +1662,7 @@ export default function App() {
           </div>
         </div>
       )}
+
     </div>
   );
 }

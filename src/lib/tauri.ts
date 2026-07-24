@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { toCommandChannelResult } from "./channelResults";
 import type {
   AppSettings,
   CastMediaRequest,
@@ -7,21 +6,24 @@ import type {
   ChannelResult,
   ChromecastDevice,
   PlaylistPreview,
+  ScanPresetCollection,
+  ScanPresetConfig,
+  ScanConfig,
+  ScanHistoryItem,
   RecentPlaylistEntry,
   RecentPlaylistKind,
   RenamePlaylistSourceInput,
   SavedPlaylistDraft,
   SavedPlaylistEntry,
   SavedPlaylistUpsertResult,
-  ScanConfig,
-  ScanHistoryItem,
-  ScanPresetCollection,
-  ScanPresetConfig,
   ScreenshotCacheStats,
   StalkerOpenRequest,
+  UpdateCheckResult,
   XtreamOpenRequest,
   XtreamServerTestReport,
 } from "./types";
+import type { UpdateInstallMode } from "./updateState";
+import { toCommandChannelResult } from "./channelResults";
 
 function toCommandChannelResults(results: ChannelResult[]) {
   return results.map(toCommandChannelResult);
@@ -113,21 +115,30 @@ export async function exportCsv(
   });
 }
 
-export async function exportSplit(results: ChannelResult[], basePath: string): Promise<void> {
+export async function exportSplit(
+  results: ChannelResult[],
+  basePath: string,
+): Promise<void> {
   return invoke("export_split", {
     results: toCommandChannelResults(results),
     basePath,
   });
 }
 
-export async function exportRenamed(results: ChannelResult[], basePath: string): Promise<void> {
+export async function exportRenamed(
+  results: ChannelResult[],
+  basePath: string,
+): Promise<void> {
   return invoke("export_renamed", {
     results: toCommandChannelResults(results),
     basePath,
   });
 }
 
-export async function exportM3u(results: ChannelResult[], path: string): Promise<void> {
+export async function exportM3u(
+  results: ChannelResult[],
+  path: string,
+): Promise<void> {
   return invoke("export_m3u", {
     results: toCommandChannelResults(results),
     path,
@@ -172,7 +183,9 @@ export async function deleteScanPreset(name: string): Promise<ScanPresetCollecti
   return invoke("delete_scan_preset", { name });
 }
 
-export async function setDefaultScanPreset(name: string | null): Promise<ScanPresetCollection> {
+export async function setDefaultScanPreset(
+  name: string | null,
+): Promise<ScanPresetCollection> {
   return invoke("set_default_scan_preset", { name });
 }
 
@@ -266,7 +279,9 @@ export async function openSavedPlaylist(
   });
 }
 
-export async function renamePlaylistSource(input: RenamePlaylistSourceInput): Promise<void> {
+export async function renamePlaylistSource(
+  input: RenamePlaylistSourceInput,
+): Promise<void> {
   return invoke("rename_playlist_source", { input });
 }
 
@@ -307,4 +322,33 @@ export async function stopCast(): Promise<void> {
 
 export async function getCastStatus(): Promise<CastSession | null> {
   return invoke("get_cast_status");
+}
+
+// --- Updater ---------------------------------------------------------------
+
+/** Look for a newer signed release. Never downloads or installs anything. */
+export async function checkForUpdates(): Promise<UpdateCheckResult> {
+  return invoke("check_for_updates");
+}
+
+/** The version found by the last check, without a network request. */
+export async function discoveredUpdate(): Promise<string | null> {
+  return invoke("discovered_update");
+}
+
+/** Whether this installation can replace itself, or must go through its own
+ *  package manager (AUR, apt/dnf). */
+export async function updateInstallMode(): Promise<UpdateInstallMode> {
+  return invoke("update_install_mode");
+}
+
+/** Open the distribution's update page. Only valid in manual install mode. */
+export async function openManualUpdate(): Promise<void> {
+  return invoke("open_manual_update");
+}
+
+/** Install the discovered update and restart. Resolves to `false` if there
+ *  turned out to be nothing to install. */
+export async function installUpdate(): Promise<boolean> {
+  return invoke("install_update");
 }

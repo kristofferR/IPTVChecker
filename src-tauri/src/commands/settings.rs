@@ -732,7 +732,15 @@ pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Re
         settings.level_filter() as usize,
         std::sync::atomic::Ordering::Relaxed,
     );
+    let update_checks_enabled = settings.automatic_update_checks && !current.automatic_update_checks;
     *current = settings.clone();
+    drop(current);
+
+    // Switching automatic checks back on should discover an update now rather
+    // than at the end of the current six-hour interval.
+    if update_checks_enabled {
+        state.update_check_wake.notify_one();
+    }
 
     // Persist to store
     if let Ok(store) = app.store("settings.json") {

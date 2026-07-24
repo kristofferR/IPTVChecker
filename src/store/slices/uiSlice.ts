@@ -31,6 +31,7 @@ export const createUiSlice: StateCreator<AppStore, [], [], UiSlice> = (set, get)
   menuInfo: null,
   menuExportRequest: null,
   updateNotice: null,
+  updatePhase: "idle",
   appVersion: "",
   openSourceDialogState: null,
 
@@ -96,6 +97,7 @@ export const createUiSlice: StateCreator<AppStore, [], [], UiSlice> = (set, get)
       menuExportRequest: { id: (state.menuExportRequest?.id ?? 0) + 1, action },
     })),
   setUpdateNotice: (updateNotice) => set({ updateNotice }),
+  setUpdatePhase: (updatePhase) => set({ updatePhase }),
   setAppVersion: (appVersion) => set({ appVersion }),
   setOpenSourceDialogState: (openSourceDialogState) => set({ openSourceDialogState }),
 });
