@@ -40,14 +40,26 @@ export function useUpdateCheck(): {
 } {
   const requestIdRef = useRef(0);
   const installModeRef = useRef<UpdateInstallMode | null>(null);
+  const installModeRequestRef = useRef<Promise<UpdateInstallMode> | null>(null);
 
   // The install mode cannot change while the app runs, and detecting it shells
-  // out to pacman on Linux, so resolve it once.
+  // out to pacman on Linux, so resolve it once. The in-flight promise is shared
+  // too: the mount effect and a manual check can ask concurrently, and that
+  // should not run detection twice.
   const resolveInstallMode = useCallback(async (): Promise<UpdateInstallMode> => {
     if (installModeRef.current) return installModeRef.current;
-    const mode = await updateInstallMode();
-    installModeRef.current = mode;
-    return mode;
+    if (!installModeRequestRef.current) {
+      installModeRequestRef.current = updateInstallMode()
+        .then((mode) => {
+          installModeRef.current = mode;
+          return mode;
+        })
+        .finally(() => {
+          // Clear on failure too, so a later attempt can retry.
+          installModeRequestRef.current = null;
+        });
+    }
+    return installModeRequestRef.current;
   }, []);
 
   const checkForUpdates = useCallback(
