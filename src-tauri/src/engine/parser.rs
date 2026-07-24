@@ -406,6 +406,62 @@ fn content_type_totals(channels: &[Channel]) -> (usize, usize, usize) {
     (live, movie, series)
 }
 
+/// Derive a filtered preview from an already-parsed source while preserving
+/// source indices and metadata. This avoids rereading very large playlists
+/// when a scan adds only a group or channel-name filter.
+pub fn filter_playlist_preview(
+    preview: &PlaylistPreview,
+    group_filter: &Option<String>,
+    channel_search: &Option<String>,
+) -> Result<PlaylistPreview, AppError> {
+    let pattern = compile_channel_search_pattern(channel_search)?;
+    let selected_group = group_filter
+        .as_deref()
+        .map(str::trim)
+        .map(str::to_lowercase);
+    let source_is_directory = Path::new(&preview.file_path).is_dir();
+
+    let mut channels = Vec::new();
+    for channel in &preview.channels {
+        let include_group = selected_group.as_ref().is_none_or(|selected| {
+            channel.group.trim().to_lowercase() == *selected
+                || (source_is_directory
+                    && format!("{PLAYLIST_GROUP_PREFIX}{}", channel.playlist)
+                        .trim()
+                        .to_lowercase()
+                        == *selected)
+        });
+        if !include_group {
+            continue;
+        }
+
+        if let Some(pattern) = &pattern {
+            if !pattern.is_match(&channel.name)? {
+                continue;
+            }
+        }
+        channels.push(channel.clone());
+    }
+
+    let (live_count, movie_count, series_count) = content_type_totals(&channels);
+    Ok(PlaylistPreview {
+        file_path: preview.file_path.clone(),
+        file_name: preview.file_name.clone(),
+        source_identity: preview.source_identity.clone(),
+        saved_playlist_id: preview.saved_playlist_id.clone(),
+        server_location: preview.server_location.clone(),
+        single_provider: preview.single_provider,
+        xtream_max_connections: preview.xtream_max_connections,
+        xtream_account_info: preview.xtream_account_info.clone(),
+        total_channels: channels.len(),
+        live_count,
+        movie_count,
+        series_count,
+        groups: preview.groups.clone(),
+        channels,
+    })
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ParseProgress {
     pub channels_found: usize,
@@ -889,6 +945,45 @@ http://example.com/three.m3u8
         assert!(preview.groups.contains(&"News".to_string()));
 
         std::fs::remove_file(path).expect("fixture file should be removable");
+    }
+
+    #[test]
+    fn test_filter_cached_preview_matches_filtered_parse() {
+        let playlist = b"\
+#EXTM3U
+#EXTINF:-1 group-title=\"Sports\",Channel One
+http://example.com/one.m3u8
+#EXTINF:-1 group-title=\"News\",Channel Two
+http://example.com/two.m3u8
+#EXTINF:-1 group-title=\"Sports\",Channel Three
+http://example.com/three.mp4
+";
+        let full =
+            parse_m3u(playlist, "cached.m3u8", &None, &None).expect("full playlist should parse");
+        let group_filter = Some(" sports ".to_string());
+        let channel_search = Some("one|three".to_string());
+        let derived = filter_playlist_preview(&full, &group_filter, &channel_search)
+            .expect("cached preview should filter");
+        let reparsed = parse_m3u(playlist, "cached.m3u8", &group_filter, &channel_search)
+            .expect("filtered playlist should parse");
+
+        assert_eq!(
+            derived
+                .channels
+                .iter()
+                .map(|channel| channel.index)
+                .collect::<Vec<_>>(),
+            reparsed
+                .channels
+                .iter()
+                .map(|channel| channel.index)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(derived.total_channels, reparsed.total_channels);
+        assert_eq!(derived.live_count, reparsed.live_count);
+        assert_eq!(derived.movie_count, reparsed.movie_count);
+        assert_eq!(derived.series_count, reparsed.series_count);
+        assert_eq!(derived.groups, reparsed.groups);
     }
 
     #[test]

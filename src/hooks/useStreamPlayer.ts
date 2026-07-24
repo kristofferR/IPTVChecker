@@ -24,6 +24,7 @@ import {
   type StreamMetadata,
 } from "../lib/playback";
 import { createRuntimeMonitor, type MpegtsPlayer } from "../lib/runtimeMonitor";
+import { canUseBlobWorkers } from "../lib/workerSupport";
 
 // Re-exported for components (e.g. StreamPlayer) that read the recovery cap
 // alongside the hook. The implementation lives in lib/playback.
@@ -595,7 +596,10 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       timeoutMs = MPEGTS_PLAYBACK_ROUTE_TIMEOUT_MS,
     ): Promise<boolean> => {
       try {
-        const mpegtsModule = await import("mpegts.js");
+        const [mpegtsModule, enableWorker] = await Promise.all([
+          import("mpegts.js"),
+          canUseBlobWorkers(),
+        ]);
         const mpegts = mpegtsModule.default;
         if (signal.aborted || !mpegts.isSupported()) return false;
 
@@ -611,7 +615,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             {
               // Trade a small amount of live latency for enough network cushion
               // to ride out the jitter common on IPTV provider connections.
-              enableWorker: true,
+              enableWorker,
               enableStashBuffer: true,
               stashInitialSize: 1024 * 1024,
               lazyLoad: false,
