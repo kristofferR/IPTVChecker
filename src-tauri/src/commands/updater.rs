@@ -25,20 +25,24 @@ const AUR_PACKAGE_URL: &str = "https://aur.archlinux.org/packages/iptv-checker-g
 
 /// How this particular installation receives updates.
 ///
-/// `Aur` and `SystemPackage` are only ever constructed on Linux, but the enum
-/// stays platform-independent so the mapping to install modes is unit-testable
-/// on every platform.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+/// Only `SelfUpdatable` is reachable on every platform; the rest are each
+/// constructed on one OS. The enum stays platform-independent so the mapping to
+/// install modes is unit-testable everywhere.
+#[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InstallSource {
-    /// The app can replace itself: macOS `.app`, Windows installer, Linux
-    /// AppImage.
+    /// The app can replace itself: macOS `.app`, an installed Windows copy, or
+    /// a Linux AppImage.
     SelfUpdatable,
     /// Installed from the AUR, so pacman owns the files.
     Aur,
     /// Installed from the `.deb`/`.rpm`, owned by apt/dnf. Tauri's updater only
     /// supports AppImage on Linux, so it cannot install these either.
     SystemPackage,
+    /// The Windows portable `.zip`. Tauri would run the NSIS installer, which
+    /// updates a *separate* installed copy and leaves the portable executable
+    /// the user launched untouched — so it must not be offered.
+    WindowsPortable,
 }
 
 impl InstallSource {
@@ -49,7 +53,7 @@ impl InstallSource {
             Self::Aur => Some(AUR_PACKAGE_URL),
             #[cfg(not(target_os = "linux"))]
             Self::Aur => Some(RELEASES_URL),
-            Self::SystemPackage => Some(RELEASES_URL),
+            Self::SystemPackage | Self::WindowsPortable => Some(RELEASES_URL),
         }
     }
 }
@@ -103,6 +107,15 @@ impl UpdateInstallMode {
                         .into(),
                 ),
             },
+            InstallSource::WindowsPortable => Self {
+                kind: UpdateInstallKind::Manual,
+                button_label: Some("Open the releases page".into()),
+                instructions: Some(
+                    "This is the portable build. Download the new portable .zip and \
+                     replace this copy."
+                        .into(),
+                ),
+            },
         }
     }
 
@@ -153,52 +166,81 @@ fn linux_install_source(pacman_owned: bool, running_as_appimage: bool) -> Instal
     }
 }
 
-fn current_install_mode() -> UpdateInstallMode {
-    #[cfg(target_os = "linux")]
-    {
-        let source = linux_install_source(
-            pacman_owns_current_executable(),
-            std::env::var_os("APPIMAGE").is_some(),
-        );
-        UpdateInstallMode::from_source(
-            source,
-            source == InstallSource::Aur && command_available("paru"),
-            source == InstallSource::Aur && command_available("yay"),
-        )
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    {
-        UpdateInstallMode::from_source(InstallSource::SelfUpdatable, false, false)
+/// Tauri's NSIS installer writes `uninstall.exe` next to the app executable
+/// (`WriteUninstaller "$INSTDIR\uninstall.exe"`), while the portable `.zip`
+/// ships only the app and its ffmpeg sidecars — so the marker distinguishes an
+/// installed copy from a portable one.
+#[cfg(any(target_os = "windows", test))]
+fn windows_install_source(has_uninstaller: bool) -> InstallSource {
+    if has_uninstaller {
+        InstallSource::SelfUpdatable
+    } else {
+        InstallSource::WindowsPortable
     }
 }
 
-fn current_manual_url() -> Option<&'static str> {
+#[cfg(target_os = "windows")]
+fn uninstaller_beside_current_exe() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("uninstall.exe")))
+        .is_some_and(|marker| marker.is_file())
+}
+
+fn current_install_source() -> InstallSource {
     #[cfg(target_os = "linux")]
     {
         linux_install_source(
             pacman_owns_current_executable(),
             std::env::var_os("APPIMAGE").is_some(),
         )
-        .manual_url()
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        windows_install_source(uninstaller_beside_current_exe())
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        InstallSource::SelfUpdatable
+    }
+}
+
+fn current_install_mode() -> UpdateInstallMode {
+    let source = current_install_source();
+    let is_aur = source == InstallSource::Aur;
+    #[cfg(target_os = "linux")]
+    {
+        UpdateInstallMode::from_source(
+            source,
+            is_aur && command_available("paru"),
+            is_aur && command_available("yay"),
+        )
     }
 
     #[cfg(not(target_os = "linux"))]
     {
-        InstallSource::SelfUpdatable.manual_url()
+        let _ = is_aur;
+        UpdateInstallMode::from_source(source, false, false)
     }
 }
 
-/// Detection shells out on Linux, so keep it off the main thread there.
+fn current_manual_url() -> Option<&'static str> {
+    current_install_source().manual_url()
+}
+
+/// Detection shells out to pacman on Linux and stats the install directory on
+/// Windows, so keep it off the main thread on both.
 async fn current_install_mode_off_main() -> Result<UpdateInstallMode, AppError> {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     {
         tauri::async_runtime::spawn_blocking(current_install_mode)
             .await
             .map_err(|error| AppError::Other(format!("update install mode worker failed: {error}")))
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     {
         Ok(current_install_mode())
     }
@@ -501,6 +543,23 @@ mod tests {
         assert_eq!(linux_install_source(true, false), InstallSource::Aur);
         // An AUR helper that runs the AppImage would still be pacman-owned.
         assert_eq!(linux_install_source(true, true), InstallSource::Aur);
+    }
+
+    #[test]
+    fn windows_portable_copies_are_manual() {
+        // Tauri would run the NSIS installer, updating a separate installed
+        // copy while the running portable .exe stays on the old version.
+        let portable = windows_install_source(false);
+        assert_eq!(portable, InstallSource::WindowsPortable);
+        let mode = UpdateInstallMode::from_source(portable, false, false);
+        assert!(mode.is_manual());
+        assert_eq!(portable.manual_url(), Some(RELEASES_URL));
+    }
+
+    #[test]
+    fn installed_windows_copies_update_themselves() {
+        // uninstall.exe beside the executable is written only by the installer.
+        assert_eq!(windows_install_source(true), InstallSource::SelfUpdatable);
     }
 
     #[test]
