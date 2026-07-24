@@ -1,200 +1,172 @@
-import { getVersion } from "@tauri-apps/api/app";
 import { useCallback, useEffect, useRef } from "react";
-import { errorToString } from "../lib/errors";
+import { getVersion } from "@tauri-apps/api/app";
+import { listen } from "@tauri-apps/api/event";
 import { useAppStore } from "../store";
-import type { UpdateNotice } from "../store/types";
+import {
+  checkForUpdates as invokeCheckForUpdates,
+  discoveredUpdate,
+  installUpdate as invokeInstallUpdate,
+  openManualUpdate,
+  updateInstallMode,
+} from "../lib/tauri";
+import type { UpdateInstallMode } from "../lib/updateState";
+import { isManualInstall, updateFailureDetail } from "../lib/updateState";
+import { errorToString } from "../lib/errors";
+import { logger } from "../lib/logger";
 
-const UPDATE_CHECK_COOLDOWN_MS = 24 * 60 * 60 * 1000;
-const UPDATE_CHECK_TIMEOUT_MS = 15_000;
-const UPDATE_LAST_CHECK_KEY = "updates:last-check-epoch-ms";
-const UPDATE_CACHE_KEY = "updates:last-available-release";
-const GITHUB_LATEST_RELEASE_API =
-  "https://api.github.com/repos/kristofferR/IPTVChecker/releases/latest";
-const GITHUB_RELEASES_PAGE = "https://github.com/kristofferR/IPTVChecker/releases";
+/** Emitted by the backend's periodic check when it finds a new version. */
+const UPDATE_AVAILABLE_EVENT = "updater://update-available";
 
 // Non-reactive store access for writes inside callbacks/effects.
 const getStore = () => useAppStore.getState();
 
-function normalizeVersion(version: string): string {
-  return version.trim().replace(/^v/i, "");
-}
-
-function parseVersionParts(version: string): number[] {
-  const numeric = normalizeVersion(version)
-    .split(".")
-    .map((part) => {
-      const matched = part.match(/^\d+/);
-      return matched ? Number.parseInt(matched[0], 10) : 0;
-    });
-  return numeric.length > 0 ? numeric : [0];
-}
-
-function compareVersions(left: string, right: string): number {
-  const leftParts = parseVersionParts(left);
-  const rightParts = parseVersionParts(right);
-  const maxLength = Math.max(leftParts.length, rightParts.length);
-
-  for (let index = 0; index < maxLength; index += 1) {
-    const a = leftParts[index] ?? 0;
-    const b = rightParts[index] ?? 0;
-    if (a > b) return 1;
-    if (a < b) return -1;
-  }
-
-  return 0;
-}
-
-function readCachedUpdateNotice(): UpdateNotice | null {
-  const raw = localStorage.getItem(UPDATE_CACHE_KEY);
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as UpdateNotice;
-    if (!parsed.latest_version || !parsed.release_url) {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function shouldSkipUpdateCheck(
-  force: boolean,
-  now: number,
-  lastCheckedRaw: string | null,
-): boolean {
-  const lastChecked = lastCheckedRaw ? Number.parseInt(lastCheckedRaw, 10) : Number.NaN;
-  return !force && Number.isFinite(lastChecked) && now - lastChecked < UPDATE_CHECK_COOLDOWN_MS;
-}
-
-/** Clears the update banner and its cached release info (used by the banner's
- *  dismiss button). */
+/** Clears the update banner. The backend keeps its own discovery, so a later
+ *  manual check can surface the same version again. */
 export function dismissUpdateNotice(): void {
   getStore().setUpdateNotice(null);
-  localStorage.removeItem(UPDATE_CACHE_KEY);
 }
 
-/** Checks GitHub releases for a newer version. Runs an initial (cooldown-gated)
- *  check on mount and returns `checkForUpdates` for the menu's manual check. */
+/**
+ * Drives the signed in-app updater.
+ *
+ * Discovery and installation are deliberately separate: nothing is downloaded
+ * until `installUpdate` is called, and installs on package-manager-owned
+ * copies (AUR, .deb/.rpm) are redirected to the distribution's page instead of
+ * replacing files the package manager owns.
+ */
 export function useUpdateCheck(): {
-  checkForUpdates: (force: boolean, knownCurrentVersion?: string) => Promise<void>;
+  checkForUpdates: (force: boolean) => Promise<void>;
+  installUpdate: () => Promise<void>;
 } {
   const requestIdRef = useRef(0);
-  const activeControllerRef = useRef<AbortController | null>(null);
+  const installModeRef = useRef<UpdateInstallMode | null>(null);
 
-  const checkForUpdates = useCallback(async (force: boolean, knownCurrentVersion?: string) => {
-    const now = Date.now();
-    const lastCheckedRaw = localStorage.getItem(UPDATE_LAST_CHECK_KEY);
-    if (shouldSkipUpdateCheck(force, now, lastCheckedRaw)) {
+  // The install mode cannot change while the app runs, and detecting it shells
+  // out to pacman on Linux, so resolve it once.
+  const resolveInstallMode = useCallback(async (): Promise<UpdateInstallMode> => {
+    if (installModeRef.current) return installModeRef.current;
+    const mode = await updateInstallMode();
+    installModeRef.current = mode;
+    return mode;
+  }, []);
+
+  const checkForUpdates = useCallback(
+    async (force: boolean) => {
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
+      const isCurrentRequest = () => requestIdRef.current === requestId;
+
+      getStore().setUpdatePhase("checking");
+      try {
+        const [result, installMode] = await Promise.all([
+          invokeCheckForUpdates(),
+          resolveInstallMode(),
+        ]);
+        if (!isCurrentRequest()) return;
+
+        if (result.version) {
+          getStore().setUpdateNotice({
+            version: result.version,
+            notes: result.notes,
+            installMode,
+          });
+          return;
+        }
+
+        getStore().setUpdateNotice(null);
+        if (force) {
+          const current = getStore().appVersion;
+          getStore().setMenuInfo(`You're up to date${current ? ` (v${current})` : ""}.`);
+        }
+      } catch (err) {
+        if (!isCurrentRequest()) return;
+        logger.error("[Update] Check failed:", errorToString(err));
+        if (force) {
+          getStore().setMenuInfo(`Update check failed: ${updateFailureDetail(errorToString(err))}`);
+        }
+      } finally {
+        if (isCurrentRequest()) getStore().setUpdatePhase("idle");
+      }
+    },
+    [resolveInstallMode],
+  );
+
+  /** Installs the discovered update, or opens the distribution's update page
+   *  when this copy is owned by a package manager. */
+  const installUpdate = useCallback(async () => {
+    const notice = getStore().updateNotice;
+    if (!notice) return;
+
+    if (isManualInstall(notice.installMode)) {
+      try {
+        await openManualUpdate();
+      } catch (err) {
+        logger.error("[Update] Failed to open the update page:", errorToString(err));
+        getStore().setMenuInfo(
+          `Could not open the update page: ${updateFailureDetail(errorToString(err))}`,
+        );
+      }
       return;
     }
 
-    const requestId = requestIdRef.current + 1;
-    requestIdRef.current = requestId;
-    activeControllerRef.current?.abort();
-    const controller = new AbortController();
-    activeControllerRef.current = controller;
-    const timeout = setTimeout(() => controller.abort(), UPDATE_CHECK_TIMEOUT_MS);
-    const isCurrentRequest = () => requestIdRef.current === requestId;
-
+    getStore().setUpdatePhase("installing");
     try {
-      const currentVersion = normalizeVersion(knownCurrentVersion ?? (await getVersion()));
-      if (!isCurrentRequest() || controller.signal.aborted) return;
-      getStore().setAppVersion(currentVersion);
-
-      const response = await fetch(GITHUB_LATEST_RELEASE_API, {
-        headers: {
-          Accept: "application/vnd.github+json",
-        },
-        signal: controller.signal,
-      });
-
-      if (!isCurrentRequest() || controller.signal.aborted) return;
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const release = (await response.json()) as {
-        tag_name?: string;
-        html_url?: string;
-      };
-
-      if (!isCurrentRequest() || controller.signal.aborted) return;
-      const latestVersion = normalizeVersion(release.tag_name ?? "");
-      if (!latestVersion) {
-        throw new Error("Latest release version is missing");
-      }
-
-      localStorage.setItem(UPDATE_LAST_CHECK_KEY, String(now));
-
-      if (compareVersions(latestVersion, currentVersion) > 0) {
-        const notice: UpdateNotice = {
-          latest_version: latestVersion,
-          release_url: release.html_url || GITHUB_RELEASES_PAGE,
-          checked_at_epoch_ms: now,
-        };
-        getStore().setUpdateNotice(notice);
-        localStorage.setItem(UPDATE_CACHE_KEY, JSON.stringify(notice));
-        return;
-      }
-
-      getStore().setUpdateNotice(null);
-      localStorage.removeItem(UPDATE_CACHE_KEY);
-      if (force) {
-        getStore().setMenuInfo(`You're up to date (v${currentVersion}).`);
+      // On success the app restarts, so nothing after this runs.
+      const installed = await invokeInstallUpdate();
+      if (!installed) {
+        getStore().setUpdateNotice(null);
+        getStore().setMenuInfo("IPTV Checker is already up to date.");
       }
     } catch (err) {
-      if (!isCurrentRequest()) return;
-      if (force) {
-        const detail = controller.signal.aborted ? "Request timed out." : errorToString(err);
-        getStore().setMenuInfo(`Update check failed: ${detail}`);
-      }
+      logger.error("[Update] Install failed:", errorToString(err));
+      getStore().setMenuInfo(`Update install failed: ${updateFailureDetail(errorToString(err))}`);
     } finally {
-      clearTimeout(timeout);
-      if (activeControllerRef.current === controller) {
-        activeControllerRef.current = null;
-      }
+      getStore().setUpdatePhase("idle");
     }
   }, []);
 
   useEffect(() => {
     let cancelled = false;
 
-    const runInitialUpdateCheck = async () => {
-      let currentVersion = "";
+    // Adopt whatever the backend's startup check already found instead of
+    // issuing a second network request from the frontend.
+    const adoptExistingDiscovery = async () => {
       try {
-        currentVersion = normalizeVersion(await getVersion());
-        if (!cancelled) {
-          getStore().setAppVersion(currentVersion);
+        const [version, currentVersion, installMode] = await Promise.all([
+          discoveredUpdate(),
+          getVersion(),
+          resolveInstallMode(),
+        ]);
+        if (cancelled) return;
+        getStore().setAppVersion(currentVersion.replace(/^v/i, ""));
+        if (version) {
+          getStore().setUpdateNotice({ version, notes: null, installMode });
         }
-      } catch {
-        currentVersion = "";
+      } catch (err) {
+        logger.error("[Update] Initial update state failed:", errorToString(err));
       }
-
-      if (cancelled) return;
-
-      const cachedNotice = readCachedUpdateNotice();
-      if (
-        cachedNotice &&
-        currentVersion &&
-        compareVersions(cachedNotice.latest_version, currentVersion) > 0
-      ) {
-        getStore().setUpdateNotice(cachedNotice);
-      } else if (cachedNotice) {
-        localStorage.removeItem(UPDATE_CACHE_KEY);
-      }
-
-      await checkForUpdates(false, currentVersion || undefined);
     };
 
-    void runInitialUpdateCheck();
+    void adoptExistingDiscovery();
+
+    const unlisten = listen<string>(UPDATE_AVAILABLE_EVENT, (event) => {
+      void (async () => {
+        try {
+          const installMode = await resolveInstallMode();
+          if (cancelled) return;
+          getStore().setUpdateNotice({ version: event.payload, notes: null, installMode });
+        } catch (err) {
+          logger.error("[Update] Failed to surface a discovered update:", errorToString(err));
+        }
+      })();
+    });
+
     return () => {
       cancelled = true;
       requestIdRef.current += 1;
-      activeControllerRef.current?.abort();
-      activeControllerRef.current = null;
+      void unlisten.then((off) => off()).catch(() => {});
     };
-  }, [checkForUpdates]);
+  }, [resolveInstallMode]);
 
-  return { checkForUpdates };
+  return { checkForUpdates, installUpdate };
 }

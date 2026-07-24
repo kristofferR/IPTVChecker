@@ -1,6 +1,12 @@
+import { useState, useEffect, useRef, useCallback } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Gauge, Layers, Network, SlidersHorizontal, Wrench } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Gauge,
+  Layers,
+  Network,
+  SlidersHorizontal,
+  Wrench,
+} from "lucide-react";
 import {
   clearScreenshotCache,
   deleteScanPreset,
@@ -8,8 +14,8 @@ import {
   getScreenshotCacheStats,
   renameScanPreset,
   saveScanPreset,
-  setDefaultM3u8FileAssociation,
   setDefaultScanPreset,
+  setDefaultM3u8FileAssociation,
 } from "../lib/tauri";
 import type {
   AppSettings,
@@ -60,7 +66,10 @@ function buildScanPresetConfig(settings: AppSettings): ScanPresetConfig {
   };
 }
 
-function applyScanPresetConfig(base: AppSettings, config: ScanPresetConfig): AppSettings {
+function applyScanPresetConfig(
+  base: AppSettings,
+  config: ScanPresetConfig,
+): AppSettings {
   return {
     ...base,
     timeout: config.timeout,
@@ -111,7 +120,9 @@ function Switch({
       aria-label={ariaLabel}
       onClick={() => onChange(!checked)}
       className={`relative inline-flex h-6 w-10 shrink-0 items-center rounded-full border transition-colors ${
-        checked ? "border-blue-500 bg-blue-500/80" : "border-border-app bg-panel"
+        checked
+          ? "border-blue-500 bg-blue-500/80"
+          : "border-border-app bg-panel"
       }`}
     >
       <span
@@ -142,7 +153,9 @@ function SegmentedControl<T extends string>({
             type="button"
             onClick={() => onChange(option.value)}
             className={`rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors ${
-              selected ? "bg-blue-600 text-white" : "text-text-secondary hover:bg-btn-hover"
+              selected
+                ? "bg-blue-600 text-white"
+                : "text-text-secondary hover:bg-btn-hover"
             }`}
           >
             {option.label}
@@ -212,7 +225,8 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
   }, [presetCollection, selectedPresetName]);
 
   const selectedPreset: ScanSettingsPreset | null =
-    presetCollection.presets.find((preset) => preset.name === selectedPresetName) ?? null;
+    presetCollection.presets.find((preset) => preset.name === selectedPresetName) ??
+    null;
 
   const persist = useCallback(
     (next: AppSettings) => {
@@ -260,7 +274,11 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
   );
 
   const updateSetting = useCallback(
-    <K extends keyof AppSettings>(key: K, value: AppSettings[K], options?: PersistOptions) => {
+    <K extends keyof AppSettings>(
+      key: K,
+      value: AppSettings[K],
+      options?: PersistOptions,
+    ) => {
       setDraft((prev) => {
         const next = { ...prev, [key]: value };
         schedulePersist(next, options);
@@ -362,7 +380,11 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
     setPresetError(null);
     setPresetNotice(null);
     try {
-      const next = await saveScanPreset(name, buildScanPresetConfig(draft), presetSetAsDefault);
+      const next = await saveScanPreset(
+        name,
+        buildScanPresetConfig(draft),
+        presetSetAsDefault,
+      );
       setPresetCollection(next);
       setSelectedPresetName(name);
       setPresetNameDraft(name);
@@ -389,7 +411,9 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
       setPresetError("Select a preset to rename.");
       return;
     }
-    const nextName = window.prompt("Rename preset", selectedPreset.name)?.trim();
+    const nextName = window
+      .prompt("Rename preset", selectedPreset.name)
+      ?.trim();
     if (!nextName || nextName === selectedPreset.name) {
       return;
     }
@@ -430,7 +454,9 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
       const next = await deleteScanPreset(selectedPreset.name);
       setPresetCollection(next);
       setPresetNameDraft("");
-      setSelectedPresetName(next.default_preset ?? next.presets[0]?.name ?? "");
+      setSelectedPresetName(
+        next.default_preset ?? next.presets[0]?.name ?? "",
+      );
       setPresetNotice(`Deleted preset "${selectedPreset.name}".`);
     } catch (error) {
       setPresetError(error instanceof Error ? error.message : String(error));
@@ -491,10 +517,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
       tabIndex={-1}
       className="flex flex-col h-full bg-overlay focus:outline-none"
     >
-      <div
-        className="relative flex items-center justify-center px-4 pt-4 pb-3 border-b border-border-app bg-panel-subtle"
-        data-tauri-drag-region
-      >
+      <div className="relative flex items-center justify-center px-4 pt-4 pb-3 border-b border-border-app bg-panel-subtle" data-tauri-drag-region>
         <div className="flex items-center gap-1">
           {tabs.map(({ id, label, Icon }) => {
             const active = activeTab === id;
@@ -517,716 +540,748 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-5 space-y-4">
-        {saveError && (
-          <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">
-            Could not save one or more changes: {saveError}
-          </div>
-        )}
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {saveError && (
+            <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">
+              Could not save one or more changes: {saveError}
+            </div>
+          )}
 
-        {activeTab === "general" && (
-          <>
-            <section className={blockClass}>
-              <div className={rowClass}>
-                <div>
-                  <p className="text-[13px] font-medium">Theme</p>
-                  <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Choose system, light, or dark appearance.
-                  </p>
+          {activeTab === "general" && (
+            <>
+              <section className={blockClass}>
+                <div className={rowClass}>
+                  <div>
+                    <p className="text-[13px] font-medium">Theme</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Choose system, light, or dark appearance.
+                    </p>
+                  </div>
+                  <SegmentedControl
+                    value={draft.theme}
+                    options={[
+                      { value: "system", label: "System" },
+                      { value: "light", label: "Light" },
+                      { value: "dark", label: "Dark" },
+                    ]}
+                    onChange={(value) => updateSetting("theme", value, { immediate: true })}
+                  />
                 </div>
-                <SegmentedControl
-                  value={draft.theme}
-                  options={[
-                    { value: "system", label: "System" },
-                    { value: "light", label: "Light" },
-                    { value: "dark", label: "Dark" },
-                  ]}
-                  onChange={(value) => updateSetting("theme", value, { immediate: true })}
-                />
-              </div>
 
-              <div className={rowClass}>
-                <div>
-                  <p className="text-[13px] font-medium">Channel logo size</p>
-                  <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Controls logo size in the channel name column.
-                  </p>
-                </div>
-                <select
-                  value={draft.channel_logo_size}
-                  onChange={(event) =>
-                    updateSetting(
-                      "channel_logo_size",
-                      event.target.value as AppSettings["channel_logo_size"],
-                      { immediate: true },
-                    )
-                  }
-                  className={`${inputClass} w-44`}
-                >
-                  <option value="small">Small (16px)</option>
-                  <option value="medium">Medium (24px)</option>
-                  <option value="large">Large (36px)</option>
-                  <option value="huge">Huge (48px)</option>
-                </select>
-              </div>
-            </section>
-
-            <section className={blockClass}>
-              <div className={rowClass}>
-                <div>
-                  <p className="text-[13px] font-medium">Profile video bitrate</p>
-                  <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Captures 10s of each stream for accurate video bitrate values. Much slower.
-                  </p>
-                </div>
-                <Switch
-                  checked={draft.profile_bitrate}
-                  onChange={(checked) =>
-                    updateSetting("profile_bitrate", checked, { immediate: true })
-                  }
-                  ariaLabel="Profile bitrate"
-                />
-              </div>
-            </section>
-
-            <section className={blockClass}>
-              <div className={rowClass}>
-                <div>
-                  <p className="text-[13px] font-medium">Show source filter bar</p>
-                  <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Display the regex source filter bar above the table.
-                  </p>
-                </div>
-                <Switch
-                  checked={draft.show_prescan_filter}
-                  onChange={(checked) =>
-                    updateSetting("show_prescan_filter", checked, { immediate: true })
-                  }
-                  ariaLabel="Show source filter bar"
-                />
-              </div>
-
-              <div className={rowClass}>
-                <div>
-                  <p className="text-[13px] font-medium">Hide VOD / series entries</p>
-                  <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Remove movies and series from loaded playlists, scans, and exports until
-                    re-enabled.
-                  </p>
-                </div>
-                <Switch
-                  checked={draft.hide_vod_content}
-                  onChange={(checked) =>
-                    updateSetting("hide_vod_content", checked, { immediate: true })
-                  }
-                  ariaLabel="Hide VOD and series entries"
-                />
-              </div>
-
-              <div className={rowClass}>
-                <div>
-                  <p className="text-[13px] font-medium">Auto-reveal report panel</p>
-                  <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Slide in the playlist report near scan completion.
-                  </p>
-                </div>
-                <Switch
-                  checked={draft.report_auto_reveal}
-                  onChange={(checked) =>
-                    updateSetting("report_auto_reveal", checked, { immediate: true })
-                  }
-                  ariaLabel="Auto-reveal report panel"
-                />
-              </div>
-
-              <div className={rowClass}>
-                <div>
-                  <p className="text-[13px] font-medium">Separate placeholder status</p>
-                  <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Show placeholder streams as a distinct status. When off, they are grouped under
-                    Dead.
-                  </p>
-                </div>
-                <Switch
-                  checked={draft.separate_placeholder_status}
-                  onChange={(checked) =>
-                    updateSetting("separate_placeholder_status", checked, { immediate: true })
-                  }
-                  ariaLabel="Separate placeholder status"
-                />
-              </div>
-
-              <div className={rowClass}>
-                <div>
-                  <p className="text-[13px] font-medium">Show header button text</p>
-                  <p className="text-[11px] text-text-tertiary mt-0.5">
-                    {platform === "macos"
-                      ? "Display labels beside toolbar icons instead of the default icon-only macOS header."
-                      : "Display labels beside toolbar icons in the main window header."}
-                  </p>
-                </div>
-                <Switch
-                  checked={draft.show_header_button_text}
-                  onChange={(checked) =>
-                    updateSetting("show_header_button_text", checked, {
-                      immediate: true,
-                    })
-                  }
-                  ariaLabel="Show header button text"
-                />
-              </div>
-            </section>
-
-            <section className={blockClass}>
-              <div className={rowClass}>
-                <div>
-                  <p className="text-[13px] font-medium">Scan completion notifications</p>
-                  <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Show native notifications when scans complete or are cancelled.
-                  </p>
-                </div>
-                <Switch
-                  checked={draft.scan_notifications}
-                  onChange={(checked) =>
-                    updateSetting("scan_notifications", checked, { immediate: true })
-                  }
-                  ariaLabel="Scan completion notifications"
-                />
-              </div>
-            </section>
-
-            <section className={blockClass}>
-              <div className={rowClass}>
-                <div className="min-w-0">
-                  <p className="text-[13px] font-medium">Default app for .m3u/.m3u8</p>
-                  <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Open playlist files in IPTV Checker by default.
-                  </p>
-                </div>
-                <button
-                  onClick={handleSetDefaultM3u8Association}
-                  disabled={associationBusy}
-                  className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
-                  type="button"
-                >
-                  {associationBusy ? "Applying..." : "Set as Default"}
-                </button>
-              </div>
-              {associationNotice && (
-                <p className="px-4 py-2 text-[11px] text-emerald-400 border-t border-border-subtle">
-                  {associationNotice}
-                </p>
-              )}
-              {associationError && (
-                <p className="px-4 py-2 text-[11px] text-red-400 border-t border-border-subtle">
-                  {associationError}
-                </p>
-              )}
-            </section>
-          </>
-        )}
-
-        {activeTab === "scanning" && (
-          <>
-            <section className={`${blockClass} px-4 py-3 space-y-2`}>
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-[12px] font-medium text-text-primary">Scan Presets</p>
-                {presetCollection.default_preset && (
-                  <span className="text-[10px] text-text-tertiary">
-                    Default: {presetCollection.default_preset}
-                  </span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-1.5">
-                <div className="flex gap-1.5">
+                <div className={rowClass}>
+                  <div>
+                    <p className="text-[13px] font-medium">Channel logo size</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Controls logo size in the channel name column.
+                    </p>
+                  </div>
                   <select
-                    value={selectedPresetName}
-                    onChange={(event) => {
-                      setSelectedPresetName(event.target.value);
-                      setPresetNameDraft(event.target.value);
-                    }}
-                    className={`${inputClass} min-w-0 flex-1`}
-                    disabled={presetBusy || presetCollection.presets.length === 0}
+                    value={draft.channel_logo_size}
+                    onChange={(event) =>
+                      updateSetting(
+                        "channel_logo_size",
+                        event.target.value as AppSettings["channel_logo_size"],
+                        { immediate: true },
+                      )
+                    }
+                    className={`${inputClass} w-44`}
                   >
-                    <option value="">
-                      {presetCollection.presets.length === 0 ? "No presets" : "Select preset"}
-                    </option>
-                    {presetCollection.presets.map((preset) => (
-                      <option key={preset.name} value={preset.name}>
-                        {preset.name}
-                        {presetCollection.default_preset === preset.name ? " (Default)" : ""}
-                      </option>
-                    ))}
+                    <option value="small">Small (16px)</option>
+                    <option value="medium">Medium (24px)</option>
+                    <option value="large">Large (36px)</option>
+                    <option value="huge">Huge (48px)</option>
                   </select>
+                </div>
+              </section>
+
+              <section className={blockClass}>
+                <div className={rowClass}>
+                  <div>
+                    <p className="text-[13px] font-medium">Profile video bitrate</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Captures 10s of each stream for accurate video bitrate values. Much slower.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={draft.profile_bitrate}
+                    onChange={(checked) =>
+                      updateSetting("profile_bitrate", checked, { immediate: true })
+                    }
+                    ariaLabel="Profile bitrate"
+                  />
+                </div>
+              </section>
+
+              <section className={blockClass}>
+                <div className={rowClass}>
+                  <div>
+                    <p className="text-[13px] font-medium">Show source filter bar</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Display the regex source filter bar above the table.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={draft.show_prescan_filter}
+                    onChange={(checked) =>
+                      updateSetting("show_prescan_filter", checked, { immediate: true })
+                    }
+                    ariaLabel="Show source filter bar"
+                  />
+                </div>
+
+                <div className={rowClass}>
+                  <div>
+                    <p className="text-[13px] font-medium">Hide VOD / series entries</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Remove movies and series from loaded playlists, scans, and exports until re-enabled.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={draft.hide_vod_content}
+                    onChange={(checked) =>
+                      updateSetting("hide_vod_content", checked, { immediate: true })
+                    }
+                    ariaLabel="Hide VOD and series entries"
+                  />
+                </div>
+
+                <div className={rowClass}>
+                  <div>
+                    <p className="text-[13px] font-medium">Auto-reveal report panel</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Slide in the playlist report near scan completion.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={draft.report_auto_reveal}
+                    onChange={(checked) =>
+                      updateSetting("report_auto_reveal", checked, { immediate: true })
+                    }
+                    ariaLabel="Auto-reveal report panel"
+                  />
+                </div>
+
+                <div className={rowClass}>
+                  <div>
+                    <p className="text-[13px] font-medium">Separate placeholder status</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Show placeholder streams as a distinct status. When off, they are grouped under Dead.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={draft.separate_placeholder_status}
+                    onChange={(checked) =>
+                      updateSetting("separate_placeholder_status", checked, { immediate: true })
+                    }
+                    ariaLabel="Separate placeholder status"
+                  />
+                </div>
+
+                <div className={rowClass}>
+                  <div>
+                    <p className="text-[13px] font-medium">Show header button text</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      {platform === "macos"
+                        ? "Display labels beside toolbar icons instead of the default icon-only macOS header."
+                        : "Display labels beside toolbar icons in the main window header."}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={draft.show_header_button_text}
+                    onChange={(checked) =>
+                      updateSetting("show_header_button_text", checked, {
+                        immediate: true,
+                      })
+                    }
+                    ariaLabel="Show header button text"
+                  />
+                </div>
+              </section>
+
+              <section className={blockClass}>
+                <div className={rowClass}>
+                  <div>
+                    <p className="text-[13px] font-medium">Scan completion notifications</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Show native notifications when scans complete or are cancelled.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={draft.scan_notifications}
+                    onChange={(checked) =>
+                      updateSetting("scan_notifications", checked, { immediate: true })
+                    }
+                    ariaLabel="Scan completion notifications"
+                  />
+                </div>
+              </section>
+
+              <section className={blockClass}>
+                <div className={rowClass}>
+                  <div>
+                    <p className="text-[13px] font-medium">Automatic update checks</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Look for a signed update on launch and every six hours. Updates are only
+                      ever installed after you confirm.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={draft.automatic_update_checks}
+                    onChange={(checked) =>
+                      updateSetting("automatic_update_checks", checked, { immediate: true })
+                    }
+                    ariaLabel="Automatic update checks"
+                  />
+                </div>
+              </section>
+
+              <section className={blockClass}>
+                <div className={rowClass}>
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-medium">Default app for .m3u/.m3u8</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Open playlist files in IPTV Checker by default.
+                    </p>
+                  </div>
                   <button
+                    onClick={handleSetDefaultM3u8Association}
+                    disabled={associationBusy}
+                    className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
                     type="button"
-                    onClick={handleLoadPreset}
-                    disabled={presetBusy || !selectedPreset}
-                    className="macos-btn px-2.5 py-1 min-h-[30px] text-[12px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
                   >
-                    Load
+                    {associationBusy ? "Applying..." : "Set as Default"}
                   </button>
                 </div>
-                <div className="flex gap-1.5">
+                {associationNotice && (
+                  <p className="px-4 py-2 text-[11px] text-emerald-400 border-t border-border-subtle">
+                    {associationNotice}
+                  </p>
+                )}
+                {associationError && (
+                  <p className="px-4 py-2 text-[11px] text-red-400 border-t border-border-subtle">
+                    {associationError}
+                  </p>
+                )}
+              </section>
+            </>
+          )}
+
+          {activeTab === "scanning" && (
+            <>
+              <section className={`${blockClass} px-4 py-3 space-y-2`}>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[12px] font-medium text-text-primary">Scan Presets</p>
+                  {presetCollection.default_preset && (
+                    <span className="text-[10px] text-text-tertiary">
+                      Default: {presetCollection.default_preset}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div className="flex gap-1.5">
+                    <select
+                      value={selectedPresetName}
+                      onChange={(event) => {
+                        setSelectedPresetName(event.target.value);
+                        setPresetNameDraft(event.target.value);
+                      }}
+                      className={`${inputClass} min-w-0 flex-1`}
+                      disabled={presetBusy || presetCollection.presets.length === 0}
+                    >
+                      <option value="">
+                        {presetCollection.presets.length === 0
+                          ? "No presets"
+                          : "Select preset"}
+                      </option>
+                      {presetCollection.presets.map((preset) => (
+                        <option key={preset.name} value={preset.name}>
+                          {preset.name}
+                          {presetCollection.default_preset === preset.name
+                            ? " (Default)"
+                            : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleLoadPreset}
+                      disabled={presetBusy || !selectedPreset}
+                      className="macos-btn px-2.5 py-1 min-h-[30px] text-[12px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
+                    >
+                      Load
+                    </button>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={presetNameDraft}
+                      onChange={(event) =>
+                        setPresetNameDraft(event.target.value.slice(0, PRESET_NAME_MAX_LENGTH))
+                      }
+                      placeholder="Preset name"
+                      className={`${inputClass} min-w-0 flex-1`}
+                      disabled={presetBusy}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSavePreset}
+                      disabled={presetBusy}
+                      className="macos-btn px-2.5 py-1 min-h-[30px] text-[12px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <label className="inline-flex items-center gap-1.5 text-[11px] text-text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={presetSetAsDefault}
+                      onChange={(event) => setPresetSetAsDefault(event.target.checked)}
+                      disabled={presetBusy}
+                    />
+                    Save as default
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleSetDefaultPreset}
+                    disabled={presetBusy || !selectedPreset}
+                    className="macos-btn px-2 py-0.5 text-[11px] bg-btn hover:bg-btn-hover rounded disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    Mark Default
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleClearDefaultPreset}
+                    disabled={presetBusy || !presetCollection.default_preset}
+                    className="macos-btn px-2 py-0.5 text-[11px] bg-btn hover:bg-btn-hover rounded disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    Clear Default
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRenamePreset}
+                    disabled={presetBusy || !selectedPreset}
+                    className="macos-btn px-2 py-0.5 text-[11px] bg-btn hover:bg-btn-hover rounded disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    Rename
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeletePreset}
+                    disabled={presetBusy || !selectedPreset}
+                    className="macos-btn px-2 py-0.5 text-[11px] bg-btn hover:bg-btn-hover rounded disabled:opacity-50 disabled:pointer-events-none text-red-400"
+                  >
+                    Delete
+                  </button>
+                </div>
+
+                {presetNotice && (
+                  <p className="text-[11px] text-emerald-400">{presetNotice}</p>
+                )}
+                {presetError && (
+                  <p className="text-[11px] text-red-400">{presetError}</p>
+                )}
+              </section>
+
+              <section className={`${blockClass} p-4`}>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
+                      Timeout (seconds)
+                    </label>
+                    <input
+                      type="number"
+                      value={draft.timeout}
+                      onChange={(event) => {
+                        const value = parseFloat(event.target.value);
+                        updateSetting(
+                          "timeout",
+                          Number.isNaN(value) ? 10 : Math.max(0.5, value),
+                        );
+                      }}
+                      step="0.5"
+                      min="0.5"
+                      className={inputClass}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
+                      Extended Timeout (seconds)
+                    </label>
+                    <input
+                      type="number"
+                      value={draft.extended_timeout ?? ""}
+                      onChange={(event) => {
+                        if (!event.target.value) {
+                          updateSetting("extended_timeout", null);
+                          return;
+                        }
+                        const value = parseFloat(event.target.value);
+                        updateSetting(
+                          "extended_timeout",
+                          Number.isNaN(value) ? null : Math.max(1, value),
+                        );
+                      }}
+                      placeholder="Disabled"
+                      step="1"
+                      min="1"
+                      className={inputClass}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
+                      Concurrency
+                    </label>
+                    <input
+                      type="number"
+                      value={draft.concurrency || ""}
+                      placeholder="Auto"
+                      onChange={(event) => {
+                        const raw = event.target.value.trim();
+                        if (raw === "") {
+                          updateSetting("concurrency", 0);
+                          return;
+                        }
+                        const value = parseInt(raw, 10);
+                        updateSetting(
+                          "concurrency",
+                          Number.isNaN(value) ? 0 : Math.max(0, Math.min(20, value)),
+                        );
+                      }}
+                      min="0"
+                      max="20"
+                      className={inputClass}
+                    />
+                    <p className="text-[11px] text-text-quaternary mt-1">
+                      0 or empty = auto (Xtream max for Xtream playlists, 10 for multi-server, 1
+                      for single-server)
+                    </p>
+                  </div>
+
+                </div>
+              </section>
+
+              <section className={`${blockClass} p-4`}>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
+                      Max Retries
+                    </label>
+                    <input
+                      type="number"
+                      value={draft.retries}
+                      onChange={(event) => {
+                        const value = parseInt(event.target.value, 10);
+                        updateSetting(
+                          "retries",
+                          Number.isNaN(value) ? 3 : Math.max(0, Math.min(10, value)),
+                        );
+                      }}
+                      min="0"
+                      max="10"
+                      className={inputClass}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
+                      Retry Backoff
+                    </label>
+                    <SegmentedControl
+                      value={draft.retry_backoff}
+                      options={[
+                        { value: "none", label: "None" },
+                        { value: "linear", label: "Linear" },
+                        { value: "exponential", label: "Exponential" },
+                      ]}
+                      onChange={(value) =>
+                        updateSetting("retry_backoff", value, { immediate: true })
+                      }
+                    />
+                  </div>
+                </div>
+              </section>
+
+              <section className={blockClass}>
+                <div className={rowClass}>
+                  <div>
+                    <p className="text-[13px] font-medium">Low FPS threshold</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Streams below this FPS are flagged as low framerate.
+                    </p>
+                  </div>
+                  <input
+                    type="number"
+                    value={draft.low_fps_threshold}
+                    onChange={(event) => {
+                      const value = parseFloat(event.target.value);
+                      updateSetting(
+                        "low_fps_threshold",
+                        Number.isNaN(value) ? 23.0 : Math.max(0, Math.min(240, value)),
+                      );
+                    }}
+                    step="0.1"
+                    min="0"
+                    max="240"
+                    className={`${inputClass} w-24`}
+                  />
+                </div>
+              </section>
+
+              <section className={blockClass}>
+                <div className={rowClass}>
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-medium">User agent</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      HTTP user agent string sent with stream requests.
+                    </p>
+                  </div>
                   <input
                     type="text"
-                    value={presetNameDraft}
-                    onChange={(event) =>
-                      setPresetNameDraft(event.target.value.slice(0, PRESET_NAME_MAX_LENGTH))
+                    value={draft.user_agent}
+                    onChange={(event) => updateSetting("user_agent", event.target.value)}
+                    className={`${inputClass} w-56`}
+                  />
+                </div>
+              </section>
+
+            </>
+          )}
+
+          {activeTab === "media" && (
+            <>
+              <section className={blockClass}>
+                <div className={rowClass}>
+                  <div>
+                    <p className="text-[13px] font-medium">Skip screenshots</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Disable frame captures for faster checks.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={draft.skip_screenshots}
+                    onChange={(checked) =>
+                      updateSetting("skip_screenshots", checked, { immediate: true })
                     }
-                    placeholder="Preset name"
-                    className={`${inputClass} min-w-0 flex-1`}
-                    disabled={presetBusy}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSavePreset}
-                    disabled={presetBusy}
-                    className="macos-btn px-2.5 py-1 min-h-[30px] text-[12px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
-                  >
-                    Save
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-1.5">
-                <label className="inline-flex items-center gap-1.5 text-[11px] text-text-secondary">
-                  <input
-                    type="checkbox"
-                    checked={presetSetAsDefault}
-                    onChange={(event) => setPresetSetAsDefault(event.target.checked)}
-                    disabled={presetBusy}
-                  />
-                  Save as default
-                </label>
-                <button
-                  type="button"
-                  onClick={handleSetDefaultPreset}
-                  disabled={presetBusy || !selectedPreset}
-                  className="macos-btn px-2 py-0.5 text-[11px] bg-btn hover:bg-btn-hover rounded disabled:opacity-50 disabled:pointer-events-none"
-                >
-                  Mark Default
-                </button>
-                <button
-                  type="button"
-                  onClick={handleClearDefaultPreset}
-                  disabled={presetBusy || !presetCollection.default_preset}
-                  className="macos-btn px-2 py-0.5 text-[11px] bg-btn hover:bg-btn-hover rounded disabled:opacity-50 disabled:pointer-events-none"
-                >
-                  Clear Default
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRenamePreset}
-                  disabled={presetBusy || !selectedPreset}
-                  className="macos-btn px-2 py-0.5 text-[11px] bg-btn hover:bg-btn-hover rounded disabled:opacity-50 disabled:pointer-events-none"
-                >
-                  Rename
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDeletePreset}
-                  disabled={presetBusy || !selectedPreset}
-                  className="macos-btn px-2 py-0.5 text-[11px] bg-btn hover:bg-btn-hover rounded disabled:opacity-50 disabled:pointer-events-none text-red-400"
-                >
-                  Delete
-                </button>
-              </div>
-
-              {presetNotice && <p className="text-[11px] text-emerald-400">{presetNotice}</p>}
-              {presetError && <p className="text-[11px] text-red-400">{presetError}</p>}
-            </section>
-
-            <section className={`${blockClass} p-4`}>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Timeout (seconds)
-                  </label>
-                  <input
-                    type="number"
-                    value={draft.timeout}
-                    onChange={(event) => {
-                      const value = parseFloat(event.target.value);
-                      updateSetting("timeout", Number.isNaN(value) ? 10 : Math.max(0.5, value));
-                    }}
-                    step="0.5"
-                    min="0.5"
-                    className={inputClass}
+                    ariaLabel="Skip screenshots"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Extended Timeout (seconds)
-                  </label>
-                  <input
-                    type="number"
-                    value={draft.extended_timeout ?? ""}
-                    onChange={(event) => {
-                      if (!event.target.value) {
-                        updateSetting("extended_timeout", null);
-                        return;
-                      }
-                      const value = parseFloat(event.target.value);
+                <div className={rowClass}>
+                  <div>
+                    <p className="text-[13px] font-medium">Screenshot format</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      WebP is faster and smaller. PNG is lossless.
+                    </p>
+                  </div>
+                  <select
+                    value={draft.screenshot_format}
+                    onChange={(event) =>
                       updateSetting(
-                        "extended_timeout",
-                        Number.isNaN(value) ? null : Math.max(1, value),
-                      );
-                    }}
-                    placeholder="Disabled"
-                    step="1"
-                    min="1"
-                    className={inputClass}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Concurrency
-                  </label>
-                  <input
-                    type="number"
-                    value={draft.concurrency || ""}
-                    placeholder="Auto"
-                    onChange={(event) => {
-                      const raw = event.target.value.trim();
-                      if (raw === "") {
-                        updateSetting("concurrency", 0);
-                        return;
-                      }
-                      const value = parseInt(raw, 10);
-                      updateSetting(
-                        "concurrency",
-                        Number.isNaN(value) ? 0 : Math.max(0, Math.min(20, value)),
-                      );
-                    }}
-                    min="0"
-                    max="20"
-                    className={inputClass}
-                  />
-                  <p className="text-[11px] text-text-quaternary mt-1">
-                    0 or empty = auto (Xtream max for Xtream playlists, 10 for multi-server, 1 for
-                    single-server)
-                  </p>
-                </div>
-              </div>
-            </section>
-
-            <section className={`${blockClass} p-4`}>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Max Retries
-                  </label>
-                  <input
-                    type="number"
-                    value={draft.retries}
-                    onChange={(event) => {
-                      const value = parseInt(event.target.value, 10);
-                      updateSetting(
-                        "retries",
-                        Number.isNaN(value) ? 3 : Math.max(0, Math.min(10, value)),
-                      );
-                    }}
-                    min="0"
-                    max="10"
-                    className={inputClass}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Retry Backoff
-                  </label>
-                  <SegmentedControl
-                    value={draft.retry_backoff}
-                    options={[
-                      { value: "none", label: "None" },
-                      { value: "linear", label: "Linear" },
-                      { value: "exponential", label: "Exponential" },
-                    ]}
-                    onChange={(value) => updateSetting("retry_backoff", value, { immediate: true })}
-                  />
-                </div>
-              </div>
-            </section>
-
-            <section className={blockClass}>
-              <div className={rowClass}>
-                <div>
-                  <p className="text-[13px] font-medium">Low FPS threshold</p>
-                  <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Streams below this FPS are flagged as low framerate.
-                  </p>
-                </div>
-                <input
-                  type="number"
-                  value={draft.low_fps_threshold}
-                  onChange={(event) => {
-                    const value = parseFloat(event.target.value);
-                    updateSetting(
-                      "low_fps_threshold",
-                      Number.isNaN(value) ? 23.0 : Math.max(0, Math.min(240, value)),
-                    );
-                  }}
-                  step="0.1"
-                  min="0"
-                  max="240"
-                  className={`${inputClass} w-24`}
-                />
-              </div>
-            </section>
-
-            <section className={blockClass}>
-              <div className={rowClass}>
-                <div className="min-w-0">
-                  <p className="text-[13px] font-medium">User agent</p>
-                  <p className="text-[11px] text-text-tertiary mt-0.5">
-                    HTTP user agent string sent with stream requests.
-                  </p>
-                </div>
-                <input
-                  type="text"
-                  value={draft.user_agent}
-                  onChange={(event) => updateSetting("user_agent", event.target.value)}
-                  className={`${inputClass} w-56`}
-                />
-              </div>
-            </section>
-          </>
-        )}
-
-        {activeTab === "media" && (
-          <>
-            <section className={blockClass}>
-              <div className={rowClass}>
-                <div>
-                  <p className="text-[13px] font-medium">Skip screenshots</p>
-                  <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Disable frame captures for faster checks.
-                  </p>
-                </div>
-                <Switch
-                  checked={draft.skip_screenshots}
-                  onChange={(checked) =>
-                    updateSetting("skip_screenshots", checked, { immediate: true })
-                  }
-                  ariaLabel="Skip screenshots"
-                />
-              </div>
-
-              <div className={rowClass}>
-                <div>
-                  <p className="text-[13px] font-medium">Screenshot format</p>
-                  <p className="text-[11px] text-text-tertiary mt-0.5">
-                    WebP is faster and smaller. PNG is lossless.
-                  </p>
-                </div>
-                <select
-                  value={draft.screenshot_format}
-                  onChange={(event) =>
-                    updateSetting(
-                      "screenshot_format",
-                      event.target.value as AppSettings["screenshot_format"],
-                      { immediate: true },
-                    )
-                  }
-                  className={`${inputClass} w-44`}
-                  disabled={draft.skip_screenshots}
-                >
-                  <option value="webp">WebP</option>
-                  <option value="png">PNG</option>
-                </select>
-              </div>
-
-              <div className={rowClass}>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-medium">Save screenshots to</p>
-                  <p
-                    className="text-[11px] text-text-tertiary mt-0.5 truncate"
-                    title={draft.screenshots_dir ?? "Not saved (preview only)"}
+                        "screenshot_format",
+                        event.target.value as AppSettings["screenshot_format"],
+                        { immediate: true },
+                      )
+                    }
+                    className={`${inputClass} w-44`}
+                    disabled={draft.skip_screenshots}
                   >
-                    {draft.screenshots_dir ?? "Not saved (preview only)"}
-                  </p>
+                    <option value="webp">WebP</option>
+                    <option value="png">PNG</option>
+                  </select>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleSelectScreenshotsDir}
-                    className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
-                    type="button"
-                  >
-                    Browse
-                  </button>
-                  {draft.screenshots_dir && (
+
+                <div className={rowClass}>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-medium">Save screenshots to</p>
+                    <p
+                      className="text-[11px] text-text-tertiary mt-0.5 truncate"
+                      title={draft.screenshots_dir ?? "Not saved (preview only)"}
+                    >
+                      {draft.screenshots_dir ?? "Not saved (preview only)"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
                     <button
-                      onClick={() => updateSetting("screenshots_dir", null, { immediate: true })}
+                      onClick={handleSelectScreenshotsDir}
                       className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
                       type="button"
                     >
-                      Clear
+                      Browse
                     </button>
-                  )}
-                </div>
-              </div>
-            </section>
-
-            <section className={blockClass}>
-              <div className={rowClass}>
-                <div className="min-w-0">
-                  <p className="text-[13px] font-medium">Temp Screenshot Cache</p>
-                  <p className="text-[11px] text-text-tertiary mt-0.5">
-                    {cacheStats
-                      ? `${formatBytes(cacheStats.total_bytes)} (${cacheStats.file_count} files)`
-                      : "Unavailable"}
-                    {cacheStats?.disk_space && (
-                      <span className="ml-1.5 text-text-tertiary/70">
-                        · {formatBytes(cacheStats.disk_space.available_bytes)} free
-                      </span>
+                    {draft.screenshots_dir && (
+                      <button
+                        onClick={() =>
+                          updateSetting("screenshots_dir", null, { immediate: true })
+                        }
+                        className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
+                        type="button"
+                      >
+                        Clear
+                      </button>
                     )}
-                  </p>
+                  </div>
                 </div>
-                <button
-                  onClick={handleClearScreenshotCache}
-                  disabled={cacheBusy || !cacheStats || cacheStats.file_count === 0}
-                  className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
-                  type="button"
-                >
-                  {cacheBusy ? "Clearing..." : "Clear Cache"}
-                </button>
-              </div>
+              </section>
 
-              {cacheStats && (
-                <p
-                  className="px-4 py-2 text-[11px] text-text-tertiary border-t border-border-subtle truncate"
-                  title={cacheStats.cache_dir}
-                >
-                  {cacheStats.cache_dir}
-                </p>
-              )}
-
-              <div className="grid grid-cols-1 grid-cols-2 gap-3 p-4 border-t border-border-subtle">
-                <div>
-                  <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Screenshot Retention
-                  </label>
-                  <input
-                    type="number"
-                    value={draft.screenshot_retention_count}
-                    onChange={(event) => {
-                      const value = parseInt(event.target.value, 10);
-                      updateSetting(
-                        "screenshot_retention_count",
-                        Number.isNaN(value) ? 1 : Math.max(0, Math.min(100, value)),
-                      );
-                    }}
-                    min="0"
-                    max="100"
-                    className={inputClass}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Low Space Threshold (GB)
-                  </label>
-                  <input
-                    type="number"
-                    value={draft.low_space_threshold_gb}
-                    onChange={(event) => {
-                      const value = parseFloat(event.target.value);
-                      updateSetting(
-                        "low_space_threshold_gb",
-                        Number.isNaN(value) ? 5.0 : Math.max(1, Math.min(50, value)),
-                      );
-                    }}
-                    step="0.5"
-                    min="1"
-                    max="50"
-                    className={inputClass}
-                  />
-                </div>
-              </div>
-            </section>
-          </>
-        )}
-
-        {activeTab === "network" && (
-          <>
-            <section className={blockClass}>
-              <div className={rowClass}>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-medium">Proxy file</p>
-                  <p
-                    className="text-[11px] text-text-tertiary mt-0.5 truncate"
-                    title={draft.proxy_file ?? "No proxy file selected"}
-                  >
-                    {draft.proxy_file ?? "No proxy file selected"}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
+              <section className={blockClass}>
+                <div className={rowClass}>
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-medium">Temp Screenshot Cache</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      {cacheStats
+                        ? `${formatBytes(cacheStats.total_bytes)} (${cacheStats.file_count} files)`
+                        : "Unavailable"}
+                      {cacheStats?.disk_space && (
+                        <span className="ml-1.5 text-text-tertiary/70">
+                          · {formatBytes(cacheStats.disk_space.available_bytes)} free
+                        </span>
+                      )}
+                    </p>
+                  </div>
                   <button
-                    onClick={handleSelectProxy}
-                    className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
+                    onClick={handleClearScreenshotCache}
+                    disabled={cacheBusy || !cacheStats || cacheStats.file_count === 0}
+                    className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
                     type="button"
                   >
-                    Browse
+                    {cacheBusy ? "Clearing..." : "Clear Cache"}
                   </button>
-                  {draft.proxy_file && (
+                </div>
+
+                {cacheStats && (
+                  <p
+                    className="px-4 py-2 text-[11px] text-text-tertiary border-t border-border-subtle truncate"
+                    title={cacheStats.cache_dir}
+                  >
+                    {cacheStats.cache_dir}
+                  </p>
+                )}
+
+                <div className="grid grid-cols-1 grid-cols-2 gap-3 p-4 border-t border-border-subtle">
+                  <div>
+                    <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
+                      Screenshot Retention
+                    </label>
+                    <input
+                      type="number"
+                      value={draft.screenshot_retention_count}
+                      onChange={(event) => {
+                        const value = parseInt(event.target.value, 10);
+                        updateSetting(
+                          "screenshot_retention_count",
+                          Number.isNaN(value) ? 1 : Math.max(0, Math.min(100, value)),
+                        );
+                      }}
+                      min="0"
+                      max="100"
+                      className={inputClass}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
+                      Low Space Threshold (GB)
+                    </label>
+                    <input
+                      type="number"
+                      value={draft.low_space_threshold_gb}
+                      onChange={(event) => {
+                        const value = parseFloat(event.target.value);
+                        updateSetting(
+                          "low_space_threshold_gb",
+                          Number.isNaN(value) ? 5.0 : Math.max(1, Math.min(50, value)),
+                        );
+                      }}
+                      step="0.5"
+                      min="1"
+                      max="50"
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
+              </section>
+            </>
+          )}
+
+          {activeTab === "network" && (
+            <>
+              <section className={blockClass}>
+                <div className={rowClass}>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-medium">Proxy file</p>
+                    <p
+                      className="text-[11px] text-text-tertiary mt-0.5 truncate"
+                      title={draft.proxy_file ?? "No proxy file selected"}
+                    >
+                      {draft.proxy_file ?? "No proxy file selected"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
                     <button
-                      onClick={() => updateSetting("proxy_file", null, { immediate: true })}
+                      onClick={handleSelectProxy}
                       className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
                       type="button"
                     >
-                      Clear
+                      Browse
                     </button>
-                  )}
+                    {draft.proxy_file && (
+                      <button
+                        onClick={() => updateSetting("proxy_file", null, { immediate: true })}
+                        className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
+                        type="button"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              <div className={rowClass}>
-                <div>
-                  <p className="text-[13px] font-medium">Confirm geoblocks with proxies</p>
-                  <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Re-test geoblocked streams through your proxy list.
-                  </p>
+                <div className={rowClass}>
+                  <div>
+                    <p className="text-[13px] font-medium">Confirm geoblocks with proxies</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Re-test geoblocked streams through your proxy list.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={draft.test_geoblock}
+                    onChange={(checked) =>
+                      updateSetting("test_geoblock", checked, { immediate: true })
+                    }
+                    ariaLabel="Confirm geoblocks with proxies"
+                  />
                 </div>
-                <Switch
-                  checked={draft.test_geoblock}
-                  onChange={(checked) =>
-                    updateSetting("test_geoblock", checked, { immediate: true })
-                  }
-                  ariaLabel="Confirm geoblocks with proxies"
-                />
-              </div>
-            </section>
+              </section>
 
-            <section className={blockClass}>
-              <div className={rowClass}>
-                <div>
-                  <p className="text-[13px] font-medium">
-                    Skip certificate verification (insecure)
-                  </p>
-                  <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Accept invalid/self-signed TLS certificates during stream checks.
-                  </p>
+              <section className={blockClass}>
+                <div className={rowClass}>
+                  <div>
+                    <p className="text-[13px] font-medium">Skip certificate verification (insecure)</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Accept invalid/self-signed TLS certificates during stream checks.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={draft.accept_invalid_certs}
+                    onChange={(checked) =>
+                      updateSetting("accept_invalid_certs", checked, { immediate: true })
+                    }
+                    ariaLabel="Skip certificate verification"
+                  />
                 </div>
-                <Switch
-                  checked={draft.accept_invalid_certs}
-                  onChange={(checked) =>
-                    updateSetting("accept_invalid_certs", checked, { immediate: true })
-                  }
-                  ariaLabel="Skip certificate verification"
-                />
-              </div>
-            </section>
-          </>
-        )}
+              </section>
+            </>
+          )}
 
-        {activeTab === "advanced" && (
-          <>
-            <section className={`${blockClass} p-4`}>
+          {activeTab === "advanced" && (
+            <>
+              <section className={`${blockClass} p-4`}>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
@@ -1266,6 +1321,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     className={inputClass}
                   />
                 </div>
+
               </div>
             </section>
 
@@ -1315,9 +1371,9 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                 </div>
               </div>
             </section>
-          </>
-        )}
-      </div>
+            </>
+          )}
+        </div>
     </div>
   );
 }

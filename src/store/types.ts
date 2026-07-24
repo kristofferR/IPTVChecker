@@ -1,6 +1,3 @@
-import type { ScanUiMetrics } from "../hooks/useScan.helpers";
-import type { Platform } from "../lib/platform";
-import type { ScanState } from "../lib/scanState";
 import type {
   AppSettings,
   ChannelResult,
@@ -15,6 +12,10 @@ import type {
   StalkerOpenRequest,
   XtreamRecentSource,
 } from "../lib/types";
+import type { Platform } from "../lib/platform";
+import type { ScanState } from "../lib/scanState";
+import type { UpdateNotice, UpdatePhase } from "../lib/updateState";
+import type { ScanUiMetrics } from "../hooks/useScan.helpers";
 
 // ---------------------------------------------------------------------------
 // Playlist
@@ -134,11 +135,7 @@ export interface MenuExportRequest {
   action: "csv" | "split" | "renamed" | "m3u" | "scanlog";
 }
 
-export interface UpdateNotice {
-  latest_version: string;
-  release_url: string;
-  checked_at_epoch_ms: number;
-}
+export type { UpdateNotice, UpdatePhase } from "../lib/updateState";
 
 export interface UiSlice {
   platform: Platform;
@@ -160,6 +157,7 @@ export interface UiSlice {
   menuInfo: string | null;
   menuExportRequest: MenuExportRequest | null;
   updateNotice: UpdateNotice | null;
+  updatePhase: UpdatePhase;
   appVersion: string;
   openSourceDialogState: OpenSourceDialogState | null;
 
@@ -185,6 +183,7 @@ export interface UiSlice {
   setMenuExportRequest: (request: MenuExportRequest | null) => void;
   queueMenuExportRequest: (action: MenuExportRequest["action"]) => void;
   setUpdateNotice: (notice: UpdateNotice | null) => void;
+  setUpdatePhase: (phase: UpdatePhase) => void;
   setAppVersion: (version: string) => void;
   setOpenSourceDialogState: (state: OpenSourceDialogState | null) => void;
 }

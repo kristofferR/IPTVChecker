@@ -36,6 +36,7 @@ tauri-plugin-os = "2"
 base64 = "0.22.1"
 sha2 = "0.10"
 tauri-plugin-notification = "2"
+tauri-plugin-updater = "2"
 # rev-pinned: the fuzz crate resolves this git dep independently of the main
 # Cargo.lock, and upstream's newer revisions pull xcap 0.9+ (pipewire system
 # libs), which broke the fuzz CI job. Bump the rev deliberately, not implicitly.

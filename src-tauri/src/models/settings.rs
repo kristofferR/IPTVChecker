@@ -87,6 +87,9 @@ pub struct AppSettings {
     pub low_space_threshold_gb: f64,
     pub separate_placeholder_status: bool,
     pub show_header_button_text: bool,
+    /// Look for a signed update on launch and every six hours. Discovery only
+    /// ever surfaces a notice; installing always needs explicit confirmation.
+    pub automatic_update_checks: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -214,6 +217,7 @@ impl Default for AppSettings {
             low_space_threshold_gb: 5.0,
             separate_placeholder_status: true,
             show_header_button_text: !cfg!(target_os = "macos"),
+            automatic_update_checks: true,
         }
     }
 }

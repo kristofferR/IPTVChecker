@@ -550,6 +550,7 @@ pub fn run() {
         )
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_window_state::Builder::new()
                 .with_state_flags(
@@ -992,6 +993,8 @@ pub fn run() {
                 }
             }
 
+            commands::updater::spawn_automatic_update_checks(app.handle().clone());
+
             Ok(())
         })
         .manage(AppState::new() as Arc<AppState>)
@@ -1029,6 +1032,11 @@ pub fn run() {
             commands::settings::read_screenshot,
             commands::settings::get_screenshot_cache_stats,
             commands::settings::clear_screenshot_cache,
+            commands::updater::check_for_updates,
+            commands::updater::discovered_update,
+            commands::updater::update_install_mode,
+            commands::updater::open_manual_update,
+            commands::updater::install_update,
             commands::history::get_scan_history,
             commands::history::clear_scan_history,
             commands::recent::get_recent_playlists,
