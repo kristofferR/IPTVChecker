@@ -444,13 +444,22 @@ pub fn filter_playlist_preview(
     }
 
     let (live_count, movie_count, series_count) = content_type_totals(&channels);
-    let mut filtered = preview.clone();
-    filtered.total_channels = channels.len();
-    filtered.live_count = live_count;
-    filtered.movie_count = movie_count;
-    filtered.series_count = series_count;
-    filtered.channels = channels;
-    Ok(filtered)
+    Ok(PlaylistPreview {
+        file_path: preview.file_path.clone(),
+        file_name: preview.file_name.clone(),
+        source_identity: preview.source_identity.clone(),
+        saved_playlist_id: preview.saved_playlist_id.clone(),
+        server_location: preview.server_location.clone(),
+        single_provider: preview.single_provider,
+        xtream_max_connections: preview.xtream_max_connections,
+        xtream_account_info: preview.xtream_account_info.clone(),
+        total_channels: channels.len(),
+        live_count,
+        movie_count,
+        series_count,
+        groups: preview.groups.clone(),
+        channels,
+    })
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
