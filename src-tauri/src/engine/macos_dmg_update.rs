@@ -73,9 +73,10 @@ pub fn install_dmg(bytes: &[u8]) -> Result<PathBuf, String> {
 }
 
 // Waits for the old process to exit before reopening, so LaunchServices doesn't
-// find the bundle mid-replacement.
-const RELAUNCH_SCRIPT: &str =
-    "while kill -0 \"$1\" 2>/dev/null; do sleep 0.1; done; exec /usr/bin/open -n \"$2\"";
+// find the bundle mid-replacement. The wait is capped at ~60s so a process that
+// hangs on quit leaves the new version openable instead of an immortal poller.
+const RELAUNCH_SCRIPT: &str = "i=0; while [ \"$i\" -lt 600 ] && kill -0 \"$1\" 2>/dev/null; \
+     do sleep 0.1; i=$((i+1)); done; exec /usr/bin/open -n \"$2\"";
 
 fn relaunch_command(pid: u32, installed_app: &Path) -> Command {
     let mut command = Command::new("/bin/sh");
