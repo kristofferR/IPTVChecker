@@ -1,5 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { applyResultUpdates, type ScanResultCollections } from "../src/hooks/useScan.helpers";
+import {
+  applyResultUpdates,
+  emptyResultCollections,
+  resultAtIndex,
+  type ScanResultCollections,
+} from "../src/hooks/useScan.helpers";
 import type { ChannelResult } from "../src/lib/types";
 
 function buildResult(index: number, overrides: Partial<ChannelResult> = {}): ChannelResult {
@@ -46,12 +51,8 @@ describe("useScan sparse result collections", () => {
     const initialA = buildResult(8);
     const initialB = buildResult(107, { status: "alive" });
     const previous: ScanResultCollections = {
-      resultsByIndex: {
-        [initialA.index]: initialA,
-        [initialB.index]: initialB,
-      },
       flatResults: [initialA, initialB],
-      indexToFlatPos: new Map([
+      positions: new Map([
         [initialA.index, 0],
         [initialB.index, 1],
       ]),
@@ -70,12 +71,42 @@ describe("useScan sparse result collections", () => {
     const addedC = buildResult(3005, { status: "alive" });
     const next = applyResultUpdates(previous, [updatedA, addedC]);
 
-    expect(next.resultsByIndex[8]?.status).toBe("dead");
-    expect(next.resultsByIndex[3005]?.status).toBe("alive");
+    expect(resultAtIndex(next, 8)?.status).toBe("dead");
+    expect(resultAtIndex(next, 3005)?.status).toBe("alive");
     expect(next.flatResults.map((result) => result.index)).toEqual([8, 107, 3005]);
-    expect(next.indexToFlatPos.get(3005)).toBe(2);
+    expect(next.positions.get(3005)).toBe(2);
     expect(next.metrics.presentCount).toBe(3);
     expect(next.metrics.lowFpsCount).toBe(1);
     expect(next.metrics.mislabeledCount).toBe(1);
+  });
+
+  it("keeps flatResults identity stable when a batch changes nothing", () => {
+    const existing = buildResult(1, { status: "alive" });
+    const previous: ScanResultCollections = {
+      flatResults: [existing],
+      positions: new Map([[1, 0]]),
+      metrics: { presentCount: 1, lowFpsCount: 0, mislabeledCount: 0 },
+    };
+
+    // Re-applying the identical object must not force a re-render.
+    const next = applyResultUpdates(previous, [existing]);
+    expect(next.flatResults).toBe(previous.flatResults);
+    expect(next.metrics).toBe(previous.metrics);
+  });
+
+  it("copies flatResults once per batch, not once per result", () => {
+    const previous = emptyResultCollections();
+    const batch = [buildResult(1), buildResult(2), buildResult(3)];
+
+    const next = applyResultUpdates(previous, batch);
+
+    // A fresh array so React re-renders, but the caller's is left alone.
+    expect(next.flatResults).not.toBe(previous.flatResults);
+    expect(previous.flatResults).toHaveLength(0);
+    expect(next.flatResults.map((result) => result.index)).toEqual([1, 2, 3]);
+  });
+
+  it("reports no result for an index that has not been checked", () => {
+    expect(resultAtIndex(emptyResultCollections(), 42)).toBeNull();
   });
 });

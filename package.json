@@ -15,7 +15,8 @@
     "setup:ffmpeg": "bash scripts/download-ffmpeg.sh",
     "clean:fuzz-local": "bash scripts/clean-fuzz-local.sh",
     "lint": "biome check .",
-    "format": "biome check --write ."
+    "format": "biome check --write .",
+    "perf:ui-batching": "bun run scripts/benchmark-result-batching.ts"
   },
   "dependencies": {
     "@bradleyhodges/sfsymbols": "^7.0.4",

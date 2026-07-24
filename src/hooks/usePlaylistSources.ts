@@ -44,7 +44,7 @@ import type {
   StalkerOpenRequest,
   XtreamOpenRequest,
 } from "../lib/types";
-import { useAppStore } from "../store";
+import { selectResultByIndex, useAppStore } from "../store";
 
 // Non-reactive store access for writes inside callbacks/effects.
 const getStore = () => useAppStore.getState();
@@ -461,7 +461,7 @@ export function usePlaylistSources({
         return;
       }
 
-      const refreshed = getStore().results[selectedIndex];
+      const refreshed = selectResultByIndex(getStore(), selectedIndex);
       if (refreshed) {
         getStore().setSelectedChannel(refreshed);
       }
