@@ -80,72 +80,65 @@ pub struct AppSettings {
     pub automatic_update_checks: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct ScanPresetConfig {
-    pub timeout: f64,
-    pub extended_timeout: Option<f64>,
-    pub concurrency: u32,
-    pub retries: u32,
-    pub retry_backoff: RetryBackoff,
-    pub user_agent: String,
-    pub skip_screenshots: bool,
-    pub profile_bitrate: bool,
-    pub ffprobe_timeout_secs: f64,
-    pub ffmpeg_bitrate_timeout_secs: f64,
-    pub accept_invalid_certs: bool,
-    pub proxy_file: Option<String>,
-    pub test_geoblock: bool,
-    pub screenshots_dir: Option<String>,
-    pub low_fps_threshold: f64,
-    pub screenshot_format: ScreenshotFormat,
+/// Declares which `AppSettings` fields a scan preset captures, and derives
+/// `ScanPresetConfig` plus both copy directions from that one list.
+///
+/// Previously the field list appeared three times — the struct, `from_settings`
+/// and `apply_to_settings` — so a new scan setting silently failed to round-trip
+/// through presets if any one of them was missed. Now the list below is the only
+/// place to edit, and a name that does not exist on `AppSettings` (or whose type
+/// disagrees) fails to compile.
+macro_rules! scan_preset_fields {
+    ($($field:ident: $ty:ty,)*) => {
+        #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+        #[serde(default)]
+        pub struct ScanPresetConfig {
+            $(pub $field: $ty,)*
+        }
+
+        impl ScanPresetConfig {
+            /// Capture the scan-relevant subset of `settings`.
+            // The macro cannot tell Copy fields from owned ones, so it clones
+            // uniformly; for the Copy fields that is just a move.
+            #[allow(clippy::clone_on_copy)]
+            pub fn from_settings(settings: &AppSettings) -> Self {
+                Self {
+                    $($field: settings.$field.clone(),)*
+                }
+            }
+
+            /// Overwrite only the scan-relevant fields of `settings`, leaving
+            /// UI and app-level preferences untouched.
+            #[allow(clippy::clone_on_copy)]
+            pub fn apply_to_settings(&self, settings: &mut AppSettings) {
+                $(settings.$field = self.$field.clone();)*
+            }
+        }
+    };
+}
+
+scan_preset_fields! {
+    timeout: f64,
+    extended_timeout: Option<f64>,
+    concurrency: u32,
+    retries: u32,
+    retry_backoff: RetryBackoff,
+    user_agent: String,
+    skip_screenshots: bool,
+    profile_bitrate: bool,
+    ffprobe_timeout_secs: f64,
+    ffmpeg_bitrate_timeout_secs: f64,
+    accept_invalid_certs: bool,
+    proxy_file: Option<String>,
+    test_geoblock: bool,
+    screenshots_dir: Option<String>,
+    low_fps_threshold: f64,
+    screenshot_format: ScreenshotFormat,
 }
 
 impl Default for ScanPresetConfig {
     fn default() -> Self {
         Self::from_settings(&AppSettings::default())
-    }
-}
-
-impl ScanPresetConfig {
-    pub fn from_settings(settings: &AppSettings) -> Self {
-        Self {
-            timeout: settings.timeout,
-            extended_timeout: settings.extended_timeout,
-            concurrency: settings.concurrency,
-            retries: settings.retries,
-            retry_backoff: settings.retry_backoff,
-            user_agent: settings.user_agent.clone(),
-            skip_screenshots: settings.skip_screenshots,
-            profile_bitrate: settings.profile_bitrate,
-            ffprobe_timeout_secs: settings.ffprobe_timeout_secs,
-            ffmpeg_bitrate_timeout_secs: settings.ffmpeg_bitrate_timeout_secs,
-            accept_invalid_certs: settings.accept_invalid_certs,
-            proxy_file: settings.proxy_file.clone(),
-            test_geoblock: settings.test_geoblock,
-            screenshots_dir: settings.screenshots_dir.clone(),
-            low_fps_threshold: settings.low_fps_threshold,
-            screenshot_format: settings.screenshot_format,
-        }
-    }
-
-    pub fn apply_to_settings(&self, settings: &mut AppSettings) {
-        settings.timeout = self.timeout;
-        settings.extended_timeout = self.extended_timeout;
-        settings.concurrency = self.concurrency;
-        settings.retries = self.retries;
-        settings.retry_backoff = self.retry_backoff;
-        settings.user_agent = self.user_agent.clone();
-        settings.skip_screenshots = self.skip_screenshots;
-        settings.profile_bitrate = self.profile_bitrate;
-        settings.ffprobe_timeout_secs = self.ffprobe_timeout_secs;
-        settings.ffmpeg_bitrate_timeout_secs = self.ffmpeg_bitrate_timeout_secs;
-        settings.accept_invalid_certs = self.accept_invalid_certs;
-        settings.proxy_file = self.proxy_file.clone();
-        settings.test_geoblock = self.test_geoblock;
-        settings.screenshots_dir = self.screenshots_dir.clone();
-        settings.low_fps_threshold = self.low_fps_threshold;
-        settings.screenshot_format = self.screenshot_format;
     }
 }
 
@@ -219,6 +212,24 @@ mod tests {
         let settings = AppSettings::default();
         assert!(settings.scan_notifications);
         assert!(!settings.accept_invalid_certs);
+    }
+
+    /// Presets are stored as their own JSON object, so their keys have to keep
+    /// matching the settings keys they are copied to and from. The macro makes
+    /// a *missing* field a compile error; this catches the remaining case of a
+    /// preset field that serializes under a name `AppSettings` does not use.
+    #[test]
+    fn preset_keys_are_a_subset_of_settings_keys() {
+        let settings = serde_json::to_value(AppSettings::default()).expect("settings serialize");
+        let preset = serde_json::to_value(ScanPresetConfig::default()).expect("preset serializes");
+
+        let settings_keys = settings.as_object().expect("settings is an object");
+        for key in preset.as_object().expect("preset is an object").keys() {
+            assert!(
+                settings_keys.contains_key(key),
+                "preset field `{key}` has no matching AppSettings field"
+            );
+        }
     }
 
     #[test]
