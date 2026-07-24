@@ -26,7 +26,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost http://localhost:* ws://localhost:* https://api.github.com https: http: streamproxy: http://streamproxy.localhost; img-src 'self' asset: http://asset.localhost data: blob: https: http:; media-src 'self' https: http: blob: streamproxy: http://streamproxy.localhost; font-src 'self' data:; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self';"
+      "csp": "default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost http://localhost:* ws://localhost:* https://api.github.com https: http: streamproxy: http://streamproxy.localhost; img-src 'self' asset: http://asset.localhost data: blob: https: http:; media-src 'self' https: http: blob: streamproxy: http://streamproxy.localhost; font-src 'self' data:; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self';"
     }
   },
   "bundle": {
