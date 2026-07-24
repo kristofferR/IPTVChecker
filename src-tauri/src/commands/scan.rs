@@ -1148,6 +1148,53 @@ async fn parse_playlist_with_cache(
         return Ok(cached);
     }
 
+    if config.group_filter.is_some() || config.channel_search.is_some() {
+        let full_preview_cache_key = playlist_preview_cache_key_from_parts(
+            &config.file_path,
+            config.source_identity.as_deref(),
+            config.playlist_display_name.as_deref(),
+            None,
+            None,
+        );
+        if let Some(full_preview) = state
+            .get_cached_playlist_preview(&full_preview_cache_key, source_mtime)
+            .await
+        {
+            let filter_started_at = Instant::now();
+            let group_filter = config.group_filter.clone();
+            let channel_search = config.channel_search.clone();
+            let filtered_preview = tokio::task::spawn_blocking(move || {
+                parser::filter_playlist_preview(
+                    full_preview.as_ref(),
+                    &group_filter,
+                    &channel_search,
+                )
+            })
+            .await
+            .map_err(|err| AppError::Other(format!("Playlist filter task failed: {err}")))??;
+            let filter_ms = filter_started_at.elapsed().as_secs_f64() * 1000.0;
+            record_backend_perf(
+                app,
+                state,
+                "scan.preflight.filter_cached_ms",
+                filter_ms,
+                Some(run_id),
+            )
+            .await;
+
+            log::info!(
+                "Scan {}: derived filtered playlist preview from full cache for {}",
+                run_id,
+                config.file_path
+            );
+            let filtered_preview = Arc::new(filtered_preview);
+            state
+                .put_cached_playlist_preview(cache_key, Arc::clone(&filtered_preview), source_mtime)
+                .await;
+            return Ok(filtered_preview);
+        }
+    }
+
     let parse_started_at = Instant::now();
     // Parsing a big playlist is seconds of CPU-bound work; keep it off the
     // async runtime that is also driving proxies and event emission.
