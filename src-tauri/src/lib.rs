@@ -189,6 +189,9 @@ fn create_window_from_main_config(app: &tauri::AppHandle, label: String) {
     match tauri::WebviewWindowBuilder::from_config(app, &window_config)
         .and_then(|builder| builder.build())
     {
+        // The built window is only consumed by the macOS-only vibrancy setup
+        // below; elsewhere the theme is applied through the app handle.
+        #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
         Ok(window) => {
             let theme_preference = {
                 let state = app.state::<Arc<AppState>>();
