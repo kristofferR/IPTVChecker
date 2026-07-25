@@ -52,8 +52,7 @@ export function applyResultUpdates(
       metricsChanged = true;
     }
 
-    const previousMislabeled =
-      (previousResult?.label_mismatches.length ?? 0) > 0;
+    const previousMislabeled = (previousResult?.label_mismatches.length ?? 0) > 0;
     const nextMislabeled = result.label_mismatches.length > 0;
     if (previousMislabeled !== nextMislabeled) {
       mislabeledCount += nextMislabeled ? 1 : -1;

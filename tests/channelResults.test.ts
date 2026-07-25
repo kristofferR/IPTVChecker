@@ -64,9 +64,7 @@ describe("channelResults helpers", () => {
   });
 
   it("creates pending channel results with backend-aligned IDs", () => {
-    const pending = toPendingChannelResult(
-      makeChannel("https://example.com/live/channel-42.ts"),
-    );
+    const pending = toPendingChannelResult(makeChannel("https://example.com/live/channel-42.ts"));
 
     expect(pending.channel_id).toBe("channel-42");
     expect(pending.status).toBe("pending");

@@ -1,29 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChannelResult } from "../lib/types";
 import { normalizeCodecName, resolveResolutionLabel } from "../lib/format";
 import { logger } from "../lib/logger";
-import { toProxyUrl } from "../lib/proxyUrl";
-import { getStreamingProxyPort } from "../lib/tauri";
 import {
   areStreamMetadataEqual,
   classifyStream,
   decidePlaybackRecovery,
   formatPlaybackRecoveryMessage,
   getMpegtsPlaybackRoutes,
+  type HlsErrorPayload,
   MAX_PLAYBACK_RECOVERY_ATTEMPTS,
+  type PlaybackRecoveryIssue,
+  type PlaybackStartMode,
+  type PlayerState,
   readMediaErrorMessage,
   recordPlaybackRecoveryAttempt,
+  type StreamMetadata,
   shouldResetPlaybackRecoveryAttempts,
   shouldTryXtreamHlsBeforeMpegts,
   supportsNativeHlsPlayback,
   tryConvertToXtreamHls,
-  type HlsErrorPayload,
-  type PlaybackRecoveryIssue,
-  type PlaybackStartMode,
-  type PlayerState,
-  type StreamMetadata,
 } from "../lib/playback";
+import { toProxyUrl } from "../lib/proxyUrl";
 import { createRuntimeMonitor, type MpegtsPlayer } from "../lib/runtimeMonitor";
+import { getStreamingProxyPort } from "../lib/tauri";
+import type { ChannelResult } from "../lib/types";
 import { canUseBlobWorkers } from "../lib/workerSupport";
 
 // Re-exported for components (e.g. StreamPlayer) that read the recovery cap
@@ -202,7 +202,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
     const hls = hlsInstanceRef.current;
     if (hls) {
-      const levelIdx = hls.currentLevel >= 0 ? hls.currentLevel : (hls.levels?.length ? 0 : -1);
+      const levelIdx = hls.currentLevel >= 0 ? hls.currentLevel : hls.levels?.length ? 0 : -1;
       const level = levelIdx >= 0 ? hls.levels?.[levelIdx] : undefined;
       if (level) {
         if (level.width && level.height) {
@@ -232,7 +232,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         meta.resolution = resolveResolutionLabel(info.width, info.height);
       }
       if (!meta.codec && info.videoCodec) meta.codec = normalizeCodecName(info.videoCodec);
-      if (!meta.audioCodec && info.audioCodec) meta.audioCodec = normalizeCodecName(info.audioCodec);
+      if (!meta.audioCodec && info.audioCodec)
+        meta.audioCodec = normalizeCodecName(info.audioCodec);
       if (!meta.fps && info.fps) meta.fps = Math.round(info.fps);
       if (!meta.videoBitrate && info.videoDataRate) {
         meta.videoBitrate = formatBitrateKbps(Math.round(info.videoDataRate));
@@ -250,9 +251,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     }
 
     if (meta.width || meta.codec || meta.audioCodec) {
-      setStreamMetadata((previous) =>
-        areStreamMetadataEqual(previous, meta) ? previous : meta,
-      );
+      setStreamMetadata((previous) => (areStreamMetadataEqual(previous, meta) ? previous : meta));
     }
   }, [videoElement]);
 
@@ -371,12 +370,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   );
 
   const attemptRecoveryOrFail = useCallback(
-    (
-      result: ChannelResult,
-      sessionId: number,
-      issue: PlaybackRecoveryIssue,
-      reason: string,
-    ) => {
+    (result: ChannelResult, sessionId: number, issue: PlaybackRecoveryIssue, reason: string) => {
       const now = Date.now();
       const decision = decidePlaybackRecovery({
         issue,
@@ -445,8 +439,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         playerStateRef,
         playbackSessionIdRef,
         hasStartedPlayingRef,
-        onRuntimeIssue: (issue, reason) =>
-          attemptRecoveryOrFail(result, sessionId, issue, reason),
+        onRuntimeIssue: (issue, reason) => attemptRecoveryOrFail(result, sessionId, issue, reason),
       });
     },
     [attemptRecoveryOrFail, cleanupRuntimeMonitor, videoElement],
@@ -656,15 +649,10 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           const onError = () => {
             fail(readMediaErrorMessage(videoElement.error) ?? "MPEG-TS media error");
           };
-          const onPlayerError = (
-            errorType?: unknown,
-            errorDetail?: unknown,
-            info?: unknown,
-          ) => {
-            const segments = [errorType, errorDetail, info]
-              .filter((value): value is string =>
-                typeof value === "string" && value.length > 0
-              );
+          const onPlayerError = (errorType?: unknown, errorDetail?: unknown, info?: unknown) => {
+            const segments = [errorType, errorDetail, info].filter(
+              (value): value is string => typeof value === "string" && value.length > 0,
+            );
             fail(segments.join(": ") || "mpegts.js error");
           };
           const onAbort = () => {
@@ -706,11 +694,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       cleanup();
       currentChannelRef.current = result;
       hasStartedPlayingRef.current = false;
-      if (shouldResetPlaybackRecoveryAttempts(
-        startMode,
-        previousChannelIndex,
-        result.index,
-      )) {
+      if (shouldResetPlaybackRecoveryAttempts(startMode, previousChannelIndex, result.index)) {
         recoveryTimestampsRef.current = [];
       }
 
@@ -804,7 +788,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         if (!isCurrentPlayback()) {
           return;
         }
-        if (nativeOk && await handleSuccessfulStart()) {
+        if (nativeOk && (await handleSuccessfulStart())) {
           return;
         }
       }
@@ -824,7 +808,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       }
 
-      if (preferXtreamHls && await tryXtreamHlsRoute()) {
+      if (preferXtreamHls && (await tryXtreamHlsRoute())) {
         return;
       }
       if (!isCurrentPlayback()) {
@@ -855,21 +839,17 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             result.name,
           );
           lastErrorRef.current = null;
-          const mpegtsOk = await tryMpegtsPlayback(
-            route.url,
-            abortController.signal,
-            isLive,
-          );
+          const mpegtsOk = await tryMpegtsPlayback(route.url, abortController.signal, isLive);
           if (!isCurrentPlayback()) {
             return;
           }
-          if (mpegtsOk && await handleSuccessfulStart()) {
+          if (mpegtsOk && (await handleSuccessfulStart())) {
             return;
           }
         }
       }
 
-      if (!preferXtreamHls && await tryXtreamHlsRoute()) {
+      if (!preferXtreamHls && (await tryXtreamHlsRoute())) {
         return;
       }
       if (!isCurrentPlayback()) {
@@ -886,7 +866,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         if (!isCurrentPlayback()) {
           return;
         }
-        if (nativeOk && await handleSuccessfulStart()) {
+        if (nativeOk && (await handleSuccessfulStart())) {
           return;
         }
       }
@@ -918,17 +898,20 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     };
   }, [cleanup, clearRecoveryTimer]);
 
-  const play = useCallback((result: ChannelResult) => {
-    playbackSessionIdRef.current += 1;
-    isPausedRef.current = false;
-    const sessionId = playbackSessionIdRef.current;
-    clearRecoveryTimer();
-    currentChannelRef.current = result;
-    recoveryTimestampsRef.current = [];
-    hasStartedPlayingRef.current = false;
-    resetRecoveryUi();
-    void startPlaybackAttempt(result, sessionId, "manual", 0);
-  }, [clearRecoveryTimer, resetRecoveryUi, startPlaybackAttempt]);
+  const play = useCallback(
+    (result: ChannelResult) => {
+      playbackSessionIdRef.current += 1;
+      isPausedRef.current = false;
+      const sessionId = playbackSessionIdRef.current;
+      clearRecoveryTimer();
+      currentChannelRef.current = result;
+      recoveryTimestampsRef.current = [];
+      hasStartedPlayingRef.current = false;
+      resetRecoveryUi();
+      void startPlaybackAttempt(result, sessionId, "manual", 0);
+    },
+    [clearRecoveryTimer, resetRecoveryUi, startPlaybackAttempt],
+  );
 
   const stop = useCallback(() => {
     playbackSessionIdRef.current += 1;

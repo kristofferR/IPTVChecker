@@ -19,19 +19,13 @@ export function errorToString(err: unknown): string {
 }
 
 function redactSensitiveQueryParameters(message: string): string {
-  return message.replace(
-    /([?&](?:username|password)=)[^&#)\]]*/gi,
-    "$1***",
-  );
+  return message.replace(/([?&](?:username|password)=)[^&#)\]]*/gi, "$1***");
 }
 
 /** Redact URL userinfo and Xtream-style credential query parameters in either
  *  a standalone URL or a larger error/log message. */
 export function redactUrlCredentials(value: string): string {
-  const redactedUserInfo = value.replace(
-    /\b(https?:\/\/)[^/\s?#()[\]]+@/gi,
-    "$1***@",
-  );
+  const redactedUserInfo = value.replace(/\b(https?:\/\/)[^/\s?#()[\]]+@/gi, "$1***@");
   return redactSensitiveQueryParameters(redactedUserInfo);
 }
 
@@ -48,16 +42,12 @@ function formatUserFacingError(
   const raw = redactUrlCredentials(errorToString(err))
     .replace(/^error:\s*/i, "")
     .trim();
-  const normalized = normalizedPrefix
-    ? raw.replace(normalizedPrefix, "").trim()
-    : raw;
+  const normalized = normalizedPrefix ? raw.replace(normalizedPrefix, "").trim() : raw;
 
   if (!normalized || normalized === "[object Object]") {
     return fallback;
   }
-  return existingPrefix.test(normalized)
-    ? normalized
-    : `${prefix}: ${normalized}`;
+  return existingPrefix.test(normalized) ? normalized : `${prefix}: ${normalized}`;
 }
 
 export function formatPlaylistOpenError(err: unknown): string {

@@ -1,3 +1,6 @@
+import type { ScanUiMetrics } from "../hooks/useScan.helpers";
+import type { Platform } from "../lib/platform";
+import type { ScanState } from "../lib/scanState";
 import type {
   AppSettings,
   ChannelResult,
@@ -12,9 +15,6 @@ import type {
   StalkerOpenRequest,
   XtreamRecentSource,
 } from "../lib/types";
-import type { Platform } from "../lib/platform";
-import type { ScanState } from "../lib/scanState";
-import type { ScanUiMetrics } from "../hooks/useScan.helpers";
 
 // ---------------------------------------------------------------------------
 // Playlist

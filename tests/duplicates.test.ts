@@ -54,10 +54,7 @@ describe("findDuplicateChannelIndices", () => {
       makeResult(2, "https://example.com/live/stream.m3u8?a=1&b=2"),
     ];
 
-    expect(Array.from(findDuplicateChannelIndices(results)).sort((a, b) => a - b)).toEqual([
-      0,
-      1,
-    ]);
+    expect(Array.from(findDuplicateChannelIndices(results)).sort((a, b) => a - b)).toEqual([0, 1]);
   });
 
   it("normalizes unreserved percent encoding in path and query", () => {

@@ -1,11 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import { Cast, ChevronDown, RefreshCw, Square } from "lucide-react";
-import type {
-  CastMediaRequest,
-  CastSession,
-  ChromecastDevice,
-} from "../lib/types";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { isCastSessionActive } from "../lib/cast";
+import type { CastMediaRequest, CastSession, ChromecastDevice } from "../lib/types";
 
 interface UseChromecastShape {
   devices: ChromecastDevice[];
@@ -48,11 +44,7 @@ export function CastMenu({
     );
   }
   return (
-    <CastMenuInline
-      chromecast={chromecast}
-      castRequest={castRequest}
-      onCastStart={onCastStart}
-    />
+    <CastMenuInline chromecast={chromecast} castRequest={castRequest} onCastStart={onCastStart} />
   );
 }
 
@@ -144,7 +136,9 @@ function CastMenuPopover({
               className="p-1 text-white/70 hover:text-white disabled:opacity-50"
               title="Refresh devices"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${chromecast.discovering ? "animate-spin" : ""}`} />
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${chromecast.discovering ? "animate-spin" : ""}`}
+              />
             </button>
           </div>
           {isCasting && chromecast.session && (
@@ -202,11 +196,7 @@ function CastMenuPopover({
 
 // ---------- Inline (sidebar) ----------
 
-function CastMenuInline({
-  chromecast,
-  castRequest,
-  onCastStart,
-}: Omit<CastMenuProps, "mode">) {
+function CastMenuInline({ chromecast, castRequest, onCastStart }: Omit<CastMenuProps, "mode">) {
   const [expanded, setExpanded] = useState(false);
   const [starting, setStarting] = useState(false);
   const isCasting = isCastSessionActive(chromecast.session);
@@ -303,7 +293,8 @@ function CastMenuInline({
             <div className="border-t border-border-subtle">
               <div className="flex items-center justify-between px-3 py-1.5 text-[11px] text-text-tertiary">
                 <span>
-                  {chromecast.devices.length} device{chromecast.devices.length === 1 ? "" : "s"} found
+                  {chromecast.devices.length} device{chromecast.devices.length === 1 ? "" : "s"}{" "}
+                  found
                 </span>
                 <button
                   type="button"

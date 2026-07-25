@@ -1,5 +1,5 @@
-import { useMemo } from "react";
 import { Clock3, RefreshCw, Trash2, X } from "lucide-react";
+import { useMemo } from "react";
 import type { ScanHistoryItem } from "../lib/types";
 
 interface HistoryPanelProps {
@@ -39,15 +39,17 @@ export default function HistoryPanel({
 }: HistoryPanelProps) {
   const hasEntries = entries.length > 0;
   const sortedEntries = useMemo(
-    () =>
-      [...entries].sort(
-        (a, b) => b.scanned_at_epoch_ms - a.scanned_at_epoch_ms,
-      ),
+    () => [...entries].sort((a, b) => b.scanned_at_epoch_ms - a.scanned_at_epoch_ms),
     [entries],
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true" aria-label="Scan history">
+    <div
+      className="fixed inset-0 z-50 flex"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Scan history"
+    >
       <div className="flex-1 bg-black/40" onClick={onClose} />
       <div className="w-[44rem] max-w-[96vw] border-l border-border-app bg-overlay backdrop-blur-xl flex flex-col">
         <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-border-app">
@@ -55,9 +57,7 @@ export default function HistoryPanel({
             <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-1">
               Scan History
             </p>
-            <h2 className="text-[17px] font-semibold">
-              {playlistName || "Current Playlist"}
-            </h2>
+            <h2 className="text-[17px] font-semibold">{playlistName || "Current Playlist"}</h2>
             <p className="text-[12px] text-text-secondary mt-1">
               Completed scans are saved automatically and compared against the previous run.
             </p>
@@ -118,15 +118,16 @@ export default function HistoryPanel({
           {sortedEntries.map((entry) => {
             const when = new Date(entry.scanned_at_epoch_ms).toLocaleString();
             return (
-              <article key={entry.id} className="rounded-xl border border-border-app bg-panel-subtle p-3.5">
+              <article
+                key={entry.id}
+                className="rounded-xl border border-border-app bg-panel-subtle p-3.5"
+              >
                 <div className="flex items-center gap-2 text-[12px] text-text-tertiary mb-2">
                   <Clock3 className="w-3.5 h-3.5" />
                   <span>{when}</span>
                 </div>
 
-                <p className="text-[12px] text-text-secondary mb-2">
-                  {formatScope(entry)}
-                </p>
+                <p className="text-[12px] text-text-secondary mb-2">{formatScope(entry)}</p>
 
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
                   <span className="text-text-secondary">{entry.summary.total} total</span>

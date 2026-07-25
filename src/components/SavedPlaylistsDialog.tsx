@@ -1,7 +1,7 @@
-import { useEffect } from "react";
 import { FolderOpen, Pencil, Server, Trash2, X } from "lucide-react";
-import type { SavedPlaylistEntry } from "../lib/types";
+import { useEffect } from "react";
 import { savedPlaylistSecondaryLabel } from "../lib/savedPlaylists";
+import type { SavedPlaylistEntry } from "../lib/types";
 
 interface SavedPlaylistsDialogProps {
   playlists: SavedPlaylistEntry[];
@@ -45,9 +45,7 @@ export default function SavedPlaylistsDialog({
             <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-1">
               Library
             </p>
-            <h2 className="text-[18px] font-semibold text-text-primary">
-              Saved Playlists
-            </h2>
+            <h2 className="text-[18px] font-semibold text-text-primary">Saved Playlists</h2>
           </div>
           <button
             type="button"

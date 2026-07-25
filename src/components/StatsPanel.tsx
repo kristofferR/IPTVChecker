@@ -1,17 +1,16 @@
-import { memo, startTransition, type ReactNode } from "react";
+import { memo, type ReactNode, startTransition } from "react";
+import { useAppStore } from "../store";
 import {
   SFCheckmarkCircleFill,
-  SFXmarkCircleFill,
-  SFLockFill,
-  SFShieldFill,
-  SFListNumber,
-  SFExclamationTriangleFill,
-  SFTagFill,
   SFDocOnDocFill,
+  SFExclamationTriangleFill,
+  SFListNumber,
+  SFLockFill,
   SFPhotoFill,
+  SFShieldFill,
+  SFTagFill,
+  SFXmarkCircleFill,
 } from "./SFSymbols";
-import { useAppStore } from "../store";
-
 
 function Pill({
   icon,
@@ -80,9 +79,7 @@ const iconSize = "w-3 h-3";
 export const StatsPanel = memo(function StatsPanel() {
   const progress = useAppStore((s) => s.progress);
   const summary = useAppStore((s) => s.summary);
-  const totalChannels = useAppStore(
-    (s) => s.playlist?.total_channels ?? 0,
-  );
+  const totalChannels = useAppStore((s) => s.playlist?.total_channels ?? 0);
   const scanState = useAppStore((s) => s.scanState);
   const lowFpsCount = useAppStore((s) => s.uiMetrics.lowFpsCount);
   const mislabeledCount = useAppStore((s) => s.uiMetrics.mislabeledCount);

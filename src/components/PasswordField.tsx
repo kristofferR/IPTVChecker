@@ -1,5 +1,5 @@
-import { useId, useState, type ComponentPropsWithoutRef } from "react";
 import { Eye, EyeOff } from "lucide-react";
+import { type ComponentPropsWithoutRef, useId, useState } from "react";
 
 interface PasswordFieldProps extends Omit<ComponentPropsWithoutRef<"input">, "type"> {
   wrapperClassName?: string;

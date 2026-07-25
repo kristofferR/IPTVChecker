@@ -33,26 +33,21 @@ function findUnquotedComma(text: string): number {
   return -1;
 }
 
-export function getExtinfAttribute(
-  extinfLine: string,
-  attribute: string,
-): string | null {
+export function getExtinfAttribute(extinfLine: string, attribute: string): string | null {
   if (!extinfLine.startsWith("#EXTINF")) return null;
 
   const headerEnd = findUnquotedComma(extinfLine);
   const header = headerEnd >= 0 ? extinfLine.slice(0, headerEnd) : extinfLine;
   const escapedAttribute = attribute.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = new RegExp(
-    `\\b${escapedAttribute}=(?:\"([^\"\\\\]*(?:\\\\.[^\"\\\\]*)*)\"|'([^'\\\\]*(?:\\\\.[^'\\\\]*)*)'|([^\\s]+))`,
+    `\\b${escapedAttribute}=(?:"([^"\\\\]*(?:\\\\.[^"\\\\]*)*)"|'([^'\\\\]*(?:\\\\.[^'\\\\]*)*)'|([^\\s]+))`,
     "i",
   );
 
   const match = pattern.exec(header);
   if (!match) return null;
 
-  const value = (match[1] ?? match[2] ?? match[3] ?? "")
-    .replace(/\\(["'])/g, "$1")
-    .trim();
+  const value = (match[1] ?? match[2] ?? match[3] ?? "").replace(/\\(["'])/g, "$1").trim();
   return value.length > 0 ? value : null;
 }
 

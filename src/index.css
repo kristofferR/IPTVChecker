@@ -2,9 +2,9 @@
 
 /* Shared base (opaque dark — used by Windows/Linux) */
 :root {
-  --text-primary: rgb(244 244 245);     /* zinc-100 */
-  --text-secondary: rgb(161 161 170);   /* zinc-400 */
-  --text-tertiary: rgb(113 113 122);    /* zinc-500 */
+  --text-primary: rgb(244 244 245); /* zinc-100 */
+  --text-secondary: rgb(161 161 170); /* zinc-400 */
+  --text-tertiary: rgb(113 113 122); /* zinc-500 */
   --panel-bg: rgb(39 39 42);
   --panel-bg-subtle: rgb(39 39 42 / 0.5);
   --panel-bg-muted: rgb(39 39 42 / 0.3);
@@ -157,7 +157,9 @@
   --color-text-tertiary: var(--text-tertiary);
 }
 
-html, body, #root {
+html,
+body,
+#root {
   height: 100%;
   background: var(--surface-bg);
 }
@@ -170,8 +172,8 @@ body {
   margin: 0;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
-    Ubuntu, Cantarell, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
   color: var(--text-primary);
 }
 
@@ -276,7 +278,7 @@ body {
 
 /* Button separators — vertical line between adjacent buttons */
 [data-platform="macos"] .toolbar-group .toolbar-btn:not(:first-child)::before {
-  content: '';
+  content: "";
   position: absolute;
   left: -0.5px;
   top: 16%;
@@ -323,29 +325,20 @@ body {
 /* macOS controls */
 [data-platform="macos"] .macos-btn {
   border: 0.5px solid rgb(0 0 0 / 0.12);
-  background: linear-gradient(
-    180deg,
-    rgb(255 255 255 / 0.9) 0%,
-    rgb(255 255 255 / 0.7) 100%
-  );
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.9) 0%, rgb(255 255 255 / 0.7) 100%);
   box-shadow: 0 0.5px 1px rgb(0 0 0 / 0.08);
-  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease;
 }
 
 [data-platform="macos"] .macos-btn:hover {
-  background: linear-gradient(
-    180deg,
-    rgb(255 255 255 / 0.96) 0%,
-    rgb(255 255 255 / 0.78) 100%
-  );
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.96) 0%, rgb(255 255 255 / 0.78) 100%);
 }
 
 [data-platform="macos"] .macos-btn:active {
-  background: linear-gradient(
-    180deg,
-    rgb(255 255 255 / 0.7) 0%,
-    rgb(255 255 255 / 0.86) 100%
-  );
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.7) 0%, rgb(255 255 255 / 0.86) 100%);
 }
 
 [data-platform="macos"] .macos-btn-primary {
@@ -377,7 +370,9 @@ body {
 
 [data-platform="macos"] .native-field:focus {
   border-color: rgb(10 132 255 / 0.7);
-  box-shadow: 0 0 0 3px var(--focus-ring), inset 0 0.5px 1px rgb(0 0 0 / 0.04);
+  box-shadow:
+    0 0 0 3px var(--focus-ring),
+    inset 0 0.5px 1px rgb(0 0 0 / 0.04);
 }
 
 .toolbar-select {
@@ -407,7 +402,7 @@ body {
   }
 
   [data-platform="macos"] .toolbar-group-prominent {
-    background: linear-gradient(to bottom, rgb(10 132 255 / 0.10), rgb(10 132 255 / 0.07));
+    background: linear-gradient(to bottom, rgb(10 132 255 / 0.1), rgb(10 132 255 / 0.07));
     box-shadow:
       0 6px 20px rgb(0 0 0 / 0.15),
       inset 1px 2px 1px -1px rgb(255 255 255 / 0.06),
@@ -441,28 +436,16 @@ body {
 
   [data-platform="macos"] .macos-btn {
     border-color: rgb(255 255 255 / 0.13);
-    background: linear-gradient(
-      180deg,
-      rgb(69 69 74 / 0.82) 0%,
-      rgb(52 52 56 / 0.82) 100%
-    );
+    background: linear-gradient(180deg, rgb(69 69 74 / 0.82) 0%, rgb(52 52 56 / 0.82) 100%);
     box-shadow: 0 0.5px 1px rgb(0 0 0 / 0.32);
   }
 
   [data-platform="macos"] .macos-btn:hover {
-    background: linear-gradient(
-      180deg,
-      rgb(80 80 86 / 0.84) 0%,
-      rgb(58 58 64 / 0.84) 100%
-    );
+    background: linear-gradient(180deg, rgb(80 80 86 / 0.84) 0%, rgb(58 58 64 / 0.84) 100%);
   }
 
   [data-platform="macos"] .macos-btn:active {
-    background: linear-gradient(
-      180deg,
-      rgb(50 50 54 / 0.84) 0%,
-      rgb(72 72 78 / 0.84) 100%
-    );
+    background: linear-gradient(180deg, rgb(50 50 54 / 0.84) 0%, rgb(72 72 78 / 0.84) 100%);
   }
 
   [data-platform="macos"] .macos-btn-primary {
@@ -483,7 +466,9 @@ body {
 
   [data-platform="macos"] .native-field:focus {
     border-color: rgb(89 180 255 / 0.78);
-    box-shadow: 0 0 0 3px rgb(10 132 255 / 0.34), inset 0 0.5px 1px rgb(0 0 0 / 0.2);
+    box-shadow:
+      0 0 0 3px rgb(10 132 255 / 0.34),
+      inset 0 0.5px 1px rgb(0 0 0 / 0.2);
   }
 
   [data-platform="macos"] .channel-row:hover {
@@ -516,7 +501,9 @@ body {
   background: rgb(255 255 255 / 0.97);
   -webkit-backdrop-filter: blur(30px) saturate(180%);
   backdrop-filter: blur(30px) saturate(180%);
-  box-shadow: 0 4px 24px rgb(0 0 0 / 0.12), 0 0 0 0.5px rgb(0 0 0 / 0.06);
+  box-shadow:
+    0 4px 24px rgb(0 0 0 / 0.12),
+    0 0 0 0.5px rgb(0 0 0 / 0.06);
   border-color: transparent;
   border-radius: 8px;
 }
@@ -524,7 +511,9 @@ body {
 @media (prefers-color-scheme: dark) {
   [data-platform="macos"] .macos-popover {
     background: rgb(38 38 40 / 0.93);
-    box-shadow: 0 4px 24px rgb(0 0 0 / 0.4), 0 0 0 0.5px rgb(255 255 255 / 0.08);
+    box-shadow:
+      0 4px 24px rgb(0 0 0 / 0.4),
+      0 0 0 0.5px rgb(255 255 255 / 0.08);
   }
 }
 

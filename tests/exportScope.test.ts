@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import {
+  type ExportScope,
   exportScopeFileSuffix,
   exportScopeLabel,
   resolveExportScopeResults,
-  type ExportScope,
 } from "../src/lib/exportScope";
 import type { ChannelResult } from "../src/lib/types";
 
@@ -62,9 +62,7 @@ describe("export scope resolution", () => {
     };
 
     for (const scope of cases) {
-      expect(resolveExportScopeResults(scope, all, filtered, selected)).toEqual(
-        byScope[scope],
-      );
+      expect(resolveExportScopeResults(scope, all, filtered, selected)).toEqual(byScope[scope]);
     }
   });
 

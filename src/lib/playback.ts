@@ -173,25 +173,20 @@ export function getMpegtsPlaybackRoutes(
   return preferRemux ? [remux, direct] : [direct, remux];
 }
 
-export function shouldTryXtreamHlsBeforeMpegts(
-  startMode: PlaybackStartMode,
-): boolean {
+export function shouldTryXtreamHlsBeforeMpegts(startMode: PlaybackStartMode): boolean {
   return startMode === "recovery";
 }
 
-export function shouldSuspendPlaybackWatchdog(
-  visibilityState: DocumentVisibilityState,
-): boolean {
+export function shouldSuspendPlaybackWatchdog(visibilityState: DocumentVisibilityState): boolean {
   return visibilityState === "hidden";
 }
 
 export function supportsNativeHlsPlayback(
   mediaElement: Pick<HTMLMediaElement, "canPlayType">,
 ): boolean {
-  return [
-    "application/vnd.apple.mpegurl",
-    "application/x-mpegurl",
-  ].some((mimeType) => mediaElement.canPlayType(mimeType) !== "");
+  return ["application/vnd.apple.mpegurl", "application/x-mpegurl"].some(
+    (mimeType) => mediaElement.canPlayType(mimeType) !== "",
+  );
 }
 
 export function readMediaErrorMessage(mediaErr: MediaError | null): string | null {
@@ -224,33 +219,21 @@ export interface BufferedTimeRange {
   end: number;
 }
 
-export function chooseLiveBufferPlaybackRate(
-  currentRate: number,
-  bufferedAhead: number,
-): number {
+export function chooseLiveBufferPlaybackRate(currentRate: number, bufferedAhead: number): number {
   if (!Number.isFinite(bufferedAhead)) return 1;
   if (currentRate < 1) {
-    return bufferedAhead < LIVE_BUFFER_RECOVERED_THRESHOLD_SECS
-      ? LIVE_BUFFER_RECOVERY_RATE
-      : 1;
+    return bufferedAhead < LIVE_BUFFER_RECOVERED_THRESHOLD_SECS ? LIVE_BUFFER_RECOVERY_RATE : 1;
   }
   if (currentRate > 1) {
-    return bufferedAhead > LIVE_BUFFER_RECOVERED_THRESHOLD_SECS
-      ? LIVE_BUFFER_CATCHUP_RATE
-      : 1;
+    return bufferedAhead > LIVE_BUFFER_RECOVERED_THRESHOLD_SECS ? LIVE_BUFFER_CATCHUP_RATE : 1;
   }
   if (bufferedAhead > LIVE_BUFFER_CATCHUP_THRESHOLD_SECS) {
     return LIVE_BUFFER_CATCHUP_RATE;
   }
-  return bufferedAhead < LIVE_BUFFER_SLOWDOWN_THRESHOLD_SECS
-    ? LIVE_BUFFER_RECOVERY_RATE
-    : 1;
+  return bufferedAhead < LIVE_BUFFER_SLOWDOWN_THRESHOLD_SECS ? LIVE_BUFFER_RECOVERY_RATE : 1;
 }
 
-export function bufferedSecondsAhead(
-  currentTime: number,
-  ranges: BufferedTimeRange[],
-): number {
+export function bufferedSecondsAhead(currentTime: number, ranges: BufferedTimeRange[]): number {
   const currentRange = ranges.find(
     (range) => currentTime >= range.start && currentTime < range.end,
   );
@@ -331,8 +314,7 @@ export function getNextPlaybackRecoveryAttempt(
   maxAttempts = MAX_PLAYBACK_RECOVERY_ATTEMPTS,
   windowMs = PLAYBACK_RECOVERY_WINDOW_MS,
 ): number | null {
-  const nextAttempt =
-    prunePlaybackRecoveryHistory(recoveryTimestamps, now, windowMs).length + 1;
+  const nextAttempt = prunePlaybackRecoveryHistory(recoveryTimestamps, now, windowMs).length + 1;
   return nextAttempt <= maxAttempts ? nextAttempt : null;
 }
 

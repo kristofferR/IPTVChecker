@@ -1,7 +1,7 @@
 import {
   HapticFeedbackPattern,
-  PerformanceTime,
   isSupported,
+  PerformanceTime,
   perform,
 } from "tauri-plugin-macos-haptics-api";
 

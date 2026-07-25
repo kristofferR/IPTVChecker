@@ -1,5 +1,14 @@
-import { useCallback, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { useCallback, useEffect, useRef } from "react";
+import {
+  getChannelIdFromUrl,
+  resetChannelResultForRescan,
+  toPendingChannelResult,
+} from "../lib/channelResults";
+import { findDuplicateChannelIndicesChunked } from "../lib/duplicates";
+import { logger } from "../lib/logger";
+import { pendingScanErrorMessageForRun, runScopedScanErrorMessage } from "../lib/scanErrorEvents";
+import { cancelScan, pauseScan, resetScan, resumeScan, startScan } from "../lib/tauri";
 import type {
   Channel,
   ChannelResult,
@@ -10,26 +19,14 @@ import type {
   ScanResultBatchPayload,
   ScanSummary,
 } from "../lib/types";
-import { cancelScan, pauseScan, resetScan, resumeScan, startScan } from "../lib/tauri";
-import { logger } from "../lib/logger";
-import {
-  getChannelIdFromUrl,
-  resetChannelResultForRescan,
-  toPendingChannelResult,
-} from "../lib/channelResults";
-import { findDuplicateChannelIndicesChunked } from "../lib/duplicates";
-import {
-  pendingScanErrorMessageForRun,
-  runScopedScanErrorMessage,
-} from "../lib/scanErrorEvents";
+import { useAppStore } from "../store";
+import { EMPTY_TELEMETRY } from "../store/slices/scanSlice";
+import type { ScanResultLookup } from "../store/types";
 import {
   applyResultUpdates,
   isRunScopedEventForActiveRun,
   type ScanUiMetrics,
 } from "./useScan.helpers";
-import { useAppStore } from "../store";
-import { EMPTY_TELEMETRY } from "../store/slices/scanSlice";
-import type { ScanResultLookup } from "../store/types";
 
 export type { ScanState } from "../lib/scanState";
 
@@ -53,9 +50,7 @@ interface RunClockState {
   accumulatedPausedMs: number;
 }
 
-function buildFlatResultsAndMetrics(
-  source: ChannelResult[],
-): {
+function buildFlatResultsAndMetrics(source: ChannelResult[]): {
   resultsByIndex: ScanResultLookup;
   flatResults: ChannelResult[];
   indexToFlatPos: Map<number, number>;
@@ -91,10 +86,7 @@ function buildFlatResultsAndMetrics(
   };
 }
 
-function mergeChannelIntoResult(
-  channel: Channel,
-  existing: ChannelResult,
-): ChannelResult {
+function mergeChannelIntoResult(channel: Channel, existing: ChannelResult): ChannelResult {
   return {
     ...existing,
     ...channel,
@@ -204,13 +196,8 @@ export function useScan() {
     if (count <= 0) return;
     const clock = runClock.current;
     if (!clock) return;
-    const pauseMs =
-      clock.pausedAtMs != null ? performance.now() - clock.pausedAtMs : 0;
-    const activeMs =
-      performance.now() -
-      clock.startedAtMs -
-      clock.accumulatedPausedMs -
-      pauseMs;
+    const pauseMs = clock.pausedAtMs != null ? performance.now() - clock.pausedAtMs : 0;
+    const activeMs = performance.now() - clock.startedAtMs - clock.accumulatedPausedMs - pauseMs;
     for (let i = 0; i < count; i += 1) {
       completionActiveMs.current.push(activeMs);
     }
@@ -295,32 +282,23 @@ export function useScan() {
       logger.debug("[useScan] Setting up event listeners");
 
       const registered = await Promise.all([
-        listen<ScanEvent<ScanResultBatchPayload>>(
-          "scan://channel-results-batch",
-          (event) => {
-            if (
-              cancelling.current ||
-              !isRunScopedEventForActiveRun(
-                activeRunId.current,
-                event.payload.run_id,
-              )
-            ) {
-              return;
-            }
+        listen<ScanEvent<ScanResultBatchPayload>>("scan://channel-results-batch", (event) => {
+          if (
+            cancelling.current ||
+            !isRunScopedEventForActiveRun(activeRunId.current, event.payload.run_id)
+          ) {
+            return;
+          }
 
-            const payload = event.payload.payload;
-            queueResults(payload.items);
-            recordCompletions(payload.items.length);
-            handleProgressUpdate(payload.progress);
-          },
-        ),
+          const payload = event.payload.payload;
+          queueResults(payload.items);
+          recordCompletions(payload.items.length);
+          handleProgressUpdate(payload.progress);
+        }),
         listen<ScanEvent<ChannelResult>>("scan://channel-result", (event) => {
           if (
             cancelling.current ||
-            !isRunScopedEventForActiveRun(
-              activeRunId.current,
-              event.payload.run_id,
-            )
+            !isRunScopedEventForActiveRun(activeRunId.current, event.payload.run_id)
           ) {
             return;
           }
@@ -330,22 +308,14 @@ export function useScan() {
         listen<ScanEvent<ScanProgress>>("scan://progress", (event) => {
           if (
             cancelling.current ||
-            !isRunScopedEventForActiveRun(
-              activeRunId.current,
-              event.payload.run_id,
-            )
+            !isRunScopedEventForActiveRun(activeRunId.current, event.payload.run_id)
           ) {
             return;
           }
           handleProgressUpdate(event.payload.payload);
         }),
         listen<ScanEvent<ScanSummary>>("scan://complete", (event) => {
-          if (
-            !isRunScopedEventForActiveRun(
-              activeRunId.current,
-              event.payload.run_id,
-            )
-          ) {
+          if (!isRunScopedEventForActiveRun(activeRunId.current, event.payload.run_id)) {
             return;
           }
           logger.debug("[useScan] scan://complete received", event.payload);
@@ -359,12 +329,7 @@ export function useScan() {
           runClock.current = null;
         }),
         listen<ScanEvent<ScanSummary>>("scan://cancelled", (event) => {
-          if (
-            !isRunScopedEventForActiveRun(
-              activeRunId.current,
-              event.payload.run_id,
-            )
-          ) {
+          if (!isRunScopedEventForActiveRun(activeRunId.current, event.payload.run_id)) {
             return;
           }
           logger.debug("[useScan] scan://cancelled received", event.payload);
@@ -379,12 +344,7 @@ export function useScan() {
           runClock.current = null;
         }),
         listen<ScanEvent<null>>("scan://paused", (event) => {
-          if (
-            !isRunScopedEventForActiveRun(
-              activeRunId.current,
-              event.payload.run_id,
-            )
-          ) {
+          if (!isRunScopedEventForActiveRun(activeRunId.current, event.payload.run_id)) {
             return;
           }
           const activeRun = runClock.current;
@@ -394,12 +354,7 @@ export function useScan() {
           getStore().applyScanRuntime({ scanState: "paused" });
         }),
         listen<ScanEvent<null>>("scan://resumed", (event) => {
-          if (
-            !isRunScopedEventForActiveRun(
-              activeRunId.current,
-              event.payload.run_id,
-            )
-          ) {
+          if (!isRunScopedEventForActiveRun(activeRunId.current, event.payload.run_id)) {
             return;
           }
           const now = performance.now();
@@ -417,10 +372,7 @@ export function useScan() {
         listen<ScanEvent<ScanErrorPayload>>("scan://error", (event) => {
           logger.debug("[useScan] scan://error received", event.payload);
 
-          const message = runScopedScanErrorMessage(
-            activeRunId.current,
-            event.payload,
-          );
+          const message = runScopedScanErrorMessage(activeRunId.current, event.payload);
           if (message) {
             pendingScanError.current = null;
             applyScanError(message);
@@ -473,25 +425,13 @@ export function useScan() {
         cancelAnimationFrame(rafId.current);
       }
     };
-  }, [
-    queueResult,
-    queueResults,
-    applyScanError,
-    recordCompletions,
-    handleProgressUpdate,
-  ]);
+  }, [queueResult, queueResults, applyScanError, recordCompletions, handleProgressUpdate]);
 
   const start = useCallback(
-    async (
-      config: ScanConfig,
-      totalChannels: number,
-      selectedIndices: number[] = [],
-    ) => {
+    async (config: ScanConfig, totalChannels: number, selectedIndices: number[] = []) => {
       logger.debug(`[useScan] start: totalChannels=${totalChannels}`, config);
-      const selectedSet =
-        selectedIndices.length > 0 ? new Set(selectedIndices) : null;
-      const initialTotal =
-        selectedIndices.length > 0 ? selectedIndices.length : totalChannels;
+      const selectedSet = selectedIndices.length > 0 ? new Set(selectedIndices) : null;
+      const initialTotal = selectedIndices.length > 0 ? selectedIndices.length : totalChannels;
 
       // Reset existing results back to pending status for channels being scanned.
       const updated = flatResultsRef.current.map((existing) =>
@@ -542,10 +482,7 @@ export function useScan() {
           accumulatedPausedMs: 0,
         };
         logger.debug(`[useScan] startScan IPC returned run_id=${runId}`);
-        const pendingMessage = pendingScanErrorMessageForRun(
-          pendingScanError.current,
-          runId,
-        );
+        const pendingMessage = pendingScanErrorMessageForRun(pendingScanError.current, runId);
         if (pendingMessage) {
           pendingScanError.current = null;
           applyScanError(pendingMessage);
@@ -664,10 +601,7 @@ export function useScan() {
         batchSize: 2000,
         shouldCancel: () => duplicateComputeVersion.current !== duplicateVersion,
       }).then((duplicates) => {
-        if (
-          duplicates == null ||
-          duplicateComputeVersion.current !== duplicateVersion
-        ) {
+        if (duplicates == null || duplicateComputeVersion.current !== duplicateVersion) {
           return;
         }
 
@@ -692,19 +626,22 @@ export function useScan() {
     [syncFromPlaylist],
   );
 
-  const updateResult = useCallback((result: ChannelResult) => {
-    const next = applyResultUpdates(
-      {
-        resultsByIndex: resultsRef.current,
-        flatResults: flatResultsRef.current,
-        indexToFlatPos: indexToFlatPosRef.current,
-        metrics: uiMetricsRef.current,
-      },
-      [result],
-    );
+  const updateResult = useCallback(
+    (result: ChannelResult) => {
+      const next = applyResultUpdates(
+        {
+          resultsByIndex: resultsRef.current,
+          flatResults: flatResultsRef.current,
+          indexToFlatPos: indexToFlatPosRef.current,
+          metrics: uiMetricsRef.current,
+        },
+        [result],
+      );
 
-    commitCollections(next);
-  }, [commitCollections]);
+      commitCollections(next);
+    },
+    [commitCollections],
+  );
 
   return {
     start,

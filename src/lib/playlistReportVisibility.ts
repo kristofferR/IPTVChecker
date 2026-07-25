@@ -18,16 +18,11 @@ export function hasScanStarted(scanState: ReportScanState): boolean {
   return scanState !== "idle";
 }
 
-export function shouldShowContentCounts(
-  movieCount: number,
-  seriesCount: number,
-): boolean {
+export function shouldShowContentCounts(movieCount: number, seriesCount: number): boolean {
   return movieCount > 0 || seriesCount > 0;
 }
 
-export function languageCoverage(
-  channels: Array<{ language: string | null }>,
-): number {
+export function languageCoverage(channels: Array<{ language: string | null }>): number {
   if (channels.length === 0) {
     return 0;
   }
