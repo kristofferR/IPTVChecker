@@ -42,7 +42,12 @@ function makeSFIcon(icon: SFIconDef) {
     return (
       <svg xmlns="http://www.w3.org/2000/svg" viewBox={icon.viewBox} fill="currentColor" {...props}>
         {icon.svgPathData.map((path, i) => (
-          <path key={i} d={path.d} fillOpacity={path.fillOpacity} />
+          <path
+            // biome-ignore lint/suspicious/noArrayIndexKey: fixed path list per icon; never reorders, children hold no state.
+            key={i}
+            d={path.d}
+            fillOpacity={path.fillOpacity}
+          />
         ))}
       </svg>
     );

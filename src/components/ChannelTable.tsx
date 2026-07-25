@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { resultAtIndex } from "../hooks/useScan.helpers";
 import { channelRowHeightPixels } from "../lib/channelLogoSize";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { getChannelTableLayout } from "../lib/channelTableLayout";
@@ -133,7 +134,7 @@ export function ChannelTable({
   toolbarHeight,
 }: ChannelTableProps) {
   const completedResults = useAppStore((s) => s.flatResults);
-  const resultsByIndex = useAppStore((s) => s.results);
+  const resultPositions = useAppStore((s) => s.resultPositions);
   const duplicateIndices = useAppStore((s) => s.duplicateIndices);
   const groupFilter = useAppStore((s) => s.groupFilter);
   const statusFilter = useAppStore((s) => s.statusFilter);
@@ -1419,7 +1420,10 @@ export function ChannelTable({
           >
             {selectedIndices.size > 0 &&
             Array.from(selectedIndices).every((idx) => {
-              const r = resultsByIndex[idx];
+              const r = resultAtIndex(
+                { flatResults: completedResults, positions: resultPositions },
+                idx,
+              );
               return r != null && r.status !== "pending" && r.status !== "checking";
             })
               ? "Rescan"

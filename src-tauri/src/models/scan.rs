@@ -18,16 +18,12 @@ pub const MAX_RETRIES: u32 = 10;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum RetryBackoff {
+    #[default]
     None,
     Linear,
     Exponential,
-}
-
-impl Default for RetryBackoff {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,8 +75,7 @@ impl ScanConfig {
 
         if let Some(ext) = self.extended_timeout {
             if !ext.is_finite()
-                || ext < MIN_EXTENDED_TIMEOUT_SECS
-                || ext > MAX_EXTENDED_TIMEOUT_SECS
+                || !(MIN_EXTENDED_TIMEOUT_SECS..=MAX_EXTENDED_TIMEOUT_SECS).contains(&ext)
             {
                 return Err(AppError::Validation(format!(
                     "Invalid extended timeout: must be between {} and {} seconds",
@@ -96,7 +91,8 @@ impl ScanConfig {
             )));
         }
 
-        if self.retries < MIN_RETRIES || self.retries > MAX_RETRIES {
+        // No lower-bound check: MIN_RETRIES is 0, which u32 already enforces.
+        if self.retries > MAX_RETRIES {
             return Err(AppError::Validation(format!(
                 "Invalid retries: must be between {} and {}",
                 MIN_RETRIES, MAX_RETRIES

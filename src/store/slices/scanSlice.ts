@@ -13,8 +13,8 @@ export const EMPTY_TELEMETRY: ScanTelemetry = {
 };
 
 export const createScanSlice: StateCreator<AppStore, [], [], ScanSlice> = (set) => ({
-  results: {},
   flatResults: [],
+  resultPositions: new Map(),
   uiMetrics: { presentCount: 0, lowFpsCount: 0, mislabeledCount: 0 },
   duplicateIndices: new Set(),
   progress: null,
@@ -27,8 +27,8 @@ export const createScanSlice: StateCreator<AppStore, [], [], ScanSlice> = (set) 
 
   applyScanCollections: (update: ScanCollectionsUpdate) =>
     set({
-      results: update.results,
       flatResults: update.flatResults,
+      resultPositions: update.resultPositions,
       uiMetrics: update.uiMetrics,
     }),
   applyScanRuntime: (update: ScanRuntimeUpdate) => set(update),

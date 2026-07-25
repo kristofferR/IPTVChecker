@@ -85,12 +85,10 @@ fn rewrite_tag_uri(line: &str, base: &Url, map_uri: &dyn Fn(&Url) -> Option<Stri
 
     let after_uri_eq = &line[uri_pos + 4..];
 
-    let (quote, uri_start, uri_end) = if after_uri_eq.starts_with('"') {
-        let inner = &after_uri_eq[1..];
+    let (quote, uri_start, uri_end) = if let Some(inner) = after_uri_eq.strip_prefix('"') {
         let end = inner.find('"').unwrap_or(inner.len());
         (Some('"'), 1, 1 + end)
-    } else if after_uri_eq.starts_with('\'') {
-        let inner = &after_uri_eq[1..];
+    } else if let Some(inner) = after_uri_eq.strip_prefix('\'') {
         let end = inner.find('\'').unwrap_or(inner.len());
         (Some('\''), 1, 1 + end)
     } else {

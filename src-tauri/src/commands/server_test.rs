@@ -711,7 +711,7 @@ async fn test_xtream_servers_inner(
                     r.trim_end_matches('p')
                         .parse::<u32>()
                         .ok()
-                        .or_else(|| r.split('x').last()?.parse::<u32>().ok())
+                        .or_else(|| r.split('x').next_back()?.parse::<u32>().ok())
                 })
             })
             .max()

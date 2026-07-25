@@ -321,6 +321,7 @@ export interface AppSettings {
   low_space_threshold_gb: number;
   separate_placeholder_status: boolean;
   show_header_button_text: boolean;
+  automatic_update_checks: boolean;
 }
 
 export interface ScanPresetConfig {
@@ -457,4 +458,20 @@ export interface CastMediaRequest {
   channelName: string | null;
   channelLogo: string | null;
   streamKind: CastStreamKind;
+}
+
+export type UpdateInstallKind = "built-in" | "manual";
+
+/** Mirrors the Rust `UpdateInstallMode`. `buttonLabel`/`instructions` are only
+ *  set for installations that must be updated by their own package manager. */
+export interface UpdateInstallMode {
+  kind: UpdateInstallKind;
+  buttonLabel: string | null;
+  instructions: string | null;
+}
+
+/** Result of a `check_for_updates` call. `version` is null when up to date. */
+export interface UpdateCheckResult {
+  version: string | null;
+  notes: string | null;
 }

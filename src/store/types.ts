@@ -15,6 +15,7 @@ import type {
   StalkerOpenRequest,
   XtreamRecentSource,
 } from "../lib/types";
+import type { UpdateNotice, UpdatePhase } from "../lib/updateState";
 
 // ---------------------------------------------------------------------------
 // Playlist
@@ -51,11 +52,9 @@ export interface ScanTelemetry {
   etaSeconds: number | null;
 }
 
-export type ScanResultLookup = Record<number, ChannelResult | undefined>;
-
 export interface ScanCollectionsUpdate {
-  results: ScanResultLookup;
   flatResults: ChannelResult[];
+  resultPositions: Map<number, number>;
   uiMetrics: ScanUiMetrics;
 }
 
@@ -71,8 +70,10 @@ export interface ScanRuntimeUpdate {
 }
 
 export interface ScanSlice {
-  results: ScanResultLookup;
   flatResults: ChannelResult[];
+  /** Channel index -> position in `flatResults`. Mutated in place as results
+   *  arrive, so subscribe to `flatResults` to observe changes. */
+  resultPositions: Map<number, number>;
   uiMetrics: ScanUiMetrics;
   duplicateIndices: Set<number>;
   progress: ScanProgress | null;
@@ -134,11 +135,7 @@ export interface MenuExportRequest {
   action: "csv" | "split" | "renamed" | "m3u" | "scanlog";
 }
 
-export interface UpdateNotice {
-  latest_version: string;
-  release_url: string;
-  checked_at_epoch_ms: number;
-}
+export type { UpdateNotice, UpdatePhase } from "../lib/updateState";
 
 export interface UiSlice {
   platform: Platform;
@@ -160,6 +157,7 @@ export interface UiSlice {
   menuInfo: string | null;
   menuExportRequest: MenuExportRequest | null;
   updateNotice: UpdateNotice | null;
+  updatePhase: UpdatePhase;
   appVersion: string;
   openSourceDialogState: OpenSourceDialogState | null;
 
@@ -185,6 +183,7 @@ export interface UiSlice {
   setMenuExportRequest: (request: MenuExportRequest | null) => void;
   queueMenuExportRequest: (action: MenuExportRequest["action"]) => void;
   setUpdateNotice: (notice: UpdateNotice | null) => void;
+  setUpdatePhase: (phase: UpdatePhase) => void;
   setAppVersion: (version: string) => void;
   setOpenSourceDialogState: (state: OpenSourceDialogState | null) => void;
 }

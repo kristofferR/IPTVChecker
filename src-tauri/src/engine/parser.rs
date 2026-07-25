@@ -470,6 +470,10 @@ pub struct ParseProgress {
     pub series_found: usize,
 }
 
+/// An `#EXTINF` line awaiting its URL: `(raw line, parsed attributes, group)`.
+/// Attributes are parsed once here rather than again per channel.
+type PendingExtinf = (String, Vec<(String, String)>, String);
+
 fn parse_playlist_reader<R: BufRead>(
     reader: R,
     file_path: &str,
@@ -485,8 +489,7 @@ fn parse_playlist_reader<R: BufRead>(
     let mut movie_found = 0usize;
     let mut series_found = 0usize;
     let mut pending_channel = false;
-    // (extinf line, parsed attributes, group name) — parsed once per EXTINF.
-    let mut pending_extinf: Option<(String, Vec<(String, String)>, String)> = None;
+    let mut pending_extinf: Option<PendingExtinf> = None;
     let mut pending_metadata: Vec<String> = Vec::new();
     let mut orphaned_extinf = 0u32;
 

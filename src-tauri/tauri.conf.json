@@ -86,5 +86,13 @@
         "role": "Editor"
       }
     ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/kristofferR/IPTVChecker/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMzMDVEMzBDQjc2RkQ3NUEKUldSYTEyKzNETk1GTXh4N2pvMG9mR3YycyttN2U2Nmg5OFVKbnNBdUVITTVkdkp0dm02aldqUnAK"
+    }
   }
 }

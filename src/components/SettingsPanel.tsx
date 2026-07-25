@@ -697,6 +697,25 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
 
             <section className={blockClass}>
               <div className={rowClass}>
+                <div>
+                  <p className="text-[13px] font-medium">Automatic update checks</p>
+                  <p className="text-[11px] text-text-tertiary mt-0.5">
+                    Look for a signed update on launch and every six hours. Updates are only ever
+                    installed after you confirm.
+                  </p>
+                </div>
+                <Switch
+                  checked={draft.automatic_update_checks}
+                  onChange={(checked) =>
+                    updateSetting("automatic_update_checks", checked, { immediate: true })
+                  }
+                  ariaLabel="Automatic update checks"
+                />
+              </div>
+            </section>
+
+            <section className={blockClass}>
+              <div className={rowClass}>
                 <div className="min-w-0">
                   <p className="text-[13px] font-medium">Default app for .m3u/.m3u8</p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
@@ -1106,7 +1125,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                 </p>
               )}
 
-              <div className="grid grid-cols-1 grid-cols-2 gap-3 p-4 border-t border-border-subtle">
+              <div className="grid grid-cols-2 gap-3 p-4 border-t border-border-subtle">
                 <div>
                   <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
                     Screenshot Retention

@@ -46,7 +46,7 @@ import {
   readScreenshot,
 } from "./lib/tauri";
 import type { AppSettings, ChannelResult, ChromecastDevice, ScanConfig } from "./lib/types";
-import { useAppStore } from "./store";
+import { selectResultByIndex, useAppStore } from "./store";
 import type { AppStore, OpenSourceDialogState } from "./store/types";
 
 const KeyboardShortcutsDialog = lazy(() => import("./components/KeyboardShortcutsDialog"));
@@ -131,7 +131,7 @@ async function canSendNotifications(requiresPermission: boolean): Promise<boolea
 
 const selectLiveSelectedChannel = (state: AppStore): ChannelResult | null => {
   const selected = state.selectedChannel;
-  return selected ? (state.results[selected.index] ?? selected) : null;
+  return selected ? (selectResultByIndex(state, selected.index) ?? selected) : null;
 };
 
 type StreamPlayerController = ReturnType<typeof useStreamPlayer>;
@@ -564,7 +564,7 @@ export default function App() {
   const { settings, save: saveSettings, applyExternal: applyExternalSettings } = useSettings();
   const { start, cancel, pause, resume, initFromPlaylist, syncFromPlaylist, updateResult } =
     useScan();
-  const { checkForUpdates } = useUpdateCheck();
+  const { checkForUpdates, installUpdate } = useUpdateCheck();
   const {
     handleClearRecentPlaylists,
     handleOpen,
@@ -1163,7 +1163,7 @@ export default function App() {
     lastMergedMetaRef.current = { index: idx, meta };
 
     const state = getStore();
-    const existing = state.results[idx];
+    const existing = selectResultByIndex(state, idx);
     if (!existing) return;
 
     let changed = false;
@@ -1455,7 +1455,7 @@ export default function App() {
         )}
         <ScanPauseBanners />
 
-        <AppBanners />
+        <AppBanners onInstallUpdate={installUpdate} />
 
         <div className="flex flex-col flex-1 min-h-0">
           <div className="flex flex-1 min-h-0 bg-content">
