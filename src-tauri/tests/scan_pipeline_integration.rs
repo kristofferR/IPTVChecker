@@ -1,7 +1,9 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use iptv_checker_lib::commands::export::{export_csv, export_m3u};
 use iptv_checker_lib::engine::checker::check_channel_status_with_debug;
+use iptv_checker_lib::engine::parser::parse_m3u;
 use iptv_checker_lib::engine::proxy::{confirm_geoblock, test_with_proxy};
 use iptv_checker_lib::engine::resume::{
     load_checkpoint_results, load_processed_channels, write_entries, CheckpointWriteEntry,
@@ -277,4 +279,130 @@ fn checkpoint_batch_roundtrip_keeps_latest_results_and_redacts_secrets() {
 
     let _ = std::fs::remove_file(&log_file);
     let _ = std::fs::remove_file(&checkpoint_file);
+}
+
+/// Parse -> check -> export, over the same code paths the app uses.
+///
+/// The unit tests cover each stage in isolation; this one checks that a real
+/// playlist survives the whole trip: that parsed channels keep the identity the
+/// exporters rely on, that a mixed alive/dead server produces the statuses the
+/// "alive only" export filters on, and that the exported M3U can be parsed back.
+#[tokio::test]
+async fn playlist_round_trips_from_parse_through_check_to_export() {
+    let stream_body = vec![b'x'; 600 * 1024];
+    let handler = Arc::new(move |path: &str| {
+        // /live/2 is the dead one; everything else streams.
+        if path.starts_with("/live/2") {
+            return TestHttpResponse {
+                status_code: 404,
+                reason: "Not Found",
+                headers: vec![("Content-Type".to_string(), "text/plain".to_string())],
+                body: b"gone".to_vec(),
+            };
+        }
+        TestHttpResponse {
+            status_code: 200,
+            reason: "OK",
+            headers: vec![("Content-Type".to_string(), "video/mp2t".to_string())],
+            body: stream_body.clone(),
+        }
+    });
+    let (base_url, server_handle) = spawn_http_server(handler).await;
+
+    let playlist = format!(
+        "#EXTM3U\n\
+         #EXTINF:-1 tvg-id=\"one\" group-title=\"News\",Channel One\n\
+         {base_url}/live/1\n\
+         #EXTINF:-1 tvg-id=\"two\" group-title=\"News\",Channel Two\n\
+         {base_url}/live/2\n\
+         #EXTINF:-1 tvg-id=\"three\" group-title=\"Sports\",Channel Three\n\
+         {base_url}/live/3\n"
+    );
+
+    let preview = parse_m3u(playlist.as_bytes(), "integration.m3u", &None, &None)
+        .expect("playlist should parse");
+    assert_eq!(preview.total_channels, 3);
+    assert_eq!(
+        preview.groups,
+        vec!["News".to_string(), "Sports".to_string()]
+    );
+
+    // Check every parsed channel against the mock server.
+    let cancel = CancellationToken::new();
+    let mut results = Vec::new();
+    for channel in &preview.channels {
+        let outcome = check_channel_status_with_debug(
+            &test_client(),
+            &channel.url,
+            2.0,
+            0,
+            RetryBackoff::None,
+            None,
+            "IPTVCheckerTests/1.0",
+            &cancel,
+        )
+        .await
+        .expect("checker request should complete");
+
+        let mut result = make_result(channel.index, outcome.status, &channel.url, None);
+        result.name = channel.name.clone();
+        result.group = channel.group.clone();
+        result.extinf_line = channel.extinf_line.clone();
+        results.push(result);
+    }
+    server_handle.abort();
+
+    let statuses: Vec<_> = results.iter().map(|result| result.status).collect();
+    assert_eq!(
+        statuses,
+        vec![
+            ChannelStatus::Alive,
+            ChannelStatus::Dead,
+            ChannelStatus::Alive
+        ],
+        "the 404 channel must be the only dead one"
+    );
+
+    // Export only the alive channels, as the "alive only" export scope does.
+    let alive: Vec<ChannelResult> = results
+        .iter()
+        .filter(|result| result.status == ChannelStatus::Alive)
+        .cloned()
+        .collect();
+
+    let m3u_path = temp_file("roundtrip.m3u");
+    export_m3u(alive.clone(), m3u_path.clone())
+        .await
+        .expect("m3u export should succeed");
+
+    let exported = std::fs::read(&m3u_path).expect("exported m3u should be readable");
+    let reparsed =
+        parse_m3u(&exported, "exported.m3u", &None, &None).expect("exported m3u should parse");
+    assert_eq!(
+        reparsed.total_channels, 2,
+        "dead channel must not be exported"
+    );
+    assert_eq!(
+        reparsed
+            .channels
+            .iter()
+            .map(|channel| channel.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Channel One", "Channel Three"],
+    );
+
+    let csv_path = temp_file("roundtrip.csv");
+    export_csv(alive, csv_path.clone(), "integration".to_string(), true)
+        .await
+        .expect("csv export should succeed");
+
+    let csv = std::fs::read_to_string(&csv_path).expect("exported csv should be readable");
+    let data_rows = csv.lines().skip(2).filter(|line| !line.is_empty()).count();
+    assert_eq!(data_rows, 2, "csv should hold one row per exported channel");
+    assert!(csv.contains("Channel One"));
+    assert!(csv.contains("Channel Three"));
+    assert!(!csv.contains("Channel Two"));
+
+    let _ = std::fs::remove_file(&m3u_path);
+    let _ = std::fs::remove_file(&csv_path);
 }

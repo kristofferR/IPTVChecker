@@ -187,7 +187,7 @@ fn extract_host_fast(url: &str) -> Option<&str> {
     } else {
         // Host ends at first '/', ':', '?', or '#' (port, path, query, or fragment)
         let end = after_userinfo
-            .find(|c: char| c == '/' || c == ':' || c == '?' || c == '#')
+            .find(['/', ':', '?', '#'])
             .unwrap_or(after_userinfo.len());
         &after_userinfo[..end]
     };
@@ -398,8 +398,8 @@ async fn populate_server_metadata(app: Option<&AppHandle>, preview: &mut Playlis
 /// Prefers the filename from the path (e.g. "news.m3u"), falling back to the
 /// hostname (e.g. "iptv-org.github.io").
 pub(crate) fn friendly_name_from_url(url: &Url) -> String {
-    if let Some(segments) = url.path_segments() {
-        if let Some(last) = segments.filter(|s| !s.is_empty()).last() {
+    if let Some(mut segments) = url.path_segments() {
+        if let Some(last) = segments.rfind(|s| !s.is_empty()) {
             // Use the segment if it looks like a real name (has extension,
             // is short, or isn't a pure hex hash).
             if last.contains('.') || last.len() < 40 || !last.chars().all(|c| c.is_ascii_hexdigit())

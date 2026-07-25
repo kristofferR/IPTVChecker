@@ -4,7 +4,10 @@ pub mod chromecast;
 pub mod connectivity;
 pub mod disk;
 pub mod ffmpeg;
+#[cfg(target_os = "macos")]
+pub mod macos_dmg_update;
 pub mod parser;
+pub mod playlist_score;
 pub mod proxy;
 pub mod proxy_common;
 pub mod remote_cache;

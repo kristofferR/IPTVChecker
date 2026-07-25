@@ -16,8 +16,8 @@ use crate::models::backend_perf::BackendPerfSample;
 use crate::models::channel::{Channel, ChannelResult, ChannelStatus};
 use crate::models::playlist::PlaylistPreview;
 use crate::models::scan::{
-    PlaylistScore, RetryBackoff, ScanConfig, ScanErrorPayload, ScanEvent, ScanProgress,
-    ScanResultBatchPayload, ScanSummary,
+    RetryBackoff, ScanConfig, ScanErrorPayload, ScanEvent, ScanProgress, ScanResultBatchPayload,
+    ScanSummary,
 };
 use crate::models::scan_log::{ChannelDebugLog, ScanDebugLog};
 use crate::models::settings::ScreenshotFormat;
@@ -88,6 +88,18 @@ impl SharedUrlResult {
         }
     }
 }
+
+/// Per-URL memo of check results, so channels that share a stream URL are only
+/// fetched once. The `OnceCell` lets the second waiter block on the first
+/// worker's result instead of racing it.
+type SharedUrlResultCache = Arc<
+    tokio::sync::Mutex<
+        HashMap<
+            String,
+            Arc<tokio::sync::OnceCell<Result<(SharedUrlResult, WorkerTiming), AppError>>>,
+        >,
+    >,
+>;
 
 fn set_screenshot_capture_success(shared: &mut SharedUrlResult, path: String) {
     shared.screenshot_path = Some(path);
@@ -346,7 +358,7 @@ async fn compute_shared_url_result(
     };
     let redacted_target_url = stream_proxy::redact_url(&target_url);
     let mut shared = SharedUrlResult {
-        status: status.clone(),
+        status,
         drm_system,
         latency_ms,
         codec: None,
@@ -485,10 +497,9 @@ async fn compute_shared_url_result(
                     shared.video_bitrate = Some(format!("{kbps} kbps"));
                 }
                 format_bitrate_kbps = diag.format_bitrate_kbps;
-                shared.channel_log.diagnostics_output =
-                    Some(crate::models::scan_log::cap_diagnostics_output(
-                        diag.diagnostics_output,
-                    ));
+                shared.channel_log.diagnostics_output = Some(
+                    crate::models::scan_log::cap_diagnostics_output(diag.diagnostics_output),
+                );
 
                 let png_fallback_result = if diag.screenshot_path.is_none()
                     && want_screenshot
@@ -857,169 +868,6 @@ impl ScanCounters {
     }
 }
 
-fn clamp_01(value: f64) -> f64 {
-    value.clamp(0.0, 1.0)
-}
-
-fn clamp_score_10(value: f64) -> f64 {
-    value.clamp(0.0, 10.0)
-}
-
-fn round_to_tenth(value: f64) -> f64 {
-    (value * 10.0).round() / 10.0
-}
-
-fn median_u64(values: &[u64]) -> Option<f64> {
-    if values.is_empty() {
-        return None;
-    }
-    let mut sorted = values.to_vec();
-    sorted.sort_unstable();
-    let mid = sorted.len() / 2;
-    if sorted.len() % 2 == 1 {
-        Some(sorted[mid] as f64)
-    } else {
-        Some((sorted[mid - 1] as f64 + sorted[mid] as f64) / 2.0)
-    }
-}
-
-fn is_hd_or_uhd(result: &ChannelResult) -> bool {
-    if let (Some(width), Some(height)) = (result.width, result.height) {
-        if width >= 1280 && height >= 720 {
-            return true;
-        }
-    }
-    if let Some(resolution) = result.resolution.as_ref() {
-        let normalized = resolution.to_ascii_lowercase();
-        return normalized.contains("720")
-            || normalized.contains("1080")
-            || normalized.contains("1440")
-            || normalized.contains("2160")
-            || normalized.contains("4k")
-            || normalized.contains("uhd");
-    }
-    false
-}
-
-fn codec_tier_score(codec: Option<&str>) -> f64 {
-    let Some(codec) = codec else {
-        return 0.4;
-    };
-    let normalized = codec.to_ascii_lowercase();
-    if normalized.contains("hevc") || normalized.contains("h265") || normalized.contains("h.265") {
-        return 1.0;
-    }
-    if normalized.contains("av1") {
-        return 1.0;
-    }
-    if normalized.contains("h264") || normalized.contains("h.264") || normalized.contains("avc") {
-        return 0.8;
-    }
-    if normalized.contains("mpeg") || normalized.contains("vp9") {
-        return 0.6;
-    }
-    0.5
-}
-
-fn compute_playlist_score(
-    results: &[ChannelResult],
-    total_channels: usize,
-) -> Option<PlaylistScore> {
-    if total_channels == 0 {
-        return None;
-    }
-
-    let alive_results = results
-        .iter()
-        .filter(|result| result.status == ChannelStatus::Alive)
-        .collect::<Vec<_>>();
-    let alive_count = alive_results.len();
-
-    let ping_score = {
-        let latencies = alive_results
-            .iter()
-            .filter_map(|result| result.latency_ms)
-            .collect::<Vec<_>>();
-        let p50 = median_u64(&latencies);
-        let raw = if let Some(p50) = p50 {
-            // 100ms ~= excellent (10), 1200ms ~= poor (0)
-            (1200.0 - p50) / 1100.0 * 10.0
-        } else {
-            0.0
-        };
-        clamp_score_10(raw)
-    };
-
-    let content_score = {
-        let alive_ratio = alive_count as f64 / total_channels as f64;
-        let unique_groups = results
-            .iter()
-            .map(|result| result.group.trim().to_ascii_lowercase())
-            .filter(|group| !group.is_empty())
-            .collect::<HashSet<_>>()
-            .len();
-        let diversity_ratio = clamp_01(unique_groups as f64 / 20.0);
-        let epg_covered = results
-            .iter()
-            .filter(|result| {
-                result
-                    .tvg_id
-                    .as_deref()
-                    .map(str::trim)
-                    .map(|value| !value.is_empty())
-                    .unwrap_or(false)
-            })
-            .count();
-        let epg_ratio = epg_covered as f64 / total_channels as f64;
-
-        clamp_score_10((alive_ratio * 0.6 + diversity_ratio * 0.2 + epg_ratio * 0.2) * 10.0)
-    };
-
-    let quality_score = {
-        if alive_results.is_empty() {
-            0.0
-        } else {
-            let hd_ratio = alive_results
-                .iter()
-                .filter(|result| is_hd_or_uhd(result))
-                .count() as f64
-                / alive_results.len() as f64;
-
-            let codec_avg = alive_results
-                .iter()
-                .map(|result| codec_tier_score(result.codec.as_deref()))
-                .sum::<f64>()
-                / alive_results.len() as f64;
-
-            let fps_known = alive_results
-                .iter()
-                .filter(|result| result.fps.is_some())
-                .count();
-            let fps_ratio = if fps_known == 0 {
-                0.0
-            } else {
-                alive_results
-                    .iter()
-                    .filter(|result| result.fps.unwrap_or_default() >= 25)
-                    .count() as f64
-                    / fps_known as f64
-            };
-
-            clamp_score_10((hd_ratio * 0.5 + codec_avg * 0.3 + fps_ratio * 0.2) * 10.0)
-        }
-    };
-
-    let overall_score =
-        clamp_score_10(ping_score * 0.25 + content_score * 0.40 + quality_score * 0.35);
-
-    Some(PlaylistScore {
-        overall: round_to_tenth(overall_score),
-        ping: round_to_tenth(ping_score),
-        content: round_to_tenth(content_score),
-        quality: round_to_tenth(quality_score),
-    })
-}
-
 fn filter_channels_by_selection(
     channels: &mut Vec<Channel>,
     selected_indices: &Option<Vec<usize>>,
@@ -1033,7 +881,10 @@ fn filter_channels_by_selection(
 fn filter_channels_by_content_type(channels: &mut Vec<Channel>, hide_vod_content: bool) {
     if hide_vod_content {
         channels.retain(|channel| {
-            matches!(channel.content_type, crate::models::channel::ContentType::Live)
+            matches!(
+                channel.content_type,
+                crate::models::channel::ContentType::Live
+            )
         });
     }
 }
@@ -1585,9 +1436,7 @@ async fn prepare_screenshots_dir(
         let dir_clone = dir.clone();
         tokio::task::spawn_blocking(move || std::fs::create_dir_all(&dir_clone))
             .await
-            .map_err(|e| {
-                AppError::Other(format!("Failed to create screenshots directory: {}", e))
-            })?
+            .map_err(|e| AppError::Other(format!("Failed to create screenshots directory: {}", e)))?
             .map_err(|e| {
                 AppError::Other(format!("Failed to create screenshots directory: {}", e))
             })?;
@@ -1641,7 +1490,8 @@ async fn pause_if_network_down(
     cancel: &CancellationToken,
     consecutive_net_failures: &AtomicU32,
 ) -> bool {
-    if consecutive_net_failures.load(Ordering::Relaxed) < connectivity::CONSECUTIVE_FAILURE_THRESHOLD
+    if consecutive_net_failures.load(Ordering::Relaxed)
+        < connectivity::CONSECUTIVE_FAILURE_THRESHOLD
     {
         return true;
     }
@@ -1726,7 +1576,10 @@ impl AdaptiveThrottle {
             if !self.engaged.swap(true, Ordering::Relaxed) {
                 log::info!(
                     "Adaptive throttle engaged: pressure_ratio={:.2} ({}/{} channels), delay={}ms",
-                    pressure_ratio, pressure, total_so_far, delay_ms
+                    pressure_ratio,
+                    pressure,
+                    total_so_far,
+                    delay_ms
                 );
                 let _ = app.emit(
                     "scan://adaptive-throttle",
@@ -1826,7 +1679,7 @@ impl ScreenshotDiskGuard {
             return false;
         }
         let count = self.check_counter.fetch_add(1, Ordering::Relaxed);
-        if count % 20 != 0 {
+        if !count.is_multiple_of(20) {
             return false;
         }
         let Some(dir) = screenshots_dir else {
@@ -2006,7 +1859,9 @@ async fn run_event_emitter(
             .await;
         }
 
-        emitter.ingest(worker.result, Some(worker.channel_log)).await;
+        emitter
+            .ingest(worker.result, Some(worker.channel_log))
+            .await;
     }
 
     emitter.finish().await
@@ -2035,14 +1890,15 @@ fn track_worker_signals(
     // Adaptive concurrency — track pressure signals
     let is_pressure_signal = if shared.status == ChannelStatus::Dead {
         // Timeout or rate limit errors are pressure signals
-        shared.error_reason.as_deref().map_or(false, |reason| {
-            reason == "Timeout" || reason.starts_with("HTTP 429")
-        })
+        shared
+            .error_reason
+            .as_deref()
+            .is_some_and(|reason| reason == "Timeout" || reason.starts_with("HTTP 429"))
     } else {
         false
     };
     // Retries indicate the server is under strain even if the channel eventually succeeded
-    let had_retries = shared.retry_count.map_or(false, |count| count > 0);
+    let had_retries = shared.retry_count.is_some_and(|count| count > 0);
 
     adaptive_throttle.record_outcome(is_pressure_signal || had_retries);
 }
@@ -2062,7 +1918,7 @@ fn build_channel_result(channel: &Channel, shared: &SharedUrlResult) -> ChannelR
         tvg_chno: channel.tvg_chno.clone(),
         url: channel.url.clone(),
         content_type: channel.content_type,
-        status: shared.status.clone(),
+        status: shared.status,
         codec: shared.codec.clone(),
         resolution: shared.resolution.clone(),
         width: shared.width,
@@ -2118,14 +1974,9 @@ async fn append_history_blocking(
     let config = config.clone();
     let summary = summary.clone();
     let _ = tokio::task::spawn_blocking(move || {
-        if let Err(error) = history::append_scan_history(
-            &app,
-            &run_id,
-            &config,
-            &summary,
-            results,
-            history_limit,
-        ) {
+        if let Err(error) =
+            history::append_scan_history(&app, &run_id, &config, &summary, results, history_limit)
+        {
             log::warn!("Failed to write scan history for {}: {}", run_id, error);
         }
     })
@@ -2353,18 +2204,11 @@ async fn execute_scan_run(
     ));
 
     let proxy_list = Arc::new(proxy_list);
-    let shared_url_results: Arc<
-        tokio::sync::Mutex<
-            HashMap<
-                String,
-                Arc<tokio::sync::OnceCell<Result<(SharedUrlResult, WorkerTiming), AppError>>>,
-            >,
-        >,
-    > = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let shared_url_results: SharedUrlResultCache =
+        Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
     // Disk space tracking for screenshot pause
-    let disk_guard =
-        ScreenshotDiskGuard::new(using_custom_screenshots_dir, low_space_threshold_gb);
+    let disk_guard = ScreenshotDiskGuard::new(using_custom_screenshots_dir, low_space_threshold_gb);
 
     // Network connectivity tracking — consecutive network-level failures trigger a check
     let consecutive_net_failures = Arc::new(AtomicU32::new(0));
@@ -2613,7 +2457,10 @@ async fn execute_scan_run(
     };
 
     let mut summary = completed_scan.summary.clone();
-    summary.playlist_score = compute_playlist_score(&completed_scan.results, summary.total);
+    summary.playlist_score = crate::engine::playlist_score::compute_playlist_score(
+        &completed_scan.results,
+        summary.total,
+    );
     if cancel_token.is_cancelled() {
         let _ = app.emit(
             "scan://cancelled",
@@ -2871,7 +2718,7 @@ pub async fn quick_check_channel(
             &channel.url,
             settings.ffprobe_timeout_secs,
             settings.retries,
-            settings.retry_backoff.clone(),
+            settings.retry_backoff,
             None,
             ffprobe_ok,
             &cancel_token,
@@ -2883,7 +2730,7 @@ pub async fn quick_check_channel(
             &channel.url,
             settings.timeout,
             settings.retries,
-            settings.retry_backoff.clone(),
+            settings.retry_backoff,
             settings.extended_timeout,
             &settings.user_agent,
             &cancel_token,
@@ -3186,44 +3033,6 @@ mod tests {
         assert_eq!(summary.low_framerate, 1);
         assert_eq!(summary.mislabeled, 1);
         assert!(summary.playlist_score.is_none());
-    }
-
-    #[test]
-    fn compute_playlist_score_builds_weighted_subscores() {
-        let mut first = make_result(0, ChannelStatus::Alive, false, false);
-        first.group = "Sports".to_string();
-        first.latency_ms = Some(150);
-        first.tvg_id = Some("epg-a".to_string());
-        first.width = Some(1920);
-        first.height = Some(1080);
-        first.codec = Some("h264".to_string());
-        first.fps = Some(30);
-
-        let mut second = make_result(1, ChannelStatus::Alive, false, false);
-        second.group = "Movies".to_string();
-        second.latency_ms = Some(300);
-        second.tvg_id = Some("epg-b".to_string());
-        second.width = Some(3840);
-        second.height = Some(2160);
-        second.codec = Some("hevc".to_string());
-        second.fps = Some(50);
-
-        let mut third = make_result(2, ChannelStatus::Dead, false, false);
-        third.group = "Kids".to_string();
-
-        let score = compute_playlist_score(&[first, second, third], 3)
-            .expect("score should be present for non-empty scans");
-
-        assert!(score.ping > 0.0);
-        assert!(score.content > 0.0);
-        assert!(score.quality > 0.0);
-        assert!(score.overall > 0.0);
-        assert!(score.overall <= 10.0);
-    }
-
-    #[test]
-    fn compute_playlist_score_returns_none_for_empty_scans() {
-        assert!(compute_playlist_score(&[], 0).is_none());
     }
 
     #[test]

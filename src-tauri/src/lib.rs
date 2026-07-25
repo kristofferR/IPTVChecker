@@ -1,3 +1,9 @@
+// The scan/ffmpeg/cast pipelines thread a lot of per-check configuration
+// through their worker functions. Bundling those into parameter structs is a
+// worthwhile refactor, but it is a behavioural change to the hottest code in
+// the app and does not belong to the lint gate that introduced this allow.
+#![allow(clippy::too_many_arguments)]
+
 pub mod commands;
 pub mod engine;
 pub mod error;
@@ -183,6 +189,9 @@ fn create_window_from_main_config(app: &tauri::AppHandle, label: String) {
     match tauri::WebviewWindowBuilder::from_config(app, &window_config)
         .and_then(|builder| builder.build())
     {
+        // The built window is only consumed by the macOS-only vibrancy setup
+        // below; elsewhere the theme is applied through the app handle.
+        #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
         Ok(window) => {
             let theme_preference = {
                 let state = app.state::<Arc<AppState>>();
@@ -550,6 +559,7 @@ pub fn run() {
         )
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_window_state::Builder::new()
                 .with_state_flags(
@@ -860,13 +870,13 @@ pub fn run() {
                 theme
             };
             if let Err(error) =
-                commands::settings::apply_theme_preference(&app.handle(), theme_preference)
+                commands::settings::apply_theme_preference(app.handle(), theme_preference)
             {
                 log::warn!("Failed to apply startup theme preference: {}", error);
             }
 
-            commands::recent::refresh_recent_menu(&app.handle());
-            commands::saved::refresh_saved_menu(&app.handle());
+            commands::recent::refresh_recent_menu(app.handle());
+            commands::saved::refresh_saved_menu(app.handle());
 
             let launch_open_paths = collect_launch_open_paths();
             if !launch_open_paths.is_empty() {
@@ -874,7 +884,7 @@ pub fn run() {
                     "Detected {} playlist path(s) from launch arguments",
                     launch_open_paths.len()
                 );
-                emit_open_paths_to_focused_window(&app.handle(), &launch_open_paths);
+                emit_open_paths_to_focused_window(app.handle(), &launch_open_paths);
             }
 
             // Warm up the localhost streaming proxy in the background. Play
@@ -992,6 +1002,8 @@ pub fn run() {
                 }
             }
 
+            commands::updater::spawn_automatic_update_checks(app.handle().clone());
+
             Ok(())
         })
         .manage(AppState::new() as Arc<AppState>)
@@ -1029,6 +1041,11 @@ pub fn run() {
             commands::settings::read_screenshot,
             commands::settings::get_screenshot_cache_stats,
             commands::settings::clear_screenshot_cache,
+            commands::updater::check_for_updates,
+            commands::updater::discovered_update,
+            commands::updater::update_install_mode,
+            commands::updater::open_manual_update,
+            commands::updater::install_update,
             commands::history::get_scan_history,
             commands::history::clear_scan_history,
             commands::recent::get_recent_playlists,

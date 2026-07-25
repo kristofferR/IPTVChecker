@@ -16,6 +16,10 @@ jobs:
   build:
     strategy:
       fail-fast: false
+      # Run targets one at a time: tauri-action's updater step downloads the
+      # release's latest.json, adds this target's entry, and re-uploads it.
+      # Concurrent jobs would clobber each other's entries.
+      max-parallel: 1
       matrix:
         include:
           - os: macos-latest
@@ -81,7 +85,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # Windows code signing (optional)
+          # Updater signing (required for the auto-update artifacts).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
@@ -91,7 +95,9 @@ jobs:
           prerelease: false
           # Keep these aliases stable: kristofferR/homebrew-tap builds asset URLs from them.
           assetNamePattern: "IPTV.Checker_[version]_${{ env.ASSET_PLATFORM }}_${{ env.ASSET_ARCH }}[_setup][ext]"
-          args: --target ${{ matrix.target }}
+          # The release config enables createUpdaterArtifacts. It is kept out of
+          # the base config so a local `tauri build` doesn't need the signing key.
+          args: --target ${{ matrix.target }} --config src-tauri/tauri.conf.release.json
 
       - name: Verify production binary set
         shell: bash
@@ -99,11 +105,82 @@ jobs:
           TARGET_TRIPLE: ${{ matrix.target }}
         run: bash scripts/verify-production-binaries.sh "${TARGET_TRIPLE}"
 
+      # tauri-action notarizes the .app but not the .dmg, so a downloaded .dmg
+      # would still be gatekeeper-prompted. Notarize + staple it, re-upload it
+      # under the stable name, and point the updater at it: the .dmg is the
+      # artifact users download, so it is the one that should be installed.
+      - name: Notarize the .dmg and point the updater at it
+        if: startsWith(matrix.os, 'macos')
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_MAC_ARCH: ${{ startsWith(matrix.target, 'aarch64') && 'aarch64' || 'x64' }}
+          UPDATER_PLATFORM: ${{ startsWith(matrix.target, 'aarch64') && 'darwin-aarch64' || 'darwin-x86_64' }}
+          TARGET_TRIPLE: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APPLE_ID}" ] || [ -z "${APPLE_PASSWORD}" ] || [ -z "${APPLE_TEAM_ID}" ]; then
+            # A tagged release promises a signed, notarized download — fail
+            # rather than publish an unstapled .dmg. Manual (workflow_dispatch)
+            # runs may still skip when the secrets aren't configured.
+            if [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
+              echo "Missing Apple notarization secrets for a tagged release." >&2
+              exit 1
+            fi
+            echo "No Apple credentials configured — skipping .dmg notarization."
+            exit 0
+          fi
+
+          # -print -quit rather than piping to head: under `set -o pipefail` a
+          # missing bundle dir makes find fail the whole step before the guard
+          # below can report it.
+          src="$(find "src-tauri/target/${TARGET_TRIPLE}/release/bundle/dmg" -name '*.dmg' -print -quit || true)"
+          if [ -z "${src}" ]; then echo "No .dmg found." >&2; exit 1; fi
+          xcrun notarytool submit "${src}" --apple-id "${APPLE_ID}" \
+            --password "${APPLE_PASSWORD}" --team-id "${APPLE_TEAM_ID}" --wait
+          xcrun stapler staple "${src}"
+
+          version="$(jq -r '.version' src-tauri/tauri.conf.json)"
+          dest="IPTV.Checker_${version}_mac_${ASSET_ARCH}.dmg"
+          cp "${src}" "${dest}"
+          bun run tauri signer sign "${dest}"
+          gh release upload "${GITHUB_REF_NAME}" "${dest}" "${dest}.sig" --clobber
+
+          bash scripts/patch-updater-manifest.sh \
+            "${GITHUB_REF_NAME}" "${UPDATER_PLATFORM}" "app" "${dest}" "$(cat "${dest}.sig")"
+
+          # Drop the stock .app.tar.gz updater archive: latest.json now points
+          # at the stapled .dmg, so the archive would only confuse the release
+          # listing (and is not notarized).
+          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
+            | jq -r --arg tag "${GITHUB_REF_NAME}" '.[] | select(.tag_name == $tag) | .id' | head -n1)"
+          assets="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" --paginate)"
+          for stale in \
+            "IPTV.Checker_${version}_${TAURI_MAC_ARCH}.app.tar.gz" \
+            "IPTV.Checker_${version}_${TAURI_MAC_ARCH}.app.tar.gz.sig" \
+            "IPTV.Checker_${version}_mac_${ASSET_ARCH}.app.tar.gz" \
+            "IPTV.Checker_${version}_mac_${ASSET_ARCH}.app.tar.gz.sig" \
+            "IPTV.Checker_${version}_${TAURI_MAC_ARCH}.dmg"; do
+            stale_id="$(printf '%s\n' "${assets}" \
+              | jq -r --arg name "${stale}" '.[] | select(.name == $name) | .id' | head -n1)"
+            if [ -n "${stale_id}" ]; then
+              echo "Deleting superseded asset ${stale}."
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${stale_id}"
+            fi
+          done
+
       - name: Harden and replace AppImage release asset
         if: startsWith(matrix.target, 'x86_64-unknown-linux') || startsWith(matrix.target, 'aarch64-unknown-linux')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_TRIPLE: ${{ matrix.target }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          UPDATER_PLATFORM: ${{ startsWith(matrix.target, 'aarch64') && 'linux-aarch64' || 'linux-x86_64' }}
         run: |
           appimage="$(bash scripts/find-appimage.sh "${TARGET_TRIPLE}")"
           bash scripts/harden-appimage-runtime.sh "${appimage}"
@@ -112,6 +189,18 @@ jobs:
           release_asset="IPTV.Checker_${version}_lin_${ASSET_ARCH}.AppImage"
           cp "${appimage}" "${release_asset}"
           gh release upload "${GITHUB_REF_NAME}" "${release_asset}" --clobber
+
+          # Hardening rewrites the AppImage after tauri-action signed it, so the
+          # signature already in latest.json does not match the published bytes.
+          # Re-sign the hardened file and repoint the manifest, or every Linux
+          # auto-update would fail minisign verification.
+          bun run tauri signer sign "${release_asset}"
+          # Replace the stale detached signature asset too, so anyone verifying
+          # the published AppImage by hand gets the matching one.
+          gh release upload "${GITHUB_REF_NAME}" "${release_asset}.sig" --clobber
+          bash scripts/patch-updater-manifest.sh \
+            "${GITHUB_REF_NAME}" "${UPDATER_PLATFORM}" "appimage" \
+            "${release_asset}" "$(cat "${release_asset}.sig")"
 
       - name: Create Windows portable zip
         if: startsWith(matrix.target, 'x86_64-pc-windows') || startsWith(matrix.target, 'aarch64-pc-windows')
@@ -215,6 +304,10 @@ jobs:
             name "IPTV Checker"
             desc "Validate IPTV playlists and inspect stream health"
             homepage "https://github.com/${REPO}"
+
+            # The app ships a signed in-app updater, so a cask-installed copy can
+            # update itself between \`brew upgrade\` runs.
+            auto_updates true
 
             preflight do
               old_app = Pathname.new("/Applications/IPTV Checker.app")

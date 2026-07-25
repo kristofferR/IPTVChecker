@@ -348,12 +348,9 @@ fn append_xtream_streams_to_m3u(
             .unwrap_or("");
         let group = entry
             .get("category_id")
-            .and_then(|v| {
-                v.as_str().or_else(|| {
-                    // Some servers return category_id as a number
-                    None
-                })
-            })
+            // Servers that return category_id as a number are handled by the
+            // numeric match below, so a string miss is simply no group.
+            .and_then(|v| v.as_str())
             .and_then(|id| cat_map.get(id))
             .map(|s| s.as_str())
             .unwrap_or("");

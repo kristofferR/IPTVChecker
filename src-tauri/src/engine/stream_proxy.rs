@@ -419,33 +419,31 @@ pub async fn handle_proxy_request(
         .unwrap_or("")
         .to_string();
 
-    let body = match crate::engine::proxy_common::read_capped(
-        upstream_response,
-        PROXY_BUFFERED_MAX_BYTES,
-    )
-    .await
-    {
-        Ok(bytes) => bytes,
-        Err(crate::engine::proxy_common::ReadCappedError::TooLarge) => {
-            log::warn!(
-                "Stream proxy: upstream body for {} exceeded {} bytes; refusing to buffer",
-                redact_url(&original_url),
-                PROXY_BUFFERED_MAX_BYTES
-            );
-            return error_response(502, "Upstream response too large");
-        }
-        Err(crate::engine::proxy_common::ReadCappedError::Read(err)) => {
-            log::warn!(
-                "Stream proxy: failed to read buffered upstream body for {} ({})",
-                redact_url(&original_url),
-                reqwest_error_kind(&err)
-            );
-            if err.is_timeout() {
-                return error_response(504, "Upstream response timed out");
+    let body =
+        match crate::engine::proxy_common::read_capped(upstream_response, PROXY_BUFFERED_MAX_BYTES)
+            .await
+        {
+            Ok(bytes) => bytes,
+            Err(crate::engine::proxy_common::ReadCappedError::TooLarge) => {
+                log::warn!(
+                    "Stream proxy: upstream body for {} exceeded {} bytes; refusing to buffer",
+                    redact_url(&original_url),
+                    PROXY_BUFFERED_MAX_BYTES
+                );
+                return error_response(502, "Upstream response too large");
             }
-            return error_response(502, "Failed to read upstream response");
-        }
-    };
+            Err(crate::engine::proxy_common::ReadCappedError::Read(err)) => {
+                log::warn!(
+                    "Stream proxy: failed to read buffered upstream body for {} ({})",
+                    redact_url(&original_url),
+                    reqwest_error_kind(&err)
+                );
+                if err.is_timeout() {
+                    return error_response(504, "Upstream response timed out");
+                }
+                return error_response(502, "Failed to read upstream response");
+            }
+        };
 
     // Rewrite M3U8 manifests so internal URLs also go through the proxy
     let looks_like_m3u8 =
@@ -903,7 +901,7 @@ fn latest_transport_stream_pcr(data: &[u8], preferred_pid: Option<u16>) -> Optio
     while offset + MPEG_TS_PACKET_SIZE <= data.len() {
         let packet = &data[offset..offset + MPEG_TS_PACKET_SIZE];
         if let Some(pid) = transport_stream_packet_pid(packet) {
-            if preferred_pid.map_or(true, |preferred| preferred == pid) {
+            if preferred_pid.is_none_or(|preferred| preferred == pid) {
                 if let Some(pcr) = transport_stream_packet_pcr(packet) {
                     latest = Some((pid, pcr));
                 }
@@ -1113,15 +1111,13 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
             tokio::spawn(async move {
                 // Read the full request head to extract the URL — the
                 // request line and headers can arrive split across segments.
-                let request_bytes = match crate::engine::proxy_common::read_http_request_head(
-                    &mut socket,
-                    8192,
-                )
-                .await
-                {
-                    Ok(Some(bytes)) => bytes,
-                    Ok(None) | Err(_) => return,
-                };
+                let request_bytes =
+                    match crate::engine::proxy_common::read_http_request_head(&mut socket, 8192)
+                        .await
+                    {
+                        Ok(Some(bytes)) => bytes,
+                        Ok(None) | Err(_) => return,
+                    };
                 let request_str = String::from_utf8_lossy(&request_bytes);
 
                 // Parse GET /stream?url=ENCODED_URL HTTP/1.1
@@ -1430,9 +1426,9 @@ fn parse_stream_request(request: &str) -> Option<StreamRequest> {
 
 #[cfg(test)]
 mod tests {
-    use tokio::io::AsyncReadExt;
     use super::*;
     use std::time::{Duration, Instant};
+    use tokio::io::AsyncReadExt;
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpListener;
 

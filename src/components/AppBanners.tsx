@@ -1,10 +1,13 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
-import { ExternalLink, Info, X } from "lucide-react";
+import { Download, ExternalLink, Info, X } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { dismissUpdateNotice } from "../hooks/useUpdateCheck";
-import { errorToString } from "../lib/errors";
-import { logger } from "../lib/logger";
 import { validateSourceFilterPattern } from "../lib/sourceFilter";
+import {
+  isManualInstall,
+  updateActionLabel,
+  updateBannerMessage,
+  updateConfirmMessage,
+} from "../lib/updateState";
 import { useAppStore } from "../store";
 
 // Non-reactive store access for writes inside callbacks/effects.
@@ -27,9 +30,15 @@ function useAutoDismiss(
   }, [value]);
 }
 
+interface AppBannersProps {
+  /** Installs the discovered update, or opens the distribution's update page
+   *  for package-manager-owned installations. */
+  onInstallUpdate: () => void | Promise<void>;
+}
+
 /** The transient error/info banners shown under the toolbar, with their
- *  auto-dismiss timers. */
-export function AppBanners() {
+ *  auto-dismiss timers. The update banner is the one persistent entry. */
+export function AppBanners({ onInstallUpdate }: AppBannersProps) {
   const scanError = useAppStore((s) => s.scanError);
   const errorDismissed = useAppStore((s) => s.errorDismissed);
   const playbackError = useAppStore((s) => s.playbackError);
@@ -37,6 +46,7 @@ export function AppBanners() {
   const scanInputError = useAppStore((s) => s.scanInputError);
   const menuInfo = useAppStore((s) => s.menuInfo);
   const updateNotice = useAppStore((s) => s.updateNotice);
+  const updatePhase = useAppStore((s) => s.updatePhase);
   const appVersion = useAppStore((s) => s.appVersion);
   const channelSearch = useAppStore((s) => s.channelSearch);
   const channelSearchError = useMemo(
@@ -138,21 +148,22 @@ export function AppBanners() {
 
       {updateNotice && (
         <div className="flex items-center gap-2 px-4 py-2.5 bg-emerald-500/10 border-b border-emerald-500/20 text-emerald-300 text-[13px]">
-          <span className="flex-1">
-            Update available: <strong>v{updateNotice.latest_version}</strong>
-            {appVersion ? ` (current v${appVersion})` : ""}.
-          </span>
+          <span className="flex-1">{updateBannerMessage(updateNotice, appVersion)}</span>
           <button
             type="button"
+            disabled={updatePhase === "installing"}
             onClick={() => {
-              void openUrl(updateNotice.release_url).catch((err) => {
-                logger.error("[Update] Failed to open release URL:", errorToString(err));
-              });
+              if (!window.confirm(updateConfirmMessage(updateNotice))) return;
+              void onInstallUpdate();
             }}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-emerald-400/30 hover:bg-emerald-500/15 transition-colors"
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-emerald-400/30 hover:bg-emerald-500/15 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Download
-            <ExternalLink className="w-3.5 h-3.5" />
+            {updateActionLabel(updateNotice, updatePhase)}
+            {isManualInstall(updateNotice.installMode) ? (
+              <ExternalLink className="w-3.5 h-3.5" />
+            ) : (
+              <Download className="w-3.5 h-3.5" />
+            )}
           </button>
           <button
             onClick={dismissUpdateNotice}

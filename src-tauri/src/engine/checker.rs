@@ -329,7 +329,7 @@ fn detect_hls_drm_system(playlist_body: &str) -> Option<String> {
         if let Some(method_start) = trimmed.find("method=") {
             let after_method = &trimmed[method_start + 7..];
             let method_value = after_method
-                .split(|c: char| c == ',' || c == '"')
+                .split([',', '"'])
                 .find(|s| !s.is_empty())
                 .unwrap_or("");
             // AES-128 and NONE are not DRM

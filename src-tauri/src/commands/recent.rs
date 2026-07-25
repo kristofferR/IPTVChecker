@@ -393,7 +393,7 @@ fn apply_recent_menu_update(app: &tauri::AppHandle, entries: &[RecentPlaylistEnt
     if let Ok(items) = recent_submenu.items() {
         for index in (0..items.len()).rev() {
             let item = &items[index];
-            if item.id() == &"menu.file.recent.clear" {
+            if item.id() == "menu.file.recent.clear" {
                 continue;
             }
             let _ = recent_submenu.remove_at(index);

@@ -62,18 +62,10 @@ impl Default for WindowScanState {
     }
 }
 
+#[derive(Default)]
 pub struct CastState {
     pub session: Option<ActiveCastSession>,
     pub proxy: Option<CastProxyHandle>,
-}
-
-impl Default for CastState {
-    fn default() -> Self {
-        Self {
-            session: None,
-            proxy: None,
-        }
-    }
 }
 
 pub struct AppState {
@@ -89,6 +81,19 @@ pub struct AppState {
     window_scan_states: Mutex<HashMap<String, WindowScanState>>,
     backend_perf_samples: Mutex<VecDeque<BackendPerfSample>>,
     playlist_preview_cache: Mutex<HashMap<String, CachedPlaylistPreview>>,
+    /// Rejects a second install immediately instead of queueing it behind the
+    /// first one on `update_checking`.
+    pub update_installing: std::sync::atomic::AtomicBool,
+    /// Serializes every updater operation so automatic discovery, a manual
+    /// check, and an install can never contend for the updater.
+    pub update_checking: Mutex<()>,
+    /// The update found by the most recent check, if any. Retaining the
+    /// verified metadata lets the install action apply exactly the update the
+    /// user was shown rather than re-resolving it.
+    pub update_available: Mutex<Option<tauri_plugin_updater::Update>>,
+    /// Wakes the periodic check loop when the preference is switched back on,
+    /// instead of waiting out the current interval.
+    pub update_check_wake: Notify,
 }
 
 impl AppState {
@@ -103,6 +108,10 @@ impl AppState {
             window_scan_states: Mutex::new(HashMap::new()),
             backend_perf_samples: Mutex::new(VecDeque::new()),
             playlist_preview_cache: Mutex::new(HashMap::new()),
+            update_installing: std::sync::atomic::AtomicBool::new(false),
+            update_checking: Mutex::new(()),
+            update_available: Mutex::new(None),
+            update_check_wake: Notify::new(),
         })
     }
 

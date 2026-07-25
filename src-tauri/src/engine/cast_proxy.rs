@@ -39,7 +39,9 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
-use crate::engine::ffmpeg::{configure_background_process, graceful_kill, resolve_binary, GRACEFUL_KILL_TIMEOUT};
+use crate::engine::ffmpeg::{
+    configure_background_process, graceful_kill, resolve_binary, GRACEFUL_KILL_TIMEOUT,
+};
 use crate::engine::proxy_common::{read_capped, ReadCappedError};
 use crate::engine::stream_proxy::redact_url;
 use crate::error::AppError;
@@ -164,9 +166,7 @@ pub async fn start(
     let lan_ip = detect_lan_ip()
         .ok_or_else(|| AppError::Other("Could not determine LAN IP for cast proxy".to_string()))?;
 
-    let listener = TcpListener::bind("0.0.0.0:0")
-        .await
-        .map_err(AppError::Io)?;
+    let listener = TcpListener::bind("0.0.0.0:0").await.map_err(AppError::Io)?;
     let port = listener.local_addr().map_err(AppError::Io)?.port();
 
     let cancel = CancellationToken::new();
@@ -564,8 +564,13 @@ async fn start_remux(
     // Wait for the manifest to actually be written so the Cast device's first
     // GET doesn't 404. On failure, trip the cancel so the spawned ffmpeg
     // worker terminates and removes the temp dir.
-    if let Err(err) =
-        wait_for_manifest(&manifest_path, is_hevc, REMUX_PLAYLIST_READY_TIMEOUT, &cancel).await
+    if let Err(err) = wait_for_manifest(
+        &manifest_path,
+        is_hevc,
+        REMUX_PLAYLIST_READY_TIMEOUT,
+        &cancel,
+    )
+    .await
     {
         cancel.cancel();
         return Err(err);
@@ -673,10 +678,7 @@ fn spawn_upstream_pump(
             } else {
                 format!("reconnect #{reconnects}")
             };
-            log::info!(
-                "[CastProxy/pump] {label} for {}",
-                redact_url(&upstream_url)
-            );
+            log::info!("[CastProxy/pump] {label} for {}", redact_url(&upstream_url));
 
             let response_result = tokio::select! {
                 _ = cancel.cancelled() => break 'session,
@@ -854,7 +856,11 @@ async fn probe_codecs(
                 .next()
                 .unwrap_or("")
                 .to_ascii_lowercase();
-            if codec.is_empty() { None } else { Some(codec) }
+            if codec.is_empty() {
+                None
+            } else {
+                Some(codec)
+            }
         }
     };
 
@@ -945,14 +951,8 @@ async fn handle_connection(
             let _ = write_simple(&mut socket, 503, "text/plain", b"Remux not ready").await;
             return Ok(());
         };
-        return serve_remux_file(
-            &mut socket,
-            &tmpdir,
-            rest,
-            &method,
-            range_header.as_deref(),
-        )
-        .await;
+        return serve_remux_file(&mut socket, &tmpdir, rest, &method, range_header.as_deref())
+            .await;
     }
 
     // Pass-through mode: entrypoint or rewritten manifest segment.
@@ -1540,14 +1540,16 @@ fn decode_segment(encoded: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use tokio::io::AsyncReadExt;
     use super::*;
+    use tokio::io::AsyncReadExt;
 
     #[test]
     fn token_is_url_safe_and_long() {
         let token = generate_token();
         assert!(token.len() >= 40, "token too short: {token}");
-        assert!(token.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert!(token
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
     }
 
     #[test]
@@ -1567,7 +1569,10 @@ seg-2.ts
             "/cast/abc/seg/{}",
             encode_segment("http://iptv.example.com/live/720p/seg-1.ts")
         );
-        assert!(rewritten.contains(&expected), "missing rewritten seg-1: {rewritten}");
+        assert!(
+            rewritten.contains(&expected),
+            "missing rewritten seg-1: {rewritten}"
+        );
     }
 
     #[test]
@@ -1649,11 +1654,7 @@ http://iptv.example.com/live/720p/seg-2.ts
     /// Mirrors the segment-fetch acceptance logic in `handle_connection`. We
     /// keep it as a test-local helper so the pairwise check is exercised
     /// without spinning up sockets.
-    fn segment_accepted(
-        resolved: Option<&Url>,
-        upstream: Option<&Url>,
-        decoded: &Url,
-    ) -> bool {
+    fn segment_accepted(resolved: Option<&Url>, upstream: Option<&Url>, decoded: &Url) -> bool {
         match (resolved, upstream) {
             (Some(r), Some(u)) => is_target_allowed(r, decoded) || is_target_allowed(u, decoded),
             (Some(r), None) => is_target_allowed(r, decoded),
@@ -1679,17 +1680,29 @@ http://iptv.example.com/live/720p/seg-2.ts
         // With resolved_origin populated by the manifest fetch, the CDN
         // segment is accepted — this is the regression the redirect-aware
         // allowlist exists to fix.
-        assert!(segment_accepted(Some(&resolved), Some(&upstream), &cdn_segment));
+        assert!(segment_accepted(
+            Some(&resolved),
+            Some(&upstream),
+            &cdn_segment
+        ));
 
         // A segment on the operator host (still legitimate during transition)
         // is accepted as long as either origin matches.
         let provider_segment = Url::parse("http://provider.example/seg-2.ts").unwrap();
-        assert!(segment_accepted(Some(&resolved), Some(&upstream), &provider_segment));
+        assert!(segment_accepted(
+            Some(&resolved),
+            Some(&upstream),
+            &provider_segment
+        ));
 
         // A loopback or unrelated host is still rejected even with both
         // origins populated.
         let loopback = Url::parse("http://127.0.0.1:9000/x.ts").unwrap();
-        assert!(!segment_accepted(Some(&resolved), Some(&upstream), &loopback));
+        assert!(!segment_accepted(
+            Some(&resolved),
+            Some(&upstream),
+            &loopback
+        ));
     }
 
     #[test]
@@ -1698,7 +1711,10 @@ http://iptv.example.com/live/720p/seg-2.ts
             redact_cast_path("/cast/abc123token/hls/playlist.m3u8"),
             "/cast/<redacted>/hls/playlist.m3u8"
         );
-        assert_eq!(redact_cast_path("/cast/tok/stream"), "/cast/<redacted>/stream");
+        assert_eq!(
+            redact_cast_path("/cast/tok/stream"),
+            "/cast/<redacted>/stream"
+        );
     }
 
     #[test]
@@ -1866,7 +1882,9 @@ seg-1.ts
         let body = b"#EXTM3U\n#EXT-X-TARGETDURATION:6\n".to_vec();
         let url = spawn_chunked_server(body.clone()).await;
         let resp = reqwest::get(&url).await.unwrap();
-        let bytes = read_capped(resp, 2 * 1024 * 1024).await.expect("within cap");
+        let bytes = read_capped(resp, 2 * 1024 * 1024)
+            .await
+            .expect("within cap");
         assert_eq!(bytes, body);
     }
 

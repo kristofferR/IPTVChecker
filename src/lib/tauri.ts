@@ -19,6 +19,8 @@ import type {
   ScanPresetConfig,
   ScreenshotCacheStats,
   StalkerOpenRequest,
+  UpdateCheckResult,
+  UpdateInstallMode,
   XtreamOpenRequest,
   XtreamServerTestReport,
 } from "./types";
@@ -307,4 +309,33 @@ export async function stopCast(): Promise<void> {
 
 export async function getCastStatus(): Promise<CastSession | null> {
   return invoke("get_cast_status");
+}
+
+// --- Updater ---------------------------------------------------------------
+
+/** Look for a newer signed release. Never downloads or installs anything. */
+export async function checkForUpdates(): Promise<UpdateCheckResult> {
+  return invoke("check_for_updates");
+}
+
+/** The version found by the last check, without a network request. */
+export async function discoveredUpdate(): Promise<string | null> {
+  return invoke("discovered_update");
+}
+
+/** Whether this installation can replace itself, or must go through its own
+ *  package manager (AUR, apt/dnf). */
+export async function updateInstallMode(): Promise<UpdateInstallMode> {
+  return invoke("update_install_mode");
+}
+
+/** Open the distribution's update page. Only valid in manual install mode. */
+export async function openManualUpdate(): Promise<void> {
+  return invoke("open_manual_update");
+}
+
+/** Install the discovered update and restart. Resolves to `false` if there
+ *  turned out to be nothing to install. */
+export async function installUpdate(): Promise<boolean> {
+  return invoke("install_update");
 }

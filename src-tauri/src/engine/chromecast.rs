@@ -240,10 +240,7 @@ pub async fn start_session(
         .await
         .map_err(|_| AppError::Other("Cast worker exited before ready".to_string()))??;
 
-    log::info!(
-        "[Chromecast] Session ready on '{}'",
-        device.friendly_name
-    );
+    log::info!("[Chromecast] Session ready on '{}'", device.friendly_name);
 
     let session = CastSession {
         device_id: device.id.clone(),
