@@ -1,16 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import {
-  castToDevice,
-  discoverChromecasts,
-  getCastStatus,
-  stopCast,
-} from "../lib/tauri";
-import type {
-  CastMediaRequest,
-  CastSession,
-  ChromecastDevice,
-} from "../lib/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { castToDevice, discoverChromecasts, getCastStatus, stopCast } from "../lib/tauri";
+import type { CastMediaRequest, CastSession, ChromecastDevice } from "../lib/types";
 
 export interface UseChromecastResult {
   devices: ChromecastDevice[];
@@ -42,22 +33,19 @@ export function useChromecast(): UseChromecastResult {
     }
   }, []);
 
-  const cast = useCallback(
-    async (device: ChromecastDevice, request: CastMediaRequest) => {
-      setError(null);
-      try {
-        const next = await castToDevice(device, request);
-        if (!cancelledRef.current) setSession(next);
-      } catch (err) {
-        if (!cancelledRef.current) {
-          setError(String(err));
-          setSession(null);
-        }
-        throw err;
+  const cast = useCallback(async (device: ChromecastDevice, request: CastMediaRequest) => {
+    setError(null);
+    try {
+      const next = await castToDevice(device, request);
+      if (!cancelledRef.current) setSession(next);
+    } catch (err) {
+      if (!cancelledRef.current) {
+        setError(String(err));
+        setSession(null);
       }
-    },
-    [],
-  );
+      throw err;
+    }
+  }, []);
 
   const stop = useCallback(async () => {
     try {

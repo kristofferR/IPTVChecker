@@ -23,9 +23,7 @@ describe("user-facing source errors", () => {
       redactUrlCredentials(
         "https://first%20last:p%20ass@example.com/get.php?username=user name&password=secret phrase&type=m3u_plus",
       ),
-    ).toBe(
-      "https://***@example.com/get.php?username=***&password=***&type=m3u_plus",
-    );
+    ).toBe("https://***@example.com/get.php?username=***&password=***&type=m3u_plus");
   });
 
   test("redacts embedded URL userinfo in formatted errors", () => {
@@ -39,9 +37,9 @@ describe("user-facing source errors", () => {
   });
 
   test("reload errors normalize an existing playlist prefix", () => {
-    expect(
-      formatSourceReloadError("Failed to open playlist: connection refused"),
-    ).toBe("Failed to reload source: connection refused");
+    expect(formatSourceReloadError("Failed to open playlist: connection refused")).toBe(
+      "Failed to reload source: connection refused",
+    );
     expect(
       formatSourceReloadError(
         "Failed to open playlist: Failed to reload source: connection refused",

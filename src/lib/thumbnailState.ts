@@ -29,9 +29,7 @@ export interface ThumbnailDisplayState {
   screenshotErrorReason: string | null;
 }
 
-export function getThumbnailDisplayState(
-  input: ThumbnailDisplayStateInput,
-): ThumbnailDisplayState {
+export function getThumbnailDisplayState(input: ThumbnailDisplayStateInput): ThumbnailDisplayState {
   const {
     result,
     screenshotUrl,
@@ -80,9 +78,7 @@ export function getThumbnailDisplayState(
     result.status === "alive" &&
     !result.screenshot_path;
   const showScreenshotsDisabled =
-    !screenshotsEnabled &&
-    result.status === "alive" &&
-    !screenshotUrl;
+    !screenshotsEnabled && result.status === "alive" && !screenshotUrl;
 
   return {
     waitingForScanResult,

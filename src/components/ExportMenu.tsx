@@ -1,34 +1,13 @@
-import { useState, useRef, useEffect, useCallback } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
-import {
-  Download,
-  ChevronDown,
-  LoaderCircle,
-  CircleCheck,
-  CircleAlert,
-  Info,
-} from "lucide-react";
-import { SFSquareArrowUp, SFChevronDown } from "./SFSymbols";
-import type { ChannelResult } from "../lib/types";
-import {
-  exportCsv,
-  exportM3u,
-  exportScanLogJson,
-  exportSplit,
-  exportRenamed,
-} from "../lib/tauri";
-import {
-  exportScopeFileSuffix,
-  exportScopeLabel,
-  type ExportScope,
-} from "../lib/exportScope";
-import { readStoredVisibleColumnOrder } from "../lib/tableColumns";
-import {
-  HapticFeedbackPattern,
-  PerformanceTime,
-  triggerHaptic,
-} from "../lib/haptics";
+import { ChevronDown, CircleAlert, CircleCheck, Download, Info, LoaderCircle } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { type ExportScope, exportScopeFileSuffix, exportScopeLabel } from "../lib/exportScope";
+import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "../lib/haptics";
 import { isScanActive, type ScanState } from "../lib/scanState";
+import { readStoredVisibleColumnOrder } from "../lib/tableColumns";
+import { exportCsv, exportM3u, exportRenamed, exportScanLogJson, exportSplit } from "../lib/tauri";
+import type { ChannelResult } from "../lib/types";
+import { SFChevronDown, SFSquareArrowUp } from "./SFSymbols";
 
 interface ExportMenuProps {
   scopeCounts: Record<ExportScope, number>;
@@ -59,7 +38,9 @@ export function ExportMenu({
   const IconExport = isMac ? SFSquareArrowUp : Download;
   const IconChevron = isMac ? SFChevronDown : ChevronDown;
   const [open, setOpen] = useState(false);
-  const [busyAction, setBusyAction] = useState<"csv" | "split" | "renamed" | "m3u" | "scanlog" | null>(null);
+  const [busyAction, setBusyAction] = useState<
+    "csv" | "split" | "renamed" | "m3u" | "scanlog" | null
+  >(null);
   const [feedback, setFeedback] = useState<{
     kind: "success" | "error" | "info";
     message: string;
@@ -324,20 +305,21 @@ export function ExportMenu({
         aria-label={exporting ? "Exporting" : "Export"}
       >
         {exporting ? (
-          <LoaderCircle className={isMac ? "w-[22px] h-[22px] animate-spin" : "w-4 h-4 animate-spin"} />
+          <LoaderCircle
+            className={isMac ? "w-[22px] h-[22px] animate-spin" : "w-4 h-4 animate-spin"}
+          />
         ) : (
           <IconExport className={isMac ? "w-[22px] h-[22px]" : "w-4 h-4"} />
         )}
-        {showButtonText && (
-          exporting ? (
+        {showButtonText &&
+          (exporting ? (
             <span className="leading-none">Exporting...</span>
           ) : (
             <span className="inline-flex items-center gap-1 leading-none">
               <span>Export</span>
               <IconChevron className="h-3 w-3" />
             </span>
-          )
-        )}
+          ))}
       </button>
       {open && (
         <div className="macos-popover absolute right-0 top-full mt-1 w-64 bg-dropdown backdrop-blur-xl border border-border-app rounded-lg shadow-xl z-50 py-1">

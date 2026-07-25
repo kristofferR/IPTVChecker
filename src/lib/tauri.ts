@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { toCommandChannelResult } from "./channelResults";
 import type {
   AppSettings,
   CastMediaRequest,
@@ -6,22 +7,21 @@ import type {
   ChannelResult,
   ChromecastDevice,
   PlaylistPreview,
-  ScanPresetCollection,
-  ScanPresetConfig,
-  ScanConfig,
-  ScanHistoryItem,
   RecentPlaylistEntry,
   RecentPlaylistKind,
   RenamePlaylistSourceInput,
   SavedPlaylistDraft,
   SavedPlaylistEntry,
   SavedPlaylistUpsertResult,
+  ScanConfig,
+  ScanHistoryItem,
+  ScanPresetCollection,
+  ScanPresetConfig,
   ScreenshotCacheStats,
   StalkerOpenRequest,
   XtreamOpenRequest,
   XtreamServerTestReport,
 } from "./types";
-import { toCommandChannelResult } from "./channelResults";
 
 function toCommandChannelResults(results: ChannelResult[]) {
   return results.map(toCommandChannelResult);
@@ -113,30 +113,21 @@ export async function exportCsv(
   });
 }
 
-export async function exportSplit(
-  results: ChannelResult[],
-  basePath: string,
-): Promise<void> {
+export async function exportSplit(results: ChannelResult[], basePath: string): Promise<void> {
   return invoke("export_split", {
     results: toCommandChannelResults(results),
     basePath,
   });
 }
 
-export async function exportRenamed(
-  results: ChannelResult[],
-  basePath: string,
-): Promise<void> {
+export async function exportRenamed(results: ChannelResult[], basePath: string): Promise<void> {
   return invoke("export_renamed", {
     results: toCommandChannelResults(results),
     basePath,
   });
 }
 
-export async function exportM3u(
-  results: ChannelResult[],
-  path: string,
-): Promise<void> {
+export async function exportM3u(results: ChannelResult[], path: string): Promise<void> {
   return invoke("export_m3u", {
     results: toCommandChannelResults(results),
     path,
@@ -181,9 +172,7 @@ export async function deleteScanPreset(name: string): Promise<ScanPresetCollecti
   return invoke("delete_scan_preset", { name });
 }
 
-export async function setDefaultScanPreset(
-  name: string | null,
-): Promise<ScanPresetCollection> {
+export async function setDefaultScanPreset(name: string | null): Promise<ScanPresetCollection> {
   return invoke("set_default_scan_preset", { name });
 }
 
@@ -277,9 +266,7 @@ export async function openSavedPlaylist(
   });
 }
 
-export async function renamePlaylistSource(
-  input: RenamePlaylistSourceInput,
-): Promise<void> {
+export async function renamePlaylistSource(input: RenamePlaylistSourceInput): Promise<void> {
   return invoke("rename_playlist_source", { input });
 }
 

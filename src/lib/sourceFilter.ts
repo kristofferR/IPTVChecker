@@ -1,8 +1,4 @@
-import type {
-  Channel,
-  CurrentSourceDescriptor,
-  PlaylistPreview,
-} from "./types";
+import type { Channel, CurrentSourceDescriptor, PlaylistPreview } from "./types";
 
 const LEADING_CASE_INSENSITIVE_PREFIX = /^(?:\(\?i\))+/i;
 
@@ -50,9 +46,7 @@ export function normalizeSourceFilter(value: string | null | undefined): string 
   return value?.trim() ?? "";
 }
 
-export function compileSourceFilterRegex(
-  value: string | null | undefined,
-): RegExp | null {
+export function compileSourceFilterRegex(value: string | null | undefined): RegExp | null {
   const normalized = normalizeSourceFilter(value);
   if (!normalized) {
     return null;
@@ -61,9 +55,7 @@ export function compileSourceFilterRegex(
   return new RegExp(stripLeadingCaseInsensitivePrefix(normalized), "i");
 }
 
-export function validateSourceFilterPattern(
-  value: string | null | undefined,
-): string | null {
+export function validateSourceFilterPattern(value: string | null | undefined): string | null {
   try {
     compileSourceFilterRegex(value);
     return null;
@@ -127,16 +119,10 @@ export function hasDirtySourceFilter(
     return false;
   }
 
-  return (
-    normalizeSourceFilter(channelSearch) !==
-    normalizeSourceFilter(lastAppliedSourceFilter)
-  );
+  return normalizeSourceFilter(channelSearch) !== normalizeSourceFilter(lastAppliedSourceFilter);
 }
 
-export function resolvePreservedGroupFilter(
-  currentGroupFilter: string,
-  groups: string[],
-): string {
+export function resolvePreservedGroupFilter(currentGroupFilter: string, groups: string[]): string {
   if (currentGroupFilter === "all") {
     return "all";
   }

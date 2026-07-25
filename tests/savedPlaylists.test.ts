@@ -6,8 +6,8 @@ import {
   findSavedPlaylistForCurrentSource,
   normalizeUrlIdentity,
   normalizeXtreamServer,
-  savedPlaylistSecondaryLabel,
   savedEntryToSourceDescriptor,
+  savedPlaylistSecondaryLabel,
 } from "../src/lib/savedPlaylists";
 import type { CurrentSourceDescriptor, SavedPlaylistEntry } from "../src/lib/types";
 
@@ -101,10 +101,7 @@ describe("saved playlist helpers", () => {
 
   it("builds save drafts from supported current sources", () => {
     expect(
-      buildSavedPlaylistDraftFromSource(
-        { kind: "path", path: "/tmp/demo.m3u" },
-        "My Local File",
-      ),
+      buildSavedPlaylistDraftFromSource({ kind: "path", path: "/tmp/demo.m3u" }, "My Local File"),
     ).toEqual({
       kind: "file",
       display_name: "My Local File",

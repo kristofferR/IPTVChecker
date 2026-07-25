@@ -17,16 +17,11 @@ function formatEta(seconds: number | null): string {
 export const ProgressBar = memo(function ProgressBar() {
   const progress = useAppStore((s) => s.progress);
   const scanState = useAppStore((s) => s.scanState);
-  const throughputChannelsPerSecond = useAppStore(
-    (s) => s.telemetry.throughputChannelsPerSecond,
-  );
+  const throughputChannelsPerSecond = useAppStore((s) => s.telemetry.throughputChannelsPerSecond);
   const etaSeconds = useAppStore((s) => s.telemetry.etaSeconds);
   if (!progress) return null;
 
-  const percent =
-    progress.total > 0
-      ? Math.round((progress.completed / progress.total) * 100)
-      : 0;
+  const percent = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
 
   const showTelemetry = isScanActive(scanState);
 
@@ -41,9 +36,7 @@ export const ProgressBar = memo(function ProgressBar() {
     } else {
       const chPerMin = throughputChannelsPerSecond * 60;
       const throughputDisplay =
-        chPerMin >= 10
-          ? `${Math.round(chPerMin)} ch/min`
-          : `${chPerMin.toFixed(1)} ch/min`;
+        chPerMin >= 10 ? `${Math.round(chPerMin)} ch/min` : `${chPerMin.toFixed(1)} ch/min`;
       telemetryLabel = `${throughputDisplay} · ~${formatEta(etaSeconds)} remaining`;
     }
   }
@@ -72,9 +65,7 @@ export const ProgressBar = memo(function ProgressBar() {
         )}
       </div>
       {telemetryLabel != null && (
-        <div className="mt-1 text-[11px] text-text-tertiary tabular-nums">
-          {telemetryLabel}
-        </div>
+        <div className="mt-1 text-[11px] text-text-tertiary tabular-nums">{telemetryLabel}</div>
       )}
     </div>
   );

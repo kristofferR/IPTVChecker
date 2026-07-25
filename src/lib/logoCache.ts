@@ -110,8 +110,7 @@ function getLogoStatus(url: string | null): LogoCacheStatus {
 
 export function useLogoCacheStatus(url: string | null): LogoCacheStatus {
   const subscribe = useCallback(
-    (onStoreChange: () => void) =>
-      url ? subscribeToLogo(url, onStoreChange) : () => {},
+    (onStoreChange: () => void) => (url ? subscribeToLogo(url, onStoreChange) : () => {}),
     [url],
   );
   const getSnapshot = useCallback(() => getLogoStatus(url), [url]);

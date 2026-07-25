@@ -2,24 +2,25 @@
 // factory over (video element, hls/mpegts instances, mutable refs, callbacks)
 // that wires stall detection, live-buffer resync, latency trimming, and the
 // watchdog interval, and returns a cleanup function that tears all of it down.
-import type { ChannelResult } from "./types";
+
 import { logger } from "./logger";
 import {
+  type BufferedTimeRange,
   bufferedSecondsAhead,
   chooseLiveBufferPlaybackRate,
   findLiveBufferResyncTarget,
   findLiveLatencyCatchUpTarget,
   getHlsFatalRecoveryAction,
   getNextPlaybackRecoveryAttempt,
+  type HlsErrorPayload,
   MIN_PROGRESS_DELTA_SECS,
+  type PlaybackRecoveryIssue,
+  type PlayerState,
   readMediaErrorMessage,
   recordPlaybackRecoveryAttempt,
   shouldSuspendPlaybackWatchdog,
-  type BufferedTimeRange,
-  type HlsErrorPayload,
-  type PlaybackRecoveryIssue,
-  type PlayerState,
 } from "./playback";
+import type { ChannelResult } from "./types";
 
 const PLAYBACK_STALL_GRACE_MS = 15_000;
 const PLAYBACK_NO_PROGRESS_STALL_MS = 20_000;
@@ -149,9 +150,7 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
     monitor.lastCurrentTime = target;
     monitor.lastProgressAt = monitor.lastResyncAt;
     monitor.stallStartedAt = null;
-    logger.warn(
-      `[Player] Skipping ${(target - from).toFixed(2)}s buffered timestamp gap`,
-    );
+    logger.warn(`[Player] Skipping ${(target - from).toFixed(2)}s buffered timestamp gap`);
     videoElement.currentTime = target;
     void videoElement.play().catch(() => {});
     return true;
@@ -175,7 +174,7 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
         ? `[Player] Slowing live playback to ${nextRate.toFixed(2)}x to rebuild buffer`
         : nextRate > 1
           ? `[Player] Increasing live playback to ${nextRate.toFixed(2)}x to reduce latency`
-        : "[Player] Restored live playback to 1.00x",
+          : "[Player] Restored live playback to 1.00x",
     );
   };
 
@@ -197,9 +196,7 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
     monitor.lastCurrentTime = target;
     monitor.lastProgressAt = now;
     monitor.stallStartedAt = null;
-    logger.warn(
-      `[Player] Trimming ${(target - from).toFixed(1)}s accumulated live latency`,
-    );
+    logger.warn(`[Player] Trimming ${(target - from).toFixed(1)}s accumulated live latency`);
     videoElement.currentTime = target;
     void videoElement.play().catch(() => {});
     return true;
@@ -220,10 +217,7 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
     }, LIVE_RESYNC_WAIT_CONFIRM_MS);
   };
 
-  const triggerRuntimeIssue = (
-    issue: PlaybackRecoveryIssue,
-    reason: string,
-  ) => {
+  const triggerRuntimeIssue = (issue: PlaybackRecoveryIssue, reason: string) => {
     if (closed || playbackSessionIdRef.current !== sessionId || !hasStartedPlayingRef.current) {
       return;
     }
@@ -257,12 +251,7 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
     if (closed || isPausedRef.current || videoElement.ended) return;
     logger.warn("[Player] Resuming an unexpected media pause");
     window.setTimeout(() => {
-      if (
-        !closed &&
-        !isPausedRef.current &&
-        videoElement.paused &&
-        !videoElement.ended
-      ) {
+      if (!closed && !isPausedRef.current && videoElement.paused && !videoElement.ended) {
         void videoElement.play().catch(() => {});
       }
     }, 100);
@@ -351,13 +340,10 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
 
   const mpegtsPlayer = mpegtsPlayerRef.current;
   if (mpegtsPlayer?.on && mpegtsPlayer.off) {
-    const onMpegtsError = (
-      errorType?: unknown,
-      errorDetail?: unknown,
-      info?: unknown,
-    ) => {
-      const segments = [errorType, errorDetail, info]
-        .filter((value): value is string => typeof value === "string" && value.length > 0);
+    const onMpegtsError = (errorType?: unknown, errorDetail?: unknown, info?: unknown) => {
+      const segments = [errorType, errorDetail, info].filter(
+        (value): value is string => typeof value === "string" && value.length > 0,
+      );
       const detail = segments.join(": ") || "mpegts.js runtime error";
       triggerRuntimeIssue("library_error", detail);
     };
@@ -381,12 +367,7 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
     if (playerStateRef.current !== "playing") {
       return;
     }
-    if (
-      isPausedRef.current ||
-      videoElement.paused ||
-      videoElement.seeking ||
-      videoElement.ended
-    ) {
+    if (isPausedRef.current || videoElement.paused || videoElement.seeking || videoElement.ended) {
       return;
     }
 
@@ -404,10 +385,7 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
     }
 
     if (monitor.stallStartedAt !== null) {
-      if (
-        now - monitor.stallStartedAt >= LIVE_RESYNC_WAIT_CONFIRM_MS &&
-        tryLiveBufferResync()
-      ) {
+      if (now - monitor.stallStartedAt >= LIVE_RESYNC_WAIT_CONFIRM_MS && tryLiveBufferResync()) {
         return;
       }
       if (now - monitor.stallStartedAt >= PLAYBACK_STALL_GRACE_MS) {
@@ -417,10 +395,7 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
     }
 
     const noProgressDuration = now - monitor.lastProgressAt;
-    if (
-      noProgressDuration >= LIVE_RESYNC_SILENT_STALL_MS &&
-      tryLiveBufferResync()
-    ) {
+    if (noProgressDuration >= LIVE_RESYNC_SILENT_STALL_MS && tryLiveBufferResync()) {
       return;
     }
 

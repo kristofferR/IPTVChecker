@@ -8,10 +8,7 @@ import {
   resolvePreservedGroupFilter,
   validateSourceFilterPattern,
 } from "../src/lib/sourceFilter";
-import type {
-  CurrentSourceDescriptor,
-  PlaylistPreview,
-} from "../src/lib/types";
+import type { CurrentSourceDescriptor, PlaylistPreview } from "../src/lib/types";
 
 const fileSource: CurrentSourceDescriptor = {
   kind: "path",
@@ -44,7 +41,7 @@ const preview: PlaylistPreview = {
       tvg_chno: null,
       url: "http://example.com/disney.m3u8",
       content_type: "live",
-      extinf_line: "#EXTINF:-1 group-title=\"Kids\",SE: Disney Junior [Multi-Audio]",
+      extinf_line: '#EXTINF:-1 group-title="Kids",SE: Disney Junior [Multi-Audio]',
       metadata_lines: [],
     },
     {
@@ -59,7 +56,7 @@ const preview: PlaylistPreview = {
       tvg_chno: null,
       url: "http://example.com/event.m3u8",
       content_type: "live",
-      extinf_line: "#EXTINF:-1 group-title=\"Sports\",Friday Event",
+      extinf_line: '#EXTINF:-1 group-title="Sports",Friday Event',
       metadata_lines: [],
     },
     {
@@ -74,7 +71,7 @@ const preview: PlaylistPreview = {
       tvg_chno: null,
       url: "http://example.com/movie.mp4",
       content_type: "movie",
-      extinf_line: "#EXTINF:-1 group-title=\"Movies\",Cinema One",
+      extinf_line: '#EXTINF:-1 group-title="Movies",Cinema One',
       metadata_lines: [],
     },
   ],
@@ -95,12 +92,8 @@ describe("sourceFilter helpers", () => {
 
   it("preserves the group filter only when it still exists", () => {
     expect(resolvePreservedGroupFilter("all", ["Sports", "News"])).toBe("all");
-    expect(resolvePreservedGroupFilter("sports", ["Sports", "News"])).toBe(
-      "sports",
-    );
-    expect(resolvePreservedGroupFilter("Movies", ["Sports", "News"])).toBe(
-      "all",
-    );
+    expect(resolvePreservedGroupFilter("sports", ["Sports", "News"])).toBe("sports");
+    expect(resolvePreservedGroupFilter("Movies", ["Sports", "News"])).toBe("all");
   });
 
   it("validates source filters with the same case-insensitive prefix handling as apply", () => {
@@ -114,10 +107,7 @@ describe("sourceFilter helpers", () => {
   });
 
   it("reapplies source filters to a cached preview while preserving source groups", () => {
-    const filtered = applySourceFilterToPreview(
-      preview,
-      "^(?!.*(event|ppv)).*",
-    );
+    const filtered = applySourceFilterToPreview(preview, "^(?!.*(event|ppv)).*");
 
     expect(filtered.channels.map((channel) => channel.name)).toEqual([
       "SE: Disney Junior [Multi-Audio]",
@@ -137,30 +127,33 @@ describe("sourceFilter helpers", () => {
   });
 
   it("can hide VOD and series entries from the visible preview", () => {
-    const filtered = applyContentVisibilityToPreview({
-      ...preview,
-      total_channels: 4,
-      series_count: 1,
-      groups: ["Kids", "Sports", "Movies", "Series"],
-      channels: [
-        ...preview.channels,
-        {
-          index: 200,
-          playlist: "sample.m3u8",
-          name: "Series One",
-          group: "Series",
-          language: null,
-          tvg_id: null,
-          tvg_name: null,
-          tvg_logo: null,
-          tvg_chno: null,
-          url: "http://example.com/series/one.mkv",
-          content_type: "series",
-          extinf_line: "#EXTINF:-1 group-title=\"Series\",Series One",
-          metadata_lines: [],
-        },
-      ],
-    }, true);
+    const filtered = applyContentVisibilityToPreview(
+      {
+        ...preview,
+        total_channels: 4,
+        series_count: 1,
+        groups: ["Kids", "Sports", "Movies", "Series"],
+        channels: [
+          ...preview.channels,
+          {
+            index: 200,
+            playlist: "sample.m3u8",
+            name: "Series One",
+            group: "Series",
+            language: null,
+            tvg_id: null,
+            tvg_name: null,
+            tvg_logo: null,
+            tvg_chno: null,
+            url: "http://example.com/series/one.mkv",
+            content_type: "series",
+            extinf_line: '#EXTINF:-1 group-title="Series",Series One',
+            metadata_lines: [],
+          },
+        ],
+      },
+      true,
+    );
 
     expect(filtered.channels.map((channel) => channel.name)).toEqual([
       "SE: Disney Junior [Multi-Audio]",

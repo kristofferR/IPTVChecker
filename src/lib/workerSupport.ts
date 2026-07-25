@@ -20,9 +20,7 @@ interface BlobWorkerProbeOptions {
  * CSP violations are reported asynchronously, which otherwise leaves mpegts.js
  * waiting on a worker that will never start or request the stream.
  */
-export function probeBlobWorkerSupport(
-  options: BlobWorkerProbeOptions = {},
-): Promise<boolean> {
+export function probeBlobWorkerSupport(options: BlobWorkerProbeOptions = {}): Promise<boolean> {
   const {
     createWorker = (url) => new Worker(url),
     createObjectUrl = (blob) => URL.createObjectURL(blob),

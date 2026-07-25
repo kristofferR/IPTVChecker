@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { filterResults, sortResults, type SortDirection, type SortField } from "../src/lib/filters";
+import { filterResults, type SortDirection, type SortField, sortResults } from "../src/lib/filters";
 import type { ChannelResult, ChannelStatus } from "../src/lib/types";
 
 interface PlaylistCase {

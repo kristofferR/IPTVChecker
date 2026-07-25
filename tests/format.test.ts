@@ -9,9 +9,7 @@ import {
 } from "../src/lib/format";
 import type { ChannelResult } from "../src/lib/types";
 
-function makeResult(
-  overrides: Partial<ChannelResult> = {},
-): ChannelResult {
+function makeResult(overrides: Partial<ChannelResult> = {}): ChannelResult {
   return {
     index: 0,
     playlist: "fixture.m3u8",

@@ -1,5 +1,5 @@
-import { useEffect } from "react";
 import { X } from "lucide-react";
+import { useEffect } from "react";
 
 interface ShortcutEntry {
   keys: string;
@@ -74,17 +74,18 @@ export default function KeyboardShortcutsDialog({
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Keyboard shortcuts"
+    >
       <div className="absolute inset-0 bg-black/45" onClick={onClose} />
       <div className="relative w-full max-w-3xl rounded-2xl border border-border-app bg-overlay shadow-2xl">
         <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-border-app">
           <div>
-            <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-1">
-              Help
-            </p>
-            <h2 className="text-[18px] font-semibold text-text-primary">
-              Keyboard Shortcuts
-            </h2>
+            <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-1">Help</p>
+            <h2 className="text-[18px] font-semibold text-text-primary">Keyboard Shortcuts</h2>
           </div>
           <button
             type="button"

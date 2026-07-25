@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { attachLogger, LogLevel } from "@tauri-apps/plugin-log";
 import { ArrowDown, Search, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 interface LogEntry {
   id: number;
@@ -12,10 +12,7 @@ interface LogEntry {
 
 const MAX_LOG_ENTRIES = 10_000;
 
-const LEVEL_META: Record<
-  LogLevel,
-  { label: string; color: string; activeColor: string }
-> = {
+const LEVEL_META: Record<LogLevel, { label: string; color: string; activeColor: string }> = {
   [LogLevel.Trace]: {
     label: "TRACE",
     color: "text-zinc-500",
@@ -43,19 +40,9 @@ const LEVEL_META: Record<
   },
 };
 
-const ALL_LEVELS: LogLevel[] = [
-  LogLevel.Debug,
-  LogLevel.Info,
-  LogLevel.Warn,
-  LogLevel.Error,
-];
+const ALL_LEVELS: LogLevel[] = [LogLevel.Debug, LogLevel.Info, LogLevel.Warn, LogLevel.Error];
 
-const DEFAULT_ENABLED = new Set([
-  LogLevel.Debug,
-  LogLevel.Info,
-  LogLevel.Warn,
-  LogLevel.Error,
-]);
+const DEFAULT_ENABLED = new Set([LogLevel.Debug, LogLevel.Info, LogLevel.Warn, LogLevel.Error]);
 
 function formatTimestamp(date: Date): string {
   const h = String(date.getHours()).padStart(2, "0");
@@ -69,9 +56,7 @@ let nextId = 0;
 
 export function LogWindowContent() {
   const [entries, setEntries] = useState<LogEntry[]>([]);
-  const [levelFilter, setLevelFilter] = useState<Set<LogLevel>>(
-    () => new Set(DEFAULT_ENABLED),
-  );
+  const [levelFilter, setLevelFilter] = useState<Set<LogLevel>>(() => new Set(DEFAULT_ENABLED));
   const [searchText, setSearchText] = useState("");
 
   const bufferRef = useRef<LogEntry[]>([]);
@@ -100,9 +85,10 @@ export function LogWindowContent() {
           bufferRef.current = [];
           if (batch.length === 0) return;
           setEntries((prev) => {
-            const combined = prev.length + batch.length > MAX_LOG_ENTRIES
-              ? [...prev, ...batch].slice(-MAX_LOG_ENTRIES)
-              : [...prev, ...batch];
+            const combined =
+              prev.length + batch.length > MAX_LOG_ENTRIES
+                ? [...prev, ...batch].slice(-MAX_LOG_ENTRIES)
+                : [...prev, ...batch];
             return combined;
           });
         }, 32);
@@ -129,8 +115,7 @@ export function LogWindowContent() {
   const filteredEntries = useMemo(() => {
     return entries.filter((entry) => {
       if (!levelFilter.has(entry.level)) return false;
-      if (searchLower && !entry.message.toLowerCase().includes(searchLower))
-        return false;
+      if (searchLower && !entry.message.toLowerCase().includes(searchLower)) return false;
       return true;
     });
   }, [entries, levelFilter, searchLower]);
@@ -292,14 +277,10 @@ export function LogWindowContent() {
                 <span className="text-text-tertiary shrink-0 select-all">
                   {formatTimestamp(entry.timestamp)}
                 </span>
-                <span
-                  className={`${meta.color} font-semibold shrink-0 w-[5ch] text-right`}
-                >
+                <span className={`${meta.color} font-semibold shrink-0 w-[5ch] text-right`}>
                   {meta.label}
                 </span>
-                <span className="text-text-primary break-all select-all">
-                  {entry.message}
-                </span>
+                <span className="text-text-primary break-all select-all">{entry.message}</span>
               </div>
             );
           })}

@@ -1,7 +1,7 @@
 import type { StateCreator } from "zustand";
-import type { AppStore, UiSlice } from "../types";
 import { inferPlatformFromNavigator } from "../../lib/platform";
 import { isScanActive } from "../../lib/scanState";
+import type { AppStore, UiSlice } from "../types";
 
 const initialPlatform = inferPlatformFromNavigator();
 
@@ -71,9 +71,7 @@ export const createUiSlice: StateCreator<AppStore, [], [], UiSlice> = (set, get)
       reportAutoRevealDone: false,
       reportWasAutoShown: false,
       showReportPanel:
-        state.reportWasAutoShown && state.showReportPanel
-          ? false
-          : state.showReportPanel,
+        state.reportWasAutoShown && state.showReportPanel ? false : state.showReportPanel,
     })),
   autoRevealReportPanel: () =>
     set({

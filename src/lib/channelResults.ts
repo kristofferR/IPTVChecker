@@ -41,9 +41,7 @@ export function getChannelIdFromUrl(url: string): string {
   return segment.replace(".ts", "");
 }
 
-export function getChannelErrorReason(
-  result: Pick<ChannelResult, "error_reason">,
-): string | null {
+export function getChannelErrorReason(result: Pick<ChannelResult, "error_reason">): string | null {
   return result.error_reason?.trim() || null;
 }
 
@@ -68,9 +66,7 @@ export function toPendingChannelResult(channel: Channel): ChannelResult {
   };
 }
 
-export function resetChannelResultForRescan(
-  result: ChannelResult,
-): ChannelResult {
+export function resetChannelResultForRescan(result: ChannelResult): ChannelResult {
   return {
     ...result,
     ...pendingScanFields(),

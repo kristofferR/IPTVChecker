@@ -1,9 +1,9 @@
 import {
   attachConsole,
   debug as tauriDebug,
+  error as tauriError,
   info as tauriInfo,
   warn as tauriWarn,
-  error as tauriError,
 } from "@tauri-apps/plugin-log";
 
 export type LogLevel = "debug" | "info" | "warn" | "error" | "silent";
@@ -62,10 +62,7 @@ function formatArgs(args: unknown[]): string {
   return args.map(formatArg).join(" ");
 }
 
-function forwardToTauri(
-  method: (message: string) => Promise<void>,
-  message: string,
-): void {
+function forwardToTauri(method: (message: string) => Promise<void>, message: string): void {
   if (!hasTauriWindow()) {
     return;
   }

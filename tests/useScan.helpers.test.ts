@@ -1,14 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import {
-  applyResultUpdates,
-  type ScanResultCollections,
-} from "../src/hooks/useScan.helpers";
+import { applyResultUpdates, type ScanResultCollections } from "../src/hooks/useScan.helpers";
 import type { ChannelResult } from "../src/lib/types";
 
-function buildResult(
-  index: number,
-  overrides: Partial<ChannelResult> = {},
-): ChannelResult {
+function buildResult(index: number, overrides: Partial<ChannelResult> = {}): ChannelResult {
   return {
     index,
     playlist: "sample",

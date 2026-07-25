@@ -1,14 +1,3 @@
-import {
-  memo,
-  startTransition,
-  useCallback,
-  useDeferredValue,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   BarChart3,
@@ -20,37 +9,44 @@ import {
   KeyRound,
   Library,
   Link2,
+  Loader2,
   Pause,
   Play,
   Radar,
-  Square,
-  Settings,
   Search,
-  Loader2,
+  Settings,
+  Square,
 } from "lucide-react";
-import {
-  SFPlayFill,
-  SFPauseFill,
-  SFStopFill,
-  SFChevronDown,
-  SFDocumentViewfinder,
-  SFFolder,
-  SFLink,
-  SFGearshape,
-  SFClockArrow,
-} from "./SFSymbols";
 import type { PointerEvent, RefObject } from "react";
-import type { ChannelResult } from "../lib/types";
-import type { ExportScope } from "../lib/exportScope";
 import {
-  countStatusOptions,
-  filterResultsShared,
-  sharedSearchTextCache,
-} from "../lib/filters";
+  memo,
+  startTransition,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type { ExportScope } from "../lib/exportScope";
+import { countStatusOptions, filterResultsShared, sharedSearchTextCache } from "../lib/filters";
 import { measureUiPerf } from "../lib/perf";
 import { validateSourceFilterPattern } from "../lib/sourceFilter";
-import { ExportMenu } from "./ExportMenu";
+import type { ChannelResult } from "../lib/types";
 import { useAppStore } from "../store";
+import { ExportMenu } from "./ExportMenu";
+import {
+  SFChevronDown,
+  SFClockArrow,
+  SFDocumentViewfinder,
+  SFFolder,
+  SFGearshape,
+  SFLink,
+  SFPauseFill,
+  SFPlayFill,
+  SFStopFill,
+} from "./SFSymbols";
 
 interface ToolbarProps {
   onOpen: () => void;
@@ -108,15 +104,12 @@ function measureGroupSelectWidth(
   }, 0);
 
   const horizontalPadding =
-    Number.parseFloat(computedStyle.paddingLeft) +
-    Number.parseFloat(computedStyle.paddingRight);
+    Number.parseFloat(computedStyle.paddingLeft) + Number.parseFloat(computedStyle.paddingRight);
   const horizontalBorder =
     Number.parseFloat(computedStyle.borderLeftWidth) +
     Number.parseFloat(computedStyle.borderRightWidth);
 
-  return Math.ceil(
-    widestLabel + horizontalPadding + horizontalBorder + GROUP_SELECT_CHROME_WIDTH,
-  );
+  return Math.ceil(widestLabel + horizontalPadding + horizontalBorder + GROUP_SELECT_CHROME_WIDTH);
 }
 
 export const Toolbar = memo(function Toolbar({
@@ -145,21 +138,15 @@ export const Toolbar = memo(function Toolbar({
   const completedResults = useAppStore((s) => s.flatResults);
   const duplicateIndices = useAppStore((s) => s.duplicateIndices);
   const menuExportRequest = useAppStore((s) => s.menuExportRequest);
-  const showReport = useAppStore(
-    (s) => s.playlist !== null && s.showReportPanel,
-  );
+  const showReport = useAppStore((s) => s.playlist !== null && s.showReportPanel);
   const hasPlaylist = useAppStore((s) => s.playlist !== null);
   const currentSourceDescriptor = useAppStore((s) => s.currentSourceDescriptor);
   const playlistName = useAppStore((s) => s.playlist?.file_name ?? "");
   const playlistPath = useAppStore((s) => s.playlist?.file_path ?? "");
   const groups = useAppStore((s) => s.playlist?.groups ?? EMPTY_GROUPS);
   const selectedIndices = useAppStore((s) => s.selectedChannelIndices);
-  const separatePlaceholder = useAppStore(
-    (s) => s.settings.separate_placeholder_status,
-  );
-  const showHeaderButtonText = useAppStore(
-    (s) => s.settings.show_header_button_text,
-  );
+  const separatePlaceholder = useAppStore((s) => s.settings.separate_placeholder_status);
+  const showHeaderButtonText = useAppStore((s) => s.settings.show_header_button_text);
   const openMenuRef = useRef<HTMLDivElement | null>(null);
   const groupSelectRef = useRef<HTMLSelectElement | null>(null);
   const [openMenuVisible, setOpenMenuVisible] = useState(false);
@@ -205,13 +192,7 @@ export const Toolbar = memo(function Toolbar({
         sharedSearchTextCache,
         separatePlaceholder,
       ),
-    [
-      completedResults,
-      deferredSearch,
-      groupFilter,
-      duplicateIndices,
-      separatePlaceholder,
-    ],
+    [completedResults, deferredSearch, groupFilter, duplicateIndices, separatePlaceholder],
   );
 
   const exportContextRef = useRef({
@@ -230,10 +211,7 @@ export const Toolbar = memo(function Toolbar({
 
   useEffect(() => {
     const handlePointerDownOutside = (event: MouseEvent) => {
-      if (
-        openMenuRef.current &&
-        !openMenuRef.current.contains(event.target as Node)
-      ) {
+      if (openMenuRef.current && !openMenuRef.current.contains(event.target as Node)) {
         setOpenMenuVisible(false);
       }
     };
@@ -252,23 +230,20 @@ export const Toolbar = memo(function Toolbar({
     };
   }, []);
 
-  const resolveExportScopeResults = useCallback(
-    (scope: ExportScope): ChannelResult[] => {
-      const context = exportContextRef.current;
-      if (scope === "all") {
-        return context.all;
-      }
-      if (scope === "filtered") {
-        return context.filtered;
-      }
-      if (context.selectedIndices.length === 0) {
-        return [];
-      }
-      const selectedSet = new Set(context.selectedIndices);
-      return context.all.filter((result) => selectedSet.has(result.index));
-    },
-    [],
-  );
+  const resolveExportScopeResults = useCallback((scope: ExportScope): ChannelResult[] => {
+    const context = exportContextRef.current;
+    if (scope === "all") {
+      return context.all;
+    }
+    if (scope === "filtered") {
+      return context.filtered;
+    }
+    if (context.selectedIndices.length === 0) {
+      return [];
+    }
+    const selectedSet = new Set(context.selectedIndices);
+    return context.all.filter((result) => selectedSet.has(result.index));
+  }, []);
 
   const exportScopeCounts = useMemo(
     () => ({
@@ -294,16 +269,10 @@ export const Toolbar = memo(function Toolbar({
   const inScanSession = scanning || paused || cancelling;
   const hasResults = exportScopeCounts.all > 0;
   const scanLabel =
-    selectedIndices.length > 0
-      ? `Scan Selected (${selectedIndices.length})`
-      : "Scan";
-  const scanDisabledReason = !hasPlaylist
-    ? "Open a playlist first"
-    : scanBlockedReason;
+    selectedIndices.length > 0 ? `Scan Selected (${selectedIndices.length})` : "Scan";
+  const scanDisabledReason = !hasPlaylist ? "Open a playlist first" : scanBlockedReason;
   const canSavePlaylist =
-    hasPlaylist &&
-    currentSourceDescriptor !== null &&
-    currentSourceDescriptor.kind !== "stalker";
+    hasPlaylist && currentSourceDescriptor !== null && currentSourceDescriptor.kind !== "stalker";
   const filtersDisabled = !hasPlaylist;
   const statusLabel = (value: string, label: string) =>
     hasPlaylist ? `${label} (${statusOptionCounts[value] ?? 0})` : label;
@@ -417,8 +386,7 @@ export const Toolbar = memo(function Toolbar({
     : isMac
       ? toolbarBtnMac
       : `${toolbarBtn} justify-center px-2.5`;
-  const btnWithOptionalText = (extraClasses = "") =>
-    `${btn} ${extraClasses}`.trim();
+  const btnWithOptionalText = (extraClasses = "") => `${btn} ${extraClasses}`.trim();
   const toolbarPadding = hasPlaylist
     ? "pt-[var(--toolbar-pt)] pb-2"
     : isMac
@@ -434,8 +402,7 @@ export const Toolbar = memo(function Toolbar({
   const rightControlsClass =
     "ml-auto flex flex-1 min-w-0 items-center justify-end gap-[clamp(0.45rem,0.9vw,1rem)]";
   const filtersClass = `flex min-w-0 flex-1 items-center justify-end gap-[clamp(0.5rem,0.95vw,1rem)] ${filtersDisabled ? "opacity-50" : ""}`;
-  const selectedGroupTitle =
-    groupFilter === "all" ? GROUP_FILTER_LABEL : groupFilter;
+  const selectedGroupTitle = groupFilter === "all" ? GROUP_FILTER_LABEL : groupFilter;
   const groupSelectStyle =
     groupSelectWidth === null
       ? {
@@ -454,7 +421,13 @@ export const Toolbar = memo(function Toolbar({
       className={`relative flex items-center px-3 ${toolbarSurface} ${toolbarPadding} ${toolbarHorizontalPadding} ${isMac ? "gap-3" : "gap-1.5"}`}
     >
       {/* Scan group: Scan / Pause+Stop — under traffic lights on macOS */}
-      <div className={isMac ? "toolbar-group toolbar-group-prominent -ml-[calc(var(--toolbar-pl)-0.75rem)] mr-2" : "flex items-center gap-1.5"}>
+      <div
+        className={
+          isMac
+            ? "toolbar-group toolbar-group-prominent -ml-[calc(var(--toolbar-pl)-0.75rem)] mr-2"
+            : "flex items-center gap-1.5"
+        }
+      >
         {inScanSession ? (
           <>
             {cancelling ? (
@@ -616,34 +589,21 @@ export const Toolbar = memo(function Toolbar({
 
       {/* macOS: playlist name centered in title bar area */}
       {playlistName && isMac && (
-        <span
-          data-tauri-drag-region
-          className={inlinePlaylistNameClass}
-          title={playlistName}
-        >
+        <span data-tauri-drag-region className={inlinePlaylistNameClass} title={playlistName}>
           {playlistName}
         </span>
       )}
 
       {/* Non-macOS: playlist name inline */}
       {playlistName && !isMac && (
-        <span
-          className={inlinePlaylistNameClass}
-          title={playlistName}
-        >
+        <span className={inlinePlaylistNameClass} title={playlistName}>
           {playlistName}
         </span>
       )}
 
-      <div
-        data-tauri-drag-region={dragRegionAttr}
-        className={rightControlsClass}
-      >
+      <div data-tauri-drag-region={dragRegionAttr} className={rightControlsClass}>
         {/* Filters: Group, Status, Search */}
-        <div
-          className={filtersClass}
-          data-no-window-drag
-        >
+        <div className={filtersClass} data-no-window-drag>
           <div className="flex min-w-0 items-center gap-[clamp(0.5rem,0.95vw,1rem)]">
             <div className="min-w-0 shrink" style={groupSelectStyle}>
               <select

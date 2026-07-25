@@ -74,9 +74,7 @@ export function findSavedPlaylistForCurrentSource(
   currentSavedPlaylistId?: string | null,
 ): SavedPlaylistEntry | null {
   if (currentSavedPlaylistId) {
-    return (
-      savedPlaylists.find((entry) => entry.id === currentSavedPlaylistId) ?? null
-    );
+    return savedPlaylists.find((entry) => entry.id === currentSavedPlaylistId) ?? null;
   }
   if (!descriptor) {
     return null;

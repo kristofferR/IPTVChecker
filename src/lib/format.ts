@@ -94,9 +94,7 @@ export function statusIcon(status: ChannelStatus): string {
 export function formatVideoInfo(result: ChannelResult): string {
   const parts: string[] = [];
   if (result.resolution && result.resolution !== "Unknown") {
-    const res = result.fps
-      ? `${result.resolution}${result.fps}`
-      : result.resolution;
+    const res = result.fps ? `${result.resolution}${result.fps}` : result.resolution;
     parts.push(res);
   }
   if (result.codec && result.codec !== "Unknown") {

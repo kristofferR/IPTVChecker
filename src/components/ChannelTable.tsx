@@ -1,32 +1,40 @@
-import { useRef, useState, useMemo, useCallback, useEffect, useDeferredValue, type RefObject } from "react";
-import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { ChannelResult } from "../lib/types";
+import { ArrowDown, ArrowUp } from "lucide-react";
+import {
+  type RefObject,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
+import { channelRowHeightPixels } from "../lib/channelLogoSize";
+import { getChannelErrorReason } from "../lib/channelResults";
+import { getChannelTableLayout } from "../lib/channelTableLayout";
 import type { SortDirection, SortField } from "../lib/filters";
 import { filterResultsShared, sortResults } from "../lib/filters";
-import {
-  COLUMN_ORDER_STORAGE_KEY,
-  COLUMN_WIDTH_STORAGE_KEY,
-  COLUMN_DEFINITIONS,
-  COLUMN_DEFINITION_MAP,
-  DEFAULT_COLUMN_ORDER,
-  DEFAULT_VISIBLE_COLUMN_ORDER,
-  DEFAULT_COLUMN_WIDTHS,
-  parseStoredColumnOrder,
-  parseStoredColumnWidths,
-  type ColumnKey,
-} from "../lib/tableColumns";
-import { ChannelRow } from "./ChannelRow";
-import { ArrowDown, ArrowUp } from "lucide-react";
-import { getChannelErrorReason } from "../lib/channelResults";
 import { statusLabel } from "../lib/format";
 import { measureUiPerf } from "../lib/perf";
 import { isScanActive } from "../lib/scanState";
 import { isInputLikeTarget, isPrimaryModifierPressed } from "../lib/shortcuts";
-import { channelRowHeightPixels } from "../lib/channelLogoSize";
 import { detectChannelProtocol } from "../lib/streamProtocol";
-import { getChannelTableLayout } from "../lib/channelTableLayout";
+import {
+  COLUMN_DEFINITION_MAP,
+  COLUMN_DEFINITIONS,
+  COLUMN_ORDER_STORAGE_KEY,
+  COLUMN_WIDTH_STORAGE_KEY,
+  type ColumnKey,
+  DEFAULT_COLUMN_ORDER,
+  DEFAULT_COLUMN_WIDTHS,
+  DEFAULT_VISIBLE_COLUMN_ORDER,
+  parseStoredColumnOrder,
+  parseStoredColumnWidths,
+} from "../lib/tableColumns";
+import type { ChannelResult } from "../lib/types";
 import { useAppStore } from "../store";
+import { ChannelRow } from "./ChannelRow";
 
 interface ChannelTableProps {
   onSelectChannel: (result: ChannelResult) => void;
@@ -59,15 +67,12 @@ const DEFAULT_VISIBLE_SINGLE_PLAYLIST_COLUMN_ORDER: ColumnKey[] =
 
 function buildChannelMetadataSummary(channel: ChannelResult): string {
   const videoBitrate = channel.video_bitrate ?? "Unknown";
-  const audioBitrate = channel.audio_bitrate
-    ? `${channel.audio_bitrate} kbps`
-    : "Unknown";
+  const audioBitrate = channel.audio_bitrate ? `${channel.audio_bitrate} kbps` : "Unknown";
   const audioCodec = channel.audio_codec ?? "Unknown";
   const hdrFormat = channel.hdr_format ?? "Unknown";
   const audioLayout = channel.audio_channel_layout ?? "Unknown";
   const resolvedStreamUrl = channel.stream_url?.trim() || null;
-  const hasResolvedStreamUrl =
-    !!resolvedStreamUrl && resolvedStreamUrl !== channel.url;
+  const hasResolvedStreamUrl = !!resolvedStreamUrl && resolvedStreamUrl !== channel.url;
   const protocol = detectChannelProtocol(channel) ?? "Unknown";
   const errorReason = getChannelErrorReason(channel) ?? "N/A";
 
@@ -94,20 +99,13 @@ function buildChannelMetadataSummary(channel: ChannelResult): string {
   return lines.join("\n");
 }
 
-function columnOrderMatchesDefaults(
-  columnOrder: ColumnKey[],
-  defaults: ColumnKey[],
-): boolean {
+function columnOrderMatchesDefaults(columnOrder: ColumnKey[], defaults: ColumnKey[]): boolean {
   if (columnOrder.length !== defaults.length) return false;
-  return defaults.every(
-    (key, index) => columnOrder[index] === key,
-  );
+  return defaults.every((key, index) => columnOrder[index] === key);
 }
 
 function columnWidthsMatchDefaults(widths: Record<ColumnKey, number>): boolean {
-  return DEFAULT_COLUMN_ORDER.every(
-    (key) => widths[key] === DEFAULT_COLUMN_WIDTHS[key],
-  );
+  return DEFAULT_COLUMN_ORDER.every((key) => widths[key] === DEFAULT_COLUMN_WIDTHS[key]);
 }
 
 function keepMenuInViewport(
@@ -151,9 +149,7 @@ export function ChannelTable({
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const copyFeedbackTimerRef = useRef<number | null>(null);
   const columnMenuRef = useRef<HTMLDivElement>(null);
-  const columnHeaderRefs = useRef<
-    Partial<Record<ColumnKey, HTMLDivElement | null>>
-  >({});
+  const columnHeaderRefs = useRef<Partial<Record<ColumnKey, HTMLDivElement | null>>>({});
   const [sortField, setSortField] = useState<SortField>("index");
   const [sortDir, setSortDir] = useState<SortDirection>("asc");
   const [focusedRow, setFocusedRow] = useState<number | null>(null);
@@ -163,9 +159,7 @@ export function ChannelTable({
     setFocusedRow(next);
   }, []);
   const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
-  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(
-    () => new Set(),
-  );
+  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(() => new Set());
   const [contextMenuState, setContextMenuState] = useState<{
     x: number;
     y: number;
@@ -194,8 +188,8 @@ export function ChannelTable({
       DEFAULT_VISIBLE_SINGLE_PLAYLIST_COLUMN_ORDER,
     ),
   );
-  const [columnWidths, setColumnWidths] = useState<Record<ColumnKey, number>>(
-    () => parseStoredColumnWidths(localStorage.getItem(COLUMN_WIDTH_STORAGE_KEY)),
+  const [columnWidths, setColumnWidths] = useState<Record<ColumnKey, number>>(() =>
+    parseStoredColumnWidths(localStorage.getItem(COLUMN_WIDTH_STORAGE_KEY)),
   );
   const filteredResultsRef = useRef<ChannelResult[]>([]);
   const selectedIndicesRef = useRef(selectedIndices);
@@ -296,8 +290,8 @@ export function ChannelTable({
   const gridTemplateColumns = useMemo(
     () =>
       columns
-        .map((column) =>
-          `${column.key === "name" ? effectiveNameWidth : columnWidths[column.key]}px`,
+        .map(
+          (column) => `${column.key === "name" ? effectiveNameWidth : columnWidths[column.key]}px`,
         )
         .join(" "),
     [columns, columnWidths, effectiveNameWidth],
@@ -410,15 +404,11 @@ export function ChannelTable({
       return next.size === prev.size ? prev : next;
     });
 
-    setSelectionAnchor((prev) =>
-      prev !== null && visible.has(prev) ? prev : null,
-    );
+    setSelectionAnchor((prev) => (prev !== null && visible.has(prev) ? prev : null));
 
     const previous = focusedRowRef.current;
     const next =
-      filteredResults.length === 0
-        ? null
-        : Math.min(previous ?? 0, filteredResults.length - 1);
+      filteredResults.length === 0 ? null : Math.min(previous ?? 0, filteredResults.length - 1);
     if (next !== previous) updateFocusedRow(next);
   }, [filteredResults, updateFocusedRow, updateSelection]);
 
@@ -548,9 +538,7 @@ export function ChannelTable({
         return;
       }
 
-      const anchorRow = filteredResults.findIndex(
-        (result) => result.index === selectionAnchor,
-      );
+      const anchorRow = filteredResults.findIndex((result) => result.index === selectionAnchor);
       if (anchorRow < 0) {
         selectSingle(clickedResult, clickedRow);
         return;
@@ -652,10 +640,7 @@ export function ChannelTable({
       }
 
       const next = [...prev, key];
-      next.sort(
-        (a, b) =>
-          DEFAULT_COLUMN_ORDER.indexOf(a) - DEFAULT_COLUMN_ORDER.indexOf(b),
-      );
+      next.sort((a, b) => DEFAULT_COLUMN_ORDER.indexOf(a) - DEFAULT_COLUMN_ORDER.indexOf(b));
       return next;
     });
   }, []);
@@ -695,15 +680,9 @@ export function ChannelTable({
       // All side effects (selection emit, playback/cast redirect, scroll) run
       // outside the focused-row state update — updaters must stay pure, and
       // StrictMode double-invocation here used to double-start playback.
-      const selectedRow = filteredResults.findIndex((result) =>
-        selectedIndices.has(result.index),
-      );
-      const current =
-        focusedRowRef.current ?? (selectedRow >= 0 ? selectedRow : 0);
-      const next = Math.min(
-        filteredResults.length - 1,
-        Math.max(0, current + delta),
-      );
+      const selectedRow = filteredResults.findIndex((result) => selectedIndices.has(result.index));
+      const current = focusedRowRef.current ?? (selectedRow >= 0 ? selectedRow : 0);
+      const next = Math.min(filteredResults.length - 1, Math.max(0, current + delta));
 
       const result = filteredResults[next];
       if (result) {
@@ -787,11 +766,7 @@ export function ChannelTable({
   );
 
   const handleRowClickAt = useCallback(
-    (
-      event: React.MouseEvent<HTMLDivElement>,
-      result: ChannelResult,
-      rowIndex: number,
-    ) => {
+    (event: React.MouseEvent<HTMLDivElement>, result: ChannelResult, rowIndex: number) => {
       setContextMenuState(null);
       setColumnMenuState(null);
 
@@ -854,11 +829,7 @@ export function ChannelTable({
   );
 
   const handleRowContextMenuAt = useCallback(
-    (
-      event: React.MouseEvent<HTMLDivElement>,
-      result: ChannelResult,
-      rowIndex: number,
-    ) => {
+    (event: React.MouseEvent<HTMLDivElement>, result: ChannelResult, rowIndex: number) => {
       event.preventDefault();
       setColumnMenuState(null);
 
@@ -942,9 +913,7 @@ export function ChannelTable({
       return [contextMenuState.channel];
     }
     const indexSet = selectedIndices;
-    return completedResults
-      .filter((r) => indexSet.has(r.index))
-      .sort((a, b) => a.index - b.index);
+    return completedResults.filter((r) => indexSet.has(r.index)).sort((a, b) => a.index - b.index);
   }, [selectedIndices, contextMenuState, completedResults]);
 
   const handleCopyChannelName = useCallback(async () => {
@@ -968,10 +937,7 @@ export function ChannelTable({
   const handleCopyAllMetadata = useCallback(async () => {
     if (!contextMenuState) return;
     const channels = getSelectedChannels();
-    await copyText(
-      "metadata",
-      channels.map(buildChannelMetadataSummary).join("\n\n"),
-    );
+    await copyText("metadata", channels.map(buildChannelMetadataSummary).join("\n\n"));
   }, [contextMenuState, copyText, getSelectedChannels]);
 
   const handlePreviewChannel = useCallback(() => {
@@ -1016,10 +982,7 @@ export function ChannelTable({
       let dropTarget: ColumnKey | null = null;
       const sourceNode = columnHeaderRefs.current[key];
       const sourceRect = sourceNode?.getBoundingClientRect();
-      const previewWidth = Math.max(
-        72,
-        Math.round(sourceRect?.width ?? columnWidths[key]),
-      );
+      const previewWidth = Math.max(72, Math.round(sourceRect?.width ?? columnWidths[key]));
 
       const onMove = (moveEvent: PointerEvent) => {
         const delta = Math.abs(moveEvent.clientX - startX);
@@ -1138,10 +1101,7 @@ export function ChannelTable({
       }
 
       const previous = lastRevealScrollStateRef.current;
-      if (
-        previous.scrollTop === nextScrollTop &&
-        previous.scrollLeft === nextScrollLeft
-      ) {
+      if (previous.scrollTop === nextScrollTop && previous.scrollLeft === nextScrollLeft) {
         return;
       }
 
@@ -1215,10 +1175,7 @@ export function ChannelTable({
   });
 
   const renderVirtualRows = useCallback(
-    (
-      items: typeof virtualItems,
-      mode: "main" | "reveal",
-    ) =>
+    (items: typeof virtualItems, mode: "main" | "reveal") =>
       items.map((virtualRow) => {
         const result = filteredResults[virtualRow.index];
         if (!result) {
@@ -1248,12 +1205,8 @@ export function ChannelTable({
               result={result}
               channelLogoSize={channelLogoSize}
               onRowClick={mode === "main" ? handleRowClick : noopRowEvent}
-              onRowDoubleClick={
-                mode === "main" ? handleRowDoubleClick : noopRowEvent
-              }
-              onRowContextMenu={
-                mode === "main" ? handleRowContextMenu : noopRowEvent
-              }
+              onRowDoubleClick={mode === "main" ? handleRowDoubleClick : noopRowEvent}
+              onRowContextMenu={mode === "main" ? handleRowContextMenu : noopRowEvent}
               selected={selectedIndices.has(result.index)}
               duplicate={duplicateIndices.has(result.index)}
               focused={focusedRow === virtualRow.index}
@@ -1285,11 +1238,19 @@ export function ChannelTable({
   const headerElement = (
     <div
       ref={headerRef}
-      className={portalTarget
-        ? "h-8 select-none overflow-hidden"
-        : "absolute top-0 left-0 right-0 z-10 h-8 bg-panel select-none overflow-hidden"
+      className={
+        portalTarget
+          ? "h-8 select-none overflow-hidden"
+          : "absolute top-0 left-0 right-0 z-10 h-8 bg-panel select-none overflow-hidden"
       }
-      style={portalTarget ? { maskImage: "linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent)" } : undefined}
+      style={
+        portalTarget
+          ? {
+              maskImage:
+                "linear-gradient(to right, transparent, black 24px, black calc(100% - 24px), transparent)",
+            }
+          : undefined
+      }
     >
       <div
         className="grid items-center h-8 px-4 text-[11px] font-semibold text-text-secondary"
@@ -1322,15 +1283,11 @@ export function ChannelTable({
                   y: event.clientY,
                 });
               }}
-              onPointerDown={(event) =>
-                handleColumnPointerDown(column.key, event)
-              }
+              onPointerDown={(event) => handleColumnPointerDown(column.key, event)}
               className={`relative flex items-center h-full w-full ${alignClass} ${
                 draggedColumn === column.key ? "opacity-45" : ""
               } ${
-                dragOverColumn === column.key
-                  ? "bg-blue-500/10 rounded-sm"
-                  : ""
+                dragOverColumn === column.key ? "bg-blue-500/10 rounded-sm" : ""
               } cursor-grab active:cursor-grabbing`}
               title={`Drag to reorder ${column.label}. Right-click for column visibility.`}
             >
@@ -1409,7 +1366,6 @@ export function ChannelTable({
             minHeight: "100%",
           }}
         >
-
           {filteredResults.length === 0 ? (
             <div className="flex items-center justify-center text-text-tertiary text-sm min-h-64">
               No channels match the current filters
@@ -1423,9 +1379,7 @@ export function ChannelTable({
               }}
             >
               {hasMacHeaderReveal ? (
-                <div
-                  className="sticky top-0 left-0 h-0 overflow-visible"
-                >
+                <div className="sticky top-0 left-0 h-0 overflow-visible">
                   <div
                     className="channel-table-viewport"
                     style={{
@@ -1492,28 +1446,44 @@ export function ChannelTable({
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
-            {copiedAction === "name" ? "Copied!" : selectedIndices.size > 1 ? `Copy ${selectedIndices.size} Names` : "Copy Channel Name"}
+            {copiedAction === "name"
+              ? "Copied!"
+              : selectedIndices.size > 1
+                ? `Copy ${selectedIndices.size} Names`
+                : "Copy Channel Name"}
           </button>
           <button
             onClick={handleCopyChannelUrl}
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
-            {copiedAction === "url" ? "Copied!" : selectedIndices.size > 1 ? `Copy ${selectedIndices.size} URLs` : "Copy URL"}
+            {copiedAction === "url"
+              ? "Copied!"
+              : selectedIndices.size > 1
+                ? `Copy ${selectedIndices.size} URLs`
+                : "Copy URL"}
           </button>
           <button
             onClick={handleCopyM3uEntry}
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
-            {copiedAction === "m3u" ? "Copied!" : selectedIndices.size > 1 ? `Copy ${selectedIndices.size} M3U Entries` : "Copy M3U Entry"}
+            {copiedAction === "m3u"
+              ? "Copied!"
+              : selectedIndices.size > 1
+                ? `Copy ${selectedIndices.size} M3U Entries`
+                : "Copy M3U Entry"}
           </button>
           <button
             onClick={handleCopyAllMetadata}
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
-            {copiedAction === "metadata" ? "Copied!" : selectedIndices.size > 1 ? `Copy ${selectedIndices.size} Metadata` : "Copy All Metadata"}
+            {copiedAction === "metadata"
+              ? "Copied!"
+              : selectedIndices.size > 1
+                ? `Copy ${selectedIndices.size} Metadata`
+                : "Copy All Metadata"}
           </button>
         </div>
       )}

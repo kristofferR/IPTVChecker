@@ -1,17 +1,14 @@
-import { memo, useMemo } from "react";
 import { BarChart3, X } from "lucide-react";
-import type {
-  ChannelResult,
-  PlaylistScore,
-} from "../lib/types";
-import { summarizeLanguageDistribution } from "../lib/languageDistribution";
+import { memo, useMemo } from "react";
 import { summarizeEpgCoverage } from "../lib/epgCoverage";
-import { useAppStore } from "../store";
+import { summarizeLanguageDistribution } from "../lib/languageDistribution";
 import {
   hasScanStarted,
   shouldShowContentCounts,
   shouldShowLanguageDistribution,
 } from "../lib/playlistReportVisibility";
+import type { ChannelResult, PlaylistScore } from "../lib/types";
+import { useAppStore } from "../store";
 
 interface PlaylistReportPanelProps {
   placement?: "left" | "right";
@@ -45,9 +42,7 @@ function median(values: number[]): number | null {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1
-    ? sorted[mid]
-    : (sorted[mid - 1] + sorted[mid]) / 2;
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 function isAliveResult(result: ChannelResult): boolean {
@@ -78,7 +73,8 @@ function qualityBucket(result: ChannelResult): keyof QualityBuckets {
   }
 
   const resolution = result.resolution?.toLowerCase() ?? "";
-  if (resolution.includes("2160") || resolution.includes("4k") || resolution.includes("uhd")) return "uhd4k";
+  if (resolution.includes("2160") || resolution.includes("4k") || resolution.includes("uhd"))
+    return "uhd4k";
   if (resolution.includes("1080")) return "hd1080";
   if (resolution.includes("720")) return "hd720";
   return "sd";
@@ -87,7 +83,12 @@ function qualityBucket(result: ChannelResult): keyof QualityBuckets {
 function codecTier(codec: string | null): number {
   const value = codec?.toLowerCase() ?? "";
   if (!value) return 0.4;
-  if (value.includes("hevc") || value.includes("h265") || value.includes("h.265") || value.includes("av1")) {
+  if (
+    value.includes("hevc") ||
+    value.includes("h265") ||
+    value.includes("h.265") ||
+    value.includes("av1")
+  ) {
     return 1;
   }
   if (value.includes("h264") || value.includes("h.264") || value.includes("avc")) {
@@ -114,7 +115,8 @@ function computeLiveScore(results: ChannelResult[], total: number): PlaylistScor
     results.map((result) => result.group.trim().toLowerCase()).filter(Boolean),
   ).size;
   const diversity = clamp01(uniqueGroups / 20);
-  const epgCoverage = results.filter((result) => (result.tvg_id ?? "").trim().length > 0).length / total;
+  const epgCoverage =
+    results.filter((result) => (result.tvg_id ?? "").trim().length > 0).length / total;
   const contentScore = clampScore10((aliveRatio * 0.6 + diversity * 0.2 + epgCoverage * 0.2) * 10);
 
   let qualityScore = 0;
@@ -122,9 +124,8 @@ function computeLiveScore(results: ChannelResult[], total: number): PlaylistScor
     const hdRatio = alive.filter((result) => isHdOrUhd(result)).length / alive.length;
     const codecAvg = alive.reduce((sum, result) => sum + codecTier(result.codec), 0) / alive.length;
     const fpsKnown = alive.filter((result) => typeof result.fps === "number").length;
-    const fpsRatio = fpsKnown === 0
-      ? 0
-      : alive.filter((result) => (result.fps ?? 0) >= 25).length / fpsKnown;
+    const fpsRatio =
+      fpsKnown === 0 ? 0 : alive.filter((result) => (result.fps ?? 0) >= 25).length / fpsKnown;
     qualityScore = clampScore10((hdRatio * 0.5 + codecAvg * 0.3 + fpsRatio * 0.2) * 10);
   }
 
@@ -172,21 +173,21 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
     if (aliveLatencies.length === 0) {
       return { average: null as number | null, p50: null as number | null };
     }
-    const average =
-      aliveLatencies.reduce((sum, value) => sum + value, 0) / aliveLatencies.length;
+    const average = aliveLatencies.reduce((sum, value) => sum + value, 0) / aliveLatencies.length;
     return { average, p50: median(aliveLatencies) };
   }, [results]);
 
   const languageSummary = useMemo(
-    () => summarizeLanguageDistribution(playlist.channels.map((channel) => ({ language: channel.language })), 5),
+    () =>
+      summarizeLanguageDistribution(
+        playlist.channels.map((channel) => ({ language: channel.language })),
+        5,
+      ),
     [playlist.channels],
   );
 
   const showHealthScore = hasScanStarted(scanState);
-  const showContentCounts = shouldShowContentCounts(
-    playlist.movie_count,
-    playlist.series_count,
-  );
+  const showContentCounts = shouldShowContentCounts(playlist.movie_count, playlist.series_count);
   const showLanguageDistribution = shouldShowLanguageDistribution(
     playlist.channels.map((channel) => ({ language: channel.language })),
   );
@@ -247,7 +248,9 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
   return (
     <aside
       className={`relative h-full shrink-0 ${
-        placement === "right" ? "border-l report-panel-enter-right" : "border-r report-panel-enter-left"
+        placement === "right"
+          ? "border-l report-panel-enter-right"
+          : "border-r report-panel-enter-left"
       } border-border-app bg-panel/70 backdrop-blur-sm overflow-auto select-none`}
       style={{ width: `${widthPx}px` }}
     >
@@ -255,19 +258,22 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
         <div
           onMouseDown={onResizeStart}
           className={`absolute top-0 bottom-0 w-1 cursor-col-resize z-10 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors ${
-            placement === "right"
-              ? "left-0 -translate-x-1/2"
-              : "right-0 translate-x-1/2"
+            placement === "right" ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2"
           }`}
         />
       )}
       <div className="sticky top-0 z-10 px-4 py-3 border-b border-border-app bg-panel/85 backdrop-blur-sm">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary">Playlist Report</p>
+            <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary">
+              Playlist Report
+            </p>
             <div className="flex items-center gap-2 mt-1">
               <BarChart3 className="w-4 h-4 text-blue-300" />
-              <p className="text-[14px] font-semibold text-text-primary truncate" title={playlist.file_name}>
+              <p
+                className="text-[14px] font-semibold text-text-primary truncate"
+                title={playlist.file_name}
+              >
                 {playlist.file_name}
               </p>
             </div>
@@ -294,7 +300,9 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
           )}
           <span className="text-text-tertiary">•</span>
           <span className="text-text-secondary">
-            {latencyStats.average == null ? "Ping N/A" : `Avg ${Math.round(latencyStats.average)} ms`}
+            {latencyStats.average == null
+              ? "Ping N/A"
+              : `Avg ${Math.round(latencyStats.average)} ms`}
           </span>
         </div>
       </div>
@@ -302,11 +310,20 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
       <div className="p-4 space-y-5">
         {showHealthScore && (
           <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
-            <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">Health Score</p>
+            <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">
+              Health Score
+            </p>
             <div className="flex items-center gap-3">
               <div className="relative w-24 h-24 shrink-0">
                 <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
-                  <circle cx="50" cy="50" r={ringRadius} stroke="rgba(148,163,184,0.22)" strokeWidth="9" fill="none" />
+                  <circle
+                    cx="50"
+                    cy="50"
+                    r={ringRadius}
+                    stroke="rgba(148,163,184,0.22)"
+                    strokeWidth="9"
+                    fill="none"
+                  />
                   <circle
                     cx="50"
                     cy="50"
@@ -331,11 +348,15 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                 </div>
                 <div className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1">
                   <span className="text-text-tertiary">Content</span>
-                  <span className="text-text-primary">{(displayScore?.content ?? 0).toFixed(1)}</span>
+                  <span className="text-text-primary">
+                    {(displayScore?.content ?? 0).toFixed(1)}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1">
                   <span className="text-text-tertiary">Quality</span>
-                  <span className="text-text-primary">{(displayScore?.quality ?? 0).toFixed(1)}</span>
+                  <span className="text-text-primary">
+                    {(displayScore?.quality ?? 0).toFixed(1)}
+                  </span>
                 </div>
               </div>
             </div>
@@ -347,7 +368,9 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
 
         {showContentCounts && (
           <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
-            <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">Content Counts</p>
+            <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">
+              Content Counts
+            </p>
             <div className="grid grid-cols-2 gap-2 text-[12px]">
               <div className="rounded-md bg-input/60 px-2 py-1.5">
                 <p className="text-text-tertiary">Live</p>
@@ -371,7 +394,9 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
 
         {showLanguageDistribution && (
           <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
-            <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">Language Distribution</p>
+            <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">
+              Language Distribution
+            </p>
             {languageSummary.entries.length === 0 ? (
               <p className="text-[12px] text-text-tertiary">No language metadata detected.</p>
             ) : (
@@ -394,7 +419,9 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                   </div>
                 ))}
                 {languageSummary.otherCount > 0 && (
-                  <p className="text-[11px] text-text-tertiary">Other: {languageSummary.otherPercentage.toFixed(1)}%</p>
+                  <p className="text-[11px] text-text-tertiary">
+                    Other: {languageSummary.otherPercentage.toFixed(1)}%
+                  </p>
                 )}
               </div>
             )}
@@ -402,14 +429,18 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
         )}
 
         <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
-          <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">Video Quality Distribution</p>
+          <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">
+            Video Quality Distribution
+          </p>
           <div className="flex h-3 rounded-full overflow-hidden bg-input">
-            {([
-              ["uhd4k", "#0ea5e9"],
-              ["hd1080", "#22c55e"],
-              ["hd720", "#f59e0b"],
-              ["sd", "#f87171"],
-            ] as const).map(([key, color]) => {
+            {(
+              [
+                ["uhd4k", "#0ea5e9"],
+                ["hd1080", "#22c55e"],
+                ["hd720", "#f59e0b"],
+                ["sd", "#f87171"],
+              ] as const
+            ).map(([key, color]) => {
               const total = Math.max(1, quality.aliveCount);
               const value = quality.buckets[key];
               const width = (value / total) * 100;
@@ -425,7 +456,9 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
         </section>
 
         <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
-          <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">EPG Coverage</p>
+          <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">
+            EPG Coverage
+          </p>
           <div className="flex items-center gap-3">
             <div
               className="w-20 h-20 rounded-full relative"
@@ -438,14 +471,18 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
               </div>
             </div>
             <div className="text-[12px] space-y-1">
-              <p className="text-text-secondary">{epgSummary.channelsWithEpg} / {epgSummary.totalChannels} channels</p>
+              <p className="text-text-secondary">
+                {epgSummary.channelsWithEpg} / {epgSummary.totalChannels} channels
+              </p>
               <p className="text-text-secondary">Unique EPG IDs: {epgSummary.uniqueEpgSources}</p>
             </div>
           </div>
         </section>
 
         <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
-          <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">Technical Details</p>
+          <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">
+            Technical Details
+          </p>
           <div className="space-y-1 text-[12px]">
             <div className="flex items-center justify-between">
               <span className="text-text-tertiary">Quality (HD+4K)</span>
@@ -464,7 +501,11 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
             <div className="flex items-center justify-between">
               <span className="text-text-tertiary">Security</span>
               <span className="text-text-primary">
-                {protocolSummary.httpsPct >= 80 ? "Mostly secure" : protocolSummary.httpsPct > 0 ? "Mixed" : "Insecure"}
+                {protocolSummary.httpsPct >= 80
+                  ? "Mostly secure"
+                  : protocolSummary.httpsPct > 0
+                    ? "Mixed"
+                    : "Insecure"}
               </span>
             </div>
             {playlist.xtream_account_info && (
@@ -482,7 +523,8 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
             <div className="flex items-center justify-between">
               <span className="text-text-tertiary">Alive / Dead / Geo</span>
               <span className="text-text-primary">
-                {statusSnapshot?.alive ?? 0} / {statusSnapshot?.dead ?? 0} / {statusSnapshot?.geoblocked ?? 0}
+                {statusSnapshot?.alive ?? 0} / {statusSnapshot?.dead ?? 0} /{" "}
+                {statusSnapshot?.geoblocked ?? 0}
               </span>
             </div>
             {(statusSnapshot?.placeholder ?? 0) > 0 && (
@@ -501,13 +543,18 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
         </section>
 
         <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
-          <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">Codec Distribution</p>
+          <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">
+            Codec Distribution
+          </p>
           {quality.codecEntries.length === 0 ? (
             <p className="text-[12px] text-text-tertiary">No codec data yet.</p>
           ) : (
             <div className="space-y-1 text-[12px]">
               {quality.codecEntries.slice(0, 5).map(([codec, count]) => (
-                <div key={codec} className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1">
+                <div
+                  key={codec}
+                  className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1"
+                >
                   <span className="text-text-secondary truncate mr-2">{codec}</span>
                   <span className="text-text-primary">{count}</span>
                 </div>

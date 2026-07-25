@@ -1,14 +1,25 @@
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+  CircleHelp,
+  ExternalLink,
+  Fullscreen,
+  ImageOff,
+  LoaderCircle,
+  Play,
+  RotateCw,
+  Shrink,
+  Square,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { CircleHelp, ExternalLink, Fullscreen, ImageOff, LoaderCircle, Play, RotateCw, Shrink, Square, X } from "lucide-react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { ChannelResult } from "../lib/types";
+import type { UseChromecastResult } from "../hooks/useChromecast";
 import { buildCastRequest, isCastSessionActive } from "../lib/cast";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
 import { isScanActive, type ScanState } from "../lib/scanState";
 import { getThumbnailDisplayState } from "../lib/thumbnailState";
-import type { UseChromecastResult } from "../hooks/useChromecast";
+import type { ChannelResult } from "../lib/types";
 import { CastMenu } from "./CastMenu";
 import { StatusBadge } from "./StatusBadge";
 import { StreamPlayer } from "./StreamPlayer";
@@ -94,9 +105,10 @@ export function ThumbnailPanel({
   useLayoutEffect(() => {
     if (!isPlaying || !videoElement) return;
 
-    const target = (lightboxOpen && lightboxRendered && lightboxPlayerRef.current)
-      ? lightboxPlayerRef.current
-      : sidebarPlayerRef.current;
+    const target =
+      lightboxOpen && lightboxRendered && lightboxPlayerRef.current
+        ? lightboxPlayerRef.current
+        : sidebarPlayerRef.current;
     if (!target || videoElement.parentNode === target) return;
 
     // FLIP: capture current position before move
@@ -113,16 +125,25 @@ export function ThumbnailPanel({
       const sw = firstRect.width / lastRect.width;
       const sh = firstRect.height / lastRect.height;
 
-      if (Math.abs(dx) > 2 || Math.abs(dy) > 2 || Math.abs(sw - 1) > 0.01 || Math.abs(sh - 1) > 0.01) {
+      if (
+        Math.abs(dx) > 2 ||
+        Math.abs(dy) > 2 ||
+        Math.abs(sw - 1) > 0.01 ||
+        Math.abs(sh - 1) > 0.01
+      ) {
         videoElement.style.transformOrigin = "top left";
         videoElement.style.transform = `translate(${dx}px, ${dy}px) scale(${sw}, ${sh})`;
         requestAnimationFrame(() => {
           videoElement.style.transition = "transform 300ms cubic-bezier(0.4, 0, 0.2, 1)";
           videoElement.style.transform = "";
-          videoElement.addEventListener("transitionend", () => {
-            videoElement.style.transition = "";
-            videoElement.style.transformOrigin = "";
-          }, { once: true });
+          videoElement.addEventListener(
+            "transitionend",
+            () => {
+              videoElement.style.transition = "";
+              videoElement.style.transformOrigin = "";
+            },
+            { once: true },
+          );
         });
       }
     }
@@ -206,7 +227,8 @@ export function ThumbnailPanel({
   // useEffect downstream of `castRequest` would tear down and re-fire on every
   // parent re-render even when none of its inputs actually changed.
   const castRequest = useMemo(() => buildCastRequest(result), [result]);
-  const mediaFrameClass = "relative w-full aspect-video overflow-hidden rounded-lg border border-border-app";
+  const mediaFrameClass =
+    "relative w-full aspect-video overflow-hidden rounded-lg border border-border-app";
   const lightboxPlaceholderClass =
     "w-[400px] max-w-[88vw] aspect-video rounded-xl border border-white/15 bg-black/60 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]";
 
@@ -240,7 +262,13 @@ export function ThumbnailPanel({
       {/* Hidden sidebar container keeps the ref alive for FLIP handoff from lightbox */}
       {isPlaying && lightboxOpen && <div ref={sidebarPlayerRef} className="hidden" />}
 
-      {isPlaying && !lightboxOpen && videoElement && onTogglePause && onStopPlayer && onSetVolume && onToggleMute ? (
+      {isPlaying &&
+      !lightboxOpen &&
+      videoElement &&
+      onTogglePause &&
+      onStopPlayer &&
+      onSetVolume &&
+      onToggleMute ? (
         <StreamPlayer
           containerRef={sidebarPlayerRef}
           playerState={playerState}
@@ -284,7 +312,9 @@ export function ThumbnailPanel({
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-secondary">
             <LoaderCircle className="h-5 w-5 animate-spin" />
             <span className="text-[11px] font-medium">
-              {thumbnailState.waitingForScanResult ? "Waiting for scan result..." : "Loading thumbnail..."}
+              {thumbnailState.waitingForScanResult
+                ? "Waiting for scan result..."
+                : "Loading thumbnail..."}
             </span>
           </div>
         </div>
@@ -309,14 +339,18 @@ export function ThumbnailPanel({
           <CircleHelp className="h-8 w-8 text-cyan-300/90" strokeWidth={1.75} />
           <p className="text-[12px] font-medium text-cyan-200">DRM-protected stream</p>
           <p className="text-[11px] text-cyan-200/80">
-            {result.drm_system ? `Detected system: ${result.drm_system}` : "Detected encrypted playback requirements."}
+            {result.drm_system
+              ? `Detected system: ${result.drm_system}`
+              : "Detected encrypted playback requirements."}
           </p>
         </div>
       ) : thumbnailState.showNoThumbnailCaptured ? (
         <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
           <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
           <p className="text-[12px] font-medium text-text-secondary">No thumbnail captured</p>
-          <p className="text-[11px] text-text-tertiary">This channel scanned successfully, but no frame was saved.</p>
+          <p className="text-[11px] text-text-tertiary">
+            This channel scanned successfully, but no frame was saved.
+          </p>
         </div>
       ) : thumbnailState.showUnscannedPlaceholder ? (
         <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
@@ -328,14 +362,16 @@ export function ThumbnailPanel({
         <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
           <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
           <p className="text-[12px] font-medium text-text-secondary">Screenshots disabled</p>
-          <p className="text-[11px] text-text-tertiary">Enable screenshots in Settings to capture thumbnails.</p>
+          <p className="text-[11px] text-text-tertiary">
+            Enable screenshots in Settings to capture thumbnails.
+          </p>
         </div>
       ) : null}
 
       {(onPlayChannel || onScanChannel) && (
         <div className="flex items-center justify-center gap-2">
-          {onPlayChannel && (
-            isPlaying ? (
+          {onPlayChannel &&
+            (isPlaying ? (
               <button
                 type="button"
                 onClick={onStopPlayer}
@@ -355,8 +391,7 @@ export function ThumbnailPanel({
                 <Play className="w-3.5 h-3.5" />
                 Play
               </button>
-            )
-          )}
+            ))}
           {onOpenExternal && (
             <button
               type="button"
@@ -373,7 +408,13 @@ export function ThumbnailPanel({
               disabled={scanActive}
               onClick={() => onScanChannel([result.index])}
               className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-btn hover:bg-btn-hover text-text-primary border border-border-app shadow-sm transition-colors disabled:opacity-40 disabled:pointer-events-none"
-              title={scanActive ? "Scan in progress" : result.status === "pending" || result.status === "checking" ? "Scan channel" : "Rescan channel"}
+              title={
+                scanActive
+                  ? "Scan in progress"
+                  : result.status === "pending" || result.status === "checking"
+                    ? "Scan channel"
+                    : "Rescan channel"
+              }
             >
               <RotateCw className="w-3.5 h-3.5" />
               {result.status === "pending" || result.status === "checking" ? "Scan" : "Rescan"}
@@ -462,9 +503,7 @@ export function ThumbnailPanel({
 
       {result.low_framerate && (
         <div className="p-2 rounded bg-orange-500/10 border border-orange-500/20">
-          <p className="text-[11px] text-orange-400">
-            Low framerate: {result.fps} fps
-          </p>
+          <p className="text-[11px] text-orange-400">Low framerate: {result.fps} fps</p>
         </div>
       )}
 
@@ -472,9 +511,7 @@ export function ThumbnailPanel({
         <div className="p-2 rounded bg-panel-subtle border border-border-subtle">
           <p className="text-[12px] font-medium text-text-primary">Diagnostics</p>
           {retryCount > 0 && (
-            <p className="text-[11px] text-text-secondary mt-1">
-              Retries used: {retryCount}
-            </p>
+            <p className="text-[11px] text-text-secondary mt-1">Retries used: {retryCount}</p>
           )}
           {lastErrorReason && (
             <p className="text-[11px] text-text-secondary mt-1 break-words">
@@ -500,171 +537,213 @@ export function ThumbnailPanel({
         </div>
       )}
 
-      {lightboxRendered && createPortal(
-        <div
-          className={`fixed inset-0 z-[80] flex items-center justify-center transition-all duration-200 ${
-            theaterMode ? "p-0" : "px-6 py-10"
-          } ${
-            lightboxVisible ? (theaterMode ? "bg-black opacity-100" : "bg-black/70 opacity-100") : "bg-black/0 opacity-0"
-          }`}
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              closeLightbox();
-            }
-          }}
-        >
-          <button
-            type="button"
-            onClick={closeLightbox}
-            className={`absolute top-5 right-5 p-2 rounded-full bg-black/35 text-white hover:bg-black/55 transition-colors ${theaterMode ? "hidden" : ""}`}
-            aria-label="Close image preview"
-          >
-            <X className="w-5 h-5" />
-          </button>
+      {lightboxRendered &&
+        createPortal(
           <div
-            className={`flex flex-col items-center transition-all duration-200 ${
-              theaterMode ? "w-full h-full gap-0" : "max-h-full max-w-full gap-3"
+            className={`fixed inset-0 z-[80] flex items-center justify-center transition-all duration-200 ${
+              theaterMode ? "p-0" : "px-6 py-10"
             } ${
-              lightboxVisible ? "opacity-100 scale-100" : "opacity-0 scale-95"
+              lightboxVisible
+                ? theaterMode
+                  ? "bg-black opacity-100"
+                  : "bg-black/70 opacity-100"
+                : "bg-black/0 opacity-0"
             }`}
-            onMouseDown={(event) => event.stopPropagation()}
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                closeLightbox();
+              }
+            }}
           >
-            {!theaterMode && (
-              <h2 className="text-white text-[15px] font-semibold truncate max-w-[88vw] text-center drop-shadow-lg">
-                {result.name}
-              </h2>
-            )}
-            {isPlaying && videoElement && onTogglePause && onStopPlayer && onSetVolume && onToggleMute ? (
-              <div
-                className={`relative ${
-                  theaterMode
-                    ? "w-full h-full [&>div]:rounded-none [&>div]:border-0 [&>div]:shadow-none [&>div]:aspect-auto [&>div]:h-full"
-                    : "mb-14 mt-2 [&>div]:rounded-xl [&>div]:border-white/15 [&>div]:shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]"
-                }`}
-                style={theaterMode ? undefined : { width: "min(calc(84vh * 16 / 9), 88vw)" }}
-                onMouseEnter={() => setTheaterHover(true)}
-                onMouseLeave={() => setTheaterHover(false)}
-              >
-                <StreamPlayer
-                  containerRef={lightboxPlayerRef}
-                  playerState={playerState}
-                  errorMessage={playerErrorMessage ?? null}
-                  isPaused={isPaused ?? false}
-                  isRecovering={isRecovering ?? false}
-                  recoveryAttempt={recoveryAttempt ?? null}
-                  recoveryMessage={recoveryMessage ?? null}
-                  volume={volume ?? 0.75}
-                  muted={muted ?? false}
-                  onTogglePause={onTogglePause}
-                  onStop={onStopPlayer}
-                  onSetVolume={onSetVolume}
-                  onToggleMute={onToggleMute}
-                  onOpenExternal={() => onOpenExternal?.(result)}
-                  onRetry={() => onRetryPlay?.(result)}
-                  onPip={onPip ? () => { onPip(); closeLightbox(); } : undefined}
-                  castRequest={castRequest}
-                  chromecast={chromecast}
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next = !theaterMode;
-                    setTheaterMode(next);
-                    void getCurrentWindow().setFullscreen(next);
-                  }}
-                  className={`absolute top-3 right-3 p-2.5 rounded-xl bg-black/50 text-white hover:bg-black/70 transition-all duration-200 ${
-                    theaterHover ? "opacity-100" : "opacity-0"
-                  }`}
-                  title={theaterMode ? "Exit fullscreen" : "Fullscreen"}
-                >
-                  {theaterMode ? <Shrink className="w-6 h-6" /> : <Fullscreen className="w-6 h-6" />}
-                </button>
-                {!theaterMode && (
-                  <button
-                    type="button"
-                    onClick={onStopPlayer}
-                    className="absolute -bottom-14 left-1/2 -translate-x-1/2 flex items-center gap-2 px-6 py-3 text-[15px] font-medium rounded-xl bg-red-600 hover:bg-red-500 text-white shadow-lg transition-colors"
-                  >
-                    <Square className="w-4 h-4" />
-                    Stop
-                  </button>
-                )}
-              </div>
-            ) : screenshotUrl ? (
-              <img
-                src={screenshotUrl}
-                alt={result.name}
-                className="block max-h-[84vh] max-w-[88vw] rounded-xl border border-white/15 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]"
-              />
-            ) : result.screenshot_path ? (
-              <div className={lightboxPlaceholderClass} />
-            ) : (
-              <div className={`flex flex-col items-center justify-center gap-2 ${lightboxPlaceholderClass}`}>
-                {result.status === "checking" ? (
-                  <LoaderCircle className="w-24 h-24 text-white/40 animate-spin" strokeWidth={1.5} />
-                ) : result.status === "pending" ? (
-                  <>
-                    <CircleHelp className="w-24 h-24 text-white/40" strokeWidth={1.5} />
-                    <span className="text-white/50 text-[14px] font-medium">Unscanned</span>
-                  </>
-                ) : (
-                  <X className="w-24 h-24 text-red-500/80" strokeWidth={2.5} />
-                )}
-              </div>
-            )}
-            {!theaterMode && !isPlaying && (onPlayChannel || onScanChannel) && (
-              <div className="flex items-center gap-2 mt-1">
-                {onPlayChannel && (
-                  <button
-                    type="button"
-                    onClick={() => onPlayChannel(result)}
-                    className="flex items-center gap-2 px-4 py-2 text-[13px] font-medium rounded-lg bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-colors"
-                  >
-                    <Play className="w-4 h-4" />
-                    Play
-                  </button>
-                )}
-                {onScanChannel && (
-                  <button
-                    type="button"
-                    disabled={scanActive}
-                    onClick={() => onScanChannel([result.index])}
-                    className="flex items-center gap-2 px-4 py-2 text-[13px] font-medium rounded-lg bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-colors disabled:opacity-40 disabled:pointer-events-none"
-                  >
-                    <RotateCw className="w-4 h-4" />
-                    {result.status === "pending" || result.status === "checking" ? "Scan" : "Rescan"}
-                  </button>
-                )}
-              </div>
-            )}
-            <div className={`flex items-center justify-center gap-2 mt-2 min-h-[24px] ${theaterMode ? "hidden" : ""}`}>
-              {result.status === "alive" && (
-                <>
-                  {result.resolution && result.resolution !== "Unknown" && (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">{result.width}x{result.height}</span>
-                  )}
-                  {result.fps && (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">{result.fps} fps</span>
-                  )}
-                  {result.video_bitrate && result.video_bitrate !== "Unknown" && result.video_bitrate !== "N/A" && (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">{result.video_bitrate}</span>
-                  )}
-                  {result.hdr_format && (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">{result.hdr_format}</span>
-                  )}
-                  {result.audio_bitrate && (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">{result.audio_bitrate} kbps audio</span>
-                  )}
-                  {result.audio_channel_layout && (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">{result.audio_channel_layout} audio</span>
-                  )}
-                </>
+            <button
+              type="button"
+              onClick={closeLightbox}
+              className={`absolute top-5 right-5 p-2 rounded-full bg-black/35 text-white hover:bg-black/55 transition-colors ${theaterMode ? "hidden" : ""}`}
+              aria-label="Close image preview"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <div
+              className={`flex flex-col items-center transition-all duration-200 ${
+                theaterMode ? "w-full h-full gap-0" : "max-h-full max-w-full gap-3"
+              } ${lightboxVisible ? "opacity-100 scale-100" : "opacity-0 scale-95"}`}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              {!theaterMode && (
+                <h2 className="text-white text-[15px] font-semibold truncate max-w-[88vw] text-center drop-shadow-lg">
+                  {result.name}
+                </h2>
               )}
+              {isPlaying &&
+              videoElement &&
+              onTogglePause &&
+              onStopPlayer &&
+              onSetVolume &&
+              onToggleMute ? (
+                <div
+                  className={`relative ${
+                    theaterMode
+                      ? "w-full h-full [&>div]:rounded-none [&>div]:border-0 [&>div]:shadow-none [&>div]:aspect-auto [&>div]:h-full"
+                      : "mb-14 mt-2 [&>div]:rounded-xl [&>div]:border-white/15 [&>div]:shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]"
+                  }`}
+                  style={theaterMode ? undefined : { width: "min(calc(84vh * 16 / 9), 88vw)" }}
+                  onMouseEnter={() => setTheaterHover(true)}
+                  onMouseLeave={() => setTheaterHover(false)}
+                >
+                  <StreamPlayer
+                    containerRef={lightboxPlayerRef}
+                    playerState={playerState}
+                    errorMessage={playerErrorMessage ?? null}
+                    isPaused={isPaused ?? false}
+                    isRecovering={isRecovering ?? false}
+                    recoveryAttempt={recoveryAttempt ?? null}
+                    recoveryMessage={recoveryMessage ?? null}
+                    volume={volume ?? 0.75}
+                    muted={muted ?? false}
+                    onTogglePause={onTogglePause}
+                    onStop={onStopPlayer}
+                    onSetVolume={onSetVolume}
+                    onToggleMute={onToggleMute}
+                    onOpenExternal={() => onOpenExternal?.(result)}
+                    onRetry={() => onRetryPlay?.(result)}
+                    onPip={
+                      onPip
+                        ? () => {
+                            onPip();
+                            closeLightbox();
+                          }
+                        : undefined
+                    }
+                    castRequest={castRequest}
+                    chromecast={chromecast}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !theaterMode;
+                      setTheaterMode(next);
+                      void getCurrentWindow().setFullscreen(next);
+                    }}
+                    className={`absolute top-3 right-3 p-2.5 rounded-xl bg-black/50 text-white hover:bg-black/70 transition-all duration-200 ${
+                      theaterHover ? "opacity-100" : "opacity-0"
+                    }`}
+                    title={theaterMode ? "Exit fullscreen" : "Fullscreen"}
+                  >
+                    {theaterMode ? (
+                      <Shrink className="w-6 h-6" />
+                    ) : (
+                      <Fullscreen className="w-6 h-6" />
+                    )}
+                  </button>
+                  {!theaterMode && (
+                    <button
+                      type="button"
+                      onClick={onStopPlayer}
+                      className="absolute -bottom-14 left-1/2 -translate-x-1/2 flex items-center gap-2 px-6 py-3 text-[15px] font-medium rounded-xl bg-red-600 hover:bg-red-500 text-white shadow-lg transition-colors"
+                    >
+                      <Square className="w-4 h-4" />
+                      Stop
+                    </button>
+                  )}
+                </div>
+              ) : screenshotUrl ? (
+                <img
+                  src={screenshotUrl}
+                  alt={result.name}
+                  className="block max-h-[84vh] max-w-[88vw] rounded-xl border border-white/15 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]"
+                />
+              ) : result.screenshot_path ? (
+                <div className={lightboxPlaceholderClass} />
+              ) : (
+                <div
+                  className={`flex flex-col items-center justify-center gap-2 ${lightboxPlaceholderClass}`}
+                >
+                  {result.status === "checking" ? (
+                    <LoaderCircle
+                      className="w-24 h-24 text-white/40 animate-spin"
+                      strokeWidth={1.5}
+                    />
+                  ) : result.status === "pending" ? (
+                    <>
+                      <CircleHelp className="w-24 h-24 text-white/40" strokeWidth={1.5} />
+                      <span className="text-white/50 text-[14px] font-medium">Unscanned</span>
+                    </>
+                  ) : (
+                    <X className="w-24 h-24 text-red-500/80" strokeWidth={2.5} />
+                  )}
+                </div>
+              )}
+              {!theaterMode && !isPlaying && (onPlayChannel || onScanChannel) && (
+                <div className="flex items-center gap-2 mt-1">
+                  {onPlayChannel && (
+                    <button
+                      type="button"
+                      onClick={() => onPlayChannel(result)}
+                      className="flex items-center gap-2 px-4 py-2 text-[13px] font-medium rounded-lg bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-colors"
+                    >
+                      <Play className="w-4 h-4" />
+                      Play
+                    </button>
+                  )}
+                  {onScanChannel && (
+                    <button
+                      type="button"
+                      disabled={scanActive}
+                      onClick={() => onScanChannel([result.index])}
+                      className="flex items-center gap-2 px-4 py-2 text-[13px] font-medium rounded-lg bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                    >
+                      <RotateCw className="w-4 h-4" />
+                      {result.status === "pending" || result.status === "checking"
+                        ? "Scan"
+                        : "Rescan"}
+                    </button>
+                  )}
+                </div>
+              )}
+              <div
+                className={`flex items-center justify-center gap-2 mt-2 min-h-[24px] ${theaterMode ? "hidden" : ""}`}
+              >
+                {result.status === "alive" && (
+                  <>
+                    {result.resolution && result.resolution !== "Unknown" && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">
+                        {result.width}x{result.height}
+                      </span>
+                    )}
+                    {result.fps && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">
+                        {result.fps} fps
+                      </span>
+                    )}
+                    {result.video_bitrate &&
+                      result.video_bitrate !== "Unknown" &&
+                      result.video_bitrate !== "N/A" && (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">
+                          {result.video_bitrate}
+                        </span>
+                      )}
+                    {result.hdr_format && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">
+                        {result.hdr_format}
+                      </span>
+                    )}
+                    {result.audio_bitrate && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">
+                        {result.audio_bitrate} kbps audio
+                      </span>
+                    )}
+                    {result.audio_channel_layout && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">
+                        {result.audio_channel_layout} audio
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-        </div>,
-        document.body
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

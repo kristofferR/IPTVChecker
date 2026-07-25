@@ -37,35 +37,27 @@ export const COLUMN_DEFINITIONS: ColumnDefinition[] = [
   },
 ];
 
-export const COLUMN_DEFINITION_MAP: Record<ColumnKey, ColumnDefinition> =
-  COLUMN_DEFINITIONS.reduce(
-    (acc, column) => {
-      acc[column.key] = column;
-      return acc;
-    },
-    {} as Record<ColumnKey, ColumnDefinition>,
-  );
-
-export const DEFAULT_COLUMN_ORDER: ColumnKey[] = COLUMN_DEFINITIONS.map(
-  (column) => column.key,
+export const COLUMN_DEFINITION_MAP: Record<ColumnKey, ColumnDefinition> = COLUMN_DEFINITIONS.reduce(
+  (acc, column) => {
+    acc[column.key] = column;
+    return acc;
+  },
+  {} as Record<ColumnKey, ColumnDefinition>,
 );
+
+export const DEFAULT_COLUMN_ORDER: ColumnKey[] = COLUMN_DEFINITIONS.map((column) => column.key);
 
 export const DEFAULT_VISIBLE_COLUMN_ORDER: ColumnKey[] = DEFAULT_COLUMN_ORDER.filter(
-  (key) =>
-    key !== "url" &&
-    key !== "error" &&
-    key !== "playlist" &&
-    key !== "audio_layout",
+  (key) => key !== "url" && key !== "error" && key !== "playlist" && key !== "audio_layout",
 );
 
-export const DEFAULT_COLUMN_WIDTHS: Record<ColumnKey, number> =
-  COLUMN_DEFINITIONS.reduce(
-    (acc, column) => {
-      acc[column.key] = column.defaultWidth;
-      return acc;
-    },
-    {} as Record<ColumnKey, number>,
-  );
+export const DEFAULT_COLUMN_WIDTHS: Record<ColumnKey, number> = COLUMN_DEFINITIONS.reduce(
+  (acc, column) => {
+    acc[column.key] = column.defaultWidth;
+    return acc;
+  },
+  {} as Record<ColumnKey, number>,
+);
 
 export function parseStoredColumnOrder(
   raw: string | null,

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import {
   areStreamMetadataEqual,
-  classifyStream,
   chooseLiveBufferPlaybackRate,
+  classifyStream,
   decidePlaybackRecovery,
   findLiveBufferResyncTarget,
   findLiveLatencyCatchUpTarget,
@@ -13,13 +13,13 @@ import {
   PLAYBACK_RECOVERY_WINDOW_MS,
   prunePlaybackRecoveryHistory,
   recordPlaybackRecoveryAttempt,
+  type StreamMetadata,
+  type StreamType,
   shouldResetPlaybackRecoveryAttempts,
   shouldSuspendPlaybackWatchdog,
   shouldTryXtreamHlsBeforeMpegts,
   supportsNativeHlsPlayback,
   tryConvertToXtreamHls,
-  type StreamMetadata,
-  type StreamType,
 } from "../src/lib/playback";
 
 function canPlayTypes(
@@ -65,12 +65,7 @@ describe("useStreamPlayer helpers", () => {
   });
 
   it("uses the compatible direct route before remux for initial live playback", () => {
-    const routes = getMpegtsPlaybackRoutes(
-      "https://example.com/live.ts",
-      3210,
-      true,
-      false,
-    );
+    const routes = getMpegtsPlaybackRoutes("https://example.com/live.ts", 3210, true, false);
 
     expect(routes).toHaveLength(2);
     expect(routes[0]?.kind).toBe("direct");
@@ -81,12 +76,7 @@ describe("useStreamPlayer helpers", () => {
   });
 
   it("prefers timestamp-normalizing remux when recovering live playback", () => {
-    const routes = getMpegtsPlaybackRoutes(
-      "https://example.com/live.ts",
-      3210,
-      true,
-      true,
-    );
+    const routes = getMpegtsPlaybackRoutes("https://example.com/live.ts", 3210, true, true);
 
     expect(routes.map((route) => route.kind)).toEqual(["remux", "direct"]);
   });
@@ -97,12 +87,7 @@ describe("useStreamPlayer helpers", () => {
   });
 
   it("uses one non-remux URL for VOD and direct playback without a proxy", () => {
-    const vodRoutes = getMpegtsPlaybackRoutes(
-      "https://example.com/movie.ts",
-      3210,
-      false,
-      false,
-    );
+    const vodRoutes = getMpegtsPlaybackRoutes("https://example.com/movie.ts", 3210, false, false);
 
     expect(vodRoutes).toHaveLength(1);
     expect(vodRoutes[0]?.url).not.toContain("remux=1");
@@ -117,24 +102,20 @@ describe("useStreamPlayer helpers", () => {
   });
 
   it("converts common Xtream MPEG-TS URL forms to HLS", () => {
-    expect(
-      tryConvertToXtreamHls("http://provider.example/live/user/pass/12345.ts"),
-    ).toBe("http://provider.example/live/user/pass/12345.m3u8");
-    expect(
-      tryConvertToXtreamHls("https://provider.example/user/pass/12345?token=abc"),
-    ).toBe("https://provider.example/live/user/pass/12345.m3u8?token=abc");
-    expect(
-      tryConvertToXtreamHls("http://provider.example/live/user/pass/channel.ts"),
-    ).toBeNull();
+    expect(tryConvertToXtreamHls("http://provider.example/live/user/pass/12345.ts")).toBe(
+      "http://provider.example/live/user/pass/12345.m3u8",
+    );
+    expect(tryConvertToXtreamHls("https://provider.example/user/pass/12345?token=abc")).toBe(
+      "https://provider.example/live/user/pass/12345.m3u8?token=abc",
+    );
+    expect(tryConvertToXtreamHls("http://provider.example/live/user/pass/channel.ts")).toBeNull();
   });
 
   it("caps automatic clean reconnect attempts within a rolling window", () => {
     const now = 1_000_000;
     expect(getNextPlaybackRecoveryAttempt([], now)).toBe(1);
     expect(getNextPlaybackRecoveryAttempt([now - 5_000], now)).toBe(2);
-    expect(
-      getNextPlaybackRecoveryAttempt([now - 5_000, now - 10_000], now),
-    ).toBe(3);
+    expect(getNextPlaybackRecoveryAttempt([now - 5_000, now - 10_000], now)).toBe(3);
     expect(
       getNextPlaybackRecoveryAttempt(
         [now - 5_000, now - 10_000, now - 15_000, now - 20_000, now - 25_000],
@@ -194,12 +175,8 @@ describe("useStreamPlayer helpers", () => {
   });
 
   it("formats reconnect status messaging for the player UI", () => {
-    expect(formatPlaybackRecoveryMessage(1)).toBe(
-      "Stream interrupted. Reconnecting (1/5)...",
-    );
-    expect(formatPlaybackRecoveryMessage(5)).toBe(
-      "Stream interrupted. Reconnecting (5/5)...",
-    );
+    expect(formatPlaybackRecoveryMessage(1)).toBe("Stream interrupted. Reconnecting (1/5)...");
+    expect(formatPlaybackRecoveryMessage(5)).toBe("Stream interrupted. Reconnecting (5/5)...");
   });
 
   it("uses hls.js recovery before rebuilding the whole player", () => {
@@ -259,9 +236,7 @@ describe("useStreamPlayer helpers", () => {
     };
 
     expect(areStreamMetadataEqual(metadata, { ...metadata })).toBe(true);
-    expect(
-      areStreamMetadataEqual(metadata, { ...metadata, videoBitrate: "8.1 Mbps" }),
-    ).toBe(false);
+    expect(areStreamMetadataEqual(metadata, { ...metadata, videoBitrate: "8.1 Mbps" })).toBe(false);
     expect(areStreamMetadataEqual(metadata, null)).toBe(false);
   });
 });
