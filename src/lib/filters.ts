@@ -1,5 +1,5 @@
-import type { ChannelResult, ChannelStatus } from "./types";
 import { getChannelErrorReason } from "./channelResults";
+import type { ChannelResult, ChannelStatus } from "./types";
 
 export type SortField =
   | "index"
@@ -115,10 +115,7 @@ function compareOptionalText(
   return compared;
 }
 
-function getSearchHaystack(
-  result: ChannelResult,
-  searchTextCache?: SearchTextCache,
-): string {
+function getSearchHaystack(result: ChannelResult, searchTextCache?: SearchTextCache): string {
   let haystack = searchTextCache?.get(result);
   if (!haystack) {
     haystack = `${result.name}\n${result.playlist}\n${result.group}`.toLowerCase();
@@ -226,13 +223,7 @@ export function sortResults(
       case "codec":
         return (a.codec ?? "").localeCompare(b.codec ?? "") * dir;
       case "hdr":
-        return compareOptionalText(
-          a.hdr_format,
-          b.hdr_format,
-          dir,
-          a.index,
-          b.index,
-        );
+        return compareOptionalText(a.hdr_format, b.hdr_format, dir, a.index, b.index);
       case "fps":
         return ((a.fps ?? 0) - (b.fps ?? 0)) * dir;
       case "latency": {
@@ -321,7 +312,10 @@ export function filterResults(
     ) {
       return false;
     }
-    if (hasStatusFilter && !matchesStatusFilter(r, statusFilter, duplicateIndices, separatePlaceholder)) {
+    if (
+      hasStatusFilter &&
+      !matchesStatusFilter(r, statusFilter, duplicateIndices, separatePlaceholder)
+    ) {
       return false;
     }
     return true;

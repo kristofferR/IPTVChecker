@@ -13,7 +13,9 @@
     "perf:ui-filter": "bun run scripts/benchmark-ui-filter.ts",
     "perf:backend-scan": "cd src-tauri && cargo run --release --example backend_bench --",
     "setup:ffmpeg": "bash scripts/download-ffmpeg.sh",
-    "clean:fuzz-local": "bash scripts/clean-fuzz-local.sh"
+    "clean:fuzz-local": "bash scripts/clean-fuzz-local.sh",
+    "lint": "biome check .",
+    "format": "biome check --write ."
   },
   "dependencies": {
     "@bradleyhodges/sfsymbols": "^7.0.4",
@@ -37,6 +39,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.5",
     "@rolldown/plugin-babel": "^0.2.2",
     "@tailwindcss/vite": "^4.2.2",
     "@tauri-apps/cli": "^2.10.1",

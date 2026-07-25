@@ -1,11 +1,7 @@
-import { useEffect, useRef } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type {
-  AppSettings,
-  PlaylistLoadProgress,
-  RecentPlaylistEntry,
-} from "../lib/types";
+import { useEffect, useRef } from "react";
+import type { AppSettings, PlaylistLoadProgress, RecentPlaylistEntry } from "../lib/types";
 import { useAppStore } from "../store";
 
 // Non-reactive store access for writes inside callbacks/effects.
@@ -109,12 +105,9 @@ export function useMenuEventBridge(handlers: MenuEventHandlers): void {
         listen("menu://open-log", () => void handlersRef.current.handleOpenLog()),
         listen("menu://check-updates", () => void handlersRef.current.checkForUpdates(true)),
         listen("menu://keyboard-shortcuts", () => getStore().setShowKeyboardShortcuts(true)),
-        listen<PlaylistLoadProgress>(
-          "playlist://load-progress",
-          (event) => {
-            getStore().setPlaylistLoadProgress(event.payload);
-          },
-        ),
+        listen<PlaylistLoadProgress>("playlist://load-progress", (event) => {
+          getStore().setPlaylistLoadProgress(event.payload);
+        }),
       ]);
       if (cancelled) {
         for (const off of listeners) off();

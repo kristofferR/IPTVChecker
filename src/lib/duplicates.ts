@@ -17,8 +17,7 @@ function decodeUnreservedPercentEncoding(value: string): string {
 }
 
 function normalizePathname(pathname: string): string {
-  const withoutTrailingSlash =
-    pathname.length > 1 ? pathname.replace(/\/+$/u, "") : pathname;
+  const withoutTrailingSlash = pathname.length > 1 ? pathname.replace(/\/+$/u, "") : pathname;
   return decodeUnreservedPercentEncoding(withoutTrailingSlash);
 }
 

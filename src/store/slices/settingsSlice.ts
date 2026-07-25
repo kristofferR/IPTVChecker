@@ -1,11 +1,10 @@
 import type { StateCreator } from "zustand";
-import type { AppStore, SettingsSlice } from "../types";
-import type { AppSettings, ScanPresetConfig } from "../../lib/types";
-import { getScanPresets, getSettings, updateSettings } from "../../lib/tauri";
 import { inferPlatformFromNavigator } from "../../lib/platform";
+import { getScanPresets, getSettings, updateSettings } from "../../lib/tauri";
+import type { AppSettings, ScanPresetConfig } from "../../lib/types";
+import type { AppStore, SettingsSlice } from "../types";
 
-const defaultShowHeaderButtonText =
-  inferPlatformFromNavigator() !== "macos";
+const defaultShowHeaderButtonText = inferPlatformFromNavigator() !== "macos";
 
 export const DEFAULT_SETTINGS: AppSettings = {
   timeout: 8.0,
@@ -38,10 +37,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   show_header_button_text: defaultShowHeaderButtonText,
 };
 
-function applyPresetConfig(
-  base: AppSettings,
-  config: ScanPresetConfig,
-): AppSettings {
+function applyPresetConfig(base: AppSettings, config: ScanPresetConfig): AppSettings {
   return {
     ...base,
     timeout: config.timeout,
@@ -63,11 +59,9 @@ function applyPresetConfig(
   };
 }
 
-function sameScanConfig(
-  value: AppSettings,
-  config: ScanPresetConfig,
-): boolean {
-  return value.timeout === config.timeout &&
+function sameScanConfig(value: AppSettings, config: ScanPresetConfig): boolean {
+  return (
+    value.timeout === config.timeout &&
     value.extended_timeout === config.extended_timeout &&
     value.concurrency === config.concurrency &&
     value.retries === config.retries &&
@@ -82,7 +76,8 @@ function sameScanConfig(
     value.test_geoblock === config.test_geoblock &&
     value.screenshots_dir === config.screenshots_dir &&
     value.low_fps_threshold === config.low_fps_threshold &&
-    value.screenshot_format === config.screenshot_format;
+    value.screenshot_format === config.screenshot_format
+  );
 }
 
 export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> = (set, get) => ({

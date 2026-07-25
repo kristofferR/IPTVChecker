@@ -1,12 +1,8 @@
-import { useMemo } from "react";
 import { FolderOpen, Loader2 } from "lucide-react";
-import type {
-  PlaylistLoadProgress,
-  RecentPlaylistEntry,
-  SavedPlaylistEntry,
-} from "../lib/types";
+import { useMemo } from "react";
 import { recentTitle, recentValueLabel } from "../lib/recentPlaylists";
 import { savedPlaylistSecondaryLabel } from "../lib/savedPlaylists";
+import type { PlaylistLoadProgress, RecentPlaylistEntry, SavedPlaylistEntry } from "../lib/types";
 
 const START_SCREEN_RECENT_LIMIT = 5;
 const START_SCREEN_SAVED_LIMIT = 8;
@@ -75,31 +71,31 @@ export function StartScreen({
             </p>
             {(playlistLoadProgress?.stage === "Connecting" ||
               playlistLoadProgress?.stage === "Saving") && (
-              <p className="text-sm mt-1 text-text-quaternary">
-                {playlistLoadProgress.detail}
-              </p>
+              <p className="text-sm mt-1 text-text-quaternary">{playlistLoadProgress.detail}</p>
             )}
             {playlistLoadProgress?.stage === "Downloading" && (
               <p className="text-sm mt-1 tabular-nums">
                 {(playlistLoadProgress.bytes_downloaded / (1024 * 1024)).toFixed(1)} MB
                 {playlistLoadProgress.elapsed_secs > 0 && (
                   <span className="ml-2 text-text-quaternary">
-                    {(playlistLoadProgress.bytes_downloaded / playlistLoadProgress.elapsed_secs / (1024 * 1024)).toFixed(1)} MB/s
+                    {(
+                      playlistLoadProgress.bytes_downloaded /
+                      playlistLoadProgress.elapsed_secs /
+                      (1024 * 1024)
+                    ).toFixed(1)}{" "}
+                    MB/s
                   </span>
                 )}
               </p>
             )}
             {playlistLoadProgress?.stage === "Parsing" && (
               <div className="text-sm mt-1 tabular-nums">
-                <p>
-                  {playlistLoadProgress.channels_found.toLocaleString()} entries found
-                </p>
+                <p>{playlistLoadProgress.channels_found.toLocaleString()} entries found</p>
                 <p className="text-text-quaternary">
                   {playlistLoadProgress.live_found.toLocaleString()} channels
                   <span className="mx-2">•</span>
                   {(
-                    playlistLoadProgress.movie_found +
-                    playlistLoadProgress.series_found
+                    playlistLoadProgress.movie_found + playlistLoadProgress.series_found
                   ).toLocaleString()}{" "}
                   VOD
                   {(playlistLoadProgress.movie_found > 0 ||
@@ -113,18 +109,14 @@ export function StartScreen({
               </div>
             )}
             {playlistLoadProgress?.stage === "Processing" && (
-              <p className="text-sm mt-1 text-text-quaternary">
-                {playlistLoadProgress.detail}
-              </p>
+              <p className="text-sm mt-1 text-text-quaternary">{playlistLoadProgress.detail}</p>
             )}
           </div>
         ) : (
           <>
             <div className="flex flex-col items-center">
               <div className="select-none pt-3">
-                <p className="text-lg font-medium mb-2">
-                  No playlist loaded
-                </p>
+                <p className="text-lg font-medium mb-2">No playlist loaded</p>
                 <p className="text-[15px] mb-4">
                   Click Open or press{" "}
                   <kbd className="px-2 py-0.5 bg-input rounded text-[13px] border border-border-app">

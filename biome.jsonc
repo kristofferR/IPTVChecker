@@ -1,0 +1,70 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.5/schema.json",
+  "files": {
+    // Only the hand-written frontend and its tests. dist/ is generated, and
+    // agent worktrees under .worktrees/ carry their own root configs.
+    "includes": ["src/**", "tests/**", "scripts/**", "!!**/.worktrees", "!!dist"]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "correctness": {
+        // Not React-Compiler-aware, and this codebase deliberately mirrors
+        // callbacks into refs so effects can run with `[]` deps — see the menu
+        // event bridge, where re-running the effect orphaned listeners. The
+        // compiler validates the hooks it can; this rule only fights the
+        // pattern that fixed that bug.
+        "useExhaustiveDependencies": "off"
+      },
+      "style": {
+        // Regex capture groups read as possibly-undefined under
+        // noUncheckedIndexedAccess; `!` on a capture the match guarantees is
+        // the sanctioned pattern here.
+        "noNonNullAssertion": "off"
+      },
+      // The app predates any linter and has a real accessibility backlog
+      // (~60 findings: unlabelled controls, click handlers on non-interactive
+      // elements, untitled SVGs). Demoted to warnings so the gate can land
+      // now and the findings stay visible — clearing them is its own pass,
+      // not something to bury under blanket suppressions.
+      "a11y": "warn"
+    }
+  },
+  "css": {
+    "parser": {
+      // Tailwind v4 directives (@theme, @apply, …) are used throughout.
+      "tailwindDirectives": true
+    },
+    "linter": {
+      "enabled": true
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "all"
+    }
+  },
+  "overrides": [
+    {
+      // The vibrancy/glass styles override WebKit defaults that are themselves
+      // set with high specificity, so `!important` and deliberately overlapping
+      // selectors are load-bearing here.
+      "includes": ["src/index.css"],
+      "linter": {
+        "rules": {
+          "complexity": { "noImportantStyles": "off" },
+          "style": { "noDescendingSpecificity": "off" }
+        }
+      }
+    }
+  ]
+}

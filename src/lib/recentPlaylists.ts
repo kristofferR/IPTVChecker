@@ -18,15 +18,12 @@ export function parseXtreamRecent(value: string): XtreamRecentSource | null {
   try {
     const parsed = JSON.parse(value) as Partial<XtreamRecentSource>;
     const server = typeof parsed.server === "string" ? parsed.server.trim() : "";
-    const username =
-      typeof parsed.username === "string" ? parsed.username.trim() : "";
+    const username = typeof parsed.username === "string" ? parsed.username.trim() : "";
     if (!server || !username) {
       return null;
     }
     const password =
-      typeof parsed.password === "string" && parsed.password
-        ? parsed.password
-        : undefined;
+      typeof parsed.password === "string" && parsed.password ? parsed.password : undefined;
     return { server, username, password };
   } catch {
     return null;

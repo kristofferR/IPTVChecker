@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { Cpu, KeyRound, Link2, Server, X, Loader2 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
+import { Cpu, KeyRound, Link2, Loader2, Server, X } from "lucide-react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { testXtreamServers } from "../lib/tauri";
 import type {
   StalkerOpenRequest,
   XtreamOpenRequest,
   XtreamRecentSource,
   XtreamServerTestReport,
 } from "../lib/types";
-import { testXtreamServers } from "../lib/tauri";
 import PasswordField from "./PasswordField";
 
 type OpenSourceMode = "url" | "xtream" | "stalker";
@@ -116,9 +116,7 @@ export function ServerTestModal({
             <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-1">
               Xtream
             </p>
-            <h2 className="text-[18px] font-semibold text-text-primary">
-              Test Servers
-            </h2>
+            <h2 className="text-[18px] font-semibold text-text-primary">Test Servers</h2>
           </div>
           <button
             type="button"
@@ -167,9 +165,7 @@ export function ServerTestModal({
             )}
           </div>
 
-          {testError && (
-            <p className="text-[12px] text-red-400">{testError}</p>
-          )}
+          {testError && <p className="text-[12px] text-red-400">{testError}</p>}
 
           {testReport && (
             <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
@@ -178,7 +174,8 @@ export function ServerTestModal({
                   {testReport.same_cdn ? "Same CDN" : "Different CDNs"}
                 </span>
                 <span>
-                  Tested {testReport.channels_probed} channel{testReport.channels_probed !== 1 ? "s" : ""} per server
+                  Tested {testReport.channels_probed} channel
+                  {testReport.channels_probed !== 1 ? "s" : ""} per server
                 </span>
               </div>
 
@@ -192,13 +189,14 @@ export function ServerTestModal({
                     hostLabel = result.server;
                   }
 
-                  const streamLatencyColor = result.avg_stream_latency_ms == null
-                    ? "text-text-muted"
-                    : result.avg_stream_latency_ms < 200
-                      ? "text-green-400"
-                      : result.avg_stream_latency_ms < 500
-                        ? "text-yellow-400"
-                        : "text-orange-400";
+                  const streamLatencyColor =
+                    result.avg_stream_latency_ms == null
+                      ? "text-text-muted"
+                      : result.avg_stream_latency_ms < 200
+                        ? "text-green-400"
+                        : result.avg_stream_latency_ms < 500
+                          ? "text-yellow-400"
+                          : "text-orange-400";
 
                   const qualitySummary = result.channel_probes
                     .filter((p) => p.resolution)
@@ -228,7 +226,11 @@ export function ServerTestModal({
                           onClose();
                         }
                       }}
-                      title={result.success ? `Click to use ${result.server}` : result.error ?? undefined}
+                      title={
+                        result.success
+                          ? `Click to use ${result.server}`
+                          : (result.error ?? undefined)
+                      }
                     >
                       {/* Header */}
                       <div className="px-4 py-3 bg-surface">
@@ -257,15 +259,17 @@ export function ServerTestModal({
                         ) : (
                           <div className="flex items-center gap-5 text-[12px]">
                             <span className="text-text-secondary tabular-nums">
-                              <span className="text-text-muted">API</span> {result.api_latency_ms != null ? `${result.api_latency_ms}ms` : "—"}
+                              <span className="text-text-muted">API</span>{" "}
+                              {result.api_latency_ms != null ? `${result.api_latency_ms}ms` : "—"}
                             </span>
                             <span className={`tabular-nums ${streamLatencyColor}`}>
-                              <span className="text-text-muted">Stream</span> {result.avg_stream_latency_ms != null ? `${result.avg_stream_latency_ms}ms` : "—"}
+                              <span className="text-text-muted">Stream</span>{" "}
+                              {result.avg_stream_latency_ms != null
+                                ? `${result.avg_stream_latency_ms}ms`
+                                : "—"}
                             </span>
                             {qualitySummary && (
-                              <span className="text-text-secondary truncate">
-                                {qualitySummary}
-                              </span>
+                              <span className="text-text-secondary truncate">{qualitySummary}</span>
                             )}
                           </div>
                         )}
@@ -321,12 +325,8 @@ export default function OpenSourceDialog({
   const [url, setUrl] = useState(initialUrl ?? "");
   const [xtreamServer, setXtreamServer] = useState(initialXtream?.server ?? "");
   const [xtreamUsername, setXtreamUsername] = useState(initialXtream?.username ?? "");
-  const [xtreamPassword, setXtreamPassword] = useState(
-    initialXtream?.password ?? "",
-  );
-  const [xtreamSavePassword, setXtreamSavePassword] = useState(
-    !!initialXtream?.password,
-  );
+  const [xtreamPassword, setXtreamPassword] = useState(initialXtream?.password ?? "");
+  const [xtreamSavePassword, setXtreamSavePassword] = useState(!!initialXtream?.password);
   const [stalkerPortal, setStalkerPortal] = useState(initialStalker?.portal ?? "");
   const [stalkerMac, setStalkerMac] = useState(initialStalker?.mac ?? "");
   const [localError, setLocalError] = useState<string | null>(null);
@@ -388,7 +388,6 @@ export default function OpenSourceDialog({
         setXtreamServer(`${url.protocol}//${url.host}`);
         setXtreamUsername(u);
         setXtreamPassword(p);
-
 
         // exit if we already set credentials
         return;
@@ -507,9 +506,7 @@ export default function OpenSourceDialog({
 
   const tabClass = (tab: OpenSourceMode) =>
     `inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] transition-colors ${
-      mode === tab
-        ? "bg-blue-600 text-white"
-        : "bg-btn text-text-secondary hover:bg-btn-hover"
+      mode === tab ? "bg-blue-600 text-white" : "bg-btn text-text-secondary hover:bg-btn-hover"
     }`;
 
   return (
@@ -522,9 +519,7 @@ export default function OpenSourceDialog({
               <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-1">
                 Source
               </p>
-              <h2 className="text-[18px] font-semibold text-text-primary">
-                Open Playlist Source
-              </h2>
+              <h2 className="text-[18px] font-semibold text-text-primary">Open Playlist Source</h2>
             </div>
             <button
               type="button"
@@ -538,11 +533,7 @@ export default function OpenSourceDialog({
 
           <form onSubmit={handleSubmit} className="p-5">
             <div className="mb-4 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => switchMode("url")}
-                className={tabClass("url")}
-              >
+              <button type="button" onClick={() => switchMode("url")} className={tabClass("url")}>
                 <Link2 className="w-4 h-4" />
                 URL
               </button>
@@ -635,9 +626,7 @@ export default function OpenSourceDialog({
                     <input
                       type="checkbox"
                       checked={xtreamSavePassword}
-                      onChange={(event) =>
-                        setXtreamSavePassword(event.target.checked)
-                      }
+                      onChange={(event) => setXtreamSavePassword(event.target.checked)}
                       className="rounded border-border-app accent-blue-600"
                     />
                     <span className="text-[12px] text-text-secondary">
@@ -692,9 +681,7 @@ export default function OpenSourceDialog({
               </div>
             )}
 
-            {localError && (
-              <p className="mt-3 text-[12px] text-red-400">{localError}</p>
-            )}
+            {localError && <p className="mt-3 text-[12px] text-red-400">{localError}</p>}
 
             <div className="mt-5 flex items-center justify-end gap-2">
               <button

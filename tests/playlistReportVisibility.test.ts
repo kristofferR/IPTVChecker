@@ -20,18 +20,8 @@ describe("playlist report visibility rules", () => {
   });
 
   test("language distribution requires majority metadata coverage", () => {
-    const sparse = [
-      { language: "en" },
-      { language: null },
-      { language: null },
-      { language: " " },
-    ];
-    const rich = [
-      { language: "en" },
-      { language: "fr" },
-      { language: "de" },
-      { language: null },
-    ];
+    const sparse = [{ language: "en" }, { language: null }, { language: null }, { language: " " }];
+    const rich = [{ language: "en" }, { language: "fr" }, { language: "de" }, { language: null }];
 
     expect(languageCoverage(sparse)).toBe(0.25);
     expect(shouldShowLanguageDistribution(sparse)).toBe(false);
