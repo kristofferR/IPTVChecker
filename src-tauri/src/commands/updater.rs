@@ -45,6 +45,11 @@ enum InstallSource {
     /// updates a *separate* installed copy and leaves the portable executable
     /// the user launched untouched — so it must not be offered.
     WindowsPortable,
+    /// A macOS bundle running from a read-only volume: straight from the
+    /// mounted `.dmg`, or from an App Translocation path. The bundle cannot be
+    /// replaced in place, and elevating to admin cannot make the mount
+    /// writable, so the install would always fail.
+    MacosReadOnly,
 }
 
 impl InstallSource {
@@ -55,7 +60,7 @@ impl InstallSource {
             Self::Aur => Some(AUR_PACKAGE_URL),
             #[cfg(not(target_os = "linux"))]
             Self::Aur => Some(RELEASES_URL),
-            Self::SystemPackage | Self::WindowsPortable => Some(RELEASES_URL),
+            Self::SystemPackage | Self::WindowsPortable | Self::MacosReadOnly => Some(RELEASES_URL),
         }
     }
 }
@@ -106,6 +111,15 @@ impl UpdateInstallMode {
                 instructions: Some(
                     "This copy was installed from a system package. Download the new \
                      .deb/.rpm and install it with your package manager."
+                        .into(),
+                ),
+            },
+            InstallSource::MacosReadOnly => Self {
+                kind: UpdateInstallKind::Manual,
+                button_label: Some("Open the releases page".into()),
+                instructions: Some(
+                    "IPTV Checker is running from a read-only volume. Drag it to your \
+                     Applications folder and reopen it to enable in-app updates."
                         .into(),
                 ),
             },
@@ -189,6 +203,34 @@ fn uninstaller_beside_current_exe() -> bool {
         .is_some_and(|marker| marker.is_file())
 }
 
+/// True when the running `.app` sits on a read-only mount. Distinguishes the
+/// DMG/translocation case from an ordinary permission problem on
+/// `/Applications`, which the privileged copy path does handle.
+#[cfg(any(target_os = "macos", test))]
+fn macos_install_source(on_read_only_volume: bool) -> InstallSource {
+    if on_read_only_volume {
+        InstallSource::MacosReadOnly
+    } else {
+        InstallSource::SelfUpdatable
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn current_bundle_on_read_only_volume() -> bool {
+    let Ok(bundle) = crate::engine::macos_dmg_update::current_app_bundle() else {
+        // Not running from a bundle at all (e.g. `cargo run`); nothing to guard.
+        return false;
+    };
+    let Ok(path) = std::ffi::CString::new(bundle.as_os_str().as_encoded_bytes()) else {
+        return false;
+    };
+    let mut stat: libc::statfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statfs(path.as_ptr(), &mut stat) } != 0 {
+        return false;
+    }
+    stat.f_flags & libc::MNT_RDONLY as u32 != 0
+}
+
 fn current_install_source() -> InstallSource {
     #[cfg(target_os = "linux")]
     {
@@ -203,7 +245,12 @@ fn current_install_source() -> InstallSource {
         windows_install_source(uninstaller_beside_current_exe())
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    #[cfg(target_os = "macos")]
+    {
+        macos_install_source(current_bundle_on_read_only_volume())
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     {
         InstallSource::SelfUpdatable
     }
@@ -231,28 +278,28 @@ fn current_install_mode() -> UpdateInstallMode {
 /// Detection shells out to pacman on Linux and stats the install directory on
 /// Windows, so keep it off the async runtime thread on both.
 async fn current_install_source_off_main() -> Result<InstallSource, AppError> {
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
     {
         tauri::async_runtime::spawn_blocking(current_install_source)
             .await
             .map_err(|error| AppError::Other(format!("install source worker failed: {error}")))
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     {
         Ok(current_install_source())
     }
 }
 
 async fn current_install_mode_off_main() -> Result<UpdateInstallMode, AppError> {
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
     {
         tauri::async_runtime::spawn_blocking(current_install_mode)
             .await
             .map_err(|error| AppError::Other(format!("update install mode worker failed: {error}")))
     }
 
-    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     {
         Ok(current_install_mode())
     }
@@ -567,6 +614,19 @@ mod tests {
         let mode = UpdateInstallMode::from_source(portable, false, false);
         assert!(mode.is_manual());
         assert_eq!(portable.manual_url(), Some(RELEASES_URL));
+    }
+
+    #[test]
+    fn macos_bundles_on_read_only_volumes_are_manual() {
+        // Running from the mounted .dmg or a translocated path: elevating to
+        // admin cannot make the mount writable, so the install would fail.
+        let mounted = macos_install_source(true);
+        assert_eq!(mounted, InstallSource::MacosReadOnly);
+        assert!(UpdateInstallMode::from_source(mounted, false, false).is_manual());
+        assert_eq!(mounted.manual_url(), Some(RELEASES_URL));
+
+        // A normal /Applications install is writable-or-elevatable.
+        assert_eq!(macos_install_source(false), InstallSource::SelfUpdatable);
     }
 
     #[test]
