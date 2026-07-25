@@ -25,10 +25,12 @@ const AUR_PACKAGE_URL: &str = "https://aur.archlinux.org/packages/iptv-checker-g
 
 /// How this particular installation receives updates.
 ///
-/// Only `SelfUpdatable` is reachable on every platform; the rest are each
-/// constructed on one OS. The enum stays platform-independent so the mapping to
-/// install modes is unit-testable everywhere.
-#[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
+/// Each variant besides `SelfUpdatable` is constructed on exactly one OS, so
+/// every target build leaves at least one unconstructed — hence the blanket
+/// allow rather than a per-platform one. The enum stays platform-independent so
+/// the mapping to install modes is unit-testable everywhere, and the tests do
+/// exercise every variant.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InstallSource {
     /// The app can replace itself: macOS `.app`, an installed Windows copy, or
