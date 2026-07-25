@@ -43,7 +43,10 @@ pub fn install_dmg(bytes: &[u8]) -> Result<PathBuf, String> {
     ));
 
     let result = (|| {
-        fs::create_dir_all(&work_dir).map_err(|e| e.to_string())?;
+        // create_dir, not create_dir_all: an existing directory or symlink at
+        // this path must not be silently reused, since whatever .app is found
+        // under it gets copied over the installed bundle, possibly as admin.
+        fs::create_dir(&work_dir).map_err(|e| e.to_string())?;
         let dmg_path = work_dir.join("IPTV-Checker-update.dmg");
         fs::write(&dmg_path, bytes).map_err(|e| e.to_string())?;
 

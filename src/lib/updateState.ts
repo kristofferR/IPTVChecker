@@ -1,15 +1,9 @@
 /** Types and pure presentation logic for the in-app updater. The effectful
  *  parts (IPC, listeners, cooldowns) live in `hooks/useUpdateCheck.ts`. */
 
-export type UpdateInstallKind = "built-in" | "manual";
+import type { UpdateInstallMode } from "./types";
 
-/** Mirrors the Rust `UpdateInstallMode`. `buttonLabel`/`instructions` are only
- *  set for installations that must be updated by their own package manager. */
-export interface UpdateInstallMode {
-  kind: UpdateInstallKind;
-  buttonLabel: string | null;
-  instructions: string | null;
-}
+export type { UpdateInstallKind, UpdateInstallMode } from "./types";
 
 export interface UpdateNotice {
   version: string;

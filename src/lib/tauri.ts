@@ -20,10 +20,10 @@ import type {
   ScreenshotCacheStats,
   StalkerOpenRequest,
   UpdateCheckResult,
+  UpdateInstallMode,
   XtreamOpenRequest,
   XtreamServerTestReport,
 } from "./types";
-import type { UpdateInstallMode } from "./updateState";
 
 function toCommandChannelResults(results: ChannelResult[]) {
   return results.map(toCommandChannelResult);

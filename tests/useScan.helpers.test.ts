@@ -110,3 +110,19 @@ describe("useScan sparse result collections", () => {
     expect(resultAtIndex(emptyResultCollections(), 42)).toBeNull();
   });
 });
+
+describe("useScan repeated indices within one batch", () => {
+  it("counts a channel once when the same index appears twice in a batch", () => {
+    // A per-channel event and the finalized batch entry can coalesce into one
+    // RAF flush, so the same index arrives twice in a single call.
+    const first = buildResult(4, { status: "checking" });
+    const second = buildResult(4, { status: "alive", low_framerate: true });
+
+    const next = applyResultUpdates(emptyResultCollections(), [first, second]);
+
+    expect(next.flatResults.map((r) => r.index)).toEqual([4]);
+    expect(next.metrics.presentCount).toBe(1);
+    expect(next.metrics.lowFpsCount).toBe(1);
+    expect(resultAtIndex(next, 4)?.status).toBe("alive");
+  });
+});
