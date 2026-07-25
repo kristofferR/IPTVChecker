@@ -27,9 +27,7 @@ export function summarizeLanguageDistribution(
   items: LanguageDistributionInput[],
   topN = 5,
 ): LanguageDistributionSummary {
-  const normalizedTopN = Number.isFinite(topN)
-    ? Math.max(1, Math.floor(topN))
-    : 5;
+  const normalizedTopN = Number.isFinite(topN) ? Math.max(1, Math.floor(topN)) : 5;
   const counts = new Map<string, number>();
   let unknownCount = 0;
 

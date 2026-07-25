@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   Cast,
@@ -11,10 +10,11 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { UseChromecastResult } from "../hooks/useChromecast";
 import { MAX_PLAYBACK_RECOVERY_ATTEMPTS } from "../hooks/useStreamPlayer";
-import type { CastMediaRequest } from "../lib/types";
 import { isCastSessionActive } from "../lib/cast";
+import type { CastMediaRequest } from "../lib/types";
 import { CastMenu } from "./CastMenu";
 
 interface StreamPlayerProps {
@@ -107,7 +107,10 @@ export function StreamPlayer({
       scheduleHide();
     } else {
       setControlsVisible(true);
-      if (hideTimerRef.current) { clearTimeout(hideTimerRef.current); hideTimerRef.current = null; }
+      if (hideTimerRef.current) {
+        clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = null;
+      }
     }
     return () => {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
@@ -136,9 +139,7 @@ export function StreamPlayer({
       {showCastUi && isCasting && chromecast?.session && (
         <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-1 rounded-md bg-blue-600/85 text-white text-[11px] font-medium shadow-md backdrop-blur-sm">
           <Cast className="w-3 h-3" />
-          <span className="truncate max-w-[180px]">
-            Casting to {chromecast.session.deviceName}
-          </span>
+          <span className="truncate max-w-[180px]">Casting to {chromecast.session.deviceName}</span>
         </div>
       )}
 
@@ -151,16 +152,14 @@ export function StreamPlayer({
         >
           <LoaderCircle className="h-6 w-6 animate-spin text-white" />
           <span className="text-[12px] font-medium text-white/85">
-            {isRecovering ? recoveryMessage ?? "Reconnecting..." : "Connecting..."}
+            {isRecovering ? (recoveryMessage ?? "Reconnecting...") : "Connecting..."}
           </span>
           {isRecovering && (
             <div className="flex items-center gap-1.5 text-[11px] text-amber-100/85">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
               <span>
                 Trying a clean reconnect
-                {recoveryAttempt
-                  ? ` (${recoveryAttempt}/${MAX_PLAYBACK_RECOVERY_ATTEMPTS})`
-                  : ""}
+                {recoveryAttempt ? ` (${recoveryAttempt}/${MAX_PLAYBACK_RECOVERY_ATTEMPTS})` : ""}
               </span>
             </div>
           )}

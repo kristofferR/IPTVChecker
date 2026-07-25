@@ -14,9 +14,7 @@ function event(runId: string, message: string): ScanEvent<ScanErrorPayload> {
 
 describe("scan error event run scoping", () => {
   it("accepts only errors from the active scan run", () => {
-    expect(runScopedScanErrorMessage("scan-run-2", event("scan-run-2", "boom"))).toBe(
-      "boom",
-    );
+    expect(runScopedScanErrorMessage("scan-run-2", event("scan-run-2", "boom"))).toBe("boom");
     expect(runScopedScanErrorMessage("scan-run-2", event("scan-run-1", "stale"))).toBeNull();
   });
 

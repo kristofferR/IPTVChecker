@@ -31,16 +31,11 @@ export function isInputLikeTarget(target: EventTarget | null): boolean {
 
   return (
     element.isContentEditable ||
-    element.closest(
-      "input, textarea, select, [contenteditable='true'], [role='textbox']",
-    ) !== null
+    element.closest("input, textarea, select, [contenteditable='true'], [role='textbox']") !== null
   );
 }
 
-export function isPrimaryModifierPressed(
-  state: ShortcutModifierState,
-  isMac: boolean,
-): boolean {
+export function isPrimaryModifierPressed(state: ShortcutModifierState, isMac: boolean): boolean {
   if (isMac) {
     return state.metaKey && !state.ctrlKey;
   }

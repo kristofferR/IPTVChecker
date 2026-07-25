@@ -1,9 +1,4 @@
-import type {
-  CastMediaRequest,
-  CastSession,
-  CastStreamKind,
-  ChannelResult,
-} from "./types";
+import type { CastMediaRequest, CastSession, CastStreamKind, ChannelResult } from "./types";
 
 export function detectStreamKind(url: string): CastStreamKind {
   // Strip query/fragment from a path-like string before checking the extension,
@@ -33,8 +28,6 @@ export function buildCastRequest(channel: ChannelResult): CastMediaRequest {
   };
 }
 
-export function isCastSessionActive(
-  session: CastSession | null,
-): session is CastSession {
+export function isCastSessionActive(session: CastSession | null): session is CastSession {
   return !!session && session.state !== "stopped" && session.state !== "error";
 }

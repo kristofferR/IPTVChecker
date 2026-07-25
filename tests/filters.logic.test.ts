@@ -76,23 +76,15 @@ describe("filterResults", () => {
   ];
 
   it("filters by search across name, playlist, and group", () => {
-    expect(filterResults(results, "sports", "all", "all").map((r) => r.index)).toEqual(
-      [0, 2],
-    );
-    expect(filterResults(results, "movies", "all", "all").map((r) => r.index)).toEqual(
-      [1],
-    );
-    expect(
-      filterResults(results, "entertainment", "all", "all").map((r) => r.index),
-    ).toEqual([1]);
+    expect(filterResults(results, "sports", "all", "all").map((r) => r.index)).toEqual([0, 2]);
+    expect(filterResults(results, "movies", "all", "all").map((r) => r.index)).toEqual([1]);
+    expect(filterResults(results, "entertainment", "all", "all").map((r) => r.index)).toEqual([1]);
   });
 
   it("filters by group and status including geoblocked umbrella", () => {
     expect(filterResults(results, "", "Sports", "all").map((r) => r.index)).toEqual([0, 2]);
     expect(filterResults(results, "", "all", "dead").map((r) => r.index)).toEqual([1]);
-    expect(filterResults(results, "", "all", "geoblocked").map((r) => r.index)).toEqual(
-      [2],
-    );
+    expect(filterResults(results, "", "all", "geoblocked").map((r) => r.index)).toEqual([2]);
   });
 
   it("supports duplicates status filter using duplicateIndices set", () => {
@@ -103,9 +95,7 @@ describe("filterResults", () => {
   });
 
   it("supports audio-only status filter", () => {
-    expect(filterResults(results, "", "all", "audio_only").map((r) => r.index)).toEqual(
-      [2],
-    );
+    expect(filterResults(results, "", "all", "audio_only").map((r) => r.index)).toEqual([2]);
   });
 
   it("supports mislabeled status filter", () => {
@@ -139,12 +129,7 @@ describe("filterResults", () => {
     const duplicateSet = new Set<number>([2, 3]);
 
     expect(
-      countStatusOptions(
-        resultsWithPendingAndMislabeled,
-        "sports",
-        "Sports",
-        duplicateSet,
-      ),
+      countStatusOptions(resultsWithPendingAndMislabeled, "sports", "Sports", duplicateSet),
     ).toEqual({
       all: 3,
       alive: 1,

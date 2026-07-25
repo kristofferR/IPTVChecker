@@ -1,10 +1,7 @@
 import { CircleHelp, Filter } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isScanActive } from "../lib/scanState";
-import {
-  hasDirtySourceFilter,
-  validateSourceFilterPattern,
-} from "../lib/sourceFilter";
+import { hasDirtySourceFilter, validateSourceFilterPattern } from "../lib/sourceFilter";
 import { useAppStore } from "../store";
 
 interface FilterBarProps {
@@ -12,10 +9,7 @@ interface FilterBarProps {
   variant?: "content" | "chrome";
 }
 
-export function FilterBar({
-  onApply,
-  variant = "content",
-}: FilterBarProps) {
+export function FilterBar({ onApply, variant = "content" }: FilterBarProps) {
   const channelSearch = useAppStore((s) => s.channelSearch);
   const setChannelSearch = useAppStore((s) => s.setChannelSearch);
   const scanState = useAppStore((s) => s.scanState);
@@ -30,19 +24,10 @@ export function FilterBar({
   );
   const isScanning = isScanActive(scanState);
   const sourceFilterDirty = useMemo(
-    () =>
-      hasDirtySourceFilter(
-        channelSearch,
-        lastAppliedSourceFilter,
-        currentSourceDescriptor,
-    ),
+    () => hasDirtySourceFilter(channelSearch, lastAppliedSourceFilter, currentSourceDescriptor),
     [channelSearch, currentSourceDescriptor, lastAppliedSourceFilter],
   );
-  const showApplyButton =
-    !!playlist &&
-    !isScanning &&
-    !channelSearchError &&
-    sourceFilterDirty;
+  const showApplyButton = !!playlist && !isScanning && !channelSearchError && sourceFilterDirty;
   const canApply = showApplyButton && !playlistLoading;
   const [showRegexHelp, setShowRegexHelp] = useState(false);
   const regexHelpRef = useRef<HTMLDivElement>(null);

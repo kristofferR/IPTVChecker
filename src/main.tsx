@@ -1,16 +1,14 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { LogWindow } from "./LogWindow";
 import { SettingsWindow } from "./SettingsWindow";
-import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./index.css";
 
 // Initialize MCP plugin listeners for AI agent debugging (dev builds only)
 if (import.meta.env.DEV) {
-  import("tauri-plugin-mcp").then(({ setupPluginListeners }) =>
-    setupPluginListeners(),
-  );
+  import("tauri-plugin-mcp").then(({ setupPluginListeners }) => setupPluginListeners());
 }
 
 const platformHint = navigator.platform.toUpperCase().includes("MAC")
@@ -33,13 +31,7 @@ document.documentElement.dataset.window = isLogWindow
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ErrorBoundary>
-      {isLogWindow ? (
-        <LogWindow />
-      ) : isSettingsWindow ? (
-        <SettingsWindow />
-      ) : (
-        <App />
-      )}
+      {isLogWindow ? <LogWindow /> : isSettingsWindow ? <SettingsWindow /> : <App />}
     </ErrorBoundary>
   </StrictMode>,
 );

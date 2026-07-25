@@ -1,13 +1,13 @@
-import { memo, useEffect, useMemo, useState } from "react";
-import type { ChannelLogoSize, ChannelResult } from "../lib/types";
-import type { ColumnDefinition } from "../lib/tableColumns";
 import { Radio, Tv } from "lucide-react";
-import { getChannelErrorReason } from "../lib/channelResults";
-import { StatusBadge } from "./StatusBadge";
-import { extractTvgLogoUrl, normalizeTvgLogoUrl } from "../lib/extinf";
+import { memo, useEffect, useMemo, useState } from "react";
 import { channelLogoPixels, channelRowHeightPixels } from "../lib/channelLogoSize";
-import { detectChannelProtocol } from "../lib/streamProtocol";
+import { getChannelErrorReason } from "../lib/channelResults";
+import { extractTvgLogoUrl, normalizeTvgLogoUrl } from "../lib/extinf";
 import { useLogoCacheStatus } from "../lib/logoCache";
+import { detectChannelProtocol } from "../lib/streamProtocol";
+import type { ColumnDefinition } from "../lib/tableColumns";
+import type { ChannelLogoSize, ChannelResult } from "../lib/types";
+import { StatusBadge } from "./StatusBadge";
 
 function formatLatency(latencyMs: number): string {
   if (latencyMs < 1000) {
@@ -57,23 +57,16 @@ function ChannelRowImpl({
 }: ChannelRowProps) {
   const isAlive = result.status === "alive";
   const logoUrl = useMemo(
-    () =>
-      normalizeTvgLogoUrl(result.tvg_logo) ??
-      extractTvgLogoUrl(result.extinf_line),
+    () => normalizeTvgLogoUrl(result.tvg_logo) ?? extractTvgLogoUrl(result.extinf_line),
     [result.extinf_line, result.tvg_logo],
   );
   const logoStatus = useLogoCacheStatus(logoUrl);
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   const logoSizePx = useMemo(() => channelLogoPixels(channelLogoSize), [channelLogoSize]);
   const rowHeightPx = useMemo(() => channelRowHeightPixels(channelLogoSize), [channelLogoSize]);
-  const kindIconSizePx = useMemo(
-    () => Math.max(12, Math.round(logoSizePx * 0.68)),
-    [logoSizePx],
-  );
+  const kindIconSizePx = useMemo(() => Math.max(12, Math.round(logoSizePx * 0.68)), [logoSizePx]);
   const errorReason = getChannelErrorReason(result);
-  const drmStatusTitle = result.drm_system
-    ? `DRM: ${result.drm_system}`
-    : "DRM-protected stream";
+  const drmStatusTitle = result.drm_system ? `DRM: ${result.drm_system}` : "DRM-protected stream";
   const streamProtocol = useMemo(() => detectChannelProtocol(result), [result]);
 
   useEffect(() => {
@@ -83,11 +76,7 @@ function ChannelRowImpl({
   const renderCell = (column: ColumnDefinition) => {
     switch (column.key) {
       case "index":
-        return (
-          <span className="text-text-tertiary tabular-nums">
-            {result.index + 1}
-          </span>
-        );
+        return <span className="text-text-tertiary tabular-nums">{result.index + 1}</span>;
       case "status":
         return (
           <StatusBadge
@@ -168,34 +157,16 @@ function ChannelRowImpl({
           </span>
         );
       case "group":
-        return (
-          <span className="truncate px-2 text-text-secondary">
-            {result.group}
-          </span>
-        );
+        return <span className="truncate px-2 text-text-secondary">{result.group}</span>;
       case "resolution":
-        return (
-          <span className="text-text-secondary tabular-nums">
-            {result.resolution ?? "—"}
-          </span>
-        );
+        return <span className="text-text-secondary tabular-nums">{result.resolution ?? "—"}</span>;
       case "codec":
-        return (
-          <span className="text-text-secondary">
-            {result.codec ?? "—"}
-          </span>
-        );
+        return <span className="text-text-secondary">{result.codec ?? "—"}</span>;
       case "hdr":
-        return (
-          <span className="text-text-secondary">
-            {result.hdr_format ?? "—"}
-          </span>
-        );
+        return <span className="text-text-secondary">{result.hdr_format ?? "—"}</span>;
       case "fps":
         return (
-          <span className="text-text-secondary tabular-nums">
-            {result.fps ? result.fps : "—"}
-          </span>
+          <span className="text-text-secondary tabular-nums">{result.fps ? result.fps : "—"}</span>
         );
       case "latency": {
         if (result.latency_ms == null) {
@@ -216,25 +187,17 @@ function ChannelRowImpl({
       case "audio":
         return (
           <span className="text-text-secondary tabular-nums">
-            {result.audio_bitrate
-              ? `${result.audio_bitrate} kbps`
-              : "—"}
+            {result.audio_bitrate ? `${result.audio_bitrate} kbps` : "—"}
           </span>
         );
       case "audio_codec":
         return (
           <span className="text-text-secondary">
-            {result.audio_codec && result.audio_codec !== "Unknown"
-              ? result.audio_codec
-              : "—"}
+            {result.audio_codec && result.audio_codec !== "Unknown" ? result.audio_codec : "—"}
           </span>
         );
       case "audio_layout":
-        return (
-          <span className="text-text-secondary">
-            {result.audio_channel_layout ?? "—"}
-          </span>
-        );
+        return <span className="text-text-secondary">{result.audio_channel_layout ?? "—"}</span>;
       default:
         return null;
     }
@@ -267,10 +230,7 @@ function ChannelRowImpl({
               : "justify-start text-left";
 
         return (
-          <div
-            key={column.key}
-            className={`h-full flex items-center ${alignClass}`}
-          >
+          <div key={column.key} className={`h-full flex items-center ${alignClass}`}>
             {renderCell(column)}
           </div>
         );

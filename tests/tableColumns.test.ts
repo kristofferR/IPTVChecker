@@ -7,10 +7,11 @@ import {
 
 describe("tableColumns helpers", () => {
   it("keeps only known columns, dedupes them, and appends fallback columns", () => {
-    const parsed = parseStoredColumnOrder(
-      JSON.stringify(["name", "status", "name", "bad-key"]),
-      ["status", "name", "group"],
-    );
+    const parsed = parseStoredColumnOrder(JSON.stringify(["name", "status", "name", "bad-key"]), [
+      "status",
+      "name",
+      "group",
+    ]);
 
     expect(parsed).toEqual(["name", "status", "group"]);
   });

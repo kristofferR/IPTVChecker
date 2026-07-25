@@ -1,13 +1,13 @@
 import { create } from "zustand";
-import type { AppStore } from "./types";
+import { createFilterSlice } from "./slices/filterSlice";
+import { createHistorySlice } from "./slices/historySlice";
+import { createPlayerSlice } from "./slices/playerSlice";
 import { createPlaylistSlice } from "./slices/playlistSlice";
 import { createScanSlice } from "./slices/scanSlice";
-import { createFilterSlice } from "./slices/filterSlice";
 import { createSelectionSlice } from "./slices/selectionSlice";
-import { createUiSlice } from "./slices/uiSlice";
-import { createPlayerSlice } from "./slices/playerSlice";
-import { createHistorySlice } from "./slices/historySlice";
 import { createSettingsSlice } from "./slices/settingsSlice";
+import { createUiSlice } from "./slices/uiSlice";
+import type { AppStore } from "./types";
 
 export const useAppStore = create<AppStore>()((...a) => ({
   ...createPlaylistSlice(...a),

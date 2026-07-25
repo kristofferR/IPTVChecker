@@ -84,10 +84,7 @@ export function summarizeUiPerf(metric: string): {
 
   const values = samples.map((sample) => sample.valueMs).sort((a, b) => a - b);
   const total = values.reduce((sum, value) => sum + value, 0);
-  const p95Index = Math.min(
-    values.length - 1,
-    Math.max(0, Math.floor(values.length * 0.95) - 1),
-  );
+  const p95Index = Math.min(values.length - 1, Math.max(0, Math.floor(values.length * 0.95) - 1));
 
   return {
     count: values.length,

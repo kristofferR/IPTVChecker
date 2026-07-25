@@ -1,6 +1,6 @@
-import { useEffect, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { FolderOpen, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { FolderOpen, X } from "lucide-react";
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useState } from "react";
 import type { SavedPlaylistDraft } from "../lib/types";
 import PasswordField from "./PasswordField";
 
@@ -44,8 +44,7 @@ function handleSelectAllShortcut(
   event: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
 ): void {
   const lowerKey = event.key.toLowerCase();
-  const hasPrimaryModifier =
-    (event.metaKey && !event.ctrlKey) || (event.ctrlKey && !event.metaKey);
+  const hasPrimaryModifier = (event.metaKey && !event.ctrlKey) || (event.ctrlKey && !event.metaKey);
 
   if (!hasPrimaryModifier || event.altKey || event.shiftKey || lowerKey !== "a") {
     return;
@@ -108,9 +107,7 @@ export default function SavedPlaylistEditorDialog({
               username: form.username.trim(),
               password: form.password?.trim() ?? null,
               preferred_server:
-                preferredServer && servers.includes(preferredServer)
-                  ? preferredServer
-                  : null,
+                preferredServer && servers.includes(preferredServer) ? preferredServer : null,
               servers,
             };
           })()
@@ -164,9 +161,7 @@ export default function SavedPlaylistEditorDialog({
 
         <div className="space-y-4 p-5">
           <div className="space-y-1.5">
-            <label className="text-[12px] font-medium text-text-secondary">
-              Display Name
-            </label>
+            <label className="text-[12px] font-medium text-text-secondary">Display Name</label>
             <input
               type="text"
               value={form.display_name}
@@ -222,9 +217,7 @@ export default function SavedPlaylistEditorDialog({
             <>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-1.5">
-                  <label className="text-[12px] font-medium text-text-secondary">
-                    Username
-                  </label>
+                  <label className="text-[12px] font-medium text-text-secondary">Username</label>
                   <input
                     type="text"
                     value={form.username}
@@ -277,9 +270,7 @@ export default function SavedPlaylistEditorDialog({
                   }
                   className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[13px] text-text-primary focus:border-blue-500 focus:outline-none font-mono resize-none"
                 />
-                <p className="text-[11px] text-text-tertiary">
-                  Enter one server URL per line.
-                </p>
+                <p className="text-[11px] text-text-tertiary">Enter one server URL per line.</p>
               </div>
 
               <div className="space-y-1.5">

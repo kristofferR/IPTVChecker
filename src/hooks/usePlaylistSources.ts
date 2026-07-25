@@ -1,5 +1,39 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  errorToString,
+  formatPlaylistOpenError,
+  formatSourceReloadError,
+  redactUrlCredentials,
+} from "../lib/errors";
+import { logger } from "../lib/logger";
+import { parseXtreamRecent, serializeXtreamRecent } from "../lib/recentPlaylists";
+import {
+  buildSavedPlaylistDraftFromSource,
+  findSavedPlaylistForCurrentSource,
+  savedEntryToSourceDescriptor,
+} from "../lib/savedPlaylists";
+import {
+  applyContentVisibilityToPreview,
+  applySourceFilterToPreview,
+  hasDirtySourceFilter,
+  normalizeSourceFilter,
+  resolvePreservedGroupFilter,
+  validateSourceFilterPattern,
+} from "../lib/sourceFilter";
+import {
+  addRecentPlaylist,
+  clearRecentPlaylists,
+  deleteSavedPlaylist,
+  getRecentPlaylists,
+  getSavedPlaylists,
+  openPlaylist,
+  openPlaylistStalker,
+  openPlaylistUrl,
+  openPlaylistXtream,
+  openSavedPlaylist,
+  upsertSavedPlaylist,
+} from "../lib/tauri";
 import type {
   Channel,
   CurrentSourceDescriptor,
@@ -10,44 +44,7 @@ import type {
   StalkerOpenRequest,
   XtreamOpenRequest,
 } from "../lib/types";
-import {
-  addRecentPlaylist,
-  clearRecentPlaylists,
-  deleteSavedPlaylist,
-  getRecentPlaylists,
-  getSavedPlaylists,
-  openPlaylist,
-  openSavedPlaylist,
-  openPlaylistStalker,
-  openPlaylistXtream,
-  openPlaylistUrl,
-  upsertSavedPlaylist,
-} from "../lib/tauri";
 import { useAppStore } from "../store";
-import { logger } from "../lib/logger";
-import {
-  errorToString,
-  formatPlaylistOpenError,
-  formatSourceReloadError,
-  redactUrlCredentials,
-} from "../lib/errors";
-import {
-  parseXtreamRecent,
-  serializeXtreamRecent,
-} from "../lib/recentPlaylists";
-import {
-  applyContentVisibilityToPreview,
-  applySourceFilterToPreview,
-  hasDirtySourceFilter,
-  normalizeSourceFilter,
-  resolvePreservedGroupFilter,
-  validateSourceFilterPattern,
-} from "../lib/sourceFilter";
-import {
-  buildSavedPlaylistDraftFromSource,
-  findSavedPlaylistForCurrentSource,
-  savedEntryToSourceDescriptor,
-} from "../lib/savedPlaylists";
 
 // Non-reactive store access for writes inside callbacks/effects.
 const getStore = () => useAppStore.getState();
@@ -71,9 +68,7 @@ function applyDisplayNameToPreview(
   savedPlaylistId?: string | null,
 ): PlaylistPreview {
   const uniquePlaylistLabels = new Set(
-    preview.channels
-      .map((channel) => channel.playlist.trim())
-      .filter((value) => value.length > 0),
+    preview.channels.map((channel) => channel.playlist.trim()).filter((value) => value.length > 0),
   );
   const shouldRewriteChannelPlaylists = uniquePlaylistLabels.size <= 1;
 
@@ -132,10 +127,7 @@ function savedEntryToDraft(entry: SavedPlaylistEntry): SavedPlaylistDraft {
 
 export interface UsePlaylistSourcesParams {
   /** From useScan: rebuilds the scan cache when a source is (re)loaded. */
-  initFromPlaylist: (
-    channels: Channel[],
-    shouldApply?: () => boolean,
-  ) => Promise<boolean>;
+  initFromPlaylist: (channels: Channel[], shouldApply?: () => boolean) => Promise<boolean>;
   /** From useScan: re-syncs the scan cache, optionally preserving results. */
   syncFromPlaylist: (
     channels: Channel[],
@@ -157,8 +149,7 @@ export function usePlaylistSources({
   const [savedPlaylistsDialogOpen, setSavedPlaylistsDialogOpen] = useState(false);
   const [savedPlaylistEditorDraft, setSavedPlaylistEditorDraft] =
     useState<SavedPlaylistDraft | null>(null);
-  const [savedXtreamTestEntry, setSavedXtreamTestEntry] =
-    useState<SavedPlaylistEntry | null>(null);
+  const [savedXtreamTestEntry, setSavedXtreamTestEntry] = useState<SavedPlaylistEntry | null>(null);
   const sourceLoadGenerationRef = useRef(0);
 
   const refreshRecentPlaylists = useCallback(async () => {
@@ -207,19 +198,12 @@ export function usePlaylistSources({
       shouldApply: () => boolean,
     ): Promise<boolean> => {
       const initStartedAt = performance.now();
-      logger.info(
-        `[App] Preparing scan cache for ${preview.channels.length} visible channels`,
-      );
-      const initialized = await initFromPlaylist(
-        preview.channels,
-        shouldApply,
-      );
+      logger.info(`[App] Preparing scan cache for ${preview.channels.length} visible channels`);
+      const initialized = await initFromPlaylist(preview.channels, shouldApply);
       if (!initialized || !shouldApply()) {
         return false;
       }
-      logger.info(
-        `[App] Scan cache ready in ${(performance.now() - initStartedAt).toFixed(1)}ms`,
-      );
+      logger.info(`[App] Scan cache ready in ${(performance.now() - initStartedAt).toFixed(1)}ms`);
 
       const state = getStore();
       state.setPlaylist(preview);
@@ -234,9 +218,7 @@ export function usePlaylistSources({
         state.setStatusFilter("all");
         state.setShowHistory(false);
       } else {
-        state.setGroupFilter(
-          resolvePreservedGroupFilter(state.groupFilter, preview.groups),
-        );
+        state.setGroupFilter(resolvePreservedGroupFilter(state.groupFilter, preview.groups));
       }
 
       state.setSelectedChannel(null);
@@ -294,8 +276,7 @@ export function usePlaylistSources({
     ): Promise<LoadAndCommitSourceResult> => {
       const loadGeneration = sourceLoadGenerationRef.current + 1;
       sourceLoadGenerationRef.current = loadGeneration;
-      const isCurrentLoad = () =>
-        sourceLoadGenerationRef.current === loadGeneration;
+      const isCurrentLoad = () => sourceLoadGenerationRef.current === loadGeneration;
       const supersededResult = (): LoadAndCommitSourceResult => ({
         ok: false,
         error: "",
@@ -303,9 +284,7 @@ export function usePlaylistSources({
       });
 
       const normalizedSourceFilter = normalizeSourceFilter(channelSearch);
-      const currentSourceFilterError = validateSourceFilterPattern(
-        normalizedSourceFilter,
-      );
+      const currentSourceFilterError = validateSourceFilterPattern(normalizedSourceFilter);
       if (currentSourceFilterError) {
         const error =
           mode === "reapplySourceFilter"
@@ -332,9 +311,7 @@ export function usePlaylistSources({
         }
       })();
       const loadingAction =
-        mode === "reapplySourceFilter"
-          ? "Reloading source with source filter"
-          : "Opening source";
+        mode === "reapplySourceFilter" ? "Reloading source with source filter" : "Opening source";
 
       getStore().setPlaylistOpenError(null);
       getStore().setPlaylistLoadProgress(null);
@@ -356,17 +333,13 @@ export function usePlaylistSources({
         const latestState = getStore();
         const savedEntry =
           descriptor.kind === "saved"
-            ? latestState.savedPlaylists.find(
-                (entry) => entry.id === descriptor.id,
-              )
+            ? latestState.savedPlaylists.find((entry) => entry.id === descriptor.id)
             : undefined;
         const xtreamUsername = (() => {
           if (descriptor.kind === "xtream") {
             return descriptor.username;
           }
-          return savedEntry?.kind === "xtream"
-            ? savedEntry.username
-            : undefined;
+          return savedEntry?.kind === "xtream" ? savedEntry.username : undefined;
         })();
         const safeFileName = xtreamUsername
           ? cachedPreview.file_name.replaceAll(xtreamUsername, "***")
@@ -465,9 +438,7 @@ export function usePlaylistSources({
       state.cachedSourcePreview,
       state.lastAppliedSourceFilter,
     );
-    const visibleIndices = new Set(
-      nextPreview.channels.map((channel) => channel.index),
-    );
+    const visibleIndices = new Set(nextPreview.channels.map((channel) => channel.index));
     const selectedIndex = state.selectedChannel?.index ?? null;
     const pendingPlaybackIndex = state.pendingPlaybackChannel?.index ?? null;
     const nextSelectedIndices = state.selectedChannelIndices.filter((index) =>
@@ -475,9 +446,7 @@ export function usePlaylistSources({
     );
 
     state.setPlaylist(nextPreview);
-    state.setGroupFilter(
-      resolvePreservedGroupFilter(state.groupFilter, nextPreview.groups),
-    );
+    state.setGroupFilter(resolvePreservedGroupFilter(state.groupFilter, nextPreview.groups));
     state.setSelectedChannelIndices(nextSelectedIndices);
 
     if (selectedIndex == null || !visibleIndices.has(selectedIndex)) {
@@ -497,28 +466,17 @@ export function usePlaylistSources({
         getStore().setSelectedChannel(refreshed);
       }
     });
-  }, [
-    buildVisiblePreview,
-    hideVodContent,
-    settingsHydrated,
-    syncFromPlaylist,
-  ]);
+  }, [buildVisiblePreview, hideVodContent, settingsHydrated, syncFromPlaylist]);
 
   const patchCurrentPlaylistMetadata = useCallback(
     (displayName: string, savedPlaylistId?: string | null) => {
       const state = getStore();
       if (state.playlist) {
-        state.setPlaylist(
-          applyDisplayNameToPreview(state.playlist, displayName, savedPlaylistId),
-        );
+        state.setPlaylist(applyDisplayNameToPreview(state.playlist, displayName, savedPlaylistId));
       }
       if (state.cachedSourcePreview) {
         state.setCachedSourcePreview(
-          applyDisplayNameToPreview(
-            state.cachedSourcePreview,
-            displayName,
-            savedPlaylistId,
-          ),
+          applyDisplayNameToPreview(state.cachedSourcePreview, displayName, savedPlaylistId),
         );
       }
     },
@@ -560,8 +518,7 @@ export function usePlaylistSources({
               : {
                   kind: "xtream" as const,
                   value: serializeXtreamRecent({
-                    server:
-                      savedEntry.preferred_server ?? savedEntry.servers[0] ?? "",
+                    server: savedEntry.preferred_server ?? savedEntry.servers[0] ?? "",
                     username: savedEntry.username,
                     password: savedEntry.password ?? undefined,
                   }),
@@ -583,32 +540,33 @@ export function usePlaylistSources({
     [loadAndCommitSource, refreshRecentPlaylists, refreshSavedPlaylists],
   );
 
-  const openPlaylistPath = useCallback(async (selectedPath: string) => {
-    const result = await loadAndCommitSource(
-      {
-        kind: "path",
-        path: selectedPath,
-      },
-      "freshOpen",
-    );
-    if (!result.ok) {
-      return;
-    }
+  const openPlaylistPath = useCallback(
+    async (selectedPath: string) => {
+      const result = await loadAndCommitSource(
+        {
+          kind: "path",
+          path: selectedPath,
+        },
+        "freshOpen",
+      );
+      if (!result.ok) {
+        return;
+      }
 
-    try {
-      const entries = await addRecentPlaylist("file", selectedPath, null, null);
-      getStore().setRecentPlaylists(entries);
-    } catch {
-      // Ignore recent-list update failures.
-    }
-  }, [loadAndCommitSource]);
+      try {
+        const entries = await addRecentPlaylist("file", selectedPath, null, null);
+        getStore().setRecentPlaylists(entries);
+      } catch {
+        // Ignore recent-list update failures.
+      }
+    },
+    [loadAndCommitSource],
+  );
 
   const handleOpen = useCallback(async () => {
     const path = await open({
       multiple: false,
-      filters: [
-        { name: "M3U Playlists", extensions: ["m3u", "m3u8"] },
-      ],
+      filters: [{ name: "M3U Playlists", extensions: ["m3u", "m3u8"] }],
       directory: false,
     });
     if (!path) return;
@@ -632,27 +590,30 @@ export function usePlaylistSources({
     await openPlaylistPath(selectedPath);
   }, [openPlaylistPath]);
 
-  const openPlaylistUrlValue = useCallback(async (url: string): Promise<string | true> => {
-    const result = await loadAndCommitSource(
-      {
-        kind: "url",
-        url,
-      },
-      "freshOpen",
-    );
-    if (!result.ok) {
-      return result.superseded ? true : result.error;
-    }
+  const openPlaylistUrlValue = useCallback(
+    async (url: string): Promise<string | true> => {
+      const result = await loadAndCommitSource(
+        {
+          kind: "url",
+          url,
+        },
+        "freshOpen",
+      );
+      if (!result.ok) {
+        return result.superseded ? true : result.error;
+      }
 
-    try {
-      const entries = await addRecentPlaylist("url", url, null, null);
-      getStore().setRecentPlaylists(entries);
-    } catch {
-      // Ignore recent-list update failures.
-    }
+      try {
+        const entries = await addRecentPlaylist("url", url, null, null);
+        getStore().setRecentPlaylists(entries);
+      } catch {
+        // Ignore recent-list update failures.
+      }
 
-    return true;
-  }, [loadAndCommitSource]);
+      return true;
+    },
+    [loadAndCommitSource],
+  );
 
   const openPlaylistXtreamValue = useCallback(
     async (source: XtreamOpenRequest, savePassword?: boolean): Promise<string | true> => {
@@ -719,9 +680,12 @@ export function usePlaylistSources({
     [loadAndCommitSource],
   );
 
-  const handleOpenSaved = useCallback((id: string) => {
-    void openSavedPlaylistById(id);
-  }, [openSavedPlaylistById]);
+  const handleOpenSaved = useCallback(
+    (id: string) => {
+      void openSavedPlaylistById(id);
+    },
+    [openSavedPlaylistById],
+  );
 
   const handleManageSavedPlaylists = useCallback(() => {
     setSavedPlaylistsDialogOpen(true);
@@ -790,11 +754,8 @@ export function usePlaylistSources({
 
       try {
         const currentState = getStore();
-        const deletedEntry =
-          currentState.savedPlaylists.find((entry) => entry.id === id) ?? null;
-        const fallbackDescriptor = deletedEntry
-          ? savedEntryToSourceDescriptor(deletedEntry)
-          : null;
+        const deletedEntry = currentState.savedPlaylists.find((entry) => entry.id === id) ?? null;
+        const fallbackDescriptor = deletedEntry ? savedEntryToSourceDescriptor(deletedEntry) : null;
         const entries = await deleteSavedPlaylist(id);
         getStore().setSavedPlaylists(entries);
         void refreshRecentPlaylists();
@@ -856,10 +817,7 @@ export function usePlaylistSources({
       return { ok: true, reapplied: false };
     }
 
-    const result = await loadAndCommitSource(
-      state.currentSourceDescriptor,
-      "reapplySourceFilter",
-    );
+    const result = await loadAndCommitSource(state.currentSourceDescriptor, "reapplySourceFilter");
     return { ok: result.ok, reapplied: result.ok };
   }, [loadAndCommitSource]);
 
