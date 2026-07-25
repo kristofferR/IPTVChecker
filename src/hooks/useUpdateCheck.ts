@@ -97,7 +97,12 @@ export function useUpdateCheck(): {
           getStore().setMenuInfo(`Update check failed: ${updateFailureDetail(errorToString(err))}`);
         }
       } finally {
-        if (isCurrentRequest()) getStore().setUpdatePhase("idle");
+        // Only clear our own phase: an install may have started while this
+        // check was in flight, and resetting to idle would re-enable the
+        // button mid-download.
+        if (isCurrentRequest() && getStore().updatePhase === "checking") {
+          getStore().setUpdatePhase("idle");
+        }
       }
     },
     [resolveInstallMode],
@@ -163,8 +168,10 @@ export function useUpdateCheck(): {
       }
     };
 
-    void adoptExistingDiscovery();
-
+    // Subscribe before reading the snapshot. The backend's launch-time check
+    // emits once and then remembers the version, so an event landing between
+    // the snapshot returning and the listener attaching would be lost until
+    // the user checked manually.
     const unlisten = listen<string>(UPDATE_AVAILABLE_EVENT, (event) => {
       void (async () => {
         try {
@@ -176,6 +183,8 @@ export function useUpdateCheck(): {
         }
       })();
     });
+
+    void unlisten.then(() => adoptExistingDiscovery());
 
     return () => {
       cancelled = true;
