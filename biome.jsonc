@@ -2,8 +2,9 @@
   "$schema": "https://biomejs.dev/schemas/2.5.5/schema.json",
   "files": {
     // Only the hand-written frontend and its tests. dist/ is generated, and
-    // agent worktrees under .worktrees/ carry their own root configs.
-    "includes": ["src/**", "tests/**", "scripts/**", "!!**/.worktrees", "!!dist"]
+    // agent worktrees under .worktrees/ carry their own root configs. scripts/
+    // is narrowed to .ts because the rest of it is shell and plain text.
+    "includes": ["src/**", "tests/**", "scripts/**/*.ts", "!!**/.worktrees", "!!dist"]
   },
   "formatter": {
     "enabled": true,
