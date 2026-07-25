@@ -2514,7 +2514,8 @@ mod tests {
 
     #[test]
     fn label_mismatch_hd_word_boundary() {
-        // "HD" as standalone word should trigger mismatch
+        // "HD" as a standalone word is checked against the resolution: 1080p
+        // matches the label, 480p contradicts it.
         assert!(check_label_mismatch("Sports HD", "1080p").is_empty());
         assert!(check_label_mismatch("Sports HD", "480p").len() == 1);
 

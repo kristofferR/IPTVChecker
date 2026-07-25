@@ -226,12 +226,22 @@ fn current_install_mode() -> UpdateInstallMode {
     }
 }
 
-fn current_manual_url() -> Option<&'static str> {
-    current_install_source().manual_url()
+/// Detection shells out to pacman on Linux and stats the install directory on
+/// Windows, so keep it off the async runtime thread on both.
+async fn current_install_source_off_main() -> Result<InstallSource, AppError> {
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    {
+        tauri::async_runtime::spawn_blocking(current_install_source)
+            .await
+            .map_err(|error| AppError::Other(format!("install source worker failed: {error}")))
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        Ok(current_install_source())
+    }
 }
 
-/// Detection shells out to pacman on Linux and stats the install directory on
-/// Windows, so keep it off the main thread on both.
 async fn current_install_mode_off_main() -> Result<UpdateInstallMode, AppError> {
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     {
@@ -351,12 +361,13 @@ pub async fn update_install_mode() -> Result<UpdateInstallMode, AppError> {
 /// accepted from the webview.
 #[tauri::command]
 pub async fn open_manual_update(app: AppHandle) -> Result<(), AppError> {
-    if !current_install_mode_off_main().await?.is_manual() {
+    // One detection for both the check and the URL: re-deriving the URL would
+    // run pacman again, and directly on the async runtime thread.
+    let Some(url) = current_install_source_off_main().await?.manual_url() else {
         return Err(AppError::Validation(
             "This installation supports built-in updates.".into(),
         ));
-    }
-    let url = current_manual_url().unwrap_or(RELEASES_URL);
+    };
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|e| AppError::Other(format!("could not open {url}: {e}")))
