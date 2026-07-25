@@ -135,7 +135,10 @@ jobs:
             exit 0
           fi
 
-          src="$(find "src-tauri/target/${TARGET_TRIPLE}/release/bundle/dmg" -name '*.dmg' | head -1)"
+          # -print -quit rather than piping to head: under `set -o pipefail` a
+          # missing bundle dir makes find fail the whole step before the guard
+          # below can report it.
+          src="$(find "src-tauri/target/${TARGET_TRIPLE}/release/bundle/dmg" -name '*.dmg' -print -quit || true)"
           if [ -z "${src}" ]; then echo "No .dmg found." >&2; exit 1; fi
           xcrun notarytool submit "${src}" --apple-id "${APPLE_ID}" \
             --password "${APPLE_PASSWORD}" --team-id "${APPLE_TEAM_ID}" --wait
