@@ -147,7 +147,15 @@ fn replace_app_bundle(
                 return Err(err);
             }
         }
-        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
+        // PermissionDenied: the destination needs an admin copy. CrossesDevices:
+        // the app lives on a different volume from the scratch dir, so it cannot
+        // be renamed aside at all. Both fall back to the copy-based install.
+        Err(err)
+            if matches!(
+                err.kind(),
+                std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::CrossesDevices
+            ) =>
+        {
             install_with_admin_privileges(source_app, destination_app)?;
         }
         Err(err) => return Err(err.to_string()),

@@ -108,6 +108,10 @@ export function useUpdateCheck(): {
   const installUpdate = useCallback(async () => {
     const notice = getStore().updateNotice;
     if (!notice) return;
+    // The banner disables its button while installing, but a menu action or a
+    // double activation could still re-enter; the backend would reject the
+    // second install anyway, so fail fast rather than surface that as an error.
+    if (getStore().updatePhase === "installing") return;
 
     if (isManualInstall(notice.installMode)) {
       try {

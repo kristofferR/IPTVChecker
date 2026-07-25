@@ -1125,7 +1125,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                 </p>
               )}
 
-              <div className="grid grid-cols-1 grid-cols-2 gap-3 p-4 border-t border-border-subtle">
+              <div className="grid grid-cols-2 gap-3 p-4 border-t border-border-subtle">
                 <div>
                   <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
                     Screenshot Retention
