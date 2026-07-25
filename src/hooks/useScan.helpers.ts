@@ -79,7 +79,10 @@ export function applyResultUpdates(
 
   for (const result of batch) {
     const position = positions.get(result.index);
-    const previousResult = position == null ? null : (previous.flatResults[position] ?? null);
+    // Read through the working array, not `previous.flatResults`: an index
+    // first seen earlier in this same batch already has a position past the
+    // end of the old array, and reading there would count it as new twice.
+    const previousResult = position == null ? null : (flatResults[position] ?? null);
 
     if (!previousResult) {
       presentCount += 1;

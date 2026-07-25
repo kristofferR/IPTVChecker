@@ -64,6 +64,11 @@ export function useUpdateCheck(): {
 
   const checkForUpdates = useCallback(
     async (force: boolean) => {
+      // Never take the phase from a running install: doing so drops the
+      // "Installing…" label and re-enables the button mid-download, which also
+      // defeats installUpdate's re-entry guard.
+      if (getStore().updatePhase === "installing") return;
+
       const requestId = requestIdRef.current + 1;
       requestIdRef.current = requestId;
       const isCurrentRequest = () => requestIdRef.current === requestId;

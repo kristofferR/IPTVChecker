@@ -231,7 +231,15 @@ fn current_bundle_on_read_only_volume() -> bool {
     stat.f_flags & libc::MNT_RDONLY as u32 != 0
 }
 
+/// Detection spawns up to three subprocesses on Linux and stats the volume on
+/// macOS, and the answer cannot change while the process runs.
+static INSTALL_SOURCE: std::sync::OnceLock<InstallSource> = std::sync::OnceLock::new();
+
 fn current_install_source() -> InstallSource {
+    *INSTALL_SOURCE.get_or_init(detect_install_source)
+}
+
+fn detect_install_source() -> InstallSource {
     #[cfg(target_os = "linux")]
     {
         linux_install_source(

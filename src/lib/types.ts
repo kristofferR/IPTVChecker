@@ -460,6 +460,16 @@ export interface CastMediaRequest {
   streamKind: CastStreamKind;
 }
 
+export type UpdateInstallKind = "built-in" | "manual";
+
+/** Mirrors the Rust `UpdateInstallMode`. `buttonLabel`/`instructions` are only
+ *  set for installations that must be updated by their own package manager. */
+export interface UpdateInstallMode {
+  kind: UpdateInstallKind;
+  buttonLabel: string | null;
+  instructions: string | null;
+}
+
 /** Result of a `check_for_updates` call. `version` is null when up to date. */
 export interface UpdateCheckResult {
   version: string | null;
