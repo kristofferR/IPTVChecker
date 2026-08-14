@@ -35,13 +35,27 @@ Set-MpPreference `
 Update-MpSignature
 
 $status = Get-MpComputerStatus
+$readinessDeadline = [DateTime]::UtcNow.AddSeconds(60)
+while (
+    $status.AntivirusEnabled -and
+    -not $status.RealTimeProtectionEnabled -and
+    [DateTime]::UtcNow -lt $readinessDeadline
+) {
+    Start-Sleep -Seconds 5
+    $status = Get-MpComputerStatus
+}
+
 $status | Select-Object `
     AMRunningMode, AntivirusEnabled, BehaviorMonitorEnabled, `
     IoavProtectionEnabled, OnAccessProtectionEnabled, `
     RealTimeProtectionEnabled, AntivirusSignatureVersion, `
     AntivirusSignatureLastUpdated
-if (-not $status.AntivirusEnabled -or -not $status.RealTimeProtectionEnabled) {
-    throw "Microsoft Defender could not be enabled"
+if (-not $status.AntivirusEnabled) {
+    throw "Microsoft Defender Antivirus is unavailable"
+}
+if (-not $status.RealTimeProtectionEnabled) {
+    Write-Warning "Real-time protection did not start; continuing with explicit custom scans" `
+        -WarningAction Continue
 }
 
 $platformRoot = Join-Path $env:ProgramData "Microsoft\Windows Defender\Platform"
