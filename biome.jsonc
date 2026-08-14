@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.5/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.8/schema.json",
   "files": {
     // Only the hand-written frontend and its tests. dist/ is generated, and
     // agent worktrees under .worktrees/ carry their own root configs. scripts/
