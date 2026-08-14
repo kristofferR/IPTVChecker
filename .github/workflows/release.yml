@@ -217,6 +217,25 @@ jobs:
           Compress-Archive -Path "$staging/*" -DestinationPath $zipName
           echo "PORTABLE_ZIP=$zipName" >> $env:GITHUB_ENV
 
+      - name: Scan Windows release artifacts with Microsoft Defender
+        if: startsWith(matrix.target, 'x86_64-pc-windows') || startsWith(matrix.target, 'aarch64-pc-windows')
+        shell: pwsh
+        run: |
+          $targetRoot = "src-tauri/target/${{ matrix.target }}/release"
+          $installers = @(Get-ChildItem "$targetRoot/bundle/nsis" -Filter "*.exe" -File)
+          if ($installers.Count -ne 1) {
+            throw "Expected one NSIS installer, found $($installers.Count)"
+          }
+
+          $scanPaths = @(
+            $installers[0].FullName
+            (Resolve-Path $env:PORTABLE_ZIP).Path
+            (Resolve-Path "$targetRoot/iptv-checker.exe").Path
+            (Resolve-Path "src-tauri/binaries/ffmpeg-${{ matrix.target }}.exe").Path
+            (Resolve-Path "src-tauri/binaries/ffprobe-${{ matrix.target }}.exe").Path
+          )
+          & scripts/scan-windows-defender.ps1 -Paths $scanPaths
+
       - name: Upload Windows portable zip
         if: startsWith(matrix.target, 'x86_64-pc-windows') || startsWith(matrix.target, 'aarch64-pc-windows')
         env:
