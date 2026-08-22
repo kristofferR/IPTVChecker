@@ -10,7 +10,13 @@ pkgdesc="GUI for validating IPTV playlists and inspecting stream health"
 arch=('x86_64' 'aarch64')
 url="https://github.com/kristofferR/IPTVChecker"
 license=('MIT')
-depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'ffmpeg' 'hicolor-icon-theme')
+# WebKitGTK lists the GStreamer plugin sets as optdepends, but they are hard
+# requirements here: without gst-plugins-good the WebProcess aborts on
+# RELEASE_ASSERT(audioSink) in MediaPlayerPrivateGStreamer::createAudioSink()
+# as soon as playback starts, and without gst-libav/gst-plugins-bad there is
+# no H.264/AAC decoding for the streams this app exists to play.
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'ffmpeg' 'hicolor-icon-theme'
+         'gst-plugins-good' 'gst-plugins-bad' 'gst-libav')
 # The unrelated freearhey CLI package also installs /usr/bin/iptv-checker.
 conflicts=('iptv-checker')
 options=('!strip' '!debug')

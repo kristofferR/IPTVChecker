@@ -56,7 +56,13 @@
         "section": "utility"
       },
       "rpm": {
-        "depends": ["webkit2gtk4.1", "gtk3", "libayatana-appindicator-gtk3"],
+        "depends": [
+          "webkit2gtk4.1",
+          "gtk3",
+          "libayatana-appindicator-gtk3",
+          "gstreamer1-plugins-good",
+          "gstreamer1-plugins-bad-free"
+        ],
         "compression": {
           "type": "zstd",
           "level": 3
