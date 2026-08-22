@@ -8,6 +8,8 @@ Ports all functionality from the CLI tool at `/Users/kristoffer/Code/Scripts/IPT
 ## GitHub
 - **Repo:** `kristofferR/IPTVChecker`
 - **Git identity:** kristofferR (`git use-personal`)
+- **No AI attribution.** Commit messages and PR bodies never carry a
+  `Co-Authored-By: Claude` trailer or a "Generated with Claude Code" line.
 
 ## Stack
 - **Backend:** Tauri v2 (Rust) — handles HTTP stream checking, M3U parsing, ffmpeg integration, proxy support
