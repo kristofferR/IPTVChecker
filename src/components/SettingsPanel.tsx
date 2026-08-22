@@ -575,8 +575,8 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   <div>
                     <p className="text-[13px] font-medium">Title bar</p>
                     <p className="text-[11px] text-text-tertiary mt-0.5">
-                      Automatic hides the title bar on tiling window managers (Hyprland, Sway,
-                      i3…) and keeps it on regular desktops.
+                      Automatic hides the title bar on tiling window managers (Hyprland, Sway, i3…)
+                      and keeps it on regular desktops.
                     </p>
                   </div>
                   <select
