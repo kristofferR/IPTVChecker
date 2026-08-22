@@ -754,7 +754,36 @@ pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Re
         log::warn!("Failed to apply theme preference: {}", error);
     }
 
+    // Title-bar visibility follows the setting live, on every window — the
+    // Settings and Log windows carry the same redundant header bar on tiling
+    // window managers.
+    #[cfg(target_os = "linux")]
+    {
+        let show_title_bar = crate::linux::show_title_bar(&settings);
+        for window in app.webview_windows().values() {
+            let _ = window.set_decorations(show_title_bar);
+        }
+    }
+
     Ok(())
+}
+
+/// Whether newly created windows should keep their native title bar. Always
+/// true off Linux (macOS/Windows use the overlay title bar instead); on Linux
+/// it follows the title-bar setting and tiling-WM detection.
+#[tauri::command]
+pub async fn get_title_bar_visibility(app: tauri::AppHandle) -> Result<bool, AppError> {
+    #[cfg(target_os = "linux")]
+    {
+        let state = app.state::<Arc<AppState>>();
+        let settings = state.settings.lock().await;
+        Ok(crate::linux::show_title_bar(&settings))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = app;
+        Ok(true)
+    }
 }
 
 #[tauri::command]

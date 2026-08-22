@@ -311,6 +311,7 @@ export interface AppSettings {
   scan_notifications: boolean;
   low_fps_threshold: number;
   theme: ThemePreference;
+  title_bar: TitleBarPreference;
   log_level: string;
   show_prescan_filter: boolean;
   hide_vod_content: boolean;
@@ -424,6 +425,9 @@ export interface XtreamServerTestReport {
 
 export type RetryBackoff = "none" | "linear" | "exponential";
 export type ThemePreference = "system" | "light" | "dark";
+
+/** Linux only: "auto" hides the title bar on tiling window managers. */
+export type TitleBarPreference = "auto" | "show" | "hide";
 
 export interface ChromecastDevice {
   id: string;
