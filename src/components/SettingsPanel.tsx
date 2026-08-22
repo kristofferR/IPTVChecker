@@ -569,6 +569,31 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   <option value="huge">Huge (48px)</option>
                 </select>
               </div>
+
+              {platform === "linux" && (
+                <div className={rowClass}>
+                  <div>
+                    <p className="text-[13px] font-medium">Title bar</p>
+                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                      Automatic hides the title bar on tiling window managers (Hyprland, Sway,
+                      i3…) and keeps it on regular desktops.
+                    </p>
+                  </div>
+                  <select
+                    value={draft.title_bar}
+                    onChange={(event) =>
+                      updateSetting("title_bar", event.target.value as AppSettings["title_bar"], {
+                        immediate: true,
+                      })
+                    }
+                    className={`${inputClass} w-44`}
+                  >
+                    <option value="auto">Automatic</option>
+                    <option value="show">Shown</option>
+                    <option value="hide">Hidden</option>
+                  </select>
+                </div>
+              )}
             </section>
 
             <section className={blockClass}>

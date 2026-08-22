@@ -41,6 +41,7 @@ import {
   checkFfmpegAvailable,
   clearScanHistory,
   getScanHistory,
+  getTitleBarVisibility,
   openChannelInPlayer,
   quickCheckChannel,
   readScreenshot,
@@ -1035,6 +1036,7 @@ export default function App() {
     new WebviewWindow("settings", {
       url: `${baseUrl}?window=settings`,
       ...(platform === "windows" ? { dataDirectory: "settings-webview" } : {}),
+      ...(platform === "linux" ? { decorations: await getTitleBarVisibility() } : {}),
       title: "Settings",
       width: 620,
       height: 680,
@@ -1060,6 +1062,7 @@ export default function App() {
     new WebviewWindow("log", {
       url: `${baseUrl}?window=log`,
       ...(platform === "windows" ? { dataDirectory: "log-webview" } : {}),
+      ...(platform === "linux" ? { decorations: await getTitleBarVisibility() } : {}),
       title: "Log",
       width: 900,
       height: 600,

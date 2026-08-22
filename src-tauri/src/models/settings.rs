@@ -15,6 +15,20 @@ pub enum ThemePreference {
     Dark,
 }
 
+/// Linux: window title bar visibility. `Auto` hides it on tiling window
+/// managers (where the compositor moves/closes windows and the GTK header
+/// bar is dead weight) and keeps it on floating desktops, where it is also
+/// how you drag and close the window.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[derive(Default)]
+pub enum TitleBarPreference {
+    #[default]
+    Auto,
+    Show,
+    Hide,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
@@ -65,6 +79,8 @@ pub struct AppSettings {
     pub scan_notifications: bool,
     pub low_fps_threshold: f64,
     pub theme: ThemePreference,
+    /// Linux only: title bar visibility (auto / show / hide).
+    pub title_bar: TitleBarPreference,
     pub log_level: String,
     pub show_prescan_filter: bool,
     pub hide_vod_content: bool,
@@ -188,6 +204,7 @@ impl Default for AppSettings {
             scan_notifications: true,
             low_fps_threshold: 23.0,
             theme: ThemePreference::System,
+            title_bar: TitleBarPreference::Auto,
             log_level: "error".to_string(),
             show_prescan_filter: false,
             hide_vod_content: false,
@@ -266,6 +283,8 @@ mod tests {
         assert_eq!(settings.low_fps_threshold, 23.0);
         assert_eq!(settings.channel_logo_size, super::ChannelLogoSize::Small);
         assert_eq!(settings.show_header_button_text, !cfg!(target_os = "macos"));
+        // Pre-existing installs have no `title_bar` key in settings.json.
+        assert_eq!(settings.title_bar, super::TitleBarPreference::Auto);
     }
 
     #[test]

@@ -7,6 +7,8 @@
 pub mod commands;
 pub mod engine;
 pub mod error;
+#[cfg(target_os = "linux")]
+pub mod linux;
 pub mod models;
 pub mod state;
 pub mod urlnorm;
@@ -190,9 +192,24 @@ fn create_window_from_main_config(app: &tauri::AppHandle, label: String) {
         .and_then(|builder| builder.build())
     {
         // The built window is only consumed by the macOS-only vibrancy setup
-        // below; elsewhere the theme is applied through the app handle.
-        #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+        // and the Linux title-bar pass below; elsewhere the theme is applied
+        // through the app handle.
+        #[cfg_attr(
+            not(any(target_os = "macos", target_os = "linux")),
+            allow(unused_variables)
+        )]
         Ok(window) => {
+            // Linux: new windows follow the title-bar setting (hidden on
+            // tiling window managers by default).
+            #[cfg(target_os = "linux")]
+            {
+                let show_title_bar = {
+                    let state = app.state::<Arc<AppState>>();
+                    let settings = state.settings.blocking_lock();
+                    linux::show_title_bar(&settings)
+                };
+                let _ = window.set_decorations(show_title_bar);
+            }
             let theme_preference = {
                 let state = app.state::<Arc<AppState>>();
                 let theme = state.settings.blocking_lock().theme;
@@ -992,12 +1009,18 @@ pub fn run() {
                 }
             }
 
-            // On Linux, ensure native window decorations are visible and the
-            // window title is set (overlay titlebar is macOS/Windows only).
+            // On Linux, apply native window decorations per the title-bar
+            // setting — hidden on tiling window managers by default — and set
+            // the window title (overlay titlebar is macOS/Windows only).
             #[cfg(target_os = "linux")]
             {
+                let show_title_bar = {
+                    let state = app.state::<Arc<AppState>>();
+                    let settings = state.settings.blocking_lock();
+                    linux::show_title_bar(&settings)
+                };
                 if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.set_decorations(true);
+                    let _ = window.set_decorations(show_title_bar);
                     let _ = window.set_title("IPTV Checker");
                 }
             }
@@ -1036,6 +1059,7 @@ pub fn run() {
             commands::settings::delete_scan_preset,
             commands::settings::set_default_scan_preset,
             commands::settings::update_settings,
+            commands::settings::get_title_bar_visibility,
             commands::settings::check_ffmpeg_available,
             commands::settings::set_default_m3u8_file_association,
             commands::settings::read_screenshot,

@@ -144,6 +144,11 @@ export async function getSettings(): Promise<AppSettings> {
   return invoke("get_settings");
 }
 
+/** Linux: whether new windows should keep their native title bar. */
+export async function getTitleBarVisibility(): Promise<boolean> {
+  return invoke("get_title_bar_visibility");
+}
+
 export async function updateSettings(settings: AppSettings): Promise<void> {
   return invoke("update_settings", { settings });
 }
