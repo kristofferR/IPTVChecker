@@ -1,16 +1,17 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { attachLogger, LogLevel } from "@tauri-apps/plugin-log";
+import { emitTo, listen } from "@tauri-apps/api/event";
+import { LogLevel } from "@tauri-apps/plugin-log";
 import { ArrowDown, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-
-interface LogEntry {
-  id: number;
-  timestamp: Date;
-  level: LogLevel;
-  message: string;
-}
-
-const MAX_LOG_ENTRIES = 10_000;
+import {
+  APP_LOG_CLEAR_EVENT,
+  APP_LOG_ENTRY_EVENT,
+  APP_LOG_HISTORY_EVENT,
+  APP_LOG_HISTORY_REQUEST_EVENT,
+  type AppLogHistoryRequest,
+  type AppLogHistoryResponse,
+} from "../lib/logBridge";
+import { type AppLogEntry, MAX_LOG_ENTRIES, mergeLogEntries } from "../lib/logEntries";
 
 const LEVEL_META: Record<LogLevel, { label: string; color: string; activeColor: string }> = {
   [LogLevel.Trace]: {
@@ -44,7 +45,15 @@ const ALL_LEVELS: LogLevel[] = [LogLevel.Debug, LogLevel.Info, LogLevel.Warn, Lo
 
 const DEFAULT_ENABLED = new Set([LogLevel.Debug, LogLevel.Info, LogLevel.Warn, LogLevel.Error]);
 
-function formatTimestamp(date: Date): string {
+let nextHistoryRequestId = 0;
+
+function createHistoryRequestId(): string {
+  nextHistoryRequestId += 1;
+  return `${Date.now()}:${nextHistoryRequestId}`;
+}
+
+function formatTimestamp(timestampMs: number): string {
+  const date = new Date(timestampMs);
   const h = String(date.getHours()).padStart(2, "0");
   const m = String(date.getMinutes()).padStart(2, "0");
   const s = String(date.getSeconds()).padStart(2, "0");
@@ -52,58 +61,70 @@ function formatTimestamp(date: Date): string {
   return `${h}:${m}:${s}.${ms}`;
 }
 
-let nextId = 0;
-
 export function LogWindowContent() {
-  const [entries, setEntries] = useState<LogEntry[]>([]);
+  const [entries, setEntries] = useState<AppLogEntry[]>([]);
   const [levelFilter, setLevelFilter] = useState<Set<LogLevel>>(() => new Set(DEFAULT_ENABLED));
   const [searchText, setSearchText] = useState("");
 
-  const bufferRef = useRef<LogEntry[]>([]);
+  const bufferRef = useRef<AppLogEntry[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearedThroughIdRef = useRef(-1);
+  const activeHistoryRequestIdRef = useRef<string | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
   const [autoScroll, setAutoScroll] = useState(true);
 
-  // Subscribe to log events
+  // The main window owns the log subscription and backlog. Listen before
+  // requesting history so live entries racing the response can be deduplicated.
   useEffect(() => {
     let cancelled = false;
-    let unlisten: (() => void) | null = null;
+    let unlisten: Array<() => void> = [];
 
-    attachLogger(({ level, message }) => {
+    const queueEntries = (incoming: AppLogEntry[]) => {
       if (cancelled) return;
-      bufferRef.current.push({
-        id: nextId++,
-        timestamp: new Date(),
-        level,
-        message,
-      });
+      bufferRef.current.push(...incoming.filter((entry) => entry.id > clearedThroughIdRef.current));
       if (timerRef.current === null) {
         timerRef.current = setTimeout(() => {
           timerRef.current = null;
           const batch = bufferRef.current;
           bufferRef.current = [];
           if (batch.length === 0) return;
-          setEntries((prev) => {
-            const combined =
-              prev.length + batch.length > MAX_LOG_ENTRIES
-                ? [...prev, ...batch].slice(-MAX_LOG_ENTRIES)
-                : [...prev, ...batch];
-            return combined;
-          });
+          setEntries((previous) => mergeLogEntries(previous, batch, MAX_LOG_ENTRIES));
         }, 32);
       }
-    }).then((fn) => {
-      if (cancelled) {
-        fn();
-      } else {
-        unlisten = fn;
+    };
+
+    const setupListeners = async () => {
+      const listeners: Array<() => void> = [];
+      try {
+        listeners.push(
+          await listen<AppLogEntry>(APP_LOG_ENTRY_EVENT, (event) => queueEntries([event.payload])),
+        );
+        listeners.push(
+          await listen<AppLogHistoryResponse>(APP_LOG_HISTORY_EVENT, (event) => {
+            if (event.payload.requestId !== activeHistoryRequestIdRef.current) return;
+            queueEntries(event.payload.entries);
+          }),
+        );
+
+        if (cancelled) {
+          for (const off of listeners) off();
+          return;
+        }
+        unlisten = listeners;
+        const request: AppLogHistoryRequest = { requestId: createHistoryRequestId() };
+        activeHistoryRequestIdRef.current = request.requestId;
+        await emitTo("main", APP_LOG_HISTORY_REQUEST_EVENT, request);
+      } catch (error) {
+        for (const off of listeners) off();
+        console.error("[LogWindow] Failed to connect to log history", error);
       }
-    });
+    };
+    void setupListeners();
 
     return () => {
       cancelled = true;
-      unlisten?.();
+      for (const off of unlisten) off();
       if (timerRef.current !== null) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
@@ -172,9 +193,14 @@ export function LogWindowContent() {
   }, []);
 
   const clearEntries = useCallback(() => {
-    setEntries([]);
+    const latestVisibleId = entries[entries.length - 1]?.id ?? -1;
+    const latestBufferedId = bufferRef.current[bufferRef.current.length - 1]?.id ?? -1;
+    clearedThroughIdRef.current = Math.max(latestVisibleId, latestBufferedId);
+    activeHistoryRequestIdRef.current = null;
     bufferRef.current = [];
-  }, []);
+    setEntries([]);
+    void emitTo("main", APP_LOG_CLEAR_EVENT).catch(() => {});
+  }, [entries]);
 
   const filteredCount = filteredEntries.length;
   const totalCount = entries.length;
@@ -275,7 +301,7 @@ export function LogWindowContent() {
                 className="flex items-baseline gap-2 px-3 py-px hover:bg-btn-hover/50"
               >
                 <span className="text-text-tertiary shrink-0 select-all">
-                  {formatTimestamp(entry.timestamp)}
+                  {formatTimestamp(entry.timestampMs)}
                 </span>
                 <span className={`${meta.color} font-semibold shrink-0 w-[5ch] text-right`}>
                   {meta.label}

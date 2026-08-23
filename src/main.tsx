@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { LogWindow } from "./LogWindow";
+import { startMainLogBridge } from "./lib/logBridge";
 import { SettingsWindow } from "./SettingsWindow";
 import "./index.css";
 
@@ -22,6 +23,9 @@ document.documentElement.dataset.theme = "system";
 const windowParam = new URLSearchParams(window.location.search).get("window");
 const isSettingsWindow = windowParam === "settings";
 const isLogWindow = windowParam === "log";
+if (!isSettingsWindow && !isLogWindow) {
+  void startMainLogBridge().catch(() => {});
+}
 document.documentElement.dataset.window = isLogWindow
   ? "log"
   : isSettingsWindow
