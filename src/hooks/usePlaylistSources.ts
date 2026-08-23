@@ -733,27 +733,38 @@ export function usePlaylistSources({
     async (draft: SavedPlaylistDraft) => {
       const action = draft.id ? "Updating" : "Saving";
       logger.info(`[Saved Playlists] ${action} "${draft.display_name}"`);
-      try {
-        const result = await upsertSavedPlaylist(draft);
-        getStore().setSavedPlaylists(result.entries);
-        setSavedPlaylistEditorDraft(null);
-        void refreshRecentPlaylists();
-
-        const state = getStore();
-        const currentPlaylist = state.playlist;
-        const currentSaved = currentPlaylist?.saved_playlist_id ?? null;
-        const currentMatch = findSavedPlaylistForCurrentSource(
-          result.entries,
-          state.currentSourceDescriptor,
-          currentSaved,
-        );
-        if (currentMatch && currentMatch.id === result.entry.id) {
-          await openSavedPlaylistById(result.entry.id);
-        }
-        logger.info(`[Saved Playlists] Saved "${result.entry.display_name}"`);
-      } catch (err) {
+      const result = await upsertSavedPlaylist(draft).catch((err: unknown) => {
         logger.error(`[Saved Playlists] Failed to save "${draft.display_name}":`, err);
         throw err;
+      });
+
+      getStore().setSavedPlaylists(result.entries);
+      setSavedPlaylistEditorDraft(null);
+      void refreshRecentPlaylists();
+      logger.info(`[Saved Playlists] Saved "${result.entry.display_name}"`);
+
+      const state = getStore();
+      const currentPlaylist = state.playlist;
+      const currentSaved = currentPlaylist?.saved_playlist_id ?? null;
+      const currentMatch = findSavedPlaylistForCurrentSource(
+        result.entries,
+        state.currentSourceDescriptor,
+        currentSaved,
+      );
+      if (currentMatch && currentMatch.id === result.entry.id) {
+        try {
+          const reloadResult = await openSavedPlaylistById(result.entry.id);
+          if (reloadResult !== true) {
+            logger.warn(
+              `[Saved Playlists] Saved "${result.entry.display_name}", but failed to reload the current source: ${reloadResult}`,
+            );
+          }
+        } catch (err) {
+          logger.warn(
+            `[Saved Playlists] Saved "${result.entry.display_name}", but failed to reload the current source:`,
+            err,
+          );
+        }
       }
     },
     [openSavedPlaylistById, refreshRecentPlaylists],
