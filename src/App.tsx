@@ -802,7 +802,7 @@ export default function App() {
       const playlistPath = paths.find((path) => isPlaylistLikePath(path));
 
       if (!playlistPath) {
-        getStore().setMenuInfo("Dropped file is not an M3U/M3U8 playlist.");
+        getStore().setMenuInfo("Dropped file is not an M3U/M3U8 playlist.", "warn");
         return;
       }
 

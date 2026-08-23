@@ -31,7 +31,7 @@ function parseLogLevel(raw: unknown): LogLevel | null {
   return null;
 }
 
-const DEFAULT_LOG_LEVEL: LogLevel = import.meta.env.DEV ? "debug" : "error";
+const DEFAULT_LOG_LEVEL: LogLevel = import.meta.env.DEV ? "debug" : "info";
 const CONFIGURED_LEVEL = parseLogLevel(import.meta.env.VITE_LOG_LEVEL);
 const ACTIVE_LOG_LEVEL = CONFIGURED_LEVEL ?? DEFAULT_LOG_LEVEL;
 
