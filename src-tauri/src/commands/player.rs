@@ -1,11 +1,15 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
+use tauri::Manager;
 
 use crate::error::AppError;
+use crate::state::AppState;
 
 static NEXT_TEMP_PLAYLIST_ID: AtomicU64 = AtomicU64::new(0);
 const TEMP_PLAYLIST_PREFIX: &str = "iptv-checker-single-channel-";
@@ -48,6 +52,59 @@ fn open_with_system_default(path: &Path) -> Result<(), AppError> {
             "Failed to open playlist with system default player".to_string(),
         ))
     }
+}
+
+fn build_custom_player_command(
+    player_path: &Path,
+    playlist_path: &Path,
+) -> Result<Command, AppError> {
+    let metadata = std::fs::metadata(player_path).map_err(|error| {
+        AppError::Other(format!(
+            "External player is unavailable at {}: {}",
+            player_path.display(),
+            error
+        ))
+    })?;
+
+    #[cfg(target_os = "macos")]
+    if metadata.is_dir()
+        && player_path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("app"))
+    {
+        let mut command = Command::new("open");
+        command.arg("-a").arg(player_path).arg(playlist_path);
+        return Ok(command);
+    }
+
+    if !metadata.is_file() {
+        return Err(AppError::Other(format!(
+            "External player path does not point to an application: {}",
+            player_path.display()
+        )));
+    }
+
+    let mut command = Command::new(player_path);
+    command.arg(playlist_path);
+    Ok(command)
+}
+
+fn open_with_custom_player(player_path: &Path, playlist_path: &Path) -> Result<(), AppError> {
+    let mut command = build_custom_player_command(player_path, playlist_path)?;
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| {
+            AppError::Other(format!(
+                "Failed to launch external player at {}: {}",
+                player_path.display(),
+                error
+            ))
+        })
 }
 
 fn write_unique_temp_playlist(content: &str) -> Result<PathBuf, AppError> {
@@ -140,7 +197,10 @@ fn spawn_temp_playlist_cleanup(
 }
 
 #[tauri::command]
-pub async fn open_channel_in_player(channel: PlayerChannel) -> Result<(), AppError> {
+pub async fn open_channel_in_player(
+    app: tauri::AppHandle,
+    channel: PlayerChannel,
+) -> Result<(), AppError> {
     let mut content = String::from("#EXTM3U\n");
     content.push_str(channel.extinf_line.trim_end());
     content.push('\n');
@@ -163,7 +223,17 @@ pub async fn open_channel_in_player(channel: PlayerChannel) -> Result<(), AppErr
         log::error!("Failed to write temp playlist for external player: {error}");
         error
     })?;
-    match open_with_system_default(&temp_path) {
+    let external_player_path = {
+        let state = app.state::<Arc<AppState>>();
+        let settings = state.settings.lock().await;
+        settings.external_player_path.clone()
+    };
+    let open_result = match external_player_path.as_deref() {
+        Some(player_path) => open_with_custom_player(Path::new(player_path), &temp_path),
+        None => open_with_system_default(&temp_path),
+    };
+
+    match open_result {
         Ok(()) => {
             log::info!("Opened channel in external player");
             let _ = spawn_temp_playlist_cleanup(temp_path, TEMP_PLAYLIST_DELETE_DELAY);
@@ -185,9 +255,12 @@ pub async fn get_streaming_proxy_port(app: tauri::AppHandle) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_unique_temp_playlist_path, cleanup_stale_temp_playlists_in_dir,
-        is_temp_playlist_file, spawn_temp_playlist_cleanup, write_unique_temp_playlist_in_dir,
+        build_custom_player_command, build_unique_temp_playlist_path,
+        cleanup_stale_temp_playlists_in_dir, is_temp_playlist_file, spawn_temp_playlist_cleanup,
+        write_unique_temp_playlist_in_dir,
     };
+    #[cfg(target_os = "macos")]
+    use std::ffi::OsStr;
     use std::time::{Duration, SystemTime};
 
     fn test_temp_dir(prefix: &str) -> std::path::PathBuf {
@@ -211,6 +284,60 @@ mod tests {
             .to_string_lossy()
             .starts_with("iptv-checker-single-channel-"));
         assert_eq!(first.extension().and_then(|ext| ext.to_str()), Some("m3u8"));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    fn custom_player_command_passes_playlist_as_one_argument() {
+        let root = test_temp_dir("iptv-player-custom-command");
+        std::fs::create_dir_all(&root).expect("Failed to create test directory");
+        let player = root.join(if cfg!(target_os = "windows") {
+            "Player With Spaces.exe"
+        } else {
+            "player with spaces"
+        });
+        let playlist = root.join("channel with spaces.m3u8");
+        std::fs::write(&player, "test").expect("Failed to create fake player");
+
+        let command = build_custom_player_command(&player, &playlist)
+            .expect("Custom player command should be created");
+
+        assert_eq!(command.get_program(), player.as_os_str());
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec![playlist.as_os_str()]
+        );
+
+        std::fs::remove_dir_all(&root).expect("Failed to remove test directory");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_app_bundle_uses_open_application_mode() {
+        let root = test_temp_dir("iptv-player-macos-app");
+        let player = root.join("VLC.app");
+        let playlist = root.join("channel.m3u8");
+        std::fs::create_dir_all(&player).expect("Failed to create fake app bundle");
+
+        let command = build_custom_player_command(&player, &playlist)
+            .expect("macOS app command should be created");
+
+        assert_eq!(command.get_program(), OsStr::new("open"));
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec![OsStr::new("-a"), player.as_os_str(), playlist.as_os_str()]
+        );
+
+        std::fs::remove_dir_all(&root).expect("Failed to remove test directory");
+    }
+
+    #[test]
+    fn custom_player_command_rejects_missing_application() {
+        let root = test_temp_dir("iptv-player-missing-app");
+        let error = build_custom_player_command(&root.join("missing"), &root.join("channel.m3u8"))
+            .expect_err("Missing custom player should be rejected");
+
+        assert!(error.to_string().contains("External player is unavailable"));
     }
 
     #[test]

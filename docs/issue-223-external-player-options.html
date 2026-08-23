@@ -1,0 +1,667 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>IPTV Checker External Player Options</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #000;
+        --surface: #0b0b0c;
+        --surface-2: #141416;
+        --surface-3: #1d1d20;
+        --line: #2b2b2f;
+        --line-soft: #202024;
+        --text: #fff;
+        --muted: #96969e;
+        --muted-2: #67676f;
+        --blue: #1684ff;
+        --blue-soft: rgba(22, 132, 255, 0.16);
+        --green: #59d98e;
+      }
+
+      * { box-sizing: border-box; }
+
+      html { background: var(--bg); }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      button, select { font: inherit; }
+
+      button { color: inherit; }
+
+      .page {
+        width: min(1160px, 100%);
+        margin: 0 auto;
+        padding: 32px 20px 64px;
+      }
+
+      .page-head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 24px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      h1, h2, h3, p { margin: 0; }
+
+      h1 {
+        font-size: clamp(21px, 3vw, 29px);
+        line-height: 1.15;
+        letter-spacing: -0.02em;
+      }
+
+      .lede {
+        max-width: 680px;
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .platforms {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        flex: none;
+      }
+
+      .platform {
+        padding: 5px 0 7px;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+      }
+
+      .platform[aria-selected="true"] {
+        border-color: var(--blue);
+        color: var(--text);
+      }
+
+      .options {
+        display: grid;
+        gap: 36px;
+        margin-top: 30px;
+      }
+
+      .option-head {
+        display: grid;
+        grid-template-columns: 36px minmax(0, 1fr) auto;
+        align-items: start;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .option-letter {
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        border: 1px solid #45454b;
+        border-radius: 5px;
+        font-weight: 700;
+      }
+
+      .option-title {
+        font-size: 16px;
+        letter-spacing: -0.01em;
+      }
+
+      .option-copy {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .recommendation {
+        color: var(--green);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .window {
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+      }
+
+      .titlebar {
+        position: relative;
+        display: flex;
+        min-height: 72px;
+        align-items: center;
+        justify-content: center;
+        padding: 10px 18px;
+        border-bottom: 1px solid var(--line);
+        background: #101012;
+      }
+
+      .traffic {
+        position: absolute;
+        left: 16px;
+        top: 16px;
+        display: flex;
+        gap: 7px;
+      }
+
+      .traffic span {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: #38383d;
+      }
+
+      .tabs {
+        display: flex;
+        align-items: stretch;
+        justify-content: center;
+        gap: 4px;
+      }
+
+      .tab {
+        min-width: 72px;
+        padding: 8px 9px;
+        border-radius: 6px;
+        color: var(--muted);
+        text-align: center;
+        font-size: 11px;
+      }
+
+      .tab b {
+        display: block;
+        margin-bottom: 5px;
+        color: inherit;
+        font-size: 17px;
+        font-weight: 500;
+        line-height: 1;
+      }
+
+      .tab.active {
+        background: var(--surface-3);
+        color: var(--text);
+      }
+
+      .settings-body {
+        width: min(760px, 100%);
+        min-height: 350px;
+        margin: 0 auto;
+        padding: 22px;
+      }
+
+      .group {
+        margin-bottom: 14px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--surface-2);
+      }
+
+      .row {
+        display: grid;
+        grid-template-columns: minmax(190px, 1fr) minmax(240px, auto);
+        gap: 22px;
+        align-items: center;
+        min-height: 66px;
+        padding: 12px 15px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .row:last-child { border-bottom: 0; }
+
+      .label { font-size: 13px; font-weight: 600; }
+
+      .hint {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .control {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .btn, .select, .field {
+        min-height: 34px;
+        border: 1px solid #3a3a40;
+        border-radius: 5px;
+        background: #242428;
+        color: var(--text);
+      }
+
+      .btn {
+        padding: 7px 11px;
+        cursor: default;
+        white-space: nowrap;
+      }
+
+      .btn.primary {
+        border-color: #2e91ff;
+        background: var(--blue);
+        color: #fff;
+      }
+
+      .btn.quiet { background: #1b1b1f; color: #d3d3d7; }
+
+      .select {
+        width: 220px;
+        padding: 6px 30px 6px 10px;
+      }
+
+      .field {
+        overflow: hidden;
+        width: 300px;
+        padding: 7px 10px;
+        color: #c6c6cc;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .choice {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .choice-dot {
+        width: 14px;
+        height: 14px;
+        border: 1px solid #62626a;
+        border-radius: 50%;
+      }
+
+      .choice.selected { color: var(--text); }
+
+      .choice.selected .choice-dot {
+        border: 4px solid var(--blue);
+        background: #fff;
+      }
+
+      .path-row {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .note {
+        padding: 10px 15px;
+        border-top: 1px solid var(--line-soft);
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .player-list {
+        display: grid;
+        gap: 0;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #121214;
+      }
+
+      .player-option {
+        display: grid;
+        grid-template-columns: 32px 1fr auto;
+        align-items: center;
+        gap: 11px;
+        min-height: 55px;
+        padding: 9px 11px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .player-option:last-child { border-bottom: 0; }
+
+      .app-icon {
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        border: 1px solid #404048;
+        border-radius: 6px;
+        background: #222227;
+        color: #ececf0;
+        font-weight: 700;
+      }
+
+      .app-name { font-size: 12px; font-weight: 600; }
+      .app-path { color: var(--muted); font-size: 10px; }
+
+      .check {
+        display: grid;
+        place-items: center;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: var(--blue);
+        font-size: 11px;
+      }
+
+      .app-shell {
+        position: relative;
+        min-height: 430px;
+        background: #080809;
+      }
+
+      .app-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 54px;
+        padding: 0 16px;
+        border-bottom: 1px solid var(--line);
+        background: #111113;
+      }
+
+      .brand { font-size: 13px; font-weight: 700; }
+
+      .toolbar-actions { display: flex; gap: 8px; }
+
+      .table-head, .table-row {
+        display: grid;
+        grid-template-columns: 36px 1.5fr 0.8fr 0.6fr;
+        gap: 10px;
+        align-items: center;
+        padding: 9px 14px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .table-head { color: var(--muted); font-size: 10px; text-transform: uppercase; }
+      .table-row { color: #c4c4c9; font-size: 12px; }
+      .status { color: var(--green); }
+
+      .scrim {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 18px;
+        background: rgba(0, 0, 0, 0.73);
+      }
+
+      .dialog {
+        width: min(430px, 100%);
+        border: 1px solid #3a3a40;
+        border-radius: 8px;
+        background: #151517;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.75);
+      }
+
+      .dialog-head { padding: 18px 18px 12px; }
+      .dialog-head h3 { font-size: 16px; }
+      .dialog-head p { margin-top: 4px; color: var(--muted); font-size: 11px; }
+      .dialog .player-list { margin: 0 18px; }
+
+      .remember {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 13px 18px;
+        color: #d0d0d5;
+        font-size: 11px;
+      }
+
+      .checkbox {
+        display: grid;
+        place-items: center;
+        width: 15px;
+        height: 15px;
+        border-radius: 3px;
+        background: var(--blue);
+        font-size: 10px;
+      }
+
+      .dialog-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 12px 18px 16px;
+        border-top: 1px solid var(--line-soft);
+      }
+
+      .tradeoffs {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        margin-top: 32px;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .tradeoff {
+        min-height: 118px;
+        padding: 15px;
+        border-right: 1px solid var(--line);
+      }
+
+      .tradeoff:last-child { border-right: 0; }
+      .tradeoff h3 { font-size: 13px; }
+      .tradeoff p { margin-top: 7px; color: var(--muted); font-size: 11px; }
+
+      @media (max-width: 760px) {
+        .page { padding-inline: 12px; }
+        .page-head { align-items: start; flex-direction: column; }
+        .platforms { width: 100%; justify-content: space-between; }
+        .option-head { grid-template-columns: 36px 1fr; }
+        .recommendation { grid-column: 2; }
+        .titlebar { align-items: end; padding-top: 34px; }
+        .tabs { width: 100%; overflow-x: auto; justify-content: start; }
+        .tab { min-width: 66px; }
+        .settings-body { padding: 12px; }
+        .row { grid-template-columns: 1fr; gap: 10px; }
+        .control, .path-row { justify-content: flex-start; }
+        .field, .select { width: 100%; }
+        .path-row { flex-wrap: wrap; }
+        .tradeoffs { grid-template-columns: 1fr; }
+        .tradeoff { min-height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+        .tradeoff:last-child { border-bottom: 0; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="page-head">
+        <div>
+          <h1>External player selection</h1>
+          <p class="lede">Issue #223. Choose how IPTV Checker should expose a preferred player while preserving system-default behavior.</p>
+        </div>
+        <div class="platforms" role="tablist" aria-label="Preview platform">
+          <button class="platform" type="button" role="tab" data-platform="macos" aria-selected="true">macOS</button>
+          <button class="platform" type="button" role="tab" data-platform="windows" aria-selected="false">Windows</button>
+          <button class="platform" type="button" role="tab" data-platform="linux" aria-selected="false">Linux</button>
+        </div>
+      </header>
+
+      <div class="options">
+        <section>
+          <div class="option-head">
+            <div class="option-letter">A</div>
+            <div>
+              <h2 class="option-title">Compact section in General</h2>
+              <p class="option-copy">A separate section for one saved app and an explicit return to the system default.</p>
+            </div>
+            <div class="recommendation">Recommended</div>
+          </div>
+          <div class="window">
+            <div class="titlebar">
+              <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+              <div class="tabs" aria-label="Settings tabs">
+                <div class="tab active"><b>⌘</b>General</div>
+                <div class="tab"><b>◴</b>Scanning</div>
+                <div class="tab"><b>▧</b>Screenshots</div>
+                <div class="tab"><b>⌁</b>Network</div>
+                <div class="tab"><b>⚙</b>Advanced</div>
+              </div>
+            </div>
+            <div class="settings-body">
+              <div class="group">
+                <div class="row">
+                  <div><div class="label">Theme</div><div class="hint">Choose system, light, or dark appearance.</div></div>
+                  <div class="control"><button class="btn quiet" type="button">System</button><button class="btn" type="button">Light</button><button class="btn" type="button">Dark</button></div>
+                </div>
+              </div>
+              <div class="group">
+                <div class="row">
+                  <div><div class="label">External player</div><div class="hint">Used by Open in External Player.</div></div>
+                  <div class="control"><div class="field"><span data-player>VLC.app</span></div><button class="btn" type="button">Choose…</button></div>
+                </div>
+                <div class="note">Selected application: <span data-path>/Applications/VLC.app</span> · <span data-platform-label>macOS</span></div>
+                <div class="row">
+                  <div><div class="label">Use system default</div><div class="hint">Clear the selected app and use the operating system association.</div></div>
+                  <div class="control"><button class="btn quiet" type="button">Reset</button></div>
+                </div>
+              </div>
+              <div class="group">
+                <div class="row">
+                  <div><div class="label">Profile video bitrate</div><div class="hint">Capture 10s of each stream for accurate values.</div></div>
+                  <div class="choice selected"><span class="choice-dot"></span>On</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div class="option-head">
+            <div class="option-letter">B</div>
+            <div>
+              <h2 class="option-title">Dedicated Playback settings</h2>
+              <p class="option-copy">Adds a Playback tab with more room for detected apps and future playback preferences.</p>
+            </div>
+          </div>
+          <div class="window">
+            <div class="titlebar">
+              <div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div>
+              <div class="tabs" aria-label="Settings tabs">
+                <div class="tab"><b>⌘</b>General</div>
+                <div class="tab"><b>◴</b>Scanning</div>
+                <div class="tab active"><b>▶</b>Playback</div>
+                <div class="tab"><b>▧</b>Screenshots</div>
+                <div class="tab"><b>⌁</b>Network</div>
+                <div class="tab"><b>⚙</b>Advanced</div>
+              </div>
+            </div>
+            <div class="settings-body">
+              <div class="group">
+                <div class="row">
+                  <div><div class="label">Open channels with</div><div class="hint">The application used by external-player actions.</div></div>
+                  <div class="control">
+                    <select class="select" aria-label="External player">
+                      <option data-select-player>VLC media player</option>
+                      <option>System default</option>
+                      <option>Choose another application…</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="player-list">
+                  <div class="player-option">
+                    <div class="app-icon">V</div>
+                    <div><div class="app-name">VLC media player</div><div class="app-path" data-path>/Applications/VLC.app</div></div>
+                    <div class="check">✓</div>
+                  </div>
+                  <div class="player-option">
+                    <div class="app-icon">OS</div>
+                    <div><div class="app-name">System default</div><div class="app-path">Use the <span data-platform-label>macOS</span> file association</div></div>
+                    <div></div>
+                  </div>
+                </div>
+                <div class="note">Unavailable apps are removed automatically. Choosing another application saves its path.</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div class="option-head">
+            <div class="option-letter">C</div>
+            <div>
+              <h2 class="option-title">Choose on first external open</h2>
+              <p class="option-copy">Ask at the moment of use, with an option to remember the selection.</p>
+            </div>
+          </div>
+          <div class="window app-shell">
+            <div class="app-toolbar">
+              <div class="brand">IPTV Checker</div>
+              <div class="toolbar-actions"><button class="btn quiet" type="button">Open</button><button class="btn primary" type="button">Start Scan</button></div>
+            </div>
+            <div class="table-head"><span></span><span>Channel</span><span>Status</span><span>Bitrate</span></div>
+            <div class="table-row"><span>1</span><span>NRK 1 HD</span><span class="status">Working</span><span>6.2 Mbps</span></div>
+            <div class="table-row"><span>2</span><span>TV 2 Direkte</span><span class="status">Working</span><span>5.8 Mbps</span></div>
+            <div class="table-row"><span>3</span><span>Discovery HD</span><span class="status">Working</span><span>4.9 Mbps</span></div>
+            <div class="scrim">
+              <div class="dialog" role="dialog" aria-label="Choose external player">
+                <div class="dialog-head">
+                  <h3>Choose external player</h3>
+                  <p>Select an application to open NRK 1 HD.</p>
+                </div>
+                <div class="player-list">
+                  <div class="player-option">
+                    <div class="app-icon">V</div>
+                    <div><div class="app-name">VLC media player</div><div class="app-path" data-path>/Applications/VLC.app</div></div>
+                    <div class="check">✓</div>
+                  </div>
+                  <div class="player-option">
+                    <div class="app-icon">OS</div>
+                    <div><div class="app-name">System default</div><div class="app-path">Use the <span data-platform-label>macOS</span> file association</div></div>
+                    <div></div>
+                  </div>
+                  <div class="player-option">
+                    <div class="app-icon">…</div>
+                    <div><div class="app-name">Choose another application</div><div class="app-path">Browse installed applications</div></div>
+                    <div></div>
+                  </div>
+                </div>
+                <div class="remember"><span class="checkbox">✓</span>Remember this choice</div>
+                <div class="dialog-actions"><button class="btn quiet" type="button">Cancel</button><button class="btn primary" type="button">Open Channel</button></div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section class="tradeoffs" aria-label="Variant comparison">
+        <div class="tradeoff"><h3>A · Compact</h3><p>Smallest change. Easy to find, simple to persist, and no application discovery logic.</p></div>
+        <div class="tradeoff"><h3>B · Extensible</h3><p>Best if more playback settings are likely, but adds a top-level tab for one current preference.</p></div>
+        <div class="tradeoff"><h3>C · Contextual</h3><p>Most discoverable at first use, but adds friction and modal state to a one-click action.</p></div>
+      </section>
+    </main>
+
+    <script>
+      const platforms = {
+        macos: { label: "macOS", player: "VLC.app", selected: "VLC media player", path: "/Applications/VLC.app" },
+        windows: { label: "Windows", player: "vlc.exe", selected: "VLC media player", path: "C:\\Program Files\\VideoLAN\\VLC\\vlc.exe" },
+        linux: { label: "Linux", player: "vlc", selected: "VLC media player", path: "/usr/bin/vlc" },
+      };
+
+      const buttons = [...document.querySelectorAll("[data-platform]")];
+      for (const button of buttons) {
+        button.addEventListener("click", () => {
+          const platform = platforms[button.dataset.platform];
+          for (const item of buttons) item.setAttribute("aria-selected", String(item === button));
+          for (const item of document.querySelectorAll("[data-player]")) item.textContent = platform.player;
+          for (const item of document.querySelectorAll("[data-select-player]")) item.textContent = platform.selected;
+          for (const item of document.querySelectorAll("[data-path]")) item.textContent = platform.path;
+          for (const item of document.querySelectorAll("[data-platform-label]")) item.textContent = platform.label;
+        });
+      }
+    </script>
+  </body>
+</html>

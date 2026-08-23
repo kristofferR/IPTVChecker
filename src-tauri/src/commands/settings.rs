@@ -674,7 +674,10 @@ pub async fn set_default_scan_preset(
 }
 
 #[tauri::command]
-pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<(), AppError> {
+pub async fn update_settings(
+    app: tauri::AppHandle,
+    mut settings: AppSettings,
+) -> Result<(), AppError> {
     if settings.scan_history_limit < MIN_SCAN_HISTORY_LIMIT
         || settings.scan_history_limit > MAX_SCAN_HISTORY_LIMIT
     {
@@ -724,6 +727,20 @@ pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Re
             "Invalid low space threshold: must be between {} and {} GB",
             MIN_LOW_SPACE_THRESHOLD_GB, MAX_LOW_SPACE_THRESHOLD_GB
         )));
+    }
+
+    settings.external_player_path = settings.external_player_path.and_then(|path| {
+        let trimmed = path.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    });
+    if settings
+        .external_player_path
+        .as_deref()
+        .is_some_and(|path| !Path::new(path).is_absolute())
+    {
+        return Err(AppError::Validation(
+            "External player path must be absolute".to_string(),
+        ));
     }
 
     let state = app.state::<Arc<AppState>>();
