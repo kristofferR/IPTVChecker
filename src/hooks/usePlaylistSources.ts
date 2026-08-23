@@ -639,9 +639,9 @@ export function usePlaylistSources({
           1,
           Math.min(20, Math.round(result.preview.xtream_max_connections)),
         );
-        getStore().setMenuInfo(
-          `Xtream max connections detected: ${result.preview.xtream_max_connections}. Scan concurrency will use ${effectiveConcurrency}.`,
-        );
+        const message = `Xtream max connections detected: ${result.preview.xtream_max_connections}. Scan concurrency will use ${effectiveConcurrency}.`;
+        logger.warn(message);
+        getStore().setMenuInfo(message);
       }
 
       try {
