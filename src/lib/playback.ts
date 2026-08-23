@@ -2,7 +2,7 @@
 // URL classification, Xtream HLS conversion, streaming-proxy URL builders,
 // recovery-window math, and live-buffer resync/rate policy. Keep this module
 // free of React and player-instance side effects so it stays unit-testable.
-import type { ContentType } from "./types";
+import type { ContentType, PlaylistPreview } from "./types";
 
 export type PlayerState = "idle" | "loading" | "playing" | "error";
 export type StreamType = "hls" | "mpegts" | "unknown";
@@ -42,6 +42,16 @@ export interface StreamMetadata {
   audioCodec: string | null;
   audioBitrate: string | null;
   audioOnly: boolean;
+}
+
+export function isSingleConnectionPlaylist(
+  playlist: Pick<PlaylistPreview, "single_provider" | "xtream_max_connections"> | null,
+): boolean {
+  if (!playlist) return false;
+  if (playlist.xtream_max_connections != null) {
+    return playlist.xtream_max_connections === 1;
+  }
+  return playlist.single_provider;
 }
 
 export function areStreamMetadataEqual(

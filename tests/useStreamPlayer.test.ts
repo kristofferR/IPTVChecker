@@ -10,6 +10,7 @@ import {
   getHlsFatalRecoveryAction,
   getMpegtsPlaybackRoutes,
   getNextPlaybackRecoveryAttempt,
+  isSingleConnectionPlaylist,
   PLAYBACK_RECOVERY_WINDOW_MS,
   prunePlaybackRecoveryHistory,
   recordPlaybackRecoveryAttempt,
@@ -30,6 +31,19 @@ function canPlayTypes(
 }
 
 describe("useStreamPlayer helpers", () => {
+  it("identifies playlists that require an exclusive playback connection", () => {
+    expect(isSingleConnectionPlaylist(null)).toBe(false);
+    expect(
+      isSingleConnectionPlaylist({ single_provider: true, xtream_max_connections: null }),
+    ).toBe(true);
+    expect(isSingleConnectionPlaylist({ single_provider: false, xtream_max_connections: 1 })).toBe(
+      true,
+    );
+    expect(isSingleConnectionPlaylist({ single_provider: true, xtream_max_connections: 2 })).toBe(
+      false,
+    );
+  });
+
   it("classifies stream URLs with query strings and Xtream-style paths", () => {
     const cases = [
       ["https://example.com/live/index.m3u8?token=abc", "hls"],

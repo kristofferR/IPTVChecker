@@ -68,6 +68,7 @@ import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/hap
 import { logger } from "./lib/logger";
 import { recordUiPerf, startLongTaskObserver, uiPerfEnabled } from "./lib/perf";
 import { detectPlatform } from "./lib/platform";
+import { isSingleConnectionPlaylist } from "./lib/playback";
 import { shouldAutoRevealReportPanel } from "./lib/playlistReportVisibility";
 import { isScanActive } from "./lib/scanState";
 import { isInputLikeTarget, isPrimaryModifierPressed } from "./lib/shortcuts";
@@ -1085,18 +1086,30 @@ export default function App() {
     getStore().setReportPanelManually(false);
   }, []);
 
-  const handleOpenExternal = useCallback(async (result: ChannelResult) => {
-    try {
-      await openChannelInPlayer({
-        extinf_line: result.extinf_line,
-        metadata_lines: result.metadata_lines,
-        url: result.url,
-      });
-    } catch (err) {
-      logger.error("[Player] Failed to open channel in external player:", errorToString(err));
-      getStore().setPlaybackError(errorToString(err));
-    }
-  }, []);
+  const handleStopPlayer = useCallback(() => {
+    getStore().setPlayIntentActive(false);
+    stopStream();
+  }, [stopStream]);
+
+  const handleOpenExternal = useCallback(
+    async (result: ChannelResult) => {
+      if (isSingleConnectionPlaylist(getStore().playlist)) {
+        handleStopPlayer();
+      }
+
+      try {
+        await openChannelInPlayer({
+          extinf_line: result.extinf_line,
+          metadata_lines: result.metadata_lines,
+          url: result.url,
+        });
+      } catch (err) {
+        logger.error("[Player] Failed to open channel in external player:", errorToString(err));
+        getStore().setPlaybackError(errorToString(err));
+      }
+    },
+    [handleStopPlayer],
+  );
 
   const handlePlayInApp = useCallback(
     (result: ChannelResult) => {
@@ -1126,11 +1139,6 @@ export default function App() {
     },
     [playStream],
   );
-
-  const handleStopPlayer = useCallback(() => {
-    getStore().setPlayIntentActive(false);
-    stopStream();
-  }, [stopStream]);
 
   const handlePip = useCallback(() => {
     const video = playbackVideoElement;
