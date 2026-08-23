@@ -173,10 +173,6 @@ export function getMpegtsPlaybackRoutes(
   return preferRemux ? [remux, direct] : [direct, remux];
 }
 
-export function shouldTryXtreamHlsBeforeMpegts(startMode: PlaybackStartMode): boolean {
-  return startMode === "recovery";
-}
-
 export function shouldSuspendPlaybackWatchdog(visibilityState: DocumentVisibilityState): boolean {
   return visibilityState === "hidden";
 }

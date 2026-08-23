@@ -16,7 +16,6 @@ import {
   recordPlaybackRecoveryAttempt,
   type StreamMetadata,
   shouldResetPlaybackRecoveryAttempts,
-  shouldTryXtreamHlsBeforeMpegts,
   supportsNativeHlsPlayback,
   tryConvertToXtreamHls,
 } from "../lib/playback";
@@ -758,7 +757,6 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       const url = result.url;
       const streamType = classifyStream(url);
       const preferNativeHls = streamType === "hls" && supportsNativeHlsPlayback(videoElement);
-      const preferXtreamHls = shouldTryXtreamHlsBeforeMpegts(startMode);
       const xtreamHlsUrl = streamType === "hls" ? null : tryConvertToXtreamHls(url);
       const tryXtreamHlsRoute = async (): Promise<boolean> => {
         if (!xtreamHlsUrl) return false;
@@ -766,7 +764,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         logger.info(
           startMode === "recovery"
             ? "[Player] Trying Xtream HLS recovery route for"
-            : "[Player] Trying Xtream HLS fallback for",
+            : "[Player] Trying Xtream HLS route for",
           result.name,
         );
         lastErrorRef.current = null;
@@ -808,7 +806,10 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       }
 
-      if (preferXtreamHls && (await tryXtreamHlsRoute())) {
+      // Xtream HLS is the WebView-native path and normally starts quickly.
+      // Try it before two independently bounded MPEG-TS routes can consume
+      // their full startup timeouts.
+      if (await tryXtreamHlsRoute()) {
         return;
       }
       if (!isCurrentPlayback()) {
@@ -847,13 +848,6 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             return;
           }
         }
-      }
-
-      if (!preferXtreamHls && (await tryXtreamHlsRoute())) {
-        return;
-      }
-      if (!isCurrentPlayback()) {
-        return;
       }
 
       if (streamType !== "hls") {
