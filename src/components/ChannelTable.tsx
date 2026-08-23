@@ -346,8 +346,11 @@ export function ChannelTable({
 
   const estimatedRowHeight = channelRowHeightPixels(channelLogoSize);
   const getVirtualItemKey = useCallback(
-    (index: number) => filteredResultsRef.current[index]?.index ?? index,
-    [],
+    (index: number) => filteredResults[index]?.index ?? index,
+    // TanStack Virtual memoizes its key map by callback identity. Filters and
+    // sorting can reorder rows without changing the item count, so the
+    // callback must change with the ordered results.
+    [filteredResults],
   );
 
   const virtualizer = useVirtualizer({
