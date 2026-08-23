@@ -18,6 +18,31 @@ const TEMP_PLAYLIST_DELETE_DELAY: std::time::Duration = std::time::Duration::fro
 const STALE_TEMP_PLAYLIST_MAX_AGE: std::time::Duration =
     std::time::Duration::from_secs(6 * 60 * 60);
 
+#[cfg(target_os = "linux")]
+const APPIMAGE_RUNTIME_ENV_VARS: [&str; 15] = [
+    "APPDIR",
+    "APPIMAGE",
+    "ARGV0",
+    "OWD",
+    "LD_LIBRARY_PATH",
+    "LD_PRELOAD",
+    "GTK_PATH",
+    "GDK_PIXBUF_MODULEDIR",
+    "GDK_PIXBUF_MODULE_FILE",
+    "GI_TYPELIB_PATH",
+    "GST_PLUGIN_PATH",
+    "GST_PLUGIN_SYSTEM_PATH",
+    "GST_PLUGIN_SCANNER",
+    "QT_PLUGIN_PATH",
+    "QML2_IMPORT_PATH",
+];
+
+#[derive(Debug)]
+struct CustomPlayerCommand {
+    command: Command,
+    wait_for_handoff: bool,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct PlayerChannel {
     pub extinf_line: String,
@@ -57,7 +82,7 @@ fn open_with_system_default(path: &Path) -> Result<(), AppError> {
 fn build_custom_player_command(
     player_path: &Path,
     playlist_path: &Path,
-) -> Result<Command, AppError> {
+) -> Result<CustomPlayerCommand, AppError> {
     let metadata = std::fs::metadata(player_path).map_err(|error| {
         AppError::Other(format!(
             "External player is unavailable at {}: {}",
@@ -75,7 +100,10 @@ fn build_custom_player_command(
     {
         let mut command = Command::new("open");
         command.arg("-a").arg(player_path).arg(playlist_path);
-        return Ok(command);
+        return Ok(CustomPlayerCommand {
+            command,
+            wait_for_handoff: true,
+        });
     }
 
     if !metadata.is_file() {
@@ -87,24 +115,77 @@ fn build_custom_player_command(
 
     let mut command = Command::new(player_path);
     command.arg(playlist_path);
-    Ok(command)
+
+    #[cfg(target_os = "linux")]
+    sanitize_appimage_environment(&mut command, std::env::var_os("APPIMAGE").is_some());
+
+    Ok(CustomPlayerCommand {
+        command,
+        wait_for_handoff: false,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn sanitize_appimage_environment(command: &mut Command, running_as_appimage: bool) {
+    if !running_as_appimage {
+        return;
+    }
+
+    for name in APPIMAGE_RUNTIME_ENV_VARS {
+        command.env_remove(name);
+    }
+}
+
+fn launch_error(player_path: &Path, error: impl std::fmt::Display) -> AppError {
+    AppError::Other(format!(
+        "Failed to launch external player at {}: {}",
+        player_path.display(),
+        error
+    ))
 }
 
 fn open_with_custom_player(player_path: &Path, playlist_path: &Path) -> Result<(), AppError> {
-    let mut command = build_custom_player_command(player_path, playlist_path)?;
+    let CustomPlayerCommand {
+        mut command,
+        wait_for_handoff,
+    } = build_custom_player_command(player_path, playlist_path)?;
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| {
-            AppError::Other(format!(
-                "Failed to launch external player at {}: {}",
-                player_path.display(),
-                error
+        .stderr(Stdio::null());
+
+    if wait_for_handoff {
+        let status = command
+            .status()
+            .map_err(|error| launch_error(player_path, error))?;
+        return if status.success() {
+            Ok(())
+        } else {
+            Err(launch_error(
+                player_path,
+                format!("launcher exited with {status}"),
             ))
-        })
+        };
+    }
+
+    let child = command
+        .spawn()
+        .map_err(|error| launch_error(player_path, error))?;
+
+    #[cfg(unix)]
+    {
+        let mut child = child;
+        let _ = std::thread::spawn(move || {
+            if let Err(error) = child.wait() {
+                log::warn!("Failed to reap external player process: {error}");
+            }
+        });
+    }
+
+    #[cfg(not(unix))]
+    drop(child);
+
+    Ok(())
 }
 
 fn write_unique_temp_playlist(content: &str) -> Result<PathBuf, AppError> {
@@ -259,6 +340,8 @@ mod tests {
         cleanup_stale_temp_playlists_in_dir, is_temp_playlist_file, spawn_temp_playlist_cleanup,
         write_unique_temp_playlist_in_dir,
     };
+    #[cfg(target_os = "linux")]
+    use super::{sanitize_appimage_environment, APPIMAGE_RUNTIME_ENV_VARS};
     #[cfg(target_os = "macos")]
     use std::ffi::OsStr;
     use std::time::{Duration, SystemTime};
@@ -299,12 +382,13 @@ mod tests {
         let playlist = root.join("channel with spaces.m3u8");
         std::fs::write(&player, "test").expect("Failed to create fake player");
 
-        let command = build_custom_player_command(&player, &playlist)
+        let built = build_custom_player_command(&player, &playlist)
             .expect("Custom player command should be created");
 
-        assert_eq!(command.get_program(), player.as_os_str());
+        assert!(!built.wait_for_handoff);
+        assert_eq!(built.command.get_program(), player.as_os_str());
         assert_eq!(
-            command.get_args().collect::<Vec<_>>(),
+            built.command.get_args().collect::<Vec<_>>(),
             vec![playlist.as_os_str()]
         );
 
@@ -319,12 +403,13 @@ mod tests {
         let playlist = root.join("channel.m3u8");
         std::fs::create_dir_all(&player).expect("Failed to create fake app bundle");
 
-        let command = build_custom_player_command(&player, &playlist)
+        let built = build_custom_player_command(&player, &playlist)
             .expect("macOS app command should be created");
 
-        assert_eq!(command.get_program(), OsStr::new("open"));
+        assert!(built.wait_for_handoff);
+        assert_eq!(built.command.get_program(), OsStr::new("open"));
         assert_eq!(
-            command.get_args().collect::<Vec<_>>(),
+            built.command.get_args().collect::<Vec<_>>(),
             vec![OsStr::new("-a"), player.as_os_str(), playlist.as_os_str()]
         );
 
@@ -338,6 +423,19 @@ mod tests {
             .expect_err("Missing custom player should be rejected");
 
         assert!(error.to_string().contains("External player is unavailable"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn appimage_environment_is_removed_from_custom_player_commands() {
+        let mut command = std::process::Command::new("player");
+        sanitize_appimage_environment(&mut command, true);
+
+        for name in APPIMAGE_RUNTIME_ENV_VARS {
+            assert!(command
+                .get_envs()
+                .any(|(key, value)| key == std::ffi::OsStr::new(name) && value.is_none()));
+        }
     }
 
     #[test]
