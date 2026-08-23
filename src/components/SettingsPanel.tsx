@@ -172,6 +172,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
   const [associationBusy, setAssociationBusy] = useState(false);
   const [associationNotice, setAssociationNotice] = useState<string | null>(null);
   const [associationError, setAssociationError] = useState<string | null>(null);
+  const [externalPlayerError, setExternalPlayerError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const panelRef = useRef<HTMLDivElement>(null);
@@ -321,6 +322,33 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
     if (path) {
       updateSetting("screenshots_dir", path as string, { immediate: true });
     }
+  };
+
+  const handleSelectExternalPlayer = async () => {
+    setExternalPlayerError(null);
+    try {
+      const filters =
+        platform === "macos"
+          ? [{ name: "Applications", extensions: ["app"] }]
+          : platform === "windows"
+            ? [{ name: "Applications", extensions: ["exe"] }]
+            : undefined;
+      const path = await open({
+        multiple: false,
+        title: "Choose External Player",
+        ...(filters ? { filters } : {}),
+      });
+      if (typeof path === "string") {
+        updateSetting("external_player_path", path, { immediate: true });
+      }
+    } catch (error) {
+      setExternalPlayerError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleUseSystemDefaultPlayer = () => {
+    setExternalPlayerError(null);
+    updateSetting("external_player_path", null, { immediate: true });
   };
 
   const handleClearScreenshotCache = async () => {
@@ -593,6 +621,44 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     <option value="hide">Hidden</option>
                   </select>
                 </div>
+              )}
+            </section>
+
+            <section className={blockClass}>
+              <div className={rowClass}>
+                <div className="min-w-0">
+                  <p className="text-[13px] font-medium">External player</p>
+                  <p
+                    className="text-[11px] text-text-tertiary mt-0.5 truncate"
+                    title={draft.external_player_path ?? "System default"}
+                  >
+                    {draft.external_player_path ??
+                      "Use the operating system default for external playback."}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    onClick={handleSelectExternalPlayer}
+                    className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
+                    type="button"
+                  >
+                    {draft.external_player_path ? "Change" : "Choose App"}
+                  </button>
+                  {draft.external_player_path && (
+                    <button
+                      onClick={handleUseSystemDefaultPlayer}
+                      className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
+                      type="button"
+                    >
+                      System Default
+                    </button>
+                  )}
+                </div>
+              </div>
+              {externalPlayerError && (
+                <p className="px-4 py-2 text-[11px] text-red-400 border-t border-border-subtle">
+                  {externalPlayerError}
+                </p>
               )}
             </section>
 

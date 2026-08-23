@@ -91,6 +91,9 @@ pub struct AppSettings {
     pub low_space_threshold_gb: f64,
     pub separate_placeholder_status: bool,
     pub show_header_button_text: bool,
+    /// Application used by explicit "Open in External Player" actions.
+    /// `None` preserves the operating system's file association behavior.
+    pub external_player_path: Option<String>,
     /// Keep the Xtream max-connections notice visible until it is dismissed.
     pub persistent_xtream_connection_notice: bool,
     /// Look for a signed update on launch and every six hours. Discovery only
@@ -217,6 +220,7 @@ impl Default for AppSettings {
             low_space_threshold_gb: 5.0,
             separate_placeholder_status: true,
             show_header_button_text: !cfg!(target_os = "macos"),
+            external_player_path: None,
             persistent_xtream_connection_notice: false,
             automatic_update_checks: true,
         }
@@ -287,6 +291,7 @@ mod tests {
         assert_eq!(settings.low_fps_threshold, 23.0);
         assert_eq!(settings.channel_logo_size, super::ChannelLogoSize::Small);
         assert_eq!(settings.show_header_button_text, !cfg!(target_os = "macos"));
+        assert_eq!(settings.external_player_path, None);
         // Pre-existing installs have no `title_bar` key in settings.json.
         assert_eq!(settings.title_bar, super::TitleBarPreference::Auto);
     }

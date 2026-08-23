@@ -178,6 +178,16 @@ fn normalize_preset_name(name: &str) -> Result<String, AppError> {
     Ok(trimmed.to_string())
 }
 
+fn validate_external_player_path(path: Option<&str>) -> Result<(), AppError> {
+    if path.is_some_and(|path| !Path::new(path).is_absolute()) {
+        return Err(AppError::Validation(
+            "External player path must be absolute".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
 fn load_scan_presets(app: &tauri::AppHandle) -> ScanPresetCollection {
     let Ok(store) = app.store("settings.json") else {
         return ScanPresetCollection::default();
@@ -726,6 +736,8 @@ pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Re
         )));
     }
 
+    validate_external_player_path(settings.external_player_path.as_deref())?;
+
     let state = app.state::<Arc<AppState>>();
     let mut current = state.settings.lock().await;
     crate::STDOUT_LOG_LEVEL.store(
@@ -1048,10 +1060,24 @@ pub fn evict_for_disk_space(
 mod tests {
     use super::{
         collect_dir_stats, normalize_preset_name, preset_index_by_name, sort_scan_presets,
-        validate_screenshot_path,
+        validate_external_player_path, validate_screenshot_path,
     };
     use crate::models::settings::{ScanPresetConfig, ScanSettingsPreset};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn external_player_path_must_be_absolute() {
+        let absolute_path = std::env::current_dir()
+            .expect("current directory should be available")
+            .join("VLC Player");
+
+        assert!(validate_external_player_path(None).is_ok());
+        assert!(validate_external_player_path(absolute_path.to_str()).is_ok());
+
+        let error = validate_external_player_path(Some("players/vlc"))
+            .expect_err("relative player path should be rejected");
+        assert!(error.to_string().contains("must be absolute"));
+    }
 
     #[test]
     fn collect_dir_stats_counts_nested_files_and_bytes() {
