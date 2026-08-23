@@ -322,6 +322,7 @@ export interface AppSettings {
   low_space_threshold_gb: number;
   separate_placeholder_status: boolean;
   show_header_button_text: boolean;
+  external_player_path: string | null;
   persistent_xtream_connection_notice: boolean;
   automatic_update_checks: boolean;
 }
