@@ -903,6 +903,22 @@ fn now_epoch_ms() -> u64 {
         .as_millis() as u64
 }
 
+fn log_scan_summary(outcome: &str, run_id: &str, started_at_epoch_ms: u64, summary: &ScanSummary) {
+    let elapsed_secs = now_epoch_ms().saturating_sub(started_at_epoch_ms) as f64 / 1000.0;
+    log::info!(
+        "Scan {} {} in {:.1}s: total={}, alive={}, dead={}, placeholder={}, geoblocked={}, drm={}",
+        run_id,
+        outcome,
+        elapsed_secs,
+        summary.total,
+        summary.alive,
+        summary.dead,
+        summary.placeholder,
+        summary.geoblocked,
+        summary.drm,
+    );
+}
+
 async fn record_backend_perf(
     app: &AppHandle,
     state: &Arc<AppState>,
@@ -2033,6 +2049,8 @@ async fn finish_empty_scan(
         playlist_score: None,
     };
 
+    log_scan_summary("completed", run_id, scan_started_at_epoch_ms, &summary);
+
     let _ = app.emit(
         "scan://complete",
         ScanEvent {
@@ -2389,7 +2407,7 @@ async fn execute_scan_run(
             }
 
             log::info!(
-                "[Scan] #{} {} → {} (bitrate: {}, latency: {})",
+                "[Scan] #{} {} → {} (bitrate: {}, latency: {}, url: {})",
                 channel.index,
                 channel.name,
                 shared.status,
@@ -2398,6 +2416,7 @@ async fn execute_scan_run(
                     .latency_ms
                     .map(|ms| format!("{ms} ms"))
                     .unwrap_or_else(|| "—".to_string()),
+                channel.url,
             );
 
             shared.channel_log.channel_index = channel.index;
@@ -2462,6 +2481,7 @@ async fn execute_scan_run(
         summary.total,
     );
     if cancel_token.is_cancelled() {
+        log_scan_summary("cancelled", &run_id, scan_started_at_epoch_ms, &summary);
         let _ = app.emit(
             "scan://cancelled",
             ScanEvent {
@@ -2489,6 +2509,8 @@ async fn execute_scan_run(
         completed_scan.results,
     )
     .await;
+
+    log_scan_summary("completed", &run_id, scan_started_at_epoch_ms, &summary);
 
     let _ = app.emit(
         "scan://complete",
@@ -2557,6 +2579,14 @@ pub async fn start_scan(
         )
         .await;
         if let Err(error) = outcome {
+            let elapsed_secs =
+                now_epoch_ms().saturating_sub(scan_started_at_epoch_ms) as f64 / 1000.0;
+            log::error!(
+                "Scan {} failed after {:.1}s: {}",
+                run_id_for_task,
+                elapsed_secs,
+                error
+            );
             emit_scan_error_event(&app_for_task, &run_id_for_task, error.to_string());
         }
         clear_scan_state_for_run(
@@ -2583,6 +2613,10 @@ pub async fn start_scan(
 #[tauri::command]
 pub async fn cancel_scan(app: AppHandle, window: Window) -> Result<(), AppError> {
     let state = app.state::<Arc<AppState>>();
+    log::info!(
+        "Scan cancellation requested for window '{}'",
+        window.label()
+    );
     cancel_scan_token(state.inner().as_ref(), window.label()).await;
     Ok(())
 }
@@ -2611,6 +2645,7 @@ pub async fn pause_scan(app: AppHandle, window: Window) -> Result<(), AppError> 
         .await?;
     pause_notify.notify_waiters();
     if let Some(run_id) = run_id {
+        log::info!("Scan {} paused", run_id);
         let _ = app.emit(
             "scan://paused",
             ScanEvent {
@@ -2647,6 +2682,7 @@ pub async fn resume_scan(app: AppHandle, window: Window) -> Result<(), AppError>
         .await?;
     pause_notify.notify_waiters();
     if let Some(run_id) = run_id {
+        log::info!("Scan {} resumed", run_id);
         let _ = app.emit(
             "scan://resumed",
             ScanEvent {
@@ -2701,6 +2737,7 @@ pub async fn quick_check_channel(
     app: AppHandle,
     channel: ChannelResult,
 ) -> Result<ChannelResult, AppError> {
+    let check_started_at = Instant::now();
     let state = app.state::<Arc<AppState>>();
     let settings = state.settings.lock().await.clone();
 
@@ -2739,8 +2776,28 @@ pub async fn quick_check_channel(
     };
 
     let (status, stream_url, latency_ms, error_reason) = match outcome {
-        Ok(o) => (o.status, o.stream_url, o.latency_ms, o.last_error_reason),
-        Err(_) => (ChannelStatus::Dead, None, None, None),
+        Ok(o) => {
+            log::info!(
+                "[Quick Check] #{} {} → {} in {:.1}s (url: {})",
+                channel.index,
+                channel.name,
+                o.status,
+                check_started_at.elapsed().as_secs_f64(),
+                channel.url,
+            );
+            (o.status, o.stream_url, o.latency_ms, o.last_error_reason)
+        }
+        Err(error) => {
+            log::warn!(
+                "[Quick Check] #{} {} failed after {:.1}s: {} (url: {})",
+                channel.index,
+                channel.name,
+                check_started_at.elapsed().as_secs_f64(),
+                error,
+                channel.url,
+            );
+            (ChannelStatus::Dead, None, None, None)
+        }
     };
 
     let mut result = channel;

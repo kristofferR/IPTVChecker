@@ -97,9 +97,13 @@ export function useUpdateCheck(): {
         }
       } catch (err) {
         if (!isCurrentRequest()) return;
-        logger.error("[Update] Check failed:", errorToString(err));
         if (force) {
-          getStore().setMenuInfo(`Update check failed: ${updateFailureDetail(errorToString(err))}`);
+          getStore().setMenuInfo(
+            `Update check failed: ${updateFailureDetail(errorToString(err))}`,
+            "error",
+          );
+        } else {
+          logger.error("[Update] Check failed:", errorToString(err));
         }
       } finally {
         // Only clear our own phase: an install may have started while this
@@ -127,9 +131,9 @@ export function useUpdateCheck(): {
       try {
         await openManualUpdate();
       } catch (err) {
-        logger.error("[Update] Failed to open the update page:", errorToString(err));
         getStore().setMenuInfo(
           `Could not open the update page: ${updateFailureDetail(errorToString(err))}`,
+          "error",
         );
       }
       return;
@@ -144,8 +148,10 @@ export function useUpdateCheck(): {
         getStore().setMenuInfo("IPTV Checker is already up to date.");
       }
     } catch (err) {
-      logger.error("[Update] Install failed:", errorToString(err));
-      getStore().setMenuInfo(`Update install failed: ${updateFailureDetail(errorToString(err))}`);
+      getStore().setMenuInfo(
+        `Update install failed: ${updateFailureDetail(errorToString(err))}`,
+        "error",
+      );
     } finally {
       getStore().setUpdatePhase("idle");
     }

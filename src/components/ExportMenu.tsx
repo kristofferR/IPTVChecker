@@ -3,6 +3,7 @@ import { ChevronDown, CircleAlert, CircleCheck, Download, Info, LoaderCircle } f
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type ExportScope, exportScopeFileSuffix, exportScopeLabel } from "../lib/exportScope";
 import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "../lib/haptics";
+import { logger } from "../lib/logger";
 import { isScanActive, type ScanState } from "../lib/scanState";
 import { readStoredVisibleColumnOrder } from "../lib/tableColumns";
 import { exportCsv, exportM3u, exportRenamed, exportScanLogJson, exportSplit } from "../lib/tauri";
@@ -24,6 +25,11 @@ interface ExportMenuProps {
   isMac?: boolean;
 }
 
+interface ExportFeedback {
+  kind: "success" | "error" | "info";
+  message: string;
+}
+
 export function ExportMenu({
   scopeCounts,
   resolveScopeResults,
@@ -41,10 +47,7 @@ export function ExportMenu({
   const [busyAction, setBusyAction] = useState<
     "csv" | "split" | "renamed" | "m3u" | "scanlog" | null
   >(null);
-  const [feedback, setFeedback] = useState<{
-    kind: "success" | "error" | "info";
-    message: string;
-  } | null>(null);
+  const [feedback, setFeedback] = useState<ExportFeedback | null>(null);
   const [scope, setScope] = useState<ExportScope>("all");
   const ref = useRef<HTMLDivElement>(null);
   const lastMenuRequestId = useRef<number | null>(null);
@@ -78,6 +81,16 @@ export function ExportMenu({
     : sourceFileName;
   const partialSuffix = isPartial ? "_partial" : "";
 
+  const showFeedback = useCallback((next: ExportFeedback) => {
+    setFeedback(next);
+    const message = `[Export] ${next.message}`;
+    if (next.kind === "error") {
+      logger.error(message);
+    } else {
+      logger.info(message);
+    }
+  }, []);
+
   const resolveScopedResults = useCallback((): ChannelResult[] | null => {
     const scoped = resolveScopeResults(scope);
     if (scoped.length > 0) {
@@ -85,25 +98,25 @@ export function ExportMenu({
     }
 
     if (scope === "selected") {
-      setFeedback({
+      showFeedback({
         kind: "info",
         message: "No selected channels to export.",
       });
       return null;
     }
     if (scope === "filtered") {
-      setFeedback({
+      showFeedback({
         kind: "info",
         message: "No channels match the current filters.",
       });
       return null;
     }
-    setFeedback({
+    showFeedback({
       kind: "info",
       message: "No channels available to export.",
     });
     return null;
-  }, [scope, resolveScopeResults]);
+  }, [scope, resolveScopeResults, showFeedback]);
 
   const handleExportCsv = useCallback(async () => {
     const scoped = resolveScopedResults();
@@ -115,11 +128,14 @@ export function ExportMenu({
       filters: [{ name: "CSV", extensions: ["csv"] }],
     });
     if (!path) {
-      setFeedback({ kind: "info", message: "Export CSV cancelled." });
+      showFeedback({ kind: "info", message: "Export CSV cancelled." });
       return;
     }
 
     setBusyAction("csv");
+    logger.info(
+      `[Export] Starting ${exportScopeLabel(scope)} CSV export: channels=${scoped.length}, path=${path}`,
+    );
     try {
       await exportCsv(
         scoped,
@@ -127,20 +143,20 @@ export function ExportMenu({
         playlistName,
         readStoredVisibleColumnOrder().includes("latency"),
       );
-      setFeedback({
+      showFeedback({
         kind: "success",
         message: `Exported ${exportScopeLabel(scope)} CSV (${scoped.length} channels) to ${path}.`,
       });
       void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
     } catch (err) {
-      setFeedback({
+      showFeedback({
         kind: "error",
         message: `CSV export failed: ${String(err)}`,
       });
     } finally {
       setBusyAction(null);
     }
-  }, [playlistName, scope, resolveScopedResults]);
+  }, [playlistName, scope, resolveScopedResults, showFeedback]);
 
   const handleExportSplit = useCallback(async () => {
     const scoped = resolveScopedResults();
@@ -148,22 +164,25 @@ export function ExportMenu({
 
     setOpen(false);
     setBusyAction("split");
+    logger.info(
+      `[Export] Starting ${exportScopeLabel(scope)} split export: channels=${scoped.length}, source=${playlistPath}`,
+    );
     try {
       await exportSplit(scoped, playlistPath);
-      setFeedback({
+      showFeedback({
         kind: "success",
         message: `Exported ${exportScopeLabel(scope)} split playlists (${scoped.length} channels) to ${sourceDir}.`,
       });
       void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
     } catch (err) {
-      setFeedback({
+      showFeedback({
         kind: "error",
         message: `Split export failed: ${String(err)}`,
       });
     } finally {
       setBusyAction(null);
     }
-  }, [playlistPath, scope, sourceDir, resolveScopedResults]);
+  }, [playlistPath, scope, sourceDir, resolveScopedResults, showFeedback]);
 
   const handleExportRenamed = useCallback(async () => {
     const scoped = resolveScopedResults();
@@ -171,22 +190,25 @@ export function ExportMenu({
 
     setOpen(false);
     setBusyAction("renamed");
+    logger.info(
+      `[Export] Starting ${exportScopeLabel(scope)} renamed-playlist export: channels=${scoped.length}, source=${playlistPath}`,
+    );
     try {
       await exportRenamed(scoped, playlistPath);
-      setFeedback({
+      showFeedback({
         kind: "success",
         message: `Exported ${exportScopeLabel(scope)} renamed playlist (${scoped.length} channels) to ${sourceDir}/${sourceStem}_renamed.m3u8.`,
       });
       void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
     } catch (err) {
-      setFeedback({
+      showFeedback({
         kind: "error",
         message: `Renamed export failed: ${String(err)}`,
       });
     } finally {
       setBusyAction(null);
     }
-  }, [playlistPath, scope, sourceDir, sourceStem, resolveScopedResults]);
+  }, [playlistPath, scope, sourceDir, sourceStem, resolveScopedResults, showFeedback]);
 
   const handleExportM3u = useCallback(async () => {
     const scoped = resolveScopedResults();
@@ -199,31 +221,34 @@ export function ExportMenu({
       filters: [{ name: "M3U Playlist", extensions: ["m3u8", "m3u"] }],
     });
     if (!path) {
-      setFeedback({ kind: "info", message: "M3U export cancelled." });
+      showFeedback({ kind: "info", message: "M3U export cancelled." });
       return;
     }
 
     setBusyAction("m3u");
+    logger.info(
+      `[Export] Starting ${exportScopeLabel(scope)} M3U export: channels=${scoped.length}, path=${path}`,
+    );
     try {
       await exportM3u(scoped, path);
-      setFeedback({
+      showFeedback({
         kind: "success",
         message: `Exported ${exportScopeLabel(scope)} M3U (${scoped.length} channels) to ${path}.`,
       });
       void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
     } catch (err) {
-      setFeedback({
+      showFeedback({
         kind: "error",
         message: `M3U export failed: ${String(err)}`,
       });
     } finally {
       setBusyAction(null);
     }
-  }, [scope, sourceStem, resolveScopedResults]);
+  }, [scope, sourceStem, resolveScopedResults, showFeedback]);
 
   const handleExportScanLog = useCallback(async () => {
     if (scanState === "idle") {
-      setFeedback({
+      showFeedback({
         kind: "info",
         message: "Run a scan first to generate a scan log.",
       });
@@ -236,27 +261,28 @@ export function ExportMenu({
       filters: [{ name: "JSON", extensions: ["json"] }],
     });
     if (!path) {
-      setFeedback({ kind: "info", message: "Scan log export cancelled." });
+      showFeedback({ kind: "info", message: "Scan log export cancelled." });
       return;
     }
 
     setBusyAction("scanlog");
+    logger.info(`[Export] Starting structured scan log export: path=${path}`);
     try {
       await exportScanLogJson(path);
-      setFeedback({
+      showFeedback({
         kind: "success",
         message: `Exported structured scan log to ${path}.`,
       });
       void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
     } catch (err) {
-      setFeedback({
+      showFeedback({
         kind: "error",
         message: `Scan log export failed: ${String(err)}`,
       });
     } finally {
       setBusyAction(null);
     }
-  }, [scanState, sourceStem]);
+  }, [scanState, sourceStem, showFeedback]);
 
   const exporting = busyAction !== null;
 

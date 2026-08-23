@@ -1175,8 +1175,6 @@ pub async fn check_channel_status_with_debug(
             .unwrap_or_else(|_| HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")),
     );
 
-    log::info!("Checking channel: {}", url);
-
     let attempt_check = |current_timeout: f64, attempt_offset: u32| {
         let client = client.clone();
         let headers = headers.clone();
@@ -1261,10 +1259,8 @@ pub async fn check_channel_status_with_debug(
                         drm_system,
                     } => {
                         let status = if drm_system.is_some() {
-                            log::info!("Channel DRM-protected: {}", url);
                             ChannelStatus::Drm
                         } else {
-                            log::info!("Channel alive: {}", url);
                             ChannelStatus::Alive
                         };
                         return Ok(AttemptOutcome {
@@ -1283,7 +1279,6 @@ pub async fn check_channel_status_with_debug(
                         stream_url,
                         latency_ms,
                     } => {
-                        log::info!("Channel placeholder: {}", url);
                         return Ok(AttemptOutcome {
                             status: ChannelStatus::Placeholder,
                             stream_url,
@@ -1297,7 +1292,6 @@ pub async fn check_channel_status_with_debug(
                         });
                     }
                     VerifyResult::Dead { latency_ms, reason } => {
-                        log::info!("Channel dead: {}", url);
                         return Ok(AttemptOutcome {
                             status: ChannelStatus::Dead,
                             stream_url: None,
@@ -1311,7 +1305,6 @@ pub async fn check_channel_status_with_debug(
                         });
                     }
                     VerifyResult::Geoblocked { latency_ms, reason } => {
-                        log::info!("Channel geoblocked: {}", url);
                         return Ok(AttemptOutcome {
                             status: ChannelStatus::Geoblocked,
                             stream_url: None,

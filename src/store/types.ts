@@ -179,7 +179,7 @@ export interface UiSlice {
   setErrorDismissed: (dismissed: boolean) => void;
   setPlaybackError: (error: string | null) => void;
   setScanInputError: (error: string | null) => void;
-  setMenuInfo: (info: string | null) => void;
+  setMenuInfo: (info: string | null, logLevel?: "info" | "warn" | "error") => void;
   setMenuExportRequest: (request: MenuExportRequest | null) => void;
   queueMenuExportRequest: (action: MenuExportRequest["action"]) => void;
   setUpdateNotice: (notice: UpdateNotice | null) => void;

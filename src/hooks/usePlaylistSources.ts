@@ -1,11 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  errorToString,
-  formatPlaylistOpenError,
-  formatSourceReloadError,
-  redactUrlCredentials,
-} from "../lib/errors";
+import { errorToString, formatPlaylistOpenError, formatSourceReloadError } from "../lib/errors";
 import { logger } from "../lib/logger";
 import { parseXtreamRecent, serializeXtreamRecent } from "../lib/recentPlaylists";
 import {
@@ -156,8 +151,8 @@ export function usePlaylistSources({
     try {
       const entries = await getRecentPlaylists();
       getStore().setRecentPlaylists(entries);
-    } catch {
-      // Ignore recent-list load failures.
+    } catch (err) {
+      logger.warn("[Recent Playlists] Failed to load entries:", errorToString(err));
     }
   }, []);
 
@@ -166,7 +161,8 @@ export function usePlaylistSources({
       const entries = await getSavedPlaylists();
       getStore().setSavedPlaylists(entries);
       return entries;
-    } catch {
+    } catch (err) {
+      logger.warn("[Saved Playlists] Failed to load entries:", errorToString(err));
       return [];
     }
   }, []);
@@ -175,8 +171,9 @@ export function usePlaylistSources({
     try {
       const entries = await clearRecentPlaylists();
       getStore().setRecentPlaylists(entries);
-    } catch {
-      // Ignore clear failures.
+      logger.info("[Recent Playlists] Cleared entries");
+    } catch (err) {
+      logger.warn("[Recent Playlists] Failed to clear entries:", errorToString(err));
     }
   }, []);
 
@@ -277,11 +274,6 @@ export function usePlaylistSources({
       const loadGeneration = sourceLoadGenerationRef.current + 1;
       sourceLoadGenerationRef.current = loadGeneration;
       const isCurrentLoad = () => sourceLoadGenerationRef.current === loadGeneration;
-      const supersededResult = (): LoadAndCommitSourceResult => ({
-        ok: false,
-        error: "",
-        superseded: true,
-      });
 
       const normalizedSourceFilter = normalizeSourceFilter(channelSearch);
       const currentSourceFilterError = validateSourceFilterPattern(normalizedSourceFilter);
@@ -293,30 +285,42 @@ export function usePlaylistSources({
         getStore().setPlaylistOpenError(error);
         getStore().setPlaylistLoading(false);
         getStore().setPlaylistLoadProgress(null);
+        logger.warn(`[Playlist] Load rejected: ${error}`);
         return { ok: false, error, superseded: false };
       }
 
+      const loadStartedAt = performance.now();
       const sourceLabel = (() => {
         switch (descriptor.kind) {
           case "path":
             return `path=${descriptor.path}`;
           case "url":
-            return `url=${redactUrlCredentials(descriptor.url)}`;
+            return `url=${descriptor.url}`;
           case "saved":
             return `saved id=${descriptor.id}`;
           case "xtream":
-            return `xtream server=${redactUrlCredentials(descriptor.server)}, username=***`;
+            return `xtream server=${descriptor.server}, username=***`;
           case "stalker":
-            return `stalker portal=${redactUrlCredentials(descriptor.portal)}, mac=***`;
+            return `stalker portal=${descriptor.portal}, mac=***`;
         }
       })();
       const loadingAction =
         mode === "reapplySourceFilter" ? "Reloading source with source filter" : "Opening source";
+      const supersededResult = (): LoadAndCommitSourceResult => {
+        logger.info(
+          `[Playlist] ${loadingAction} superseded after ${((performance.now() - loadStartedAt) / 1000).toFixed(1)}s: ${sourceLabel}`,
+        );
+        return {
+          ok: false,
+          error: "",
+          superseded: true,
+        };
+      };
 
       getStore().setPlaylistOpenError(null);
       getStore().setPlaylistLoadProgress(null);
       getStore().setPlaylistLoading(true);
-      logger.info(`[App] ${loadingAction}: ${sourceLabel}`);
+      logger.info(`[Playlist] ${loadingAction}: ${sourceLabel}`);
 
       try {
         const state = getStore();
@@ -372,6 +376,9 @@ export function usePlaylistSources({
         if (!committed) {
           return supersededResult();
         }
+        logger.info(
+          `[Playlist] Loaded ${safeFileName}: visible=${preview.channels.length}, total=${cachedPreview.total_channels}, groups=${preview.groups.length}, preview=${canReuseCachedPreview ? "memory-cache" : "fresh"}, elapsed=${((performance.now() - loadStartedAt) / 1000).toFixed(1)}s`,
+        );
         return { ok: true, preview };
       } catch (err) {
         if (!isCurrentLoad()) {
@@ -380,8 +387,8 @@ export function usePlaylistSources({
 
         logger.error(
           mode === "reapplySourceFilter"
-            ? "[App] Failed to reload source with source filter"
-            : "[App] Failed to open source",
+            ? `[Playlist] Failed to reload source with source filter after ${((performance.now() - loadStartedAt) / 1000).toFixed(1)}s:`
+            : `[Playlist] Failed to open source after ${((performance.now() - loadStartedAt) / 1000).toFixed(1)}s:`,
           err,
         );
         const message =
@@ -531,8 +538,8 @@ export function usePlaylistSources({
           savedEntry.id,
         );
         getStore().setRecentPlaylists(entries);
-      } catch {
-        // Ignore recent-list update failures.
+      } catch (err) {
+        logger.warn("[Recent Playlists] Failed to record saved playlist:", errorToString(err));
       }
 
       return true;
@@ -556,8 +563,8 @@ export function usePlaylistSources({
       try {
         const entries = await addRecentPlaylist("file", selectedPath, null, null);
         getStore().setRecentPlaylists(entries);
-      } catch {
-        // Ignore recent-list update failures.
+      } catch (err) {
+        logger.warn("[Recent Playlists] Failed to record file playlist:", errorToString(err));
       }
     },
     [loadAndCommitSource],
@@ -606,8 +613,8 @@ export function usePlaylistSources({
       try {
         const entries = await addRecentPlaylist("url", url, null, null);
         getStore().setRecentPlaylists(entries);
-      } catch {
-        // Ignore recent-list update failures.
+      } catch (err) {
+        logger.warn("[Recent Playlists] Failed to record URL playlist:", errorToString(err));
       }
 
       return true;
@@ -640,8 +647,7 @@ export function usePlaylistSources({
           Math.min(20, Math.round(result.preview.xtream_max_connections)),
         );
         const message = `Xtream max connections detected: ${result.preview.xtream_max_connections}. Scan concurrency will use ${effectiveConcurrency}.`;
-        logger.warn(message);
-        getStore().setMenuInfo(message);
+        getStore().setMenuInfo(message, "warn");
       }
 
       try {
@@ -656,8 +662,8 @@ export function usePlaylistSources({
           null,
         );
         getStore().setRecentPlaylists(entries);
-      } catch {
-        // Ignore recent-list update failures.
+      } catch (err) {
+        logger.warn("[Recent Playlists] Failed to record Xtream playlist:", errorToString(err));
       }
 
       return true;
@@ -725,21 +731,29 @@ export function usePlaylistSources({
 
   const handleSavePlaylistDraft = useCallback(
     async (draft: SavedPlaylistDraft) => {
-      const result = await upsertSavedPlaylist(draft);
-      getStore().setSavedPlaylists(result.entries);
-      setSavedPlaylistEditorDraft(null);
-      void refreshRecentPlaylists();
+      const action = draft.id ? "Updating" : "Saving";
+      logger.info(`[Saved Playlists] ${action} "${draft.display_name}"`);
+      try {
+        const result = await upsertSavedPlaylist(draft);
+        getStore().setSavedPlaylists(result.entries);
+        setSavedPlaylistEditorDraft(null);
+        void refreshRecentPlaylists();
 
-      const state = getStore();
-      const currentPlaylist = state.playlist;
-      const currentSaved = currentPlaylist?.saved_playlist_id ?? null;
-      const currentMatch = findSavedPlaylistForCurrentSource(
-        result.entries,
-        state.currentSourceDescriptor,
-        currentSaved,
-      );
-      if (currentMatch && currentMatch.id === result.entry.id) {
-        await openSavedPlaylistById(result.entry.id);
+        const state = getStore();
+        const currentPlaylist = state.playlist;
+        const currentSaved = currentPlaylist?.saved_playlist_id ?? null;
+        const currentMatch = findSavedPlaylistForCurrentSource(
+          result.entries,
+          state.currentSourceDescriptor,
+          currentSaved,
+        );
+        if (currentMatch && currentMatch.id === result.entry.id) {
+          await openSavedPlaylistById(result.entry.id);
+        }
+        logger.info(`[Saved Playlists] Saved "${result.entry.display_name}"`);
+      } catch (err) {
+        logger.error(`[Saved Playlists] Failed to save "${draft.display_name}":`, err);
+        throw err;
       }
     },
     [openSavedPlaylistById, refreshRecentPlaylists],
@@ -765,8 +779,9 @@ export function usePlaylistSources({
           state.setCurrentSourceDescriptor(fallbackDescriptor);
           patchCurrentPlaylistMetadata(state.playlist.file_name, null);
         }
+        logger.info(`[Saved Playlists] Deleted "${deletedEntry?.display_name ?? id}"`);
       } catch (err) {
-        getStore().setMenuInfo(errorToString(err));
+        getStore().setMenuInfo(errorToString(err), "error");
       }
     },
     [patchCurrentPlaylistMetadata, refreshRecentPlaylists],
@@ -794,8 +809,11 @@ export function usePlaylistSources({
         if (state.playlist?.saved_playlist_id === entry.id) {
           await openSavedPlaylistById(entry.id);
         }
+        logger.info(
+          `[Saved Playlists] Preferred Xtream server updated for "${entry.display_name}": ${server}`,
+        );
       } catch (err) {
-        getStore().setMenuInfo(errorToString(err));
+        getStore().setMenuInfo(errorToString(err), "error");
       }
     },
     [openSavedPlaylistById],
@@ -851,7 +869,7 @@ export function usePlaylistSources({
       if (entry.kind === "xtream") {
         const source = parseXtreamRecent(entry.value);
         if (!source) {
-          getStore().setMenuInfo("This Xtream recent entry is invalid.");
+          getStore().setMenuInfo("This Xtream recent entry is invalid.", "warn");
           void refreshRecentPlaylists();
           return;
         }

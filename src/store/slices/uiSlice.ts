@@ -1,4 +1,5 @@
 import type { StateCreator } from "zustand";
+import { logger } from "../../lib/logger";
 import { inferPlatformFromNavigator } from "../../lib/platform";
 import { isScanActive } from "../../lib/scanState";
 import type { AppStore, UiSlice } from "../types";
@@ -90,7 +91,12 @@ export const createUiSlice: StateCreator<AppStore, [], [], UiSlice> = (set, get)
   setErrorDismissed: (errorDismissed) => set({ errorDismissed }),
   setPlaybackError: (playbackError) => set({ playbackError }),
   setScanInputError: (scanInputError) => set({ scanInputError }),
-  setMenuInfo: (menuInfo) => set({ menuInfo }),
+  setMenuInfo: (menuInfo, logLevel = "info") => {
+    set({ menuInfo });
+    if (menuInfo) {
+      logger[logLevel](`[Notice] ${menuInfo}`);
+    }
+  },
   setMenuExportRequest: (menuExportRequest) => set({ menuExportRequest }),
   queueMenuExportRequest: (action) =>
     set((state) => ({
