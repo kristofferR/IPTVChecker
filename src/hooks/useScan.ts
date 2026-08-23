@@ -26,16 +26,9 @@ import {
   isRunScopedEventForActiveRun,
   resultAtIndex,
   type ScanResultCollections,
-  type ScanUiMetrics,
 } from "./useScan.helpers";
 
 export type { ScanState } from "../lib/scanState";
-
-const EMPTY_UI_METRICS: ScanUiMetrics = {
-  presentCount: 0,
-  lowFpsCount: 0,
-  mislabeledCount: 0,
-};
 
 /** Number of recent completions used for rolling throughput average. */
 const SLIDING_WINDOW_SIZE = 20;
@@ -94,9 +87,10 @@ const getStore = () => useAppStore.getState();
 export function useScan() {
   // Batch incoming results with requestAnimationFrame
   const pendingResults = useRef<ChannelResult[]>([]);
-  const flatResultsRef = useRef<ChannelResult[]>([]);
-  const resultPositionsRef = useRef<Map<number, number>>(new Map());
-  const uiMetricsRef = useRef<ScanUiMetrics>(EMPTY_UI_METRICS);
+  // Preserve the store's current collections across hook remounts, including Vite HMR.
+  const flatResultsRef = useRef<ChannelResult[]>(getStore().flatResults);
+  const resultPositionsRef = useRef<Map<number, number>>(getStore().resultPositions);
+  const uiMetricsRef = useRef(getStore().uiMetrics);
   const rafId = useRef<number | null>(null);
   const eventCount = useRef(0);
   const activeRunId = useRef<string | null>(null);
