@@ -155,6 +155,7 @@ export interface UiSlice {
   playbackError: string | null;
   scanInputError: string | null;
   menuInfo: string | null;
+  menuInfoPersistent: boolean;
   menuExportRequest: MenuExportRequest | null;
   updateNotice: UpdateNotice | null;
   updatePhase: UpdatePhase;
@@ -179,7 +180,11 @@ export interface UiSlice {
   setErrorDismissed: (dismissed: boolean) => void;
   setPlaybackError: (error: string | null) => void;
   setScanInputError: (error: string | null) => void;
-  setMenuInfo: (info: string | null, logLevel?: "info" | "warn" | "error") => void;
+  setMenuInfo: (
+    info: string | null,
+    logLevel?: "info" | "warn" | "error",
+    persistent?: boolean,
+  ) => void;
   setMenuExportRequest: (request: MenuExportRequest | null) => void;
   queueMenuExportRequest: (action: MenuExportRequest["action"]) => void;
   setUpdateNotice: (notice: UpdateNotice | null) => void;

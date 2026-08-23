@@ -20,14 +20,15 @@ function useAutoDismiss(
   timeoutMs: number,
   dismiss: () => void,
   onShow?: () => void,
+  enabled = true,
 ) {
   useEffect(() => {
-    if (!value) return;
+    if (!value || !enabled) return;
     onShow?.();
     const timer = setTimeout(dismiss, timeoutMs);
     return () => clearTimeout(timer);
-    // Callbacks are stable store writes; only the banner value drives re-arming.
-  }, [value]);
+    // Callbacks are stable store writes; only the banner value and dismissal policy re-arm it.
+  }, [value, enabled]);
 }
 
 interface AppBannersProps {
@@ -36,8 +37,8 @@ interface AppBannersProps {
   onInstallUpdate: () => void | Promise<void>;
 }
 
-/** The transient error/info banners shown under the toolbar, with their
- *  auto-dismiss timers. The update banner is the one persistent entry. */
+/** Error/info banners shown under the toolbar, with optional auto-dismiss
+ *  timers. The update banner is always persistent. */
 export function AppBanners({ onInstallUpdate }: AppBannersProps) {
   const scanError = useAppStore((s) => s.scanError);
   const errorDismissed = useAppStore((s) => s.errorDismissed);
@@ -45,6 +46,7 @@ export function AppBanners({ onInstallUpdate }: AppBannersProps) {
   const playlistOpenError = useAppStore((s) => s.playlistOpenError);
   const scanInputError = useAppStore((s) => s.scanInputError);
   const menuInfo = useAppStore((s) => s.menuInfo);
+  const menuInfoPersistent = useAppStore((s) => s.menuInfoPersistent);
   const updateNotice = useAppStore((s) => s.updateNotice);
   const updatePhase = useAppStore((s) => s.updatePhase);
   const appVersion = useAppStore((s) => s.appVersion);
@@ -64,7 +66,13 @@ export function AppBanners({ onInstallUpdate }: AppBannersProps) {
   useAutoDismiss(playbackError, 10000, () => getStore().setPlaybackError(null));
   useAutoDismiss(playlistOpenError, 10000, () => getStore().setPlaylistOpenError(null));
   useAutoDismiss(scanInputError, 8000, () => getStore().setScanInputError(null));
-  useAutoDismiss(menuInfo, 8000, () => getStore().setMenuInfo(null));
+  useAutoDismiss(
+    menuInfo,
+    8000,
+    () => getStore().setMenuInfo(null),
+    undefined,
+    !menuInfoPersistent,
+  );
 
   // Clear any stale scan-input error once the source filter becomes valid.
   useEffect(() => {

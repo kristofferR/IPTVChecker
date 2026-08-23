@@ -1270,6 +1270,26 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
 
         {activeTab === "advanced" && (
           <>
+            <section className={blockClass}>
+              <div className={rowClass}>
+                <div>
+                  <p className="text-[13px] font-medium">Keep Xtream connection notice visible</p>
+                  <p className="text-[11px] text-text-tertiary mt-0.5">
+                    Keep the detected max-connections banner visible until you dismiss it.
+                  </p>
+                </div>
+                <Switch
+                  checked={draft.persistent_xtream_connection_notice}
+                  onChange={(checked) =>
+                    updateSetting("persistent_xtream_connection_notice", checked, {
+                      immediate: true,
+                    })
+                  }
+                  ariaLabel="Keep Xtream connection notice visible"
+                />
+              </div>
+            </section>
+
             <section className={`${blockClass} p-4`}>
               <div className="grid grid-cols-2 gap-3">
                 <div>

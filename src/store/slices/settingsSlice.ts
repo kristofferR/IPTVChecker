@@ -36,6 +36,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   low_space_threshold_gb: 5.0,
   separate_placeholder_status: true,
   show_header_button_text: defaultShowHeaderButtonText,
+  persistent_xtream_connection_notice: false,
   automatic_update_checks: true,
 };
 

@@ -91,6 +91,8 @@ pub struct AppSettings {
     pub low_space_threshold_gb: f64,
     pub separate_placeholder_status: bool,
     pub show_header_button_text: bool,
+    /// Keep the Xtream max-connections notice visible until it is dismissed.
+    pub persistent_xtream_connection_notice: bool,
     /// Look for a signed update on launch and every six hours. Discovery only
     /// ever surfaces a notice; installing always needs explicit confirmation.
     pub automatic_update_checks: bool,
@@ -215,6 +217,7 @@ impl Default for AppSettings {
             low_space_threshold_gb: 5.0,
             separate_placeholder_status: true,
             show_header_button_text: !cfg!(target_os = "macos"),
+            persistent_xtream_connection_notice: false,
             automatic_update_checks: true,
         }
     }
@@ -280,6 +283,7 @@ mod tests {
         assert!(settings.scan_notifications);
         assert!(settings.report_auto_reveal);
         assert!(!settings.hide_vod_content);
+        assert!(!settings.persistent_xtream_connection_notice);
         assert_eq!(settings.low_fps_threshold, 23.0);
         assert_eq!(settings.channel_logo_size, super::ChannelLogoSize::Small);
         assert_eq!(settings.show_header_button_text, !cfg!(target_os = "macos"));

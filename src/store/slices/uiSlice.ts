@@ -30,6 +30,7 @@ export const createUiSlice: StateCreator<AppStore, [], [], UiSlice> = (set, get)
   playbackError: null,
   scanInputError: null,
   menuInfo: null,
+  menuInfoPersistent: false,
   menuExportRequest: null,
   updateNotice: null,
   updatePhase: "idle",
@@ -91,8 +92,8 @@ export const createUiSlice: StateCreator<AppStore, [], [], UiSlice> = (set, get)
   setErrorDismissed: (errorDismissed) => set({ errorDismissed }),
   setPlaybackError: (playbackError) => set({ playbackError }),
   setScanInputError: (scanInputError) => set({ scanInputError }),
-  setMenuInfo: (menuInfo, logLevel = "info") => {
-    set({ menuInfo });
+  setMenuInfo: (menuInfo, logLevel = "info", persistent = false) => {
+    set({ menuInfo, menuInfoPersistent: Boolean(menuInfo && persistent) });
     if (menuInfo) {
       logger[logLevel](`[Notice] ${menuInfo}`);
     }
