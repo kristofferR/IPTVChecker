@@ -62,7 +62,7 @@ const SavedPlaylistsDialog = lazy(() => import("./components/SavedPlaylistsDialo
 const SavedPlaylistEditorDialog = lazy(() => import("./components/SavedPlaylistEditorDialog"));
 
 import { AlertTriangle } from "lucide-react";
-import { toPendingChannelResult } from "./lib/channelResults";
+import { mergeSuccessfulPlaybackResult, toPendingChannelResult } from "./lib/channelResults";
 import { errorToString } from "./lib/errors";
 import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/haptics";
 import { logger } from "./lib/logger";
@@ -944,11 +944,12 @@ export default function App() {
 
   handlePlaybackFailedRef.current = (result) => {
     // Set "checking" status immediately, then run a lightweight backend check
-    const checking = { ...result, status: "checking" as const };
+    const latestResult = selectResultByIndex(getStore(), result.index) ?? result;
+    const checking = { ...latestResult, status: "checking" as const };
     updateResult(checking);
-    quickCheckChannel(result).then(
+    quickCheckChannel(latestResult).then(
       (checked) => updateResult(checked),
-      () => updateResult({ ...result, status: "dead" as const }),
+      () => updateResult({ ...latestResult, status: "dead" as const }),
     );
   };
 
@@ -1158,69 +1159,34 @@ export default function App() {
     playStream(channel);
   }, [pendingPlaybackChannel, playStream]);
 
-  // Merge player-derived metadata into ChannelResult for unscanned channels
-  const lastMergedMetaRef = useRef<{
-    index: number;
-    meta: typeof streamPlayer.streamMetadata;
-  } | null>(null);
+  // Successful playback is itself a channel check. Keep the result row and
+  // detail panel in sync with everything the active player can establish.
   useEffect(() => {
-    const meta = streamPlayer.streamMetadata;
     const idx = streamPlayer.activeChannelIndex;
-    if (!meta || idx === null) return;
-
-    // Prevent infinite re-trigger: skip if we already merged this exact data
-    const last = lastMergedMetaRef.current;
-    if (last && last.index === idx && last.meta === meta) return;
-    lastMergedMetaRef.current = { index: idx, meta };
+    if (idx === null || streamPlayer.playerState !== "playing") return;
 
     const state = getStore();
     const existing = selectResultByIndex(state, idx);
     if (!existing) return;
 
-    let changed = false;
-    const updated = { ...existing };
-
-    if (meta.width != null && existing.width == null) {
-      updated.width = meta.width;
-      changed = true;
-    }
-    if (meta.height != null && existing.height == null) {
-      updated.height = meta.height;
-      changed = true;
-    }
-    if (meta.resolution && !existing.resolution) {
-      updated.resolution = meta.resolution;
-      changed = true;
-    }
-    if (meta.codec && !existing.codec) {
-      updated.codec = meta.codec;
-      changed = true;
-    }
-    if (meta.fps != null && existing.fps == null) {
-      updated.fps = meta.fps;
-      changed = true;
-    }
-    if (meta.videoBitrate && !existing.video_bitrate) {
-      updated.video_bitrate = meta.videoBitrate;
-      changed = true;
-    }
-    if (meta.audioCodec && !existing.audio_codec) {
-      updated.audio_codec = meta.audioCodec;
-      changed = true;
-    }
-    if (meta.audioBitrate && !existing.audio_bitrate) {
-      updated.audio_bitrate = meta.audioBitrate;
-      changed = true;
-    }
-
-    if (changed) {
+    const updated = mergeSuccessfulPlaybackResult(
+      existing,
+      streamPlayer.streamMetadata,
+      settings.low_fps_threshold,
+    );
+    if (updated !== existing) {
       updateResult(updated);
-      // Also update selectedChannel if it's the same index
       if (state.selectedChannel?.index === idx) {
         getStore().setSelectedChannel(updated);
       }
     }
-  }, [streamPlayer.streamMetadata, streamPlayer.activeChannelIndex, updateResult]);
+  }, [
+    settings.low_fps_threshold,
+    streamPlayer.activeChannelIndex,
+    streamPlayer.playerState,
+    streamPlayer.streamMetadata,
+    updateResult,
+  ]);
 
   const handleToggleSidebar = useCallback(() => {
     const state = getStore();

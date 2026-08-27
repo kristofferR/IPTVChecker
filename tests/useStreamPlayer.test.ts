@@ -14,6 +14,8 @@ import {
   PLAYBACK_RECOVERY_WINDOW_MS,
   prunePlaybackRecoveryHistory,
   recordPlaybackRecoveryAttempt,
+  resolveAudioChannelLayout,
+  resolveHlsHdrFormat,
   type StreamMetadata,
   type StreamType,
   shouldResetPlaybackRecoveryAttempts,
@@ -75,6 +77,20 @@ describe("useStreamPlayer helpers", () => {
     ).toBe(true);
 
     expect(supportsNativeHlsPlayback(canPlayTypes({}))).toBe(false);
+  });
+
+  it("normalizes player audio channel counts to scan-style labels", () => {
+    expect(resolveAudioChannelLayout(1)).toBe("Mono");
+    expect(resolveAudioChannelLayout("2")).toBe("Stereo");
+    expect(resolveAudioChannelLayout("6/JOC")).toBe("6 ch");
+    expect(resolveAudioChannelLayout(null)).toBeNull();
+  });
+
+  it("derives HDR labels from HLS variant metadata", () => {
+    expect(resolveHlsHdrFormat("PQ", "hvc1.2.4.L153.B0")).toBe("HDR10");
+    expect(resolveHlsHdrFormat("HLG", "hvc1.2.4.L153.B0")).toBe("HLG");
+    expect(resolveHlsHdrFormat("PQ", "dvh1.05.06")).toBe("Dolby Vision");
+    expect(resolveHlsHdrFormat("SDR", "avc1.640028")).toBeNull();
   });
 
   it("uses the compatible direct route before remux for initial live playback", () => {
@@ -237,9 +253,12 @@ describe("useStreamPlayer helpers", () => {
       resolution: "1080p",
       codec: "H.264",
       fps: 50,
+      latencyMs: 740,
+      hdrFormat: null,
       videoBitrate: "8.0 Mbps",
       audioCodec: "AAC",
       audioBitrate: "192",
+      audioChannelLayout: "Stereo",
       audioOnly: false,
     };
 

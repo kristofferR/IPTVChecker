@@ -45,6 +45,7 @@ export interface MpegtsPlayer {
     height?: number;
     hasVideo?: boolean;
     hasAudio?: boolean;
+    audioChannelCount?: number;
     fps?: number;
     videoDataRate?: number;
     audioDataRate?: number;

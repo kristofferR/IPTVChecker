@@ -14,6 +14,8 @@ import {
   type PlayerState,
   readMediaErrorMessage,
   recordPlaybackRecoveryAttempt,
+  resolveAudioChannelLayout,
+  resolveHlsHdrFormat,
   type StreamMetadata,
   shouldResetPlaybackRecoveryAttempts,
   supportsNativeHlsPlayback,
@@ -129,6 +131,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const currentChannelRef = useRef<ChannelResult | null>(null);
   const recoveryTimestampsRef = useRef<number[]>([]);
   const hasStartedPlayingRef = useRef(false);
+  const playbackStartedAtRef = useRef<number | null>(null);
+  const startupLatencyMsRef = useRef<number | null>(null);
   const playbackSessionIdRef = useRef(0);
   const startPlaybackAttemptRef = useRef<StartPlaybackAttempt | null>(null);
 
@@ -193,9 +197,12 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       resolution: null,
       codec: null,
       fps: null,
+      latencyMs: startupLatencyMsRef.current,
+      hdrFormat: null,
       videoBitrate: null,
       audioCodec: null,
       audioBitrate: null,
+      audioChannelLayout: null,
       audioOnly: false,
     };
 
@@ -210,6 +217,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           meta.resolution = resolveResolutionLabel(level.width, level.height);
         }
         if (level.videoCodec) meta.codec = normalizeCodecName(level.videoCodec);
+        meta.hdrFormat = resolveHlsHdrFormat(level.videoRange, level.videoCodec);
         if (level.audioCodec) meta.audioCodec = normalizeCodecName(level.audioCodec);
         if (level.bitrate) {
           meta.videoBitrate = formatBitrateKbps(Math.round(level.bitrate / 1000));
@@ -219,6 +227,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         if ((level as { frameRate?: number }).frameRate) {
           meta.fps = Math.round((level as { frameRate: number }).frameRate);
         }
+      }
+
+      const audioTrack = hls.audioTracks?.[hls.audioTrack];
+      if (audioTrack?.channels) {
+        meta.audioChannelLayout = resolveAudioChannelLayout(audioTrack.channels);
       }
     }
 
@@ -240,6 +253,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       if (!meta.audioBitrate && info.audioDataRate) {
         meta.audioBitrate = String(Math.round(info.audioDataRate));
       }
+      if (!meta.audioChannelLayout && info.audioChannelCount) {
+        meta.audioChannelLayout = resolveAudioChannelLayout(info.audioChannelCount);
+      }
       if (info.hasAudio && !info.hasVideo) meta.audioOnly = true;
     }
 
@@ -249,7 +265,14 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       meta.resolution = resolveResolutionLabel(videoElement.videoWidth, videoElement.videoHeight);
     }
 
-    if (meta.width || meta.codec || meta.audioCodec) {
+    if (
+      meta.width ||
+      meta.codec ||
+      meta.hdrFormat ||
+      meta.audioCodec ||
+      meta.audioChannelLayout ||
+      meta.audioOnly
+    ) {
       setStreamMetadata((previous) => (areStreamMetadataEqual(previous, meta) ? previous : meta));
     }
   }, [videoElement]);
@@ -736,6 +759,12 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         if (!isCurrentPlayback()) {
           return false;
         }
+        if (startMode === "manual" && playbackStartedAtRef.current != null) {
+          startupLatencyMsRef.current = Math.max(
+            0,
+            Math.round(performance.now() - playbackStartedAtRef.current),
+          );
+        }
         hasStartedPlayingRef.current = true;
         setPlayerState("playing");
         setErrorMessage(null);
@@ -901,6 +930,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       currentChannelRef.current = result;
       recoveryTimestampsRef.current = [];
       hasStartedPlayingRef.current = false;
+      playbackStartedAtRef.current = performance.now();
+      startupLatencyMsRef.current = null;
       resetRecoveryUi();
       void startPlaybackAttempt(result, sessionId, "manual", 0);
     },
@@ -914,6 +945,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     currentChannelRef.current = null;
     recoveryTimestampsRef.current = [];
     hasStartedPlayingRef.current = false;
+    playbackStartedAtRef.current = null;
+    startupLatencyMsRef.current = null;
     resetRecoveryUi();
     cleanup();
     setPlayerState("idle");

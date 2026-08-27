@@ -38,10 +38,38 @@ export interface StreamMetadata {
   resolution: string | null;
   codec: string | null;
   fps: number | null;
+  latencyMs: number | null;
+  hdrFormat: string | null;
   videoBitrate: string | null;
   audioCodec: string | null;
   audioBitrate: string | null;
+  audioChannelLayout: string | null;
   audioOnly: boolean;
+}
+
+export function resolveAudioChannelLayout(
+  channels: string | number | null | undefined,
+): string | null {
+  if (channels == null) return null;
+
+  const channelCount =
+    typeof channels === "number"
+      ? channels
+      : Number.parseInt(channels.trim().split("/", 1)[0] ?? "", 10);
+  if (!Number.isFinite(channelCount) || channelCount <= 0) return null;
+  if (channelCount === 1) return "Mono";
+  if (channelCount === 2) return "Stereo";
+  return `${channelCount} ch`;
+}
+
+export function resolveHlsHdrFormat(
+  videoRange: string | null | undefined,
+  videoCodec: string | null | undefined,
+): string | null {
+  if (videoCodec && /^(dvh1|dvhe)/i.test(videoCodec)) return "Dolby Vision";
+  if (videoRange === "PQ") return "HDR10";
+  if (videoRange === "HLG") return "HLG";
+  return null;
 }
 
 export function isSingleConnectionPlaylist(
@@ -66,9 +94,12 @@ export function areStreamMetadataEqual(
     left.resolution === right.resolution &&
     left.codec === right.codec &&
     left.fps === right.fps &&
+    left.latencyMs === right.latencyMs &&
+    left.hdrFormat === right.hdrFormat &&
     left.videoBitrate === right.videoBitrate &&
     left.audioCodec === right.audioCodec &&
     left.audioBitrate === right.audioBitrate &&
+    left.audioChannelLayout === right.audioChannelLayout &&
     left.audioOnly === right.audioOnly
   );
 }
