@@ -647,6 +647,8 @@ export const Toolbar = memo(function Toolbar({
             <input
               ref={searchInputRef}
               type="search"
+              autoCorrect="off"
+              spellCheck={false}
               placeholder="Search..."
               value={search}
               disabled={filtersDisabled}
