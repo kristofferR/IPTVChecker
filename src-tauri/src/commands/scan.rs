@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager, Window};
 use tokio::sync::Semaphore;
@@ -30,6 +30,7 @@ const CHECKPOINT_FLUSH_INTERVAL_MS: u64 = 250;
 const CHECKPOINT_FLUSH_MAX_BATCH: usize = 128;
 const RESULT_BATCH_MAX_ITEMS: usize = 64;
 const MIN_SCREENSHOT_DIAGNOSTIC_TIMEOUT_SECS: f64 = 15.0;
+const XTREAM_ARCHIVE_SCAN_COMPLETION_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 struct SharedUrlResult {
@@ -2501,8 +2502,12 @@ async fn execute_scan_run(
 
     if !cancel_token.is_cancelled() {
         if let Some(source_identity) = config.source_identity.as_deref() {
-            if let Some(archive_flags) = state.wait_for_xtream_archive_flags(source_identity).await
-            {
+            let archive_flags = tokio::select! {
+                flags = state.wait_for_xtream_archive_flags(source_identity) => flags,
+                _ = cancel_token.cancelled() => None,
+                _ = tokio::time::sleep(XTREAM_ARCHIVE_SCAN_COMPLETION_TIMEOUT) => None,
+            };
+            if let Some(archive_flags) = archive_flags {
                 apply_xtream_archive_flags_to_results(
                     &mut completed_scan.results,
                     archive_flags.as_ref(),

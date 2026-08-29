@@ -1,5 +1,6 @@
 import { memo, type ReactNode, startTransition, useDeferredValue, useMemo } from "react";
 import { hasArchive } from "../lib/archive";
+import { filterResultsShared } from "../lib/filters";
 import type { Channel } from "../lib/types";
 import { useAppStore } from "../store";
 import {
@@ -94,34 +95,40 @@ export const StatsPanel = memo(function StatsPanel() {
   const lowFpsCount = useAppStore((s) => s.uiMetrics.lowFpsCount);
   const mislabeledCount = useAppStore((s) => s.uiMetrics.mislabeledCount);
   const duplicateCount = useAppStore((s) => s.duplicateIndices.size);
+  const duplicateIndices = useAppStore((s) => s.duplicateIndices);
+  const completedResults = useAppStore((s) => s.flatResults);
   const statusFilter = useAppStore((s) => s.statusFilter);
   const setStatusFilter = useAppStore((s) => s.setStatusFilter);
   const toggleReportPanel = useAppStore((s) => s.toggleReportPanel);
   const selectedChannelIndices = useAppStore((s) => s.selectedChannelIndices);
   const search = useDeferredValue(useAppStore((s) => s.search));
   const groupFilter = useAppStore((s) => s.groupFilter);
+  const separatePlaceholder = useAppStore((s) => s.settings.separate_placeholder_status);
   const stats = summary ?? progress;
   const effectiveLowFpsCount = summary?.low_framerate ?? lowFpsCount;
   const effectiveMislabeledCount = summary?.mislabeled ?? mislabeledCount;
 
   const { catchupCount, visibleCatchupCount } = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
-    const hasGroupFilter = groupFilter !== "" && groupFilter !== "all";
-    let catchupCount = 0;
-    let visibleCatchupCount = 0;
-
-    for (const channel of channels) {
-      if (!hasArchive(channel)) continue;
-      catchupCount += 1;
-
-      if (hasGroupFilter && channel.group !== groupFilter) continue;
-      const searchText = `${channel.name}\n${channel.playlist}\n${channel.group}`.toLowerCase();
-      if (normalizedSearch && !searchText.includes(normalizedSearch)) continue;
-      visibleCatchupCount += 1;
-    }
+    const catchupCount = channels.filter(hasArchive).length;
+    const visibleCatchupCount = filterResultsShared(
+      completedResults,
+      search,
+      groupFilter,
+      statusFilter,
+      duplicateIndices,
+      separatePlaceholder,
+    ).filter(hasArchive).length;
 
     return { catchupCount, visibleCatchupCount };
-  }, [channels, search, groupFilter]);
+  }, [
+    channels,
+    completedResults,
+    search,
+    groupFilter,
+    statusFilter,
+    duplicateIndices,
+    separatePlaceholder,
+  ]);
 
   const selectedCatchupCount = useMemo(() => {
     if (selectedChannelIndices.length < 2) return 0;

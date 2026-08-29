@@ -829,6 +829,13 @@ pub(crate) async fn open_playlist_xtream_inner(
             if let Some(task) = archive_task {
                 task.abort();
             }
+            app.state::<Arc<AppState>>()
+                .complete_xtream_archive_enrichment(
+                    &source_identity,
+                    archive_generation,
+                    HashMap::new(),
+                )
+                .await;
             return Err(error);
         }
     };

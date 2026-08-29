@@ -609,18 +609,19 @@ export function useScan() {
 
   const updateResult = useCallback(
     (result: ChannelResult) => {
+      const [updatedResult] = applyArchiveOverlays([result]);
       const next = applyResultUpdates(
         {
           flatResults: flatResultsRef.current,
           positions: resultPositionsRef.current,
           metrics: uiMetricsRef.current,
         },
-        [result],
+        [updatedResult],
       );
 
       commitCollections(next);
     },
-    [commitCollections],
+    [applyArchiveOverlays, commitCollections],
   );
 
   const applyArchiveUpdates = useCallback(
