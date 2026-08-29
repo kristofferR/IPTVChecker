@@ -232,6 +232,41 @@ pub fn extract_tvg_metadata(
     tvg_metadata_from_attrs(&extinf_attributes_for(extinf_line))
 }
 
+fn parse_catchup_days(raw: &str) -> Option<u32> {
+    let digits: String = raw
+        .trim()
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse::<u32>().ok().filter(|days| *days > 0)
+}
+
+/// Extract advertised catch-up metadata: `(type, days, source template)`.
+///
+/// `catchup-days`, `tvg-rec`, and `timeshift` all carry the archive depth in
+/// days depending on the provider. A depth or source without an explicit type
+/// still means the channel advertises catch-up, so the type defaults to
+/// `default`; an explicitly disabled type suppresses everything.
+fn catchup_metadata_from_attrs(
+    attrs: &[(String, String)],
+) -> (Option<String>, Option<u32>, Option<String>) {
+    let kind = attr_value(attrs, "catchup")
+        .or_else(|| attr_value(attrs, "catchup-type"))
+        .map(|value| value.to_ascii_lowercase());
+    if matches!(kind.as_deref(), Some("none" | "no" | "0" | "disabled")) {
+        return (None, None, None);
+    }
+
+    let days = ["catchup-days", "tvg-rec", "timeshift"]
+        .iter()
+        .find_map(|key| attr_value(attrs, key))
+        .and_then(|value| parse_catchup_days(&value));
+    let source = attr_value(attrs, "catchup-source");
+
+    let kind = kind.or_else(|| (days.is_some() || source.is_some()).then(|| "default".to_string()));
+    (kind, days, source)
+}
+
 fn normalize_language_candidate(raw: &str) -> Option<String> {
     let first = raw
         .split(['|', ',', ';', '/'])
@@ -540,6 +575,7 @@ fn parse_playlist_reader<R: BufRead>(
                 let name = get_channel_name(&extinf_line);
                 let language = language_from_attrs(&attrs, &group, &name);
                 let (tvg_id, tvg_name, tvg_logo, tvg_chno) = tvg_metadata_from_attrs(&attrs);
+                let (catchup, catchup_days, catchup_source) = catchup_metadata_from_attrs(&attrs);
                 channels.push(Channel {
                     index: source_index,
                     playlist: playlist_name.clone(),
@@ -550,6 +586,9 @@ fn parse_playlist_reader<R: BufRead>(
                     tvg_name,
                     tvg_logo,
                     tvg_chno,
+                    catchup,
+                    catchup_days,
+                    catchup_source,
                     url: line,
                     content_type,
                     extinf_line,
@@ -899,6 +938,48 @@ mod tests {
         assert_eq!(tvg_name.as_deref(), Some("Channel Name"));
         assert_eq!(tvg_logo.as_deref(), Some("http://img/logo.png"));
         assert_eq!(tvg_chno.as_deref(), Some("101"));
+    }
+
+    #[test]
+    fn test_catchup_metadata_reads_explicit_attributes() {
+        let attrs = parse_extinf_attributes(
+            "#EXTINF:-1 catchup=\"shift\" catchup-days=\"7\" catchup-source=\"http://x/${start}\",Ch",
+        );
+        assert_eq!(
+            catchup_metadata_from_attrs(&attrs),
+            (
+                Some("shift".to_string()),
+                Some(7),
+                Some("http://x/${start}".to_string())
+            )
+        );
+    }
+
+    #[test]
+    fn test_catchup_metadata_infers_default_type_from_day_aliases() {
+        let rec = parse_extinf_attributes("#EXTINF:-1 tvg-rec=\"3\",Ch");
+        assert_eq!(
+            catchup_metadata_from_attrs(&rec),
+            (Some("default".to_string()), Some(3), None)
+        );
+
+        let timeshift = parse_extinf_attributes("#EXTINF:-1 timeshift=\"5\",Ch");
+        assert_eq!(
+            catchup_metadata_from_attrs(&timeshift),
+            (Some("default".to_string()), Some(5), None)
+        );
+
+        let none = parse_extinf_attributes("#EXTINF:-1 group-title=\"News\",Ch");
+        assert_eq!(catchup_metadata_from_attrs(&none), (None, None, None));
+    }
+
+    #[test]
+    fn test_catchup_metadata_respects_disabled_and_zero_values() {
+        let disabled = parse_extinf_attributes("#EXTINF:-1 catchup=\"none\" catchup-days=\"7\",Ch");
+        assert_eq!(catchup_metadata_from_attrs(&disabled), (None, None, None));
+
+        let zero_days = parse_extinf_attributes("#EXTINF:-1 catchup-days=\"0\",Ch");
+        assert_eq!(catchup_metadata_from_attrs(&zero_days), (None, None, None));
     }
 
     #[test]

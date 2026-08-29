@@ -319,6 +319,27 @@ fn build_xtream_stream_base(server: &Url, segment: &str, username: &str, passwor
     base.to_string()
 }
 
+/// Read a numeric Xtream field that servers return as either number or string.
+fn xtream_numeric_field(entry: &serde_json::Value, key: &str) -> Option<i64> {
+    match entry.get(key) {
+        Some(serde_json::Value::Number(n)) => n.as_i64(),
+        Some(serde_json::Value::String(s)) => s.trim().parse::<i64>().ok(),
+        _ => None,
+    }
+}
+
+/// Build the catch-up attributes for a stream entry, or an empty string.
+/// Xtream advertises archives via `tv_archive` / `tv_archive_duration` (days).
+fn xtream_catchup_attrs(entry: &serde_json::Value) -> String {
+    if xtream_numeric_field(entry, "tv_archive") != Some(1) {
+        return String::new();
+    }
+    match xtream_numeric_field(entry, "tv_archive_duration").filter(|days| *days > 0) {
+        Some(days) => format!(" catchup=\"xc\" catchup-days=\"{}\"", days),
+        None => " catchup=\"xc\"".to_string(),
+    }
+}
+
 /// Append M3U entries for a list of Xtream streams.
 fn append_xtream_streams_to_m3u(
     m3u: &mut String,
@@ -369,10 +390,11 @@ fn append_xtream_streams_to_m3u(
         };
 
         m3u.push_str(&format!(
-            "#EXTINF:-1 tvg-id=\"{}\" tvg-logo=\"{}\" group-title=\"{}\",{}\n",
+            "#EXTINF:-1 tvg-id=\"{}\" tvg-logo=\"{}\" group-title=\"{}\"{},{}\n",
             crate::engine::parser::escape_extinf_value(tvg_id),
             crate::engine::parser::escape_extinf_value(tvg_logo),
             crate::engine::parser::escape_extinf_value(group),
+            xtream_catchup_attrs(entry),
             crate::engine::parser::flatten_extinf_title(name)
         ));
         m3u.push_str(&format!("{}{}.{}\n", stream_base, stream_id, extension));
@@ -575,6 +597,43 @@ mod tests {
         extract_xtream_account_info, extract_xtream_max_connections, normalize_xtream_server,
     };
     use std::collections::HashMap;
+
+    #[test]
+    fn generated_xtream_entries_carry_catchup_attributes() {
+        let streams = vec![
+            serde_json::json!({
+                "name": "Archive One",
+                "stream_id": 1,
+                "tv_archive": 1,
+                "tv_archive_duration": 7
+            }),
+            serde_json::json!({
+                "name": "Archive Two",
+                "stream_id": 2,
+                "tv_archive": "1",
+                "tv_archive_duration": "3"
+            }),
+            serde_json::json!({
+                "name": "Live Only",
+                "stream_id": 3,
+                "tv_archive": 0
+            }),
+        ];
+        let mut m3u = String::new();
+
+        append_xtream_streams_to_m3u(
+            &mut m3u,
+            &streams,
+            &HashMap::new(),
+            "https://example.com/live/user/pass/",
+            "ts",
+        );
+
+        let lines: Vec<&str> = m3u.lines().collect();
+        assert!(lines[0].contains("catchup=\"xc\" catchup-days=\"7\""));
+        assert!(lines[2].contains("catchup=\"xc\" catchup-days=\"3\""));
+        assert!(!lines[4].contains("catchup"));
+    }
 
     #[test]
     fn generated_xtream_entries_escape_provider_supplied_extinf_values() {

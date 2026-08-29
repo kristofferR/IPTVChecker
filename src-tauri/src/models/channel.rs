@@ -126,6 +126,15 @@ pub struct Channel {
     pub tvg_logo: Option<String>,
     #[serde(default)]
     pub tvg_chno: Option<String>,
+    /// Advertised catch-up/archive type (`default`, `append`, `shift`, `flussonic`, `xc`, ...).
+    #[serde(default)]
+    pub catchup: Option<String>,
+    /// Advertised archive depth in days.
+    #[serde(default)]
+    pub catchup_days: Option<u32>,
+    /// Raw `catchup-source` URL template, when the provider supplies one.
+    #[serde(default)]
+    pub catchup_source: Option<String>,
     pub url: String,
     #[serde(default)]
     pub content_type: ContentType,
@@ -149,6 +158,12 @@ pub struct ChannelResult {
     pub tvg_logo: Option<String>,
     #[serde(default)]
     pub tvg_chno: Option<String>,
+    #[serde(default)]
+    pub catchup: Option<String>,
+    #[serde(default)]
+    pub catchup_days: Option<u32>,
+    #[serde(default)]
+    pub catchup_source: Option<String>,
     pub url: String,
     #[serde(default)]
     pub content_type: ContentType,
@@ -201,6 +216,9 @@ mod tests {
             tvg_name: None,
             tvg_logo: None,
             tvg_chno: None,
+            catchup: None,
+            catchup_days: None,
+            catchup_source: None,
             url: "https://example.com/live.m3u8".to_string(),
             content_type: ContentType::Live,
             status: ChannelStatus::Dead,
