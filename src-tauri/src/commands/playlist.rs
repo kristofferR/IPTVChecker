@@ -704,18 +704,36 @@ pub(crate) async fn open_playlist_xtream_inner(
     let cache_path = remote_playlist_cache_path_from_data_dir(&data_dir, &source_key)?;
     let accept_invalid_certs = accepts_invalid_certs(Some(app)).await;
 
-    // Try /get.php and fetch optional account/archive metadata in parallel.
-    let (xtream_account_info, live_streams, m3u_result) = tokio::join!(
-        fetch_xtream_account_info(&server, &username, &password, accept_invalid_certs),
-        fetch_xtream_live_streams(&server, &username, &password, accept_invalid_certs),
-        download_playlist_to_cache_in_data_dir(
+    // Start the potentially large live-stream catalog in parallel, but do not
+    // let optional archive metadata delay a successful /get.php download.
+    let playlist_and_live_streams = async {
+        let live_streams =
+            fetch_xtream_live_streams(&server, &username, &password, accept_invalid_certs);
+        let playlist = download_playlist_to_cache_in_data_dir(
             Some(app),
             &data_dir,
             &source_key,
             &download_url,
             "Xtream playlist",
             accept_invalid_certs,
-        )
+        );
+        tokio::pin!(live_streams, playlist);
+
+        tokio::select! {
+            biased;
+            live_streams = &mut live_streams => (playlist.await, live_streams),
+            m3u_result = &mut playlist => {
+                if m3u_result.is_ok() {
+                    (m3u_result, None)
+                } else {
+                    (m3u_result, live_streams.await)
+                }
+            }
+        }
+    };
+    let (xtream_account_info, (m3u_result, live_streams)) = tokio::join!(
+        fetch_xtream_account_info(&server, &username, &password, accept_invalid_certs),
+        playlist_and_live_streams,
     );
 
     // If /get.php failed, fall back to the JSON API.

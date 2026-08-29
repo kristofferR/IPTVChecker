@@ -64,32 +64,30 @@ pub(crate) fn sanitize_url_for_persistence(url: &str) -> String {
 
 fn redact_provider_path_credentials(path: &str) -> Option<String> {
     let mut segments: Vec<String> = path.split('/').map(str::to_string).collect();
-    let credential_positions = segments
-        .iter()
-        .enumerate()
-        .find(|(index, segment)| {
-            matches!(
-                segment.to_ascii_lowercase().as_str(),
-                "live" | "movie" | "series" | "timeshift"
-            ) && segments.len() >= index + 4
-        })
-        .map(|(index, _)| (index + 1, index + 2))
-        .or_else(|| {
-            let nonempty: Vec<usize> = segments
-                .iter()
-                .enumerate()
-                .filter_map(|(index, segment)| (!segment.is_empty()).then_some(index))
-                .collect();
-            if nonempty.len() == 3
-                && segments[nonempty[2]].split('.').next().is_some_and(|id| {
-                    !id.is_empty() && id.chars().all(|character| character.is_ascii_digit())
-                })
-            {
-                Some((nonempty[0], nonempty[1]))
-            } else {
-                None
-            }
-        });
+    let credential_positions = segments.iter().enumerate().find_map(|(index, segment)| {
+        if !segment.eq_ignore_ascii_case("timeshift") || segments.len() < index + 6 {
+            return None;
+        }
+
+        let duration = &segments[index + 3];
+        let start = &segments[index + 4];
+        let stream_id = segments[index + 5].split('.').next().unwrap_or_default();
+        let valid_duration = duration == "${duration}"
+            || duration.eq_ignore_ascii_case("$%7Bduration%7D")
+            || duration.eq_ignore_ascii_case("%24%7Bduration%7D")
+            || (!duration.is_empty()
+                && duration.chars().all(|character| character.is_ascii_digit()));
+        let valid_start = start == "${start}"
+            || start.eq_ignore_ascii_case("$%7Bstart%7D")
+            || start.eq_ignore_ascii_case("%24%7Bstart%7D")
+            || (!start.is_empty() && start.chars().all(|character| character.is_ascii_digit()));
+        let valid_stream_id = !stream_id.is_empty()
+            && stream_id
+                .chars()
+                .all(|character| character.is_ascii_digit());
+
+        (valid_duration && valid_start && valid_stream_id).then_some((index + 1, index + 2))
+    });
 
     let (username, password) = credential_positions?;
     segments[username] = REDACTED_PATH_SEGMENT.to_string();
@@ -688,7 +686,10 @@ mod tests {
         let sanitized = sanitize_url_for_persistence(
             "https://provider.example/timeshift/path-user/path-pass/${duration}/${start}/42.ts",
         );
-        assert!(sanitized.contains("/timeshift/REDACTED/REDACTED/"));
+        assert!(
+            sanitized.contains("/timeshift/REDACTED/REDACTED/"),
+            "{sanitized}"
+        );
         assert!(!sanitized.contains("path-user"));
         assert!(!sanitized.contains("path-pass"));
         assert_eq!(
@@ -704,6 +705,14 @@ mod tests {
         assert!(extinf.contains("/timeshift/REDACTED/REDACTED/"));
         assert!(!extinf.contains("extinf-user"));
         assert!(!extinf.contains("extinf-pass"));
+    }
+
+    #[test]
+    fn sanitize_url_for_persistence_preserves_ordinary_stream_paths() {
+        assert_eq!(
+            sanitize_url_for_persistence("https://cdn.example/live/sports/channel/42.ts"),
+            "https://cdn.example/live/sports/channel/42.ts"
+        );
     }
 
     #[test]
