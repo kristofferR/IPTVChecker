@@ -495,8 +495,22 @@ export function usePlaylistSources({
         state.setPendingPlaybackChannel(null);
       }
 
-      void syncFromPlaylist(nextPreview.channels, true).then(() => {
-        if (selectedIndex == null || !visibleIndices.has(selectedIndex)) {
+      const shouldApply = () => {
+        const latest = getStore();
+        return (
+          previousHideVodContentRef.current === hideVodContent &&
+          latest.cachedSourcePreview === cachedSourcePreview &&
+          latest.playlist === nextPreview
+        );
+      };
+
+      void syncFromPlaylist(nextPreview.channels, true, shouldApply).then((synced) => {
+        if (
+          !synced ||
+          !shouldApply() ||
+          selectedIndex == null ||
+          !visibleIndices.has(selectedIndex)
+        ) {
           return;
         }
 

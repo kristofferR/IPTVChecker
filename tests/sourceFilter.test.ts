@@ -214,4 +214,27 @@ describe("sourceFilter helpers", () => {
     expect(filtered.series_count).toBe(0);
     expect(filtered.groups).toEqual(["Kids", "Sports"]);
   });
+
+  it("prunes EPG sources for VOD-only directory children", () => {
+    const filtered = applyContentVisibilityToPreview(
+      {
+        ...preview,
+        epg_sources: ["https://example.com/live.xml", "https://example.com/vod.xml"],
+        epg_sources_by_playlist: {
+          "live.m3u8": ["https://example.com/live.xml"],
+          "vod.m3u8": ["https://example.com/vod.xml"],
+        },
+        channels: [
+          { ...preview.channels[0], playlist: "live.m3u8" },
+          { ...preview.channels[2], playlist: "vod.m3u8" },
+        ],
+      },
+      true,
+    );
+
+    expect(filtered.epg_sources).toEqual(["https://example.com/live.xml"]);
+    expect(filtered.epg_sources_by_playlist).toEqual({
+      "live.m3u8": ["https://example.com/live.xml"],
+    });
+  });
 });

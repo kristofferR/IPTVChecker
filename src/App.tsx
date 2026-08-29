@@ -924,10 +924,7 @@ export default function App() {
       }
 
       const appliedState = getStore();
-      if (
-        appliedState.playlist?.single_provider &&
-        Object.values(appliedState.archiveProbes).some((probe) => probe.running)
-      ) {
+      if (Object.values(appliedState.archiveProbes).some((probe) => probe.running)) {
         await cancelArchiveProbes();
       }
 

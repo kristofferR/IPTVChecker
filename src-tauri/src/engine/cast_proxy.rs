@@ -54,6 +54,11 @@ const MANIFEST_FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 const REMUX_PLAYLIST_READY_TIMEOUT: Duration = Duration::from_secs(20);
 const REMUX_PLAYLIST_POLL_INTERVAL: Duration = Duration::from_millis(150);
 const REMUX_PLAYLIST_SEGMENTS: &str = "6";
+/// Finite remuxes retain all segments so a Cast receiver can buffer or pause
+/// without losing earlier media. Stop a malformed finite endpoint before it
+/// can consume unbounded temporary storage.
+const FINITE_REMUX_MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+const FINITE_REMUX_STORAGE_POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// Hard cap on manifest body buffered into memory before rewriting. Real HLS
 /// playlists are well under a megabyte; this exists so a misclassified upstream
 /// (URL ends in `.m3u8` but body is actually a long-running MPEG-TS or live
@@ -500,6 +505,10 @@ async fn start_remux(
         ))
     })?;
 
+    if is_finite {
+        spawn_finite_remux_storage_guard(tmpdir.clone(), cancel.clone());
+    }
+
     // For HEVC, pump upstream bytes into ffmpeg's stdin via our own
     // reconnecting fetcher. ffmpeg's built-in `-reconnect 1 -reconnect_streamed
     // 1` opens a fresh HTTP response each time the upstream hangs up; the
@@ -668,6 +677,56 @@ async fn wait_for_manifest(
 
 async fn cleanup_remux_async(state: RemuxState) {
     let _ = tokio::fs::remove_dir_all(&state.tmpdir).await;
+}
+
+fn spawn_finite_remux_storage_guard(tmpdir: PathBuf, cancel: CancellationToken) {
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = cancel.cancelled() => return,
+                _ = tokio::time::sleep(FINITE_REMUX_STORAGE_POLL_INTERVAL) => {}
+            }
+
+            let path = tmpdir.clone();
+            let size = tokio::task::spawn_blocking(move || remux_directory_size(&path))
+                .await
+                .unwrap_or(0);
+            if size < FINITE_REMUX_MAX_BYTES {
+                continue;
+            }
+
+            log::warn!(
+                "[CastProxy] Finite remux reached the {} MiB storage limit; stopping",
+                FINITE_REMUX_MAX_BYTES / (1024 * 1024)
+            );
+            cancel.cancel();
+            return;
+        }
+    });
+}
+
+fn remux_directory_size(path: &Path) -> u64 {
+    let mut total: u64 = 0;
+    let mut directories = vec![path.to_path_buf()];
+
+    while let Some(directory) = directories.pop() {
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                directories.push(entry.path());
+            } else if file_type.is_file() {
+                total = total
+                    .saturating_add(entry.metadata().map(|metadata| metadata.len()).unwrap_or(0));
+            }
+        }
+    }
+
+    total
 }
 
 /// Pump bytes from the upstream IPTV URL into ffmpeg's stdin, transparently
