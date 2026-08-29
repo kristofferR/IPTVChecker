@@ -1,6 +1,7 @@
 import { useAppStore } from "../store";
 import { hasArchive } from "./archive";
 import { verifyChannelArchive } from "./archiveVerification";
+import { isSingleConnectionPlaylist } from "./playback";
 import { isScanActive } from "./scanState";
 
 let bulkRunActive = false;
@@ -13,15 +14,16 @@ export function cancelArchiveVerification(): void {
 /** Verify every catch-up channel sequentially, with progress in the store. */
 export async function verifyAllArchives(): Promise<void> {
   const initialState = useAppStore.getState();
+  const playlist = initialState.playlist;
   if (
     bulkRunActive ||
     isScanActive(initialState.scanState) ||
     initialState.archiveGuideTestRunning ||
-    Object.values(initialState.archiveProbes).some((entry) => entry.running)
+    Object.values(initialState.archiveProbes).some((entry) => entry.running) ||
+    (initialState.playIntentActive && isSingleConnectionPlaylist(playlist))
   ) {
     return;
   }
-  const playlist = initialState.playlist;
   const targets = initialState.flatResults.filter(hasArchive);
   if (targets.length === 0) {
     return;
@@ -33,7 +35,12 @@ export async function verifyAllArchives(): Promise<void> {
   const playlistChanged = () => useAppStore.getState().playlist !== playlist;
   const shouldCancel = () => {
     const state = useAppStore.getState();
-    return bulkCancelRequested || state.playlist !== playlist || isScanActive(state.scanState);
+    return (
+      bulkCancelRequested ||
+      state.playlist !== playlist ||
+      isScanActive(state.scanState) ||
+      (state.playIntentActive && isSingleConnectionPlaylist(playlist))
+    );
   };
   setProgress(0);
   try {

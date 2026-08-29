@@ -6,6 +6,7 @@ import { cancelArchiveVerification, verifyAllArchives } from "../lib/archiveVeri
 import { blendOverallScore, computeCatchupScore } from "../lib/catchupScore";
 import { summarizeEpgCoverage } from "../lib/epgCoverage";
 import { summarizeLanguageDistribution } from "../lib/languageDistribution";
+import { isSingleConnectionPlaylist } from "../lib/playback";
 import {
   hasScanStarted,
   shouldShowContentCounts,
@@ -167,7 +168,9 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
   const archiveProbes = useAppStore((s) => s.archiveProbes);
   const archiveVerifyRun = useAppStore((s) => s.archiveVerifyRun);
   const archiveGuideTestRunning = useAppStore((s) => s.archiveGuideTestRunning);
+  const playIntentActive = useAppStore((s) => s.playIntentActive);
   const archiveProbeRunning = Object.values(archiveProbes).some((entry) => entry.running);
+  const playbackBlocksVerification = playIntentActive && isSingleConnectionPlaylist(playlist);
   const summary = useAppStore((s) => s.summary);
   const scanState = useAppStore((s) => s.scanState);
   // Every hook below must run unconditionally: the "no playlist" early return
@@ -572,14 +575,19 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                   type="button"
                   onClick={() => void verifyAllArchives()}
                   disabled={
-                    isScanActive(scanState) || archiveGuideTestRunning || archiveProbeRunning
+                    playbackBlocksVerification ||
+                    isScanActive(scanState) ||
+                    archiveGuideTestRunning ||
+                    archiveProbeRunning
                   }
                   title={
-                    isScanActive(scanState)
-                      ? "Wait for the scan to finish"
-                      : archiveGuideTestRunning || archiveProbeRunning
-                        ? "Another catch-up verification is running"
-                        : undefined
+                    playbackBlocksVerification
+                      ? "Stop playback before verifying catch-up"
+                      : isScanActive(scanState)
+                        ? "Wait for the scan to finish"
+                        : archiveGuideTestRunning || archiveProbeRunning
+                          ? "Another catch-up verification is running"
+                          : undefined
                   }
                   className="rounded-md border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/20 transition-colors disabled:opacity-40 disabled:pointer-events-none"
                 >
