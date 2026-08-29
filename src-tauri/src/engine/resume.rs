@@ -7,6 +7,7 @@ use crate::models::channel::ChannelResult;
 use crate::models::scan_log::{ChannelAttemptDebugLog, ChannelDebugLog};
 
 const REDACTED_QUERY_VALUE: &str = "REDACTED";
+const REDACTED_PATH_SEGMENT: &str = "REDACTED";
 static URL_IN_TEXT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r#"https?://[^\s"'<>]+"#).expect("valid URL regex"));
 static CATCHUP_SOURCE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
@@ -18,23 +19,33 @@ pub(crate) fn sanitize_url_for_persistence(url: &str) -> String {
     let trimmed = url.trim();
     let Ok(mut parsed) = url::Url::parse(trimmed) else {
         let without_fragment = trimmed.split_once('#').map_or(trimmed, |(value, _)| value);
-        let Some((base, query)) = without_fragment.split_once('?') else {
-            return without_fragment.to_string();
+        let (base, query) = without_fragment
+            .split_once('?')
+            .map_or((without_fragment, None), |(base, query)| {
+                (base, Some(query))
+            });
+        let sanitized_base =
+            redact_provider_path_credentials(base).unwrap_or_else(|| base.to_string());
+        let Some(query) = query else {
+            return sanitized_base;
         };
         if query.is_empty() {
-            return base.to_string();
+            return sanitized_base;
         }
 
         let mut serializer = url::form_urlencoded::Serializer::new(String::new());
         for (key, _) in url::form_urlencoded::parse(query.as_bytes()) {
             serializer.append_pair(&key, REDACTED_QUERY_VALUE);
         }
-        return format!("{}?{}", base, serializer.finish());
+        return format!("{}?{}", sanitized_base, serializer.finish());
     };
 
     let _ = parsed.set_username("");
     let _ = parsed.set_password(None);
     parsed.set_fragment(None);
+    if let Some(path) = redact_provider_path_credentials(parsed.path()) {
+        parsed.set_path(&path);
+    }
 
     let query_keys: Vec<String> = parsed
         .query_pairs()
@@ -49,6 +60,41 @@ pub(crate) fn sanitize_url_for_persistence(url: &str) -> String {
     }
 
     parsed.to_string()
+}
+
+fn redact_provider_path_credentials(path: &str) -> Option<String> {
+    let mut segments: Vec<String> = path.split('/').map(str::to_string).collect();
+    let credential_positions = segments
+        .iter()
+        .enumerate()
+        .find(|(index, segment)| {
+            matches!(
+                segment.to_ascii_lowercase().as_str(),
+                "live" | "movie" | "series" | "timeshift"
+            ) && segments.len() >= index + 4
+        })
+        .map(|(index, _)| (index + 1, index + 2))
+        .or_else(|| {
+            let nonempty: Vec<usize> = segments
+                .iter()
+                .enumerate()
+                .filter_map(|(index, segment)| (!segment.is_empty()).then_some(index))
+                .collect();
+            if nonempty.len() == 3
+                && segments[nonempty[2]].split('.').next().is_some_and(|id| {
+                    !id.is_empty() && id.chars().all(|character| character.is_ascii_digit())
+                })
+            {
+                Some((nonempty[0], nonempty[1]))
+            } else {
+                None
+            }
+        });
+
+    let (username, password) = credential_positions?;
+    segments[username] = REDACTED_PATH_SEGMENT.to_string();
+    segments[password] = REDACTED_PATH_SEGMENT.to_string();
+    Some(segments.join("/"))
 }
 
 pub(crate) fn sanitize_extinf_for_persistence(extinf_line: &str) -> String {
@@ -635,6 +681,29 @@ mod tests {
             sanitize_url_for_persistence("archive/path?username=demo&password=hunter2"),
             "archive/path?username=REDACTED&password=REDACTED"
         );
+    }
+
+    #[test]
+    fn sanitize_url_for_persistence_redacts_provider_path_credentials() {
+        let sanitized = sanitize_url_for_persistence(
+            "https://provider.example/timeshift/path-user/path-pass/${duration}/${start}/42.ts",
+        );
+        assert!(sanitized.contains("/timeshift/REDACTED/REDACTED/"));
+        assert!(!sanitized.contains("path-user"));
+        assert!(!sanitized.contains("path-pass"));
+        assert_eq!(
+            sanitize_url_for_persistence(
+                "/timeshift/relative-user/relative-pass/${duration}/${start}/42.ts"
+            ),
+            "/timeshift/REDACTED/REDACTED/${duration}/${start}/42.ts"
+        );
+
+        let extinf = sanitize_extinf_for_persistence(
+            "#EXTINF:-1 catchup-source=\"https://provider.example/timeshift/extinf-user/extinf-pass/${duration}/${start}/42.ts\",Channel",
+        );
+        assert!(extinf.contains("/timeshift/REDACTED/REDACTED/"));
+        assert!(!extinf.contains("extinf-user"));
+        assert!(!extinf.contains("extinf-pass"));
     }
 
     #[test]
