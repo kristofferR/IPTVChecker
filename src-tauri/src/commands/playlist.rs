@@ -22,7 +22,7 @@ use crate::engine::xtream::{
     fetch_xtream_live_streams, fetch_xtream_playlist_via_json_api, xtream_archive_flags,
 };
 use crate::error::AppError;
-use crate::models::channel::Channel;
+use crate::models::channel::{Channel, ContentType};
 use crate::models::playlist::PlaylistPreview;
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
@@ -68,6 +68,15 @@ pub enum PlaylistLoadProgress {
 #[derive(Clone, Serialize)]
 struct XtreamArchiveChannelUpdate {
     index: usize,
+    catchup: Option<String>,
+    catchup_days: Option<u32>,
+    extinf_line: String,
+}
+
+struct XtreamArchiveChannelSnapshot {
+    index: usize,
+    content_type: ContentType,
+    url: String,
     catchup: Option<String>,
     catchup_days: Option<u32>,
     extinf_line: String,
@@ -128,35 +137,25 @@ const PROGRESS_LOG_THROTTLE: Duration = Duration::from_secs(1);
 const XTREAM_ARCHIVE_ENRICHMENT_GRACE_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn apply_xtream_archive_flags_with_updates(
-    channels: &mut [Channel],
+    channels: &mut [XtreamArchiveChannelSnapshot],
     archive_flags: &HashMap<String, Option<u32>>,
 ) -> Vec<XtreamArchiveChannelUpdate> {
-    let previous = channels
-        .iter()
-        .map(|channel| {
-            (
-                channel.catchup.clone(),
-                channel.catchup_days,
-                channel.extinf_line.clone(),
-            )
-        })
-        .collect::<Vec<_>>();
-    apply_xtream_archive_flags(channels, archive_flags);
-
     channels
-        .iter()
-        .zip(previous)
-        .filter_map(|(channel, before)| {
-            let after = (
-                channel.catchup.clone(),
-                channel.catchup_days,
-                channel.extinf_line.clone(),
+        .iter_mut()
+        .filter_map(|channel| {
+            let changed = crate::engine::xtream::apply_xtream_archive_fields(
+                channel.content_type,
+                &channel.url,
+                &mut channel.catchup,
+                &mut channel.catchup_days,
+                &mut channel.extinf_line,
+                archive_flags,
             );
-            (after != before).then_some(XtreamArchiveChannelUpdate {
+            changed.then(|| XtreamArchiveChannelUpdate {
                 index: channel.index,
-                catchup: after.0,
-                catchup_days: after.1,
-                extinf_line: after.2,
+                catchup: channel.catchup.clone(),
+                catchup_days: channel.catchup_days,
+                extinf_line: channel.extinf_line.clone(),
             })
         })
         .collect()
@@ -840,23 +839,35 @@ pub(crate) async fn open_playlist_xtream_inner(
                 get_php_error
             );
             let live_streams = live_streams_task.await.ok().flatten();
-            let m3u_bytes = fetch_xtream_playlist_via_json_api(
+            let m3u_bytes = match fetch_xtream_playlist_via_json_api(
                 &server,
                 &username,
                 &password,
                 accept_invalid_certs,
                 live_streams,
             )
-            .await?;
+            .await
+            {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    archive_enrichment.complete(HashMap::new()).await;
+                    return Err(error);
+                }
+            };
             // Same rule as the normal download path: a potentially large
             // synchronous cache write belongs on a blocking thread.
             {
                 let cache_path = cache_path.clone();
-                tokio::task::spawn_blocking(move || write_bytes_to_cache(&cache_path, &m3u_bytes))
-                    .await
-                    .map_err(|err| {
-                        AppError::Other(format!("Playlist cache write task failed: {err}"))
-                    })??;
+                let write_result = tokio::task::spawn_blocking(move || {
+                    write_bytes_to_cache(&cache_path, &m3u_bytes)
+                })
+                .await
+                .map_err(|err| AppError::Other(format!("Playlist cache write task failed: {err}")))
+                .and_then(|result| result);
+                if let Err(error) = write_result {
+                    archive_enrichment.complete(HashMap::new()).await;
+                    return Err(error);
+                }
             }
             (cache_path.to_string_lossy().to_string(), None)
         }
@@ -901,7 +912,18 @@ pub(crate) async fn open_playlist_xtream_inner(
     if let Some(task) = pending_archive_task {
         let app = app.clone();
         let source_identity = source_identity.clone();
-        let mut channels = preview.channels.clone();
+        let mut channels = preview
+            .channels
+            .iter()
+            .map(|channel| XtreamArchiveChannelSnapshot {
+                index: channel.index,
+                content_type: channel.content_type,
+                url: channel.url.clone(),
+                catchup: channel.catchup.clone(),
+                catchup_days: channel.catchup_days,
+                extinf_line: channel.extinf_line.clone(),
+            })
+            .collect::<Vec<_>>();
         let mut archive_enrichment = archive_enrichment;
         tokio::spawn(async move {
             match task.await {

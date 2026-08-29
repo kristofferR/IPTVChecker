@@ -465,26 +465,45 @@ fn apply_archive_flags<T: XtreamArchiveTarget>(
 ) {
     for target in targets {
         let (content_type, url, catchup, catchup_days, extinf_line) = target.archive_fields();
-        if content_type != ContentType::Live || extinf_explicitly_disables_catchup(extinf_line) {
-            continue;
-        }
-        let Some(stream_id) = xtream_stream_id_from_url(url) else {
-            continue;
-        };
-        let Some(days) = archive_flags.get(&stream_id) else {
-            continue;
-        };
-
-        let added_catchup = catchup.is_none();
-        if added_catchup {
-            *catchup = Some("xc".to_string());
-        }
-        let added_days = catchup_days.is_none().then_some(*days).flatten();
-        if catchup_days.is_none() {
-            *catchup_days = *days;
-        }
-        append_xtream_archive_attrs(extinf_line, added_catchup, added_days);
+        apply_xtream_archive_fields(
+            content_type,
+            url,
+            catchup,
+            catchup_days,
+            extinf_line,
+            archive_flags,
+        );
     }
+}
+
+pub(crate) fn apply_xtream_archive_fields(
+    content_type: ContentType,
+    url: &str,
+    catchup: &mut Option<String>,
+    catchup_days: &mut Option<u32>,
+    extinf_line: &mut String,
+    archive_flags: &HashMap<String, Option<u32>>,
+) -> bool {
+    if content_type != ContentType::Live || extinf_explicitly_disables_catchup(extinf_line) {
+        return false;
+    }
+    let Some(stream_id) = xtream_stream_id_from_url(url) else {
+        return false;
+    };
+    let Some(days) = archive_flags.get(&stream_id) else {
+        return false;
+    };
+
+    let added_catchup = catchup.is_none();
+    if added_catchup {
+        *catchup = Some("xc".to_string());
+    }
+    let added_days = catchup_days.is_none().then_some(*days).flatten();
+    if catchup_days.is_none() {
+        *catchup_days = *days;
+    }
+    append_xtream_archive_attrs(extinf_line, added_catchup, added_days);
+    added_catchup || added_days.is_some()
 }
 
 fn xtream_stream_id_from_url(url: &str) -> Option<String> {
