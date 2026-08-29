@@ -253,6 +253,7 @@ async fn geoblock_confirmation_unconfirmed_when_proxy_candidates_fail_fast() {
             "also-invalid".to_string(),
         ],
         1.0,
+        &CancellationToken::new(),
     )
     .await;
 

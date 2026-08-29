@@ -283,6 +283,22 @@ describe("computeCatchupScore", () => {
 
     expect(computeCatchupScore(results, probes)).toBe(7.5);
   });
+
+  it("counts completed but unverified probes as failed verification", () => {
+    const results = [channel(0, 7), channel(1, 7)];
+    const probes = {
+      0: entry([
+        [0, true, 400, false],
+        [7, true, 700, false],
+      ]),
+      1: entry([
+        [0, true, 400, false],
+        [7, true, 700, false],
+      ]),
+    };
+
+    expect(computeCatchupScore(results, probes)).toBe(5);
+  });
 });
 
 describe("archiveDepthMidpoint", () => {

@@ -117,6 +117,21 @@ pub fn load_proxy_list(proxy_file: &str) -> Result<Vec<String>, AppError> {
 
 /// Test stream access through a specific proxy.
 pub async fn test_with_proxy(url: &str, proxy: &str, timeout: f64, retries: u32) -> bool {
+    let cancel = tokio_util::sync::CancellationToken::new();
+    test_with_proxy_cancellable(url, proxy, timeout, retries, &cancel).await
+}
+
+async fn test_with_proxy_cancellable(
+    url: &str,
+    proxy: &str,
+    timeout: f64,
+    retries: u32,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> bool {
+    if cancel.is_cancelled() {
+        return false;
+    }
+
     let proxy_url = match reqwest::Proxy::all(proxy) {
         Ok(p) => p,
         Err(_) => return false,
@@ -132,7 +147,6 @@ pub async fn test_with_proxy(url: &str, proxy: &str, timeout: f64, retries: u32)
         Err(_) => return false,
     };
 
-    let cancel = tokio_util::sync::CancellationToken::new();
     let outcome = crate::engine::checker::check_channel_status_with_debug(
         &client,
         url,
@@ -141,7 +155,7 @@ pub async fn test_with_proxy(url: &str, proxy: &str, timeout: f64, retries: u32)
         RetryBackoff::None,
         None,
         "TiviMate/5.1.6 (Android 12)",
-        &cancel,
+        cancel,
     )
     .await;
 
@@ -157,6 +171,7 @@ pub async fn confirm_geoblock(
     url: &str,
     proxy_list: &[String],
     timeout: f64,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> crate::models::channel::ChannelStatus {
     use rand::seq::IndexedRandom;
 
@@ -168,8 +183,11 @@ pub async fn confirm_geoblock(
     };
 
     for proxy in &sample {
+        if cancel.is_cancelled() {
+            break;
+        }
         log::debug!("Testing geoblock via proxy: {}", proxy);
-        if test_with_proxy(url, proxy, timeout, 3).await {
+        if test_with_proxy_cancellable(url, proxy, timeout, 3, cancel).await {
             return crate::models::channel::ChannelStatus::GeoblockedConfirmed;
         }
     }

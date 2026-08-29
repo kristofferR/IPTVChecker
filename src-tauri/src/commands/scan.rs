@@ -290,7 +290,7 @@ async fn compute_shared_url_result(
     let status = if checked_status == ChannelStatus::Geoblocked && test_geoblock {
         if let Some(proxies) = proxy_list {
             if !proxies.is_empty() {
-                proxy::confirm_geoblock(channel_url, proxies, timeout).await
+                proxy::confirm_geoblock(channel_url, proxies, timeout, cancel).await
             } else {
                 checked_status
             }
@@ -2812,10 +2812,10 @@ pub async fn quick_check_channel(
         } => outcome,
     };
 
-    if let Some(request_id) = request_id.as_deref() {
-        state.unregister_quick_check(request_id).await;
-    }
     if matches!(outcome, Err(AppError::Cancelled)) {
+        if let Some(request_id) = request_id.as_deref() {
+            state.unregister_quick_check(request_id).await;
+        }
         return Err(AppError::Cancelled);
     }
 
@@ -2848,7 +2848,8 @@ pub async fn quick_check_channel(
         match settings.proxy_file.as_deref() {
             Some(proxy_file) => match proxy::load_proxy_list(proxy_file) {
                 Ok(proxies) => {
-                    proxy::confirm_geoblock(&channel.url, &proxies, settings.timeout).await
+                    proxy::confirm_geoblock(&channel.url, &proxies, settings.timeout, &cancel_token)
+                        .await
                 }
                 Err(error) => {
                     log::warn!(
@@ -2865,12 +2866,22 @@ pub async fn quick_check_channel(
         checked_status
     };
 
+    if cancel_token.is_cancelled() {
+        if let Some(request_id) = request_id.as_deref() {
+            state.unregister_quick_check(request_id).await;
+        }
+        return Err(AppError::Cancelled);
+    }
+
     let mut result = channel;
     result.status = status;
     result.stream_url = stream_url;
     result.latency_ms = latency_ms;
     result.error_reason = error_reason;
     result.screenshot_error_reason = None;
+    if let Some(request_id) = request_id.as_deref() {
+        state.unregister_quick_check(request_id).await;
+    }
     Ok(result)
 }
 

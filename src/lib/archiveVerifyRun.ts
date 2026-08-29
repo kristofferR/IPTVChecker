@@ -57,6 +57,14 @@ export async function verifyAllArchives(): Promise<void> {
   bulkCancelRequested = false;
   const abortController = new AbortController();
   bulkAbortController = abortController;
+  const unsubscribeGeneration = useAppStore.subscribe((state, previousState) => {
+    if (
+      state.archiveProbeGeneration !== generation &&
+      state.archiveProbeGeneration !== previousState.archiveProbeGeneration
+    ) {
+      abortController.abort();
+    }
+  });
   const setProgress = (done: number) =>
     useAppStore.getState().setArchiveVerifyRun({ running: true, done, total: targets.length });
   const shouldCancel = () => {
@@ -89,6 +97,7 @@ export async function verifyAllArchives(): Promise<void> {
       setProgress(done);
     }
   } finally {
+    unsubscribeGeneration();
     useAppStore.getState().setArchiveVerifyRun(null);
     bulkRunActive = false;
     if (bulkAbortController === abortController) {

@@ -39,7 +39,8 @@ export function computeCatchupScore(
   for (const channel of catchupChannels) {
     const entry = probes[channel.index];
     const verdict = archiveVerdict(channel, entry);
-    if (verdict === "advertised") {
+    const completed = entry != null && !entry.running && entry.checkedAt != null;
+    if (!completed) {
       continue;
     }
     tested += 1;
