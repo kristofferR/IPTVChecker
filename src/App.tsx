@@ -527,6 +527,12 @@ export default function App() {
     result: ChannelResult;
     options: ArchivePlayOptions;
   } | null>(null);
+  const [pendingPlaybackReason, setPendingPlaybackReason] = useState<"scan" | "archive_probe" | null>(
+    null,
+  );
+  const archiveProbeActive = useAppStore((state) =>
+    Object.values(state.archiveProbes).some((probe) => probe.running),
+  );
   const liveSelectedChannel = useAppStore(selectLiveSelectedChannel);
   const showHistory = useAppStore((s) => s.showHistory);
   const historyEntries = useAppStore((s) => s.historyEntries);
@@ -1131,6 +1137,15 @@ export default function App() {
     (result: ChannelResult) => {
       if (isScanActive(getStore().scanState) && getStore().playlist?.single_provider) {
         getStore().setPendingPlaybackChannel(result);
+        setPendingPlaybackReason("scan");
+        return;
+      }
+      if (
+        getStore().playlist?.single_provider &&
+        Object.values(getStore().archiveProbes).some((probe) => probe.running)
+      ) {
+        getStore().setPendingPlaybackChannel(result);
+        setPendingPlaybackReason("archive_probe");
         return;
       }
       // While a cast session is active, redirect the cast to the new channel
@@ -1160,6 +1175,15 @@ export default function App() {
     (result: ChannelResult, options: ArchivePlayOptions) => {
       if (isScanActive(getStore().scanState) && getStore().playlist?.single_provider) {
         setPendingArchivePlayback({ result, options });
+        setPendingPlaybackReason("scan");
+        return;
+      }
+      if (
+        getStore().playlist?.single_provider &&
+        Object.values(getStore().archiveProbes).some((probe) => probe.running)
+      ) {
+        setPendingArchivePlayback({ result, options });
+        setPendingPlaybackReason("archive_probe");
         return;
       }
 
@@ -1205,6 +1229,7 @@ export default function App() {
   }, [playbackVideoElement]);
 
   const handleProceedPlayback = useCallback(() => {
+    setPendingPlaybackReason(null);
     if (pendingArchivePlayback) {
       setPendingArchivePlayback(null);
       getStore().setPlayIntentActive(true);
@@ -1217,6 +1242,12 @@ export default function App() {
     getStore().setPlayIntentActive(true);
     playStream(channel);
   }, [pendingArchivePlayback, pendingPlaybackChannel, playStream, streamPlayer.playArchive]);
+
+  useEffect(() => {
+    if (pendingPlaybackReason === "archive_probe" && !archiveProbeActive) {
+      handleProceedPlayback();
+    }
+  }, [archiveProbeActive, handleProceedPlayback, pendingPlaybackReason]);
 
   // Successful playback is itself a channel check. Keep the result row and
   // detail panel in sync with everything the active player can establish.
@@ -1366,6 +1397,7 @@ export default function App() {
         if (state.pendingPlaybackChannel || pendingArchivePlayback) {
           state.setPendingPlaybackChannel(null);
           setPendingArchivePlayback(null);
+          setPendingPlaybackReason(null);
           return;
         }
         if (state.openSourceDialogState) {
@@ -1654,29 +1686,37 @@ export default function App() {
       {(pendingPlaybackChannel || pendingArchivePlayback) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-xl rounded-xl border border-border-app bg-overlay p-5 shadow-2xl">
-            <h2 className="text-[16px] font-semibold mb-2">Scan currently running</h2>
+            <h2 className="text-[16px] font-semibold mb-2">
+              {pendingPlaybackReason === "archive_probe"
+                ? "Catch-up test currently running"
+                : "Scan currently running"}
+            </h2>
             <p className="text-[14px] text-text-secondary leading-relaxed">
-              A scan is currently running. Playing a channel while scanning may interfere with the
-              scan or cause playback issues if the server&apos;s max connection limit is exceeded.
+              {pendingPlaybackReason === "archive_probe"
+                ? "Playback will start when the catch-up test finishes, so a single-connection server is not interrupted."
+                : "A scan is currently running. Playing a channel while scanning may interfere with the scan or cause playback issues if the server&apos;s max connection limit is exceeded."}
             </p>
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
                 onClick={() => {
                   getStore().setPendingPlaybackChannel(null);
                   setPendingArchivePlayback(null);
+                  setPendingPlaybackReason(null);
                 }}
                 className="macos-btn px-3 py-2 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
                 type="button"
               >
                 Cancel
               </button>
-              <button
-                onClick={handleProceedPlayback}
-                className="macos-btn macos-btn-primary px-3 py-2 min-h-9 text-[13px] font-medium bg-blue-600 hover:bg-blue-500 rounded-md"
-                type="button"
-              >
-                Proceed
-              </button>
+              {pendingPlaybackReason !== "archive_probe" && (
+                <button
+                  onClick={handleProceedPlayback}
+                  className="macos-btn macos-btn-primary px-3 py-2 min-h-9 text-[13px] font-medium bg-blue-600 hover:bg-blue-500 rounded-md"
+                  type="button"
+                >
+                  Proceed
+                </button>
+              )}
             </div>
           </div>
         </div>

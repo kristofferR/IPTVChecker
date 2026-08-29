@@ -60,7 +60,7 @@ export function substituteArchiveTemplate(template: string, window: ArchiveWindo
   const values: Record<string, number> = {
     start,
     utc: start,
-    timestamp: start,
+    timestamp: now,
     lutc: now,
     now,
     end: start + duration,
@@ -90,8 +90,9 @@ function formatXtreamStart(epochS: number): string {
   )}-${pad(date.getUTCMinutes())}`;
 }
 
-/** `http(s)://host[/live]/user/pass/id[.ext]` — the Xtream live URL shape. */
-const XTREAM_LIVE_URL = /^(https?:\/\/[^/]+)(?:\/live)?\/([^/]+)\/([^/]+)\/(\d+)(?:\.\w+)?$/;
+/** `http(s)://host[/prefix][/live]/user/pass/id[.ext]` — Xtream live URL shape. */
+const XTREAM_LIVE_URL =
+  /^(https?:\/\/[^/]+)((?:\/[^/]+)*?)(?:\/live)?\/([^/]+)\/([^/]+)\/(\d+)(?:\.\w+)?$/;
 
 function defaultArchiveUrl(url: string, window: ArchiveWindow): string {
   return appendQuery(url, substituteArchiveTemplate("utc=${start}&lutc=${now}", window));
@@ -123,9 +124,9 @@ export function buildArchiveUrl(channel: ArchiveUrlFields, window: ArchiveWindow
       const suffix = suffixStart === -1 ? "" : channel.url.slice(suffixStart);
       const match = streamUrl.match(XTREAM_LIVE_URL);
       if (!match) return defaultArchiveUrl(channel.url, window);
-      const [, base, user, pass, id] = match;
-      const durationMinutes = Math.max(1, Math.round(window.durationS / 60));
-      return `${base}/timeshift/${user}/${pass}/${durationMinutes}/${formatXtreamStart(
+      const [, base, prefix, user, pass, id] = match;
+      const durationMinutes = Math.max(1, Math.ceil(window.durationS / 60));
+      return `${base}${prefix}/timeshift/${user}/${pass}/${durationMinutes}/${formatXtreamStart(
         window.startEpochS,
       )}/${id}.m3u8${suffix}`;
     }

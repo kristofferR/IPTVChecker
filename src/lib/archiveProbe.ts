@@ -56,9 +56,12 @@ export async function probeArchivePoint(
     });
     return {
       label: point.label,
-      ok: checked.status === "alive",
+      ok: checked.status === "alive" || checked.status === "drm",
       latencyMs: checked.latency_ms,
-      error: checked.status === "alive" ? null : (checked.error_reason ?? checked.status),
+      error:
+        checked.status === "alive" || checked.status === "drm"
+          ? null
+          : (checked.error_reason ?? checked.status),
     };
   } catch (error) {
     return {

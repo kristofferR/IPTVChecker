@@ -20,6 +20,12 @@ const EPG_DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const EPG_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 /// Hard cap on a single downloaded guide; anything larger is a broken feed.
 const EPG_MAX_DOWNLOAD_BYTES: u64 = 1024 * 1024 * 1024;
+/// Prevent compressed XMLTV feeds from expanding without bound while parsing.
+const EPG_MAX_DECOMPRESSED_BYTES: u64 = 1024 * 1024 * 1024;
+/// Missing XMLTV stop times use the following programme, or this fallback.
+const EPG_MISSING_STOP_FALLBACK: i64 = 6 * 60 * 60;
+/// Keep recently used EPG downloads bounded across distinct playlist sources.
+const EPG_CACHE_MAX_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 static NEXT_TEMP_FILE_ID: AtomicU64 = AtomicU64::new(0);
 
 struct PartialEpgDownload {
@@ -29,6 +35,42 @@ struct PartialEpgDownload {
 impl Drop for PartialEpgDownload {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+struct LimitedReader<R> {
+    inner: R,
+    remaining: u64,
+}
+
+impl<R: Read> LimitedReader<R> {
+    fn new(inner: R, limit: u64) -> Self {
+        Self {
+            inner,
+            remaining: limit,
+        }
+    }
+}
+
+impl<R: Read> Read for LimitedReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        if self.remaining == 0 {
+            let mut extra = [0u8; 1];
+            return match self.inner.read(&mut extra)? {
+                0 => Ok(0),
+                _ => Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "EPG source exceeds decompressed size limit",
+                )),
+            };
+        }
+        let readable = buffer.len().min(self.remaining as usize);
+        let read = self.inner.read(&mut buffer[..readable])?;
+        self.remaining -= read as u64;
+        Ok(read)
     }
 }
 
@@ -110,6 +152,17 @@ impl EpgIndex {
     fn finalize(&mut self) {
         for programmes in self.programmes.values_mut() {
             programmes.sort_by_key(|programme| programme.start);
+            for index in 0..programmes.len() {
+                if programmes[index].stop == programmes[index].start {
+                    let start = programmes[index].start;
+                    let stop = programmes[index + 1..]
+                        .iter()
+                        .find(|programme| programme.start > start)
+                        .map(|programme| programme.start)
+                        .unwrap_or(start.saturating_add(EPG_MISSING_STOP_FALLBACK));
+                    programmes[index].stop = stop;
+                }
+            }
             programmes.dedup();
         }
     }
@@ -195,7 +248,7 @@ pub fn parse_xmltv_into_with_source<R: Read>(
     reader.config_mut().trim_text(true);
 
     let mut buffer = Vec::new();
-    let mut current: Option<(String, i64, i64)> = None;
+    let mut current: Option<(String, i64, Option<i64>)> = None;
     let mut current_title: Option<String> = None;
     let mut in_title = false;
 
@@ -219,7 +272,7 @@ pub fn parse_xmltv_into_with_source<R: Read>(
                         }
                     }
                     current = match (channel, start, stop) {
-                        (Some(channel), Some(start), Some(stop))
+                        (Some(channel), Some(start), stop)
                             if wanted.is_empty() || wanted.contains(&channel) =>
                         {
                             Some((channel, start, stop))
@@ -254,14 +307,16 @@ pub fn parse_xmltv_into_with_source<R: Read>(
             Ok(Event::End(element)) => match element.name().as_ref() {
                 b"programme" => {
                     if let Some((channel, start, stop)) = current.take() {
-                        if stop > start {
+                        if stop.is_none_or(|stop| stop > start) {
                             index
                                 .programmes
                                 .entry((source_identity.to_string(), channel))
                                 .or_default()
                                 .push(EpgProgramme {
                                     start,
-                                    stop,
+                                    // `start` is an internal sentinel for an omitted stop time;
+                                    // finalize replaces it with the following programme or fallback.
+                                    stop: stop.unwrap_or(start),
                                     title: current_title
                                         .take()
                                         .unwrap_or_else(|| "Untitled".to_string()),
@@ -294,9 +349,15 @@ pub fn open_guide_file(path: &Path) -> Result<Box<dyn Read + Send>, AppError> {
     file.seek(std::io::SeekFrom::Start(0))
         .map_err(AppError::Io)?;
     if read == 2 && magic == [0x1f, 0x8b] {
-        Ok(Box::new(flate2::read::GzDecoder::new(file)))
+        Ok(Box::new(LimitedReader::new(
+            flate2::read::GzDecoder::new(file),
+            EPG_MAX_DECOMPRESSED_BYTES,
+        )))
     } else {
-        Ok(Box::new(file))
+        Ok(Box::new(LimitedReader::new(
+            file,
+            EPG_MAX_DECOMPRESSED_BYTES,
+        )))
     }
 }
 
@@ -331,6 +392,45 @@ fn cache_is_fresh(path: &Path) -> bool {
 fn temporary_cache_path(target: &Path) -> PathBuf {
     let id = NEXT_TEMP_FILE_ID.fetch_add(1, Ordering::Relaxed);
     target.with_extension(format!("{}.{}.part", std::process::id(), id))
+}
+
+fn prune_epg_cache(cache_dir: &Path, keep: &Path, max_bytes: u64) {
+    let Ok(entries) = std::fs::read_dir(cache_dir) else {
+        return;
+    };
+    let mut cached = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let name = path.file_name()?.to_str()?;
+            if path == keep || !name.starts_with("epg-") || !name.ends_with(".bin") {
+                return None;
+            }
+            let metadata = entry.metadata().ok()?;
+            metadata.is_file().then_some((
+                metadata
+                    .modified()
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH),
+                metadata.len(),
+                path,
+            ))
+        })
+        .collect::<Vec<_>>();
+    let mut total_bytes = cached.iter().map(|(_, size, _)| size).sum::<u64>();
+    total_bytes += std::fs::metadata(keep)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    cached.sort_by_key(|(modified, _, _)| *modified);
+
+    for (_, size, path) in cached {
+        if total_bytes <= max_bytes {
+            break;
+        }
+        match std::fs::remove_file(&path) {
+            Ok(()) => total_bytes = total_bytes.saturating_sub(size),
+            Err(error) => log::warn!("Failed to prune EPG cache {}: {error}", path.display()),
+        }
+    }
 }
 
 /// Download one EPG source into the cache (streamed), reusing a fresh copy.
@@ -387,6 +487,7 @@ pub async fn download_epg_source(
     file.flush().map_err(AppError::Io)?;
     drop(file);
     crate::engine::disk::atomic_rename(&target, &temp)?;
+    prune_epg_cache(cache_dir, &target, EPG_CACHE_MAX_BYTES);
     log::info!(
         "Downloaded EPG {} ({downloaded} bytes)",
         redact_epg_source(url)
@@ -453,6 +554,26 @@ mod tests {
     }
 
     #[test]
+    fn infers_missing_programme_stop_times() {
+        let xml = r#"<tv>
+  <programme start="20260828200000" channel="nrk1.no"><title>News</title></programme>
+  <programme start="20260828210000" stop="20260828211000" channel="nrk1.no"><title>Weather</title></programme>
+  <programme start="20260828220000" channel="nrk1.no"><title>Late</title></programme>
+</tv>"#;
+        let mut index = EpgIndex::default();
+
+        parse_xmltv_into(xml.as_bytes(), &HashSet::new(), &mut index).expect("xmltv should parse");
+
+        let programmes = index.programmes_for("nrk1.no", 0, i64::MAX);
+        assert_eq!(programmes.len(), 3);
+        assert_eq!(programmes[0].stop, programmes[1].start);
+        assert_eq!(
+            programmes[2].stop - programmes[2].start,
+            EPG_MISSING_STOP_FALLBACK
+        );
+    }
+
+    #[test]
     fn parses_cdata_programme_titles() {
         let xml = r#"<tv><programme start="20260828200000" stop="20260828210000" channel="nrk1.no"><title><![CDATA[News & Weather]]></title></programme></tv>"#;
         let mut index = EpgIndex::default();
@@ -513,6 +634,48 @@ mod tests {
         let target = Path::new("epg-cache.bin");
 
         assert_ne!(temporary_cache_path(target), temporary_cache_path(target));
+    }
+
+    #[test]
+    fn rejects_readers_that_exceed_the_decompressed_limit() {
+        let mut reader = LimitedReader::new("too long".as_bytes(), 3);
+        let mut output = Vec::new();
+
+        let error = reader
+            .read_to_end(&mut output)
+            .expect_err("should exceed limit");
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(output, b"too");
+    }
+
+    #[test]
+    fn prunes_old_epg_cache_entries_but_keeps_current_download() {
+        let dir = std::env::temp_dir().join(format!(
+            "iptv-epg-cache-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let oldest = dir.join("epg-oldest.bin");
+        let newest = dir.join("epg-newest.bin");
+        let keep = dir.join("epg-keep.bin");
+        std::fs::write(&oldest, [0; 4]).expect("write oldest");
+        std::fs::write(&newest, [0; 4]).expect("write newest");
+        std::fs::write(&keep, [0; 4]).expect("write keep");
+        std::fs::File::open(&oldest)
+            .expect("open oldest")
+            .set_modified(std::time::SystemTime::UNIX_EPOCH)
+            .expect("age oldest");
+
+        prune_epg_cache(&dir, &keep, 8);
+
+        assert!(!oldest.exists());
+        assert!(newest.exists());
+        assert!(keep.exists());
+        std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 
     #[test]
