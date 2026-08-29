@@ -67,6 +67,7 @@ pub enum PlaylistLoadProgress {
 
 pub(crate) const PROGRESS_THROTTLE: Duration = Duration::from_millis(100);
 const PROGRESS_LOG_THROTTLE: Duration = Duration::from_secs(1);
+const XTREAM_ARCHIVE_ENRICHMENT_GRACE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Default)]
 struct PlaylistProgressLogState {
@@ -704,52 +705,37 @@ pub(crate) async fn open_playlist_xtream_inner(
     let cache_path = remote_playlist_cache_path_from_data_dir(&data_dir, &source_key)?;
     let accept_invalid_certs = accepts_invalid_certs(Some(app)).await;
 
-    // Start the potentially large live-stream catalog in parallel, but do not
-    // let optional archive metadata delay a successful /get.php download.
-    let playlist_and_live_streams = async {
-        let live_streams =
-            fetch_xtream_live_streams(&server, &username, &password, accept_invalid_certs);
-        let playlist = download_playlist_to_cache_in_data_dir(
+    // Keep the potentially large live-stream catalog running independently so
+    // it can enrich the parsed playlist without imposing its full timeout.
+    let live_streams_task = {
+        let server = server.clone();
+        let username = username.clone();
+        let password = password.clone();
+        tokio::spawn(async move {
+            fetch_xtream_live_streams(&server, &username, &password, accept_invalid_certs).await
+        })
+    };
+    let (xtream_account_info, m3u_result) = tokio::join!(
+        fetch_xtream_account_info(&server, &username, &password, accept_invalid_certs),
+        download_playlist_to_cache_in_data_dir(
             Some(app),
             &data_dir,
             &source_key,
             &download_url,
             "Xtream playlist",
             accept_invalid_certs,
-        );
-        tokio::pin!(live_streams, playlist);
-
-        tokio::select! {
-            biased;
-            live_streams = &mut live_streams => (playlist.await, live_streams),
-            m3u_result = &mut playlist => {
-                if m3u_result.is_ok() {
-                    (m3u_result, None)
-                } else {
-                    (m3u_result, live_streams.await)
-                }
-            }
-        }
-    };
-    let (xtream_account_info, (m3u_result, live_streams)) = tokio::join!(
-        fetch_xtream_account_info(&server, &username, &password, accept_invalid_certs),
-        playlist_and_live_streams,
+        ),
     );
 
     // If /get.php failed, fall back to the JSON API.
-    let (cached_path, archive_flags) = match m3u_result {
-        Ok(path) => (
-            path,
-            live_streams
-                .as_deref()
-                .map(xtream_archive_flags)
-                .unwrap_or_default(),
-        ),
+    let (cached_path, archive_task) = match m3u_result {
+        Ok(path) => (path, Some(live_streams_task)),
         Err(get_php_error) => {
             log::info!(
                 "Xtream /get.php download failed ({}), falling back to JSON API",
                 get_php_error
             );
+            let live_streams = live_streams_task.await.ok().flatten();
             let m3u_bytes = fetch_xtream_playlist_via_json_api(
                 &server,
                 &username,
@@ -768,13 +754,29 @@ pub(crate) async fn open_playlist_xtream_inner(
                         AppError::Other(format!("Playlist cache write task failed: {err}"))
                     })??;
             }
-            (cache_path.to_string_lossy().to_string(), HashMap::new())
+            (cache_path.to_string_lossy().to_string(), None)
         }
     };
 
     let mut preview =
         parse_playlist_off_thread(Some(app), cached_path.clone(), group_filter, channel_search)
             .await?;
+    let archive_flags = if let Some(mut task) = archive_task {
+        match tokio::time::timeout(XTREAM_ARCHIVE_ENRICHMENT_GRACE_TIMEOUT, &mut task).await {
+            Ok(Ok(Some(live_streams))) => xtream_archive_flags(&live_streams),
+            Ok(Ok(None)) => HashMap::new(),
+            Ok(Err(error)) => {
+                log::debug!("Xtream live-stream catalog task failed: {error}");
+                HashMap::new()
+            }
+            Err(_) => {
+                task.abort();
+                HashMap::new()
+            }
+        }
+    } else {
+        HashMap::new()
+    };
     if !archive_flags.is_empty() {
         apply_xtream_archive_flags(&mut preview.channels, &archive_flags);
     }
