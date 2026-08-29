@@ -99,6 +99,12 @@ describe("buildArchiveUrl", () => {
         WINDOW,
       ),
     ).toBe(`http://h/replay/${START}-3600.m3u8`);
+    expect(
+      buildArchiveUrl(
+        urlFields("http://h/live/s.m3u8", "default", "HTTPS://h/replay/${start}.m3u8"),
+        WINDOW,
+      ),
+    ).toBe(`HTTPS://h/replay/${START}.m3u8`);
     // Query templates attach to the stream URL, respecting existing queries.
     expect(
       buildArchiveUrl(urlFields("http://h/s.m3u8?token=x", "shift", "?utc=${start}"), WINDOW),

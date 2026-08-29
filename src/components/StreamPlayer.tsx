@@ -282,7 +282,16 @@ export function StreamPlayer({
               }}
               onKeyUp={(e) => {
                 if (
-                  (e.key === "ArrowLeft" || e.key === "ArrowRight") &&
+                  [
+                    "ArrowDown",
+                    "ArrowLeft",
+                    "ArrowRight",
+                    "ArrowUp",
+                    "End",
+                    "Home",
+                    "PageDown",
+                    "PageUp",
+                  ].includes(e.key) &&
                   archiveScrubEpochS != null
                 ) {
                   onSeekArchive(archiveScrubEpochS);

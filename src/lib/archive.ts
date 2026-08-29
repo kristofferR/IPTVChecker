@@ -111,7 +111,7 @@ export function buildArchiveUrl(channel: ArchiveUrlFields, window: ArchiveWindow
   const source = channel.catchup_source?.trim();
   if (source) {
     const resolved = substituteArchiveTemplate(source, window);
-    if (/^https?:\/\//.test(resolved)) return resolved;
+    if (/^https?:\/\//i.test(resolved)) return resolved;
     if (resolved.startsWith("?") || resolved.startsWith("&")) {
       return appendQuery(channel.url, resolved.slice(1));
     }

@@ -218,30 +218,32 @@ export function ThumbnailPanel({
   // return lives after them — bailing out first would change the hook count
   // between renders as soon as a channel is selected.
   const resolvedUrl = result?.stream_url?.trim() || null;
+  const activeArchiveSession =
+    archiveSession && archiveSession.baseResult.index === result?.index ? archiveSession : null;
 
   // Memoized so the prop identity is stable across renders — without this, any
   // useEffect downstream of `castRequest` would tear down and re-fire on every
   // parent re-render even when none of its inputs actually changed.
   const castRequest = useMemo(() => {
     if (!result) return null;
-    if (!archiveSession) return buildCastRequest(result);
+    if (!activeArchiveSession) return buildCastRequest(result);
     return buildCastRequest({
-      ...archiveSession.baseResult,
-      url: archiveSession.url,
+      ...activeArchiveSession.baseResult,
+      url: activeArchiveSession.url,
       content_type: "movie",
       stream_url: null,
     });
-  }, [archiveSession, result]);
+  }, [activeArchiveSession, result]);
 
   const externalPlaybackResult = useMemo(() => {
-    if (!archiveSession) return result;
+    if (!activeArchiveSession) return result;
     return {
-      ...archiveSession.baseResult,
-      url: archiveSession.url,
+      ...activeArchiveSession.baseResult,
+      url: activeArchiveSession.url,
       content_type: "movie" as const,
       stream_url: null,
     };
-  }, [archiveSession, result]);
+  }, [activeArchiveSession, result]);
 
   const handleCopyResolvedUrl = useCallback(async () => {
     if (!resolvedUrl) return;
@@ -327,7 +329,7 @@ export function ThumbnailPanel({
           castRequest={castRequest}
           compact
           chromecast={chromecast}
-          archiveSession={archiveSession}
+          archiveSession={activeArchiveSession}
           videoElement={videoElement}
           onSeekArchive={onSeekArchive}
           onGoLive={onGoLive}
@@ -531,7 +533,7 @@ export function ThumbnailPanel({
       {onPlayArchive && (
         <ArchiveCard
           result={result}
-          archiveSession={archiveSession ?? null}
+          archiveSession={activeArchiveSession}
           isCasting={isCastSessionActive(chromecast.session)}
           onPlayArchive={onPlayArchive}
         />
@@ -676,7 +678,7 @@ export function ThumbnailPanel({
                     }
                     castRequest={castRequest}
                     chromecast={chromecast}
-                    archiveSession={archiveSession}
+                    archiveSession={activeArchiveSession}
                     videoElement={videoElement}
                     onSeekArchive={onSeekArchive}
                     onGoLive={onGoLive}
