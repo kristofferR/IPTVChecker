@@ -80,6 +80,9 @@ fn redact_provider_path_credentials(path: &str) -> Option<String> {
         let valid_start = start == "${start}"
             || start.eq_ignore_ascii_case("$%7Bstart%7D")
             || start.eq_ignore_ascii_case("%24%7Bstart%7D")
+            || start == "${offset}"
+            || start.eq_ignore_ascii_case("$%7Boffset%7D")
+            || start.eq_ignore_ascii_case("%24%7Boffset%7D")
             || (!start.is_empty() && start.chars().all(|character| character.is_ascii_digit()));
         let valid_stream_id = !stream_id.is_empty()
             && stream_id
@@ -698,6 +701,14 @@ mod tests {
             ),
             "/timeshift/REDACTED/REDACTED/${duration}/${start}/42.ts"
         );
+        for offset in ["${offset}", "$%7Boffset%7D", "%24%7Boffset%7D"] {
+            let url = format!(
+                "https://provider.example/timeshift/offset-user/offset-pass/${{duration}}/{offset}/42.ts"
+            );
+            let sanitized = sanitize_url_for_persistence(&url);
+            assert!(!sanitized.contains("offset-user"), "{sanitized}");
+            assert!(!sanitized.contains("offset-pass"), "{sanitized}");
+        }
 
         let extinf = sanitize_extinf_for_persistence(
             "#EXTINF:-1 catchup-source=\"https://provider.example/timeshift/extinf-user/extinf-pass/${duration}/${start}/42.ts\",Channel",
