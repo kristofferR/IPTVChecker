@@ -3,8 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import type { ArchivePlayOptions, ArchiveSession } from "../hooks/useStreamPlayer";
 import { archiveTitle, hasArchive } from "../lib/archive";
 import { probeChannelArchive } from "../lib/archiveProbe";
-import { logger } from "../lib/logger";
-import { getEpgProgrammes, loadEpg } from "../lib/tauri";
+import { ensureEpgLoaded } from "../lib/epgLoader";
+import { getEpgProgrammes } from "../lib/tauri";
+import { dayLabel, timeLabel } from "../lib/timeFormat";
 import type { ChannelResult, EpgProgramme } from "../lib/types";
 import { useAppStore } from "../store";
 
@@ -12,60 +13,6 @@ interface ArchiveCardProps {
   result: ChannelResult;
   archiveSession: ArchiveSession | null;
   onPlayArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
-}
-
-// The EPG download can be hundreds of MB, so it loads lazily the first time a
-// catch-up channel's card opens, once per playlist+sources combination.
-let epgLoad: { key: string; promise: Promise<void> } | null = null;
-
-function ensureEpgLoaded(): Promise<void> {
-  const state = useAppStore.getState();
-  const sources = state.playlist?.epg_sources ?? [];
-  if (sources.length === 0) {
-    return Promise.resolve();
-  }
-  const key = `${state.playlist?.source_identity ?? state.playlist?.file_path ?? ""}|${sources.join(",")}`;
-  if (epgLoad?.key === key) {
-    return epgLoad.promise;
-  }
-  const tvgIds = [
-    ...new Set(
-      state.flatResults
-        .filter(hasArchive)
-        .map((result) => result.tvg_id)
-        .filter((id): id is string => !!id),
-    ),
-  ];
-  const promise = loadEpg(sources, tvgIds).then(
-    (summary) => {
-      useAppStore.getState().setEpgLoadSummary(summary);
-      logger.info(
-        "[EPG] Loaded",
-        summary.programme_count,
-        "programmes for",
-        summary.channels_matched,
-        "channels",
-      );
-    },
-    (error) => {
-      logger.warn("[EPG] Load failed:", error);
-    },
-  );
-  epgLoad = { key, promise };
-  return promise;
-}
-
-function dayLabel(epochS: number, now: Date): string {
-  const date = new Date(epochS * 1000);
-  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const dayDiff = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
-  if (dayDiff === 0) return "Today";
-  if (dayDiff === 1) return "Yesterday";
-  return date.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
-}
-
-function timeLabel(epochS: number): string {
-  return new Date(epochS * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function ArchiveProbe({ result }: { result: ChannelResult }) {

@@ -135,6 +135,8 @@ export const Toolbar = memo(function Toolbar({
   const channelSearch = useAppStore((s) => s.channelSearch);
   const groupFilter = useAppStore((s) => s.groupFilter);
   const statusFilter = useAppStore((s) => s.statusFilter);
+  const viewMode = useAppStore((s) => s.viewMode);
+  const setViewMode = useAppStore((s) => s.setViewMode);
   const completedResults = useAppStore((s) => s.flatResults);
   const duplicateIndices = useAppStore((s) => s.duplicateIndices);
   const menuExportRequest = useAppStore((s) => s.menuExportRequest);
@@ -586,6 +588,37 @@ export const Toolbar = memo(function Toolbar({
           {showButtonText && "Saved"}
         </button>
       </div>
+
+      {/* Table / Guide mode switch; only meaningful with catch-up channels */}
+      {hasPlaylist && (statusOptionCounts.catchup ?? 0) > 0 && (
+        <div
+          data-no-window-drag
+          className="ml-1.5 flex shrink-0 items-center gap-0.5 rounded-lg border border-border-app bg-input p-0.5"
+        >
+          <button
+            type="button"
+            onClick={() => setViewMode("table")}
+            className={`rounded-md px-2.5 py-1 text-[12px] transition-colors ${
+              viewMode === "table"
+                ? "bg-btn text-text-primary font-medium"
+                : "text-text-secondary hover:text-text-primary"
+            }`}
+          >
+            Table
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("guide")}
+            className={`rounded-md px-2.5 py-1 text-[12px] transition-colors ${
+              viewMode === "guide"
+                ? "bg-violet-600 text-white font-medium"
+                : "text-text-secondary hover:text-text-primary"
+            }`}
+          >
+            Guide
+          </button>
+        </div>
+      )}
 
       {/* macOS: playlist name centered in title bar area */}
       {playlistName && isMac && (

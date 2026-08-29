@@ -922,6 +922,17 @@ export function ChannelTable({
     return completedResults.filter((r) => indexSet.has(r.index)).sort((a, b) => a.index - b.index);
   }, [selectedIndices, contextMenuState, completedResults]);
 
+  const handleBrowseCatchup = useCallback(() => {
+    const channel = contextMenuState?.channel;
+    setContextMenuState(null);
+    if (!channel || !hasArchive(channel)) {
+      return;
+    }
+    const store = useAppStore.getState();
+    store.setGuideFocusChannelIndex(channel.index);
+    store.setViewMode("guide");
+  }, [contextMenuState]);
+
   const handleTestCatchup = useCallback(() => {
     const targets = getSelectedChannels().filter(hasArchive);
     setContextMenuState(null);
@@ -1456,13 +1467,24 @@ export function ChannelTable({
             const archiveCount = getSelectedChannels().filter(hasArchive).length;
             if (archiveCount === 0) return null;
             return (
-              <button
-                onClick={handleTestCatchup}
-                className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
-                type="button"
-              >
-                Test Catch-up ({archiveCount})
-              </button>
+              <>
+                <button
+                  onClick={handleTestCatchup}
+                  className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+                  type="button"
+                >
+                  Test Catch-up ({archiveCount})
+                </button>
+                {hasArchive(contextMenuState.channel) && (
+                  <button
+                    onClick={handleBrowseCatchup}
+                    className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+                    type="button"
+                  >
+                    Browse Catch-up
+                  </button>
+                )}
+              </>
             );
           })()}
           <div className="h-px my-1 bg-border-subtle" />

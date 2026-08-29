@@ -5,8 +5,8 @@ import type { ScanState } from "../lib/scanState";
 import type {
   AppSettings,
   ChannelResult,
-  EpgLoadSummary,
   CurrentSourceDescriptor,
+  EpgLoadSummary,
   PlaylistLoadProgress,
   PlaylistPreview,
   RecentPlaylistEntry,
@@ -151,8 +151,14 @@ export interface MenuExportRequest {
 
 export type { UpdateNotice, UpdatePhase } from "../lib/updateState";
 
+export type MainViewMode = "table" | "guide";
+
 export interface UiSlice {
   platform: Platform;
+  /** Table shows all channels; guide is the catch-up EPG grid. */
+  viewMode: MainViewMode;
+  /** Channel the guide should scroll to when opened via right-click. */
+  guideFocusChannelIndex: number | null;
   isMac: boolean;
   sidebarHidden: boolean;
   sidebarWidth: number;
@@ -178,6 +184,8 @@ export interface UiSlice {
 
   setPlatform: (platform: Platform) => void;
   setSidebarHidden: (hidden: boolean) => void;
+  setViewMode: (mode: MainViewMode) => void;
+  setGuideFocusChannelIndex: (index: number | null) => void;
   setSidebarWidth: (width: number) => void;
   toggleReportPanel: () => void;
   setReportPanelManually: (visible: boolean) => void;

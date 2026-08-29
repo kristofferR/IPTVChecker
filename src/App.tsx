@@ -23,6 +23,7 @@ import { setLiquidGlassEffect } from "tauri-plugin-liquid-glass-api";
 import { AppBanners } from "./components/AppBanners";
 import { ChannelTable } from "./components/ChannelTable";
 import { FilterBar } from "./components/FilterBar";
+import { GuideView } from "./components/GuideView";
 import { PlaylistReportPanel } from "./components/PlaylistReportPanel";
 import { ProgressBar } from "./components/ProgressBar";
 import { StartScreen } from "./components/StartScreen";
@@ -34,7 +35,7 @@ import { useMenuEventBridge } from "./hooks/useMenuEventBridge";
 import { usePlaylistSources } from "./hooks/usePlaylistSources";
 import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
-import { useStreamPlayer } from "./hooks/useStreamPlayer";
+import { type ArchivePlayOptions, useStreamPlayer } from "./hooks/useStreamPlayer";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
 import {
@@ -512,6 +513,7 @@ export default function App() {
   const platform = useAppStore((s) => s.platform);
   const isMac = useAppStore((s) => s.isMac);
   const sidebarHidden = useAppStore((s) => s.sidebarHidden);
+  const viewMode = useAppStore((s) => s.viewMode);
   const sidebarWidth = useAppStore((s) => s.sidebarWidth);
   const showReportPanel = useAppStore((s) => s.showReportPanel);
   const reportSidebarWidth = useAppStore((s) => s.reportSidebarWidth);
@@ -1031,6 +1033,16 @@ export default function App() {
     getStore().setSelectedChannel(result);
   }, []);
 
+  // Guide playback also selects the channel so the sidebar player shows it.
+  const handleGuidePlayArchive = useCallback(
+    (result: ChannelResult, options: ArchivePlayOptions) => {
+      getStore().setSelectedChannel(result);
+      getStore().setSelectedChannelIndices([result.index]);
+      streamPlayer.playArchive(result, options);
+    },
+    [streamPlayer.playArchive],
+  );
+
   const handleOpenSettings = useCallback(async () => {
     const existing = await WebviewWindow.getByLabel("settings");
     if (existing) {
@@ -1456,7 +1468,9 @@ export default function App() {
             <div className="flex flex-col flex-1 min-w-0">
               {!isMac && <FilterBar onApply={handleApplySourceFilter} />}
               {playlist ? (
-                tableProfilerEnabled ? (
+                viewMode === "guide" ? (
+                  <GuideView onPlayArchive={handleGuidePlayArchive} />
+                ) : tableProfilerEnabled ? (
                   <Profiler id="ChannelTable" onRender={handleTableProfilerRender}>
                     {channelTableElement}
                   </Profiler>
