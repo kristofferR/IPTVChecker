@@ -37,6 +37,7 @@ import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
 import { type ArchivePlayOptions, useStreamPlayer } from "./hooks/useStreamPlayer";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
+import { verifyAllArchives } from "./lib/archiveVerifyRun";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
 import {
   checkFfmpegAvailable,
@@ -514,6 +515,20 @@ export default function App() {
   const isMac = useAppStore((s) => s.isMac);
   const sidebarHidden = useAppStore((s) => s.sidebarHidden);
   const viewMode = useAppStore((s) => s.viewMode);
+  const verifyCatchupAfterScan = useAppStore((s) => s.verifyCatchupAfterScan);
+  const scanState = useAppStore((s) => s.scanState);
+
+  // Opt-in "Scan + Verify Catch-up": run the verification pass once the scan
+  // finishes; a cancelled or reset scan drops the request.
+  useEffect(() => {
+    if (!verifyCatchupAfterScan) return;
+    if (scanState === "complete") {
+      getStore().setVerifyCatchupAfterScan(false);
+      void verifyAllArchives();
+    } else if (scanState === "idle" || scanState === "cancelled") {
+      getStore().setVerifyCatchupAfterScan(false);
+    }
+  }, [verifyCatchupAfterScan, scanState]);
   const sidebarWidth = useAppStore((s) => s.sidebarWidth);
   const showReportPanel = useAppStore((s) => s.showReportPanel);
   const reportSidebarWidth = useAppStore((s) => s.reportSidebarWidth);

@@ -127,10 +127,7 @@ export function buildArchiveUrl(channel: ArchiveUrlFields, window: ArchiveWindow
       const start = Math.floor(window.startEpochS);
       const duration = Math.max(1, Math.floor(window.durationS));
       if (/\.m3u8(\?|$)/.test(channel.url)) {
-        return channel.url.replace(
-          /\/[^/?]+\.m3u8(\?|$)/,
-          `/archive-${start}-${duration}.m3u8$1`,
-        );
+        return channel.url.replace(/\/[^/?]+\.m3u8(\?|$)/, `/archive-${start}-${duration}.m3u8$1`);
       }
       if (/\.ts(\?|$)/.test(channel.url)) {
         return channel.url.replace(/\/[^/?]+\.ts(\?|$)/, `/timeshift_abs-${start}.ts$1`);

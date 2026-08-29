@@ -137,6 +137,7 @@ export const Toolbar = memo(function Toolbar({
   const statusFilter = useAppStore((s) => s.statusFilter);
   const viewMode = useAppStore((s) => s.viewMode);
   const setViewMode = useAppStore((s) => s.setViewMode);
+  const setVerifyCatchupAfterScan = useAppStore((s) => s.setVerifyCatchupAfterScan);
   const completedResults = useAppStore((s) => s.flatResults);
   const duplicateIndices = useAppStore((s) => s.duplicateIndices);
   const menuExportRequest = useAppStore((s) => s.menuExportRequest);
@@ -152,6 +153,8 @@ export const Toolbar = memo(function Toolbar({
   const openMenuRef = useRef<HTMLDivElement | null>(null);
   const groupSelectRef = useRef<HTMLSelectElement | null>(null);
   const [openMenuVisible, setOpenMenuVisible] = useState(false);
+  const scanMenuRef = useRef<HTMLDivElement | null>(null);
+  const [scanMenuVisible, setScanMenuVisible] = useState(false);
   const [groupSelectWidth, setGroupSelectWidth] = useState<number | null>(null);
 
   const filteredExportResults = useMemo(
@@ -216,11 +219,15 @@ export const Toolbar = memo(function Toolbar({
       if (openMenuRef.current && !openMenuRef.current.contains(event.target as Node)) {
         setOpenMenuVisible(false);
       }
+      if (scanMenuRef.current && !scanMenuRef.current.contains(event.target as Node)) {
+        setScanMenuVisible(false);
+      }
     };
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setOpenMenuVisible(false);
+        setScanMenuVisible(false);
       }
     };
 
@@ -476,16 +483,58 @@ export const Toolbar = memo(function Toolbar({
             )}
           </>
         ) : (
-          <button
-            onClick={onStartScan}
-            disabled={scanDisabledReason !== null}
-            title={scanDisabledReason ?? "Scan"}
-            className={btnWithOptionalText("toolbar-btn-primary")}
-            aria-label={scanLabel}
-          >
-            <IconScan className="w-[22px] h-[22px]" />
-            {showButtonText && scanLabel}
-          </button>
+          <div className="relative flex items-center" ref={scanMenuRef} data-no-window-drag>
+            <button
+              onClick={onStartScan}
+              disabled={scanDisabledReason !== null}
+              title={scanDisabledReason ?? "Scan"}
+              className={btnWithOptionalText("toolbar-btn-primary")}
+              aria-label={scanLabel}
+            >
+              <IconScan className="w-[22px] h-[22px]" />
+              {showButtonText && scanLabel}
+            </button>
+            {(statusOptionCounts.catchup ?? 0) > 0 && (
+              <button
+                type="button"
+                onClick={() => setScanMenuVisible((visible) => !visible)}
+                disabled={scanDisabledReason !== null}
+                className="toolbar-btn rounded-md px-0.5 py-2 disabled:opacity-40 disabled:pointer-events-none"
+                title="Scan options"
+                aria-label="Scan options"
+                aria-haspopup="menu"
+                aria-expanded={scanMenuVisible}
+              >
+                <SFChevronDown className="w-3 h-3" />
+              </button>
+            )}
+            {scanMenuVisible && (
+              <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-lg border border-border-app bg-dropdown py-1 shadow-2xl">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScanMenuVisible(false);
+                    setVerifyCatchupAfterScan(false);
+                    onStartScan();
+                  }}
+                  className="w-full px-3 py-2 text-left text-[13px] hover:bg-btn-hover"
+                >
+                  Scan
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScanMenuVisible(false);
+                    setVerifyCatchupAfterScan(true);
+                    onStartScan();
+                  }}
+                  className="w-full px-3 py-2 text-left text-[13px] hover:bg-btn-hover"
+                >
+                  Scan + Verify Catch-up ({statusOptionCounts.catchup ?? 0})
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

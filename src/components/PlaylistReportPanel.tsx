@@ -1,5 +1,9 @@
 import { BarChart3, X } from "lucide-react";
 import { memo, useMemo } from "react";
+import { hasArchive } from "../lib/archive";
+import { archiveVerdict, measuredDepthDays } from "../lib/archiveVerification";
+import { cancelArchiveVerification, verifyAllArchives } from "../lib/archiveVerifyRun";
+import { blendOverallScore, computeCatchupScore } from "../lib/catchupScore";
 import { summarizeEpgCoverage } from "../lib/epgCoverage";
 import { summarizeLanguageDistribution } from "../lib/languageDistribution";
 import {
@@ -159,6 +163,8 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
   const results = useAppStore((s) => s.flatResults);
   const progress = useAppStore((s) => s.progress);
   const epgLoadSummary = useAppStore((s) => s.epgLoadSummary);
+  const archiveProbes = useAppStore((s) => s.archiveProbes);
+  const archiveVerifyRun = useAppStore((s) => s.archiveVerifyRun);
   const summary = useAppStore((s) => s.summary);
   const scanState = useAppStore((s) => s.scanState);
   // Every hook below must run unconditionally: the "no playlist" early return
@@ -191,6 +197,56 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
     () => summarizeEpgCoverage((channels ?? []).map((channel) => ({ tvg_id: channel.tvg_id }))),
     [channels],
   );
+
+  const catchupScore = useMemo(
+    () => computeCatchupScore(results, archiveProbes),
+    [results, archiveProbes],
+  );
+
+  const catchupStats = useMemo(() => {
+    const channels = results.filter(hasArchive);
+    if (channels.length === 0) return null;
+    let verified = 0;
+    let shallower = 0;
+    let broken = 0;
+    const depths: number[] = [];
+    const latencies: number[] = [];
+    for (const channel of channels) {
+      const entry = archiveProbes[channel.index];
+      const verdict = archiveVerdict(channel, entry);
+      if (verdict === "verified") {
+        verified += 1;
+        depths.push(Math.min(channel.catchup_days ?? measuredDepthDays(entry) ?? 1, 14));
+      } else if (verdict === "shallower") {
+        shallower += 1;
+        const measured = measuredDepthDays(entry);
+        if (measured != null) depths.push(Math.min(measured, 14));
+      } else if (verdict === "broken") {
+        broken += 1;
+      }
+      for (const outcome of entry?.outcomes ?? []) {
+        if (outcome.ok && outcome.latencyMs != null) latencies.push(outcome.latencyMs);
+      }
+    }
+    const buckets: Array<{ label: string; count: number }> = [
+      { label: "1-2 d", count: depths.filter((d) => d <= 2).length },
+      { label: "3-6 d", count: depths.filter((d) => d >= 3 && d <= 6).length },
+      { label: "7 d", count: depths.filter((d) => d === 7).length },
+      { label: "8+ d", count: depths.filter((d) => d >= 8).length },
+    ];
+    const sortedLatencies = [...latencies].sort((a, b) => a - b);
+    const medianLatency =
+      sortedLatencies.length > 0 ? sortedLatencies[Math.floor(sortedLatencies.length / 2)] : null;
+    return {
+      advertised: channels.length,
+      verified,
+      shallower,
+      broken,
+      tested: verified + shallower + broken,
+      buckets,
+      medianLatency,
+    };
+  }, [results, archiveProbes]);
 
   const protocolSummary = useMemo(() => {
     let http = 0;
@@ -242,7 +298,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
     playlist.channels.map((channel) => ({ language: channel.language })),
   );
   const displayScore = summary?.playlist_score ?? computedScore;
-  const ringScore = displayScore?.overall ?? 0;
+  const ringScore = displayScore ? blendOverallScore(displayScore, catchupScore) : 0;
   const ringPercent = clamp01(ringScore / 10);
   const ringRadius = 38;
   const ringCircumference = 2 * Math.PI * ringRadius;
@@ -362,6 +418,12 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                   <span className="text-text-tertiary">Quality</span>
                   <span className="text-text-primary">
                     {(displayScore?.quality ?? 0).toFixed(1)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1 ring-1 ring-violet-500/25">
+                  <span className="text-violet-400">Catch-up</span>
+                  <span className={catchupScore != null ? "text-violet-300" : "text-text-tertiary"}>
+                    {catchupScore != null ? catchupScore.toFixed(1) : "N/A"}
                   </span>
                 </div>
               </div>
@@ -490,6 +552,109 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
             </div>
           </div>
         </section>
+
+        {catchupStats && (
+          <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary">Catch-up</p>
+              {archiveVerifyRun ? (
+                <button
+                  type="button"
+                  onClick={cancelArchiveVerification}
+                  className="rounded-md border border-border-app bg-btn px-2 py-0.5 text-[11px] text-text-primary hover:bg-btn-hover transition-colors"
+                >
+                  {archiveVerifyRun.done}/{archiveVerifyRun.total} · Cancel
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void verifyAllArchives()}
+                  className="rounded-md border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/20 transition-colors"
+                >
+                  Verify ({catchupStats.advertised})
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <div className="rounded-md bg-input/60 px-2 py-1.5">
+                <span className="block text-[15px] font-semibold text-violet-300 tabular-nums">
+                  {catchupStats.advertised}
+                </span>
+                <span className="text-text-tertiary uppercase text-[9px] tracking-[0.04em]">
+                  advertise
+                </span>
+              </div>
+              <div className="rounded-md bg-input/60 px-2 py-1.5">
+                <span className="block text-[15px] font-semibold text-green-400 tabular-nums">
+                  {catchupStats.verified}
+                </span>
+                <span className="text-text-tertiary uppercase text-[9px] tracking-[0.04em]">
+                  verified
+                </span>
+              </div>
+              <div className="rounded-md bg-input/60 px-2 py-1.5">
+                <span className="block text-[15px] font-semibold text-amber-400 tabular-nums">
+                  {catchupStats.shallower}
+                </span>
+                <span className="text-text-tertiary uppercase text-[9px] tracking-[0.04em]">
+                  shallower
+                </span>
+              </div>
+              <div className="rounded-md bg-input/60 px-2 py-1.5">
+                <span className="block text-[15px] font-semibold text-red-400 tabular-nums">
+                  {catchupStats.broken}
+                </span>
+                <span className="text-text-tertiary uppercase text-[9px] tracking-[0.04em]">
+                  broken
+                </span>
+              </div>
+            </div>
+            {catchupStats.tested > 0 && (
+              <>
+                <p className="mt-3 mb-1 text-[11px] uppercase tracking-[0.08em] text-text-tertiary">
+                  Verified depth
+                </p>
+                {catchupStats.buckets.map((bucket) => {
+                  const maxCount = Math.max(1, ...catchupStats.buckets.map((b) => b.count));
+                  return (
+                    <div key={bucket.label} className="mb-1 flex items-center gap-2 text-[10px]">
+                      <span className="w-8 shrink-0 text-right text-text-secondary tabular-nums">
+                        {bucket.label}
+                      </span>
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-btn/40">
+                        <div
+                          className="h-full rounded-full bg-violet-500"
+                          style={{ width: `${(bucket.count / maxCount) * 100}%` }}
+                        />
+                      </div>
+                      <span className="w-7 shrink-0 text-text-tertiary tabular-nums">
+                        {bucket.count}
+                      </span>
+                    </div>
+                  );
+                })}
+                <div className="mt-2 space-y-1 text-[12px]">
+                  <div className="flex items-center justify-between">
+                    <span className="text-text-tertiary">Median archive start</span>
+                    <span className="text-text-primary tabular-nums">
+                      {catchupStats.medianLatency != null
+                        ? `${Math.round(catchupStats.medianLatency)} ms`
+                        : "N/A"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-text-tertiary">Average live start</span>
+                    <span className="text-text-primary tabular-nums">
+                      {latencyStats.average != null
+                        ? `${Math.round(latencyStats.average)} ms`
+                        : "N/A"}
+                    </span>
+                  </div>
+                </div>
+              </>
+            )}
+          </section>
+        )}
 
         <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
           <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">

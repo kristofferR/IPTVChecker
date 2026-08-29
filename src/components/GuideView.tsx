@@ -215,10 +215,15 @@ export function GuideView({
     if (!selection) return;
     setTesting(true);
     setTestOutcome(null);
+    const now = Math.floor(Date.now() / 1000);
     const outcome = await probeArchivePoint(
       selection.result,
-      { label: timeLabel(selection.programme.start), startEpochS: selection.programme.start },
-      Math.floor(Date.now() / 1000),
+      {
+        label: timeLabel(selection.programme.start),
+        daysBack: Math.max(0, Math.round((now - selection.programme.start) / 86_400)),
+        startEpochS: selection.programme.start,
+      },
+      now,
     );
     setTestOutcome(outcome);
     setTesting(false);

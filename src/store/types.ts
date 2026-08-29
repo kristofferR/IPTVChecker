@@ -116,9 +116,15 @@ export interface ArchiveSlice {
   archiveProbes: Record<number, ArchiveProbeEntry>;
   /** Result of the most recent XMLTV load for the current playlist. */
   epgLoadSummary: EpgLoadSummary | null;
+  /** Progress of a playlist-wide catch-up verification run. */
+  archiveVerifyRun: { running: boolean; done: number; total: number } | null;
+  /** When set, a full verification pass starts after the scan completes. */
+  verifyCatchupAfterScan: boolean;
 
   setArchiveProbe: (index: number, entry: ArchiveProbeEntry) => void;
   setEpgLoadSummary: (summary: EpgLoadSummary | null) => void;
+  setArchiveVerifyRun: (run: { running: boolean; done: number; total: number } | null) => void;
+  setVerifyCatchupAfterScan: (value: boolean) => void;
   /** Reset all per-playlist archive state (probes and EPG summary). */
   clearArchiveProbes: () => void;
 }

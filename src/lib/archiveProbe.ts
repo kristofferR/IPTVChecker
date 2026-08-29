@@ -4,6 +4,8 @@ import type { ChannelResult } from "./types";
 
 export interface ArchiveProbeOutcome {
   label: string;
+  /** How far back this point reached, in days (0 = the −1 h near point). */
+  daysBack: number;
   ok: boolean;
   latencyMs: number | null;
   error: string | null;
@@ -17,16 +19,20 @@ export interface ArchiveProbeEntry {
 
 export interface ArchiveProbePoint {
   label: string;
+  daysBack: number;
   startEpochS: number;
 }
 
 /** One hour back, plus a point just inside the advertised depth when known. */
 export function archiveProbePoints(result: ChannelResult, nowEpochS: number): ArchiveProbePoint[] {
-  const points: ArchiveProbePoint[] = [{ label: "Archive −1 h", startEpochS: nowEpochS - 3600 }];
+  const points: ArchiveProbePoint[] = [
+    { label: "Archive −1 h", daysBack: 0, startEpochS: nowEpochS - 3600 },
+  ];
   const depthDays = result.catchup_days;
   if (depthDays != null && depthDays > 0) {
     points.push({
       label: `Archive −${depthDays} d`,
+      daysBack: depthDays,
       startEpochS: nowEpochS - depthDays * 86_400 + 1800,
     });
   }
@@ -56,6 +62,7 @@ export async function probeArchivePoint(
     });
     return {
       label: point.label,
+      daysBack: point.daysBack,
       ok: checked.status === "alive",
       latencyMs: checked.latency_ms,
       error: checked.status === "alive" ? null : (checked.error_reason ?? checked.status),
@@ -63,6 +70,7 @@ export async function probeArchivePoint(
   } catch (error) {
     return {
       label: point.label,
+      daysBack: point.daysBack,
       ok: false,
       latencyMs: null,
       error: error instanceof Error ? error.message : String(error),

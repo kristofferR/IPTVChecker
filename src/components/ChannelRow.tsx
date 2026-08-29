@@ -1,6 +1,7 @@
 import { Radio, Tv } from "lucide-react";
 import { memo, useEffect, useMemo, useState } from "react";
 import { archiveBadgeText, archiveTitle } from "../lib/archive";
+import { archiveVerdict, measuredDepthDays } from "../lib/archiveVerification";
 import { channelLogoPixels, channelRowHeightPixels } from "../lib/channelLogoSize";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { extractTvgLogoUrl, normalizeTvgLogoUrl } from "../lib/extinf";
@@ -8,6 +9,7 @@ import { useLogoCacheStatus } from "../lib/logoCache";
 import { detectChannelProtocol } from "../lib/streamProtocol";
 import type { ColumnDefinition } from "../lib/tableColumns";
 import type { ChannelLogoSize, ChannelResult } from "../lib/types";
+import { useAppStore } from "../store";
 import { StatusBadge } from "./StatusBadge";
 
 function formatLatency(latencyMs: number): string {
@@ -69,6 +71,7 @@ function ChannelRowImpl({
   const errorReason = getChannelErrorReason(result);
   const drmStatusTitle = result.drm_system ? `DRM: ${result.drm_system}` : "DRM-protected stream";
   const streamProtocol = useMemo(() => detectChannelProtocol(result), [result]);
+  const probeEntry = useAppStore((s) => s.archiveProbes[result.index]);
 
   useEffect(() => {
     setLogoLoadFailed(false);
@@ -204,12 +207,34 @@ function ChannelRowImpl({
         if (!badge) {
           return <span className="text-text-secondary tabular-nums">—</span>;
         }
+        const verdict = archiveVerdict(result, probeEntry);
+        const chipClass = {
+          advertised: "bg-violet-500/15 text-violet-300 ring-violet-500/30",
+          verified: "bg-green-500/15 text-green-300 ring-green-500/30",
+          shallower: "bg-amber-500/15 text-amber-300 ring-amber-500/30",
+          broken: "bg-red-500/15 text-red-300 ring-red-500/30",
+        }[verdict];
+        const measured = verdict === "shallower" ? measuredDepthDays(probeEntry) : null;
+        const chipText =
+          verdict === "verified"
+            ? `✓ ${badge}`
+            : verdict === "shallower"
+              ? `⚠ ${measured ?? "?"}/${result.catchup_days ?? "?"}d`
+              : verdict === "broken"
+                ? `✕ ${badge}`
+                : badge;
+        const verdictTitle =
+          verdict === "advertised"
+            ? null
+            : verdict === "shallower"
+              ? `Verified depth ${measured ?? "?"} of ${result.catchup_days ?? "?"} days`
+              : `Archive ${verdict}`;
         return (
           <span
-            className="rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-violet-300 ring-1 ring-violet-500/30 tabular-nums"
-            title={archiveTitle(result) ?? undefined}
+            className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] ring-1 tabular-nums ${chipClass}`}
+            title={[archiveTitle(result), verdictTitle].filter(Boolean).join(" · ") || undefined}
           >
-            {badge}
+            {chipText}
           </span>
         );
       }

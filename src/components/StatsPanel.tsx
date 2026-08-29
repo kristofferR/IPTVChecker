@@ -1,5 +1,6 @@
 import { memo, type ReactNode, startTransition, useDeferredValue, useMemo } from "react";
 import { hasArchive } from "../lib/archive";
+import { blendOverallScore, computeCatchupScore } from "../lib/catchupScore";
 import type { Channel } from "../lib/types";
 import { useAppStore } from "../store";
 import {
@@ -98,6 +99,8 @@ export const StatsPanel = memo(function StatsPanel() {
   const setStatusFilter = useAppStore((s) => s.setStatusFilter);
   const toggleReportPanel = useAppStore((s) => s.toggleReportPanel);
   const selectedChannelIndices = useAppStore((s) => s.selectedChannelIndices);
+  const flatResults = useAppStore((s) => s.flatResults);
+  const archiveProbes = useAppStore((s) => s.archiveProbes);
   const search = useDeferredValue(useAppStore((s) => s.search));
   const groupFilter = useAppStore((s) => s.groupFilter);
   const stats = summary ?? progress;
@@ -136,6 +139,11 @@ export const StatsPanel = memo(function StatsPanel() {
     visibleCatchupCount === catchupCount
       ? `${catchupCount} catch-up`
       : `${visibleCatchupCount} of ${catchupCount} catch-up`;
+
+  const catchupScore = useMemo(
+    () => computeCatchupScore(flatResults, archiveProbes),
+    [flatResults, archiveProbes],
+  );
 
   const showSelectionInfo = selectedChannelIndices.length > 1 && catchupCount > 0;
   const showRightStatus =
@@ -218,7 +226,7 @@ export const StatsPanel = memo(function StatsPanel() {
       {summary?.playlist_score && (
         <Pill
           icon={null}
-          label={`Score ${summary.playlist_score.overall.toFixed(1)}/10`}
+          label={`Score ${blendOverallScore(summary.playlist_score, catchupScore).toFixed(1)}/10`}
           color="blue"
           onClick={toggleReportPanel}
         />
