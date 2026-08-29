@@ -593,7 +593,13 @@ export default function App() {
         throw new Error(ARCHIVE_VERIFICATION_PLAYBACK_ERROR);
       }
       lastCastDeviceRef.current = device;
-      await baseCastFn(device, request);
+      getStore().setCastActive(true);
+      try {
+        await baseCastFn(device, request);
+      } catch (error) {
+        getStore().setCastActive(false);
+        throw error;
+      }
     },
     [baseCastFn],
   );

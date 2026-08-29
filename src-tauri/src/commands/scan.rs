@@ -2767,12 +2767,15 @@ pub async fn quick_check_channel(
     let cancel_token = CancellationToken::new();
     let client = get_quick_check_client(settings.accept_invalid_certs);
 
-    let ffprobe_ok = {
+    let uses_ffprobe_liveness = checker::uses_ffprobe_liveness(&channel.url);
+    let ffprobe_ok = if uses_ffprobe_liveness {
         let (_, fp) = ffmpeg::check_availability(&app).await;
         fp
+    } else {
+        false
     };
 
-    let outcome = if checker::uses_ffprobe_liveness(&channel.url) {
+    let outcome = if uses_ffprobe_liveness {
         checker::check_channel_status_with_ffprobe_debug(
             &app,
             &channel.url,
