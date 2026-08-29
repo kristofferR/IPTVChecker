@@ -18,7 +18,13 @@ interface ArchiveCardProps {
 
 // The EPG download can be hundreds of MB, so it loads lazily the first time a
 // catch-up channel's card opens, once per playlist, sources, and indexed IDs.
-let epgLoad: { key: string; promise: Promise<void>; summary: EpgLoadSummary | null } | null = null;
+let epgLoad: {
+  key: string;
+  promise: Promise<void>;
+  summary: EpgLoadSummary | null;
+  loadedAt: number | null;
+} | null = null;
+const EPG_LOAD_TTL_MS = 6 * 60 * 60 * 1_000;
 const MAX_RENDERED_PROGRAMMES = 2_000;
 
 function epgSourcesFor(result: ChannelResult): string[] {
@@ -44,7 +50,10 @@ function epgLoadRequest() {
 
 function ensureEpgLoaded(): Promise<void> {
   const { key, sources, tvgIds } = epgLoadRequest();
-  if (epgLoad?.key === key) {
+  if (
+    epgLoad?.key === key &&
+    (epgLoad.loadedAt == null || Date.now() - epgLoad.loadedAt < EPG_LOAD_TTL_MS)
+  ) {
     if (epgLoad.summary) {
       useAppStore.getState().setEpgLoadSummary(epgLoad.summary);
     }
@@ -56,6 +65,7 @@ function ensureEpgLoaded(): Promise<void> {
         return;
       }
       epgLoad.summary = summary;
+      epgLoad.loadedAt = Date.now();
       useAppStore.getState().setEpgLoadSummary(summary);
       logger.info(
         "[EPG] Loaded",
@@ -81,7 +91,7 @@ function ensureEpgLoaded(): Promise<void> {
       }
     },
   );
-  epgLoad = { key, promise, summary: null };
+  epgLoad = { key, promise, summary: null, loadedAt: null };
   return promise;
 }
 

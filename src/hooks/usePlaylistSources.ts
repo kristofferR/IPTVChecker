@@ -1,5 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { cancelArchiveProbes } from "../lib/archiveProbe";
 import { errorToString, formatPlaylistOpenError, formatSourceReloadError } from "../lib/errors";
 import { logger } from "../lib/logger";
 import { parseXtreamRecent, serializeXtreamRecent } from "../lib/recentPlaylists";
@@ -203,6 +204,10 @@ export function usePlaylistSources({
       }
       logger.info(`[App] Scan cache ready in ${(performance.now() - initStartedAt).toFixed(1)}ms`);
 
+      await cancelArchiveProbes();
+      if (!shouldApply()) {
+        return false;
+      }
       await cancelEpgLoad().catch(() => {});
       if (!shouldApply()) {
         return false;

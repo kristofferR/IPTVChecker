@@ -1143,6 +1143,10 @@ export default function App() {
 
   const handleCastStart = useCallback(() => {
     const archiveSession = streamPlayer.archiveSession;
+    const liveChannel =
+      archiveSession || playbackChannelIndex == null
+        ? null
+        : selectResultByIndex(getStore(), playbackChannelIndex);
     getStore().setPlayIntentActive(false);
     stopStream({ preserveArchiveSession: true });
     if (archiveSession) {
@@ -1151,7 +1155,13 @@ export default function App() {
         resumeArchive(archiveSession);
       };
     }
-  }, [resumeArchive, stopStream, streamPlayer.archiveSession]);
+    if (liveChannel) {
+      return () => {
+        getStore().setPlayIntentActive(true);
+        playStream(liveChannel);
+      };
+    }
+  }, [playStream, playbackChannelIndex, resumeArchive, stopStream, streamPlayer.archiveSession]);
 
   const handleOpenExternal = useCallback(
     async (result: ChannelResult) => {
