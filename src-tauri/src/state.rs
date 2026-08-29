@@ -292,17 +292,15 @@ impl AppState {
         flags: XtreamArchiveFlags,
     ) -> bool {
         let flags = Arc::new(flags);
-        {
-            let mut enrichments = self.xtream_archive_enrichments.lock().await;
-            let Some(enrichment) = enrichments.get_mut(source_identity) else {
-                return false;
-            };
-            if enrichment.generation != generation {
-                return false;
-            }
-            enrichment.flags = Some(Arc::clone(&flags));
-            enrichment.notify.notify_waiters();
+        let mut enrichments = self.xtream_archive_enrichments.lock().await;
+        let Some(enrichment) = enrichments.get_mut(source_identity) else {
+            return false;
+        };
+        if enrichment.generation != generation {
+            return false;
         }
+        enrichment.flags = Some(Arc::clone(&flags));
+        enrichment.notify.notify_waiters();
 
         let mut cache = self.playlist_preview_cache.lock().await;
         for cached in cache.values_mut() {
@@ -400,6 +398,46 @@ mod tests {
             .expect("cached preview");
         assert_eq!(cached.channels[0].catchup.as_deref(), Some("xc"));
         assert_eq!(cached.channels[0].catchup_days, Some(7));
+    }
+
+    #[tokio::test]
+    async fn new_generation_waits_until_archive_flags_are_published() {
+        let state = AppState::new();
+        let generation = state
+            .begin_xtream_archive_enrichment("xtream:provider".to_string())
+            .await;
+        state
+            .put_cached_playlist_preview("cache-key".to_string(), Arc::new(preview()), None)
+            .await;
+
+        let cache = state.playlist_preview_cache.lock().await;
+        let enrichments = state.xtream_archive_enrichments.lock().await;
+        let completing_state = Arc::clone(&state);
+        let completion = tokio::spawn(async move {
+            completing_state
+                .complete_xtream_archive_enrichment(
+                    "xtream:provider",
+                    generation,
+                    HashMap::from([("42".to_string(), Some(7))]),
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        drop(enrichments);
+        tokio::task::yield_now().await;
+
+        let next_state = Arc::clone(&state);
+        let next_generation = tokio::spawn(async move {
+            next_state
+                .begin_xtream_archive_enrichment("xtream:provider".to_string())
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(!next_generation.is_finished());
+
+        drop(cache);
+        assert!(completion.await.expect("archive enrichment completion"));
+        next_generation.await.expect("next archive generation");
     }
 
     #[tokio::test]
