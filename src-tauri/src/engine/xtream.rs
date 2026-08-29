@@ -244,8 +244,6 @@ fn extract_xtream_max_connections(payload: &serde_json::Value) -> Option<u32> {
         })
 }
 
-/// Fetch a single Xtream JSON API endpoint, returning parsed JSON array.
-/// Returns an empty Vec on non-2xx or parse failures (best-effort for optional content).
 fn describe_read_capped_error(error: crate::engine::proxy_common::ReadCappedError) -> String {
     match error {
         crate::engine::proxy_common::ReadCappedError::TooLarge => {
@@ -257,11 +255,14 @@ fn describe_read_capped_error(error: crate::engine::proxy_common::ReadCappedErro
     }
 }
 
+/// Fetch a single Xtream JSON API endpoint, returning a parsed JSON array.
+/// Returns `None` on non-2xx or parse failures so callers can distinguish a
+/// failed request from a successful empty catalog.
 async fn fetch_xtream_json_array(
     client: &reqwest::Client,
     url: reqwest::Url,
     label: &str,
-) -> Vec<serde_json::Value> {
+) -> Option<Vec<serde_json::Value>> {
     match client
         .get(url)
         .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
@@ -275,24 +276,27 @@ async fn fetch_xtream_json_array(
             )
             .await
             {
-                Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
-                    log::warn!("Failed to parse Xtream {} JSON response: {}", label, e);
-                    Vec::new()
-                }),
+                Ok(bytes) => match serde_json::from_slice(&bytes) {
+                    Ok(entries) => Some(entries),
+                    Err(e) => {
+                        log::warn!("Failed to parse Xtream {} JSON response: {}", label, e);
+                        None
+                    }
+                },
                 Err(e) => {
                     let detail = describe_read_capped_error(e);
                     log::warn!("Failed to read Xtream {} response: {}", label, detail);
-                    Vec::new()
+                    None
                 }
             }
         }
         Ok(resp) => {
             log::warn!("Xtream {} API returned HTTP {}", label, resp.status());
-            Vec::new()
+            None
         }
         Err(e) => {
             log::warn!("Failed to fetch Xtream {}: {}", label, e.without_url());
-            Vec::new()
+            None
         }
     }
 }
@@ -351,30 +355,35 @@ fn xtream_stream_id(entry: &serde_json::Value) -> Option<String> {
     }
 }
 
-pub(crate) async fn fetch_xtream_archive_flags(
+pub(crate) async fn fetch_xtream_live_streams(
     server: &Url,
     username: &str,
     password: &str,
     accept_invalid_certs: bool,
-) -> HashMap<String, Option<u32>> {
+) -> Option<Vec<serde_json::Value>> {
     let Ok(client) = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
         .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
-        .timeout(XTREAM_PLAYER_API_TIMEOUT)
+        .timeout(XTREAM_JSON_API_TIMEOUT)
         .danger_accept_invalid_certs(accept_invalid_certs)
         .build()
     else {
-        return HashMap::new();
+        return None;
     };
     let url = build_xtream_player_api_action_url(server, username, password, "get_live_streams");
 
-    fetch_xtream_json_array(&client, url, "live streams")
-        .await
-        .into_iter()
+    fetch_xtream_json_array(&client, url, "live streams").await
+}
+
+pub(crate) fn xtream_archive_flags(
+    live_streams: &[serde_json::Value],
+) -> HashMap<String, Option<u32>> {
+    live_streams
+        .iter()
         .filter(|entry| xtream_numeric_field(entry, "tv_archive") == Some(1))
         .filter_map(|entry| {
-            let stream_id = xtream_stream_id(&entry)?;
-            let days = xtream_numeric_field(&entry, "tv_archive_duration")
+            let stream_id = xtream_stream_id(entry)?;
+            let days = xtream_numeric_field(entry, "tv_archive_duration")
                 .filter(|days| *days > 0)
                 .and_then(|days| u32::try_from(days).ok());
             Some((stream_id, days))
@@ -402,11 +411,38 @@ pub(crate) fn apply_xtream_archive_flags(
             continue;
         };
 
-        channel.catchup.get_or_insert_with(|| "xc".to_string());
+        let added_catchup = channel.catchup.is_none();
+        if added_catchup {
+            channel.catchup = Some("xc".to_string());
+        }
+        let added_days = channel.catchup_days.is_none().then_some(*days).flatten();
         if channel.catchup_days.is_none() {
             channel.catchup_days = *days;
         }
+        append_xtream_archive_attrs(&mut channel.extinf_line, added_catchup, added_days);
     }
+}
+
+fn append_xtream_archive_attrs(
+    extinf_line: &mut String,
+    add_catchup: bool,
+    catchup_days: Option<u32>,
+) {
+    if !add_catchup && catchup_days.is_none() {
+        return;
+    }
+    let Some(comma) = crate::engine::parser::find_unquoted_comma(extinf_line) else {
+        return;
+    };
+
+    let mut attrs = String::new();
+    if add_catchup {
+        attrs.push_str(" catchup=\"xc\"");
+    }
+    if let Some(days) = catchup_days {
+        attrs.push_str(&format!(" catchup-days=\"{}\"", days));
+    }
+    extinf_line.insert_str(comma, &attrs);
 }
 
 /// Append M3U entries for a list of Xtream streams.
@@ -481,6 +517,7 @@ pub(crate) async fn fetch_xtream_playlist_via_json_api(
     username: &str,
     password: &str,
     accept_invalid_certs: bool,
+    prefetched_live_streams: Option<Vec<serde_json::Value>>,
 ) -> Result<Vec<u8>, AppError> {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
@@ -499,11 +536,31 @@ pub(crate) async fn fetch_xtream_playlist_via_json_api(
         build_xtream_player_api_action_url(server, username, password, "get_vod_categories");
     let vod_streams_url =
         build_xtream_player_api_action_url(server, username, password, "get_vod_streams");
+    let live_streams_request = async {
+        match prefetched_live_streams {
+            Some(streams) => streams,
+            None => fetch_xtream_json_array(&client, live_streams_url, "live streams")
+                .await
+                .unwrap_or_default(),
+        }
+    };
     let (live_cats, live_streams, vod_cats, vod_streams) = tokio::join!(
-        fetch_xtream_json_array(&client, live_cats_url, "live categories"),
-        fetch_xtream_json_array(&client, live_streams_url, "live streams"),
-        fetch_xtream_json_array(&client, vod_cats_url, "VOD categories"),
-        fetch_xtream_json_array(&client, vod_streams_url, "VOD streams"),
+        async {
+            fetch_xtream_json_array(&client, live_cats_url, "live categories")
+                .await
+                .unwrap_or_default()
+        },
+        live_streams_request,
+        async {
+            fetch_xtream_json_array(&client, vod_cats_url, "VOD categories")
+                .await
+                .unwrap_or_default()
+        },
+        async {
+            fetch_xtream_json_array(&client, vod_streams_url, "VOD streams")
+                .await
+                .unwrap_or_default()
+        },
     );
 
     if live_streams.is_empty() && vod_streams.is_empty() {
@@ -722,7 +779,7 @@ mod tests {
                 catchup_source: None,
                 url: "https://example.com/live/user/pass/42.ts".to_string(),
                 content_type: crate::models::channel::ContentType::Live,
-                extinf_line: String::new(),
+                extinf_line: "#EXTINF:-1,Missing metadata".to_string(),
                 metadata_lines: Vec::new(),
             },
             crate::models::channel::Channel {
@@ -740,7 +797,8 @@ mod tests {
                 catchup_source: None,
                 url: "https://example.com/live/user/pass/43.m3u8?token=secret".to_string(),
                 content_type: crate::models::channel::ContentType::Live,
-                extinf_line: String::new(),
+                extinf_line: "#EXTINF:-1 catchup=\"append\" catchup-days=\"14\",Existing metadata"
+                    .to_string(),
                 metadata_lines: Vec::new(),
             },
         ];
@@ -750,8 +808,16 @@ mod tests {
 
         assert_eq!(channels[0].catchup.as_deref(), Some("xc"));
         assert_eq!(channels[0].catchup_days, Some(7));
+        assert_eq!(
+            channels[0].extinf_line,
+            "#EXTINF:-1 catchup=\"xc\" catchup-days=\"7\",Missing metadata"
+        );
         assert_eq!(channels[1].catchup.as_deref(), Some("append"));
         assert_eq!(channels[1].catchup_days, Some(14));
+        assert_eq!(
+            channels[1].extinf_line,
+            "#EXTINF:-1 catchup=\"append\" catchup-days=\"14\",Existing metadata"
+        );
     }
 
     #[test]

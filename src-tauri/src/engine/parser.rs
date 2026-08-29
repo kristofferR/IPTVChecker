@@ -262,8 +262,7 @@ fn catchup_metadata_from_attrs(
 
     let days = ["catchup-days", "tvg-rec", "timeshift"]
         .iter()
-        .find_map(|key| attr_value(attrs, key))
-        .and_then(|value| parse_catchup_days(&value));
+        .find_map(|key| attr_value(attrs, key).and_then(|value| parse_catchup_days(&value)));
     let source = attr_value(attrs, "catchup-source");
 
     let kind = kind.or_else(|| (days.is_some() || source.is_some()).then(|| "default".to_string()));
@@ -974,6 +973,14 @@ mod tests {
 
         let none = parse_extinf_attributes("#EXTINF:-1 group-title=\"News\",Ch");
         assert_eq!(catchup_metadata_from_attrs(&none), (None, None, None));
+
+        let invalid_then_valid = parse_extinf_attributes(
+            "#EXTINF:-1 catchup-days=\"0\" tvg-rec=\"invalid\" timeshift=\"7\",Ch",
+        );
+        assert_eq!(
+            catchup_metadata_from_attrs(&invalid_then_valid),
+            (Some("default".to_string()), Some(7), None)
+        );
     }
 
     #[test]

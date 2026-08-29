@@ -19,7 +19,7 @@ use crate::engine::stalker::{
 };
 use crate::engine::xtream::{
     apply_xtream_archive_flags, build_xtream_download_url, fetch_xtream_account_info,
-    fetch_xtream_archive_flags, fetch_xtream_playlist_via_json_api,
+    fetch_xtream_live_streams, fetch_xtream_playlist_via_json_api, xtream_archive_flags,
 };
 use crate::error::AppError;
 use crate::models::channel::Channel;
@@ -705,9 +705,9 @@ pub(crate) async fn open_playlist_xtream_inner(
     let accept_invalid_certs = accepts_invalid_certs(Some(app)).await;
 
     // Try /get.php and fetch optional account/archive metadata in parallel.
-    let (xtream_account_info, archive_flags, m3u_result) = tokio::join!(
+    let (xtream_account_info, live_streams, m3u_result) = tokio::join!(
         fetch_xtream_account_info(&server, &username, &password, accept_invalid_certs),
-        fetch_xtream_archive_flags(&server, &username, &password, accept_invalid_certs),
+        fetch_xtream_live_streams(&server, &username, &password, accept_invalid_certs),
         download_playlist_to_cache_in_data_dir(
             Some(app),
             &data_dir,
@@ -719,8 +719,14 @@ pub(crate) async fn open_playlist_xtream_inner(
     );
 
     // If /get.php failed, fall back to the JSON API.
-    let (cached_path, should_apply_archive_flags) = match m3u_result {
-        Ok(path) => (path, true),
+    let (cached_path, archive_flags) = match m3u_result {
+        Ok(path) => (
+            path,
+            live_streams
+                .as_deref()
+                .map(xtream_archive_flags)
+                .unwrap_or_default(),
+        ),
         Err(get_php_error) => {
             log::info!(
                 "Xtream /get.php download failed ({}), falling back to JSON API",
@@ -731,6 +737,7 @@ pub(crate) async fn open_playlist_xtream_inner(
                 &username,
                 &password,
                 accept_invalid_certs,
+                live_streams,
             )
             .await?;
             // Same rule as the normal download path: a potentially large
@@ -743,14 +750,14 @@ pub(crate) async fn open_playlist_xtream_inner(
                         AppError::Other(format!("Playlist cache write task failed: {err}"))
                     })??;
             }
-            (cache_path.to_string_lossy().to_string(), false)
+            (cache_path.to_string_lossy().to_string(), HashMap::new())
         }
     };
 
     let mut preview =
         parse_playlist_off_thread(Some(app), cached_path.clone(), group_filter, channel_search)
             .await?;
-    if should_apply_archive_flags {
+    if !archive_flags.is_empty() {
         apply_xtream_archive_flags(&mut preview.channels, &archive_flags);
     }
     let server_host = server.host_str().unwrap_or("Xtream");
