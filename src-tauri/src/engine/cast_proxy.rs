@@ -301,10 +301,7 @@ struct RemuxStartInfo {
 
 fn hls_muxer_options(is_finite: bool) -> (&'static str, &'static str) {
     if is_finite {
-        (
-            REMUX_PLAYLIST_SEGMENTS,
-            "delete_segments+independent_segments",
-        )
+        ("0", "independent_segments")
     } else {
         (
             REMUX_PLAYLIST_SEGMENTS,
@@ -1589,12 +1586,13 @@ mod tests {
     }
 
     #[test]
-    fn finite_hls_remux_prunes_segments_but_keeps_endlist() {
+    fn finite_hls_remux_keeps_all_segments_and_endlist() {
         let (playlist_size, flags) = hls_muxer_options(true);
 
-        assert_ne!(playlist_size, "0");
-        assert!(flags.split('+').any(|flag| flag == "delete_segments"));
+        assert_eq!(playlist_size, "0");
+        assert!(!flags.split('+').any(|flag| flag == "delete_segments"));
         assert!(!flags.split('+').any(|flag| flag == "omit_endlist"));
+        assert!(flags.split('+').any(|flag| flag == "independent_segments"));
     }
 
     #[test]

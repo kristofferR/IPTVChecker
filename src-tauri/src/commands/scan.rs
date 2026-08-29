@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use tauri::{AppHandle, Emitter, Manager, Window};
@@ -29,6 +29,8 @@ const CHECKPOINT_FLUSH_INTERVAL_MS: u64 = 250;
 const CHECKPOINT_FLUSH_MAX_BATCH: usize = 128;
 const RESULT_BATCH_MAX_ITEMS: usize = 64;
 const MIN_SCREENSHOT_DIAGNOSTIC_TIMEOUT_SECS: f64 = 15.0;
+static DIAGNOSTIC_URL_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r#"(?i)\b(?:https?|rtsp|rtmp)://[^\s'"]+"#).unwrap());
 
 #[derive(Debug, Clone)]
 struct SharedUrlResult {
@@ -2037,7 +2039,24 @@ fn redact_channel_debug_log(mut channel_log: ChannelDebugLog) -> ChannelDebugLog
             .map(|url| stream_proxy::redact_url(url))
             .collect();
     }
+    channel_log.diagnostics_output = channel_log
+        .diagnostics_output
+        .map(|text| redact_urls_in_text(&text));
+    channel_log.final_reason = channel_log
+        .final_reason
+        .map(|text| redact_urls_in_text(&text));
+    channel_log.screenshot_error_reason = channel_log
+        .screenshot_error_reason
+        .map(|text| redact_urls_in_text(&text));
     channel_log
+}
+
+fn redact_urls_in_text(text: &str) -> String {
+    DIAGNOSTIC_URL_RE
+        .replace_all(text, |captures: &regex::Captures<'_>| {
+            stream_proxy::redact_url(&captures[0])
+        })
+        .into_owned()
 }
 
 /// Store the finished scan's debug log on the window scan state.
@@ -2965,6 +2984,9 @@ mod tests {
         let redacted = redact_channel_debug_log(ChannelDebugLog {
             channel_url: sensitive_url.to_string(),
             redirect_chain: vec![sensitive_url.to_string()],
+            diagnostics_output: Some(format!(r#"{{"filename":"{sensitive_url}"}}"#)),
+            final_reason: Some(format!("Probe failed for {sensitive_url}")),
+            screenshot_error_reason: Some(format!("Screenshot failed for {sensitive_url}")),
             attempts: vec![crate::models::scan_log::ChannelAttemptDebugLog {
                 redirect_chain: vec![sensitive_url.to_string()],
                 ..Default::default()
@@ -2983,6 +3005,18 @@ mod tests {
         assert_eq!(
             redacted.attempts[0].redirect_chain.as_slice(),
             std::slice::from_ref(&redacted.channel_url)
+        );
+        assert_eq!(
+            redacted.diagnostics_output.as_deref(),
+            Some(r#"{"filename":"http://provider.example/live/***/***/42.ts?***"}"#)
+        );
+        assert_eq!(
+            redacted.final_reason.as_deref(),
+            Some("Probe failed for http://provider.example/live/***/***/42.ts?***")
+        );
+        assert_eq!(
+            redacted.screenshot_error_reason.as_deref(),
+            Some("Screenshot failed for http://provider.example/live/***/***/42.ts?***")
         );
     }
 
