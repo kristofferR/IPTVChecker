@@ -310,7 +310,7 @@ function SelectedChannelSidebar({
         onSetVolume={streamPlayer.setVolume}
         onToggleMute={streamPlayer.toggleMute}
         onOpenExternal={onOpenExternal}
-        onRetryPlay={(result) => streamPlayer.play(result)}
+        onRetryPlay={onPlayChannel}
         onPip={document.pictureInPictureEnabled ? onPip : undefined}
       />
     </div>
