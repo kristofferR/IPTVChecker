@@ -225,6 +225,7 @@ export function GuideView({
   }, [guideFocusChannelIndex, channels, virtualizer, setGuideFocusChannelIndex]);
 
   const activate = (target: GuideSelection) => {
+    if (testing) return;
     if (!isSelectionPlayable(target, Math.floor(Date.now() / 1000))) return;
     onPlayArchive(target.result, {
       startEpochS: target.programme.start,
@@ -324,7 +325,7 @@ export function GuideView({
               </span>
               <button
                 type="button"
-                disabled={!selectionPlayable}
+                disabled={!selectionPlayable || testing}
                 onClick={() => activate(selection)}
                 className="flex shrink-0 items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-500 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
               >
