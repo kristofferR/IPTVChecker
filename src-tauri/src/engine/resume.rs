@@ -10,7 +10,7 @@ const REDACTED_QUERY_VALUE: &str = "REDACTED";
 static URL_IN_TEXT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r#"https?://[^\s"'<>]+"#).expect("valid URL regex"));
 
-fn sanitize_url_for_persistence(url: &str) -> String {
+pub(crate) fn sanitize_url_for_persistence(url: &str) -> String {
     let trimmed = url.trim();
     let Ok(mut parsed) = url::Url::parse(trimmed) else {
         return trimmed.to_string();

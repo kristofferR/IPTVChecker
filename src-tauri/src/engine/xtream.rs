@@ -7,6 +7,7 @@ use crate::engine::remote_cache::{
     parse_http_url, PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT, PLAYLIST_DOWNLOAD_USER_AGENT,
 };
 use crate::error::AppError;
+use crate::models::channel::Channel;
 use crate::models::playlist::XtreamAccountInfo;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -340,6 +341,74 @@ fn xtream_catchup_attrs(entry: &serde_json::Value) -> String {
     }
 }
 
+fn xtream_stream_id(entry: &serde_json::Value) -> Option<String> {
+    match entry.get("stream_id") {
+        Some(serde_json::Value::Number(number)) => Some(number.to_string()),
+        Some(serde_json::Value::String(raw)) if !raw.trim().is_empty() => {
+            Some(raw.trim().to_string())
+        }
+        _ => None,
+    }
+}
+
+pub(crate) async fn fetch_xtream_archive_flags(
+    server: &Url,
+    username: &str,
+    password: &str,
+    accept_invalid_certs: bool,
+) -> HashMap<String, Option<u32>> {
+    let Ok(client) = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .connect_timeout(PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT)
+        .timeout(XTREAM_PLAYER_API_TIMEOUT)
+        .danger_accept_invalid_certs(accept_invalid_certs)
+        .build()
+    else {
+        return HashMap::new();
+    };
+    let url = build_xtream_player_api_action_url(server, username, password, "get_live_streams");
+
+    fetch_xtream_json_array(&client, url, "live streams")
+        .await
+        .into_iter()
+        .filter(|entry| xtream_numeric_field(entry, "tv_archive") == Some(1))
+        .filter_map(|entry| {
+            let stream_id = xtream_stream_id(&entry)?;
+            let days = xtream_numeric_field(&entry, "tv_archive_duration")
+                .filter(|days| *days > 0)
+                .and_then(|days| u32::try_from(days).ok());
+            Some((stream_id, days))
+        })
+        .collect()
+}
+
+pub(crate) fn apply_xtream_archive_flags(
+    channels: &mut [Channel],
+    archive_flags: &HashMap<String, Option<u32>>,
+) {
+    for channel in channels {
+        let Some(stream_id) = Url::parse(&channel.url).ok().and_then(|url| {
+            let file_name = url.path_segments()?.next_back()?;
+            Some(
+                file_name
+                    .rsplit_once('.')
+                    .map_or(file_name, |(stem, _)| stem)
+                    .to_string(),
+            )
+        }) else {
+            continue;
+        };
+        let Some(days) = archive_flags.get(&stream_id) else {
+            continue;
+        };
+
+        channel.catchup.get_or_insert_with(|| "xc".to_string());
+        if channel.catchup_days.is_none() {
+            channel.catchup_days = *days;
+        }
+    }
+}
+
 /// Append M3U entries for a list of Xtream streams.
 fn append_xtream_streams_to_m3u(
     m3u: &mut String,
@@ -592,7 +661,7 @@ pub(crate) async fn fetch_xtream_account_info(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_xtream_streams_to_m3u, build_xtream_download_url,
+        append_xtream_streams_to_m3u, apply_xtream_archive_flags, build_xtream_download_url,
         build_xtream_player_api_action_url, build_xtream_player_api_url, build_xtream_source_key,
         extract_xtream_account_info, extract_xtream_max_connections, normalize_xtream_server,
     };
@@ -633,6 +702,56 @@ mod tests {
         assert!(lines[0].contains("catchup=\"xc\" catchup-days=\"7\""));
         assert!(lines[2].contains("catchup=\"xc\" catchup-days=\"3\""));
         assert!(!lines[4].contains("catchup"));
+    }
+
+    #[test]
+    fn archive_flags_enrich_missing_m3u_metadata_without_overwriting_it() {
+        let mut channels = vec![
+            crate::models::channel::Channel {
+                index: 0,
+                playlist: "fixture.m3u".to_string(),
+                name: "Missing metadata".to_string(),
+                group: String::new(),
+                language: None,
+                tvg_id: None,
+                tvg_name: None,
+                tvg_logo: None,
+                tvg_chno: None,
+                catchup: None,
+                catchup_days: None,
+                catchup_source: None,
+                url: "https://example.com/live/user/pass/42.ts".to_string(),
+                content_type: crate::models::channel::ContentType::Live,
+                extinf_line: String::new(),
+                metadata_lines: Vec::new(),
+            },
+            crate::models::channel::Channel {
+                index: 1,
+                playlist: "fixture.m3u".to_string(),
+                name: "Existing metadata".to_string(),
+                group: String::new(),
+                language: None,
+                tvg_id: None,
+                tvg_name: None,
+                tvg_logo: None,
+                tvg_chno: None,
+                catchup: Some("append".to_string()),
+                catchup_days: Some(14),
+                catchup_source: None,
+                url: "https://example.com/live/user/pass/43.m3u8?token=secret".to_string(),
+                content_type: crate::models::channel::ContentType::Live,
+                extinf_line: String::new(),
+                metadata_lines: Vec::new(),
+            },
+        ];
+        let flags = HashMap::from([("42".to_string(), Some(7)), ("43".to_string(), Some(3))]);
+
+        apply_xtream_archive_flags(&mut channels, &flags);
+
+        assert_eq!(channels[0].catchup.as_deref(), Some("xc"));
+        assert_eq!(channels[0].catchup_days, Some(7));
+        assert_eq!(channels[1].catchup.as_deref(), Some("append"));
+        assert_eq!(channels[1].catchup_days, Some(14));
     }
 
     #[test]

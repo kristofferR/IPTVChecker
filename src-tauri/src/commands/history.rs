@@ -294,7 +294,18 @@ fn write_run_file(
     std::fs::create_dir_all(&runs_dir).map_err(AppError::Io)?;
 
     let run_path = v2_run_file_path(base_dir, run_id);
-    let bytes = serde_json::to_vec(results).map_err(|error| {
+    let sanitized_results = results
+        .iter()
+        .map(|result| {
+            let mut sanitized = result.clone();
+            sanitized.catchup_source = sanitized
+                .catchup_source
+                .as_deref()
+                .map(crate::engine::resume::sanitize_url_for_persistence);
+            sanitized
+        })
+        .collect::<Vec<_>>();
+    let bytes = serde_json::to_vec(&sanitized_results).map_err(|error| {
         AppError::Parse(format!(
             "Failed to serialize run file {}: {}",
             run_id, error
@@ -965,6 +976,32 @@ mod tests {
         // Verify per-run files exist
         assert!(v2_run_file_path(&test_root, "run-1").exists());
         assert!(v2_run_file_path(&test_root, "run-2").exists());
+
+        let _ = std::fs::remove_dir_all(&test_root);
+    }
+
+    #[test]
+    fn v2_run_files_redact_catchup_source_credentials() {
+        let test_root = create_test_root_dir("v2-catchup-source-redaction");
+        std::fs::create_dir_all(&test_root).unwrap();
+
+        let mut result = sample_result("http://example.com/a", ChannelStatus::Alive);
+        result.catchup_source = Some(
+            "https://archive:secret@example.com/timeshift?username=demo&token=abc123".to_string(),
+        );
+
+        write_run_file(&test_root, "run-1", &[result]).unwrap();
+
+        let persisted = std::fs::read_to_string(v2_run_file_path(&test_root, "run-1")).unwrap();
+        assert!(!persisted.contains("secret"));
+        assert!(!persisted.contains("demo"));
+        assert!(!persisted.contains("abc123"));
+
+        let loaded = load_run_file(&test_root, "run-1").unwrap();
+        assert_eq!(
+            loaded[0].catchup_source.as_deref(),
+            Some("https://example.com/timeshift?username=REDACTED&token=REDACTED")
+        );
 
         let _ = std::fs::remove_dir_all(&test_root);
     }
