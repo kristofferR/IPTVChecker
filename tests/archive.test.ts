@@ -105,6 +105,16 @@ describe("buildArchiveUrl", () => {
         WINDOW,
       ),
     ).toBe(`HTTPS://h/replay/${START}.m3u8`);
+    expect(
+      buildArchiveUrl(
+        urlFields(
+          "http://h/live/s.m3u8",
+          "default",
+          "http://h/replay?start=${start}&amp;duration=${duration}",
+        ),
+        WINDOW,
+      ),
+    ).toBe(`http://h/replay?start=${START}&duration=3600`);
     // Query templates attach to the stream URL, respecting existing queries.
     expect(
       buildArchiveUrl(urlFields("http://h/s.m3u8?token=x", "shift", "?utc=${start}"), WINDOW),
@@ -113,6 +123,9 @@ describe("buildArchiveUrl", () => {
     expect(buildArchiveUrl(urlFields("http://h/s.m3u8", "append", "&start=${start}"), WINDOW)).toBe(
       `http://h/s.m3u8?start=${START}`,
     );
+    expect(
+      buildArchiveUrl(urlFields("http://h/s.m3u8", "append", "&amp;start=${start}"), WINDOW),
+    ).toBe(`http://h/s.m3u8?start=${START}`);
     expect(
       buildArchiveUrl(
         urlFields("http://h/s.m3u8?token=x#player", "shift", "?utc=${start}"),
@@ -148,6 +161,9 @@ describe("buildArchiveUrl", () => {
     expect(
       buildArchiveUrl(urlFields("https://host/provider/live/alice/secret/42.ts", "xc"), WINDOW),
     ).toBe("https://host/provider/timeshift/alice/secret/60/2026-08-28:20-00/42.m3u8");
+    expect(buildArchiveUrl(urlFields("HTTPS://host/live/alice/secret/42.ts", "xc"), WINDOW)).toBe(
+      "HTTPS://host/timeshift/alice/secret/60/2026-08-28:20-00/42.m3u8",
+    );
     expect(
       buildArchiveUrl(urlFields("https://host/provider/alice/secret/42.ts", "xc"), {
         ...WINDOW,

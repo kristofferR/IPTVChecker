@@ -486,6 +486,7 @@ export interface CastMediaRequest {
   channelName: string | null;
   channelLogo: string | null;
   streamKind: CastStreamKind;
+  isFinite: boolean;
 }
 
 export type UpdateInstallKind = "built-in" | "manual";

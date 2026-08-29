@@ -381,7 +381,14 @@ fn build_load_payload(request: &CastMediaRequest, cast_url: &str, is_dash: bool)
     let mut media_obj = serde_json::Map::new();
     media_obj.insert("contentId".to_string(), json!(cast_url));
     media_obj.insert("contentType".to_string(), json!(content_type));
-    media_obj.insert("streamType".to_string(), json!("LIVE"));
+    media_obj.insert(
+        "streamType".to_string(),
+        json!(if request.is_finite {
+            "BUFFERED"
+        } else {
+            "LIVE"
+        }),
+    );
     media_obj.insert("metadata".to_string(), Value::Object(metadata));
 
     let mut fields = HashMap::new();
@@ -545,5 +552,29 @@ pub struct CastSessionHandle(pub Mutex<Option<ActiveCastSession>>);
 impl CastSessionHandle {
     pub fn new() -> Arc<Self> {
         Arc::new(Self(Mutex::new(None)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn media_request(is_finite: bool) -> CastMediaRequest {
+        CastMediaRequest {
+            original_url: "https://example.com/stream.ts".to_string(),
+            channel_name: Some("Example".to_string()),
+            channel_logo: None,
+            stream_kind: CastStreamKind::MpegTs,
+            is_finite,
+        }
+    }
+
+    #[test]
+    fn finite_media_uses_buffered_cast_stream_type() {
+        let finite = build_load_payload(&media_request(true), "http://127.0.0.1/archive", false);
+        let live = build_load_payload(&media_request(false), "http://127.0.0.1/live", false);
+
+        assert_eq!(finite.fields["media"]["streamType"], "BUFFERED");
+        assert_eq!(live.fields["media"]["streamType"], "LIVE");
     }
 }

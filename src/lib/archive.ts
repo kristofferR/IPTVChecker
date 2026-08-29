@@ -94,7 +94,7 @@ function formatXtreamStart(epochS: number): string {
 
 /** `http(s)://host[/prefix][/live]/user/pass/id[.ext]` — Xtream live URL shape. */
 const XTREAM_LIVE_URL =
-  /^(https?:\/\/[^/]+)((?:\/[^/]+)*?)(?:\/live)?\/([^/]+)\/([^/]+)\/(\d+)(?:\.\w+)?$/;
+  /^(https?:\/\/[^/]+)((?:\/[^/]+)*?)(?:\/live)?\/([^/]+)\/([^/]+)\/(\d+)(?:\.\w+)?$/i;
 
 function defaultArchiveUrl(url: string, window: ArchiveWindow): string {
   return appendQuery(url, substituteArchiveTemplate("utc=${start}&lutc=${now}", window));
@@ -110,7 +110,7 @@ export function buildArchiveUrl(channel: ArchiveUrlFields, window: ArchiveWindow
 
   const source = channel.catchup_source?.trim();
   if (source) {
-    const resolved = substituteArchiveTemplate(source, window);
+    const resolved = substituteArchiveTemplate(source, window).replace(/&amp;/g, "&");
     if (/^https?:\/\//i.test(resolved)) return resolved;
     if (resolved.startsWith("?") || resolved.startsWith("&")) {
       return appendQuery(channel.url, resolved.slice(1));

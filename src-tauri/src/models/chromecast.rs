@@ -40,6 +40,8 @@ pub struct CastMediaRequest {
     pub channel_name: Option<String>,
     pub channel_logo: Option<String>,
     pub stream_kind: CastStreamKind,
+    #[serde(default)]
+    pub is_finite: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

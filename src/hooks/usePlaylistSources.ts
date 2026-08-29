@@ -131,6 +131,7 @@ export interface UsePlaylistSourcesParams {
     preserveExistingResults?: boolean,
     shouldApply?: () => boolean,
   ) => Promise<boolean>;
+  invalidatePendingArchivePlayback: () => void;
 }
 
 /** Playlist source management: opening file/URL/Xtream/Stalker sources,
@@ -138,6 +139,7 @@ export interface UsePlaylistSourcesParams {
 export function usePlaylistSources({
   initFromPlaylist,
   syncFromPlaylist,
+  invalidatePendingArchivePlayback,
 }: UsePlaylistSourcesParams) {
   const channelSearch = useAppStore((s) => s.channelSearch);
   const settingsHydrated = useAppStore((s) => s.settingsHydrated);
@@ -196,6 +198,7 @@ export function usePlaylistSources({
       appliedSourceFilter: string,
       shouldApply: () => boolean,
     ): Promise<boolean> => {
+      invalidatePendingArchivePlayback();
       await cancelArchiveProbes();
       if (!shouldApply()) {
         return false;
@@ -236,7 +239,7 @@ export function usePlaylistSources({
 
       return true;
     },
-    [initFromPlaylist],
+    [initFromPlaylist, invalidatePendingArchivePlayback],
   );
 
   const loadFullSourcePreview = useCallback(
@@ -410,6 +413,7 @@ export function usePlaylistSources({
         getStore().setPlaylistOpenError(message);
 
         if (mode === "freshOpen") {
+          invalidatePendingArchivePlayback();
           await cancelArchiveProbes();
           if (!isCurrentLoad()) {
             return supersededResult();
@@ -435,6 +439,7 @@ export function usePlaylistSources({
       buildVisiblePreview,
       channelSearch,
       commitLoadedPlaylist,
+      invalidatePendingArchivePlayback,
       loadFullSourcePreview,
       refreshRecentPlaylists,
     ],

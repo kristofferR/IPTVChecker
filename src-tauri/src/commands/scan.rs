@@ -2023,6 +2023,23 @@ async fn append_history_blocking(
     .await;
 }
 
+fn redact_channel_debug_log(mut channel_log: ChannelDebugLog) -> ChannelDebugLog {
+    channel_log.channel_url = stream_proxy::redact_url(&channel_log.channel_url);
+    channel_log.redirect_chain = channel_log
+        .redirect_chain
+        .into_iter()
+        .map(|url| stream_proxy::redact_url(&url))
+        .collect();
+    for attempt in &mut channel_log.attempts {
+        attempt.redirect_chain = attempt
+            .redirect_chain
+            .iter()
+            .map(|url| stream_proxy::redact_url(url))
+            .collect();
+    }
+    channel_log
+}
+
 /// Store the finished scan's debug log on the window scan state.
 async fn store_scan_log(
     state: &Arc<AppState>,
@@ -2045,7 +2062,10 @@ async fn store_scan_log(
                 started_at_epoch_ms,
                 finished_at_epoch_ms: now_epoch_ms(),
                 summary,
-                channels: channel_logs,
+                channels: channel_logs
+                    .into_iter()
+                    .map(redact_channel_debug_log)
+                    .collect(),
             });
         })
         .await;
@@ -2937,6 +2957,33 @@ mod tests {
             error_reason: None,
             channel_log: ChannelDebugLog::default(),
         }
+    }
+
+    #[test]
+    fn scan_debug_log_redacts_all_url_fields_before_storage() {
+        let sensitive_url = "http://provider.example/live/user/pass/42.ts?token=secret";
+        let redacted = redact_channel_debug_log(ChannelDebugLog {
+            channel_url: sensitive_url.to_string(),
+            redirect_chain: vec![sensitive_url.to_string()],
+            attempts: vec![crate::models::scan_log::ChannelAttemptDebugLog {
+                redirect_chain: vec![sensitive_url.to_string()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+
+        assert_eq!(
+            redacted.channel_url,
+            "http://provider.example/live/***/***/42.ts?***"
+        );
+        assert_eq!(
+            redacted.redirect_chain.as_slice(),
+            std::slice::from_ref(&redacted.channel_url)
+        );
+        assert_eq!(
+            redacted.attempts[0].redirect_chain.as_slice(),
+            std::slice::from_ref(&redacted.channel_url)
+        );
     }
 
     #[test]

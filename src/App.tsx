@@ -604,6 +604,7 @@ export default function App() {
   const { start, cancel, pause, resume, initFromPlaylist, syncFromPlaylist, updateResult } =
     useScan();
   const { checkForUpdates, installUpdate } = useUpdateCheck();
+  const invalidatePendingArchivePlayback = useCallback(() => setPendingArchivePlayback(null), []);
   const {
     handleClearRecentPlaylists,
     handleOpen,
@@ -628,7 +629,11 @@ export default function App() {
     setSavedPlaylistEditorDraft,
     savedXtreamTestEntry,
     setSavedXtreamTestEntry,
-  } = usePlaylistSources({ initFromPlaylist, syncFromPlaylist });
+  } = usePlaylistSources({
+    initFromPlaylist,
+    syncFromPlaylist,
+    invalidatePendingArchivePlayback,
+  });
 
   useEffect(() => {
     setPendingArchivePlayback(null);
@@ -1186,6 +1191,7 @@ export default function App() {
   const handlePlayInApp = useCallback(
     (result: ChannelResult) => {
       if (isScanActive(getStore().scanState) && getStore().playlist?.single_provider) {
+        setPendingArchivePlayback(null);
         getStore().setPendingPlaybackChannel(result);
         setPendingPlaybackReason("scan");
         return;
@@ -1194,6 +1200,7 @@ export default function App() {
         getStore().playlist?.single_provider &&
         Object.values(getStore().archiveProbes).some((probe) => probe.running)
       ) {
+        setPendingArchivePlayback(null);
         getStore().setPendingPlaybackChannel(result);
         setPendingPlaybackReason("archive_probe");
         return;
@@ -1272,6 +1279,7 @@ export default function App() {
   const handlePlayArchive = useCallback(
     (result: ChannelResult, options: ArchivePlayOptions) => {
       if (isScanActive(getStore().scanState) && getStore().playlist?.single_provider) {
+        getStore().setPendingPlaybackChannel(null);
         setPendingArchivePlayback({ result, options });
         setPendingPlaybackReason("scan");
         return;
@@ -1280,6 +1288,7 @@ export default function App() {
         getStore().playlist?.single_provider &&
         Object.values(getStore().archiveProbes).some((probe) => probe.running)
       ) {
+        getStore().setPendingPlaybackChannel(null);
         setPendingArchivePlayback({ result, options });
         setPendingPlaybackReason("archive_probe");
         return;
@@ -1303,12 +1312,14 @@ export default function App() {
   const handleProceedPlayback = useCallback(() => {
     setPendingPlaybackReason(null);
     if (pendingArchivePlayback) {
+      getStore().setPendingPlaybackChannel(null);
       setPendingArchivePlayback(null);
       startArchivePlayback(pendingArchivePlayback.result, pendingArchivePlayback.options);
       return;
     }
     if (!pendingPlaybackChannel) return;
     const channel = pendingPlaybackChannel;
+    setPendingArchivePlayback(null);
     getStore().setPendingPlaybackChannel(null);
     getStore().setPlayIntentActive(true);
     playStream(channel);

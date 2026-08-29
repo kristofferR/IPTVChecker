@@ -161,6 +161,7 @@ pub async fn start(
     app: AppHandle,
     upstream_url: String,
     stream_kind: CastStreamKind,
+    is_finite: bool,
 ) -> Result<CastProxyHandle, AppError> {
     let token = generate_token();
     let lan_ip = detect_lan_ip()
@@ -204,6 +205,7 @@ pub async fn start(
             cancel.clone(),
             remux_state.clone(),
             client.clone(),
+            is_finite,
         )
         .await?;
         (
@@ -306,6 +308,7 @@ async fn start_remux(
     cancel: CancellationToken,
     remux_state: Arc<Mutex<Option<RemuxState>>>,
     client: Arc<reqwest::Client>,
+    is_finite: bool,
 ) -> Result<RemuxStartInfo, AppError> {
     let tmpdir = std::env::temp_dir().join(format!("iptv-cast-{token}"));
     std::fs::create_dir_all(&tmpdir).map_err(AppError::Io)?;
@@ -418,15 +421,15 @@ async fn start_remux(
         // which the muxer rejects.
         cmd.arg("-avoid_negative_ts").arg("make_zero");
 
-        // DASH muxer: sliding-window live profile, fMP4 segments under
-        // SegmentTemplate so Shaka can index by $Number$. `remove_at_exit`
-        // pairs with `extra_window_size` so segments stay on disk a couple
-        // of windows past the manifest tail (covers receiver reconnects).
+        // DASH uses a sliding window for live streams and retains every
+        // segment for finite streams so ffmpeg can finalize a static MPD.
         cmd.arg("-f").arg("dash");
         cmd.arg("-seg_duration").arg("4");
-        cmd.arg("-window_size").arg("6");
-        cmd.arg("-extra_window_size").arg("2");
-        cmd.arg("-remove_at_exit").arg("1");
+        if !is_finite {
+            cmd.arg("-window_size").arg("6");
+            cmd.arg("-extra_window_size").arg("2");
+            cmd.arg("-remove_at_exit").arg("1");
+        }
         cmd.arg("-use_template").arg("1");
         cmd.arg("-use_timeline").arg("1");
         cmd.arg("-init_seg_name")
@@ -450,9 +453,13 @@ async fn start_remux(
         let segment_pattern = tmpdir.join("seg_%05d.ts");
         cmd.arg("-f").arg("hls");
         cmd.arg("-hls_time").arg("4");
-        cmd.arg("-hls_list_size").arg("6");
-        cmd.arg("-hls_flags")
-            .arg("delete_segments+omit_endlist+independent_segments");
+        cmd.arg("-hls_list_size")
+            .arg(if is_finite { "0" } else { "6" });
+        cmd.arg("-hls_flags").arg(if is_finite {
+            "independent_segments"
+        } else {
+            "delete_segments+omit_endlist+independent_segments"
+        });
         cmd.arg("-hls_segment_filename").arg(&segment_pattern);
     }
     cmd.arg(&manifest_path);
@@ -488,6 +495,7 @@ async fn start_remux(
                 client.clone(),
                 stdin,
                 cancel.clone(),
+                is_finite,
             );
         }
     }
@@ -529,6 +537,9 @@ async fn start_remux(
                             "[CastProxy/ffmpeg] Exited cleanly for {}",
                             redact_url(&upstream_for_worker)
                         );
+                        if is_finite {
+                            return;
+                        }
                     }
                     Ok(s) => {
                         log::warn!(
@@ -545,8 +556,9 @@ async fn start_remux(
                         log::warn!("[CastProxy/ffmpeg] wait() failed: {err}");
                     }
                 }
-                // ffmpeg ended on its own — also cancel the listener so the
-                // session tears down rather than serving a dead playlist.
+                // A completed finite remux must remain available while the
+                // receiver consumes its final segments. Other exits tear down
+                // the listener rather than leaving a dead live playlist.
                 cancel_for_worker.cancel();
                 let mut guard = remux_state_for_worker.lock().await;
                 if let Some(state) = guard.take() {
@@ -651,6 +663,7 @@ fn spawn_upstream_pump(
     client: Arc<reqwest::Client>,
     mut stdin: tokio::process::ChildStdin,
     cancel: CancellationToken,
+    is_finite: bool,
 ) {
     tokio::spawn(async move {
         use futures::StreamExt;
@@ -747,6 +760,12 @@ fn spawn_upstream_pump(
                                 break;
                             }
                             None => {
+                                if is_finite {
+                                    log::info!(
+                                        "[CastProxy/pump] Upstream EOF ({label}); finite stream complete"
+                                    );
+                                    break 'session;
+                                }
                                 log::info!(
                                     "[CastProxy/pump] Upstream EOF ({label}); reconnecting"
                                 );
