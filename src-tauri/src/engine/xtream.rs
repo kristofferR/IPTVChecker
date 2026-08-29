@@ -32,6 +32,11 @@ pub(crate) fn xtream_host_label(server: &str) -> String {
 
 pub(crate) fn normalize_xtream_server(server: &str) -> Result<Url, AppError> {
     let mut parsed = parse_http_url(server, "Invalid Xtream server URL")?;
+    if parsed.scheme() != "https" {
+        return Err(AppError::Parse(
+            "Xtream server URL must use https://".to_string(),
+        ));
+    }
     if parsed.host_str().is_none() {
         return Err(AppError::Parse(
             "Invalid Xtream server URL: missing host".to_string(),
@@ -860,6 +865,13 @@ mod tests {
         let error = normalize_xtream_server("ftp://demo.example.com")
             .expect_err("invalid scheme should fail");
         assert!(error.to_string().contains("must use http:// or https://"));
+    }
+
+    #[test]
+    fn normalize_xtream_server_rejects_http() {
+        let error = normalize_xtream_server("http://demo.example.com")
+            .expect_err("insecure Xtream server should fail");
+        assert!(error.to_string().contains("must use https://"));
     }
 
     #[test]

@@ -1311,6 +1311,7 @@ fn refresh_resumed_catchup_metadata(
             entry.result.catchup = channel.catchup.clone();
             entry.result.catchup_days = channel.catchup_days;
             entry.result.catchup_source = channel.catchup_source.clone();
+            entry.result.extinf_line = channel.extinf_line.clone();
         }
     }
 }
@@ -2950,8 +2951,9 @@ mod tests {
         channel.catchup = Some("xc".to_string());
         channel.catchup_days = Some(7);
         channel.catchup_source = Some("https://new.example/archive".to_string());
+        channel.extinf_line = "#EXTINF:-1 catchup=\"xc\" catchup-days=\"7\",Test".to_string();
 
-        refresh_resumed_catchup_metadata(&mut entries, &[channel]);
+        refresh_resumed_catchup_metadata(&mut entries, std::slice::from_ref(&channel));
 
         assert_eq!(entries[0].result.catchup.as_deref(), Some("xc"));
         assert_eq!(entries[0].result.catchup_days, Some(7));
@@ -2959,6 +2961,7 @@ mod tests {
             entries[0].result.catchup_source.as_deref(),
             Some("https://new.example/archive")
         );
+        assert_eq!(entries[0].result.extinf_line, channel.extinf_line);
     }
 
     #[test]

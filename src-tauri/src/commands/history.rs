@@ -302,6 +302,8 @@ fn write_run_file(
                 .catchup_source
                 .as_deref()
                 .map(crate::engine::resume::sanitize_url_for_persistence);
+            sanitized.extinf_line =
+                crate::engine::resume::sanitize_extinf_for_persistence(&sanitized.extinf_line);
             sanitized
         })
         .collect::<Vec<_>>();
@@ -989,6 +991,7 @@ mod tests {
         result.catchup_source = Some(
             "https://archive:secret@example.com/timeshift?username=demo&token=abc123".to_string(),
         );
+        result.extinf_line = "#EXTINF:-1 catchup-source='https://archive:extinf-secret@example.com/timeshift?token=extinf-token',Channel".to_string();
 
         write_run_file(&test_root, "run-1", &[result]).unwrap();
 
@@ -996,11 +999,17 @@ mod tests {
         assert!(!persisted.contains("secret"));
         assert!(!persisted.contains("demo"));
         assert!(!persisted.contains("abc123"));
+        assert!(!persisted.contains("extinf-secret"));
+        assert!(!persisted.contains("extinf-token"));
 
         let loaded = load_run_file(&test_root, "run-1").unwrap();
         assert_eq!(
             loaded[0].catchup_source.as_deref(),
             Some("https://example.com/timeshift?username=REDACTED&token=REDACTED")
+        );
+        assert_eq!(
+            loaded[0].extinf_line,
+            "#EXTINF:-1 catchup-source='https://example.com/timeshift?token=REDACTED',Channel"
         );
 
         let _ = std::fs::remove_dir_all(&test_root);

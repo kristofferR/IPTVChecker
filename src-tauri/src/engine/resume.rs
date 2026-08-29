@@ -9,11 +9,27 @@ use crate::models::scan_log::{ChannelAttemptDebugLog, ChannelDebugLog};
 const REDACTED_QUERY_VALUE: &str = "REDACTED";
 static URL_IN_TEXT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r#"https?://[^\s"'<>]+"#).expect("valid URL regex"));
+static CATCHUP_SOURCE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?i)(catchup-source\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s,]+))"#)
+        .expect("valid catch-up source regex")
+});
 
 pub(crate) fn sanitize_url_for_persistence(url: &str) -> String {
     let trimmed = url.trim();
     let Ok(mut parsed) = url::Url::parse(trimmed) else {
-        return trimmed.to_string();
+        let without_fragment = trimmed.split_once('#').map_or(trimmed, |(value, _)| value);
+        let Some((base, query)) = without_fragment.split_once('?') else {
+            return without_fragment.to_string();
+        };
+        if query.is_empty() {
+            return base.to_string();
+        }
+
+        let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+        for (key, _) in url::form_urlencoded::parse(query.as_bytes()) {
+            serializer.append_pair(&key, REDACTED_QUERY_VALUE);
+        }
+        return format!("{}?{}", base, serializer.finish());
     };
 
     let _ = parsed.set_username("");
@@ -33,6 +49,32 @@ pub(crate) fn sanitize_url_for_persistence(url: &str) -> String {
     }
 
     parsed.to_string()
+}
+
+pub(crate) fn sanitize_extinf_for_persistence(extinf_line: &str) -> String {
+    CATCHUP_SOURCE_RE
+        .replace_all(extinf_line, |captures: &regex::Captures<'_>| {
+            let value = captures
+                .get(2)
+                .or_else(|| captures.get(3))
+                .or_else(|| captures.get(4))
+                .map_or("", |capture| capture.as_str());
+            let quote = if captures.get(2).is_some() {
+                "\""
+            } else if captures.get(3).is_some() {
+                "'"
+            } else {
+                ""
+            };
+            format!(
+                "{}{}{}{}",
+                &captures[1],
+                quote,
+                sanitize_url_for_persistence(value),
+                quote
+            )
+        })
+        .into_owned()
 }
 
 fn sanitize_log_entry(entry: &str) -> String {
@@ -156,6 +198,7 @@ fn sanitize_result_for_persistence(result: &ChannelResult) -> ChannelResult {
         .catchup_source
         .as_deref()
         .map(sanitize_url_for_persistence);
+    sanitized.extinf_line = sanitize_extinf_for_persistence(&sanitized.extinf_line);
     sanitized
 }
 
@@ -583,6 +626,18 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_url_for_persistence_redacts_relative_query_values() {
+        assert_eq!(
+            sanitize_url_for_persistence("?token=abc123&start=${start}#fragment"),
+            "?token=REDACTED&start=REDACTED"
+        );
+        assert_eq!(
+            sanitize_url_for_persistence("archive/path?username=demo&password=hunter2"),
+            "archive/path?username=REDACTED&password=REDACTED"
+        );
+    }
+
+    #[test]
     fn write_log_entry_redacts_raw_secrets_in_urls() {
         let log_file = temp_file("resume-log-redaction");
 
@@ -612,6 +667,9 @@ mod tests {
             "https://archive:secret@example.com/timeshift?username=demo&password=hunter2"
                 .to_string(),
         );
+        result.extinf_line =
+            "#EXTINF:-1 catchup-source=\"?token=checkpoint-secret&start=${start}\",Secret"
+                .to_string();
 
         write_result_entry(&checkpoint_file, &result).expect("result write should succeed");
 
@@ -620,6 +678,7 @@ mod tests {
         assert!(!persisted.contains("abc123"));
         assert!(!persisted.contains("xyz987"));
         assert!(!persisted.contains("hunter2"));
+        assert!(!persisted.contains("checkpoint-secret"));
         assert!(persisted.contains("token=REDACTED"));
         assert!(persisted.contains("auth=REDACTED"));
         assert!(persisted.contains("session=REDACTED"));
@@ -639,6 +698,10 @@ mod tests {
         assert_eq!(
             loaded[0].catchup_source.as_deref(),
             Some("https://example.com/timeshift?username=REDACTED&password=REDACTED")
+        );
+        assert_eq!(
+            loaded[0].extinf_line,
+            "#EXTINF:-1 catchup-source=\"?token=REDACTED&start=REDACTED\",Secret"
         );
 
         let _ = std::fs::remove_file(&checkpoint_file);
