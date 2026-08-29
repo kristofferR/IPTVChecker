@@ -4,6 +4,7 @@ import type { ArchivePlayOptions, ArchiveSession } from "../hooks/useStreamPlaye
 import { archiveTitle, hasArchive } from "../lib/archive";
 import { probeChannelArchive } from "../lib/archiveProbe";
 import { ensureEpgLoaded } from "../lib/epgLoader";
+import { isScanActive } from "../lib/scanState";
 import { getEpgProgrammes } from "../lib/tauri";
 import { dayLabel, timeLabel } from "../lib/timeFormat";
 import type { ChannelResult, EpgProgramme } from "../lib/types";
@@ -18,10 +19,22 @@ interface ArchiveCardProps {
 function ArchiveProbe({ result }: { result: ChannelResult }) {
   const entry = useAppStore((state) => state.archiveProbes[result.index]);
   const setArchiveProbe = useAppStore((state) => state.setArchiveProbe);
+  const scanState = useAppStore((state) => state.scanState);
+  const anotherProbeRunning = useAppStore((state) =>
+    Object.values(state.archiveProbes).some((probe) => probe.running),
+  );
   const running = entry?.running ?? false;
+  const disabled = anotherProbeRunning || isScanActive(scanState);
   const outcomes = entry?.outcomes ?? [];
 
   const runProbe = () => {
+    const state = useAppStore.getState();
+    if (
+      isScanActive(state.scanState) ||
+      Object.values(state.archiveProbes).some((probe) => probe.running)
+    ) {
+      return;
+    }
     void probeChannelArchive(result, (update) => setArchiveProbe(result.index, update));
   };
 
@@ -29,7 +42,8 @@ function ArchiveProbe({ result }: { result: ChannelResult }) {
     <div className="mt-2 border-t border-violet-500/15 pt-2">
       <button
         type="button"
-        disabled={running}
+        disabled={disabled}
+        title={isScanActive(scanState) ? "Wait for the scan to finish" : undefined}
         onClick={runProbe}
         className="flex w-full items-center justify-center gap-1.5 rounded-md bg-btn px-3 py-1.5 text-[12px] font-medium text-text-primary border border-border-app shadow-sm hover:bg-btn-hover transition-colors disabled:opacity-40"
       >

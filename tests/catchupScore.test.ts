@@ -63,7 +63,7 @@ describe("archiveVerdict", () => {
   });
 
   it("measures depth as the deepest answering point", () => {
-    expect(measuredDepthDays(entry([[0, true, 400]]))).toBe(1);
+    expect(measuredDepthDays(entry([[0, true, 400]]))).toBe(1 / 24);
     expect(
       measuredDepthDays(
         entry([

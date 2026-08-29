@@ -215,11 +215,12 @@ function ChannelRowImpl({
           broken: "bg-red-500/15 text-red-300 ring-red-500/30",
         }[verdict];
         const measured = verdict === "shallower" ? measuredDepthDays(probeEntry) : null;
+        const measuredLabel = measured != null && measured < 1 ? "<1" : measured;
         const chipText =
           verdict === "verified"
             ? `✓ ${badge}`
             : verdict === "shallower"
-              ? `⚠ ${measured ?? "?"}/${result.catchup_days ?? "?"}d`
+              ? `⚠ ${measuredLabel ?? "?"}/${result.catchup_days ?? "?"}d`
               : verdict === "broken"
                 ? `✕ ${badge}`
                 : badge;
@@ -227,7 +228,9 @@ function ChannelRowImpl({
           verdict === "advertised"
             ? null
             : verdict === "shallower"
-              ? `Verified depth ${measured ?? "?"} of ${result.catchup_days ?? "?"} days`
+              ? measured != null && measured < 1
+                ? `Verified depth less than 1 of ${result.catchup_days ?? "?"} days`
+                : `Verified depth ${measured ?? "?"} of ${result.catchup_days ?? "?"} days`
               : `Archive ${verdict}`;
         return (
           <span

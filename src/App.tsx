@@ -517,11 +517,16 @@ export default function App() {
   const viewMode = useAppStore((s) => s.viewMode);
   const verifyCatchupAfterScan = useAppStore((s) => s.verifyCatchupAfterScan);
   const scanState = useAppStore((s) => s.scanState);
+  const verifyCatchupScanStartedRef = useRef(false);
 
   // Opt-in "Scan + Verify Catch-up": run the verification pass once the scan
   // finishes; a cancelled or reset scan drops the request.
   useEffect(() => {
-    if (!verifyCatchupAfterScan) return;
+    if (!verifyCatchupAfterScan) {
+      verifyCatchupScanStartedRef.current = false;
+      return;
+    }
+    if (!verifyCatchupScanStartedRef.current) return;
     if (scanState === "complete") {
       getStore().setVerifyCatchupAfterScan(false);
       void verifyAllArchives();
@@ -884,8 +889,14 @@ export default function App() {
   }, []);
 
   const startScanWithSelection = useCallback(
-    async (selection: number[]) => {
+    async (selection: number[], verifyCatchup = false) => {
       const state = getStore();
+      if (
+        state.archiveVerifyRun ||
+        Object.values(state.archiveProbes).some((entry) => entry.running)
+      ) {
+        return false;
+      }
       const currentChannelSearchError = validateSourceFilterPattern(state.channelSearch);
 
       if (currentChannelSearchError) {
@@ -899,6 +910,12 @@ export default function App() {
       }
 
       const refreshedState = getStore();
+      if (
+        refreshedState.archiveVerifyRun ||
+        Object.values(refreshedState.archiveProbes).some((entry) => entry.running)
+      ) {
+        return false;
+      }
       const currentPlaylist = refreshedState.playlist;
       const currentChannelSearch = normalizeSourceFilter(refreshedState.channelSearch);
       const currentGroupFilter = refreshedState.groupFilter;
@@ -938,18 +955,26 @@ export default function App() {
         },
       };
 
+      verifyCatchupScanStartedRef.current = verifyCatchup;
+      refreshedState.setVerifyCatchupAfterScan(verifyCatchup);
       await start(config, currentPlaylist.total_channels, effectiveSelection);
       return true;
     },
     [ensureSourceFilterApplied, start],
   );
 
-  const handleStartScan = useCallback(async () => {
-    const started = await startScanWithSelection(getStore().selectedChannelIndices);
-    if (started) {
-      void triggerHaptic(HapticFeedbackPattern.LevelChange, PerformanceTime.Now);
-    }
-  }, [startScanWithSelection]);
+  const handleStartScan = useCallback(
+    async (verifyCatchup = false) => {
+      const started = await startScanWithSelection(
+        getStore().selectedChannelIndices,
+        verifyCatchup,
+      );
+      if (started) {
+        void triggerHaptic(HapticFeedbackPattern.LevelChange, PerformanceTime.Now);
+      }
+    },
+    [startScanWithSelection],
+  );
 
   const handleScanSelected = useCallback(
     (indices: number[]) => {

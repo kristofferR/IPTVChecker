@@ -55,7 +55,7 @@ interface ToolbarProps {
   onOpenXtream: () => void;
   onSavePlaylist: () => void;
   onManageSavedPlaylists: () => void;
-  onStartScan: () => void;
+  onStartScan: (verifyCatchup?: boolean) => void;
   onPauseScan: () => void;
   onResumeScan: () => void;
   onStopScan: () => void;
@@ -137,7 +137,10 @@ export const Toolbar = memo(function Toolbar({
   const statusFilter = useAppStore((s) => s.statusFilter);
   const viewMode = useAppStore((s) => s.viewMode);
   const setViewMode = useAppStore((s) => s.setViewMode);
-  const setVerifyCatchupAfterScan = useAppStore((s) => s.setVerifyCatchupAfterScan);
+  const archiveVerifyRun = useAppStore((s) => s.archiveVerifyRun);
+  const archiveProbeRunning = useAppStore((s) =>
+    Object.values(s.archiveProbes).some((entry) => entry.running),
+  );
   const completedResults = useAppStore((s) => s.flatResults);
   const duplicateIndices = useAppStore((s) => s.duplicateIndices);
   const menuExportRequest = useAppStore((s) => s.menuExportRequest);
@@ -279,7 +282,11 @@ export const Toolbar = memo(function Toolbar({
   const hasResults = exportScopeCounts.all > 0;
   const scanLabel =
     selectedIndices.length > 0 ? `Scan Selected (${selectedIndices.length})` : "Scan";
-  const scanDisabledReason = !hasPlaylist ? "Open a playlist first" : scanBlockedReason;
+  const scanDisabledReason = !hasPlaylist
+    ? "Open a playlist first"
+    : archiveVerifyRun || archiveProbeRunning
+      ? "Wait for catch-up verification to finish"
+      : scanBlockedReason;
   const canSavePlaylist =
     hasPlaylist && currentSourceDescriptor !== null && currentSourceDescriptor.kind !== "stalker";
   const filtersDisabled = !hasPlaylist;
@@ -485,7 +492,7 @@ export const Toolbar = memo(function Toolbar({
         ) : (
           <div className="relative flex items-center" ref={scanMenuRef} data-no-window-drag>
             <button
-              onClick={onStartScan}
+              onClick={() => onStartScan(false)}
               disabled={scanDisabledReason !== null}
               title={scanDisabledReason ?? "Scan"}
               className={btnWithOptionalText("toolbar-btn-primary")}
@@ -514,8 +521,7 @@ export const Toolbar = memo(function Toolbar({
                   type="button"
                   onClick={() => {
                     setScanMenuVisible(false);
-                    setVerifyCatchupAfterScan(false);
-                    onStartScan();
+                    onStartScan(false);
                   }}
                   className="w-full px-3 py-2 text-left text-[13px] hover:bg-btn-hover"
                 >
@@ -525,8 +531,7 @@ export const Toolbar = memo(function Toolbar({
                   type="button"
                   onClick={() => {
                     setScanMenuVisible(false);
-                    setVerifyCatchupAfterScan(true);
-                    onStartScan();
+                    onStartScan(true);
                   }}
                   className="w-full px-3 py-2 text-left text-[13px] hover:bg-btn-hover"
                 >

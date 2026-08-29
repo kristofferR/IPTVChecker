@@ -37,8 +37,9 @@ export function measuredDepthDays(entry: ArchiveProbeEntry | undefined): number 
     .map((outcome) => outcome.daysBack);
   if (okDays.length === 0) return null;
   const deepest = Math.max(...okDays);
-  // The near point alone proves less than a day of archive.
-  return deepest === 0 ? 1 : deepest;
+  // The near point is one hour back; keep that sub-day evidence distinct from
+  // a probe that actually established a full day of archive.
+  return deepest === 0 ? 1 / 24 : deepest;
 }
 
 function probePointForDays(daysBack: number, nowEpochS: number) {
@@ -62,6 +63,7 @@ const MAX_BISECT_STEPS = 3;
 export async function verifyChannelArchive(
   result: ChannelResult,
   onUpdate: (entry: ArchiveProbeEntry) => void,
+  shouldCancel: () => boolean = () => false,
 ): Promise<ArchiveProbeEntry> {
   const nowEpochS = Math.floor(Date.now() / 1000);
   const outcomes: ArchiveProbeOutcome[] = [];
@@ -77,8 +79,11 @@ export async function verifyChannelArchive(
   };
 
   push(null, false);
+  if (shouldCancel()) {
+    return push(null, true);
+  }
   const near = await probeArchivePoint(result, probePointForDays(0, nowEpochS), nowEpochS);
-  if (!near?.ok) {
+  if (!near?.ok || shouldCancel()) {
     return push(near, true);
   }
   push(near, false);
@@ -88,12 +93,16 @@ export async function verifyChannelArchive(
     return push(null, true);
   }
 
+  if (shouldCancel()) {
+    return push(null, true);
+  }
+
   const deep = await probeArchivePoint(
     result,
     probePointForDays(advertisedDays, nowEpochS),
     nowEpochS,
   );
-  if (!deep || deep.ok) {
+  if (!deep || deep.ok || shouldCancel()) {
     return push(deep, true);
   }
   push(deep, false);
@@ -103,6 +112,7 @@ export async function verifyChannelArchive(
   let workingDays = 0;
   let failingDays = advertisedDays;
   for (let step = 0; step < MAX_BISECT_STEPS; step += 1) {
+    if (shouldCancel()) break;
     const midDays = Math.round((workingDays + failingDays) / 2);
     if (midDays <= workingDays || midDays >= failingDays) break;
     const outcome = await probeArchivePoint(

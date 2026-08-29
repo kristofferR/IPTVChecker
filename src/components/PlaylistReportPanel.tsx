@@ -11,6 +11,7 @@ import {
   shouldShowContentCounts,
   shouldShowLanguageDistribution,
 } from "../lib/playlistReportVisibility";
+import { isScanActive } from "../lib/scanState";
 import type { ChannelResult, PlaylistScore } from "../lib/types";
 import { useAppStore } from "../store";
 
@@ -165,6 +166,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
   const epgLoadSummary = useAppStore((s) => s.epgLoadSummary);
   const archiveProbes = useAppStore((s) => s.archiveProbes);
   const archiveVerifyRun = useAppStore((s) => s.archiveVerifyRun);
+  const archiveProbeRunning = Object.values(archiveProbes).some((entry) => entry.running);
   const summary = useAppStore((s) => s.summary);
   const scanState = useAppStore((s) => s.scanState);
   // Every hook below must run unconditionally: the "no playlist" early return
@@ -229,14 +231,13 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
       }
     }
     const buckets: Array<{ label: string; count: number }> = [
-      { label: "1-2 d", count: depths.filter((d) => d <= 2).length },
+      { label: "<1 d", count: depths.filter((d) => d < 1).length },
+      { label: "1-2 d", count: depths.filter((d) => d >= 1 && d <= 2).length },
       { label: "3-6 d", count: depths.filter((d) => d >= 3 && d <= 6).length },
       { label: "7 d", count: depths.filter((d) => d === 7).length },
       { label: "8+ d", count: depths.filter((d) => d >= 8).length },
     ];
-    const sortedLatencies = [...latencies].sort((a, b) => a - b);
-    const medianLatency =
-      sortedLatencies.length > 0 ? sortedLatencies[Math.floor(sortedLatencies.length / 2)] : null;
+    const medianLatency = median(latencies);
     return {
       advertised: channels.length,
       verified,
@@ -569,7 +570,15 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                 <button
                   type="button"
                   onClick={() => void verifyAllArchives()}
-                  className="rounded-md border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/20 transition-colors"
+                  disabled={isScanActive(scanState) || archiveProbeRunning}
+                  title={
+                    isScanActive(scanState)
+                      ? "Wait for the scan to finish"
+                      : archiveProbeRunning
+                        ? "Another catch-up verification is running"
+                        : undefined
+                  }
+                  className="rounded-md border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/20 transition-colors disabled:opacity-40 disabled:pointer-events-none"
                 >
                   Verify ({catchupStats.advertised})
                 </button>

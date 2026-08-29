@@ -12,6 +12,5 @@ export const createArchiveSlice: StateCreator<AppStore, [], [], ArchiveSlice> = 
   setEpgLoadSummary: (epgLoadSummary) => set({ epgLoadSummary }),
   setArchiveVerifyRun: (archiveVerifyRun) => set({ archiveVerifyRun }),
   setVerifyCatchupAfterScan: (verifyCatchupAfterScan) => set({ verifyCatchupAfterScan }),
-  clearArchiveProbes: () =>
-    set({ archiveProbes: {}, epgLoadSummary: null, archiveVerifyRun: null }),
+  clearArchiveProbes: () => set({ archiveProbes: {}, epgLoadSummary: null }),
 });

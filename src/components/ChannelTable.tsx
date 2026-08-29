@@ -141,6 +141,9 @@ export function ChannelTable({
   const groupFilter = useAppStore((s) => s.groupFilter);
   const statusFilter = useAppStore((s) => s.statusFilter);
   const scanState = useAppStore((s) => s.scanState);
+  const archiveProbeRunning = useAppStore((s) =>
+    Object.values(s.archiveProbes).some((entry) => entry.running),
+  );
   const isMac = useAppStore((s) => s.isMac);
   const channelLogoSize = useAppStore((s) => s.settings.channel_logo_size);
   const isPlaying = useAppStore((s) => s.playIntentActive);
@@ -934,6 +937,10 @@ export function ChannelTable({
   }, [contextMenuState]);
 
   const handleTestCatchup = useCallback(() => {
+    if (isScanActive(scanState) || archiveProbeRunning) {
+      setContextMenuState(null);
+      return;
+    }
     const targets = getSelectedChannels().filter(hasArchive);
     setContextMenuState(null);
     if (targets.length === 0) {
@@ -948,7 +955,7 @@ export function ChannelTable({
         );
       }
     })();
-  }, [getSelectedChannels]);
+  }, [archiveProbeRunning, getSelectedChannels, scanState]);
 
   const handleCopyChannelName = useCallback(async () => {
     if (!contextMenuState) return;
@@ -1470,7 +1477,8 @@ export function ChannelTable({
               <>
                 <button
                   onClick={handleTestCatchup}
-                  className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+                  disabled={isScanActive(scanState) || archiveProbeRunning}
+                  className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
                   type="button"
                 >
                   Test Catch-up ({archiveCount})

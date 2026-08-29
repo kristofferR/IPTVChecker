@@ -1,6 +1,7 @@
 import { useAppStore } from "../store";
 import { hasArchive } from "./archive";
 import { verifyChannelArchive } from "./archiveVerification";
+import { isScanActive } from "./scanState";
 
 let bulkRunActive = false;
 let bulkCancelRequested = false;
@@ -11,10 +12,16 @@ export function cancelArchiveVerification(): void {
 
 /** Verify every catch-up channel sequentially, with progress in the store. */
 export async function verifyAllArchives(): Promise<void> {
-  if (bulkRunActive) {
+  const initialState = useAppStore.getState();
+  if (
+    bulkRunActive ||
+    isScanActive(initialState.scanState) ||
+    Object.values(initialState.archiveProbes).some((entry) => entry.running)
+  ) {
     return;
   }
-  const targets = useAppStore.getState().flatResults.filter(hasArchive);
+  const playlist = initialState.playlist;
+  const targets = initialState.flatResults.filter(hasArchive);
   if (targets.length === 0) {
     return;
   }
@@ -22,16 +29,28 @@ export async function verifyAllArchives(): Promise<void> {
   bulkCancelRequested = false;
   const setProgress = (done: number) =>
     useAppStore.getState().setArchiveVerifyRun({ running: true, done, total: targets.length });
+  const playlistChanged = () => useAppStore.getState().playlist !== playlist;
+  const shouldCancel = () => {
+    const state = useAppStore.getState();
+    return bulkCancelRequested || state.playlist !== playlist || isScanActive(state.scanState);
+  };
   setProgress(0);
   try {
     let done = 0;
     for (const target of targets) {
-      if (bulkCancelRequested) {
+      if (shouldCancel()) {
         break;
       }
-      await verifyChannelArchive(target, (entry) =>
-        useAppStore.getState().setArchiveProbe(target.index, entry),
+      await verifyChannelArchive(
+        target,
+        (entry) => {
+          if (!playlistChanged()) {
+            useAppStore.getState().setArchiveProbe(target.index, entry);
+          }
+        },
+        shouldCancel,
       );
+      if (shouldCancel()) break;
       done += 1;
       setProgress(done);
     }
