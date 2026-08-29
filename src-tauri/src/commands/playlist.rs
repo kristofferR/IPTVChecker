@@ -79,6 +79,50 @@ struct XtreamArchiveEnrichment {
     channels: Vec<XtreamArchiveChannelUpdate>,
 }
 
+struct XtreamArchiveEnrichmentGuard {
+    state: Arc<AppState>,
+    source_identity: String,
+    generation: u64,
+    completed: bool,
+}
+
+impl XtreamArchiveEnrichmentGuard {
+    fn new(app: &tauri::AppHandle, source_identity: String, generation: u64) -> Self {
+        Self {
+            state: app.state::<Arc<AppState>>().inner().clone(),
+            source_identity,
+            generation,
+            completed: false,
+        }
+    }
+
+    async fn complete(&mut self, flags: HashMap<String, Option<u32>>) -> bool {
+        let is_current = self
+            .state
+            .complete_xtream_archive_enrichment(&self.source_identity, self.generation, flags)
+            .await;
+        self.completed = true;
+        is_current
+    }
+}
+
+impl Drop for XtreamArchiveEnrichmentGuard {
+    fn drop(&mut self) {
+        if self.completed {
+            return;
+        }
+
+        let state = Arc::clone(&self.state);
+        let source_identity = self.source_identity.clone();
+        let generation = self.generation;
+        tauri::async_runtime::spawn(async move {
+            state
+                .complete_xtream_archive_enrichment(&source_identity, generation, HashMap::new())
+                .await;
+        });
+    }
+}
+
 pub(crate) const PROGRESS_THROTTLE: Duration = Duration::from_millis(100);
 const PROGRESS_LOG_THROTTLE: Duration = Duration::from_secs(1);
 const XTREAM_ARCHIVE_ENRICHMENT_GRACE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -754,6 +798,8 @@ pub(crate) async fn open_playlist_xtream_inner(
         .state::<Arc<AppState>>()
         .begin_xtream_archive_enrichment(source_identity.clone())
         .await;
+    let mut archive_enrichment =
+        XtreamArchiveEnrichmentGuard::new(app, source_identity.clone(), archive_generation);
     let _ = app.emit(
         "playlist://xtream-archive-enrichment-started",
         source_identity.clone(),
@@ -829,13 +875,7 @@ pub(crate) async fn open_playlist_xtream_inner(
             if let Some(task) = archive_task {
                 task.abort();
             }
-            app.state::<Arc<AppState>>()
-                .complete_xtream_archive_enrichment(
-                    &source_identity,
-                    archive_generation,
-                    HashMap::new(),
-                )
-                .await;
+            archive_enrichment.complete(HashMap::new()).await;
             return Err(error);
         }
     };
@@ -856,28 +896,20 @@ pub(crate) async fn open_playlist_xtream_inner(
         if !archive_flags.is_empty() {
             apply_xtream_archive_flags(&mut preview.channels, &archive_flags);
         }
-        app.state::<Arc<AppState>>()
-            .complete_xtream_archive_enrichment(&source_identity, archive_generation, archive_flags)
-            .await;
+        archive_enrichment.complete(archive_flags).await;
     }
     if let Some(task) = pending_archive_task {
         let app = app.clone();
         let source_identity = source_identity.clone();
         let mut channels = preview.channels.clone();
+        let mut archive_enrichment = archive_enrichment;
         tokio::spawn(async move {
             match task.await {
                 Ok(Some(live_streams)) => {
                     let archive_flags = xtream_archive_flags(&live_streams);
                     let updates =
                         apply_xtream_archive_flags_with_updates(&mut channels, &archive_flags);
-                    let is_current = app
-                        .state::<Arc<AppState>>()
-                        .complete_xtream_archive_enrichment(
-                            &source_identity,
-                            archive_generation,
-                            archive_flags,
-                        )
-                        .await;
+                    let is_current = archive_enrichment.complete(archive_flags).await;
                     if is_current && !updates.is_empty() {
                         let _ = app.emit(
                             "playlist://xtream-archive-enrichment",
@@ -889,23 +921,11 @@ pub(crate) async fn open_playlist_xtream_inner(
                     }
                 }
                 Ok(None) => {
-                    app.state::<Arc<AppState>>()
-                        .complete_xtream_archive_enrichment(
-                            &source_identity,
-                            archive_generation,
-                            HashMap::new(),
-                        )
-                        .await;
+                    archive_enrichment.complete(HashMap::new()).await;
                 }
                 Err(error) => {
                     log::debug!("Xtream live-stream catalog task failed: {error}");
-                    app.state::<Arc<AppState>>()
-                        .complete_xtream_archive_enrichment(
-                            &source_identity,
-                            archive_generation,
-                            HashMap::new(),
-                        )
-                        .await;
+                    archive_enrichment.complete(HashMap::new()).await;
                 }
             }
         });

@@ -397,57 +397,93 @@ pub(crate) fn apply_xtream_archive_flags(
     channels: &mut [Channel],
     archive_flags: &HashMap<String, Option<u32>>,
 ) {
-    for channel in channels {
-        if channel.content_type != ContentType::Live
-            || extinf_explicitly_disables_catchup(&channel.extinf_line)
-        {
-            continue;
-        }
-        let Some(stream_id) = xtream_stream_id_from_url(&channel.url) else {
-            continue;
-        };
-        let Some(days) = archive_flags.get(&stream_id) else {
-            continue;
-        };
-
-        let added_catchup = channel.catchup.is_none();
-        if added_catchup {
-            channel.catchup = Some("xc".to_string());
-        }
-        let added_days = channel.catchup_days.is_none().then_some(*days).flatten();
-        if channel.catchup_days.is_none() {
-            channel.catchup_days = *days;
-        }
-        append_xtream_archive_attrs(&mut channel.extinf_line, added_catchup, added_days);
-    }
+    apply_archive_flags(channels, archive_flags);
 }
 
 pub(crate) fn apply_xtream_archive_flags_to_results(
     results: &mut [ChannelResult],
     archive_flags: &HashMap<String, Option<u32>>,
 ) {
-    for result in results {
-        if result.content_type != ContentType::Live
-            || extinf_explicitly_disables_catchup(&result.extinf_line)
-        {
+    apply_archive_flags(results, archive_flags);
+}
+
+trait XtreamArchiveTarget {
+    fn archive_fields(
+        &mut self,
+    ) -> (
+        ContentType,
+        &str,
+        &mut Option<String>,
+        &mut Option<u32>,
+        &mut String,
+    );
+}
+
+impl XtreamArchiveTarget for Channel {
+    fn archive_fields(
+        &mut self,
+    ) -> (
+        ContentType,
+        &str,
+        &mut Option<String>,
+        &mut Option<u32>,
+        &mut String,
+    ) {
+        (
+            self.content_type,
+            &self.url,
+            &mut self.catchup,
+            &mut self.catchup_days,
+            &mut self.extinf_line,
+        )
+    }
+}
+
+impl XtreamArchiveTarget for ChannelResult {
+    fn archive_fields(
+        &mut self,
+    ) -> (
+        ContentType,
+        &str,
+        &mut Option<String>,
+        &mut Option<u32>,
+        &mut String,
+    ) {
+        (
+            self.content_type,
+            &self.url,
+            &mut self.catchup,
+            &mut self.catchup_days,
+            &mut self.extinf_line,
+        )
+    }
+}
+
+fn apply_archive_flags<T: XtreamArchiveTarget>(
+    targets: &mut [T],
+    archive_flags: &HashMap<String, Option<u32>>,
+) {
+    for target in targets {
+        let (content_type, url, catchup, catchup_days, extinf_line) = target.archive_fields();
+        if content_type != ContentType::Live || extinf_explicitly_disables_catchup(extinf_line) {
             continue;
         }
-        let Some(stream_id) = xtream_stream_id_from_url(&result.url) else {
+        let Some(stream_id) = xtream_stream_id_from_url(url) else {
             continue;
         };
         let Some(days) = archive_flags.get(&stream_id) else {
             continue;
         };
 
-        let added_catchup = result.catchup.is_none();
+        let added_catchup = catchup.is_none();
         if added_catchup {
-            result.catchup = Some("xc".to_string());
+            *catchup = Some("xc".to_string());
         }
-        let added_days = result.catchup_days.is_none().then_some(*days).flatten();
-        if result.catchup_days.is_none() {
-            result.catchup_days = *days;
+        let added_days = catchup_days.is_none().then_some(*days).flatten();
+        if catchup_days.is_none() {
+            *catchup_days = *days;
         }
-        append_xtream_archive_attrs(&mut result.extinf_line, added_catchup, added_days);
+        append_xtream_archive_attrs(extinf_line, added_catchup, added_days);
     }
 }
 

@@ -1,5 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
@@ -14,6 +15,7 @@ use crate::models::settings::AppSettings;
 
 pub const PLAYLIST_PREVIEW_CACHE_LIMIT: usize = 8;
 pub const BACKEND_PERF_SAMPLES_LIMIT: usize = 512;
+const XTREAM_ARCHIVE_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 type XtreamArchiveFlags = HashMap<String, Option<u32>>;
 
 struct XtreamArchiveEnrichmentState {
@@ -236,34 +238,39 @@ impl AppState {
             .get(source_identity)
             .map(|enrichment| enrichment.generation)?;
 
-        loop {
-            let notify = {
-                let enrichments = self.xtream_archive_enrichments.lock().await;
-                let enrichment = enrichments.get(source_identity)?;
-                if enrichment.generation != generation {
-                    return None;
-                }
-                if let Some(flags) = &enrichment.flags {
-                    return Some(Arc::clone(flags));
-                }
-                Arc::clone(&enrichment.notify)
-            };
+        tokio::time::timeout(XTREAM_ARCHIVE_WAIT_TIMEOUT, async {
+            loop {
+                let notify = {
+                    let enrichments = self.xtream_archive_enrichments.lock().await;
+                    let enrichment = enrichments.get(source_identity)?;
+                    if enrichment.generation != generation {
+                        return None;
+                    }
+                    if let Some(flags) = &enrichment.flags {
+                        return Some(Arc::clone(flags));
+                    }
+                    Arc::clone(&enrichment.notify)
+                };
 
-            let notified = notify.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-            {
-                let enrichments = self.xtream_archive_enrichments.lock().await;
-                let enrichment = enrichments.get(source_identity)?;
-                if enrichment.generation != generation {
-                    return None;
+                let notified = notify.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                {
+                    let enrichments = self.xtream_archive_enrichments.lock().await;
+                    let enrichment = enrichments.get(source_identity)?;
+                    if enrichment.generation != generation {
+                        return None;
+                    }
+                    if let Some(flags) = &enrichment.flags {
+                        return Some(Arc::clone(flags));
+                    }
                 }
-                if let Some(flags) = &enrichment.flags {
-                    return Some(Arc::clone(flags));
-                }
+                notified.await;
             }
-            notified.await;
-        }
+        })
+        .await
+        .ok()
+        .flatten()
     }
 
     pub async fn complete_xtream_archive_enrichment(
