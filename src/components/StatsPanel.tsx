@@ -1,6 +1,6 @@
 import { memo, type ReactNode, startTransition, useDeferredValue, useMemo } from "react";
 import { hasArchive } from "../lib/archive";
-import { countStatusOptions, sharedSearchTextCache } from "../lib/filters";
+import type { Channel } from "../lib/types";
 import { useAppStore } from "../store";
 import {
   SFCheckmarkCircleFill,
@@ -82,11 +82,14 @@ function Pill({
 }
 
 const iconSize = "w-3 h-3";
+const noChannels: Channel[] = [];
 
 export const StatsPanel = memo(function StatsPanel() {
   const progress = useAppStore((s) => s.progress);
   const summary = useAppStore((s) => s.summary);
-  const totalChannels = useAppStore((s) => s.playlist?.total_channels ?? 0);
+  const playlist = useAppStore((s) => s.playlist);
+  const totalChannels = playlist?.total_channels ?? 0;
+  const channels = playlist?.channels ?? noChannels;
   const scanState = useAppStore((s) => s.scanState);
   const lowFpsCount = useAppStore((s) => s.uiMetrics.lowFpsCount);
   const mislabeledCount = useAppStore((s) => s.uiMetrics.mislabeledCount);
@@ -94,7 +97,6 @@ export const StatsPanel = memo(function StatsPanel() {
   const statusFilter = useAppStore((s) => s.statusFilter);
   const setStatusFilter = useAppStore((s) => s.setStatusFilter);
   const toggleReportPanel = useAppStore((s) => s.toggleReportPanel);
-  const flatResults = useAppStore((s) => s.flatResults);
   const selectedChannelIndices = useAppStore((s) => s.selectedChannelIndices);
   const search = useDeferredValue(useAppStore((s) => s.search));
   const groupFilter = useAppStore((s) => s.groupFilter);
@@ -102,33 +104,34 @@ export const StatsPanel = memo(function StatsPanel() {
   const effectiveLowFpsCount = summary?.low_framerate ?? lowFpsCount;
   const effectiveMislabeledCount = summary?.mislabeled ?? mislabeledCount;
 
-  // Advertised catch-up is parse-time data, so this only truly changes when a
-  // playlist loads; the memo guards against the per-flush flatResults identity
-  // churn during scans.
-  const catchupCount = useMemo(() => {
-    let count = 0;
-    for (const result of flatResults) {
-      if (hasArchive(result)) count += 1;
+  const { catchupCount, visibleCatchupCount } = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    const hasGroupFilter = groupFilter !== "" && groupFilter !== "all";
+    let catchupCount = 0;
+    let visibleCatchupCount = 0;
+
+    for (const channel of channels) {
+      if (!hasArchive(channel)) continue;
+      catchupCount += 1;
+
+      if (hasGroupFilter && channel.group !== groupFilter) continue;
+      const searchText = `${channel.name}\n${channel.playlist}\n${channel.group}`.toLowerCase();
+      if (normalizedSearch && !searchText.includes(normalizedSearch)) continue;
+      visibleCatchupCount += 1;
     }
-    return count;
-  }, [flatResults]);
+
+    return { catchupCount, visibleCatchupCount };
+  }, [channels, search, groupFilter]);
 
   const selectedCatchupCount = useMemo(() => {
     if (selectedChannelIndices.length < 2) return 0;
     const selected = new Set(selectedChannelIndices);
     let count = 0;
-    for (const result of flatResults) {
-      if (selected.has(result.index) && hasArchive(result)) count += 1;
+    for (const channel of channels) {
+      if (selected.has(channel.index) && hasArchive(channel)) count += 1;
     }
     return count;
-  }, [flatResults, selectedChannelIndices]);
-
-  const visibleCatchupCount = useMemo(
-    () =>
-      countStatusOptions(flatResults, search, groupFilter, undefined, sharedSearchTextCache)
-        .catchup,
-    [flatResults, search, groupFilter],
-  );
+  }, [channels, selectedChannelIndices]);
   const catchupLabel =
     visibleCatchupCount === catchupCount
       ? `${catchupCount} catch-up`
