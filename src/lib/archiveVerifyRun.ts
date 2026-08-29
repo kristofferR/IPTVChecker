@@ -11,6 +11,11 @@ export function cancelArchiveVerification(): void {
   bulkCancelRequested = true;
 }
 
+export function isArchiveVerificationBlockingPlayback(): boolean {
+  const state = useAppStore.getState();
+  return state.archiveVerifyRun != null && isSingleConnectionPlaylist(state.playlist);
+}
+
 /** Verify every catch-up channel sequentially, with progress in the store. */
 export async function verifyAllArchives(): Promise<void> {
   const initialState = useAppStore.getState();

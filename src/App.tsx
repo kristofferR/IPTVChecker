@@ -37,7 +37,7 @@ import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
 import { type ArchivePlayOptions, useStreamPlayer } from "./hooks/useStreamPlayer";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
-import { verifyAllArchives } from "./lib/archiveVerifyRun";
+import { isArchiveVerificationBlockingPlayback, verifyAllArchives } from "./lib/archiveVerifyRun";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
 import {
   checkFfmpegAvailable,
@@ -96,6 +96,13 @@ const TABLE_PROFILER_ROW_LIMIT = 50_000;
 
 // Non-reactive store access for writes inside callbacks/effects.
 const getStore = () => useAppStore.getState();
+const ARCHIVE_VERIFICATION_PLAYBACK_ERROR = "Cancel catch-up verification before starting playback";
+
+function blockPlaybackDuringArchiveVerification(): boolean {
+  if (!isArchiveVerificationBlockingPlayback()) return false;
+  getStore().setPlaybackError(ARCHIVE_VERIFICATION_PLAYBACK_ERROR);
+  return true;
+}
 
 function formatScanNotificationBody(stats: {
   alive: number;
@@ -573,6 +580,9 @@ export default function App() {
   const baseCastFn = baseChromecast.cast;
   const wrappedCast = useCallback<UseChromecastResult["cast"]>(
     async (device, request) => {
+      if (blockPlaybackDuringArchiveVerification()) {
+        throw new Error(ARCHIVE_VERIFICATION_PLAYBACK_ERROR);
+      }
       lastCastDeviceRef.current = device;
       await baseCastFn(device, request);
     },
@@ -1082,6 +1092,7 @@ export default function App() {
   // Guide playback also selects the channel so the sidebar player shows it.
   const handleGuidePlayArchive = useCallback(
     (result: ChannelResult, options: ArchivePlayOptions) => {
+      if (blockPlaybackDuringArchiveVerification()) return;
       getStore().setSelectedChannel(result);
       getStore().setSelectedChannelIndices([result.index]);
       streamPlayer.playArchive(result, options);
@@ -1156,6 +1167,7 @@ export default function App() {
 
   const handleOpenExternal = useCallback(
     async (result: ChannelResult) => {
+      if (blockPlaybackDuringArchiveVerification()) return;
       if (isSingleConnectionPlaylist(getStore().playlist)) {
         handleStopPlayer();
       }
@@ -1176,6 +1188,7 @@ export default function App() {
 
   const handlePlayInApp = useCallback(
     (result: ChannelResult) => {
+      if (blockPlaybackDuringArchiveVerification()) return;
       if (isScanActive(getStore().scanState) && getStore().playlist?.single_provider) {
         getStore().setPendingPlaybackChannel(result);
         return;
@@ -1215,6 +1228,7 @@ export default function App() {
 
   const handleProceedPlayback = useCallback(() => {
     if (!pendingPlaybackChannel) return;
+    if (blockPlaybackDuringArchiveVerification()) return;
     const channel = pendingPlaybackChannel;
     getStore().setPendingPlaybackChannel(null);
     getStore().setPlayIntentActive(true);

@@ -28,25 +28,10 @@ export interface ArchiveProbePoint {
   startEpochS: number;
 }
 
-const ARCHIVE_TIME_QUERY_PARAMS = [
-  "begin",
-  "duration",
-  "end",
-  "lutc",
-  "offset",
-  "start",
-  "timestamp",
-  "utc",
-  "utcend",
-];
-
 function responseIdentity(responseUrl: string | null): string | null {
   if (!responseUrl) return null;
   try {
     const parsed = new URL(responseUrl);
-    for (const param of ARCHIVE_TIME_QUERY_PARAMS) {
-      parsed.searchParams.delete(param);
-    }
     parsed.hash = "";
     return parsed.toString();
   } catch {
@@ -54,7 +39,7 @@ function responseIdentity(responseUrl: string | null): string | null {
   }
 }
 
-/** A deep response only proves depth when it resolves to different media. */
+/** A deep response proves depth when its successful request identifies a different archive window. */
 export function verifyArchiveDepthResponse(
   outcome: ArchiveProbeOutcome,
   near: ArchiveProbeOutcome | undefined,

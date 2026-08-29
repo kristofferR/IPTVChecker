@@ -66,10 +66,16 @@ describe("verifyArchiveDepthResponse", () => {
     expect(verifyArchiveDepthResponse(deep, near).depthVerified).toBe(true);
   });
 
-  it("rejects an endpoint that only echoes different timestamp parameters", () => {
+  it("accepts successful direct streams for distinct archive windows", () => {
     const queryNear = responseOutcome(0, "https://host/live.ts?utc=100&lutc=200&token=x");
     const deep = responseOutcome(7, "https://host/live.ts?utc=10&lutc=200&token=x");
-    expect(verifyArchiveDepthResponse(deep, queryNear).depthVerified).toBe(false);
+    expect(verifyArchiveDepthResponse(deep, queryNear).depthVerified).toBe(true);
+  });
+
+  it("ignores URL fragments when comparing responses", () => {
+    const fragmentNear = responseOutcome(0, "https://host/live.ts?utc=100#near");
+    const deep = responseOutcome(7, "https://host/live.ts?utc=100#deep");
+    expect(verifyArchiveDepthResponse(deep, fragmentNear).depthVerified).toBe(false);
   });
 });
 
