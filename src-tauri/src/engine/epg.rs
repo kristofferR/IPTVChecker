@@ -344,7 +344,7 @@ pub async fn download_epg_source(
     }
     file.flush().map_err(AppError::Io)?;
     drop(file);
-    std::fs::rename(&temp, &target).map_err(AppError::Io)?;
+    crate::engine::disk::atomic_rename(&target, &temp)?;
     log::info!(
         "Downloaded EPG {} ({downloaded} bytes)",
         redact_epg_source(url)

@@ -73,6 +73,9 @@ function timeLabel(epochS: number): string {
 
 function ArchiveProbe({ result, isCasting }: Pick<ArchiveCardProps, "result" | "isCasting">) {
   const entry = useAppStore((state) => state.archiveProbes[result.index]);
+  const probeActive = useAppStore((state) =>
+    Object.values(state.archiveProbes).some((probe) => probe.running),
+  );
   const setArchiveProbe = useAppStore((state) => state.setArchiveProbe);
   const scanState = useAppStore((state) => state.scanState);
   const singleProvider = useAppStore((state) => state.playlist?.single_provider ?? false);
@@ -88,6 +91,7 @@ function ArchiveProbe({ result, isCasting }: Pick<ArchiveCardProps, "result" | "
     const initialState = useAppStore.getState();
     if (
       isScanActive(initialState.scanState) ||
+      Object.values(initialState.archiveProbes).some((probe) => probe.running) ||
       (initialState.playlist?.single_provider &&
         (initialState.playIntentActive || isCastingRef.current))
     ) {
@@ -116,7 +120,7 @@ function ArchiveProbe({ result, isCasting }: Pick<ArchiveCardProps, "result" | "
     <div className="mt-2 border-t border-violet-500/15 pt-2">
       <button
         type="button"
-        disabled={running || scanActive || streamActive}
+        disabled={probeActive || scanActive || streamActive}
         onClick={runProbe}
         className="flex w-full items-center justify-center gap-1.5 rounded-md bg-btn px-3 py-1.5 text-[12px] font-medium text-text-primary border border-border-app shadow-sm hover:bg-btn-hover transition-colors disabled:opacity-40"
       >

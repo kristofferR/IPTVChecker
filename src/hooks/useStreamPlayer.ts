@@ -66,6 +66,7 @@ export interface UseStreamPlayerReturn {
   streamMetadata: StreamMetadata | null;
   archiveSession: ArchiveSession | null;
   play: (result: ChannelResult) => void;
+  retry: (result: ChannelResult) => void;
   playArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
   seekArchive: (toEpochS: number) => void;
   goLive: () => void;
@@ -417,7 +418,6 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       if (notifyBackend && !archiveSessionRef.current) {
         onPlaybackFailedRef.current?.(result);
       }
-      setArchiveSession(null);
     },
     [cleanup, clearRecoveryTimer, resetRecoveryUi],
   );
@@ -977,6 +977,20 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     [beginPlayback],
   );
 
+  const retry = useCallback(
+    (result: ChannelResult) => {
+      const session = archiveSessionRef.current;
+      const currentChannel = currentChannelRef.current;
+      if (session && currentChannel && session.baseResult.index === result.index) {
+        beginPlayback(currentChannel);
+        return;
+      }
+      setArchiveSession(null);
+      beginPlayback(result);
+    },
+    [beginPlayback],
+  );
+
   const playArchive = useCallback(
     (result: ChannelResult, options: ArchivePlayOptions) => {
       const now = Math.floor(Date.now() / 1000);
@@ -1095,6 +1109,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     streamMetadata,
     archiveSession,
     play,
+    retry,
     playArchive,
     seekArchive,
     goLive,

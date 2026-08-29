@@ -144,6 +144,9 @@ export function ChannelTable({
   const isMac = useAppStore((s) => s.isMac);
   const channelLogoSize = useAppStore((s) => s.settings.channel_logo_size);
   const isPlaying = useAppStore((s) => s.playIntentActive);
+  const archiveProbeActive = useAppStore((state) =>
+    Object.values(state.archiveProbes).some((probe) => probe.running),
+  );
   const singleProvider = useAppStore((s) => s.playlist?.single_provider ?? false);
   const separatePlaceholder = useAppStore((s) => s.settings.separate_placeholder_status);
   const onSelectionChange = useAppStore((s) => s.setSelectedChannelIndices);
@@ -929,6 +932,7 @@ export function ChannelTable({
     const initialState = useAppStore.getState();
     if (
       isScanActive(initialState.scanState) ||
+      Object.values(initialState.archiveProbes).some((probe) => probe.running) ||
       (initialState.playlist?.single_provider &&
         (initialState.playIntentActive || isCastingRef.current))
     ) {
@@ -1487,7 +1491,11 @@ export function ChannelTable({
             return (
               <button
                 onClick={handleTestCatchup}
-                disabled={isScanActive(scanState) || (singleProvider && (isPlaying || isCasting))}
+                disabled={
+                  archiveProbeActive ||
+                  isScanActive(scanState) ||
+                  (singleProvider && (isPlaying || isCasting))
+                }
                 className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
                 type="button"
               >
