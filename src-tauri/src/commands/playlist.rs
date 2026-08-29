@@ -915,6 +915,7 @@ pub(crate) async fn open_playlist_xtream_inner(
         let mut channels = preview
             .channels
             .iter()
+            .filter(|channel| channel.content_type == ContentType::Live)
             .map(|channel| XtreamArchiveChannelSnapshot {
                 index: channel.index,
                 content_type: channel.content_type,
