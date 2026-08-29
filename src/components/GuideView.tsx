@@ -6,6 +6,7 @@ import { archiveBadgeText, hasArchive } from "../lib/archive";
 import { type ArchiveProbeOutcome, probeArchivePoint } from "../lib/archiveProbe";
 import { fetchGuideProgrammes } from "../lib/epgLoader";
 import { filterResultsShared } from "../lib/filters";
+import { isSingleConnectionPlaylist } from "../lib/playback";
 import { isScanActive } from "../lib/scanState";
 import { isInputLikeTarget } from "../lib/shortcuts";
 import { dayLabel, startOfDayEpochS, timeLabel } from "../lib/timeFormat";
@@ -140,6 +141,9 @@ export function GuideView({
   const archiveProbeRunning = useAppStore((s) =>
     Object.values(s.archiveProbes).some((entry) => entry.running),
   );
+  const playIntentActive = useAppStore((s) => s.playIntentActive);
+  const castActive = useAppStore((s) => s.castActive);
+  const externalPlaybackActive = useAppStore((s) => s.externalPlaybackActive);
 
   const nowEpochS = useMemo(() => Math.floor(Date.now() / 1000), []);
 
@@ -231,7 +235,9 @@ export function GuideView({
       isScanActive(state.scanState) ||
       state.archiveVerifyRun ||
       state.archiveGuideTestRunning ||
-      Object.values(state.archiveProbes).some((entry) => entry.running)
+      Object.values(state.archiveProbes).some((entry) => entry.running) ||
+      ((state.playIntentActive || state.castActive || state.externalPlaybackActive) &&
+        isSingleConnectionPlaylist(state.playlist))
     ) {
       return;
     }
@@ -275,7 +281,9 @@ export function GuideView({
     isScanActive(scanState) ||
     archiveVerifyRun !== null ||
     archiveGuideTestRunning ||
-    archiveProbeRunning;
+    archiveProbeRunning ||
+    ((playIntentActive || castActive || externalPlaybackActive) &&
+      isSingleConnectionPlaylist(playlist));
 
   const hourLabels = Array.from(
     { length: WINDOW_HOURS },
