@@ -73,6 +73,8 @@ export function withCatchupScore(score: PlaylistScore, catchupScore: number | nu
   if (catchupScore == null) return score;
   return {
     ...score,
-    overall: clampScore10(score.overall * 0.85 + catchupScore * 0.15),
+    overall: clampScore10(
+      score.ping * 0.2 + score.content * 0.35 + score.quality * 0.3 + catchupScore * 0.15,
+    ),
   };
 }

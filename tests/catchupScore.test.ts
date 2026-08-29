@@ -285,7 +285,7 @@ describe("withCatchupScore", () => {
   });
 
   it("includes catch-up in the overall score", () => {
-    expect(withCatchupScore(base, 10).overall).toBeCloseTo(7.45, 5);
-    expect(withCatchupScore(base, 0).overall).toBeCloseTo(5.95, 5);
+    expect(withCatchupScore(base, 10).overall).toBeCloseTo(7.6, 5);
+    expect(withCatchupScore(base, 0).overall).toBeCloseTo(6.1, 5);
   });
 });
