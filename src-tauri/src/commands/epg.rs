@@ -179,12 +179,18 @@ pub async fn load_epg(
         }
     }
 
+    let retained_index = if sources_requested > 0 && sources_loaded == 0 {
+        state.epg.lock().await.clone()
+    } else {
+        None
+    };
+    let summary_index = retained_index.as_deref().unwrap_or(&index);
     let summary = EpgLoadSummary {
         sources_requested,
         sources_loaded,
         failed_sources,
-        channels_matched: index.matched_channel_count(&tvg_ids),
-        programme_count: index.programme_count(),
+        channels_matched: summary_index.matched_channel_count(&tvg_ids),
+        programme_count: summary_index.programme_count(),
     };
     log::info!(
         "EPG loaded: {} sources, {} channels, {} programmes",
