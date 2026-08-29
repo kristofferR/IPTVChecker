@@ -132,7 +132,12 @@ export function ArchiveCard({ result, archiveSession, onPlayArchive }: ArchiveCa
         if (!stale) setProgrammes([]);
         return;
       }
-      await ensureEpgLoaded();
+      try {
+        await ensureEpgLoaded();
+      } catch {
+        if (!stale) setProgrammes([]);
+        return;
+      }
       const now = Math.floor(Date.now() / 1000);
       const depthDays = result.catchup_days ?? 7;
       const list = await getEpgProgrammes(result.tvg_id, now - depthDays * 86_400, now).catch(

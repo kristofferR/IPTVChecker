@@ -49,6 +49,11 @@ export function ensureEpgLoaded(): Promise<void> {
     },
     (error) => {
       logger.warn("[EPG] Load failed:", error);
+      if (epgLoad?.key === key && epgLoad.promise === promise) {
+        epgLoad = null;
+        programmeCache = new Map();
+      }
+      throw error;
     },
   );
   epgLoad = { key, promise };

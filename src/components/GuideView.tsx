@@ -14,6 +14,7 @@ import { useAppStore } from "../store";
 const ROW_HEIGHT_PX = 32;
 const WINDOW_HOURS = 6;
 const MAX_GUIDE_DEPTH_DAYS = 14;
+const GUIDE_CLOCK_INTERVAL_MS = 30_000;
 
 interface GuideSelection {
   result: ChannelResult;
@@ -144,7 +145,15 @@ export function GuideView({
   const guideFocusChannelIndex = useAppStore((s) => s.guideFocusChannelIndex);
   const setGuideFocusChannelIndex = useAppStore((s) => s.setGuideFocusChannelIndex);
 
-  const nowEpochS = useMemo(() => Math.floor(Date.now() / 1000), []);
+  const [nowEpochS, setNowEpochS] = useState(() => Math.floor(Date.now() / 1000));
+
+  useEffect(() => {
+    const interval = window.setInterval(
+      () => setNowEpochS(Math.floor(Date.now() / 1000)),
+      GUIDE_CLOCK_INTERVAL_MS,
+    );
+    return () => window.clearInterval(interval);
+  }, []);
 
   const channels = useMemo(
     () => filterResultsShared(flatResults, search, groupFilter, "all").filter(hasArchive),
@@ -240,9 +249,7 @@ export function GuideView({
     }
   };
 
-  const selectionPlayable = selection
-    ? isSelectionPlayable(selection, Math.floor(Date.now() / 1000))
-    : false;
+  const selectionPlayable = selection ? isSelectionPlayable(selection, nowEpochS) : false;
 
   const hourLabels = Array.from(
     { length: WINDOW_HOURS },

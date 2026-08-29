@@ -144,9 +144,44 @@ describe("resolveArchivePlayback", () => {
         nowEpochS,
       ),
     ).toEqual({
-      url: `http://h/s.m3u8?utc=${nowEpochS - 1}&lutc=${nowEpochS}`,
-      startEpochS: nowEpochS - 1,
+      url: `http://h/s.m3u8?utc=${nowEpochS - 60}&lutc=${nowEpochS}`,
+      startEpochS: nowEpochS - 60,
       windowEndEpochS: nowEpochS,
     });
+  });
+
+  it("moves short archive windows earlier without extending duration-bearing URLs", () => {
+    const nowEpochS = START + 8000;
+    const range = { startEpochS: nowEpochS - 1, endEpochS: nowEpochS + 3600 };
+
+    expect(
+      resolveArchivePlayback(
+        urlFields(
+          "http://h/live/s.m3u8",
+          "default",
+          "http://h/replay/${start}-${duration}-${end}-${utcend}.m3u8",
+        ),
+        range,
+        nowEpochS,
+      ),
+    ).toEqual({
+      url: `http://h/replay/${nowEpochS - 60}-60-${nowEpochS}-${nowEpochS}.m3u8`,
+      startEpochS: nowEpochS - 60,
+      windowEndEpochS: nowEpochS,
+    });
+    expect(
+      resolveArchivePlayback(
+        urlFields("http://host/channel/index.m3u8", "flussonic"),
+        range,
+        nowEpochS,
+      )?.url,
+    ).toBe(`http://host/channel/archive-${nowEpochS - 60}-60.m3u8`);
+    expect(
+      resolveArchivePlayback(
+        urlFields("http://host/live/alice/secret/42.ts", "xc"),
+        range,
+        nowEpochS,
+      )?.url,
+    ).toBe("http://host/timeshift/alice/secret/1/2026-08-28:22-12/42.m3u8");
   });
 });

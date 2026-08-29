@@ -159,8 +159,9 @@ export function resolveArchivePlayback(
   nowEpochS: number = Math.floor(Date.now() / 1000),
 ): ResolvedArchivePlayback | null {
   const windowEndEpochS = Math.min(range.endEpochS ?? nowEpochS, nowEpochS);
-  const startEpochS = Math.min(Math.floor(range.startEpochS), windowEndEpochS - 1);
-  const durationS = Math.max(60, windowEndEpochS - startEpochS);
+  const requestedStartEpochS = Math.min(Math.floor(range.startEpochS), windowEndEpochS - 1);
+  const durationS = Math.max(60, windowEndEpochS - requestedStartEpochS);
+  const startEpochS = windowEndEpochS - durationS;
   const url = buildArchiveUrl(channel, { startEpochS, durationS, nowEpochS });
   return url ? { url, startEpochS, windowEndEpochS } : null;
 }
