@@ -1,7 +1,9 @@
-import { memo, type ReactNode, startTransition } from "react";
+import { memo, type ReactNode, startTransition, useMemo } from "react";
+import { hasArchive } from "../lib/archive";
 import { useAppStore } from "../store";
 import {
   SFCheckmarkCircleFill,
+  SFClockArrow,
   SFDocOnDocFill,
   SFExclamationTriangleFill,
   SFListNumber,
@@ -54,6 +56,10 @@ function Pill({
       base: "text-orange-400 bg-orange-400/10",
       active: "text-orange-300 bg-orange-400/25 ring-1 ring-orange-400/50",
     },
+    violet: {
+      base: "text-violet-400 bg-violet-400/10",
+      active: "text-violet-300 bg-violet-400/25 ring-1 ring-violet-400/50",
+    },
   };
 
   const colors = colorMap[color] ?? colorMap.neutral;
@@ -87,15 +93,41 @@ export const StatsPanel = memo(function StatsPanel() {
   const statusFilter = useAppStore((s) => s.statusFilter);
   const setStatusFilter = useAppStore((s) => s.setStatusFilter);
   const toggleReportPanel = useAppStore((s) => s.toggleReportPanel);
+  const flatResults = useAppStore((s) => s.flatResults);
+  const selectedChannelIndices = useAppStore((s) => s.selectedChannelIndices);
   const stats = summary ?? progress;
   const effectiveLowFpsCount = summary?.low_framerate ?? lowFpsCount;
   const effectiveMislabeledCount = summary?.mislabeled ?? mislabeledCount;
+
+  // Advertised catch-up is parse-time data, so this only truly changes when a
+  // playlist loads; the memo guards against the per-flush flatResults identity
+  // churn during scans.
+  const catchupCount = useMemo(() => {
+    let count = 0;
+    for (const result of flatResults) {
+      if (hasArchive(result)) count += 1;
+    }
+    return count;
+  }, [flatResults]);
+
+  const selectedCatchupCount = useMemo(() => {
+    if (selectedChannelIndices.length < 2) return 0;
+    const selected = new Set(selectedChannelIndices);
+    let count = 0;
+    for (const result of flatResults) {
+      if (selected.has(result.index) && hasArchive(result)) count += 1;
+    }
+    return count;
+  }, [flatResults, selectedChannelIndices]);
+
+  const showSelectionInfo = selectedChannelIndices.length > 1 && catchupCount > 0;
   const showRightStatus =
     scanState === "cancelling" ||
     scanState === "paused" ||
     effectiveLowFpsCount > 0 ||
     effectiveMislabeledCount > 0 ||
-    duplicateCount > 0;
+    duplicateCount > 0 ||
+    showSelectionInfo;
 
   function handleStatusChange(value: string) {
     startTransition(() => setStatusFilter(value));
@@ -157,6 +189,15 @@ export const StatsPanel = memo(function StatsPanel() {
           )}
         </>
       )}
+      {catchupCount > 0 && (
+        <Pill
+          icon={<SFClockArrow className={iconSize} />}
+          label={`${catchupCount} catch-up`}
+          color="violet"
+          active={statusFilter === "catchup"}
+          onClick={() => toggleFilter("catchup")}
+        />
+      )}
       {summary?.playlist_score && (
         <Pill
           icon={null}
@@ -167,6 +208,12 @@ export const StatsPanel = memo(function StatsPanel() {
       )}
       {showRightStatus && (
         <div className="ml-auto flex items-center gap-2">
+          {showSelectionInfo && (
+            <span className="text-[12px] text-text-tertiary tabular-nums">
+              {selectedChannelIndices.length} selected ·{" "}
+              <span className="text-violet-400">{selectedCatchupCount} with catch-up</span>
+            </span>
+          )}
           {scanState === "paused" && (
             <span className="text-[12px] text-yellow-400 font-medium uppercase tracking-[0.04em]">
               Paused

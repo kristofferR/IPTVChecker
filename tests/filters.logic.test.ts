@@ -11,6 +11,8 @@ function makeResult(
     status: ChannelStatus;
     audioOnly?: boolean;
     labelMismatches?: string[];
+    catchup?: string;
+    catchupDays?: number;
   },
 ): ChannelResult {
   return {
@@ -23,6 +25,9 @@ function makeResult(
     tvg_name: null,
     tvg_logo: null,
     tvg_chno: null,
+    catchup: options.catchup ?? (options.catchupDays != null ? "default" : null),
+    catchup_days: options.catchupDays ?? null,
+    catchup_source: null,
     url: `https://example.com/${index}.m3u8`,
     content_type: "live",
     status: options.status,
@@ -141,6 +146,33 @@ describe("filterResults", () => {
       audio_only: 2,
       duplicates: 2,
       pending: 1,
+      catchup: 0,
     });
+  });
+
+  it("filters and counts channels advertising catch-up", () => {
+    const withCatchup = [
+      ...results,
+      makeResult(3, {
+        name: "Sports Archive",
+        playlist: "Primary",
+        group: "Sports",
+        status: "alive",
+        catchup: "xc",
+        catchupDays: 7,
+      }),
+      makeResult(4, {
+        name: "Sports Rec",
+        playlist: "Primary",
+        group: "Sports",
+        status: "dead",
+        catchupDays: 3,
+      }),
+    ];
+
+    const filtered = filterResults(withCatchup, "", "all", "catchup");
+    expect(filtered.map((r) => r.index)).toEqual([3, 4]);
+
+    expect(countStatusOptions(withCatchup, "", "all").catchup).toBe(2);
   });
 });

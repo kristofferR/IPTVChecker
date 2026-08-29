@@ -1,5 +1,6 @@
 import { Radio, Tv } from "lucide-react";
 import { memo, useEffect, useMemo, useState } from "react";
+import { archiveBadgeText, archiveTitle } from "../lib/archive";
 import { channelLogoPixels, channelRowHeightPixels } from "../lib/channelLogoSize";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { extractTvgLogoUrl, normalizeTvgLogoUrl } from "../lib/extinf";
@@ -198,6 +199,20 @@ function ChannelRowImpl({
         );
       case "audio_layout":
         return <span className="text-text-secondary">{result.audio_channel_layout ?? "—"}</span>;
+      case "catchup": {
+        const badge = archiveBadgeText(result);
+        if (!badge) {
+          return <span className="text-text-secondary tabular-nums">—</span>;
+        }
+        return (
+          <span
+            className="rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-violet-300 ring-1 ring-violet-500/30 tabular-nums"
+            title={archiveTitle(result) ?? undefined}
+          >
+            {badge}
+          </span>
+        );
+      }
       default:
         return null;
     }

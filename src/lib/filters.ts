@@ -1,3 +1,4 @@
+import { archiveSortValue, hasArchive } from "./archive";
 import { getChannelErrorReason } from "./channelResults";
 import type { ChannelResult, ChannelStatus } from "./types";
 
@@ -17,6 +18,7 @@ export type SortField =
   | "audio"
   | "audio_codec"
   | "audio_layout"
+  | "catchup"
   | "error";
 
 export type SortDirection = "asc" | "desc";
@@ -35,6 +37,7 @@ export interface StatusOptionCounts {
   audio_only: number;
   duplicates: number;
   pending: number;
+  catchup: number;
 }
 
 const STATUS_ORDER: Record<ChannelStatus, number> = {
@@ -161,6 +164,9 @@ function matchesStatusFilter(
   if (statusFilter === "audio_only") {
     return result.audio_only;
   }
+  if (statusFilter === "catchup") {
+    return hasArchive(result);
+  }
   if (statusFilter === "mislabeled") {
     return result.label_mismatches.length > 0;
   }
@@ -261,6 +267,14 @@ export function sortResults(
         return compareOptionalNumber(
           parseAudioLayout(a.audio_channel_layout),
           parseAudioLayout(b.audio_channel_layout),
+          dir,
+          a.index,
+          b.index,
+        );
+      case "catchup":
+        return compareOptionalNumber(
+          archiveSortValue(a),
+          archiveSortValue(b),
           dir,
           a.index,
           b.index,
@@ -405,6 +419,7 @@ export function countStatusOptions(
     audio_only: 0,
     duplicates: 0,
     pending: 0,
+    catchup: 0,
   };
 
   for (const result of results) {
@@ -452,6 +467,10 @@ export function countStatusOptions(
 
     if (result.audio_only) {
       counts.audio_only += 1;
+    }
+
+    if (hasArchive(result)) {
+      counts.catchup += 1;
     }
 
     if (duplicateIndices?.has(result.index)) {

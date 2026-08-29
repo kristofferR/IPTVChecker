@@ -21,6 +21,9 @@ export interface Channel {
   tvg_name: string | null;
   tvg_logo: string | null;
   tvg_chno: string | null;
+  catchup: string | null;
+  catchup_days: number | null;
+  catchup_source: string | null;
   url: string;
   content_type: ContentType;
   extinf_line: string;
@@ -37,6 +40,9 @@ export interface ChannelResult {
   tvg_name: string | null;
   tvg_logo: string | null;
   tvg_chno: string | null;
+  catchup: string | null;
+  catchup_days: number | null;
+  catchup_source: string | null;
   url: string;
   content_type: ContentType;
   status: ChannelStatus;
