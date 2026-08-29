@@ -5,6 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use quick_xml::events::Event;
@@ -19,6 +20,7 @@ const EPG_DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const EPG_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 /// Hard cap on a single downloaded guide; anything larger is a broken feed.
 const EPG_MAX_DOWNLOAD_BYTES: u64 = 1024 * 1024 * 1024;
+static NEXT_TEMP_FILE_ID: AtomicU64 = AtomicU64::new(0);
 
 struct PartialEpgDownload {
     path: PathBuf,
@@ -324,6 +326,11 @@ fn cache_is_fresh(path: &Path) -> bool {
         .is_some_and(|age| age < EPG_CACHE_TTL)
 }
 
+fn temporary_cache_path(target: &Path) -> PathBuf {
+    let id = NEXT_TEMP_FILE_ID.fetch_add(1, Ordering::Relaxed);
+    target.with_extension(format!("{}.{}.part", std::process::id(), id))
+}
+
 /// Download one EPG source into the cache (streamed), reusing a fresh copy.
 pub async fn download_epg_source(
     url: &str,
@@ -356,7 +363,7 @@ pub async fn download_epg_source(
         )));
     }
 
-    let temp = target.with_extension("part");
+    let temp = temporary_cache_path(&target);
     let _partial_download = PartialEpgDownload { path: temp.clone() };
     let mut file = std::fs::File::create(&temp).map_err(AppError::Io)?;
     let mut downloaded: u64 = 0;
@@ -485,6 +492,13 @@ mod tests {
             ),
             "https://example.com/xmltv.php"
         );
+    }
+
+    #[test]
+    fn uses_unique_temporary_cache_paths() {
+        let target = Path::new("epg-cache.bin");
+
+        assert_ne!(temporary_cache_path(target), temporary_cache_path(target));
     }
 
     #[test]

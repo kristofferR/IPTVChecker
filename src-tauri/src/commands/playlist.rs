@@ -793,7 +793,14 @@ pub(crate) async fn open_playlist_xtream_inner(
     };
     let xmltv_source = build_xtream_xmltv_url(&server, &username, &password).to_string();
     if !preview.epg_sources.contains(&xmltv_source) {
-        preview.epg_sources.push(xmltv_source);
+        preview.epg_sources.push(xmltv_source.clone());
+    }
+    let playlist_sources = preview
+        .epg_sources_by_playlist
+        .entry(preview.file_name.clone())
+        .or_default();
+    if !playlist_sources.contains(&xmltv_source) {
+        playlist_sources.push(xmltv_source);
     }
     if !archive_flags.is_empty() {
         apply_xtream_archive_flags(&mut preview.channels, &archive_flags);

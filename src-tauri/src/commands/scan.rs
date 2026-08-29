@@ -2798,6 +2798,7 @@ pub async fn quick_check_channel(
         .await
     };
 
+    let redacted_url = stream_proxy::redact_url(&channel.url);
     let (status, stream_url, latency_ms, error_reason) = match outcome {
         Ok(o) => {
             log::info!(
@@ -2806,7 +2807,7 @@ pub async fn quick_check_channel(
                 channel.name,
                 o.status,
                 check_started_at.elapsed().as_secs_f64(),
-                channel.url,
+                redacted_url,
             );
             (o.status, o.stream_url, o.latency_ms, o.last_error_reason)
         }
@@ -2817,7 +2818,7 @@ pub async fn quick_check_channel(
                 channel.name,
                 check_started_at.elapsed().as_secs_f64(),
                 error,
-                channel.url,
+                redacted_url,
             );
             (ChannelStatus::Dead, None, None, None)
         }

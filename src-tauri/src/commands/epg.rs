@@ -51,14 +51,22 @@ pub async fn load_epg(
                     .await?;
             let wanted = wanted.clone();
             let source_identity = source.clone();
-            tokio::task::spawn_blocking(move || {
+            let parse_path = path.clone();
+            let parse_result = match tokio::task::spawn_blocking(move || {
                 let mut partial = EpgIndex::default();
-                let reader = epg::open_guide_file(&path)?;
+                let reader = epg::open_guide_file(&parse_path)?;
                 epg::parse_xmltv_into_with_source(reader, &wanted, &source_identity, &mut partial)?;
                 Ok::<EpgIndex, AppError>(partial)
             })
             .await
-            .map_err(|error| AppError::Other(format!("EPG parse task failed: {error}")))?
+            {
+                Ok(result) => result,
+                Err(error) => Err(AppError::Other(format!("EPG parse task failed: {error}"))),
+            };
+            if parse_result.is_err() {
+                let _ = std::fs::remove_file(path);
+            }
+            parse_result
         }
         .await;
 
