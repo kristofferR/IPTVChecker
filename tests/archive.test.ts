@@ -137,10 +137,10 @@ describe("buildArchiveUrl", () => {
       buildArchiveUrl(urlFields("https://host/provider/live/alice/secret/42.ts", "xc"), WINDOW),
     ).toBe("https://host/provider/timeshift/alice/secret/60/2026-08-28:20-00/42.m3u8");
     expect(
-      buildArchiveUrl(
-        urlFields("https://host/provider/alice/secret/42.ts", "xc"),
-        { ...WINDOW, durationS: 3629 },
-      ),
+      buildArchiveUrl(urlFields("https://host/provider/alice/secret/42.ts", "xc"), {
+        ...WINDOW,
+        durationS: 3629,
+      }),
     ).toBe("https://host/provider/timeshift/alice/secret/61/2026-08-28:20-00/42.m3u8");
     // Non-xtream shapes fall back to the utc query convention.
     expect(buildArchiveUrl(urlFields("http://host/odd/path.m3u8", "xc"), WINDOW)).toBe(

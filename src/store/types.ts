@@ -5,8 +5,8 @@ import type { ScanState } from "../lib/scanState";
 import type {
   AppSettings,
   ChannelResult,
-  EpgLoadSummary,
   CurrentSourceDescriptor,
+  EpgLoadSummary,
   PlaylistLoadProgress,
   PlaylistPreview,
   RecentPlaylistEntry,
