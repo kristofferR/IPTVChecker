@@ -97,6 +97,8 @@ pub async fn load_epg(
 
     let mut index = EpgIndex::default();
     let mut failed_sources = Vec::new();
+    let mut failed_source_ids = HashSet::new();
+    let mut loaded_source_ids = HashSet::new();
     let mut sources_loaded = 0usize;
 
     for source in sources {
@@ -151,18 +153,30 @@ pub async fn load_epg(
         match outcome {
             Ok(partial) => {
                 index.merge(partial);
+                loaded_source_ids.insert(source);
                 sources_loaded += 1;
             }
             Err(error) => {
-                let source = epg::redact_epg_source(&source);
-                log::warn!("EPG source {source} failed: {error}");
-                failed_sources.push(source);
+                failed_source_ids.insert(source.clone());
+                let redacted_source = epg::redact_epg_source(&source);
+                log::warn!("EPG source {redacted_source} failed: {error}");
+                failed_sources.push(redacted_source);
             }
         }
     }
 
     if cancel.is_cancelled() {
         return Err(superseded_error());
+    }
+
+    if sources_loaded > 0 {
+        failed_source_ids.retain(|source| !loaded_source_ids.contains(source));
+        if !failed_source_ids.is_empty() {
+            let previous = state.epg.lock().await.clone();
+            if let Some(previous) = previous {
+                index.merge_sources_from(&previous, &failed_source_ids, &wanted);
+            }
+        }
     }
 
     let summary = EpgLoadSummary {

@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use cast_sender::namespace::media::Media;
+use cast_sender::namespace::media::{IdleReason, Media, PlayerState};
 use cast_sender::namespace::{Custom, NamespaceUrn};
 use cast_sender::{App as CastApp, AppId, Payload, Receiver};
 use mdns_sd::{ServiceDaemon, ServiceEvent};
@@ -203,7 +203,7 @@ impl ActiveCastSession {
 
 /// Start a Cast session: connect, launch the default media receiver, load
 /// media. Spawns a tokio task that owns the `Receiver` and watches for stop
-/// signals or device disconnect.
+/// signals, device disconnect, or finite media completion.
 pub async fn start_session(
     app: AppHandle,
     device: ChromecastDevice,
@@ -321,11 +321,11 @@ async fn run_session_worker(
     )
     .await;
 
-    // For self-exit paths (device disconnected, error) we clear the stored
-    // session so a remounted frontend calling `get_cast_status()` doesn't see
-    // a stale Playing state. On manual stop the caller already cleared the
-    // session before sending Stop, so we skip. The uid match prevents
-    // clearing a successor session started after we exited.
+    // For self-exit paths (device disconnected or finite media completed) we
+    // clear the stored session so a remounted frontend calling
+    // `get_cast_status()` doesn't see a stale Playing state. On manual stop
+    // the caller already cleared the session before sending Stop, so we skip.
+    // The uid match prevents clearing a successor session started after exit.
     if !manual_stop {
         let app_for_cleanup = app.clone();
         tokio::spawn(async move {
@@ -441,8 +441,19 @@ async fn send_load(
     Ok(())
 }
 
+fn media_has_finished(payload: &Payload) -> bool {
+    let Payload::Media(Media::MediaStatus(response)) = payload else {
+        return false;
+    };
+
+    response.status.iter().any(|status| {
+        matches!(&status.player_state, PlayerState::Idle)
+            && matches!(&status.idle_reason, Some(IdleReason::Finished))
+    })
+}
+
 /// Returns `true` if the session ended due to an explicit stop signal,
-/// `false` if the device disconnected on its own.
+/// `false` if it ended on its own.
 async fn drive_session(
     app: &AppHandle,
     device: &ChromecastDevice,
@@ -479,6 +490,37 @@ async fn drive_session(
                     log::info!("[Chromecast] Receiver connection lost on '{}'", device.friendly_name);
                     emit_state(app, device, CastSessionState::Stopped, &cast_url, &request, None);
                     return false;
+                }
+                if request.is_finite {
+                    match receiver
+                        .send_request(cast_app, Media::GetStatus(Default::default()))
+                        .await
+                    {
+                        Ok(response) if media_has_finished(&response.payload) => {
+                            let _ = receiver.stop_app(cast_app).await;
+                            receiver.disconnect().await;
+                            emit_state(
+                                app,
+                                device,
+                                CastSessionState::Stopped,
+                                &cast_url,
+                                &request,
+                                None,
+                            );
+                            log::info!(
+                                "[Chromecast] Buffered playback finished on '{}'",
+                                device.friendly_name
+                            );
+                            return false;
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            log::debug!(
+                                "[Chromecast] Media status poll failed on '{}': {error}",
+                                device.friendly_name
+                            );
+                        }
+                    }
                 }
             }
             maybe_swap = swap_rx.recv() => {
@@ -576,5 +618,21 @@ mod tests {
 
         assert_eq!(finite.fields["media"]["streamType"], "BUFFERED");
         assert_eq!(live.fields["media"]["streamType"], "LIVE");
+    }
+
+    #[test]
+    fn detects_finished_buffered_media_status() {
+        use cast_sender::namespace::media::{MediaStatus, ResponseData};
+
+        let status = MediaStatus {
+            player_state: PlayerState::Idle,
+            idle_reason: Some(IdleReason::Finished),
+            ..Default::default()
+        };
+        let finished = Payload::Media(Media::MediaStatus(ResponseData {
+            status: vec![status],
+        }));
+
+        assert!(media_has_finished(&finished));
     }
 }

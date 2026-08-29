@@ -166,6 +166,23 @@ impl EpgIndex {
         }
     }
 
+    pub fn merge_sources_from(
+        &mut self,
+        other: &Self,
+        sources: &HashSet<String>,
+        tvg_ids: &HashSet<String>,
+    ) {
+        self.programmes.extend(
+            other
+                .programmes
+                .iter()
+                .filter(|((source, tvg_id), _)| {
+                    sources.contains(source) && tvg_ids.contains(tvg_id)
+                })
+                .map(|(channel, programmes)| (channel.clone(), programmes.clone())),
+        );
+    }
+
     fn finalize(&mut self) {
         for programmes in self.programmes.values_mut() {
             Self::finalize_programmes(programmes);
@@ -771,6 +788,52 @@ mod tests {
             index.programmes_for_sources(&[second_source], "news", 0, i64::MAX)[0].title,
             "Provider B"
         );
+    }
+
+    #[test]
+    fn merges_only_programmes_from_requested_sources() {
+        let parsed_ids = HashSet::from(["news".to_string(), "old".to_string()]);
+        let retained_source = "https://failed.example/epg.xml".to_string();
+        let replaced_source = "https://loaded.example/epg.xml".to_string();
+        let mut previous = EpgIndex::default();
+        parse_xmltv_into_with_source(
+            r#"<tv><programme start="20260828200000" stop="20260828210000" channel="news"><title>Retained</title></programme><programme start="20260828200000" stop="20260828210000" channel="old"><title>Stale</title></programme></tv>"#.as_bytes(),
+            &parsed_ids,
+            &retained_source,
+            &mut previous,
+        )
+        .expect("retained source should parse");
+        parse_xmltv_into_with_source(
+            r#"<tv><programme start="20260828200000" stop="20260828210000" channel="news"><title>Old</title></programme></tv>"#.as_bytes(),
+            &parsed_ids,
+            &replaced_source,
+            &mut previous,
+        )
+        .expect("replaced source should parse");
+
+        let mut refreshed = EpgIndex::default();
+        refreshed.merge_sources_from(
+            &previous,
+            &HashSet::from([retained_source.clone()]),
+            &HashSet::from(["news".to_string()]),
+        );
+
+        assert_eq!(
+            refreshed.programmes_for_sources(
+                std::slice::from_ref(&retained_source),
+                "news",
+                0,
+                i64::MAX,
+            )[0]
+            .title,
+            "Retained"
+        );
+        assert!(refreshed
+            .programmes_for_sources(std::slice::from_ref(&replaced_source), "news", 0, i64::MAX,)
+            .is_empty());
+        assert!(refreshed
+            .programmes_for_sources(std::slice::from_ref(&retained_source), "old", 0, i64::MAX,)
+            .is_empty());
     }
 
     #[test]

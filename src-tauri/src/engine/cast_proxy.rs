@@ -53,6 +53,7 @@ const CAST_READ_TIMEOUT: Duration = Duration::from_secs(20);
 const MANIFEST_FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 const REMUX_PLAYLIST_READY_TIMEOUT: Duration = Duration::from_secs(20);
 const REMUX_PLAYLIST_POLL_INTERVAL: Duration = Duration::from_millis(150);
+const REMUX_PLAYLIST_SEGMENTS: &str = "6";
 /// Hard cap on manifest body buffered into memory before rewriting. Real HLS
 /// playlists are well under a megabyte; this exists so a misclassified upstream
 /// (URL ends in `.m3u8` but body is actually a long-running MPEG-TS or live
@@ -298,6 +299,20 @@ struct RemuxStartInfo {
     is_dash: bool,
 }
 
+fn hls_muxer_options(is_finite: bool) -> (&'static str, &'static str) {
+    if is_finite {
+        (
+            REMUX_PLAYLIST_SEGMENTS,
+            "delete_segments+independent_segments",
+        )
+    } else {
+        (
+            REMUX_PLAYLIST_SEGMENTS,
+            "delete_segments+omit_endlist+independent_segments",
+        )
+    }
+}
+
 /// Spawn ffmpeg to remux the upstream MPEG-TS into a sliding-window HLS
 /// playlist on disk. Waits for the playlist file to appear (so the Cast
 /// device's first GET doesn't 404) before returning.
@@ -451,15 +466,11 @@ async fn start_remux(
             cmd.arg("-c:a").arg("copy");
         }
         let segment_pattern = tmpdir.join("seg_%05d.ts");
+        let (playlist_size, hls_flags) = hls_muxer_options(is_finite);
         cmd.arg("-f").arg("hls");
         cmd.arg("-hls_time").arg("4");
-        cmd.arg("-hls_list_size")
-            .arg(if is_finite { "0" } else { "6" });
-        cmd.arg("-hls_flags").arg(if is_finite {
-            "independent_segments"
-        } else {
-            "delete_segments+omit_endlist+independent_segments"
-        });
+        cmd.arg("-hls_list_size").arg(playlist_size);
+        cmd.arg("-hls_flags").arg(hls_flags);
         cmd.arg("-hls_segment_filename").arg(&segment_pattern);
     }
     cmd.arg(&manifest_path);
@@ -1569,6 +1580,15 @@ mod tests {
         assert!(token
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+    }
+
+    #[test]
+    fn finite_hls_remux_prunes_segments_but_keeps_endlist() {
+        let (playlist_size, flags) = hls_muxer_options(true);
+
+        assert_ne!(playlist_size, "0");
+        assert!(flags.split('+').any(|flag| flag == "delete_segments"));
+        assert!(!flags.split('+').any(|flag| flag == "omit_endlist"));
     }
 
     #[test]
