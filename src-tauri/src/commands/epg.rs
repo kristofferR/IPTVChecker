@@ -43,11 +43,22 @@ pub async fn load_epg(
     }
 
     let _guard = state.epg_load_lock.lock().await;
+    let sources_requested = sources.len();
+    let wanted: HashSet<String> = tvg_ids.into_iter().filter(|id| !id.is_empty()).collect();
+    if wanted.is_empty() {
+        *state.epg.lock().await = Some(Arc::new(EpgIndex::default()));
+        return Ok(EpgLoadSummary {
+            sources_requested,
+            sources_loaded: 0,
+            failed_sources: Vec::new(),
+            channels_matched: 0,
+            programme_count: 0,
+        });
+    }
+
     let accept_invalid_certs = state.settings.lock().await.accept_invalid_certs;
     let cache_dir = epg_cache_dir(&app);
-    let wanted: HashSet<String> = tvg_ids.into_iter().filter(|id| !id.is_empty()).collect();
 
-    let sources_requested = sources.len();
     let mut index = EpgIndex::default();
     let mut failed_sources = Vec::new();
     let mut sources_loaded = 0usize;

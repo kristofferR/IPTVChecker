@@ -56,6 +56,7 @@ interface ThumbnailPanelProps {
   videoElement?: HTMLVideoElement;
   onTogglePause?: () => void;
   onStopPlayer?: () => void;
+  onCastStart?: () => void;
   onSetVolume?: (v: number) => void;
   onToggleMute?: () => void;
   onOpenExternal?: (result: ChannelResult) => void;
@@ -91,6 +92,7 @@ export function ThumbnailPanel({
   videoElement,
   onTogglePause,
   onStopPlayer,
+  onCastStart,
   onSetVolume,
   onToggleMute,
   onOpenExternal,
@@ -317,6 +319,7 @@ export function ThumbnailPanel({
           onStop={onStopPlayer}
           onSetVolume={onSetVolume}
           onToggleMute={onToggleMute}
+          onCastStart={onCastStart}
           onOpenExternal={() => externalPlaybackResult && onOpenExternal?.(externalPlaybackResult)}
           onRetry={() => onRetryPlay?.(result)}
           onFullscreen={() => onLightboxChange(true)}
@@ -477,7 +480,7 @@ export function ThumbnailPanel({
             chromecast={chromecast}
             castRequest={castRequest}
             mode="inline"
-            onCastStart={() => onStopPlayer?.()}
+            onCastStart={onCastStart ?? onStopPlayer}
           />
         );
       })()}
@@ -652,6 +655,7 @@ export function ThumbnailPanel({
                     onStop={onStopPlayer}
                     onSetVolume={onSetVolume}
                     onToggleMute={onToggleMute}
+                    onCastStart={onCastStart}
                     onOpenExternal={() =>
                       externalPlaybackResult && onOpenExternal?.(externalPlaybackResult)
                     }

@@ -67,12 +67,13 @@ export interface UseStreamPlayerReturn {
   videoElement: HTMLVideoElement;
   streamMetadata: StreamMetadata | null;
   archiveSession: ArchiveSession | null;
+  setArchiveSession: (session: ArchiveSession | null) => void;
   play: (result: ChannelResult) => void;
   retry: (result: ChannelResult) => void;
   playArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
   seekArchive: (toEpochS: number) => void;
   goLive: () => void;
-  stop: () => void;
+  stop: (options?: { preserveArchiveSession?: boolean }) => void;
   togglePause: () => void;
   setVolume: (v: number) => void;
   toggleMute: () => void;
@@ -1059,23 +1060,28 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     beginPlayback(session.baseResult);
   }, [beginPlayback]);
 
-  const stop = useCallback(() => {
-    playbackSessionIdRef.current += 1;
-    isPausedRef.current = false;
-    clearRecoveryTimer();
-    currentChannelRef.current = null;
-    recoveryTimestampsRef.current = [];
-    hasStartedPlayingRef.current = false;
-    playbackStartedAtRef.current = null;
-    startupLatencyMsRef.current = null;
-    resetRecoveryUi();
-    cleanup();
-    setPlayerState("idle");
-    setErrorMessage(null);
-    setIsPaused(false);
-    setActiveChannelIndex(null);
-    setArchiveSession(null);
-  }, [cleanup, clearRecoveryTimer, resetRecoveryUi]);
+  const stop = useCallback(
+    (options?: { preserveArchiveSession?: boolean }) => {
+      playbackSessionIdRef.current += 1;
+      isPausedRef.current = false;
+      clearRecoveryTimer();
+      currentChannelRef.current = null;
+      recoveryTimestampsRef.current = [];
+      hasStartedPlayingRef.current = false;
+      playbackStartedAtRef.current = null;
+      startupLatencyMsRef.current = null;
+      resetRecoveryUi();
+      cleanup();
+      setPlayerState("idle");
+      setErrorMessage(null);
+      setIsPaused(false);
+      setActiveChannelIndex(null);
+      if (!options?.preserveArchiveSession) {
+        setArchiveSession(null);
+      }
+    },
+    [cleanup, clearRecoveryTimer, resetRecoveryUi],
+  );
 
   const togglePause = useCallback(() => {
     if (videoElement.paused) {
@@ -1111,6 +1117,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     videoElement,
     streamMetadata,
     archiveSession,
+    setArchiveSession,
     play,
     retry,
     playArchive,

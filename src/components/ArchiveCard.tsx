@@ -20,6 +20,7 @@ interface ArchiveCardProps {
 // catch-up channel's card opens, once per playlist, sources, and indexed IDs.
 let epgLoad: { key: string; promise: Promise<void> } | null = null;
 const MAX_CATCHUP_DAYS = 31;
+const MAX_RENDERED_PROGRAMMES = 2_000;
 
 function epgSourcesFor(result: ChannelResult): string[] {
   const playlist = useAppStore.getState().playlist;
@@ -249,9 +250,7 @@ export function ArchiveCard({
         result.tvg_id,
         now - depthDays * 86_400,
         now,
-      ).catch(
-        () => [] as EpgProgramme[],
-      );
+      ).catch(() => [] as EpgProgramme[]);
       if (!stale) setProgrammes(list);
     };
     void load();
@@ -265,9 +264,11 @@ export function ArchiveCard({
     const now = new Date();
     const nowEpochS = Math.floor(now.getTime() / 1000);
     const groups: Array<{ label: string; entries: EpgProgramme[] }> = [];
+    const visibleProgrammes = programmes
+      .filter((programme) => programme.start <= nowEpochS)
+      .slice(-MAX_RENDERED_PROGRAMMES);
     // Newest day first, programmes within a day in airing order.
-    for (const programme of programmes) {
-      if (programme.start > nowEpochS) continue;
+    for (const programme of visibleProgrammes) {
       const label = dayLabel(programme.start, now);
       const group = groups.find((candidate) => candidate.label === label);
       if (group) {

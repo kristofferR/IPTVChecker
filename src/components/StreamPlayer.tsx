@@ -60,6 +60,7 @@ interface StreamPlayerProps {
   onGoLive?: () => void;
   onTogglePause: () => void;
   onStop: () => void;
+  onCastStart?: () => void;
   onSetVolume: (v: number) => void;
   onToggleMute: () => void;
   onOpenExternal: () => void;
@@ -87,6 +88,7 @@ export function StreamPlayer({
   onGoLive,
   onTogglePause,
   onStop,
+  onCastStart,
   onSetVolume,
   onToggleMute,
   onOpenExternal,
@@ -164,8 +166,8 @@ export function StreamPlayer({
     // ffmpeg every few seconds. Each reconnect introduces a DTS jump that
     // the Chromecast HLS player can't recover from cleanly, so the cast
     // session goes idle/error within seconds.
-    onStop();
-  }, [onStop]);
+    (onCastStart ?? onStop)();
+  }, [onCastStart, onStop]);
 
   return (
     <div

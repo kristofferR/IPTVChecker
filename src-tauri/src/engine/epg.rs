@@ -89,7 +89,11 @@ pub struct EpgIndex {
 
 impl EpgIndex {
     pub fn channel_count(&self) -> usize {
-        self.programmes.len()
+        self.programmes
+            .keys()
+            .map(|(_, tvg_id)| tvg_id)
+            .collect::<HashSet<_>>()
+            .len()
     }
 
     pub fn programme_count(&self) -> usize {
@@ -609,6 +613,7 @@ mod tests {
         parse_xmltv_into_with_source(second.as_bytes(), &wanted, &second_source, &mut index)
             .expect("second source should parse");
 
+        assert_eq!(index.channel_count(), 1);
         assert_eq!(
             index.programmes_for_sources(&[first_source], "news", 0, i64::MAX)[0].title,
             "Provider A"

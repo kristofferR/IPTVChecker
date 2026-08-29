@@ -36,8 +36,8 @@ import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
 import { type ArchivePlayOptions, useStreamPlayer } from "./hooks/useStreamPlayer";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
-import { buildCastRequest, isCastSessionActive } from "./lib/cast";
 import { buildArchiveUrl } from "./lib/archive";
+import { buildCastRequest, isCastSessionActive } from "./lib/cast";
 import {
   checkFfmpegAvailable,
   clearScanHistory,
@@ -173,6 +173,7 @@ function SelectedChannelSidebar({
   onPlayArchive,
   onScanChannel,
   onStopPlayer,
+  onCastStart,
   onOpenExternal,
   onPip,
 }: {
@@ -184,6 +185,7 @@ function SelectedChannelSidebar({
   onPlayArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
   onScanChannel: (indices: number[]) => void;
   onStopPlayer: () => void;
+  onCastStart: () => void;
   onOpenExternal: (result: ChannelResult) => void;
   onPip?: () => void;
 }) {
@@ -299,6 +301,7 @@ function SelectedChannelSidebar({
         onGoLive={streamPlayer.goLive}
         onTogglePause={streamPlayer.togglePause}
         onStopPlayer={onStopPlayer}
+        onCastStart={onCastStart}
         onSetVolume={streamPlayer.setVolume}
         onToggleMute={streamPlayer.toggleMute}
         onOpenExternal={onOpenExternal}
@@ -527,9 +530,9 @@ export default function App() {
     result: ChannelResult;
     options: ArchivePlayOptions;
   } | null>(null);
-  const [pendingPlaybackReason, setPendingPlaybackReason] = useState<"scan" | "archive_probe" | null>(
-    null,
-  );
+  const [pendingPlaybackReason, setPendingPlaybackReason] = useState<
+    "scan" | "archive_probe" | null
+  >(null);
   const archiveProbeActive = useAppStore((state) =>
     Object.values(state.archiveProbes).some((probe) => probe.running),
   );
@@ -553,6 +556,7 @@ export default function App() {
     activeChannelIndex: playbackChannelIndex,
     play: playStream,
     stop: stopStream,
+    setArchiveSession,
     videoElement: playbackVideoElement,
   } = streamPlayer;
 
@@ -1113,6 +1117,11 @@ export default function App() {
     stopStream();
   }, [stopStream]);
 
+  const handleCastStart = useCallback(() => {
+    getStore().setPlayIntentActive(false);
+    stopStream({ preserveArchiveSession: true });
+  }, [stopStream]);
+
   const handleOpenExternal = useCallback(
     async (result: ChannelResult) => {
       if (isSingleConnectionPlaylist(getStore().playlist)) {
@@ -1159,7 +1168,10 @@ export default function App() {
           currentChromecast.devices.find((d) => d.id === session.deviceId) ??
           (lastCastDeviceRef.current?.id === session.deviceId ? lastCastDeviceRef.current : null);
         if (device) {
-          void currentChromecast.cast(device, buildCastRequest(result));
+          void currentChromecast
+            .cast(device, buildCastRequest(result))
+            .then(() => setArchiveSession(null))
+            .catch(() => {});
           return;
         }
         // Fall through to local play if we can't resolve the device — better
@@ -1168,7 +1180,7 @@ export default function App() {
       getStore().setPlayIntentActive(true);
       playStream(result);
     },
-    [playStream],
+    [playStream, setArchiveSession],
   );
 
   const handlePlayArchive = useCallback(
@@ -1204,10 +1216,22 @@ export default function App() {
           currentChromecast.devices.find((d) => d.id === session.deviceId) ??
           (lastCastDeviceRef.current?.id === session.deviceId ? lastCastDeviceRef.current : null);
         if (device) {
-          void currentChromecast.cast(
-            device,
-            buildCastRequest({ ...result, url, content_type: "movie", stream_url: null }),
-          );
+          void currentChromecast
+            .cast(
+              device,
+              buildCastRequest({ ...result, url, content_type: "movie", stream_url: null }),
+            )
+            .then(() => {
+              setArchiveSession({
+                baseResult: result,
+                url,
+                startEpochS,
+                windowStartEpochS: startEpochS,
+                windowEndEpochS,
+                title: options.title ?? null,
+              });
+            })
+            .catch(() => {});
           return;
         }
       }
@@ -1215,7 +1239,7 @@ export default function App() {
       getStore().setPlayIntentActive(true);
       streamPlayer.playArchive(result, options);
     },
-    [streamPlayer.playArchive],
+    [setArchiveSession, streamPlayer.playArchive],
   );
 
   const handlePip = useCallback(() => {
@@ -1253,7 +1277,8 @@ export default function App() {
   // detail panel in sync with everything the active player can establish.
   useEffect(() => {
     const idx = streamPlayer.activeChannelIndex;
-    if (idx === null || streamPlayer.playerState !== "playing" || streamPlayer.archiveSession) return;
+    if (idx === null || streamPlayer.playerState !== "playing" || streamPlayer.archiveSession)
+      return;
 
     const state = getStore();
     const existing = selectResultByIndex(state, idx);
@@ -1539,6 +1564,7 @@ export default function App() {
                 onPlayArchive={handlePlayArchive}
                 onScanChannel={handleScanSelected}
                 onStopPlayer={handleStopPlayer}
+                onCastStart={handleCastStart}
                 onOpenExternal={handleOpenExternal}
                 onPip={handlePip}
               />
