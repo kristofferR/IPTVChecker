@@ -540,7 +540,6 @@ export default function App() {
     if (!verifyCatchupScanStartedRef.current) return;
     if (scanState === "complete") {
       if ((playIntentActive || castActive) && isSingleConnectionPlaylist(playlist)) return;
-      getStore().setVerifyCatchupAfterScan(false);
       void verifyAllArchives();
     } else if (scanState === "idle" || scanState === "cancelled") {
       getStore().setVerifyCatchupAfterScan(false);
@@ -1438,10 +1437,8 @@ export default function App() {
   // Auto-stop player when selected channel changes or is deselected
   useEffect(() => {
     if (playbackChannelIndex === null) return;
-    if (!liveSelectedChannel) {
+    if (!liveSelectedChannel || liveSelectedChannel.index !== playbackChannelIndex) {
       getStore().setPlayIntentActive(false);
-      stopStream();
-    } else if (liveSelectedChannel.index !== playbackChannelIndex) {
       stopStream();
     }
   }, [liveSelectedChannel, playbackChannelIndex, stopStream]);
