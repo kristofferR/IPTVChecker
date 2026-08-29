@@ -76,7 +76,11 @@ pub async fn load_epg(
         guard = state.epg_load_lock.lock() => guard,
     };
     let sources_requested = sources.len();
-    let wanted: HashSet<String> = tvg_ids.into_iter().filter(|id| !id.is_empty()).collect();
+    let wanted: HashSet<String> = tvg_ids
+        .iter()
+        .filter(|id| !id.is_empty())
+        .cloned()
+        .collect();
     if wanted.is_empty() {
         *state.epg.lock().await = Some(Arc::new(EpgIndex::default()));
         return Ok(EpgLoadSummary {
@@ -165,7 +169,7 @@ pub async fn load_epg(
         sources_requested,
         sources_loaded,
         failed_sources,
-        channels_matched: index.channel_count(),
+        channels_matched: index.matched_channel_count(&tvg_ids),
         programme_count: index.programme_count(),
     };
     log::info!(

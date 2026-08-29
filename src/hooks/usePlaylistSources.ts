@@ -203,8 +203,11 @@ export function usePlaylistSources({
       }
       logger.info(`[App] Scan cache ready in ${(performance.now() - initStartedAt).toFixed(1)}ms`);
 
-      const state = getStore();
       await cancelEpgLoad().catch(() => {});
+      if (!shouldApply()) {
+        return false;
+      }
+      const state = getStore();
       state.setPlaylist(preview);
       state.setCachedSourcePreview(cachedPreview);
       state.setCurrentSourceDescriptor(descriptor);

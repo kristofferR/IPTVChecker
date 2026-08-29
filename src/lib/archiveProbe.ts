@@ -23,6 +23,12 @@ export interface ArchiveProbePoint {
 let archiveProbeGeneration = 0;
 const inFlightArchiveChecks = new Set<Promise<void>>();
 
+/** Keep a multi-channel sequence tied to the generation in which it started. */
+export function createArchiveProbeSequenceGuard(): () => boolean {
+  const generation = archiveProbeGeneration;
+  return () => generation === archiveProbeGeneration;
+}
+
 /** Stop probe sequences and wait for their current backend checks to release the provider. */
 export async function cancelArchiveProbes(): Promise<void> {
   archiveProbeGeneration += 1;

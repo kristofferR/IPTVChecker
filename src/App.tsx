@@ -553,6 +553,7 @@ export default function App() {
   const handlePlaybackFailedRef = useRef<((result: ChannelResult) => void) | undefined>(undefined);
   const streamPlayer = useStreamPlayer({
     onPlaybackFailed: (result) => handlePlaybackFailedRef.current?.(result),
+    onPlaybackFinished: () => getStore().setPlayIntentActive(false),
   });
   const {
     activeChannelIndex: playbackChannelIndex,

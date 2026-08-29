@@ -81,6 +81,7 @@ export interface UseStreamPlayerReturn {
 
 interface UseStreamPlayerOptions {
   onPlaybackFailed?: (result: ChannelResult) => void;
+  onPlaybackFinished?: (result: ChannelResult) => void;
 }
 
 function readStoredVolume(): number {
@@ -135,6 +136,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
   const onPlaybackFailedRef = useRef(options?.onPlaybackFailed);
   onPlaybackFailedRef.current = options?.onPlaybackFailed;
+  const onPlaybackFinishedRef = useRef(options?.onPlaybackFinished);
+  onPlaybackFinishedRef.current = options?.onPlaybackFinished;
 
   const [playerState, setPlayerState] = useState<PlayerState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -466,6 +469,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
       if (decision.kind === "finish") {
         logger.info("[Player] Playback finished for", result.name);
+        onPlaybackFinishedRef.current?.(result);
         stop();
         return;
       }

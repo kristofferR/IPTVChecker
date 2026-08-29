@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
 
+use crate::engine::remote_cache::PLAYLIST_DOWNLOAD_USER_AGENT;
 use crate::error::AppError;
 
 const EPG_CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -96,6 +97,18 @@ impl EpgIndex {
             .map(|(_, tvg_id)| tvg_id)
             .collect::<HashSet<_>>()
             .len()
+    }
+
+    pub fn matched_channel_count(&self, tvg_ids: &[String]) -> usize {
+        let matched_ids = self
+            .programmes
+            .keys()
+            .map(|(_, tvg_id)| tvg_id.as_str())
+            .collect::<HashSet<_>>();
+        tvg_ids
+            .iter()
+            .filter(|tvg_id| matched_ids.contains(tvg_id.as_str()))
+            .count()
     }
 
     pub fn programme_count(&self) -> usize {
@@ -540,7 +553,10 @@ pub async fn download_epg_source(
 
     let response = tokio::select! {
         _ = cancel.cancelled() => return Err(AppError::Other("EPG load superseded".to_string())),
-        response = client.get(url).send() => response.map_err(|error| {
+        response = client
+            .get(url)
+            .header(reqwest::header::USER_AGENT, PLAYLIST_DOWNLOAD_USER_AGENT)
+            .send() => response.map_err(|error| {
             AppError::Other(format!("EPG download failed: {}", error.without_url()))
         })?,
     };
@@ -590,6 +606,8 @@ pub async fn download_epg_source(
 mod tests {
     use super::*;
     use std::io::Write;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     #[test]
     fn parses_xmltv_timestamps_with_and_without_offsets() {
@@ -632,6 +650,14 @@ mod tests {
         parse_xmltv_into(xml.as_bytes(), &wanted, &mut index).expect("xmltv should parse");
 
         assert_eq!(index.channel_count(), 1);
+        assert_eq!(
+            index.matched_channel_count(&[
+                "nrk1.no".to_string(),
+                "nrk1.no".to_string(),
+                "unwanted.tv".to_string(),
+            ]),
+            2
+        );
         assert_eq!(index.programme_count(), 2);
         let programmes = index.programmes_for("nrk1.no", 0, i64::MAX);
         assert_eq!(programmes[0].title, "Dagsrevyen");
@@ -857,6 +883,65 @@ mod tests {
         .expect_err("cancelled EPG download should stop");
 
         assert!(error.to_string().contains("superseded"));
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn downloads_epg_with_iptv_user_agent() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test server should bind");
+        let address = listener
+            .local_addr()
+            .expect("test server should have local address");
+        let (request_tx, request_rx) = tokio::sync::oneshot::channel();
+
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("test server should accept");
+            let mut request = Vec::new();
+            loop {
+                let mut chunk = [0u8; 1024];
+                let read = socket
+                    .read(&mut chunk)
+                    .await
+                    .expect("test server should read request");
+                request.extend_from_slice(&chunk[..read]);
+                if read == 0 || request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let _ = request_tx.send(String::from_utf8_lossy(&request).into_owned());
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\n<tv/>",
+                )
+                .await
+                .expect("test server should write response");
+        });
+
+        let dir = std::env::temp_dir().join(format!(
+            "iptv-epg-user-agent-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let cancel = CancellationToken::new();
+        download_epg_source(
+            &format!("http://{address}/guide.xml"),
+            &dir,
+            false,
+            false,
+            &cancel,
+        )
+        .await
+        .expect("EPG should download");
+
+        let request = request_rx.await.expect("request should be captured");
+        assert!(request.to_ascii_lowercase().contains(&format!(
+            "user-agent: {}",
+            PLAYLIST_DOWNLOAD_USER_AGENT.to_ascii_lowercase()
+        )));
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 

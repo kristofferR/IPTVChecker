@@ -29,14 +29,11 @@ function epgSourcesFor(result: ChannelResult): string[] {
 function epgLoadRequest() {
   const state = useAppStore.getState();
   const sources = state.playlist?.epg_sources ?? [];
-  const tvgIds = [
-    ...new Set(
-      state.flatResults
-        .filter(hasArchive)
-        .map((result) => result.tvg_id)
-        .filter((id): id is string => !!id),
-    ),
-  ].sort();
+  const tvgIds = state.flatResults
+    .filter(hasArchive)
+    .map((result) => result.tvg_id)
+    .filter((id): id is string => !!id)
+    .sort();
   const key = JSON.stringify([
     state.playlist?.source_identity ?? state.playlist?.file_path ?? "",
     sources,
@@ -63,8 +60,11 @@ function ensureEpgLoaded(): Promise<void> {
         summary.channels_matched,
         "channels",
       );
-      if (summary.failed_sources.length > 0 && epgLoad?.key === key) {
-        epgLoad = null;
+      if (summary.failed_sources.length > 0) {
+        logger.warn("[EPG] Some sources failed to load:", summary.failed_sources.length);
+        if (summary.sources_loaded === 0 && epgLoad?.key === key) {
+          epgLoad = null;
+        }
       }
     },
     (error) => {

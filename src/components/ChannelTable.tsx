@@ -12,7 +12,7 @@ import {
 import { createPortal } from "react-dom";
 import { resultAtIndex } from "../hooks/useScan.helpers";
 import { hasArchive } from "../lib/archive";
-import { probeChannelArchive } from "../lib/archiveProbe";
+import { createArchiveProbeSequenceGuard, probeChannelArchive } from "../lib/archiveProbe";
 import { channelRowHeightPixels } from "../lib/channelLogoSize";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { getChannelTableLayout } from "../lib/channelTableLayout";
@@ -945,9 +945,11 @@ export function ChannelTable({
     if (targets.length === 0) {
       return;
     }
+    const sequenceIsCurrent = createArchiveProbeSequenceGuard();
     const shouldContinue = () => {
       const state = useAppStore.getState();
       return (
+        sequenceIsCurrent() &&
         state.playlist === playlist &&
         !isScanActive(state.scanState) &&
         !(state.playlist?.single_provider && (state.playIntentActive || isCastingRef.current))
