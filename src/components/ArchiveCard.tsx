@@ -348,7 +348,7 @@ export function ArchiveCard({
                 const playing = playingStart === programme.start;
                 return (
                   <button
-                    key={`${programme.start}-${programme.title}`}
+                    key={`${programme.start}-${programme.stop}-${programme.title}`}
                     type="button"
                     onClick={() =>
                       onPlayArchive(result, {

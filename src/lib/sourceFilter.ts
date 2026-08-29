@@ -75,6 +75,19 @@ export function applySourceFilterToPreview(
 
   const channels = preview.channels.filter((channel) => matcher.test(channel.name));
   const totals = contentTypeTotals(channels);
+  const representedPlaylists = new Set(channels.map((channel) => channel.playlist));
+  const everyRepresentedPlaylistMapped = [...representedPlaylists].every((playlist) =>
+    Object.hasOwn(preview.epg_sources_by_playlist, playlist),
+  );
+  const filteredEpgSourcesByPlaylist = Object.fromEntries(
+    Object.entries(preview.epg_sources_by_playlist).filter(([playlist]) =>
+      representedPlaylists.has(playlist),
+    ),
+  );
+  const representedEpgSources = new Set(Object.values(filteredEpgSourcesByPlaylist).flat());
+  const shouldFilterEpgSources =
+    Object.keys(preview.epg_sources_by_playlist).length > 0 &&
+    (channels.length === 0 || everyRepresentedPlaylistMapped);
 
   return {
     ...preview,
@@ -85,6 +98,12 @@ export function applySourceFilterToPreview(
     channels,
     // Keep the full group list to mirror backend source-filter semantics.
     groups: [...preview.groups],
+    epg_sources: shouldFilterEpgSources
+      ? preview.epg_sources.filter((source) => representedEpgSources.has(source))
+      : preview.epg_sources,
+    epg_sources_by_playlist: shouldFilterEpgSources
+      ? filteredEpgSourcesByPlaylist
+      : preview.epg_sources_by_playlist,
   };
 }
 

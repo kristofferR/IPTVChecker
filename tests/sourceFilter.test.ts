@@ -19,6 +19,7 @@ const preview: PlaylistPreview = {
   file_path: "/tmp/sample.m3u8",
   file_name: "sample.m3u8",
   source_identity: "path:/tmp/sample.m3u8",
+  saved_playlist_id: null,
   server_location: "SE",
   single_provider: true,
   xtream_max_connections: null,
@@ -28,6 +29,8 @@ const preview: PlaylistPreview = {
   movie_count: 1,
   series_count: 0,
   groups: ["Kids", "Sports", "Movies"],
+  epg_sources: [],
+  epg_sources_by_playlist: {},
   channels: [
     {
       index: 8,
@@ -118,6 +121,52 @@ describe("sourceFilter helpers", () => {
     expect(filtered.movie_count).toBe(1);
     expect(filtered.groups).toEqual(preview.groups);
     expect(filtered.channels.map((channel) => channel.index)).toEqual([8, 107]);
+  });
+
+  it("keeps only EPG sources for represented cached directory playlists", () => {
+    const filtered = applySourceFilterToPreview(
+      {
+        ...preview,
+        epg_sources: ["https://example.com/kids.xml", "https://example.com/sports.xml"],
+        epg_sources_by_playlist: {
+          "kids.m3u8": ["https://example.com/kids.xml"],
+          "sports.m3u8": ["https://example.com/sports.xml"],
+        },
+        channels: [
+          { ...preview.channels[0], playlist: "kids.m3u8" },
+          { ...preview.channels[1], playlist: "sports.m3u8" },
+        ],
+      },
+      "Disney",
+    );
+
+    expect(filtered.epg_sources).toEqual(["https://example.com/kids.xml"]);
+    expect(filtered.epg_sources_by_playlist).toEqual({
+      "kids.m3u8": ["https://example.com/kids.xml"],
+    });
+  });
+
+  it("preserves EPG sources when a represented playlist has no source mapping", () => {
+    const epgSources = ["https://example.com/kids.xml", "https://example.com/shared.xml"];
+    const epgSourcesByPlaylist = {
+      "kids.m3u8": ["https://example.com/kids.xml"],
+      "removed.m3u8": ["https://example.com/shared.xml"],
+    };
+    const filtered = applySourceFilterToPreview(
+      {
+        ...preview,
+        epg_sources: epgSources,
+        epg_sources_by_playlist: epgSourcesByPlaylist,
+        channels: [
+          { ...preview.channels[0], playlist: "kids.m3u8" },
+          { ...preview.channels[1], name: "Disney Sports", playlist: "unmapped.m3u8" },
+        ],
+      },
+      "Disney",
+    );
+
+    expect(filtered.epg_sources).toEqual(epgSources);
+    expect(filtered.epg_sources_by_playlist).toEqual(epgSourcesByPlaylist);
   });
 
   it("returns the preview unchanged when content visibility filtering is disabled", () => {

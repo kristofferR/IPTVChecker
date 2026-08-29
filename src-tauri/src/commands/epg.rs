@@ -178,7 +178,11 @@ pub async fn load_epg(
         summary.channels_matched,
         summary.programme_count
     );
-    *state.epg.lock().await = Some(Arc::new(index));
+    if sources_requested == 0 || sources_loaded > 0 {
+        *state.epg.lock().await = Some(Arc::new(index));
+    } else {
+        log::warn!("All EPG sources failed; retaining the previously loaded guide");
+    }
     Ok(summary)
 }
 
