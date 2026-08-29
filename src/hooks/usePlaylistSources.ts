@@ -133,6 +133,8 @@ export interface UsePlaylistSourcesParams {
     preserveExistingResults?: boolean,
     shouldApply?: () => boolean,
   ) => Promise<boolean>;
+  /** From useScan: applies delayed archive metadata without desynchronizing scan state. */
+  applyArchiveUpdates: (updates: XtreamArchiveChannelUpdate[]) => void;
 }
 
 /** Playlist source management: opening file/URL/Xtream/Stalker sources,
@@ -140,6 +142,7 @@ export interface UsePlaylistSourcesParams {
 export function usePlaylistSources({
   initFromPlaylist,
   syncFromPlaylist,
+  applyArchiveUpdates,
 }: UsePlaylistSourcesParams) {
   const channelSearch = useAppStore((s) => s.channelSearch);
   const settingsHydrated = useAppStore((s) => s.settingsHydrated);
@@ -175,14 +178,7 @@ export function usePlaylistSources({
         }
 
         state.setPlaylist(applyXtreamArchiveUpdatesToPreview(state.playlist, enrichment.channels));
-        const flatResults = applyXtreamArchiveUpdates(state.flatResults, enrichment.channels);
-        if (flatResults !== state.flatResults) {
-          state.applyScanCollections({
-            flatResults,
-            resultPositions: state.resultPositions,
-            uiMetrics: state.uiMetrics,
-          });
-        }
+        applyArchiveUpdates(enrichment.channels);
         if (state.selectedChannel) {
           const [selectedChannel] = applyXtreamArchiveUpdates(
             [state.selectedChannel],
@@ -214,7 +210,7 @@ export function usePlaylistSources({
       cancelled = true;
       for (const unlisten of unlisteners) unlisten();
     };
-  }, []);
+  }, [applyArchiveUpdates]);
 
   const refreshRecentPlaylists = useCallback(async () => {
     try {

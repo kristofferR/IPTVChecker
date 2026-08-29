@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef } from "react";
+import { applyXtreamArchiveUpdates } from "../lib/archive";
 import {
   getChannelIdFromUrl,
   resetChannelResultForRescan,
@@ -18,6 +19,7 @@ import type {
   ScanProgress,
   ScanResultBatchPayload,
   ScanSummary,
+  XtreamArchiveChannelUpdate,
 } from "../lib/types";
 import { useAppStore } from "../store";
 import { EMPTY_TELEMETRY } from "../store/slices/scanSlice";
@@ -91,6 +93,7 @@ export function useScan() {
   const flatResultsRef = useRef<ChannelResult[]>(getStore().flatResults);
   const resultPositionsRef = useRef<Map<number, number>>(getStore().resultPositions);
   const uiMetricsRef = useRef(getStore().uiMetrics);
+  const archiveUpdatesRef = useRef(new Map<number, XtreamArchiveChannelUpdate>());
   const rafId = useRef<number | null>(null);
   const eventCount = useRef(0);
   const activeRunId = useRef<string | null>(null);
@@ -119,6 +122,14 @@ export function useScan() {
       resultPositions: next.positions,
       uiMetrics: next.metrics,
     });
+  }, []);
+
+  const applyArchiveOverlays = useCallback((results: ChannelResult[]) => {
+    const updates = results.flatMap((result) => {
+      const update = archiveUpdatesRef.current.get(result.index);
+      return update ? [update] : [];
+    });
+    return applyXtreamArchiveUpdates(results, updates);
   }, []);
 
   const flushResults = useCallback(() => {
@@ -153,12 +164,12 @@ export function useScan() {
           `[useScan] events total=${eventCount.current}: +${incoming.length}, latest index=${last.index} status=${last.status}`,
         );
       }
-      pendingResults.current.push(...incoming);
+      pendingResults.current.push(...applyArchiveOverlays(incoming));
       if (rafId.current === null) {
         rafId.current = requestAnimationFrame(flushResults);
       }
     },
-    [flushResults],
+    [applyArchiveOverlays, flushResults],
   );
 
   const queueResult = useCallback(
@@ -528,6 +539,7 @@ export function useScan() {
       if (!shouldApply()) {
         return false;
       }
+      archiveUpdatesRef.current.clear();
 
       const synced = channels.map((channel) => {
         const existing = resultAtIndex(
@@ -611,6 +623,27 @@ export function useScan() {
     [commitCollections],
   );
 
+  const applyArchiveUpdates = useCallback(
+    (updates: XtreamArchiveChannelUpdate[]) => {
+      if (updates.length === 0) return;
+
+      for (const update of updates) {
+        archiveUpdatesRef.current.set(update.index, update);
+      }
+      pendingResults.current = applyXtreamArchiveUpdates(pendingResults.current, updates);
+
+      const flatResults = applyXtreamArchiveUpdates(flatResultsRef.current, updates);
+      if (flatResults !== flatResultsRef.current) {
+        commitCollections({
+          flatResults,
+          positions: resultPositionsRef.current,
+          metrics: uiMetricsRef.current,
+        });
+      }
+    },
+    [commitCollections],
+  );
+
   return {
     start,
     cancel,
@@ -619,5 +652,6 @@ export function useScan() {
     initFromPlaylist,
     syncFromPlaylist,
     updateResult,
+    applyArchiveUpdates,
   };
 }
