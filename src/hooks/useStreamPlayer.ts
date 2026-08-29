@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { buildArchiveUrl } from "../lib/archive";
 import { normalizeCodecName, resolveResolutionLabel } from "../lib/format";
 import { logger } from "../lib/logger";
 import {
@@ -31,6 +32,26 @@ import { canUseBlobWorkers } from "../lib/workerSupport";
 // alongside the hook. The implementation lives in lib/playback.
 export { MAX_PLAYBACK_RECOVERY_ATTEMPTS } from "../lib/playback";
 
+/** Active catch-up playback: which channel, where in its archive, and the
+ * seekable window. Present only while playing an archive URL. */
+export interface ArchiveSession {
+  baseResult: ChannelResult;
+  /** Where the current archive URL starts, epoch seconds. */
+  startEpochS: number;
+  /** Earliest seekable point (programme start or the picked time). */
+  windowStartEpochS: number;
+  /** Latest seekable point (programme end, clamped to launch time). */
+  windowEndEpochS: number;
+  title: string | null;
+}
+
+export interface ArchivePlayOptions {
+  startEpochS: number;
+  /** Programme end; defaults to now (watch from start up to live edge). */
+  endEpochS?: number;
+  title?: string;
+}
+
 export interface UseStreamPlayerReturn {
   playerState: PlayerState;
   errorMessage: string | null;
@@ -43,7 +64,11 @@ export interface UseStreamPlayerReturn {
   activeChannelIndex: number | null;
   videoElement: HTMLVideoElement;
   streamMetadata: StreamMetadata | null;
+  archiveSession: ArchiveSession | null;
   play: (result: ChannelResult) => void;
+  playArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
+  seekArchive: (toEpochS: number) => void;
+  goLive: () => void;
   stop: () => void;
   togglePause: () => void;
   setVolume: (v: number) => void;
@@ -117,6 +142,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
   const [activeChannelIndex, setActiveChannelIndex] = useState<number | null>(null);
   const [streamMetadata, setStreamMetadata] = useState<StreamMetadata | null>(null);
+  const [archiveSession, setArchiveSession] = useState<ArchiveSession | null>(null);
+  const archiveSessionRef = useRef<ArchiveSession | null>(null);
+  archiveSessionRef.current = archiveSession;
 
   const lastErrorRef = useRef<string | null>(null);
   const playerStateRef = useRef<PlayerState>("idle");
@@ -384,9 +412,12 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       setErrorMessage(reason);
       setIsPaused(false);
       setActiveChannelIndex(null);
-      if (notifyBackend) {
+      // A failed archive URL says nothing about the live channel's health, so
+      // never report it to the backend as a channel failure.
+      if (notifyBackend && !archiveSessionRef.current) {
         onPlaybackFailedRef.current?.(result);
       }
+      setArchiveSession(null);
     },
     [cleanup, clearRecoveryTimer, resetRecoveryUi],
   );
@@ -921,7 +952,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     };
   }, [cleanup, clearRecoveryTimer]);
 
-  const play = useCallback(
+  const beginPlayback = useCallback(
     (result: ChannelResult) => {
       playbackSessionIdRef.current += 1;
       isPausedRef.current = false;
@@ -938,6 +969,79 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     [clearRecoveryTimer, resetRecoveryUi, startPlaybackAttempt],
   );
 
+  const play = useCallback(
+    (result: ChannelResult) => {
+      setArchiveSession(null);
+      beginPlayback(result);
+    },
+    [beginPlayback],
+  );
+
+  const playArchive = useCallback(
+    (result: ChannelResult, options: ArchivePlayOptions) => {
+      const now = Math.floor(Date.now() / 1000);
+      const windowEnd = Math.min(options.endEpochS ?? now, now);
+      const start = Math.min(Math.floor(options.startEpochS), windowEnd - 1);
+      const durationS = Math.max(60, windowEnd - start);
+      const url = buildArchiveUrl(result, { startEpochS: start, durationS, nowEpochS: now });
+      if (!url) {
+        return;
+      }
+      setArchiveSession({
+        baseResult: result,
+        startEpochS: start,
+        windowStartEpochS: start,
+        windowEndEpochS: windowEnd,
+        title: options.title ?? null,
+      });
+      // The archive URL rides through the normal route/recovery pipeline as a
+      // synthetic channel; it is not live, so MPEG-TS routes get a VOD hint.
+      beginPlayback({ ...result, url, content_type: "movie", stream_url: null });
+    },
+    [beginPlayback],
+  );
+
+  const seekArchive = useCallback(
+    (toEpochS: number) => {
+      const session = archiveSessionRef.current;
+      if (!session) {
+        return;
+      }
+      const now = Math.floor(Date.now() / 1000);
+      const latestSeekable = Math.min(session.windowEndEpochS, now) - 10;
+      const clamped = Math.max(
+        session.windowStartEpochS,
+        Math.min(Math.floor(toEpochS), latestSeekable),
+      );
+      const durationS = Math.max(60, session.windowEndEpochS - clamped);
+      const url = buildArchiveUrl(session.baseResult, {
+        startEpochS: clamped,
+        durationS,
+        nowEpochS: now,
+      });
+      if (!url) {
+        return;
+      }
+      setArchiveSession({ ...session, startEpochS: clamped });
+      beginPlayback({
+        ...session.baseResult,
+        url,
+        content_type: "movie",
+        stream_url: null,
+      });
+    },
+    [beginPlayback],
+  );
+
+  const goLive = useCallback(() => {
+    const session = archiveSessionRef.current;
+    if (!session) {
+      return;
+    }
+    setArchiveSession(null);
+    beginPlayback(session.baseResult);
+  }, [beginPlayback]);
+
   const stop = useCallback(() => {
     playbackSessionIdRef.current += 1;
     isPausedRef.current = false;
@@ -953,6 +1057,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     setErrorMessage(null);
     setIsPaused(false);
     setActiveChannelIndex(null);
+    setArchiveSession(null);
   }, [cleanup, clearRecoveryTimer, resetRecoveryUi]);
 
   const togglePause = useCallback(() => {
@@ -988,7 +1093,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     activeChannelIndex,
     videoElement,
     streamMetadata,
+    archiveSession,
     play,
+    playArchive,
+    seekArchive,
+    goLive,
     stop,
     togglePause,
     setVolume,
