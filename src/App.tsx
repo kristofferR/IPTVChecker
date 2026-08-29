@@ -1197,6 +1197,7 @@ export default function App() {
           metadata_lines: result.metadata_lines,
           url: result.url,
         });
+        getStore().setExternalPlaybackActive(true);
       } catch (err) {
         logger.error("[Player] Failed to open channel in external player:", errorToString(err));
         getStore().setPlaybackError(errorToString(err));

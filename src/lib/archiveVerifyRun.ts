@@ -20,16 +20,24 @@ export function isArchiveVerificationBlockingPlayback(): boolean {
 export async function verifyAllArchives(): Promise<void> {
   const initialState = useAppStore.getState();
   const playlist = initialState.playlist;
+  const singleConnection = isSingleConnectionPlaylist(playlist);
   if (
     bulkRunActive ||
     isScanActive(initialState.scanState) ||
     initialState.archiveGuideTestRunning ||
     Object.values(initialState.archiveProbes).some((entry) => entry.running) ||
-    ((initialState.playIntentActive || initialState.castActive) &&
-      isSingleConnectionPlaylist(playlist))
+    ((initialState.playIntentActive || initialState.castActive) && singleConnection)
   ) {
     return;
   }
+  if (
+    initialState.externalPlaybackActive &&
+    singleConnection &&
+    !window.confirm("Close the external player before verifying catch-up. Continue?")
+  ) {
+    return;
+  }
+  initialState.setExternalPlaybackActive(false);
   const targets = initialState.flatResults.filter(hasArchive);
   if (targets.length === 0) {
     return;
@@ -45,7 +53,8 @@ export async function verifyAllArchives(): Promise<void> {
       bulkCancelRequested ||
       state.playlist !== playlist ||
       isScanActive(state.scanState) ||
-      ((state.playIntentActive || state.castActive) && isSingleConnectionPlaylist(playlist))
+      ((state.playIntentActive || state.castActive || state.externalPlaybackActive) &&
+        singleConnection)
     );
   };
   setProgress(0);

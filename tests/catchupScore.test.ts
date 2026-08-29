@@ -199,6 +199,19 @@ describe("computeCatchupScore", () => {
     const probes = { 0: entry([[0, false, null]]) };
     expect(computeCatchupScore(results, probes)).toBeCloseTo(9.95, 5);
   });
+
+  it("counts failed probes as zero measured depth", () => {
+    const results = [channel(0, 7), channel(1, 7)];
+    const probes = {
+      0: entry([
+        [0, true, 400],
+        [7, true, 700],
+      ]),
+      1: entry([[0, false, null]]),
+    };
+
+    expect(computeCatchupScore(results, probes)).toBe(7.5);
+  });
 });
 
 describe("blendOverallScore", () => {

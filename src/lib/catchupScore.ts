@@ -37,7 +37,6 @@ export function computeCatchupScore(
   let tested = 0;
   let reliabilityPoints = 0;
   let depthSum = 0;
-  let depthCount = 0;
   for (const channel of catchupChannels) {
     const entry = probes[channel.index];
     const verdict = archiveVerdict(channel, entry);
@@ -56,7 +55,6 @@ export function computeCatchupScore(
         : measuredDepthDays(entry);
     if (depth != null) {
       depthSum += Math.min(depth, DEPTH_CAP_DAYS);
-      depthCount += 1;
     }
   }
 
@@ -65,7 +63,7 @@ export function computeCatchupScore(
   }
 
   const reliability = reliabilityPoints / tested;
-  const depthScore = depthCount > 0 ? Math.min(1, depthSum / depthCount / FULL_DEPTH_DAYS) : 0;
+  const depthScore = Math.min(1, depthSum / tested / FULL_DEPTH_DAYS);
   const verifiedScore = coverage * 0.5 + reliability * 0.35 + depthScore * 0.15;
   const testedFraction = tested / catchupChannels.length;
   return clampScore10((coverage * (1 - testedFraction) + verifiedScore * testedFraction) * 10);
