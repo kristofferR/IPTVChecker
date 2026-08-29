@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { buildArchiveUrl } from "../lib/archive";
+import { buildArchiveUrl, resolveArchivePlayback } from "../lib/archive";
 import { normalizeCodecName, resolveResolutionLabel } from "../lib/format";
 import { logger } from "../lib/logger";
 import {
@@ -979,24 +979,20 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
   const playArchive = useCallback(
     (result: ChannelResult, options: ArchivePlayOptions) => {
-      const now = Math.floor(Date.now() / 1000);
-      const windowEnd = Math.min(options.endEpochS ?? now, now);
-      const start = Math.min(Math.floor(options.startEpochS), windowEnd - 1);
-      const durationS = Math.max(60, windowEnd - start);
-      const url = buildArchiveUrl(result, { startEpochS: start, durationS, nowEpochS: now });
-      if (!url) {
+      const playback = resolveArchivePlayback(result, options);
+      if (!playback) {
         return;
       }
       setArchiveSession({
         baseResult: result,
-        startEpochS: start,
-        windowStartEpochS: start,
-        windowEndEpochS: windowEnd,
+        startEpochS: playback.startEpochS,
+        windowStartEpochS: playback.startEpochS,
+        windowEndEpochS: playback.windowEndEpochS,
         title: options.title ?? null,
       });
       // The archive URL rides through the normal route/recovery pipeline as a
       // synthetic channel; it is not live, so MPEG-TS routes get a VOD hint.
-      beginPlayback({ ...result, url, content_type: "movie", stream_url: null });
+      beginPlayback({ ...result, url: playback.url, content_type: "movie", stream_url: null });
     },
     [beginPlayback],
   );

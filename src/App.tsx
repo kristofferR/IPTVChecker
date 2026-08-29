@@ -37,6 +37,7 @@ import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
 import { type ArchivePlayOptions, useStreamPlayer } from "./hooks/useStreamPlayer";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
+import { resolveArchivePlayback } from "./lib/archive";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
 import {
   checkFfmpegAvailable,
@@ -533,6 +534,7 @@ export default function App() {
   const sidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const reportSidebarDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const pendingArchivePlaybackRef = useRef<ArchivePlayOptions | null>(null);
 
   const handlePlaybackFailedRef = useRef<((result: ChannelResult) => void) | undefined>(undefined);
   const streamPlayer = useStreamPlayer({
@@ -1033,17 +1035,6 @@ export default function App() {
     getStore().setSelectedChannel(result);
   }, []);
 
-  // Guide playback also selects the channel so the sidebar player shows it.
-  const handleGuidePlayArchive = useCallback(
-    (result: ChannelResult, options: ArchivePlayOptions) => {
-      getStore().setSelectedChannel(result);
-      getStore().setSelectedChannelIndices([result.index]);
-      getStore().setPlayIntentActive(true);
-      streamPlayer.playArchive(result, options);
-    },
-    [streamPlayer.playArchive],
-  );
-
   const handleOpenSettings = useCallback(async () => {
     const existing = await WebviewWindow.getByLabel("settings");
     if (existing) {
@@ -1131,6 +1122,7 @@ export default function App() {
 
   const handlePlayInApp = useCallback(
     (result: ChannelResult) => {
+      pendingArchivePlaybackRef.current = null;
       if (isScanActive(getStore().scanState) && getStore().playlist?.single_provider) {
         getStore().setPendingPlaybackChannel(result);
         return;
@@ -1158,6 +1150,50 @@ export default function App() {
     [playStream],
   );
 
+  const playGuideArchive = useCallback(
+    (result: ChannelResult, options: ArchivePlayOptions) => {
+      const currentChromecast = chromecastRef.current;
+      if (isCastSessionActive(currentChromecast.session)) {
+        const session = currentChromecast.session;
+        const device =
+          currentChromecast.devices.find((candidate) => candidate.id === session.deviceId) ??
+          (lastCastDeviceRef.current?.id === session.deviceId ? lastCastDeviceRef.current : null);
+        const playback = resolveArchivePlayback(result, options);
+        if (device && playback) {
+          void currentChromecast.cast(
+            device,
+            buildCastRequest({
+              ...result,
+              name: options.title ?? result.name,
+              url: playback.url,
+              stream_url: null,
+            }),
+          );
+          return;
+        }
+      }
+      getStore().setPlayIntentActive(true);
+      streamPlayer.playArchive(result, options);
+    },
+    [streamPlayer.playArchive],
+  );
+
+  // Guide playback also selects the channel so the sidebar player shows it.
+  const handleGuidePlayArchive = useCallback(
+    (result: ChannelResult, options: ArchivePlayOptions) => {
+      getStore().setSelectedChannel(result);
+      getStore().setSelectedChannelIndices([result.index]);
+      if (isScanActive(getStore().scanState) && getStore().playlist?.single_provider) {
+        pendingArchivePlaybackRef.current = options;
+        getStore().setPendingPlaybackChannel(result);
+        return;
+      }
+      pendingArchivePlaybackRef.current = null;
+      playGuideArchive(result, options);
+    },
+    [playGuideArchive],
+  );
+
   const handlePip = useCallback(() => {
     const video = playbackVideoElement;
     if (!video) return;
@@ -1171,10 +1207,16 @@ export default function App() {
   const handleProceedPlayback = useCallback(() => {
     if (!pendingPlaybackChannel) return;
     const channel = pendingPlaybackChannel;
+    const archiveOptions = pendingArchivePlaybackRef.current;
+    pendingArchivePlaybackRef.current = null;
     getStore().setPendingPlaybackChannel(null);
+    if (archiveOptions) {
+      playGuideArchive(channel, archiveOptions);
+      return;
+    }
     getStore().setPlayIntentActive(true);
     playStream(channel);
-  }, [pendingPlaybackChannel, playStream]);
+  }, [pendingPlaybackChannel, playGuideArchive, playStream]);
 
   // Successful playback is itself a channel check. Keep the result row and
   // detail panel in sync with everything the active player can establish.

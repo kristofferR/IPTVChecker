@@ -62,7 +62,7 @@ export function fetchGuideProgrammes(
   from: number,
   to: number,
 ): Promise<EpgProgramme[]> {
-  const cacheKey = `${tvgId}|${from}|${to}`;
+  const cacheKey = `${currentEpgKey() ?? ""}|${tvgId}|${from}|${to}`;
   const cached = programmeCache.get(cacheKey);
   if (cached) {
     return cached;

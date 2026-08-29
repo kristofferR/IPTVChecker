@@ -47,6 +47,17 @@ export interface ArchiveWindow {
   nowEpochS: number;
 }
 
+export interface ArchivePlaybackRange {
+  startEpochS: number;
+  endEpochS?: number;
+}
+
+export interface ResolvedArchivePlayback {
+  url: string;
+  startEpochS: number;
+  windowEndEpochS: number;
+}
+
 type ArchiveUrlFields = Pick<ChannelResult, "url" | "catchup" | "catchup_days" | "catchup_source">;
 
 /**
@@ -127,10 +138,7 @@ export function buildArchiveUrl(channel: ArchiveUrlFields, window: ArchiveWindow
       const start = Math.floor(window.startEpochS);
       const duration = Math.max(1, Math.floor(window.durationS));
       if (/\.m3u8(\?|$)/.test(channel.url)) {
-        return channel.url.replace(
-          /\/[^/?]+\.m3u8(\?|$)/,
-          `/archive-${start}-${duration}.m3u8$1`,
-        );
+        return channel.url.replace(/\/[^/?]+\.m3u8(\?|$)/, `/archive-${start}-${duration}.m3u8$1`);
       }
       if (/\.ts(\?|$)/.test(channel.url)) {
         return channel.url.replace(/\/[^/?]+\.ts(\?|$)/, `/timeshift_abs-${start}.ts$1`);
@@ -142,4 +150,17 @@ export function buildArchiveUrl(channel: ArchiveUrlFields, window: ArchiveWindow
       // use the standard utc/lutc query convention.
       return defaultArchiveUrl(channel.url, window);
   }
+}
+
+/** Resolve the bounded archive window shared by local and cast playback. */
+export function resolveArchivePlayback(
+  channel: ArchiveUrlFields,
+  range: ArchivePlaybackRange,
+  nowEpochS: number = Math.floor(Date.now() / 1000),
+): ResolvedArchivePlayback | null {
+  const windowEndEpochS = Math.min(range.endEpochS ?? nowEpochS, nowEpochS);
+  const startEpochS = Math.min(Math.floor(range.startEpochS), windowEndEpochS - 1);
+  const durationS = Math.max(60, windowEndEpochS - startEpochS);
+  const url = buildArchiveUrl(channel, { startEpochS, durationS, nowEpochS });
+  return url ? { url, startEpochS, windowEndEpochS } : null;
 }

@@ -24,6 +24,17 @@ function selectionKey(selection: GuideSelection | null): string | null {
   return selection ? `${selection.result.index}:${selection.programme.start}` : null;
 }
 
+function isSelectionPlayable(selection: GuideSelection, nowEpochS: number): boolean {
+  const earliestPlayable =
+    selection.result.catchup_days != null
+      ? nowEpochS - selection.result.catchup_days * 86_400
+      : null;
+  return (
+    selection.programme.start <= nowEpochS &&
+    (earliestPlayable == null || selection.programme.start >= earliestPlayable)
+  );
+}
+
 interface GuideRowProps {
   result: ChannelResult;
   windowFrom: number;
@@ -153,6 +164,7 @@ export function GuideView({
   const [selection, setSelection] = useState<GuideSelection | null>(null);
   const [testOutcome, setTestOutcome] = useState<ArchiveProbeOutcome | null>(null);
   const [testing, setTesting] = useState(false);
+  const testRequestRef = useRef(0);
 
   const windowFrom = startOfDayEpochS(daysAgo) + windowStartHour * 3600;
   const windowTo = windowFrom + WINDOW_HOURS * 3600;
@@ -204,6 +216,7 @@ export function GuideView({
   }, [guideFocusChannelIndex, channels, virtualizer, setGuideFocusChannelIndex]);
 
   const activate = (target: GuideSelection) => {
+    if (!isSelectionPlayable(target, Math.floor(Date.now() / 1000))) return;
     onPlayArchive(target.result, {
       startEpochS: target.programme.start,
       endEpochS: target.programme.stop,
@@ -213,6 +226,7 @@ export function GuideView({
 
   const runTest = async () => {
     if (!selection) return;
+    const requestId = ++testRequestRef.current;
     setTesting(true);
     setTestOutcome(null);
     const outcome = await probeArchivePoint(
@@ -220,9 +234,15 @@ export function GuideView({
       { label: timeLabel(selection.programme.start), startEpochS: selection.programme.start },
       Math.floor(Date.now() / 1000),
     );
-    setTestOutcome(outcome);
-    setTesting(false);
+    if (requestId === testRequestRef.current) {
+      setTestOutcome(outcome);
+      setTesting(false);
+    }
   };
+
+  const selectionPlayable = selection
+    ? isSelectionPlayable(selection, Math.floor(Date.now() / 1000))
+    : false;
 
   const hourLabels = Array.from(
     { length: WINDOW_HOURS },
@@ -297,8 +317,9 @@ export function GuideView({
               </span>
               <button
                 type="button"
+                disabled={!selectionPlayable}
                 onClick={() => activate(selection)}
-                className="flex shrink-0 items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-500 transition-colors"
+                className="flex shrink-0 items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-500 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Play className="h-3 w-3" />
                 Play
@@ -350,8 +371,10 @@ export function GuideView({
                     nowEpochS={nowEpochS}
                     selectedKey={selectionKey(selection)}
                     onSelect={(next) => {
+                      testRequestRef.current += 1;
                       setSelection(next);
                       setTestOutcome(null);
+                      setTesting(false);
                     }}
                     onActivate={activate}
                   />
