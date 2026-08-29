@@ -145,7 +145,7 @@ export function buildArchiveUrl(channel: ArchiveUrlFields, window: ArchiveWindow
         );
       }
       if (/\.ts([?#]|$)/.test(channel.url)) {
-        return channel.url.replace(/\/[^/?#]+\.ts([?#]|$)/, `/timeshift_abs-${start}.ts$1`);
+        return channel.url.replace(/\/[^/?#]+\.ts([?#]|$)/, `/archive-${start}-${duration}.ts$1`);
       }
       return defaultArchiveUrl(channel.url, window);
     }

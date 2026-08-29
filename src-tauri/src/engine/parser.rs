@@ -276,6 +276,7 @@ fn parse_header_epg_sources(header_line: &str) -> Vec<String> {
     let mut sources = Vec::new();
     for key in ["x-tvg-url", "url-tvg"] {
         if let Some(value) = attr_value(&attrs, key) {
+            let value = value.replace("&amp;", "&");
             for url in value.split(',') {
                 let url = url.trim();
                 if Url::parse(url).is_ok_and(|parsed| matches!(parsed.scheme(), "http" | "https"))
@@ -1077,6 +1078,12 @@ mod tests {
         assert_eq!(
             parse_header_epg_sources("#EXTM3U x-tvg-url=\"HTTPS://epg.example.com/guide.xml\""),
             vec!["HTTPS://epg.example.com/guide.xml".to_string()]
+        );
+        assert_eq!(
+            parse_header_epg_sources(
+                "#EXTM3U x-tvg-url=\"https://epg.example.com/xmltv.php?username=u&amp;password=p\""
+            ),
+            vec!["https://epg.example.com/xmltv.php?username=u&password=p".to_string()]
         );
     }
 

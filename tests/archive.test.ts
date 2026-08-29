@@ -182,13 +182,13 @@ describe("buildArchiveUrl", () => {
     );
     expect(
       buildArchiveUrl(urlFields("http://host/channel/mono.ts?tok=1", "flussonic"), WINDOW),
-    ).toBe(`http://host/channel/timeshift_abs-${START}.ts?tok=1`);
+    ).toBe(`http://host/channel/archive-${START}-3600.ts?tok=1`);
     expect(
       buildArchiveUrl(urlFields("http://host/channel/index.m3u8#player", "flussonic"), WINDOW),
     ).toBe(`http://host/channel/archive-${START}-3600.m3u8#player`);
     expect(
       buildArchiveUrl(urlFields("http://host/channel/mono.ts#player", "flussonic"), WINDOW),
-    ).toBe(`http://host/channel/timeshift_abs-${START}.ts#player`);
+    ).toBe(`http://host/channel/archive-${START}-3600.ts#player`);
   });
 
   it("uses the utc query convention for default and shift types", () => {

@@ -391,6 +391,12 @@ async fn start_remux(
 
     cmd.arg("-hide_banner").arg("-loglevel").arg("warning");
     cmd.arg("-fflags").arg("+genpts+discardcorrupt");
+    // Archive endpoints may deliver the complete recording as fast as the
+    // connection allows. Pace them so the receiver can consume each segment
+    // before the sliding HLS/DASH window removes it.
+    if is_finite {
+        cmd.arg("-re");
+    }
     if is_hevc {
         cmd.arg("-f").arg("mpegts");
         cmd.arg("-i").arg("pipe:0");
@@ -436,13 +442,13 @@ async fn start_remux(
         // which the muxer rejects.
         cmd.arg("-avoid_negative_ts").arg("make_zero");
 
-        // DASH uses a sliding window for live streams and retains every
-        // segment for finite streams so ffmpeg can finalize a static MPD.
+        // Keep both live and finite streams bounded. Finite inputs are paced
+        // above, giving the receiver time to fetch segments before removal.
         cmd.arg("-f").arg("dash");
         cmd.arg("-seg_duration").arg("4");
+        cmd.arg("-window_size").arg(REMUX_PLAYLIST_SEGMENTS);
+        cmd.arg("-extra_window_size").arg("2");
         if !is_finite {
-            cmd.arg("-window_size").arg("6");
-            cmd.arg("-extra_window_size").arg("2");
             cmd.arg("-remove_at_exit").arg("1");
         }
         cmd.arg("-use_template").arg("1");
