@@ -458,42 +458,53 @@ export function usePlaylistSources({
     }
     previousHideVodContentRef.current = hideVodContent;
 
-    const state = getStore();
-    if (!state.cachedSourcePreview) {
+    const initialState = getStore();
+    const cachedSourcePreview = initialState.cachedSourcePreview;
+    const playlist = initialState.playlist;
+    if (!cachedSourcePreview) {
       return;
     }
 
-    const nextPreview = buildVisiblePreview(
-      state.cachedSourcePreview,
-      state.lastAppliedSourceFilter,
-    );
-    const visibleIndices = new Set(nextPreview.channels.map((channel) => channel.index));
-    const selectedIndex = state.selectedChannel?.index ?? null;
-    const pendingPlaybackIndex = state.pendingPlaybackChannel?.index ?? null;
-    const nextSelectedIndices = state.selectedChannelIndices.filter((index) =>
-      visibleIndices.has(index),
-    );
-
-    state.setPlaylist(nextPreview);
-    state.setGroupFilter(resolvePreservedGroupFilter(state.groupFilter, nextPreview.groups));
-    state.setSelectedChannelIndices(nextSelectedIndices);
-
-    if (selectedIndex == null || !visibleIndices.has(selectedIndex)) {
-      state.setSelectedChannel(null);
-    }
-    if (pendingPlaybackIndex == null || !visibleIndices.has(pendingPlaybackIndex)) {
-      state.setPendingPlaybackChannel(null);
-    }
-
-    void syncFromPlaylist(nextPreview.channels, true).then(() => {
-      if (selectedIndex == null || !visibleIndices.has(selectedIndex)) {
+    void cancelArchiveProbes().then(() => {
+      const state = getStore();
+      if (
+        previousHideVodContentRef.current !== hideVodContent ||
+        state.cachedSourcePreview !== cachedSourcePreview ||
+        state.playlist !== playlist
+      ) {
         return;
       }
 
-      const refreshed = selectResultByIndex(getStore(), selectedIndex);
-      if (refreshed) {
-        getStore().setSelectedChannel(refreshed);
+      const nextPreview = buildVisiblePreview(cachedSourcePreview, state.lastAppliedSourceFilter);
+      const visibleIndices = new Set(nextPreview.channels.map((channel) => channel.index));
+      const selectedIndex = state.selectedChannel?.index ?? null;
+      const pendingPlaybackIndex = state.pendingPlaybackChannel?.index ?? null;
+      const nextSelectedIndices = state.selectedChannelIndices.filter((index) =>
+        visibleIndices.has(index),
+      );
+
+      state.clearArchiveProbes();
+      state.setPlaylist(nextPreview);
+      state.setGroupFilter(resolvePreservedGroupFilter(state.groupFilter, nextPreview.groups));
+      state.setSelectedChannelIndices(nextSelectedIndices);
+
+      if (selectedIndex == null || !visibleIndices.has(selectedIndex)) {
+        state.setSelectedChannel(null);
       }
+      if (pendingPlaybackIndex == null || !visibleIndices.has(pendingPlaybackIndex)) {
+        state.setPendingPlaybackChannel(null);
+      }
+
+      void syncFromPlaylist(nextPreview.channels, true).then(() => {
+        if (selectedIndex == null || !visibleIndices.has(selectedIndex)) {
+          return;
+        }
+
+        const refreshed = selectResultByIndex(getStore(), selectedIndex);
+        if (refreshed) {
+          getStore().setSelectedChannel(refreshed);
+        }
+      });
     });
   }, [buildVisiblePreview, hideVodContent, settingsHydrated, syncFromPlaylist]);
 
