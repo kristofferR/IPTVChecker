@@ -1047,6 +1047,8 @@ pub fn run() {
             commands::scan::cancel_scan,
             commands::scan::reset_scan,
             commands::scan::quick_check_channel,
+            commands::epg::load_epg,
+            commands::epg::get_epg_programmes,
             commands::export::export_csv,
             commands::export::export_split,
             commands::export::export_renamed,

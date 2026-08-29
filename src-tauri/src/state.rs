@@ -81,6 +81,10 @@ pub struct AppState {
     window_scan_states: Mutex<HashMap<String, WindowScanState>>,
     backend_perf_samples: Mutex<VecDeque<BackendPerfSample>>,
     playlist_preview_cache: Mutex<HashMap<String, CachedPlaylistPreview>>,
+    /// Programme index from the most recent load_epg call.
+    pub epg: Mutex<Option<std::sync::Arc<crate::engine::epg::EpgIndex>>>,
+    /// Serializes concurrent load_epg calls so two loads never interleave.
+    pub epg_load_lock: Mutex<()>,
     /// Rejects a second install immediately instead of queueing it behind the
     /// first one on `update_checking`.
     pub update_installing: std::sync::atomic::AtomicBool,
@@ -108,6 +112,8 @@ impl AppState {
             window_scan_states: Mutex::new(HashMap::new()),
             backend_perf_samples: Mutex::new(VecDeque::new()),
             playlist_preview_cache: Mutex::new(HashMap::new()),
+            epg: Mutex::new(None),
+            epg_load_lock: Mutex::new(()),
             update_installing: std::sync::atomic::AtomicBool::new(false),
             update_checking: Mutex::new(()),
             update_available: Mutex::new(None),

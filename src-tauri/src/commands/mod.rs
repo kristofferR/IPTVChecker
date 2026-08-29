@@ -1,4 +1,5 @@
 pub mod chromecast;
+pub mod epg;
 pub mod export;
 pub mod history;
 pub mod player;

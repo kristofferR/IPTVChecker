@@ -41,5 +41,8 @@ pub struct PlaylistPreview {
     #[serde(default)]
     pub series_count: usize,
     pub groups: Vec<String>,
+    /// XMLTV EPG URLs advertised by the playlist header (`x-tvg-url` / `url-tvg`).
+    #[serde(default)]
+    pub epg_sources: Vec<String>,
     pub channels: Vec<Channel>,
 }

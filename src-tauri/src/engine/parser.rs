@@ -232,6 +232,31 @@ pub fn extract_tvg_metadata(
     tvg_metadata_from_attrs(&extinf_attributes_for(extinf_line))
 }
 
+/// Extract XMLTV EPG source URLs from a playlist `#EXTM3U` header line.
+/// Both `x-tvg-url` and `url-tvg` occur in the wild, each possibly holding a
+/// comma-separated list of URLs.
+fn parse_header_epg_sources(header_line: &str) -> Vec<String> {
+    // parse_extinf_attributes drops everything before the first ':', which in
+    // an #EXTM3U header would be the colon of the first quoted URL. Insert a
+    // separator right after the tag so the attribute payload survives intact.
+    let doctored = header_line.replacen("#EXTM3U", "#EXTM3U:", 1);
+    let attrs = parse_extinf_attributes(&doctored);
+    let mut sources = Vec::new();
+    for key in ["x-tvg-url", "url-tvg"] {
+        if let Some(value) = attr_value(&attrs, key) {
+            for url in value.split(',') {
+                let url = url.trim();
+                if (url.starts_with("http://") || url.starts_with("https://"))
+                    && !sources.iter().any(|existing| existing == url)
+                {
+                    sources.push(url.to_string());
+                }
+            }
+        }
+    }
+    sources
+}
+
 fn parse_catchup_days(raw: &str) -> Option<u32> {
     let digits: String = raw
         .trim()
@@ -495,6 +520,7 @@ pub fn filter_playlist_preview(
         movie_count,
         series_count,
         groups: preview.groups.clone(),
+        epg_sources: preview.epg_sources.clone(),
         channels,
     })
 }
@@ -529,6 +555,7 @@ fn parse_playlist_reader<R: BufRead>(
     let mut pending_extinf: Option<PendingExtinf> = None;
     let mut pending_metadata: Vec<String> = Vec::new();
     let mut orphaned_extinf = 0u32;
+    let mut epg_sources: Vec<String> = Vec::new();
 
     for raw_line in reader.split(b'\n') {
         let raw_line = raw_line.map_err(AppError::Io)?;
@@ -537,6 +564,15 @@ fn parse_playlist_reader<R: BufRead>(
             line.pop();
         }
         let line = line.trim().to_string();
+
+        if !pending_channel && line.starts_with("#EXTM3U") {
+            for source in parse_header_epg_sources(&line) {
+                if !epg_sources.contains(&source) {
+                    epg_sources.push(source);
+                }
+            }
+            continue;
+        }
 
         if line.starts_with("#EXTINF") {
             // A new EXTINF supersedes any pending entry that never got a stream URL.
@@ -629,6 +665,7 @@ fn parse_playlist_reader<R: BufRead>(
     Ok(PlaylistPreview {
         file_path: file_path.to_string(),
         file_name: playlist_name,
+        epg_sources,
         source_identity: None,
         saved_playlist_id: None,
         server_location: None,
@@ -729,6 +766,7 @@ fn parse_playlist_directory(
     let mut groups = BTreeSet::new();
     let mut source_index = 0usize;
     let mut parsed_progress = ParseProgress::default();
+    let mut epg_sources: Vec<String> = Vec::new();
 
     for file in files {
         let last_reported = std::cell::Cell::new(ParseProgress::default());
@@ -745,6 +783,11 @@ fn parse_playlist_directory(
             }
         };
         let parsed = parse_playlist_with_progress(&file, &None, &None, Some(&child_progress))?;
+        for source in &parsed.epg_sources {
+            if !epg_sources.contains(source) {
+                epg_sources.push(source.clone());
+            }
+        }
         let last = last_reported.get();
         parsed_progress = ParseProgress {
             channels_found: base_progress.channels_found + last.channels_found,
@@ -789,6 +832,7 @@ fn parse_playlist_directory(
     Ok(PlaylistPreview {
         file_path: dir_path.to_string(),
         file_name: dir_name,
+        epg_sources,
         source_identity: None,
         saved_playlist_id: None,
         server_location: None,
@@ -943,6 +987,27 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_header_epg_sources_reads_both_keys_and_lists() {
+        assert_eq!(
+            parse_header_epg_sources("#EXTM3U x-tvg-url=\"http://epg.example.com/guide.xml.gz\""),
+            vec!["http://epg.example.com/guide.xml.gz".to_string()]
+        );
+
+        let line =
+            "#EXTM3U x-tvg-url=\"http://a/epg.xml\" url-tvg=\"http://a/epg.xml,http://b/epg.xml\"";
+        assert_eq!(
+            parse_header_epg_sources(line),
+            vec![
+                "http://a/epg.xml".to_string(),
+                "http://b/epg.xml".to_string()
+            ]
+        );
+
+        assert!(parse_header_epg_sources("#EXTM3U").is_empty());
+        assert!(parse_header_epg_sources("#EXTM3U x-tvg-url=\"not-a-url\"").is_empty());
+    }
+
+    #[test]
     fn test_catchup_metadata_reads_explicit_attributes() {
         let attrs = parse_extinf_attributes(
             "#EXTINF:-1 catchup=\"shift\" catchup-days=\"7\" catchup-source=\"http://x/${start}\",Ch",
@@ -1011,7 +1076,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("iptv-parser-streaming-{unique}.m3u8"));
 
         let playlist = "\
-#EXTM3U
+#EXTM3U x-tvg-url=\"http://epg.example.com/all.xml\"
 #EXTINF:-1 group-title=\"Sports\",Channel One
 #KODIPROP:inputstream=ffmpegdirect
 http://example.com/one.m3u8
@@ -1040,6 +1105,10 @@ http://example.com/three.m3u8
         assert_eq!(preview.channels[1].name, "Channel Three");
         assert!(preview.groups.contains(&"Sports".to_string()));
         assert!(preview.groups.contains(&"News".to_string()));
+        assert_eq!(
+            preview.epg_sources,
+            vec!["http://epg.example.com/all.xml".to_string()]
+        );
 
         std::fs::remove_file(path).expect("fixture file should be removable");
     }
@@ -1092,7 +1161,7 @@ http://example.com/three.mp4
         let path = std::env::temp_dir().join(format!("iptv-parser-stable-index-{unique}.m3u8"));
 
         let playlist = "\
-#EXTM3U
+#EXTM3U x-tvg-url=\"http://epg.example.com/all.xml\"
 #EXTINF:-1 group-title=\"Sports\",Channel One
 http://example.com/one.m3u8
 #EXTINF:-1 group-title=\"News\",Channel Two

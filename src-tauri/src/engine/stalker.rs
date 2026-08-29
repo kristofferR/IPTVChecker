@@ -728,6 +728,7 @@ pub(crate) fn build_stalker_preview(
         movie_count,
         series_count,
         groups: groups.into_iter().collect(),
+        epg_sources: Vec::new(),
         channels,
     })
 }

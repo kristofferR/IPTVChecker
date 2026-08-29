@@ -3,6 +3,7 @@ pub mod checker;
 pub mod chromecast;
 pub mod connectivity;
 pub mod disk;
+pub mod epg;
 pub mod ffmpeg;
 #[cfg(target_os = "macos")]
 pub mod macos_dmg_update;
