@@ -758,9 +758,22 @@ pub(crate) async fn open_playlist_xtream_inner(
         }
     };
 
-    let mut preview =
-        parse_playlist_off_thread(Some(app), cached_path.clone(), group_filter, channel_search)
-            .await?;
+    let mut preview = match parse_playlist_off_thread(
+        Some(app),
+        cached_path.clone(),
+        group_filter,
+        channel_search,
+    )
+    .await
+    {
+        Ok(preview) => preview,
+        Err(error) => {
+            if let Some(task) = archive_task {
+                task.abort();
+            }
+            return Err(error);
+        }
+    };
     let archive_flags = if let Some(mut task) = archive_task {
         match tokio::time::timeout(XTREAM_ARCHIVE_ENRICHMENT_GRACE_TIMEOUT, &mut task).await {
             Ok(Ok(Some(live_streams))) => xtream_archive_flags(&live_streams),
