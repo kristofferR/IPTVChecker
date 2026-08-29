@@ -536,7 +536,7 @@ pub(crate) async fn fetch_xtream_playlist_via_json_api(
     username: &str,
     password: &str,
     accept_invalid_certs: bool,
-    prefetched_live_streams: Option<Vec<serde_json::Value>>,
+    live_streams: Option<Vec<serde_json::Value>>,
 ) -> Result<Vec<u8>, AppError> {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
@@ -546,30 +546,20 @@ pub(crate) async fn fetch_xtream_playlist_via_json_api(
         .build()
         .map_err(|e| AppError::Other(format!("Failed to build HTTP client: {}", e)))?;
 
-    // Fetch all content types in parallel
+    // Fetch the remaining content types in parallel. The live catalog request
+    // already completed while /get.php was downloading, so reuse its outcome.
     let live_cats_url =
         build_xtream_player_api_action_url(server, username, password, "get_live_categories");
-    let live_streams_url =
-        build_xtream_player_api_action_url(server, username, password, "get_live_streams");
     let vod_cats_url =
         build_xtream_player_api_action_url(server, username, password, "get_vod_categories");
     let vod_streams_url =
         build_xtream_player_api_action_url(server, username, password, "get_vod_streams");
-    let live_streams_request = async {
-        match prefetched_live_streams {
-            Some(streams) => streams,
-            None => fetch_xtream_json_array(&client, live_streams_url, "live streams")
-                .await
-                .unwrap_or_default(),
-        }
-    };
-    let (live_cats, live_streams, vod_cats, vod_streams) = tokio::join!(
+    let (live_cats, vod_cats, vod_streams) = tokio::join!(
         async {
             fetch_xtream_json_array(&client, live_cats_url, "live categories")
                 .await
                 .unwrap_or_default()
         },
-        live_streams_request,
         async {
             fetch_xtream_json_array(&client, vod_cats_url, "VOD categories")
                 .await
@@ -581,6 +571,7 @@ pub(crate) async fn fetch_xtream_playlist_via_json_api(
                 .unwrap_or_default()
         },
     );
+    let live_streams = live_streams.unwrap_or_default();
 
     if live_streams.is_empty() && vod_streams.is_empty() {
         return Err(AppError::Other(
