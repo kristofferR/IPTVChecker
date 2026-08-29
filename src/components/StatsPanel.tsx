@@ -108,27 +108,19 @@ export const StatsPanel = memo(function StatsPanel() {
   const effectiveLowFpsCount = summary?.low_framerate ?? lowFpsCount;
   const effectiveMislabeledCount = summary?.mislabeled ?? mislabeledCount;
 
-  const { catchupCount, visibleCatchupCount } = useMemo(() => {
-    const catchupCount = channels.filter(hasArchive).length;
-    const visibleCatchupCount = filterResultsShared(
-      completedResults,
-      search,
-      groupFilter,
-      statusFilter,
-      duplicateIndices,
-      separatePlaceholder,
-    ).filter(hasArchive).length;
-
-    return { catchupCount, visibleCatchupCount };
-  }, [
-    channels,
-    completedResults,
-    search,
-    groupFilter,
-    statusFilter,
-    duplicateIndices,
-    separatePlaceholder,
-  ]);
+  const catchupCount = useMemo(() => channels.filter(hasArchive).length, [channels]);
+  const visibleCatchupCount = useMemo(
+    () =>
+      filterResultsShared(
+        completedResults,
+        search,
+        groupFilter,
+        statusFilter,
+        duplicateIndices,
+        separatePlaceholder,
+      ).filter(hasArchive).length,
+    [completedResults, search, groupFilter, statusFilter, duplicateIndices, separatePlaceholder],
+  );
 
   const selectedCatchupCount = useMemo(() => {
     if (selectedChannelIndices.length < 2) return 0;

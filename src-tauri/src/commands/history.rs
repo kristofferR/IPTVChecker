@@ -288,26 +288,21 @@ fn save_v2_index(base_dir: &Path, index: &HistoryIndexV2) -> Result<(), AppError
 fn write_run_file(
     base_dir: &Path,
     run_id: &str,
-    results: &[ChannelResult],
+    mut results: Vec<ChannelResult>,
 ) -> Result<(), AppError> {
     let runs_dir = v2_runs_dir(base_dir);
     std::fs::create_dir_all(&runs_dir).map_err(AppError::Io)?;
 
     let run_path = v2_run_file_path(base_dir, run_id);
-    let sanitized_results = results
-        .iter()
-        .map(|result| {
-            let mut sanitized = result.clone();
-            sanitized.catchup_source = sanitized
-                .catchup_source
-                .as_deref()
-                .map(crate::engine::resume::sanitize_url_for_persistence);
-            sanitized.extinf_line =
-                crate::engine::resume::sanitize_extinf_for_persistence(&sanitized.extinf_line);
-            sanitized
-        })
-        .collect::<Vec<_>>();
-    let bytes = serde_json::to_vec(&sanitized_results).map_err(|error| {
+    for result in &mut results {
+        result.catchup_source = result
+            .catchup_source
+            .as_deref()
+            .map(crate::engine::resume::sanitize_url_for_persistence);
+        result.extinf_line =
+            crate::engine::resume::sanitize_extinf_for_persistence(&result.extinf_line);
+    }
+    let bytes = serde_json::to_vec(&results).map_err(|error| {
         AppError::Parse(format!(
             "Failed to serialize run file {}: {}",
             run_id, error
@@ -373,7 +368,7 @@ fn migrate_v1_to_v2(base_dir: &Path) -> Result<(), AppError> {
 
     // Write per-run files
     for entry in &v1_store.entries {
-        if let Err(error) = write_run_file(base_dir, &entry.id, &entry.results) {
+        if let Err(error) = write_run_file(base_dir, &entry.id, entry.results.clone()) {
             log::warn!(
                 "Failed to write per-run file during migration for {}: {}",
                 entry.id,
@@ -550,7 +545,7 @@ fn append_scan_history_at_dir(
     };
 
     // Write per-run file
-    write_run_file(base_dir, run_id, &results)?;
+    write_run_file(base_dir, run_id, results)?;
 
     // Add new entry to index
     let new_entry = IndexEntryV2 {
@@ -993,7 +988,7 @@ mod tests {
         );
         result.extinf_line = "#EXTINF:-1 catchup-source='https://archive:extinf-secret@example.com/timeshift?token=extinf-token',Channel".to_string();
 
-        write_run_file(&test_root, "run-1", &[result]).unwrap();
+        write_run_file(&test_root, "run-1", vec![result]).unwrap();
 
         let persisted = std::fs::read_to_string(v2_run_file_path(&test_root, "run-1")).unwrap();
         assert!(!persisted.contains("secret"));

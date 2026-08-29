@@ -213,14 +213,26 @@ impl AppState {
         let generation = self
             .xtream_archive_generation
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let previous = self.xtream_archive_enrichments.lock().await.insert(
-            source_identity,
+        let mut enrichments = self.xtream_archive_enrichments.lock().await;
+        let previous = enrichments.insert(
+            source_identity.clone(),
             XtreamArchiveEnrichmentState {
                 generation,
                 flags: None,
                 notify: Arc::new(Notify::new()),
             },
         );
+        if enrichments.len() > PLAYLIST_PREVIEW_CACHE_LIMIT {
+            if let Some(stale_key) = enrichments
+                .iter()
+                .filter(|(key, _)| key.as_str() != source_identity)
+                .min_by_key(|(_, enrichment)| enrichment.generation)
+                .map(|(key, _)| key.clone())
+            {
+                enrichments.remove(&stale_key);
+            }
+        }
+        drop(enrichments);
         if let Some(previous) = previous {
             previous.notify.notify_waiters();
         }
