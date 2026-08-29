@@ -140,6 +140,15 @@ describe("archiveVerdict", () => {
       archiveVerdict(
         ch,
         entry([
+          [0, true, 400, false],
+          [7, false, null],
+        ]),
+      ),
+    ).toBe("advertised");
+    expect(
+      archiveVerdict(
+        ch,
+        entry([
           [0, true, 400],
           [7, true, 700],
         ]),

@@ -4,6 +4,7 @@ import {
   type ArchiveProbeOutcome,
   probeArchivePoint,
   verifyArchiveDepthResponse,
+  verifyArchivePointResponse,
 } from "./archiveProbe";
 import type { ChannelResult } from "./types";
 
@@ -24,6 +25,7 @@ export function archiveVerdict(
   const outcomes = entry?.outcomes ?? [];
   if (entry?.running || entry?.checkedAt == null || outcomes.length === 0) return "advertised";
   if (!outcomes.some((outcome) => outcome.ok)) return "broken";
+  if (!outcomes.some((outcome) => outcome.ok && outcome.depthVerified)) return "advertised";
   const advertisedDays = result.catchup_days;
   if (advertisedDays == null) return "verified";
   if (
@@ -98,7 +100,8 @@ export async function verifyChannelArchive(
   if (shouldCancel()) {
     return push(null, true, false);
   }
-  const near = await probeArchivePoint(result, probePointForDays(0, nowEpochS), nowEpochS);
+  const probedNear = await probeArchivePoint(result, probePointForDays(0, nowEpochS), nowEpochS);
+  const near = probedNear ? verifyArchivePointResponse(probedNear) : null;
   if (shouldCancel()) {
     return push(near, true, false);
   }
@@ -129,6 +132,10 @@ export async function verifyChannelArchive(
     return push(deep, true);
   }
   push(deep, false);
+
+  // Without a verified near point there is no working archive depth from
+  // which to start bisection. A reachable live stream is not archive evidence.
+  if (!near.depthVerified) return push(null, true);
 
   // The advertised depth lied; bisect between the working near point and the
   // failing deep point to estimate what the provider actually keeps.
