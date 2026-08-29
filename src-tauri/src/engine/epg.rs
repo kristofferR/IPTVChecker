@@ -20,6 +20,16 @@ const EPG_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 /// Hard cap on a single downloaded guide; anything larger is a broken feed.
 const EPG_MAX_DOWNLOAD_BYTES: u64 = 1024 * 1024 * 1024;
 
+struct PartialEpgDownload {
+    path: PathBuf,
+}
+
+impl Drop for PartialEpgDownload {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 /// One XMLTV programme; times are unix epoch seconds.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EpgProgramme {
@@ -195,6 +205,15 @@ pub fn parse_xmltv_into<R: Read>(
                     in_title = false;
                 }
             }
+            Ok(Event::CData(text)) => {
+                if in_title {
+                    let value = text.decode().unwrap_or_default().into_owned();
+                    if !value.trim().is_empty() {
+                        current_title = Some(value.trim().to_string());
+                    }
+                    in_title = false;
+                }
+            }
             Ok(Event::End(element)) => match element.name().as_ref() {
                 b"programme" => {
                     if let Some((channel, start, stop)) = current.take() {
@@ -252,6 +271,18 @@ pub fn cache_path_for(cache_dir: &Path, url: &str) -> PathBuf {
     cache_dir.join(format!("epg-{hex}.bin"))
 }
 
+/// Return a safe source label for logs and UI-visible failure summaries.
+pub fn redact_epg_source(source: &str) -> String {
+    let Ok(mut url) = url::Url::parse(source) else {
+        return "<invalid EPG source>".to_string();
+    };
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.set_query(None);
+    url.set_fragment(None);
+    url.to_string()
+}
+
 fn cache_is_fresh(path: &Path) -> bool {
     std::fs::metadata(path)
         .and_then(|meta| meta.modified())
@@ -269,7 +300,7 @@ pub async fn download_epg_source(
 ) -> Result<PathBuf, AppError> {
     let target = cache_path_for(cache_dir, url);
     if !force_refresh && cache_is_fresh(&target) {
-        log::info!("EPG cache hit for {url}");
+        log::info!("EPG cache hit for {}", redact_epg_source(url));
         return Ok(target);
     }
 
@@ -293,6 +324,7 @@ pub async fn download_epg_source(
     }
 
     let temp = target.with_extension("part");
+    let _partial_download = PartialEpgDownload { path: temp.clone() };
     let mut file = std::fs::File::create(&temp).map_err(AppError::Io)?;
     let mut downloaded: u64 = 0;
     let mut stream = response;
@@ -303,7 +335,6 @@ pub async fn download_epg_source(
     {
         downloaded += chunk.len() as u64;
         if downloaded > EPG_MAX_DOWNLOAD_BYTES {
-            let _ = std::fs::remove_file(&temp);
             return Err(AppError::Other(format!(
                 "EPG source exceeds {} MB limit",
                 EPG_MAX_DOWNLOAD_BYTES / (1024 * 1024)
@@ -314,7 +345,10 @@ pub async fn download_epg_source(
     file.flush().map_err(AppError::Io)?;
     drop(file);
     std::fs::rename(&temp, &target).map_err(AppError::Io)?;
-    log::info!("Downloaded EPG {url} ({downloaded} bytes)");
+    log::info!(
+        "Downloaded EPG {} ({downloaded} bytes)",
+        redact_epg_source(url)
+    );
     Ok(target)
 }
 
@@ -374,6 +408,26 @@ mod tests {
         let only_first = index.programmes_for("nrk1.no", start, start + 1800);
         assert_eq!(only_first.len(), 1);
         assert!(index.programmes_for("unwanted.tv", 0, i64::MAX).is_empty());
+    }
+
+    #[test]
+    fn parses_cdata_programme_titles() {
+        let xml = r#"<tv><programme start="20260828200000" stop="20260828210000" channel="nrk1.no"><title><![CDATA[News & Weather]]></title></programme></tv>"#;
+        let mut index = EpgIndex::default();
+        parse_xmltv_into(xml.as_bytes(), &HashSet::new(), &mut index).expect("xmltv should parse");
+
+        let programmes = index.programmes_for("nrk1.no", 0, i64::MAX);
+        assert_eq!(programmes[0].title, "News & Weather");
+    }
+
+    #[test]
+    fn redacts_epg_source_credentials() {
+        assert_eq!(
+            redact_epg_source(
+                "https://alice:secret@example.com/xmltv.php?username=alice&password=secret"
+            ),
+            "https://example.com/xmltv.php"
+        );
     }
 
     #[test]

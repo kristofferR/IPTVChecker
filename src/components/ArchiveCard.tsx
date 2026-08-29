@@ -17,19 +17,12 @@ interface ArchiveCardProps {
 }
 
 // The EPG download can be hundreds of MB, so it loads lazily the first time a
-// catch-up channel's card opens, once per playlist+sources combination.
+// catch-up channel's card opens, once per playlist, sources, and indexed IDs.
 let epgLoad: { key: string; promise: Promise<void> } | null = null;
 
 function ensureEpgLoaded(): Promise<void> {
   const state = useAppStore.getState();
   const sources = state.playlist?.epg_sources ?? [];
-  if (sources.length === 0) {
-    return Promise.resolve();
-  }
-  const key = `${state.playlist?.source_identity ?? state.playlist?.file_path ?? ""}|${sources.join(",")}`;
-  if (epgLoad?.key === key) {
-    return epgLoad.promise;
-  }
   const tvgIds = [
     ...new Set(
       state.flatResults
@@ -37,7 +30,15 @@ function ensureEpgLoaded(): Promise<void> {
         .map((result) => result.tvg_id)
         .filter((id): id is string => !!id),
     ),
-  ];
+  ].sort();
+  const key = JSON.stringify([
+    state.playlist?.source_identity ?? state.playlist?.file_path ?? "",
+    sources,
+    tvgIds,
+  ]);
+  if (epgLoad?.key === key) {
+    return epgLoad.promise;
+  }
   const promise = loadEpg(sources, tvgIds).then(
     (summary) => {
       useAppStore.getState().setEpgLoadSummary(summary);
@@ -161,9 +162,10 @@ function ArchivePicker({
     const [hours, minutes] = time.split(":").map((part) => Number.parseInt(part, 10));
     const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysBack);
     date.setHours(hours || 0, minutes || 0, 0, 0);
-    const startEpochS = Math.min(
-      Math.floor(date.getTime() / 1000),
-      Math.floor(Date.now() / 1000) - 60,
+    const nowEpochS = Math.floor(Date.now() / 1000);
+    const startEpochS = Math.max(
+      nowEpochS - depthDays * 86_400,
+      Math.min(Math.floor(date.getTime() / 1000), nowEpochS - 60),
     );
     onPlayArchive(result, { startEpochS });
   };

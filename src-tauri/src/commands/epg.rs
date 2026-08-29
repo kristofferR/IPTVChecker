@@ -67,6 +67,7 @@ pub async fn load_epg(
                 sources_loaded += 1;
             }
             Err(error) => {
+                let source = epg::redact_epg_source(&source);
                 log::warn!("EPG source {source} failed: {error}");
                 failed_sources.push(source);
             }
