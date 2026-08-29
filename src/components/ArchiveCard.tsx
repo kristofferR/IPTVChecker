@@ -19,6 +19,12 @@ interface ArchiveCardProps {
 // The EPG download can be hundreds of MB, so it loads lazily the first time a
 // catch-up channel's card opens, once per playlist, sources, and indexed IDs.
 let epgLoad: { key: string; promise: Promise<void> } | null = null;
+const MAX_CATCHUP_DAYS = 31;
+
+function epgSourcesFor(result: ChannelResult): string[] {
+  const playlist = useAppStore.getState().playlist;
+  return playlist?.epg_sources_by_playlist[result.playlist] ?? playlist?.epg_sources ?? [];
+}
 
 function ensureEpgLoaded(): Promise<void> {
   const state = useAppStore.getState();
@@ -49,9 +55,15 @@ function ensureEpgLoaded(): Promise<void> {
         summary.channels_matched,
         "channels",
       );
+      if (summary.failed_sources.length > 0 && epgLoad?.key === key) {
+        epgLoad = null;
+      }
     },
     (error) => {
       logger.warn("[EPG] Load failed:", error);
+      if (epgLoad?.key === key) {
+        epgLoad = null;
+      }
     },
   );
   epgLoad = { key, promise };
@@ -157,7 +169,7 @@ function ArchivePicker({
   result,
   onPlayArchive,
 }: Pick<ArchiveCardProps, "result" | "onPlayArchive">) {
-  const depthDays = Math.max(1, result.catchup_days ?? 1);
+  const depthDays = Math.min(MAX_CATCHUP_DAYS, Math.max(1, result.catchup_days ?? 1));
   const [daysBack, setDaysBack] = useState(0);
   const [time, setTime] = useState("20:00");
   const now = new Date();
@@ -231,8 +243,13 @@ export function ArchiveCard({
       }
       await ensureEpgLoaded();
       const now = Math.floor(Date.now() / 1000);
-      const depthDays = result.catchup_days ?? 7;
-      const list = await getEpgProgrammes(result.tvg_id, now - depthDays * 86_400, now).catch(
+      const depthDays = Math.min(MAX_CATCHUP_DAYS, result.catchup_days ?? 7);
+      const list = await getEpgProgrammes(
+        epgSourcesFor(result),
+        result.tvg_id,
+        now - depthDays * 86_400,
+        now,
+      ).catch(
         () => [] as EpgProgramme[],
       );
       if (!stale) setProgrammes(list);

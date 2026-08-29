@@ -50,10 +50,11 @@ pub async fn load_epg(
                 epg::download_epg_source(&source, &cache_dir, accept_invalid_certs, force_refresh)
                     .await?;
             let wanted = wanted.clone();
+            let source_identity = source.clone();
             tokio::task::spawn_blocking(move || {
                 let mut partial = EpgIndex::default();
                 let reader = epg::open_guide_file(&path)?;
-                epg::parse_xmltv_into(reader, &wanted, &mut partial)?;
+                epg::parse_xmltv_into_with_source(reader, &wanted, &source_identity, &mut partial)?;
                 Ok::<EpgIndex, AppError>(partial)
             })
             .await
@@ -95,12 +96,13 @@ pub async fn load_epg(
 #[tauri::command]
 pub async fn get_epg_programmes(
     state: tauri::State<'_, Arc<AppState>>,
+    sources: Vec<String>,
     tvg_id: String,
     from: i64,
     to: i64,
 ) -> Result<Vec<EpgProgramme>, AppError> {
     let index = state.epg.lock().await.clone();
     Ok(index
-        .map(|index| index.programmes_for(&tvg_id, from, to))
+        .map(|index| index.programmes_for_sources(&sources, &tvg_id, from, to))
         .unwrap_or_default())
 }

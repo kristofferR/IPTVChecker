@@ -40,7 +40,7 @@ pub struct EpgProgramme {
 
 #[derive(Debug, Default)]
 pub struct EpgIndex {
-    programmes: HashMap<String, Vec<EpgProgramme>>,
+    programmes: HashMap<(String, String), Vec<EpgProgramme>>,
 }
 
 impl EpgIndex {
@@ -53,23 +53,46 @@ impl EpgIndex {
     }
 
     pub fn has_channel(&self, tvg_id: &str) -> bool {
-        self.programmes.contains_key(tvg_id)
+        self.programmes.keys().any(|(_, id)| id == tvg_id)
     }
 
     pub fn matched_channel_ids(&self) -> Vec<String> {
-        self.programmes.keys().cloned().collect()
+        self.programmes
+            .keys()
+            .map(|(_, tvg_id)| tvg_id.clone())
+            .collect()
     }
 
     /// Programmes overlapping `[from, to)`, oldest first.
     pub fn programmes_for(&self, tvg_id: &str, from: i64, to: i64) -> Vec<EpgProgramme> {
-        let Some(programmes) = self.programmes.get(tvg_id) else {
-            return Vec::new();
-        };
-        programmes
+        self.programmes_for_sources(&[], tvg_id, from, to)
+    }
+
+    pub fn programmes_for_sources(
+        &self,
+        sources: &[String],
+        tvg_id: &str,
+        from: i64,
+        to: i64,
+    ) -> Vec<EpgProgramme> {
+        let mut programmes = self
+            .programmes
             .iter()
+            .filter(|((source, id), _)| {
+                id == tvg_id
+                    && if sources.is_empty() {
+                        source.is_empty()
+                    } else {
+                        sources.contains(source)
+                    }
+            })
+            .flat_map(|(_, programmes)| programmes.iter())
             .filter(|programme| programme.stop > from && programme.start < to)
             .cloned()
-            .collect()
+            .collect::<Vec<_>>();
+        programmes.sort_by_key(|programme| programme.start);
+        programmes.dedup();
+        programmes
     }
 
     pub fn merge(&mut self, other: EpgIndex) {
@@ -156,6 +179,16 @@ pub fn parse_xmltv_into<R: Read>(
     wanted: &HashSet<String>,
     index: &mut EpgIndex,
 ) -> Result<(), AppError> {
+    parse_xmltv_into_with_source(source, wanted, "", index)
+}
+
+/// Parse one XMLTV source while retaining the source identity in the index.
+pub fn parse_xmltv_into_with_source<R: Read>(
+    source: R,
+    wanted: &HashSet<String>,
+    source_identity: &str,
+    index: &mut EpgIndex,
+) -> Result<(), AppError> {
     let mut reader = Reader::from_reader(BufReader::new(source));
     reader.config_mut().trim_text(true);
 
@@ -220,7 +253,7 @@ pub fn parse_xmltv_into<R: Read>(
                         if stop > start {
                             index
                                 .programmes
-                                .entry(channel)
+                                .entry((source_identity.to_string(), channel))
                                 .or_default()
                                 .push(EpgProgramme {
                                     start,
@@ -418,6 +451,30 @@ mod tests {
 
         let programmes = index.programmes_for("nrk1.no", 0, i64::MAX);
         assert_eq!(programmes[0].title, "News & Weather");
+    }
+
+    #[test]
+    fn keeps_programmes_with_matching_ids_scoped_to_their_source() {
+        let first = r#"<tv><programme start="20260828200000" stop="20260828210000" channel="news"><title>Provider A</title></programme></tv>"#;
+        let second = r#"<tv><programme start="20260828200000" stop="20260828210000" channel="news"><title>Provider B</title></programme></tv>"#;
+        let wanted = HashSet::from(["news".to_string()]);
+        let first_source = "https://provider-a.example/epg.xml".to_string();
+        let second_source = "https://provider-b.example/epg.xml".to_string();
+        let mut index = EpgIndex::default();
+
+        parse_xmltv_into_with_source(first.as_bytes(), &wanted, &first_source, &mut index)
+            .expect("first source should parse");
+        parse_xmltv_into_with_source(second.as_bytes(), &wanted, &second_source, &mut index)
+            .expect("second source should parse");
+
+        assert_eq!(
+            index.programmes_for_sources(&[first_source], "news", 0, i64::MAX)[0].title,
+            "Provider A"
+        );
+        assert_eq!(
+            index.programmes_for_sources(&[second_source], "news", 0, i64::MAX)[0].title,
+            "Provider B"
+        );
     }
 
     #[test]

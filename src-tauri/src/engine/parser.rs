@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::BufRead;
 use std::path::Path;
 
@@ -521,6 +521,7 @@ pub fn filter_playlist_preview(
         series_count,
         groups: preview.groups.clone(),
         epg_sources: preview.epg_sources.clone(),
+        epg_sources_by_playlist: preview.epg_sources_by_playlist.clone(),
         channels,
     })
 }
@@ -662,10 +663,12 @@ fn parse_playlist_reader<R: BufRead>(
         groups.len()
     );
     let (live_count, movie_count, series_count) = content_type_totals(&channels);
+    let epg_sources_by_playlist = BTreeMap::from([(playlist_name.clone(), epg_sources.clone())]);
     Ok(PlaylistPreview {
         file_path: file_path.to_string(),
         file_name: playlist_name,
         epg_sources,
+        epg_sources_by_playlist,
         source_identity: None,
         saved_playlist_id: None,
         server_location: None,
@@ -767,6 +770,7 @@ fn parse_playlist_directory(
     let mut source_index = 0usize;
     let mut parsed_progress = ParseProgress::default();
     let mut epg_sources: Vec<String> = Vec::new();
+    let mut epg_sources_by_playlist = BTreeMap::new();
 
     for file in files {
         let last_reported = std::cell::Cell::new(ParseProgress::default());
@@ -788,6 +792,7 @@ fn parse_playlist_directory(
                 epg_sources.push(source.clone());
             }
         }
+        epg_sources_by_playlist.insert(parsed.file_name.clone(), parsed.epg_sources.clone());
         let last = last_reported.get();
         parsed_progress = ParseProgress {
             channels_found: base_progress.channels_found + last.channels_found,
@@ -833,6 +838,7 @@ fn parse_playlist_directory(
         file_path: dir_path.to_string(),
         file_name: dir_name,
         epg_sources,
+        epg_sources_by_playlist,
         source_identity: None,
         saved_playlist_id: None,
         server_location: None,
@@ -1258,6 +1264,10 @@ http://example.com/beta.m3u8
         assert!(preview.groups.contains(&"News".to_string()));
         assert!(preview.groups.contains(&"Playlist: first.m3u8".to_string()));
         assert!(preview.groups.contains(&"Playlist: second.m3u".to_string()));
+        assert_eq!(
+            preview.epg_sources_by_playlist.get("first.m3u8"),
+            Some(&Vec::new())
+        );
 
         let playlist_filtered = parse_playlist(
             &root.to_string_lossy(),

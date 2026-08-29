@@ -112,11 +112,12 @@ export async function loadEpg(
 }
 
 export async function getEpgProgrammes(
+  sources: string[],
   tvgId: string,
   from: number,
   to: number,
 ): Promise<EpgProgramme[]> {
-  return invoke("get_epg_programmes", { tvgId, from, to });
+  return invoke("get_epg_programmes", { sources, tvgId, from, to });
 }
 
 export async function exportCsv(

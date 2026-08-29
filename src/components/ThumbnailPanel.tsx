@@ -15,6 +15,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import type { UseChromecastResult } from "../hooks/useChromecast";
 import type { ArchivePlayOptions, ArchiveSession } from "../hooks/useStreamPlayer";
+import { buildArchiveUrl } from "../lib/archive";
 import { buildCastRequest, isCastSessionActive } from "../lib/cast";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
@@ -220,7 +221,22 @@ export function ThumbnailPanel({
   // Memoized so the prop identity is stable across renders — without this, any
   // useEffect downstream of `castRequest` would tear down and re-fire on every
   // parent re-render even when none of its inputs actually changed.
-  const castRequest = useMemo(() => (result ? buildCastRequest(result) : null), [result]);
+  const castRequest = useMemo(() => {
+    if (!result) return null;
+    if (!archiveSession) return buildCastRequest(result);
+
+    const nowEpochS = Math.floor(Date.now() / 1000);
+    const url = buildArchiveUrl(archiveSession.baseResult, {
+      startEpochS: archiveSession.startEpochS,
+      durationS: Math.max(60, archiveSession.windowEndEpochS - archiveSession.startEpochS),
+      nowEpochS,
+    });
+    return buildCastRequest(
+      url
+        ? { ...archiveSession.baseResult, url, content_type: "movie", stream_url: null }
+        : result,
+    );
+  }, [archiveSession, result]);
 
   const handleCopyResolvedUrl = useCallback(async () => {
     if (!resolvedUrl) return;

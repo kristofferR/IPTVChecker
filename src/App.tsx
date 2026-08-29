@@ -34,9 +34,10 @@ import { useMenuEventBridge } from "./hooks/useMenuEventBridge";
 import { usePlaylistSources } from "./hooks/usePlaylistSources";
 import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
-import { useStreamPlayer } from "./hooks/useStreamPlayer";
+import { type ArchivePlayOptions, useStreamPlayer } from "./hooks/useStreamPlayer";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
+import { buildArchiveUrl } from "./lib/archive";
 import {
   checkFfmpegAvailable,
   clearScanHistory,
@@ -169,6 +170,7 @@ function SelectedChannelSidebar({
   streamPlayer,
   chromecast,
   onPlayChannel,
+  onPlayArchive,
   onScanChannel,
   onStopPlayer,
   onOpenExternal,
@@ -179,6 +181,7 @@ function SelectedChannelSidebar({
   streamPlayer: StreamPlayerController;
   chromecast: UseChromecastResult;
   onPlayChannel: (result: ChannelResult) => void;
+  onPlayArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
   onScanChannel: (indices: number[]) => void;
   onStopPlayer: () => void;
   onOpenExternal: (result: ChannelResult) => void;
@@ -291,7 +294,7 @@ function SelectedChannelSidebar({
         muted={streamPlayer.muted}
         videoElement={streamPlayer.videoElement}
         archiveSession={streamPlayer.archiveSession}
-        onPlayArchive={streamPlayer.playArchive}
+        onPlayArchive={onPlayArchive}
         onSeekArchive={streamPlayer.seekArchive}
         onGoLive={streamPlayer.goLive}
         onTogglePause={streamPlayer.togglePause}
@@ -520,6 +523,10 @@ export default function App() {
   const ffmpegWarning = useAppStore((s) => s.ffmpegWarning);
   const openSourceDialogState = useAppStore((s) => s.openSourceDialogState);
   const pendingPlaybackChannel = useAppStore((s) => s.pendingPlaybackChannel);
+  const [pendingArchivePlayback, setPendingArchivePlayback] = useState<{
+    result: ChannelResult;
+    options: ArchivePlayOptions;
+  } | null>(null);
   const liveSelectedChannel = useAppStore(selectLiveSelectedChannel);
   const showHistory = useAppStore((s) => s.showHistory);
   const historyEntries = useAppStore((s) => s.historyEntries);
@@ -1145,6 +1152,44 @@ export default function App() {
     [playStream],
   );
 
+  const handlePlayArchive = useCallback(
+    (result: ChannelResult, options: ArchivePlayOptions) => {
+      if (isScanActive(getStore().scanState) && getStore().playlist?.single_provider) {
+        setPendingArchivePlayback({ result, options });
+        return;
+      }
+
+      const nowEpochS = Math.floor(Date.now() / 1000);
+      const windowEndEpochS = Math.min(options.endEpochS ?? nowEpochS, nowEpochS);
+      const startEpochS = Math.min(Math.floor(options.startEpochS), windowEndEpochS - 1);
+      const url = buildArchiveUrl(result, {
+        startEpochS,
+        durationS: Math.max(60, windowEndEpochS - startEpochS),
+        nowEpochS,
+      });
+      if (!url) return;
+
+      const currentChromecast = chromecastRef.current;
+      if (isCastSessionActive(currentChromecast.session)) {
+        const session = currentChromecast.session;
+        const device =
+          currentChromecast.devices.find((d) => d.id === session.deviceId) ??
+          (lastCastDeviceRef.current?.id === session.deviceId ? lastCastDeviceRef.current : null);
+        if (device) {
+          void currentChromecast.cast(
+            device,
+            buildCastRequest({ ...result, url, content_type: "movie", stream_url: null }),
+          );
+          return;
+        }
+      }
+
+      getStore().setPlayIntentActive(true);
+      streamPlayer.playArchive(result, options);
+    },
+    [streamPlayer.playArchive],
+  );
+
   const handlePip = useCallback(() => {
     const video = playbackVideoElement;
     if (!video) return;
@@ -1156,18 +1201,24 @@ export default function App() {
   }, [playbackVideoElement]);
 
   const handleProceedPlayback = useCallback(() => {
+    if (pendingArchivePlayback) {
+      setPendingArchivePlayback(null);
+      getStore().setPlayIntentActive(true);
+      streamPlayer.playArchive(pendingArchivePlayback.result, pendingArchivePlayback.options);
+      return;
+    }
     if (!pendingPlaybackChannel) return;
     const channel = pendingPlaybackChannel;
     getStore().setPendingPlaybackChannel(null);
     getStore().setPlayIntentActive(true);
     playStream(channel);
-  }, [pendingPlaybackChannel, playStream]);
+  }, [pendingArchivePlayback, pendingPlaybackChannel, playStream, streamPlayer.playArchive]);
 
   // Successful playback is itself a channel check. Keep the result row and
   // detail panel in sync with everything the active player can establish.
   useEffect(() => {
     const idx = streamPlayer.activeChannelIndex;
-    if (idx === null || streamPlayer.playerState !== "playing") return;
+    if (idx === null || streamPlayer.playerState !== "playing" || streamPlayer.archiveSession) return;
 
     const state = getStore();
     const existing = selectResultByIndex(state, idx);
@@ -1187,6 +1238,7 @@ export default function App() {
   }, [
     settings.low_fps_threshold,
     streamPlayer.activeChannelIndex,
+    streamPlayer.archiveSession,
     streamPlayer.playerState,
     streamPlayer.streamMetadata,
     updateResult,
@@ -1307,8 +1359,9 @@ export default function App() {
           state.setLightboxOpen(false);
           return;
         }
-        if (state.pendingPlaybackChannel) {
+        if (state.pendingPlaybackChannel || pendingArchivePlayback) {
           state.setPendingPlaybackChannel(null);
+          setPendingArchivePlayback(null);
           return;
         }
         if (state.openSourceDialogState) {
@@ -1327,7 +1380,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [isMac]);
+  }, [isMac, pendingArchivePlayback]);
 
   const handleTableProfilerRender = useCallback<ProfilerOnRenderCallback>(
     (id, phase, actualDuration, baseDuration) => {
@@ -1447,6 +1500,7 @@ export default function App() {
                 streamPlayer={streamPlayer}
                 chromecast={chromecast}
                 onPlayChannel={handlePlayInApp}
+                onPlayArchive={handlePlayArchive}
                 onScanChannel={handleScanSelected}
                 onStopPlayer={handleStopPlayer}
                 onOpenExternal={handleOpenExternal}
@@ -1593,7 +1647,7 @@ export default function App() {
         </div>
       )}
 
-      {pendingPlaybackChannel && (
+      {(pendingPlaybackChannel || pendingArchivePlayback) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-xl rounded-xl border border-border-app bg-overlay p-5 shadow-2xl">
             <h2 className="text-[16px] font-semibold mb-2">Scan currently running</h2>
@@ -1603,7 +1657,10 @@ export default function App() {
             </p>
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
-                onClick={() => getStore().setPendingPlaybackChannel(null)}
+                onClick={() => {
+                  getStore().setPendingPlaybackChannel(null);
+                  setPendingArchivePlayback(null);
+                }}
                 className="macos-btn px-3 py-2 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
                 type="button"
               >
