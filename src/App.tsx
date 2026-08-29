@@ -178,6 +178,7 @@ function SelectedChannelSidebar({
   streamPlayer,
   chromecast,
   onPlayChannel,
+  onPlayArchive,
   onScanChannel,
   onStopPlayer,
   onOpenExternal,
@@ -188,6 +189,7 @@ function SelectedChannelSidebar({
   streamPlayer: StreamPlayerController;
   chromecast: UseChromecastResult;
   onPlayChannel: (result: ChannelResult) => void;
+  onPlayArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
   onScanChannel: (indices: number[]) => void;
   onStopPlayer: () => void;
   onOpenExternal: (result: ChannelResult) => void;
@@ -300,7 +302,7 @@ function SelectedChannelSidebar({
         muted={streamPlayer.muted}
         videoElement={streamPlayer.videoElement}
         archiveSession={streamPlayer.archiveSession}
-        onPlayArchive={streamPlayer.playArchive}
+        onPlayArchive={onPlayArchive}
         onSeekArchive={streamPlayer.seekArchive}
         onGoLive={streamPlayer.goLive}
         onTogglePause={streamPlayer.togglePause}
@@ -1089,15 +1091,24 @@ export default function App() {
     getStore().setSelectedChannel(result);
   }, []);
 
+  const handlePlayArchive = useCallback(
+    (result: ChannelResult, options: ArchivePlayOptions) => {
+      if (blockPlaybackDuringArchiveVerification()) return;
+      getStore().setPlayIntentActive(true);
+      streamPlayer.playArchive(result, options);
+    },
+    [streamPlayer.playArchive],
+  );
+
   // Guide playback also selects the channel so the sidebar player shows it.
   const handleGuidePlayArchive = useCallback(
     (result: ChannelResult, options: ArchivePlayOptions) => {
       if (blockPlaybackDuringArchiveVerification()) return;
       getStore().setSelectedChannel(result);
       getStore().setSelectedChannelIndices([result.index]);
-      streamPlayer.playArchive(result, options);
+      handlePlayArchive(result, options);
     },
-    [streamPlayer.playArchive],
+    [handlePlayArchive],
   );
 
   const handleOpenSettings = useCallback(async () => {
@@ -1519,6 +1530,7 @@ export default function App() {
                 streamPlayer={streamPlayer}
                 chromecast={chromecast}
                 onPlayChannel={handlePlayInApp}
+                onPlayArchive={handlePlayArchive}
                 onScanChannel={handleScanSelected}
                 onStopPlayer={handleStopPlayer}
                 onOpenExternal={handleOpenExternal}

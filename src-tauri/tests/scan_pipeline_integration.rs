@@ -206,6 +206,44 @@ async fn proxy_stream_check_succeeds_with_http_proxy_response() {
 }
 
 #[tokio::test]
+async fn proxy_stream_check_follows_hls_manifest_to_media_segment() {
+    let request_count = Arc::new(AtomicUsize::new(0));
+    let handler_count = Arc::clone(&request_count);
+    let handler = Arc::new(move |path: &str| {
+        handler_count.fetch_add(1, Ordering::SeqCst);
+        if path.contains("live.m3u8") {
+            return TestHttpResponse {
+                status_code: 200,
+                reason: "OK",
+                headers: vec![(
+                    "Content-Type".to_string(),
+                    "application/vnd.apple.mpegurl".to_string(),
+                )],
+                body:
+                    b"#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nhttp://example.com/segment.ts\n"
+                        .to_vec(),
+            };
+        }
+
+        TestHttpResponse {
+            status_code: 200,
+            reason: "OK",
+            headers: vec![("Content-Type".to_string(), "video/mp2t".to_string())],
+            body: vec![b'x'; 200 * 1024],
+        }
+    });
+    let (proxy_url, server_handle) = spawn_http_server(handler).await;
+
+    let ok = test_with_proxy("http://example.com/live.m3u8", &proxy_url, 2.0, 1).await;
+    assert!(
+        ok,
+        "proxy check should follow HLS manifests to a live segment"
+    );
+    assert_eq!(request_count.load(Ordering::SeqCst), 2);
+    server_handle.abort();
+}
+
+#[tokio::test]
 async fn geoblock_confirmation_unconfirmed_when_proxy_candidates_fail_fast() {
     let result = confirm_geoblock(
         "http://example.com/live.ts",

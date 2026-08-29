@@ -1,9 +1,10 @@
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use url::Url;
 
 use crate::error::AppError;
+use crate::models::channel::ChannelStatus;
+use crate::models::scan::RetryBackoff;
 
 fn is_valid_proxy_entry(candidate: &str) -> bool {
     let parsed = match Url::parse(candidate) {
@@ -131,65 +132,23 @@ pub async fn test_with_proxy(url: &str, proxy: &str, timeout: f64, retries: u32)
         Err(_) => return false,
     };
 
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        USER_AGENT,
-        HeaderValue::from_static("TiviMate/5.1.6 (Android 12)"),
-    );
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let outcome = crate::engine::checker::check_channel_status_with_debug(
+        &client,
+        url,
+        timeout,
+        retries.max(1).saturating_sub(1),
+        RetryBackoff::None,
+        None,
+        "TiviMate/5.1.6 (Android 12)",
+        &cancel,
+    )
+    .await;
 
-    let stream_extensions = [".ts", ".m2ts", ".m4s", ".mp4", ".aac", ".m3u8"];
-
-    for attempt in 0..retries.max(1) {
-        let resp = match client.get(url).headers(headers.clone()).send().await {
-            Ok(r) => r,
-            Err(_) => {
-                if attempt + 1 < retries.max(1) {
-                    tokio::time::sleep(Duration::from_secs_f64(0.5 * (attempt as f64 + 1.0))).await;
-                }
-                continue;
-            }
-        };
-
-        if resp.status() != 200 {
-            continue;
-        }
-
-        let content_type = resp
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .to_lowercase();
-
-        let stream_path = Url::parse(resp.url().as_str())
-            .map(|u| u.path().to_lowercase())
-            .unwrap_or_default();
-
-        let is_stream = content_type.starts_with("video/")
-            || content_type.starts_with("audio/")
-            || content_type.contains("application/vnd.apple.mpegurl")
-            || content_type.contains("application/x-mpegurl")
-            || content_type.contains("application/octet-stream")
-            || content_type.contains("application/mp4")
-            || stream_extensions
-                .iter()
-                .any(|ext| stream_path.ends_with(ext));
-
-        if is_stream {
-            // Read 500KB to verify
-            use futures::StreamExt;
-            let mut stream = resp.bytes_stream();
-            let mut read = 0u64;
-            while let Some(Ok(chunk)) = stream.next().await {
-                read += chunk.len() as u64;
-                if read >= 1024 * 500 {
-                    return true;
-                }
-            }
-        }
-    }
-
-    false
+    matches!(
+        outcome.map(|result| result.status),
+        Ok(ChannelStatus::Alive | ChannelStatus::Drm | ChannelStatus::Placeholder)
+    )
 }
 
 /// Confirm geoblock by testing with up to 3 random proxies.
