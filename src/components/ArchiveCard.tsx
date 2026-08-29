@@ -48,7 +48,8 @@ function ArchiveProbe({ result }: { result: ChannelResult }) {
     ) {
       return;
     }
-    void probeChannelArchive(result, (update) => setArchiveProbe(result.index, update));
+    const generation = state.archiveProbeGeneration;
+    void probeChannelArchive(result, (update) => setArchiveProbe(generation, result.index, update));
   };
 
   return (

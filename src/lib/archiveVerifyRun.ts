@@ -27,6 +27,7 @@ export function isArchiveVerificationBlockingPlayback(): boolean {
 export async function verifyAllArchives(): Promise<void> {
   const initialState = useAppStore.getState();
   const playlist = initialState.playlist;
+  const generation = initialState.archiveProbeGeneration;
   const singleConnection = isSingleConnectionPlaylist(playlist);
   if (
     bulkRunActive ||
@@ -58,12 +59,11 @@ export async function verifyAllArchives(): Promise<void> {
   bulkAbortController = abortController;
   const setProgress = (done: number) =>
     useAppStore.getState().setArchiveVerifyRun({ running: true, done, total: targets.length });
-  const playlistChanged = () => useAppStore.getState().playlist !== playlist;
   const shouldCancel = () => {
     const state = useAppStore.getState();
     return (
       bulkCancelRequested ||
-      state.playlist !== playlist ||
+      state.archiveProbeGeneration !== generation ||
       isScanActive(state.scanState) ||
       ((state.playIntentActive || state.castActive || state.externalPlaybackActive) &&
         singleConnection)
@@ -79,9 +79,7 @@ export async function verifyAllArchives(): Promise<void> {
       await verifyChannelArchive(
         target,
         (entry) => {
-          if (!playlistChanged()) {
-            useAppStore.getState().setArchiveProbe(target.index, entry);
-          }
+          useAppStore.getState().setArchiveProbe(generation, target.index, entry);
         },
         shouldCancel,
         abortController.signal,

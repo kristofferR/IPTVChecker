@@ -948,11 +948,13 @@ export function ChannelTable({
       return;
     }
     void (async () => {
+      const generation = useAppStore.getState().archiveProbeGeneration;
       // Sequential on purpose: IPTV providers commonly cap concurrent
       // connections, and each probe already opens up to two archive URLs.
       for (const target of targets) {
+        if (useAppStore.getState().archiveProbeGeneration !== generation) break;
         await probeChannelArchive(target, (entry) =>
-          useAppStore.getState().setArchiveProbe(target.index, entry),
+          useAppStore.getState().setArchiveProbe(generation, target.index, entry),
         );
       }
     })();

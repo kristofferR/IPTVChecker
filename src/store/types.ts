@@ -114,6 +114,8 @@ export interface FilterSlice {
 export interface ArchiveSlice {
   /** Spot-probe results for catch-up channels, keyed by channel index. */
   archiveProbes: Record<number, ArchiveProbeEntry>;
+  /** Changes whenever per-playlist archive state is reset. */
+  archiveProbeGeneration: number;
   /** Whether a programme selected in the Guide is being tested. */
   archiveGuideTestRunning: boolean;
   /** Result of the most recent XMLTV load for the current playlist. */
@@ -123,7 +125,7 @@ export interface ArchiveSlice {
   /** When set, a full verification pass starts after the scan completes. */
   verifyCatchupAfterScan: boolean;
 
-  setArchiveProbe: (index: number, entry: ArchiveProbeEntry) => void;
+  setArchiveProbe: (generation: number, index: number, entry: ArchiveProbeEntry) => void;
   setArchiveGuideTestRunning: (running: boolean) => void;
   setEpgLoadSummary: (summary: EpgLoadSummary | null) => void;
   setArchiveVerifyRun: (run: { running: boolean; done: number; total: number } | null) => void;
