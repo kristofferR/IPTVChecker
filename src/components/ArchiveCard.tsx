@@ -240,6 +240,7 @@ export function ArchiveCard({
   onPlayArchive,
 }: ArchiveCardProps) {
   const [programmes, setProgrammes] = useState<EpgProgramme[] | null>(null);
+  const depthDays = Math.min(MAX_CATCHUP_DAYS, Math.max(1, result.catchup_days ?? 7));
 
   useEffect(() => {
     if (!hasArchive(result)) {
@@ -254,7 +255,6 @@ export function ArchiveCard({
       }
       await ensureEpgLoaded();
       const now = Math.floor(Date.now() / 1000);
-      const depthDays = Math.min(MAX_CATCHUP_DAYS, result.catchup_days ?? 7);
       const list = await getEpgProgrammes(
         epgSourcesFor(result),
         result.tvg_id,
@@ -267,15 +267,18 @@ export function ArchiveCard({
     return () => {
       stale = true;
     };
-  }, [result]);
+  }, [depthDays, result]);
 
   const dayGroups = useMemo(() => {
     if (!programmes || programmes.length === 0) return [];
     const now = new Date();
     const nowEpochS = Math.floor(now.getTime() / 1000);
+    const retentionStartEpochS = nowEpochS - depthDays * 86_400;
     const groups: Array<{ label: string; entries: EpgProgramme[] }> = [];
     const visibleProgrammes = programmes
-      .filter((programme) => programme.start <= nowEpochS)
+      .filter(
+        (programme) => programme.start >= retentionStartEpochS && programme.start <= nowEpochS,
+      )
       .slice(-MAX_RENDERED_PROGRAMMES);
     // Newest day first, programmes within a day in airing order.
     for (const programme of visibleProgrammes) {
@@ -289,7 +292,7 @@ export function ArchiveCard({
     }
     groups.reverse();
     return groups;
-  }, [programmes]);
+  }, [depthDays, programmes]);
 
   if (!hasArchive(result)) {
     return null;

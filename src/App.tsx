@@ -1301,6 +1301,11 @@ export default function App() {
 
   useEffect(() => {
     if (pendingPlaybackReason === "archive_probe" && !archiveProbeActive) {
+      const state = getStore();
+      if (isScanActive(state.scanState) && state.playlist?.single_provider) {
+        setPendingPlaybackReason("scan");
+        return;
+      }
       handleProceedPlayback();
     }
   }, [archiveProbeActive, handleProceedPlayback, pendingPlaybackReason]);

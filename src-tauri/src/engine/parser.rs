@@ -79,15 +79,7 @@ pub fn find_unquoted_comma(input: &str) -> Option<usize> {
     None
 }
 
-/// Parse key-value attributes from an #EXTINF line header.
-pub fn parse_extinf_attributes(extinf_line: &str) -> Vec<(String, String)> {
-    let header_end = find_unquoted_comma(extinf_line).unwrap_or(extinf_line.len());
-    let header = &extinf_line[..header_end];
-    let payload = header
-        .split_once(':')
-        .map(|(_, after_colon)| after_colon)
-        .unwrap_or(header);
-
+fn parse_attributes(payload: &str, comma_terminates_unquoted_value: bool) -> Vec<(String, String)> {
     let bytes = payload.as_bytes();
     let mut i = 0usize;
     let mut attrs = Vec::new();
@@ -171,7 +163,10 @@ pub fn parse_extinf_attributes(extinf_line: &str) -> Vec<(String, String)> {
             raw.trim().to_string()
         } else {
             let value_start = i;
-            while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b',' {
+            while i < bytes.len()
+                && !bytes[i].is_ascii_whitespace()
+                && (!comma_terminates_unquoted_value || bytes[i] != b',')
+            {
                 i += 1;
             }
             payload[value_start..i].trim().to_string()
@@ -184,6 +179,17 @@ pub fn parse_extinf_attributes(extinf_line: &str) -> Vec<(String, String)> {
     }
 
     attrs
+}
+
+/// Parse key-value attributes from an #EXTINF line header.
+pub fn parse_extinf_attributes(extinf_line: &str) -> Vec<(String, String)> {
+    let header_end = find_unquoted_comma(extinf_line).unwrap_or(extinf_line.len());
+    let header = &extinf_line[..header_end];
+    let payload = header
+        .split_once(':')
+        .map(|(_, after_colon)| after_colon)
+        .unwrap_or(header);
+    parse_attributes(payload, true)
 }
 
 /// Extract channel name from #EXTINF line (text after the last comma).
@@ -263,11 +269,8 @@ pub fn extract_tvg_metadata(
 /// Both `x-tvg-url` and `url-tvg` occur in the wild, each possibly holding a
 /// comma-separated list of URLs.
 fn parse_header_epg_sources(header_line: &str) -> Vec<String> {
-    // parse_extinf_attributes drops everything before the first ':', which in
-    // an #EXTM3U header would be the colon of the first quoted URL. Insert a
-    // separator right after the tag so the attribute payload survives intact.
-    let doctored = header_line.replacen("#EXTM3U", "#EXTM3U:", 1);
-    let attrs = parse_extinf_attributes(&doctored);
+    let payload = header_line.strip_prefix("#EXTM3U").unwrap_or(header_line);
+    let attrs = parse_attributes(payload, false);
     let mut sources = Vec::new();
     for key in ["x-tvg-url", "url-tvg"] {
         if let Some(value) = attr_value(&attrs, key) {
@@ -1053,6 +1056,17 @@ mod tests {
             vec![
                 "http://a/epg.xml".to_string(),
                 "http://b/epg.xml".to_string()
+            ]
+        );
+
+        assert_eq!(
+            parse_header_epg_sources(
+                "#EXTM3U x-tvg-url=http://a/epg.xml,http://b/epg.xml url-tvg=http://c/epg.xml"
+            ),
+            vec![
+                "http://a/epg.xml".to_string(),
+                "http://b/epg.xml".to_string(),
+                "http://c/epg.xml".to_string()
             ]
         );
 
