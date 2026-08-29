@@ -65,6 +65,12 @@ function probePointForDays(daysBack: number, nowEpochS: number) {
 
 const MAX_BISECT_STEPS = 3;
 
+/** Next probe point between the deepest working and shallowest failing depths. */
+export function archiveDepthMidpoint(workingDays: number, failingDays: number): number | null {
+  const midpoint = (workingDays + failingDays) / 2;
+  return midpoint > workingDays && midpoint < failingDays ? midpoint : null;
+}
+
 /**
  * Verify one channel's archive: probe −1 h, then the advertised depth, and on
  * a mismatch bisect a few points to estimate the real depth. Streams partial
@@ -130,8 +136,8 @@ export async function verifyChannelArchive(
   let failingDays = advertisedDays;
   for (let step = 0; step < MAX_BISECT_STEPS; step += 1) {
     if (shouldCancel()) return push(null, true, false);
-    const midDays = Math.round((workingDays + failingDays) / 2);
-    if (midDays <= workingDays || midDays >= failingDays) break;
+    const midDays = archiveDepthMidpoint(workingDays, failingDays);
+    if (midDays == null) break;
     const probedOutcome = await probeArchivePoint(
       result,
       probePointForDays(midDays, nowEpochS),

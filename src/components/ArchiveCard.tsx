@@ -58,10 +58,16 @@ function ArchiveProbe({ result }: { result: ChannelResult }) {
           className="mt-1.5 flex items-center justify-between gap-2 text-[11px]"
         >
           <span className="text-text-secondary">{outcome.label}</span>
-          {outcome.ok ? (
+          {outcome.ok && outcome.depthVerified ? (
             <span className="flex items-center gap-1 font-medium text-green-400">
               <CircleCheck className="h-3 w-3" />
               OK{outcome.latencyMs != null ? ` \u00b7 ${outcome.latencyMs} ms` : ""}
+            </span>
+          ) : outcome.ok ? (
+            <span className="flex items-center gap-1 font-medium text-amber-400">
+              <CircleCheck className="h-3 w-3" />
+              {outcome.depthUnknown ? "Reachable" : "Unverified"}
+              {outcome.latencyMs != null ? ` \u00b7 ${outcome.latencyMs} ms` : ""}
             </span>
           ) : (
             <span

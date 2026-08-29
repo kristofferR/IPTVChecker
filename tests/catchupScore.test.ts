@@ -4,8 +4,12 @@ import {
   type ArchiveProbeOutcome,
   verifyArchiveDepthResponse,
 } from "../src/lib/archiveProbe";
-import { archiveVerdict, measuredDepthDays } from "../src/lib/archiveVerification";
-import { computeCatchupScore } from "../src/lib/catchupScore";
+import {
+  archiveDepthMidpoint,
+  archiveVerdict,
+  measuredDepthDays,
+} from "../src/lib/archiveVerification";
+import { computeCatchupScore, withCatchupScore } from "../src/lib/catchupScore";
 import type { ChannelResult } from "../src/lib/types";
 
 function channel(index: number, catchupDays: number | null, catchup = "xc"): ChannelResult {
@@ -211,5 +215,24 @@ describe("computeCatchupScore", () => {
     };
 
     expect(computeCatchupScore(results, probes)).toBe(7.5);
+  });
+});
+
+describe("archiveDepthMidpoint", () => {
+  it("keeps sub-day precision when a one-day archive needs bisection", () => {
+    expect(archiveDepthMidpoint(0, 1)).toBe(0.5);
+  });
+});
+
+describe("withCatchupScore", () => {
+  const base = { overall: 7, ping: 6, content: 8, quality: 7 };
+
+  it("keeps the original score without catch-up", () => {
+    expect(withCatchupScore(base, null)).toBe(base);
+  });
+
+  it("includes catch-up in the overall score", () => {
+    expect(withCatchupScore(base, 10).overall).toBeCloseTo(7.45, 5);
+    expect(withCatchupScore(base, 0).overall).toBeCloseTo(5.95, 5);
   });
 });
