@@ -6,6 +6,7 @@ import { archiveBadgeText, hasArchive } from "../lib/archive";
 import { type ArchiveProbeOutcome, probeArchivePoint } from "../lib/archiveProbe";
 import { fetchGuideProgrammes } from "../lib/epgLoader";
 import { filterResultsShared } from "../lib/filters";
+import { isScanActive } from "../lib/scanState";
 import { isInputLikeTarget } from "../lib/shortcuts";
 import { dayLabel, startOfDayEpochS, timeLabel } from "../lib/timeFormat";
 import type { ChannelResult, EpgProgramme } from "../lib/types";
@@ -132,6 +133,11 @@ export function GuideView({
   const setViewMode = useAppStore((s) => s.setViewMode);
   const guideFocusChannelIndex = useAppStore((s) => s.guideFocusChannelIndex);
   const setGuideFocusChannelIndex = useAppStore((s) => s.setGuideFocusChannelIndex);
+  const scanState = useAppStore((s) => s.scanState);
+  const archiveVerifyRun = useAppStore((s) => s.archiveVerifyRun);
+  const archiveProbeRunning = useAppStore((s) =>
+    Object.values(s.archiveProbes).some((entry) => entry.running),
+  );
 
   const nowEpochS = useMemo(() => Math.floor(Date.now() / 1000), []);
 
@@ -213,21 +219,43 @@ export function GuideView({
 
   const runTest = async () => {
     if (!selection) return;
+    const state = useAppStore.getState();
+    if (
+      isScanActive(state.scanState) ||
+      state.archiveVerifyRun ||
+      Object.values(state.archiveProbes).some((entry) => entry.running)
+    ) {
+      return;
+    }
+    const target = selection;
     setTesting(true);
     setTestOutcome(null);
+    state.setArchiveProbe(target.result.index, {
+      running: true,
+      outcomes: [],
+      checkedAt: null,
+    });
     const now = Math.floor(Date.now() / 1000);
     const outcome = await probeArchivePoint(
-      selection.result,
+      target.result,
       {
-        label: timeLabel(selection.programme.start),
-        daysBack: Math.max(0, Math.round((now - selection.programme.start) / 86_400)),
-        startEpochS: selection.programme.start,
+        label: timeLabel(target.programme.start),
+        daysBack: Math.max(0, Math.round((now - target.programme.start) / 86_400)),
+        startEpochS: target.programme.start,
       },
       now,
     );
+    useAppStore.getState().setArchiveProbe(target.result.index, {
+      running: false,
+      outcomes: outcome ? [outcome] : [],
+      checkedAt: now,
+    });
     setTestOutcome(outcome);
     setTesting(false);
   };
+
+  const testBlocked =
+    testing || isScanActive(scanState) || archiveVerifyRun !== null || archiveProbeRunning;
 
   const hourLabels = Array.from(
     { length: WINDOW_HOURS },
@@ -310,7 +338,7 @@ export function GuideView({
               </button>
               <button
                 type="button"
-                disabled={testing}
+                disabled={testBlocked}
                 onClick={runTest}
                 className="shrink-0 rounded-md border border-border-app bg-btn px-2.5 py-1 text-[11px] font-medium text-text-primary hover:bg-btn-hover transition-colors disabled:opacity-40"
               >
