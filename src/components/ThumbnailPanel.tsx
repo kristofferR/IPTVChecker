@@ -15,7 +15,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import type { UseChromecastResult } from "../hooks/useChromecast";
 import type { ArchivePlayOptions, ArchiveSession } from "../hooks/useStreamPlayer";
-import { buildArchiveUrl } from "../lib/archive";
 import { buildCastRequest, isCastSessionActive } from "../lib/cast";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
@@ -224,18 +223,22 @@ export function ThumbnailPanel({
   const castRequest = useMemo(() => {
     if (!result) return null;
     if (!archiveSession) return buildCastRequest(result);
-
-    const nowEpochS = Math.floor(Date.now() / 1000);
-    const url = buildArchiveUrl(archiveSession.baseResult, {
-      startEpochS: archiveSession.startEpochS,
-      durationS: Math.max(60, archiveSession.windowEndEpochS - archiveSession.startEpochS),
-      nowEpochS,
+    return buildCastRequest({
+      ...archiveSession.baseResult,
+      url: archiveSession.url,
+      content_type: "movie",
+      stream_url: null,
     });
-    return buildCastRequest(
-      url
-        ? { ...archiveSession.baseResult, url, content_type: "movie", stream_url: null }
-        : result,
-    );
+  }, [archiveSession, result]);
+
+  const externalPlaybackResult = useMemo(() => {
+    if (!archiveSession) return result;
+    return {
+      ...archiveSession.baseResult,
+      url: archiveSession.url,
+      content_type: "movie" as const,
+      stream_url: null,
+    };
   }, [archiveSession, result]);
 
   const handleCopyResolvedUrl = useCallback(async () => {
@@ -314,7 +317,7 @@ export function ThumbnailPanel({
           onStop={onStopPlayer}
           onSetVolume={onSetVolume}
           onToggleMute={onToggleMute}
-          onOpenExternal={() => onOpenExternal?.(result)}
+          onOpenExternal={() => externalPlaybackResult && onOpenExternal?.(externalPlaybackResult)}
           onRetry={() => onRetryPlay?.(result)}
           onFullscreen={() => onLightboxChange(true)}
           onPip={onPip}
@@ -649,7 +652,9 @@ export function ThumbnailPanel({
                     onStop={onStopPlayer}
                     onSetVolume={onSetVolume}
                     onToggleMute={onToggleMute}
-                    onOpenExternal={() => onOpenExternal?.(result)}
+                    onOpenExternal={() =>
+                      externalPlaybackResult && onOpenExternal?.(externalPlaybackResult)
+                    }
                     onRetry={() => onRetryPlay?.(result)}
                     onPip={
                       onPip

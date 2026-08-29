@@ -75,7 +75,10 @@ export function substituteArchiveTemplate(template: string, window: ArchiveWindo
 }
 
 function appendQuery(url: string, query: string): string {
-  return `${url}${url.includes("?") ? "&" : "?"}${query}`;
+  const fragmentStart = url.indexOf("#");
+  const requestUrl = fragmentStart === -1 ? url : url.slice(0, fragmentStart);
+  const fragment = fragmentStart === -1 ? "" : url.slice(fragmentStart);
+  return `${requestUrl}${requestUrl.includes("?") ? "&" : "?"}${query}${fragment}`;
 }
 
 /** "YYYY-MM-DD:HH-MM" in UTC, the start format Xtream timeshift URLs expect. */

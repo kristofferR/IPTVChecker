@@ -94,6 +94,12 @@ describe("buildArchiveUrl", () => {
     expect(buildArchiveUrl(urlFields("http://h/s.m3u8", "append", "&start=${start}"), WINDOW)).toBe(
       `http://h/s.m3u8?start=${START}`,
     );
+    expect(
+      buildArchiveUrl(
+        urlFields("http://h/s.m3u8?token=x#player", "shift", "?utc=${start}"),
+        WINDOW,
+      ),
+    ).toBe(`http://h/s.m3u8?token=x&utc=${START}#player`);
     // Non-query relative templates concatenate verbatim.
     expect(
       buildArchiveUrl(urlFields("http://h/video", "append", "-${start}-${duration}.m3u8"), WINDOW),
@@ -135,6 +141,9 @@ describe("buildArchiveUrl", () => {
     );
     expect(buildArchiveUrl(urlFields("http://h/s.m3u8?a=1", "shift"), WINDOW)).toBe(
       `http://h/s.m3u8?a=1&utc=${START}&lutc=${START + 8000}`,
+    );
+    expect(buildArchiveUrl(urlFields("http://h/s.m3u8#player", "default"), WINDOW)).toBe(
+      `http://h/s.m3u8?utc=${START}&lutc=${START + 8000}#player`,
     );
   });
 });

@@ -787,12 +787,17 @@ fn parse_playlist_directory(
             }
         };
         let parsed = parse_playlist_with_progress(&file, &None, &None, Some(&child_progress))?;
+        let playlist_id = Path::new(&file)
+            .strip_prefix(dir_path)
+            .unwrap_or_else(|_| Path::new(&file))
+            .to_string_lossy()
+            .replace('\\', "/");
         for source in &parsed.epg_sources {
             if !epg_sources.contains(source) {
                 epg_sources.push(source.clone());
             }
         }
-        epg_sources_by_playlist.insert(parsed.file_name.clone(), parsed.epg_sources.clone());
+        epg_sources_by_playlist.insert(playlist_id.clone(), parsed.epg_sources.clone());
         let last = last_reported.get();
         parsed_progress = ParseProgress {
             channels_found: base_progress.channels_found + last.channels_found,
@@ -801,6 +806,7 @@ fn parse_playlist_directory(
             series_found: base_progress.series_found + last.series_found,
         };
         for mut channel in parsed.channels {
+            channel.playlist.clone_from(&playlist_id);
             let playlist_group = format!("{}{}", PLAYLIST_GROUP_PREFIX, channel.playlist);
             groups.insert(channel.group.clone());
             groups.insert(playlist_group.clone());
@@ -1220,12 +1226,12 @@ http://example.com/three.m3u8
         let nested = root.join("nested");
         std::fs::create_dir_all(&nested).expect("nested fixture dir should be created");
 
-        let first = root.join("first.m3u8");
-        let second = nested.join("second.m3u");
+        let first = root.join("live.m3u8");
+        let second = nested.join("live.m3u8");
         std::fs::write(
             &first,
             "\
-#EXTM3U
+#EXTM3U x-tvg-url=\"http://provider-a.example/epg.xml\"
 #EXTINF:-1 group-title=\"Sports\",Alpha
 http://example.com/alpha.m3u8
 ",
@@ -1234,7 +1240,7 @@ http://example.com/alpha.m3u8
         std::fs::write(
             &second,
             "\
-#EXTM3U
+#EXTM3U x-tvg-url=\"http://provider-b.example/epg.xml\"
 #EXTINF:-1 group-title=\"News\",Beta
 http://example.com/beta.m3u8
 ",
@@ -1258,20 +1264,26 @@ http://example.com/beta.m3u8
                 .iter()
                 .map(|channel| channel.playlist.clone())
                 .collect::<Vec<_>>(),
-            vec!["first.m3u8".to_string(), "second.m3u".to_string()]
+            vec!["live.m3u8".to_string(), "nested/live.m3u8".to_string()]
         );
         assert!(preview.groups.contains(&"Sports".to_string()));
         assert!(preview.groups.contains(&"News".to_string()));
-        assert!(preview.groups.contains(&"Playlist: first.m3u8".to_string()));
-        assert!(preview.groups.contains(&"Playlist: second.m3u".to_string()));
+        assert!(preview.groups.contains(&"Playlist: live.m3u8".to_string()));
+        assert!(preview
+            .groups
+            .contains(&"Playlist: nested/live.m3u8".to_string()));
         assert_eq!(
-            preview.epg_sources_by_playlist.get("first.m3u8"),
-            Some(&Vec::new())
+            preview.epg_sources_by_playlist.get("live.m3u8"),
+            Some(&vec!["http://provider-a.example/epg.xml".to_string()])
+        );
+        assert_eq!(
+            preview.epg_sources_by_playlist.get("nested/live.m3u8"),
+            Some(&vec!["http://provider-b.example/epg.xml".to_string()])
         );
 
         let playlist_filtered = parse_playlist(
             &root.to_string_lossy(),
-            &Some("Playlist: second.m3u".to_string()),
+            &Some("Playlist: nested/live.m3u8".to_string()),
             &None,
         )
         .expect("playlist-filtered directory parse should succeed");

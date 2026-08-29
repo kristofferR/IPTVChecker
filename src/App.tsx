@@ -605,6 +605,10 @@ export default function App() {
   } = usePlaylistSources({ initFromPlaylist, syncFromPlaylist });
 
   useEffect(() => {
+    setPendingArchivePlayback(null);
+  }, [playlist?.file_path, playlist?.source_identity]);
+
+  useEffect(() => {
     document.documentElement.dataset.platform = platform;
     if (platform !== "macos") return;
 

@@ -36,6 +36,8 @@ export { MAX_PLAYBACK_RECOVERY_ATTEMPTS } from "../lib/playback";
  * seekable window. Present only while playing an archive URL. */
 export interface ArchiveSession {
   baseResult: ChannelResult;
+  /** Exact synthetic URL currently loaded by the player. */
+  url: string;
   /** Where the current archive URL starts, epoch seconds. */
   startEpochS: number;
   /** Earliest seekable point (programme start or the picked time). */
@@ -1003,6 +1005,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       }
       setArchiveSession({
         baseResult: result,
+        url,
         startEpochS: start,
         windowStartEpochS: start,
         windowEndEpochS: windowEnd,
@@ -1036,7 +1039,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       if (!url) {
         return;
       }
-      setArchiveSession({ ...session, startEpochS: clamped });
+      setArchiveSession({ ...session, url, startEpochS: clamped });
       beginPlayback({
         ...session.baseResult,
         url,

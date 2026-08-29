@@ -35,7 +35,7 @@ tauri-plugin-log = "2"
 tauri-plugin-os = "2"
 base64 = "0.22.1"
 sha2 = "0.10"
-quick-xml = "0.37"
+quick-xml = { version = "0.37", features = ["encoding"] }
 flate2 = "1"
 tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"

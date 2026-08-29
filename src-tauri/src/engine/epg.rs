@@ -208,7 +208,9 @@ pub fn parse_xmltv_into_with_source<R: Read>(
                     let mut start = None;
                     let mut stop = None;
                     for attribute in element.attributes().flatten() {
-                        let value = attribute.unescape_value().unwrap_or_default();
+                        let value = attribute
+                            .decode_and_unescape_value(reader.decoder())
+                            .unwrap_or_default();
                         match attribute.key.as_ref() {
                             b"channel" => channel = Some(value.into_owned()),
                             b"start" => start = parse_xmltv_time(&value),
@@ -458,6 +460,18 @@ mod tests {
 
         let programmes = index.programmes_for("nrk1.no", 0, i64::MAX);
         assert_eq!(programmes[0].title, "News & Weather");
+    }
+
+    #[test]
+    fn parses_windows_1252_channel_ids_and_titles() {
+        let xml = b"<?xml version=\"1.0\" encoding=\"windows-1252\"?><tv><programme start=\"20260828200000\" stop=\"20260828210000\" channel=\"caf\xe9\"><title>Caf\xe9 News</title></programme></tv>";
+        let wanted = HashSet::from(["café".to_string()]);
+        let mut index = EpgIndex::default();
+
+        parse_xmltv_into(xml.as_slice(), &wanted, &mut index).expect("xmltv should parse");
+
+        let programmes = index.programmes_for("café", 0, i64::MAX);
+        assert_eq!(programmes[0].title, "Café News");
     }
 
     #[test]

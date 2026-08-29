@@ -8,6 +8,8 @@ use crate::engine::epg::{self, EpgIndex, EpgProgramme};
 use crate::error::AppError;
 use crate::state::AppState;
 
+const MAX_EPG_SOURCES_PER_LOAD: usize = 32;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct EpgLoadSummary {
     pub sources_requested: usize,
@@ -34,6 +36,12 @@ pub async fn load_epg(
     tvg_ids: Vec<String>,
     force_refresh: bool,
 ) -> Result<EpgLoadSummary, AppError> {
+    if sources.len() > MAX_EPG_SOURCES_PER_LOAD {
+        return Err(AppError::Other(format!(
+            "EPG source count exceeds the limit of {MAX_EPG_SOURCES_PER_LOAD}"
+        )));
+    }
+
     let _guard = state.epg_load_lock.lock().await;
     let accept_invalid_certs = state.settings.lock().await.accept_invalid_certs;
     let cache_dir = epg_cache_dir(&app);
