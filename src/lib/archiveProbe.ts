@@ -101,7 +101,9 @@ export async function probeArchivePoint(
       depthVerified: reachable && point.daysBack <= 0,
       depthUnknown: checked.status === "geoblocked_confirmed" && point.daysBack > 0,
       responseUrl: checked.stream_url,
-      latencyMs: checked.latency_ms,
+      // The quick check keeps the failed direct request's latency when a proxy
+      // confirms access, so it does not represent archive startup time.
+      latencyMs: checked.status === "geoblocked_confirmed" ? null : checked.latency_ms,
       error: reachable ? null : (checked.error_reason ?? checked.status),
     };
   } catch (error) {
