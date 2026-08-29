@@ -82,6 +82,7 @@ export async function verifyChannelArchive(
   result: ChannelResult,
   onUpdate: (entry: ArchiveProbeEntry) => void,
   shouldCancel: () => boolean = () => false,
+  signal?: AbortSignal,
 ): Promise<ArchiveProbeEntry> {
   const nowEpochS = Math.floor(Date.now() / 1000);
   const outcomes: ArchiveProbeOutcome[] = [];
@@ -100,7 +101,12 @@ export async function verifyChannelArchive(
   if (shouldCancel()) {
     return push(null, true, false);
   }
-  const probedNear = await probeArchivePoint(result, probePointForDays(0, nowEpochS), nowEpochS);
+  const probedNear = await probeArchivePoint(
+    result,
+    probePointForDays(0, nowEpochS),
+    nowEpochS,
+    signal,
+  );
   const near = probedNear ? verifyArchivePointResponse(probedNear) : null;
   if (shouldCancel()) {
     return push(near, true, false);
@@ -123,6 +129,7 @@ export async function verifyChannelArchive(
     result,
     probePointForDays(advertisedDays, nowEpochS),
     nowEpochS,
+    signal,
   );
   const deep = probedDeep ? verifyArchiveDepthResponse(probedDeep, near) : null;
   if (shouldCancel()) {
@@ -149,6 +156,7 @@ export async function verifyChannelArchive(
       result,
       probePointForDays(midDays, nowEpochS),
       nowEpochS,
+      signal,
     );
     const outcome = probedOutcome ? verifyArchiveDepthResponse(probedOutcome, near) : null;
     if (shouldCancel()) return push(outcome, true, false);

@@ -1,5 +1,5 @@
 import { buildArchiveUrl } from "./archive";
-import { quickCheckChannel } from "./tauri";
+import { cancelQuickCheck, quickCheckChannel } from "./tauri";
 import type { ChannelResult } from "./types";
 
 export interface ArchiveProbeOutcome {
@@ -49,8 +49,7 @@ const MEDIA_TIME_TOLERANCE_SECONDS = 300;
 
 function responseMediaTimeMatchesRequest(outcome: ArchiveProbeOutcome): boolean | null {
   const response = responseIdentity(outcome.responseUrl);
-  const request = responseIdentity(outcome.requestUrl);
-  if (response == null || response === request) return null;
+  if (response == null) return null;
 
   try {
     const pathname = new URL(response).pathname;
@@ -123,6 +122,7 @@ export async function probeArchivePoint(
   result: ChannelResult,
   point: ArchiveProbePoint,
   nowEpochS: number,
+  signal?: AbortSignal,
 ): Promise<ArchiveProbeOutcome | null> {
   const url = buildArchiveUrl(result, {
     startEpochS: point.startEpochS,
@@ -132,14 +132,25 @@ export async function probeArchivePoint(
   if (!url) {
     return null;
   }
+  if (signal?.aborted) {
+    return null;
+  }
+  const requestId = crypto.randomUUID();
+  const cancel = () => {
+    void cancelQuickCheck(requestId);
+  };
+  signal?.addEventListener("abort", cancel, { once: true });
   try {
-    const checked = await quickCheckChannel({
-      ...result,
-      url,
-      content_type: "movie",
-      stream_url: null,
-      status: "pending",
-    });
+    const checked = await quickCheckChannel(
+      {
+        ...result,
+        url,
+        content_type: "movie",
+        stream_url: null,
+        status: "pending",
+      },
+      requestId,
+    );
     const reachable =
       checked.status === "alive" ||
       checked.status === "drm" ||
@@ -170,6 +181,8 @@ export async function probeArchivePoint(
       latencyMs: null,
       error: error instanceof Error ? error.message : String(error),
     };
+  } finally {
+    signal?.removeEventListener("abort", cancel);
   }
 }
 

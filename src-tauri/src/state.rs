@@ -79,6 +79,7 @@ pub struct AppState {
     /// the stored session.
     pub cast_lifecycle_lock: Mutex<()>,
     window_scan_states: Mutex<HashMap<String, WindowScanState>>,
+    quick_check_tokens: Mutex<HashMap<String, CancellationToken>>,
     backend_perf_samples: Mutex<VecDeque<BackendPerfSample>>,
     playlist_preview_cache: Mutex<HashMap<String, CachedPlaylistPreview>>,
     /// Programme index from the most recent load_epg call.
@@ -110,6 +111,7 @@ impl AppState {
             cast_state: Mutex::new(CastState::default()),
             cast_lifecycle_lock: Mutex::new(()),
             window_scan_states: Mutex::new(HashMap::new()),
+            quick_check_tokens: Mutex::new(HashMap::new()),
             backend_perf_samples: Mutex::new(VecDeque::new()),
             playlist_preview_cache: Mutex::new(HashMap::new()),
             epg: Mutex::new(None),
@@ -136,6 +138,30 @@ impl AppState {
     pub async fn window_pause_notify(&self, window_label: &str) -> Arc<Notify> {
         self.with_window_scan_state(window_label, |scan_state| scan_state.pause_notify.clone())
             .await
+    }
+
+    pub async fn register_quick_check(&self, request_id: String, token: CancellationToken) {
+        let mut quick_check_tokens = self.quick_check_tokens.lock().await;
+        if quick_check_tokens
+            .get(&request_id)
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            token.cancel();
+        }
+        quick_check_tokens.insert(request_id, token);
+    }
+
+    pub async fn cancel_quick_check(&self, request_id: &str) {
+        self.quick_check_tokens
+            .lock()
+            .await
+            .entry(request_id.to_string())
+            .or_insert_with(CancellationToken::new)
+            .cancel();
+    }
+
+    pub async fn unregister_quick_check(&self, request_id: &str) {
+        self.quick_check_tokens.lock().await.remove(request_id);
     }
 
     pub async fn push_backend_perf_sample(&self, sample: BackendPerfSample) {

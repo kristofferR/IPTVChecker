@@ -2759,12 +2759,18 @@ fn get_quick_check_client(accept_invalid_certs: bool) -> reqwest::Client {
 pub async fn quick_check_channel(
     app: AppHandle,
     channel: ChannelResult,
+    request_id: Option<String>,
 ) -> Result<ChannelResult, AppError> {
     let check_started_at = Instant::now();
     let state = app.state::<Arc<AppState>>();
     let settings = state.settings.lock().await.clone();
 
     let cancel_token = CancellationToken::new();
+    if let Some(request_id) = request_id.as_ref() {
+        state
+            .register_quick_check(request_id.clone(), cancel_token.clone())
+            .await;
+    }
     let client = get_quick_check_client(settings.accept_invalid_certs);
 
     let uses_ffprobe_liveness = checker::uses_ffprobe_liveness(&channel.url);
@@ -2775,31 +2781,43 @@ pub async fn quick_check_channel(
         false
     };
 
-    let outcome = if uses_ffprobe_liveness {
-        checker::check_channel_status_with_ffprobe_debug(
-            &app,
-            &channel.url,
-            settings.ffprobe_timeout_secs,
-            settings.retries,
-            settings.retry_backoff,
-            None,
-            ffprobe_ok,
-            &cancel_token,
-        )
-        .await
-    } else {
-        checker::check_channel_status_with_debug(
-            &client,
-            &channel.url,
-            settings.timeout,
-            settings.retries,
-            settings.retry_backoff,
-            settings.extended_timeout,
-            &settings.user_agent,
-            &cancel_token,
-        )
-        .await
+    let outcome = tokio::select! {
+        _ = cancel_token.cancelled() => Err(AppError::Cancelled),
+        outcome = async {
+            if uses_ffprobe_liveness {
+                checker::check_channel_status_with_ffprobe_debug(
+                    &app,
+                    &channel.url,
+                    settings.ffprobe_timeout_secs,
+                    settings.retries,
+                    settings.retry_backoff,
+                    None,
+                    ffprobe_ok,
+                    &cancel_token,
+                )
+                .await
+            } else {
+                checker::check_channel_status_with_debug(
+                    &client,
+                    &channel.url,
+                    settings.timeout,
+                    settings.retries,
+                    settings.retry_backoff,
+                    settings.extended_timeout,
+                    &settings.user_agent,
+                    &cancel_token,
+                )
+                .await
+            }
+        } => outcome,
     };
+
+    if let Some(request_id) = request_id.as_deref() {
+        state.unregister_quick_check(request_id).await;
+    }
+    if matches!(outcome, Err(AppError::Cancelled)) {
+        return Err(AppError::Cancelled);
+    }
 
     let (checked_status, stream_url, latency_ms, error_reason) = match outcome {
         Ok(o) => {
@@ -2854,6 +2872,13 @@ pub async fn quick_check_channel(
     result.error_reason = error_reason;
     result.screenshot_error_reason = None;
     Ok(result)
+}
+
+#[tauri::command]
+pub async fn cancel_quick_check(app: AppHandle, request_id: String) {
+    app.state::<Arc<AppState>>()
+        .cancel_quick_check(&request_id)
+        .await;
 }
 
 #[cfg(test)]
@@ -3263,6 +3288,19 @@ mod tests {
             .await;
 
         cancel_scan_token(state.as_ref(), scan_scope).await;
+        assert!(token.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn cancel_quick_check_cancels_registered_token() {
+        let state = AppState::new();
+        let token = CancellationToken::new();
+
+        state
+            .register_quick_check("archive-probe".to_string(), token.clone())
+            .await;
+        state.cancel_quick_check("archive-probe").await;
+
         assert!(token.is_cancelled());
     }
 

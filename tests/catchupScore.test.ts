@@ -101,6 +101,20 @@ describe("verifyArchiveDepthResponse", () => {
 });
 
 describe("verifyArchivePointResponse", () => {
+  it("accepts a direct response with a timestamped archive pathname", () => {
+    const requestedStartEpochS = 1_699_913_600;
+    const outcome = responseOutcome(
+      1,
+      `https://host/archive/${requestedStartEpochS}.ts`,
+      requestedStartEpochS,
+    );
+    outcome.requestUrl = outcome.responseUrl!;
+    expect(verifyArchivePointResponse(outcome)).toMatchObject({
+      depthVerified: true,
+      depthUnknown: false,
+    });
+  });
+
   it("verifies returned media whose timestamp matches the requested programme", () => {
     const outcome = responseOutcome(1, "https://host/archive/1699913605.ts");
     expect(verifyArchivePointResponse(outcome)).toMatchObject({

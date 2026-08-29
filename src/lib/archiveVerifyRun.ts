@@ -6,9 +6,11 @@ import { isScanActive } from "./scanState";
 
 let bulkRunActive = false;
 let bulkCancelRequested = false;
+let bulkAbortController: AbortController | null = null;
 
 export function cancelArchiveVerification(): void {
   bulkCancelRequested = true;
+  bulkAbortController?.abort();
 }
 
 export function isArchiveVerificationBlockingPlayback(): boolean {
@@ -52,6 +54,8 @@ export async function verifyAllArchives(): Promise<void> {
   }
   bulkRunActive = true;
   bulkCancelRequested = false;
+  const abortController = new AbortController();
+  bulkAbortController = abortController;
   const setProgress = (done: number) =>
     useAppStore.getState().setArchiveVerifyRun({ running: true, done, total: targets.length });
   const playlistChanged = () => useAppStore.getState().playlist !== playlist;
@@ -80,6 +84,7 @@ export async function verifyAllArchives(): Promise<void> {
           }
         },
         shouldCancel,
+        abortController.signal,
       );
       if (shouldCancel()) break;
       done += 1;
@@ -88,5 +93,8 @@ export async function verifyAllArchives(): Promise<void> {
   } finally {
     useAppStore.getState().setArchiveVerifyRun(null);
     bulkRunActive = false;
+    if (bulkAbortController === abortController) {
+      bulkAbortController = null;
+    }
   }
 }

@@ -99,8 +99,18 @@ export async function resetScan(): Promise<void> {
   return invoke("reset_scan");
 }
 
-export async function quickCheckChannel(channel: ChannelResult): Promise<ChannelResult> {
-  return invoke("quick_check_channel", { channel: toCommandChannelResult(channel) });
+export async function quickCheckChannel(
+  channel: ChannelResult,
+  requestId?: string,
+): Promise<ChannelResult> {
+  return invoke("quick_check_channel", {
+    channel: toCommandChannelResult(channel),
+    requestId,
+  });
+}
+
+export async function cancelQuickCheck(requestId: string): Promise<void> {
+  return invoke("cancel_quick_check", { requestId });
 }
 
 export async function loadEpg(
