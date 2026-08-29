@@ -196,6 +196,11 @@ export function usePlaylistSources({
       appliedSourceFilter: string,
       shouldApply: () => boolean,
     ): Promise<boolean> => {
+      await cancelArchiveProbes();
+      if (!shouldApply()) {
+        return false;
+      }
+
       const initStartedAt = performance.now();
       logger.info(`[App] Preparing scan cache for ${preview.channels.length} visible channels`);
       const initialized = await initFromPlaylist(preview.channels, shouldApply);
@@ -204,10 +209,6 @@ export function usePlaylistSources({
       }
       logger.info(`[App] Scan cache ready in ${(performance.now() - initStartedAt).toFixed(1)}ms`);
 
-      await cancelArchiveProbes();
-      if (!shouldApply()) {
-        return false;
-      }
       await cancelEpgLoad().catch(() => {});
       if (!shouldApply()) {
         return false;
@@ -409,6 +410,10 @@ export function usePlaylistSources({
         getStore().setPlaylistOpenError(message);
 
         if (mode === "freshOpen") {
+          await cancelArchiveProbes();
+          if (!isCurrentLoad()) {
+            return supersededResult();
+          }
           // Keep app interaction predictable after a failed fresh open attempt.
           getStore().setSelectedChannel(null);
           getStore().setSelectedChannelIndices([]);

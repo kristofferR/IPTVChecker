@@ -41,7 +41,14 @@ export function useChromecast(): UseChromecastResult {
     } catch (err) {
       if (!cancelledRef.current) {
         setError(String(err));
-        setSession(null);
+        // A same-device redirect may fail after the backend has restored the
+        // previous cast. Reconcile instead of assuming the receiver stopped.
+        try {
+          const current = await getCastStatus();
+          if (!cancelledRef.current) setSession(current);
+        } catch {
+          // Keep the last known session when status cannot be refreshed.
+        }
       }
       throw err;
     }
