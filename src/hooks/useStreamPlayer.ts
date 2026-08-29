@@ -148,8 +148,12 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
   const [activeChannelIndex, setActiveChannelIndex] = useState<number | null>(null);
   const [streamMetadata, setStreamMetadata] = useState<StreamMetadata | null>(null);
-  const [archiveSession, setArchiveSession] = useState<ArchiveSession | null>(null);
+  const [archiveSession, setArchiveSessionState] = useState<ArchiveSession | null>(null);
   const archiveSessionRef = useRef<ArchiveSession | null>(null);
+  const setArchiveSession = useCallback((session: ArchiveSession | null) => {
+    archiveSessionRef.current = session;
+    setArchiveSessionState(session);
+  }, []);
 
   const lastErrorRef = useRef<string | null>(null);
   const playerStateRef = useRef<PlayerState>("idle");
@@ -173,10 +177,6 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     onPlaybackFailedRef.current = options?.onPlaybackFailed;
     onPlaybackFinishedRef.current = options?.onPlaybackFinished;
   }, [options?.onPlaybackFailed, options?.onPlaybackFinished]);
-
-  useEffect(() => {
-    archiveSessionRef.current = archiveSession;
-  }, [archiveSession]);
 
   useEffect(() => {
     playerStateRef.current = playerState;

@@ -6,7 +6,7 @@ import { probeChannelArchive } from "../lib/archiveProbe";
 import { logger } from "../lib/logger";
 import { isScanActive } from "../lib/scanState";
 import { getEpgProgrammes, loadEpg } from "../lib/tauri";
-import type { ChannelResult, EpgProgramme } from "../lib/types";
+import type { ChannelResult, EpgLoadSummary, EpgProgramme } from "../lib/types";
 import { useAppStore } from "../store";
 
 interface ArchiveCardProps {
@@ -18,7 +18,7 @@ interface ArchiveCardProps {
 
 // The EPG download can be hundreds of MB, so it loads lazily the first time a
 // catch-up channel's card opens, once per playlist, sources, and indexed IDs.
-let epgLoad: { key: string; promise: Promise<void> } | null = null;
+let epgLoad: { key: string; promise: Promise<void>; summary: EpgLoadSummary | null } | null = null;
 const MAX_RENDERED_PROGRAMMES = 2_000;
 
 function epgSourcesFor(result: ChannelResult): string[] {
@@ -45,6 +45,9 @@ function epgLoadRequest() {
 function ensureEpgLoaded(): Promise<void> {
   const { key, sources, tvgIds } = epgLoadRequest();
   if (epgLoad?.key === key) {
+    if (epgLoad.summary) {
+      useAppStore.getState().setEpgLoadSummary(epgLoad.summary);
+    }
     return epgLoad.promise;
   }
   const promise = loadEpg(sources, tvgIds).then(
@@ -52,6 +55,7 @@ function ensureEpgLoaded(): Promise<void> {
       if (epgLoad?.key !== key || epgLoadRequest().key !== key) {
         return;
       }
+      epgLoad.summary = summary;
       useAppStore.getState().setEpgLoadSummary(summary);
       logger.info(
         "[EPG] Loaded",
@@ -77,7 +81,7 @@ function ensureEpgLoaded(): Promise<void> {
       }
     },
   );
-  epgLoad = { key, promise };
+  epgLoad = { key, promise, summary: null };
   return promise;
 }
 

@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::BufRead;
 use std::path::Path;
 
+use url::Url;
+
 use crate::engine::search_pattern::ChannelSearchPattern;
 use crate::error::AppError;
 use crate::models::channel::{Channel, ContentType};
@@ -276,7 +278,7 @@ fn parse_header_epg_sources(header_line: &str) -> Vec<String> {
         if let Some(value) = attr_value(&attrs, key) {
             for url in value.split(',') {
                 let url = url.trim();
-                if (url.starts_with("http://") || url.starts_with("https://"))
+                if Url::parse(url).is_ok_and(|parsed| matches!(parsed.scheme(), "http" | "https"))
                     && !sources.iter().any(|existing| existing == url)
                 {
                     sources.push(url.to_string());
@@ -1072,6 +1074,10 @@ mod tests {
 
         assert!(parse_header_epg_sources("#EXTM3U").is_empty());
         assert!(parse_header_epg_sources("#EXTM3U x-tvg-url=\"not-a-url\"").is_empty());
+        assert_eq!(
+            parse_header_epg_sources("#EXTM3U x-tvg-url=\"HTTPS://epg.example.com/guide.xml\""),
+            vec!["HTTPS://epg.example.com/guide.xml".to_string()]
+        );
     }
 
     #[test]
