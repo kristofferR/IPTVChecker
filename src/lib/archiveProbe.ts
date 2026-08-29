@@ -7,6 +7,9 @@ export interface ArchiveProbeOutcome {
   /** How far back this point reached, in days (0 = the −1 h near point). */
   daysBack: number;
   ok: boolean;
+  /** Whether this response identifies media distinct from the near probe. */
+  depthVerified: boolean;
+  responseUrl: string | null;
   latencyMs: number | null;
   error: string | null;
 }
@@ -21,6 +24,46 @@ export interface ArchiveProbePoint {
   label: string;
   daysBack: number;
   startEpochS: number;
+}
+
+const ARCHIVE_TIME_QUERY_PARAMS = [
+  "begin",
+  "duration",
+  "end",
+  "lutc",
+  "offset",
+  "start",
+  "timestamp",
+  "utc",
+  "utcend",
+];
+
+function responseIdentity(responseUrl: string | null): string | null {
+  if (!responseUrl) return null;
+  try {
+    const parsed = new URL(responseUrl);
+    for (const param of ARCHIVE_TIME_QUERY_PARAMS) {
+      parsed.searchParams.delete(param);
+    }
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return responseUrl;
+  }
+}
+
+/** A deep response only proves depth when it resolves to different media. */
+export function verifyArchiveDepthResponse(
+  outcome: ArchiveProbeOutcome,
+  near: ArchiveProbeOutcome | undefined,
+): ArchiveProbeOutcome {
+  if (!outcome.ok || outcome.daysBack <= 0) return outcome;
+  const response = responseIdentity(outcome.responseUrl);
+  const nearResponse = responseIdentity(near?.responseUrl ?? null);
+  return {
+    ...outcome,
+    depthVerified: response != null && nearResponse != null && response !== nearResponse,
+  };
 }
 
 /** One hour back, plus a point just inside the advertised depth when known. */
@@ -60,18 +103,26 @@ export async function probeArchivePoint(
       stream_url: null,
       status: "pending",
     });
+    const reachable =
+      checked.status === "alive" ||
+      checked.status === "drm" ||
+      checked.status === "geoblocked_confirmed";
     return {
       label: point.label,
       daysBack: point.daysBack,
-      ok: checked.status === "alive",
+      ok: reachable,
+      depthVerified: reachable && point.daysBack <= 0,
+      responseUrl: checked.stream_url,
       latencyMs: checked.latency_ms,
-      error: checked.status === "alive" ? null : (checked.error_reason ?? checked.status),
+      error: reachable ? null : (checked.error_reason ?? checked.status),
     };
   } catch (error) {
     return {
       label: point.label,
       daysBack: point.daysBack,
       ok: false,
+      depthVerified: false,
+      responseUrl: null,
       latencyMs: null,
       error: error instanceof Error ? error.message : String(error),
     };
@@ -91,7 +142,8 @@ export async function probeChannelArchive(
   const outcomes: ArchiveProbeOutcome[] = [];
   onUpdate({ running: true, outcomes: [], checkedAt: null });
   for (const point of archiveProbePoints(result, nowEpochS)) {
-    const outcome = await probeArchivePoint(result, point, nowEpochS);
+    const probed = await probeArchivePoint(result, point, nowEpochS);
+    const outcome = probed ? verifyArchiveDepthResponse(probed, outcomes[0]) : null;
     if (outcome) {
       outcomes.push(outcome);
       onUpdate({ running: true, outcomes: [...outcomes], checkedAt: null });

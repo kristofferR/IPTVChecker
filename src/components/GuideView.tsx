@@ -254,6 +254,8 @@ export function GuideView({
         label: point.label,
         daysBack: point.daysBack,
         ok: false,
+        depthVerified: false,
+        responseUrl: null,
         latencyMs: null,
         error: error instanceof Error ? error.message : String(error),
       };

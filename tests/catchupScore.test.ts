@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import type { ArchiveProbeEntry } from "../src/lib/archiveProbe";
+import {
+  type ArchiveProbeEntry,
+  type ArchiveProbeOutcome,
+  verifyArchiveDepthResponse,
+} from "../src/lib/archiveProbe";
 import { archiveVerdict, measuredDepthDays } from "../src/lib/archiveVerification";
 import { blendOverallScore, computeCatchupScore } from "../src/lib/catchupScore";
 import type { ChannelResult } from "../src/lib/types";
@@ -24,19 +28,50 @@ function plain(index: number): ChannelResult {
   } as ChannelResult;
 }
 
-function entry(outcomes: Array<[number, boolean, number | null]>): ArchiveProbeEntry {
+function entry(
+  outcomes: Array<[number, boolean, number | null, depthVerified?: boolean]>,
+): ArchiveProbeEntry {
   return {
     running: false,
     checkedAt: 1,
-    outcomes: outcomes.map(([daysBack, ok, latencyMs]) => ({
+    outcomes: outcomes.map(([daysBack, ok, latencyMs, depthVerified = ok]) => ({
       label: `−${daysBack}d`,
       daysBack,
       ok,
+      depthVerified,
+      responseUrl: null,
       latencyMs,
       error: ok ? null : "dead",
     })),
   };
 }
+
+function responseOutcome(daysBack: number, responseUrl: string): ArchiveProbeOutcome {
+  return {
+    label: `−${daysBack}d`,
+    daysBack,
+    ok: true,
+    depthVerified: daysBack === 0,
+    responseUrl,
+    latencyMs: 100,
+    error: null,
+  };
+}
+
+describe("verifyArchiveDepthResponse", () => {
+  const near = responseOutcome(0, "https://host/live/segment-100.ts");
+
+  it("accepts a deep probe that resolves to different media", () => {
+    const deep = responseOutcome(7, "https://host/archive/segment-20.ts");
+    expect(verifyArchiveDepthResponse(deep, near).depthVerified).toBe(true);
+  });
+
+  it("rejects an endpoint that only echoes different timestamp parameters", () => {
+    const queryNear = responseOutcome(0, "https://host/live.ts?utc=100&lutc=200&token=x");
+    const deep = responseOutcome(7, "https://host/live.ts?utc=10&lutc=200&token=x");
+    expect(verifyArchiveDepthResponse(deep, queryNear).depthVerified).toBe(false);
+  });
+});
 
 describe("archiveVerdict", () => {
   const ch = channel(1, 7);
@@ -71,6 +106,15 @@ describe("archiveVerdict", () => {
           [0, true, 400],
           [7, false, null],
           [3, true, 500],
+        ]),
+      ),
+    ).toBe("shallower");
+    expect(
+      archiveVerdict(
+        ch,
+        entry([
+          [0, true, 400],
+          [7, true, 700, false],
         ]),
       ),
     ).toBe("shallower");
@@ -126,6 +170,12 @@ describe("computeCatchupScore", () => {
     const broken = { 0: entry([[0, false, null]]), 1: entry([[0, false, null]]) };
     // Full coverage but nothing works: only the coverage half survives.
     expect(computeCatchupScore(results, broken as Record<number, ArchiveProbeEntry>)).toBe(5);
+  });
+
+  it("retains the advertised baseline for untested catch-up channels", () => {
+    const results = Array.from({ length: 100 }, (_, index) => channel(index, 7));
+    const probes = { 0: entry([[0, false, null]]) };
+    expect(computeCatchupScore(results, probes)).toBeCloseTo(9.95, 5);
   });
 });
 

@@ -3,6 +3,7 @@ import {
   type ArchiveProbeEntry,
   type ArchiveProbeOutcome,
   probeArchivePoint,
+  verifyArchiveDepthResponse,
 } from "./archiveProbe";
 import type { ChannelResult } from "./types";
 
@@ -25,7 +26,9 @@ export function archiveVerdict(
   if (!outcomes.some((outcome) => outcome.ok)) return "broken";
   const advertisedDays = result.catchup_days;
   if (advertisedDays == null) return "verified";
-  return outcomes.some((outcome) => outcome.ok && outcome.daysBack >= advertisedDays)
+  return outcomes.some(
+    (outcome) => outcome.ok && outcome.depthVerified && outcome.daysBack >= advertisedDays,
+  )
     ? "verified"
     : "shallower";
 }
@@ -33,7 +36,7 @@ export function archiveVerdict(
 /** Deepest point that answered, in days; null without any successful probe. */
 export function measuredDepthDays(entry: ArchiveProbeEntry | undefined): number | null {
   const okDays = (entry?.outcomes ?? [])
-    .filter((outcome) => outcome.ok)
+    .filter((outcome) => outcome.ok && outcome.depthVerified)
     .map((outcome) => outcome.daysBack);
   if (okDays.length === 0) return null;
   const deepest = Math.max(...okDays);
@@ -100,12 +103,13 @@ export async function verifyChannelArchive(
     return push(null, true, false);
   }
 
-  const deep = await probeArchivePoint(
+  const probedDeep = await probeArchivePoint(
     result,
     probePointForDays(advertisedDays, nowEpochS),
     nowEpochS,
   );
-  if (!deep || deep.ok || shouldCancel()) {
+  const deep = probedDeep ? verifyArchiveDepthResponse(probedDeep, near) : null;
+  if (!deep || (deep.ok && deep.depthVerified) || shouldCancel()) {
     return push(deep, true);
   }
   push(deep, false);
@@ -118,13 +122,14 @@ export async function verifyChannelArchive(
     if (shouldCancel()) break;
     const midDays = Math.round((workingDays + failingDays) / 2);
     if (midDays <= workingDays || midDays >= failingDays) break;
-    const outcome = await probeArchivePoint(
+    const probedOutcome = await probeArchivePoint(
       result,
       probePointForDays(midDays, nowEpochS),
       nowEpochS,
     );
+    const outcome = probedOutcome ? verifyArchiveDepthResponse(probedOutcome, near) : null;
     if (!outcome) break;
-    if (outcome.ok) {
+    if (outcome.ok && outcome.depthVerified) {
       workingDays = midDays;
     } else {
       failingDays = midDays;

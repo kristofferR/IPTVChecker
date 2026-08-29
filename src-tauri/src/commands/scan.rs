@@ -2798,7 +2798,7 @@ pub async fn quick_check_channel(
         .await
     };
 
-    let (status, stream_url, latency_ms, error_reason) = match outcome {
+    let (checked_status, stream_url, latency_ms, error_reason) = match outcome {
         Ok(o) => {
             log::info!(
                 "[Quick Check] #{} {} → {} in {:.1}s (url: {})",
@@ -2821,6 +2821,18 @@ pub async fn quick_check_channel(
             );
             (ChannelStatus::Dead, None, None, None)
         }
+    };
+
+    let status = if checked_status == ChannelStatus::Geoblocked && settings.test_geoblock {
+        match settings.proxy_file.as_deref() {
+            Some(proxy_file) => {
+                let proxies = proxy::load_proxy_list(proxy_file)?;
+                proxy::confirm_geoblock(&channel.url, &proxies, settings.timeout).await
+            }
+            None => checked_status,
+        }
+    } else {
+        checked_status
     };
 
     let mut result = channel;

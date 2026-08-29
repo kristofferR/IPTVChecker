@@ -66,7 +66,9 @@ export function computeCatchupScore(
 
   const reliability = reliabilityPoints / tested;
   const depthScore = depthCount > 0 ? Math.min(1, depthSum / depthCount / FULL_DEPTH_DAYS) : 0;
-  return clampScore10((coverage * 0.5 + reliability * 0.35 + depthScore * 0.15) * 10);
+  const verifiedScore = coverage * 0.5 + reliability * 0.35 + depthScore * 0.15;
+  const testedFraction = tested / catchupChannels.length;
+  return clampScore10((coverage * (1 - testedFraction) + verifiedScore * testedFraction) * 10);
 }
 
 /**
