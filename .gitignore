@@ -23,7 +23,7 @@ tsconfig.tsbuildinfo
 Thumbs.db
 
 # Tauri
-src-tauri/binaries/
+src-tauri/binaries
 src-tauri/gen/
 
 # Test playlists
