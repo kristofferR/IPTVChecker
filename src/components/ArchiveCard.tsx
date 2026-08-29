@@ -38,6 +38,7 @@ function ensureEpgLoaded(): Promise<void> {
   ];
   const promise = loadEpg(sources, tvgIds).then(
     (summary) => {
+      useAppStore.getState().setEpgLoadSummary(summary);
       logger.info(
         "[EPG] Loaded",
         summary.programme_count,

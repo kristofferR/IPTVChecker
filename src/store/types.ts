@@ -5,6 +5,7 @@ import type { ScanState } from "../lib/scanState";
 import type {
   AppSettings,
   ChannelResult,
+  EpgLoadSummary,
   CurrentSourceDescriptor,
   PlaylistLoadProgress,
   PlaylistPreview,
@@ -113,8 +114,12 @@ export interface FilterSlice {
 export interface ArchiveSlice {
   /** Spot-probe results for catch-up channels, keyed by channel index. */
   archiveProbes: Record<number, ArchiveProbeEntry>;
+  /** Result of the most recent XMLTV load for the current playlist. */
+  epgLoadSummary: EpgLoadSummary | null;
 
   setArchiveProbe: (index: number, entry: ArchiveProbeEntry) => void;
+  setEpgLoadSummary: (summary: EpgLoadSummary | null) => void;
+  /** Reset all per-playlist archive state (probes and EPG summary). */
   clearArchiveProbes: () => void;
 }
 

@@ -158,6 +158,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
   const playlist = useAppStore((s) => s.playlist);
   const results = useAppStore((s) => s.flatResults);
   const progress = useAppStore((s) => s.progress);
+  const epgLoadSummary = useAppStore((s) => s.epgLoadSummary);
   const summary = useAppStore((s) => s.summary);
   const scanState = useAppStore((s) => s.scanState);
   // Every hook below must run unconditionally: the "no playlist" early return
@@ -480,6 +481,12 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                 {epgSummary.channelsWithEpg} / {epgSummary.totalChannels} channels
               </p>
               <p className="text-text-secondary">Unique EPG IDs: {epgSummary.uniqueEpgSources}</p>
+              {epgLoadSummary && (
+                <p className="text-text-secondary">
+                  Programme data: {epgLoadSummary.channels_matched} channels ·{" "}
+                  {epgLoadSummary.programme_count.toLocaleString()} programmes
+                </p>
+              )}
             </div>
           </div>
         </section>
