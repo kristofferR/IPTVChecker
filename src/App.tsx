@@ -1170,11 +1170,15 @@ export default function App() {
 
   const handleOpenExternal = useCallback(
     async (result: ChannelResult) => {
-      if (isSingleConnectionPlaylist(getStore().playlist)) {
-        handleStopPlayer();
-      }
-
       try {
+        if (isSingleConnectionPlaylist(getStore().playlist)) {
+          handleStopPlayer();
+          const currentChromecast = chromecastRef.current;
+          if (isCastSessionActive(currentChromecast.session)) {
+            await currentChromecast.stop();
+          }
+        }
+
         await openChannelInPlayer({
           extinf_line: result.extinf_line,
           metadata_lines: result.metadata_lines,

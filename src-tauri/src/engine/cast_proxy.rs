@@ -310,6 +310,14 @@ fn hls_muxer_options(is_finite: bool) -> (&'static str, &'static str) {
     }
 }
 
+fn dash_window_size(is_finite: bool) -> &'static str {
+    if is_finite {
+        "0"
+    } else {
+        REMUX_PLAYLIST_SEGMENTS
+    }
+}
+
 /// Spawn ffmpeg to remux the upstream MPEG-TS into a sliding-window HLS
 /// playlist on disk. Waits for the playlist file to appear (so the Cast
 /// device's first GET doesn't 404) before returning.
@@ -439,13 +447,14 @@ async fn start_remux(
         // which the muxer rejects.
         cmd.arg("-avoid_negative_ts").arg("make_zero");
 
-        // Keep both live and finite streams bounded. Finite inputs are paced
-        // above, giving the receiver time to fetch segments before removal.
+        // Live streams use a bounded sliding window. Finite streams retain
+        // every segment so receiver-side pauses and buffering cannot make an
+        // earlier segment disappear before it is fetched.
         cmd.arg("-f").arg("dash");
         cmd.arg("-seg_duration").arg("4");
-        cmd.arg("-window_size").arg(REMUX_PLAYLIST_SEGMENTS);
-        cmd.arg("-extra_window_size").arg("2");
+        cmd.arg("-window_size").arg(dash_window_size(is_finite));
         if !is_finite {
+            cmd.arg("-extra_window_size").arg("2");
             cmd.arg("-remove_at_exit").arg("1");
         }
         cmd.arg("-use_template").arg("1");
@@ -1593,6 +1602,12 @@ mod tests {
         assert!(!flags.split('+').any(|flag| flag == "delete_segments"));
         assert!(!flags.split('+').any(|flag| flag == "omit_endlist"));
         assert!(flags.split('+').any(|flag| flag == "independent_segments"));
+    }
+
+    #[test]
+    fn finite_dash_remux_keeps_all_segments() {
+        assert_eq!(dash_window_size(true), "0");
+        assert_eq!(dash_window_size(false), REMUX_PLAYLIST_SEGMENTS);
     }
 
     #[test]

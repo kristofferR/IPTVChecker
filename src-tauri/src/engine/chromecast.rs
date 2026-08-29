@@ -441,14 +441,35 @@ async fn send_load(
     Ok(())
 }
 
-fn media_has_finished(payload: &Payload) -> bool {
+#[derive(Debug, PartialEq, Eq)]
+enum BufferedPlaybackEnd {
+    Finished,
+    Failed(&'static str),
+}
+
+fn buffered_playback_end(payload: &Payload) -> Option<BufferedPlaybackEnd> {
     let Payload::Media(Media::MediaStatus(response)) = payload else {
-        return false;
+        return None;
     };
 
-    response.status.iter().any(|status| {
-        matches!(&status.player_state, PlayerState::Idle)
-            && matches!(&status.idle_reason, Some(IdleReason::Finished))
+    response.status.iter().find_map(|status| {
+        if !matches!(&status.player_state, PlayerState::Idle) {
+            return None;
+        }
+
+        match &status.idle_reason {
+            Some(IdleReason::Finished) => Some(BufferedPlaybackEnd::Finished),
+            Some(IdleReason::Error) => Some(BufferedPlaybackEnd::Failed(
+                "Chromecast reported a playback error",
+            )),
+            Some(IdleReason::Cancelled) => {
+                Some(BufferedPlaybackEnd::Failed("Chromecast cancelled playback"))
+            }
+            Some(IdleReason::Interrupted) => Some(BufferedPlaybackEnd::Failed(
+                "Chromecast interrupted playback",
+            )),
+            None => None,
+        }
     })
 }
 
@@ -496,24 +517,43 @@ async fn drive_session(
                         .send_request(cast_app, Media::GetStatus(Default::default()))
                         .await
                     {
-                        Ok(response) if media_has_finished(&response.payload) => {
-                            let _ = receiver.stop_app(cast_app).await;
-                            receiver.disconnect().await;
-                            emit_state(
-                                app,
-                                device,
-                                CastSessionState::Stopped,
-                                &cast_url,
-                                &request,
-                                None,
-                            );
-                            log::info!(
-                                "[Chromecast] Buffered playback finished on '{}'",
-                                device.friendly_name
-                            );
-                            return false;
+                        Ok(response) => {
+                            if let Some(playback_end) = buffered_playback_end(&response.payload) {
+                                let _ = receiver.stop_app(cast_app).await;
+                                receiver.disconnect().await;
+                                match playback_end {
+                                    BufferedPlaybackEnd::Finished => {
+                                        emit_state(
+                                            app,
+                                            device,
+                                            CastSessionState::Stopped,
+                                            &cast_url,
+                                            &request,
+                                            None,
+                                        );
+                                        log::info!(
+                                            "[Chromecast] Buffered playback finished on '{}'",
+                                            device.friendly_name
+                                        );
+                                    }
+                                    BufferedPlaybackEnd::Failed(message) => {
+                                        emit_state(
+                                            app,
+                                            device,
+                                            CastSessionState::Error,
+                                            &cast_url,
+                                            &request,
+                                            Some(message.to_string()),
+                                        );
+                                        log::warn!(
+                                            "[Chromecast] Buffered playback failed on '{}': {message}",
+                                            device.friendly_name
+                                        );
+                                    }
+                                }
+                                return false;
+                            }
                         }
-                        Ok(_) => {}
                         Err(error) => {
                             log::debug!(
                                 "[Chromecast] Media status poll failed on '{}': {error}",
@@ -620,19 +660,42 @@ mod tests {
         assert_eq!(live.fields["media"]["streamType"], "LIVE");
     }
 
-    #[test]
-    fn detects_finished_buffered_media_status() {
+    fn buffered_media_status(idle_reason: IdleReason) -> Payload {
         use cast_sender::namespace::media::{MediaStatus, ResponseData};
 
         let status = MediaStatus {
             player_state: PlayerState::Idle,
-            idle_reason: Some(IdleReason::Finished),
+            idle_reason: Some(idle_reason),
             ..Default::default()
         };
-        let finished = Payload::Media(Media::MediaStatus(ResponseData {
+        Payload::Media(Media::MediaStatus(ResponseData {
             status: vec![status],
-        }));
+        }))
+    }
 
-        assert!(media_has_finished(&finished));
+    #[test]
+    fn detects_finished_buffered_media_status() {
+        let finished = buffered_media_status(IdleReason::Finished);
+
+        assert_eq!(
+            buffered_playback_end(&finished),
+            Some(BufferedPlaybackEnd::Finished)
+        );
+    }
+
+    #[test]
+    fn detects_failed_buffered_media_statuses() {
+        for reason in [
+            IdleReason::Error,
+            IdleReason::Cancelled,
+            IdleReason::Interrupted,
+        ] {
+            let failed = buffered_media_status(reason);
+
+            assert!(matches!(
+                buffered_playback_end(&failed),
+                Some(BufferedPlaybackEnd::Failed(_))
+            ));
+        }
     }
 }
