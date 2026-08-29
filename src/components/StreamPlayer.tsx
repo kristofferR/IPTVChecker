@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   Cast,
+  History,
   LoaderCircle,
   Maximize,
   Pause,
@@ -12,10 +13,21 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { UseChromecastResult } from "../hooks/useChromecast";
-import { MAX_PLAYBACK_RECOVERY_ATTEMPTS } from "../hooks/useStreamPlayer";
+import { type ArchiveSession, MAX_PLAYBACK_RECOVERY_ATTEMPTS } from "../hooks/useStreamPlayer";
 import { isCastSessionActive } from "../lib/cast";
 import type { CastMediaRequest } from "../lib/types";
 import { CastMenu } from "./CastMenu";
+
+function formatArchiveClock(epochS: number): string {
+  return new Date(epochS * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatBehindLive(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  return hours > 0 ? `−${hours} h ${minutes} m` : `−${minutes} m`;
+}
 
 interface StreamPlayerProps {
   playerState: "idle" | "loading" | "playing" | "error";
@@ -40,6 +52,12 @@ interface StreamPlayerProps {
    * UI is shown regardless of `castRequest`.
    */
   chromecast?: UseChromecastResult;
+  /** Active catch-up session; enables the archive badge, seek bar, GO LIVE. */
+  archiveSession?: ArchiveSession | null;
+  /** Needed to poll the playback position for the archive seek bar. */
+  videoElement?: HTMLVideoElement;
+  onSeekArchive?: (epochS: number) => void;
+  onGoLive?: () => void;
   onTogglePause: () => void;
   onStop: () => void;
   onSetVolume: (v: number) => void;
@@ -63,6 +81,10 @@ export function StreamPlayer({
   castRequest,
   compact = false,
   chromecast,
+  archiveSession,
+  videoElement,
+  onSeekArchive,
+  onGoLive,
   onTogglePause,
   onStop,
   onSetVolume,
@@ -74,10 +96,28 @@ export function StreamPlayer({
 }: StreamPlayerProps) {
   const [controlsVisible, setControlsVisible] = useState(true);
   const [castMenuPinned, setCastMenuPinned] = useState(false);
+  const [archivePositionS, setArchivePositionS] = useState(0);
+  const [archiveScrubEpochS, setArchiveScrubEpochS] = useState<number | null>(null);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showCastUi = !compact && !!castRequest && !!chromecast;
   const isCasting = isCastSessionActive(chromecast?.session ?? null);
+
+  useEffect(() => {
+    setArchivePositionS(0);
+    setArchiveScrubEpochS(null);
+    if (!archiveSession || !videoElement || playerState !== "playing") {
+      return;
+    }
+    const tick = () => setArchivePositionS(videoElement.currentTime);
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [archiveSession, videoElement, playerState]);
+
+  const archiveCurrentEpochS = archiveSession
+    ? archiveSession.startEpochS + archivePositionS
+    : null;
 
   const scheduleHide = useCallback(() => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
@@ -135,6 +175,28 @@ export function StreamPlayer({
       onMouseEnter={showControls}
     >
       {/* Video element is appended here by ThumbnailPanel */}
+
+      {archiveSession && playerState !== "error" && archiveCurrentEpochS != null && (
+        <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-1 rounded-md bg-violet-600/85 text-white text-[11px] font-medium shadow-md backdrop-blur-sm">
+          <History className="w-3 h-3" />
+          <span className="truncate max-w-[200px]">
+            {archiveSession.title ?? formatArchiveClock(archiveCurrentEpochS)}
+            {archiveSession.title
+              ? ""
+              : ` · ${formatBehindLive(Date.now() / 1000 - archiveCurrentEpochS)}`}
+          </span>
+        </div>
+      )}
+
+      {archiveSession && playerState !== "error" && onGoLive && (
+        <button
+          type="button"
+          onClick={onGoLive}
+          className="absolute top-2 right-2 px-2 py-0.5 rounded border border-white/40 bg-black/45 text-[10px] font-semibold text-white hover:bg-black/70 transition-colors"
+        >
+          GO LIVE
+        </button>
+      )}
 
       {showCastUi && isCasting && chromecast?.session && (
         <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-1 rounded-md bg-blue-600/85 text-white text-[11px] font-medium shadow-md backdrop-blur-sm">
@@ -194,76 +256,105 @@ export function StreamPlayer({
       {/* Controls overlay */}
       {playerState === "playing" && (
         <div
-          className={`absolute inset-x-0 bottom-0 flex items-center gap-2 px-2.5 py-2 bg-gradient-to-t from-black/70 to-transparent transition-opacity duration-200 ${
+          className={`absolute inset-x-0 bottom-0 flex flex-col gap-1 px-2.5 py-2 bg-gradient-to-t from-black/70 to-transparent transition-opacity duration-200 ${
             controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"
           }`}
         >
-          <button
-            type="button"
-            onClick={onTogglePause}
-            className="p-1 text-white hover:text-white/80 transition-colors"
-            title={isPaused ? "Play" : "Pause"}
-          >
-            {isPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
-          </button>
-          <button
-            type="button"
-            onClick={onStop}
-            className="p-1 text-white hover:text-white/80 transition-colors"
-            title="Stop"
-          >
-            <Square className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={onToggleMute}
-            className="p-1 text-white hover:text-white/80 transition-colors ml-auto"
-            title={muted ? "Unmute" : "Mute"}
-          >
-            {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-          </button>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={muted ? 0 : volume}
-            onChange={(e) => {
-              onSetVolume(Number.parseFloat(e.target.value));
-              if (muted) onToggleMute();
-            }}
-            className="w-16 h-1 accent-white cursor-pointer"
-            title={`Volume: ${Math.round((muted ? 0 : volume) * 100)}%`}
-          />
-          {showCastUi && castRequest && chromecast && (
-            <CastMenu
-              chromecast={chromecast}
-              castRequest={castRequest}
-              mode="popover"
-              onCastStart={handleCastStart}
-              onOpenChange={setCastMenuPinned}
+          {archiveSession && onSeekArchive && archiveCurrentEpochS != null && (
+            <input
+              type="range"
+              min={archiveSession.windowStartEpochS}
+              max={archiveSession.windowEndEpochS}
+              step={10}
+              value={Math.round(archiveScrubEpochS ?? archiveCurrentEpochS)}
+              onChange={(e) => setArchiveScrubEpochS(Number.parseInt(e.target.value, 10))}
+              onPointerUp={() => {
+                if (archiveScrubEpochS != null) {
+                  onSeekArchive(archiveScrubEpochS);
+                  setArchiveScrubEpochS(null);
+                }
+              }}
+              onKeyUp={(e) => {
+                if (
+                  (e.key === "ArrowLeft" || e.key === "ArrowRight") &&
+                  archiveScrubEpochS != null
+                ) {
+                  onSeekArchive(archiveScrubEpochS);
+                  setArchiveScrubEpochS(null);
+                }
+              }}
+              className="w-full h-1 accent-violet-400 cursor-pointer"
+              title={formatArchiveClock(archiveScrubEpochS ?? archiveCurrentEpochS)}
             />
           )}
-          {onPip && (
+          <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={onPip}
-              className="p-1 text-white hover:text-white/80 transition-colors ml-1"
-              title="Picture-in-Picture"
+              onClick={onTogglePause}
+              className="p-1 text-white hover:text-white/80 transition-colors"
+              title={isPaused ? "Play" : "Pause"}
             >
-              <PictureInPicture2 className="w-4 h-4" />
+              {isPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
             </button>
-          )}
-          {onFullscreen && (
             <button
               type="button"
-              onClick={onFullscreen}
-              className="p-1 text-white hover:text-white/80 transition-colors ml-1"
-              title="Fullscreen"
+              onClick={onStop}
+              className="p-1 text-white hover:text-white/80 transition-colors"
+              title="Stop"
             >
-              <Maximize className="w-4 h-4" />
+              <Square className="w-3.5 h-3.5" />
             </button>
-          )}
+            <button
+              type="button"
+              onClick={onToggleMute}
+              className="p-1 text-white hover:text-white/80 transition-colors ml-auto"
+              title={muted ? "Unmute" : "Mute"}
+            >
+              {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={muted ? 0 : volume}
+              onChange={(e) => {
+                onSetVolume(Number.parseFloat(e.target.value));
+                if (muted) onToggleMute();
+              }}
+              className="w-16 h-1 accent-white cursor-pointer"
+              title={`Volume: ${Math.round((muted ? 0 : volume) * 100)}%`}
+            />
+            {showCastUi && castRequest && chromecast && (
+              <CastMenu
+                chromecast={chromecast}
+                castRequest={castRequest}
+                mode="popover"
+                onCastStart={handleCastStart}
+                onOpenChange={setCastMenuPinned}
+              />
+            )}
+            {onPip && (
+              <button
+                type="button"
+                onClick={onPip}
+                className="p-1 text-white hover:text-white/80 transition-colors ml-1"
+                title="Picture-in-Picture"
+              >
+                <PictureInPicture2 className="w-4 h-4" />
+              </button>
+            )}
+            {onFullscreen && (
+              <button
+                type="button"
+                onClick={onFullscreen}
+                className="p-1 text-white hover:text-white/80 transition-colors ml-1"
+                title="Fullscreen"
+              >
+                <Maximize className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>

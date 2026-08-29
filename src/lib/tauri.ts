@@ -6,6 +6,8 @@ import type {
   CastSession,
   ChannelResult,
   ChromecastDevice,
+  EpgLoadSummary,
+  EpgProgramme,
   PlaylistPreview,
   RecentPlaylistEntry,
   RecentPlaylistKind,
@@ -99,6 +101,22 @@ export async function resetScan(): Promise<void> {
 
 export async function quickCheckChannel(channel: ChannelResult): Promise<ChannelResult> {
   return invoke("quick_check_channel", { channel: toCommandChannelResult(channel) });
+}
+
+export async function loadEpg(
+  sources: string[],
+  tvgIds: string[],
+  forceRefresh = false,
+): Promise<EpgLoadSummary> {
+  return invoke("load_epg", { sources, tvgIds, forceRefresh });
+}
+
+export async function getEpgProgrammes(
+  tvgId: string,
+  from: number,
+  to: number,
+): Promise<EpgProgramme[]> {
+  return invoke("get_epg_programmes", { tvgId, from, to });
 }
 
 export async function exportCsv(

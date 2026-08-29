@@ -290,6 +290,10 @@ function SelectedChannelSidebar({
         volume={streamPlayer.volume}
         muted={streamPlayer.muted}
         videoElement={streamPlayer.videoElement}
+        archiveSession={streamPlayer.archiveSession}
+        onPlayArchive={streamPlayer.playArchive}
+        onSeekArchive={streamPlayer.seekArchive}
+        onGoLive={streamPlayer.goLive}
         onTogglePause={streamPlayer.togglePause}
         onStopPlayer={onStopPlayer}
         onSetVolume={streamPlayer.setVolume}

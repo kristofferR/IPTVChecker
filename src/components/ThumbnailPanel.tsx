@@ -14,12 +14,14 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { UseChromecastResult } from "../hooks/useChromecast";
+import type { ArchivePlayOptions, ArchiveSession } from "../hooks/useStreamPlayer";
 import { buildCastRequest, isCastSessionActive } from "../lib/cast";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
 import { isScanActive, type ScanState } from "../lib/scanState";
 import { getThumbnailDisplayState } from "../lib/thumbnailState";
 import type { ChannelResult } from "../lib/types";
+import { ArchiveCard } from "./ArchiveCard";
 import { CastMenu } from "./CastMenu";
 import { StatusBadge } from "./StatusBadge";
 import { StreamPlayer } from "./StreamPlayer";
@@ -59,6 +61,10 @@ interface ThumbnailPanelProps {
   onOpenExternal?: (result: ChannelResult) => void;
   onRetryPlay?: (result: ChannelResult) => void;
   onPip?: () => void;
+  archiveSession?: ArchiveSession | null;
+  onPlayArchive?: (result: ChannelResult, options: ArchivePlayOptions) => void;
+  onSeekArchive?: (epochS: number) => void;
+  onGoLive?: () => void;
 }
 
 export function ThumbnailPanel({
@@ -90,6 +96,10 @@ export function ThumbnailPanel({
   onOpenExternal,
   onRetryPlay,
   onPip,
+  archiveSession,
+  onPlayArchive,
+  onSeekArchive,
+  onGoLive,
 }: ThumbnailPanelProps) {
   const [lightboxRendered, setLightboxRendered] = useState(false);
   const [lightboxVisible, setLightboxVisible] = useState(false);
@@ -295,6 +305,10 @@ export function ThumbnailPanel({
           castRequest={castRequest}
           compact
           chromecast={chromecast}
+          archiveSession={archiveSession}
+          videoElement={videoElement}
+          onSeekArchive={onSeekArchive}
+          onGoLive={onGoLive}
         />
       ) : screenshotUrl ? (
         <button
@@ -486,6 +500,14 @@ export function ThumbnailPanel({
         )}
       </div>
 
+      {onPlayArchive && (
+        <ArchiveCard
+          result={result}
+          archiveSession={archiveSession ?? null}
+          onPlayArchive={onPlayArchive}
+        />
+      )}
+
       {result.status === "drm" && (
         <div className="p-2 rounded bg-cyan-500/10 border border-cyan-500/20">
           <p className="text-[12px] font-medium text-cyan-300">DRM Detection</p>
@@ -622,6 +644,10 @@ export function ThumbnailPanel({
                     }
                     castRequest={castRequest}
                     chromecast={chromecast}
+                    archiveSession={archiveSession}
+                    videoElement={videoElement}
+                    onSeekArchive={onSeekArchive}
+                    onGoLive={onGoLive}
                   />
                   <button
                     type="button"

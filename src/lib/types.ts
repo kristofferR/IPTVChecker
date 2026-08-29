@@ -86,7 +86,22 @@ export interface PlaylistPreview {
   movie_count: number;
   series_count: number;
   groups: string[];
+  epg_sources: string[];
   channels: Channel[];
+}
+
+export interface EpgProgramme {
+  start: number;
+  stop: number;
+  title: string;
+}
+
+export interface EpgLoadSummary {
+  sources_requested: number;
+  sources_loaded: number;
+  failed_sources: string[];
+  channels_matched: number;
+  programme_count: number;
 }
 
 export interface XtreamAccountInfo {
