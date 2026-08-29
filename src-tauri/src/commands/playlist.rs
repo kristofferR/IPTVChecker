@@ -65,9 +65,58 @@ pub enum PlaylistLoadProgress {
     },
 }
 
+#[derive(Clone, Serialize)]
+struct XtreamArchiveChannelUpdate {
+    index: usize,
+    catchup: Option<String>,
+    catchup_days: Option<u32>,
+    extinf_line: String,
+}
+
+#[derive(Clone, Serialize)]
+struct XtreamArchiveEnrichment {
+    source_identity: String,
+    channels: Vec<XtreamArchiveChannelUpdate>,
+}
+
 pub(crate) const PROGRESS_THROTTLE: Duration = Duration::from_millis(100);
 const PROGRESS_LOG_THROTTLE: Duration = Duration::from_secs(1);
 const XTREAM_ARCHIVE_ENRICHMENT_GRACE_TIMEOUT: Duration = Duration::from_secs(2);
+
+fn apply_xtream_archive_flags_with_updates(
+    channels: &mut [Channel],
+    archive_flags: &HashMap<String, Option<u32>>,
+) -> Vec<XtreamArchiveChannelUpdate> {
+    let previous = channels
+        .iter()
+        .map(|channel| {
+            (
+                channel.catchup.clone(),
+                channel.catchup_days,
+                channel.extinf_line.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    apply_xtream_archive_flags(channels, archive_flags);
+
+    channels
+        .iter()
+        .zip(previous)
+        .filter_map(|(channel, before)| {
+            let after = (
+                channel.catchup.clone(),
+                channel.catchup_days,
+                channel.extinf_line.clone(),
+            );
+            (after != before).then_some(XtreamArchiveChannelUpdate {
+                index: channel.index,
+                catchup: after.0,
+                catchup_days: after.1,
+                extinf_line: after.2,
+            })
+        })
+        .collect()
+}
 
 #[derive(Default)]
 struct PlaylistProgressLogState {
@@ -700,6 +749,15 @@ pub(crate) async fn open_playlist_xtream_inner(
 
     let server = normalize_xtream_server(&source.server)?;
     let source_key = build_xtream_source_key(&server, &username);
+    let source_identity = source_identity_override.unwrap_or_else(|| source_key.clone());
+    let archive_generation = app
+        .state::<Arc<AppState>>()
+        .begin_xtream_archive_enrichment(source_identity.clone())
+        .await;
+    let _ = app.emit(
+        "playlist://xtream-archive-enrichment-started",
+        source_identity.clone(),
+    );
     let download_url = build_xtream_download_url(&server, &username, &password);
     let data_dir = app_data_dir(app)?;
     let cache_path = remote_playlist_cache_path_from_data_dir(&data_dir, &source_key)?;
@@ -774,28 +832,68 @@ pub(crate) async fn open_playlist_xtream_inner(
             return Err(error);
         }
     };
-    let archive_flags = if let Some(mut task) = archive_task {
+    let (archive_flags, pending_archive_task) = if let Some(mut task) = archive_task {
         match tokio::time::timeout(XTREAM_ARCHIVE_ENRICHMENT_GRACE_TIMEOUT, &mut task).await {
-            Ok(Ok(Some(live_streams))) => xtream_archive_flags(&live_streams),
-            Ok(Ok(None)) => HashMap::new(),
+            Ok(Ok(Some(live_streams))) => (Some(xtream_archive_flags(&live_streams)), None),
+            Ok(Ok(None)) => (None, None),
             Ok(Err(error)) => {
                 log::debug!("Xtream live-stream catalog task failed: {error}");
-                HashMap::new()
+                (None, None)
             }
-            Err(_) => {
-                task.abort();
-                HashMap::new()
-            }
+            Err(_) => (None, Some(task)),
         }
     } else {
-        HashMap::new()
+        (None, None)
     };
-    if !archive_flags.is_empty() {
-        apply_xtream_archive_flags(&mut preview.channels, &archive_flags);
+    if let Some(archive_flags) = archive_flags {
+        if !archive_flags.is_empty() {
+            apply_xtream_archive_flags(&mut preview.channels, &archive_flags);
+        }
+        app.state::<Arc<AppState>>()
+            .complete_xtream_archive_enrichment(&source_identity, archive_generation, archive_flags)
+            .await;
+    }
+    if let Some(task) = pending_archive_task {
+        let app = app.clone();
+        let source_identity = source_identity.clone();
+        let mut channels = preview.channels.clone();
+        tokio::spawn(async move {
+            match task.await {
+                Ok(Some(live_streams)) => {
+                    let archive_flags = xtream_archive_flags(&live_streams);
+                    if archive_flags.is_empty() {
+                        return;
+                    }
+                    let updates =
+                        apply_xtream_archive_flags_with_updates(&mut channels, &archive_flags);
+                    let is_current = app
+                        .state::<Arc<AppState>>()
+                        .complete_xtream_archive_enrichment(
+                            &source_identity,
+                            archive_generation,
+                            archive_flags,
+                        )
+                        .await;
+                    if is_current && !updates.is_empty() {
+                        let _ = app.emit(
+                            "playlist://xtream-archive-enrichment",
+                            XtreamArchiveEnrichment {
+                                source_identity,
+                                channels: updates,
+                            },
+                        );
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    log::debug!("Xtream live-stream catalog task failed: {error}");
+                }
+            }
+        });
     }
     let server_host = server.host_str().unwrap_or("Xtream");
     preview.file_name = format!("{} ({})", server_host, username);
-    preview.source_identity = Some(source_identity_override.unwrap_or(source_key));
+    preview.source_identity = Some(source_identity);
     preview.xtream_max_connections = xtream_account_info
         .as_ref()
         .and_then(|account| account.max_connections);

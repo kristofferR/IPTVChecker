@@ -1,4 +1,4 @@
-import type { ChannelResult } from "./types";
+import type { ChannelResult, PlaylistPreview, XtreamArchiveChannelUpdate } from "./types";
 
 // "Archive" = provider catch-up/replay of past programmes (issue #229). Named
 // archive rather than catch-up because playback.ts already uses "catch-up"
@@ -32,4 +32,46 @@ export function archiveTitle(result: ArchiveFields): string | null {
 export function archiveSortValue(result: ArchiveFields): number | null {
   if (!hasArchive(result)) return null;
   return result.catchup_days ?? 0;
+}
+
+type ArchiveUpdateTarget = Pick<
+  ChannelResult,
+  "index" | "catchup" | "catchup_days" | "extinf_line"
+>;
+
+export function applyXtreamArchiveUpdates<T extends ArchiveUpdateTarget>(
+  items: T[],
+  updates: XtreamArchiveChannelUpdate[],
+): T[] {
+  if (updates.length === 0) return items;
+
+  const updatesByIndex = new Map(updates.map((update) => [update.index, update]));
+  let changed = false;
+  const next = items.map((item) => {
+    const update = updatesByIndex.get(item.index);
+    if (
+      !update ||
+      (item.catchup === update.catchup &&
+        item.catchup_days === update.catchup_days &&
+        item.extinf_line === update.extinf_line)
+    ) {
+      return item;
+    }
+    changed = true;
+    return {
+      ...item,
+      catchup: update.catchup,
+      catchup_days: update.catchup_days,
+      extinf_line: update.extinf_line,
+    };
+  });
+  return changed ? next : items;
+}
+
+export function applyXtreamArchiveUpdatesToPreview(
+  preview: PlaylistPreview,
+  updates: XtreamArchiveChannelUpdate[],
+): PlaylistPreview {
+  const channels = applyXtreamArchiveUpdates(preview.channels, updates);
+  return channels === preview.channels ? preview : { ...preview, channels };
 }

@@ -6,6 +6,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::engine::cast_proxy::CastProxyHandle;
 use crate::engine::chromecast::ActiveCastSession;
+use crate::engine::xtream::apply_xtream_archive_flags;
 use crate::models::backend_perf::BackendPerfSample;
 use crate::models::playlist::PlaylistPreview;
 use crate::models::scan_log::ScanDebugLog;
@@ -13,6 +14,12 @@ use crate::models::settings::AppSettings;
 
 pub const PLAYLIST_PREVIEW_CACHE_LIMIT: usize = 8;
 pub const BACKEND_PERF_SAMPLES_LIMIT: usize = 512;
+type XtreamArchiveFlags = HashMap<String, Option<u32>>;
+
+struct XtreamArchiveEnrichmentState {
+    generation: u64,
+    flags: Option<Arc<XtreamArchiveFlags>>,
+}
 
 fn now_epoch_ms() -> u64 {
     std::time::SystemTime::now()
@@ -81,6 +88,8 @@ pub struct AppState {
     window_scan_states: Mutex<HashMap<String, WindowScanState>>,
     backend_perf_samples: Mutex<VecDeque<BackendPerfSample>>,
     playlist_preview_cache: Mutex<HashMap<String, CachedPlaylistPreview>>,
+    xtream_archive_enrichments: Mutex<HashMap<String, XtreamArchiveEnrichmentState>>,
+    xtream_archive_generation: std::sync::atomic::AtomicU64,
     /// Rejects a second install immediately instead of queueing it behind the
     /// first one on `update_checking`.
     pub update_installing: std::sync::atomic::AtomicBool,
@@ -108,6 +117,8 @@ impl AppState {
             window_scan_states: Mutex::new(HashMap::new()),
             backend_perf_samples: Mutex::new(VecDeque::new()),
             playlist_preview_cache: Mutex::new(HashMap::new()),
+            xtream_archive_enrichments: Mutex::new(HashMap::new()),
+            xtream_archive_generation: std::sync::atomic::AtomicU64::new(0),
             update_installing: std::sync::atomic::AtomicBool::new(false),
             update_checking: Mutex::new(()),
             update_available: Mutex::new(None),
@@ -163,9 +174,22 @@ impl AppState {
     pub async fn put_cached_playlist_preview(
         &self,
         cache_key: String,
-        preview: Arc<PlaylistPreview>,
+        mut preview: Arc<PlaylistPreview>,
         source_fingerprint: Option<u64>,
     ) {
+        let archive_flags = if let Some(source_identity) = &preview.source_identity {
+            self.xtream_archive_enrichments
+                .lock()
+                .await
+                .get(source_identity)
+                .and_then(|enrichment| enrichment.flags.clone())
+        } else {
+            None
+        };
+        if let Some(flags) = archive_flags {
+            apply_xtream_archive_flags(&mut Arc::make_mut(&mut preview).channels, &flags);
+        }
+
         let mut cache = self.playlist_preview_cache.lock().await;
         if cache.len() >= PLAYLIST_PREVIEW_CACHE_LIMIT && !cache.contains_key(&cache_key) {
             if let Some(stale_key) = cache
@@ -180,5 +204,135 @@ impl AppState {
             cache_key,
             CachedPlaylistPreview::new(preview, source_fingerprint),
         );
+    }
+
+    pub async fn begin_xtream_archive_enrichment(&self, source_identity: String) -> u64 {
+        let generation = self
+            .xtream_archive_generation
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.xtream_archive_enrichments.lock().await.insert(
+            source_identity,
+            XtreamArchiveEnrichmentState {
+                generation,
+                flags: None,
+            },
+        );
+        generation
+    }
+
+    pub async fn complete_xtream_archive_enrichment(
+        &self,
+        source_identity: &str,
+        generation: u64,
+        flags: XtreamArchiveFlags,
+    ) -> bool {
+        let flags = Arc::new(flags);
+        {
+            let mut enrichments = self.xtream_archive_enrichments.lock().await;
+            let Some(enrichment) = enrichments.get_mut(source_identity) else {
+                return false;
+            };
+            if enrichment.generation != generation {
+                return false;
+            }
+            enrichment.flags = Some(Arc::clone(&flags));
+        }
+
+        let mut cache = self.playlist_preview_cache.lock().await;
+        for cached in cache.values_mut() {
+            if cached.preview.source_identity.as_deref() == Some(source_identity) {
+                apply_xtream_archive_flags(
+                    &mut Arc::make_mut(&mut cached.preview).channels,
+                    &flags,
+                );
+            }
+        }
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppState;
+    use crate::models::channel::{Channel, ContentType};
+    use crate::models::playlist::PlaylistPreview;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    fn preview() -> PlaylistPreview {
+        PlaylistPreview {
+            file_path: "cached.m3u".to_string(),
+            file_name: "Provider".to_string(),
+            source_identity: Some("xtream:provider".to_string()),
+            saved_playlist_id: None,
+            server_location: None,
+            single_provider: true,
+            xtream_max_connections: None,
+            xtream_account_info: None,
+            total_channels: 1,
+            live_count: 1,
+            movie_count: 0,
+            series_count: 0,
+            groups: vec!["News".to_string()],
+            channels: vec![Channel {
+                index: 0,
+                playlist: "Provider".to_string(),
+                name: "News".to_string(),
+                group: "News".to_string(),
+                language: None,
+                tvg_id: None,
+                tvg_name: None,
+                tvg_logo: None,
+                tvg_chno: None,
+                catchup: None,
+                catchup_days: None,
+                catchup_source: None,
+                url: "https://provider.example/live/user/pass/42.ts".to_string(),
+                content_type: ContentType::Live,
+                extinf_line: "#EXTINF:-1,News".to_string(),
+                metadata_lines: Vec::new(),
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn only_current_xtream_enrichment_updates_cached_previews() {
+        let state = AppState::new();
+        let stale_generation = state
+            .begin_xtream_archive_enrichment("xtream:provider".to_string())
+            .await;
+        let current_generation = state
+            .begin_xtream_archive_enrichment("xtream:provider".to_string())
+            .await;
+        state
+            .put_cached_playlist_preview("cache-key".to_string(), Arc::new(preview()), None)
+            .await;
+
+        let flags = HashMap::from([("42".to_string(), Some(7))]);
+        assert!(
+            !state
+                .complete_xtream_archive_enrichment(
+                    "xtream:provider",
+                    stale_generation,
+                    flags.clone(),
+                )
+                .await
+        );
+        assert!(state
+            .get_cached_playlist_preview("cache-key", None)
+            .await
+            .is_some_and(|preview| preview.channels[0].catchup.is_none()));
+
+        assert!(
+            state
+                .complete_xtream_archive_enrichment("xtream:provider", current_generation, flags,)
+                .await
+        );
+        let cached = state
+            .get_cached_playlist_preview("cache-key", None)
+            .await
+            .expect("cached preview");
+        assert_eq!(cached.channels[0].catchup.as_deref(), Some("xc"));
+        assert_eq!(cached.channels[0].catchup_days, Some(7));
     }
 }
