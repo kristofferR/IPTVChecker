@@ -16,6 +16,7 @@ export async function verifyAllArchives(): Promise<void> {
   if (
     bulkRunActive ||
     isScanActive(initialState.scanState) ||
+    initialState.archiveGuideTestRunning ||
     Object.values(initialState.archiveProbes).some((entry) => entry.running)
   ) {
     return;

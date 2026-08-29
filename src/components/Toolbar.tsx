@@ -139,6 +139,7 @@ export const Toolbar = memo(function Toolbar({
   const viewMode = useAppStore((s) => s.viewMode);
   const setViewMode = useAppStore((s) => s.setViewMode);
   const archiveVerifyRun = useAppStore((s) => s.archiveVerifyRun);
+  const archiveGuideTestRunning = useAppStore((s) => s.archiveGuideTestRunning);
   const archiveProbeRunning = useAppStore((s) =>
     Object.values(s.archiveProbes).some((entry) => entry.running),
   );
@@ -289,7 +290,7 @@ export const Toolbar = memo(function Toolbar({
     selectedIndices.length > 0 ? `Scan Selected (${selectedIndices.length})` : "Scan";
   const scanDisabledReason = !hasPlaylist
     ? "Open a playlist first"
-    : archiveVerifyRun || archiveProbeRunning
+    : archiveVerifyRun || archiveGuideTestRunning || archiveProbeRunning
       ? "Wait for catch-up verification to finish"
       : scanBlockedReason;
   const canSavePlaylist =
@@ -303,6 +304,12 @@ export const Toolbar = memo(function Toolbar({
       setOpenMenuVisible(false);
     }
   }, [inScanSession]);
+
+  useEffect(() => {
+    if (scanDisabledReason !== null) {
+      setScanMenuVisible(false);
+    }
+  }, [scanDisabledReason]);
 
   useLayoutEffect(() => {
     const select = groupSelectRef.current;

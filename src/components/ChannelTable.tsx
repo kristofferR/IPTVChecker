@@ -141,6 +141,7 @@ export function ChannelTable({
   const groupFilter = useAppStore((s) => s.groupFilter);
   const statusFilter = useAppStore((s) => s.statusFilter);
   const scanState = useAppStore((s) => s.scanState);
+  const archiveGuideTestRunning = useAppStore((s) => s.archiveGuideTestRunning);
   const archiveProbeRunning = useAppStore((s) =>
     Object.values(s.archiveProbes).some((entry) => entry.running),
   );
@@ -937,7 +938,7 @@ export function ChannelTable({
   }, [contextMenuState]);
 
   const handleTestCatchup = useCallback(() => {
-    if (isScanActive(scanState) || archiveProbeRunning) {
+    if (isScanActive(scanState) || archiveGuideTestRunning || archiveProbeRunning) {
       setContextMenuState(null);
       return;
     }
@@ -955,7 +956,7 @@ export function ChannelTable({
         );
       }
     })();
-  }, [archiveProbeRunning, getSelectedChannels, scanState]);
+  }, [archiveGuideTestRunning, archiveProbeRunning, getSelectedChannels, scanState]);
 
   const handleCopyChannelName = useCallback(async () => {
     if (!contextMenuState) return;
@@ -1477,7 +1478,9 @@ export function ChannelTable({
               <>
                 <button
                   onClick={handleTestCatchup}
-                  disabled={isScanActive(scanState) || archiveProbeRunning}
+                  disabled={
+                    isScanActive(scanState) || archiveGuideTestRunning || archiveProbeRunning
+                  }
                   className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
                   type="button"
                 >

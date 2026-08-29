@@ -166,6 +166,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
   const epgLoadSummary = useAppStore((s) => s.epgLoadSummary);
   const archiveProbes = useAppStore((s) => s.archiveProbes);
   const archiveVerifyRun = useAppStore((s) => s.archiveVerifyRun);
+  const archiveGuideTestRunning = useAppStore((s) => s.archiveGuideTestRunning);
   const archiveProbeRunning = Object.values(archiveProbes).some((entry) => entry.running);
   const summary = useAppStore((s) => s.summary);
   const scanState = useAppStore((s) => s.scanState);
@@ -570,11 +571,13 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                 <button
                   type="button"
                   onClick={() => void verifyAllArchives()}
-                  disabled={isScanActive(scanState) || archiveProbeRunning}
+                  disabled={
+                    isScanActive(scanState) || archiveGuideTestRunning || archiveProbeRunning
+                  }
                   title={
                     isScanActive(scanState)
                       ? "Wait for the scan to finish"
-                      : archiveProbeRunning
+                      : archiveGuideTestRunning || archiveProbeRunning
                         ? "Another catch-up verification is running"
                         : undefined
                   }

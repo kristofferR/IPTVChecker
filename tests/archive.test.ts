@@ -91,9 +91,9 @@ describe("buildArchiveUrl", () => {
       buildArchiveUrl(urlFields("http://h/s.m3u8?token=x", "shift", "?utc=${start}"), WINDOW),
     ).toBe(`http://h/s.m3u8?token=x&utc=${START}`);
     // A leading & normalizes to ? when the URL has no query yet.
-    expect(
-      buildArchiveUrl(urlFields("http://h/s.m3u8", "append", "&start=${start}"), WINDOW),
-    ).toBe(`http://h/s.m3u8?start=${START}`);
+    expect(buildArchiveUrl(urlFields("http://h/s.m3u8", "append", "&start=${start}"), WINDOW)).toBe(
+      `http://h/s.m3u8?start=${START}`,
+    );
     // Non-query relative templates concatenate verbatim.
     expect(
       buildArchiveUrl(urlFields("http://h/video", "append", "-${start}-${duration}.m3u8"), WINDOW),
@@ -115,9 +115,9 @@ describe("buildArchiveUrl", () => {
   });
 
   it("builds flussonic archive URLs", () => {
-    expect(
-      buildArchiveUrl(urlFields("http://host/channel/index.m3u8", "flussonic"), WINDOW),
-    ).toBe(`http://host/channel/archive-${START}-3600.m3u8`);
+    expect(buildArchiveUrl(urlFields("http://host/channel/index.m3u8", "flussonic"), WINDOW)).toBe(
+      `http://host/channel/archive-${START}-3600.m3u8`,
+    );
     expect(
       buildArchiveUrl(urlFields("http://host/channel/mono.ts?tok=1", "flussonic"), WINDOW),
     ).toBe(`http://host/channel/timeshift_abs-${START}.ts?tok=1`);

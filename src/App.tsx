@@ -893,6 +893,7 @@ export default function App() {
       const state = getStore();
       if (
         state.archiveVerifyRun ||
+        state.archiveGuideTestRunning ||
         Object.values(state.archiveProbes).some((entry) => entry.running)
       ) {
         return false;
@@ -912,6 +913,7 @@ export default function App() {
       const refreshedState = getStore();
       if (
         refreshedState.archiveVerifyRun ||
+        refreshedState.archiveGuideTestRunning ||
         Object.values(refreshedState.archiveProbes).some((entry) => entry.running)
       ) {
         return false;

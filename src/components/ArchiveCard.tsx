@@ -20,17 +20,19 @@ function ArchiveProbe({ result }: { result: ChannelResult }) {
   const entry = useAppStore((state) => state.archiveProbes[result.index]);
   const setArchiveProbe = useAppStore((state) => state.setArchiveProbe);
   const scanState = useAppStore((state) => state.scanState);
+  const archiveGuideTestRunning = useAppStore((state) => state.archiveGuideTestRunning);
   const anotherProbeRunning = useAppStore((state) =>
     Object.values(state.archiveProbes).some((probe) => probe.running),
   );
   const running = entry?.running ?? false;
-  const disabled = anotherProbeRunning || isScanActive(scanState);
+  const disabled = archiveGuideTestRunning || anotherProbeRunning || isScanActive(scanState);
   const outcomes = entry?.outcomes ?? [];
 
   const runProbe = () => {
     const state = useAppStore.getState();
     if (
       isScanActive(state.scanState) ||
+      state.archiveGuideTestRunning ||
       Object.values(state.archiveProbes).some((probe) => probe.running)
     ) {
       return;

@@ -128,6 +128,7 @@ export function GuideView({
   onPlayArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
 }) {
   const flatResults = useAppStore((s) => s.flatResults);
+  const playlist = useAppStore((s) => s.playlist);
   const search = useAppStore((s) => s.search);
   const groupFilter = useAppStore((s) => s.groupFilter);
   const setViewMode = useAppStore((s) => s.setViewMode);
@@ -135,6 +136,7 @@ export function GuideView({
   const setGuideFocusChannelIndex = useAppStore((s) => s.setGuideFocusChannelIndex);
   const scanState = useAppStore((s) => s.scanState);
   const archiveVerifyRun = useAppStore((s) => s.archiveVerifyRun);
+  const archiveGuideTestRunning = useAppStore((s) => s.archiveGuideTestRunning);
   const archiveProbeRunning = useAppStore((s) =>
     Object.values(s.archiveProbes).some((entry) => entry.running),
   );
@@ -159,6 +161,11 @@ export function GuideView({
   const [selection, setSelection] = useState<GuideSelection | null>(null);
   const [testOutcome, setTestOutcome] = useState<ArchiveProbeOutcome | null>(null);
   const [testing, setTesting] = useState(false);
+
+  useEffect(() => {
+    setSelection(null);
+    setTestOutcome(null);
+  }, [playlist]);
 
   const windowFrom = startOfDayEpochS(daysAgo) + windowStartHour * 3600;
   const windowTo = windowFrom + WINDOW_HOURS * 3600;
@@ -223,39 +230,49 @@ export function GuideView({
     if (
       isScanActive(state.scanState) ||
       state.archiveVerifyRun ||
+      state.archiveGuideTestRunning ||
       Object.values(state.archiveProbes).some((entry) => entry.running)
     ) {
       return;
     }
     const target = selection;
+    const playlistAtStart = state.playlist;
     setTesting(true);
     setTestOutcome(null);
-    state.setArchiveProbe(target.result.index, {
-      running: true,
-      outcomes: [],
-      checkedAt: null,
-    });
+    state.setArchiveGuideTestRunning(true);
     const now = Math.floor(Date.now() / 1000);
-    const outcome = await probeArchivePoint(
-      target.result,
-      {
-        label: timeLabel(target.programme.start),
-        daysBack: Math.max(0, Math.round((now - target.programme.start) / 86_400)),
-        startEpochS: target.programme.start,
-      },
-      now,
-    );
-    useAppStore.getState().setArchiveProbe(target.result.index, {
-      running: false,
-      outcomes: outcome ? [outcome] : [],
-      checkedAt: now,
-    });
-    setTestOutcome(outcome);
-    setTesting(false);
+    const point = {
+      label: timeLabel(target.programme.start),
+      daysBack: Math.max(0, Math.round((now - target.programme.start) / 86_400)),
+      startEpochS: target.programme.start,
+    };
+    let outcome: ArchiveProbeOutcome | null = null;
+    try {
+      outcome = await probeArchivePoint(target.result, point, now);
+    } catch (error) {
+      outcome = {
+        label: point.label,
+        daysBack: point.daysBack,
+        ok: false,
+        latencyMs: null,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      const currentState = useAppStore.getState();
+      currentState.setArchiveGuideTestRunning(false);
+      if (currentState.playlist === playlistAtStart) {
+        setTestOutcome(outcome);
+      }
+      setTesting(false);
+    }
   };
 
   const testBlocked =
-    testing || isScanActive(scanState) || archiveVerifyRun !== null || archiveProbeRunning;
+    testing ||
+    isScanActive(scanState) ||
+    archiveVerifyRun !== null ||
+    archiveGuideTestRunning ||
+    archiveProbeRunning;
 
   const hourLabels = Array.from(
     { length: WINDOW_HOURS },
