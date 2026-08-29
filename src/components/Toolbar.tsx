@@ -29,6 +29,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { hasArchive } from "../lib/archive";
 import type { ExportScope } from "../lib/exportScope";
 import { countStatusOptions, filterResultsShared, sharedSearchTextCache } from "../lib/filters";
 import { measureUiPerf } from "../lib/perf";
@@ -201,6 +202,10 @@ export const Toolbar = memo(function Toolbar({
         separatePlaceholder,
       ),
     [completedResults, deferredSearch, groupFilter, duplicateIndices, separatePlaceholder],
+  );
+  const catchupChannelCount = useMemo(
+    () => completedResults.filter(hasArchive).length,
+    [completedResults],
   );
 
   const exportContextRef = useRef({
@@ -501,7 +506,7 @@ export const Toolbar = memo(function Toolbar({
               <IconScan className="w-[22px] h-[22px]" />
               {showButtonText && scanLabel}
             </button>
-            {(statusOptionCounts.catchup ?? 0) > 0 && (
+            {catchupChannelCount > 0 && (
               <button
                 type="button"
                 onClick={() => setScanMenuVisible((visible) => !visible)}
@@ -535,7 +540,7 @@ export const Toolbar = memo(function Toolbar({
                   }}
                   className="w-full px-3 py-2 text-left text-[13px] hover:bg-btn-hover"
                 >
-                  Scan + Verify Catch-up ({statusOptionCounts.catchup ?? 0})
+                  Scan + Verify Catch-up ({catchupChannelCount})
                 </button>
               </div>
             )}

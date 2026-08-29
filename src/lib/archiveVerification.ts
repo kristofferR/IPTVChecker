@@ -21,7 +21,7 @@ export function archiveVerdict(
 ): ArchiveVerdict {
   if (!hasArchive(result)) return "advertised";
   const outcomes = entry?.outcomes ?? [];
-  if (entry?.running || outcomes.length === 0) return "advertised";
+  if (entry?.running || entry?.checkedAt == null || outcomes.length === 0) return "advertised";
   if (!outcomes.some((outcome) => outcome.ok)) return "broken";
   const advertisedDays = result.catchup_days;
   if (advertisedDays == null) return "verified";
@@ -67,12 +67,12 @@ export async function verifyChannelArchive(
 ): Promise<ArchiveProbeEntry> {
   const nowEpochS = Math.floor(Date.now() / 1000);
   const outcomes: ArchiveProbeOutcome[] = [];
-  const push = (outcome: ArchiveProbeOutcome | null, done: boolean) => {
+  const push = (outcome: ArchiveProbeOutcome | null, done: boolean, completed = done) => {
     if (outcome) outcomes.push(outcome);
     const entry: ArchiveProbeEntry = {
       running: !done,
       outcomes: [...outcomes],
-      checkedAt: done ? nowEpochS : null,
+      checkedAt: completed ? nowEpochS : null,
     };
     onUpdate(entry);
     return entry;
@@ -80,11 +80,14 @@ export async function verifyChannelArchive(
 
   push(null, false);
   if (shouldCancel()) {
-    return push(null, true);
+    return push(null, true, false);
   }
   const near = await probeArchivePoint(result, probePointForDays(0, nowEpochS), nowEpochS);
-  if (!near?.ok || shouldCancel()) {
+  if (!near?.ok) {
     return push(near, true);
+  }
+  if (shouldCancel()) {
+    return push(near, true, false);
   }
   push(near, false);
 
@@ -94,7 +97,7 @@ export async function verifyChannelArchive(
   }
 
   if (shouldCancel()) {
-    return push(null, true);
+    return push(null, true, false);
   }
 
   const deep = await probeArchivePoint(

@@ -10,11 +10,18 @@ function channel(index: number, catchupDays: number | null, catchup = "xc"): Cha
     catchup: catchupDays != null || catchup ? catchup : null,
     catchup_days: catchupDays,
     catchup_source: null,
+    content_type: "live",
   } as ChannelResult;
 }
 
 function plain(index: number): ChannelResult {
-  return { index, catchup: null, catchup_days: null, catchup_source: null } as ChannelResult;
+  return {
+    index,
+    catchup: null,
+    catchup_days: null,
+    catchup_source: null,
+    content_type: "live",
+  } as ChannelResult;
 }
 
 function entry(outcomes: Array<[number, boolean, number | null]>): ArchiveProbeEntry {
@@ -37,6 +44,13 @@ describe("archiveVerdict", () => {
   it("stays advertised without completed probes", () => {
     expect(archiveVerdict(ch, undefined)).toBe("advertised");
     expect(archiveVerdict(ch, { running: true, outcomes: [], checkedAt: null })).toBe("advertised");
+    expect(
+      archiveVerdict(ch, {
+        running: false,
+        outcomes: entry([[0, true, 400]]).outcomes,
+        checkedAt: null,
+      }),
+    ).toBe("advertised");
   });
 
   it("classifies broken, verified, and shallower archives", () => {
@@ -86,6 +100,12 @@ describe("computeCatchupScore", () => {
   it("scores advertised coverage before verification", () => {
     const results = [channel(0, 7), channel(1, 7), plain(2), plain(3)];
     expect(computeCatchupScore(results, {})).toBe(5);
+  });
+
+  it("calculates coverage from live channels only", () => {
+    const movie = { ...plain(2), content_type: "movie" as const };
+    const series = { ...plain(3), content_type: "series" as const };
+    expect(computeCatchupScore([channel(0, 7), plain(1), movie, series], {})).toBe(5);
   });
 
   it("blends reliability and depth after verification", () => {

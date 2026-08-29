@@ -24,14 +24,15 @@ export function computeCatchupScore(
   results: ChannelResult[],
   probes: Record<number, ArchiveProbeEntry>,
 ): number | null {
-  if (results.length === 0) {
+  const liveChannels = results.filter((result) => result.content_type === "live");
+  if (liveChannels.length === 0) {
     return null;
   }
-  const catchupChannels = results.filter(hasArchive);
+  const catchupChannels = liveChannels.filter(hasArchive);
   if (catchupChannels.length === 0) {
     return null;
   }
-  const coverage = catchupChannels.length / results.length;
+  const coverage = catchupChannels.length / liveChannels.length;
 
   let tested = 0;
   let reliabilityPoints = 0;
