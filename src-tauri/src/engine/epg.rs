@@ -12,6 +12,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio_util::sync::CancellationToken;
 
 use crate::error::AppError;
 
@@ -518,6 +519,7 @@ pub async fn download_epg_source(
     cache_dir: &Path,
     accept_invalid_certs: bool,
     force_refresh: bool,
+    cancel: &CancellationToken,
 ) -> Result<PathBuf, AppError> {
     std::fs::create_dir_all(cache_dir).map_err(AppError::Io)?;
     remove_stale_partial_downloads(cache_dir);
@@ -535,9 +537,12 @@ pub async fn download_epg_source(
         .build()
         .map_err(|error| AppError::Other(format!("Failed to build HTTP client: {error}")))?;
 
-    let response = client.get(url).send().await.map_err(|error| {
-        AppError::Other(format!("EPG download failed: {}", error.without_url()))
-    })?;
+    let response = tokio::select! {
+        _ = cancel.cancelled() => return Err(AppError::Other("EPG load superseded".to_string())),
+        response = client.get(url).send() => response.map_err(|error| {
+            AppError::Other(format!("EPG download failed: {}", error.without_url()))
+        })?,
+    };
     if !response.status().is_success() {
         return Err(AppError::Other(format!(
             "EPG download failed: HTTP {}",
@@ -550,11 +555,16 @@ pub async fn download_epg_source(
     let mut file = std::fs::File::create(&temp).map_err(AppError::Io)?;
     let mut downloaded: u64 = 0;
     let mut stream = response;
-    while let Some(chunk) = stream
-        .chunk()
-        .await
-        .map_err(|error| AppError::Other(format!("EPG download failed: {}", error.without_url())))?
-    {
+    loop {
+        let chunk = tokio::select! {
+            _ = cancel.cancelled() => return Err(AppError::Other("EPG load superseded".to_string())),
+            chunk = stream.chunk() => chunk.map_err(|error| {
+                AppError::Other(format!("EPG download failed: {}", error.without_url()))
+            })?,
+        };
+        let Some(chunk) = chunk else {
+            break;
+        };
         downloaded += chunk.len() as u64;
         if downloaded > EPG_MAX_DOWNLOAD_BYTES {
             return Err(AppError::Other(format!(
@@ -819,6 +829,32 @@ mod tests {
 
         assert!(!stale.exists());
         assert!(unrelated.exists());
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn cancels_epg_downloads_before_connecting() {
+        let dir = std::env::temp_dir().join(format!(
+            "iptv-epg-cancel-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+
+        let error = download_epg_source(
+            "https://example.invalid/guide.xml",
+            &dir,
+            false,
+            false,
+            &cancel,
+        )
+        .await
+        .expect_err("cancelled EPG download should stop");
+
+        assert!(error.to_string().contains("superseded"));
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 

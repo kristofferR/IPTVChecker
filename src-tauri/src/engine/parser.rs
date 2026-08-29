@@ -10,6 +10,33 @@ use crate::models::playlist::PlaylistPreview;
 const PLAYLIST_GROUP_PREFIX: &str = "Playlist: ";
 const MAX_PLAYLIST_DISCOVERY_DEPTH: usize = 64;
 
+fn epg_sources_for_channels(
+    epg_sources: &[String],
+    epg_sources_by_playlist: &BTreeMap<String, Vec<String>>,
+    channels: &[Channel],
+) -> (Vec<String>, BTreeMap<String, Vec<String>>) {
+    let represented_playlists = channels
+        .iter()
+        .map(|channel| channel.playlist.as_str())
+        .collect::<BTreeSet<_>>();
+    let filtered_by_playlist = epg_sources_by_playlist
+        .iter()
+        .filter(|(playlist, _)| represented_playlists.contains(playlist.as_str()))
+        .map(|(playlist, sources)| (playlist.clone(), sources.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let represented_sources = filtered_by_playlist
+        .values()
+        .flatten()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let filtered_sources = epg_sources
+        .iter()
+        .filter(|source| represented_sources.contains(source.as_str()))
+        .cloned()
+        .collect();
+    (filtered_sources, filtered_by_playlist)
+}
+
 /// Escape provider-supplied text before embedding it in a generated EXTINF
 /// line. Newlines are flattened so a value cannot inject extra playlist tags.
 pub(crate) fn escape_extinf_value(value: &str) -> String {
@@ -506,6 +533,18 @@ pub fn filter_playlist_preview(
     }
 
     let (live_count, movie_count, series_count) = content_type_totals(&channels);
+    let (epg_sources, epg_sources_by_playlist) = if source_is_directory {
+        epg_sources_for_channels(
+            &preview.epg_sources,
+            &preview.epg_sources_by_playlist,
+            &channels,
+        )
+    } else {
+        (
+            preview.epg_sources.clone(),
+            preview.epg_sources_by_playlist.clone(),
+        )
+    };
     Ok(PlaylistPreview {
         file_path: preview.file_path.clone(),
         file_name: preview.file_name.clone(),
@@ -520,8 +559,8 @@ pub fn filter_playlist_preview(
         movie_count,
         series_count,
         groups: preview.groups.clone(),
-        epg_sources: preview.epg_sources.clone(),
-        epg_sources_by_playlist: preview.epg_sources_by_playlist.clone(),
+        epg_sources,
+        epg_sources_by_playlist,
         channels,
     })
 }
@@ -840,6 +879,8 @@ fn parse_playlist_directory(
         .unwrap_or_else(|| dir_path.to_string());
 
     let (live_count, movie_count, series_count) = content_type_totals(&channels);
+    let (epg_sources, epg_sources_by_playlist) =
+        epg_sources_for_channels(&epg_sources, &epg_sources_by_playlist, &channels);
     Ok(PlaylistPreview {
         file_path: dir_path.to_string(),
         file_name: dir_name,
@@ -1305,6 +1346,29 @@ http://example.com/beta.m3u8
         assert_eq!(playlist_filtered.total_channels, 1);
         assert_eq!(playlist_filtered.channels[0].name, "Beta");
         assert_eq!(playlist_filtered.channels[0].index, 1);
+        assert_eq!(
+            playlist_filtered.epg_sources,
+            vec!["http://provider-b.example/epg.xml".to_string()]
+        );
+        assert_eq!(playlist_filtered.epg_sources_by_playlist.len(), 1);
+        assert_eq!(
+            playlist_filtered
+                .epg_sources_by_playlist
+                .get("nested/live.m3u8"),
+            Some(&vec!["http://provider-b.example/epg.xml".to_string()])
+        );
+
+        let cached_filtered = filter_playlist_preview(
+            &preview,
+            &Some("Playlist: nested/live.m3u8".to_string()),
+            &None,
+        )
+        .expect("cached directory preview should filter");
+        assert_eq!(cached_filtered.epg_sources, playlist_filtered.epg_sources);
+        assert_eq!(
+            cached_filtered.epg_sources_by_playlist,
+            playlist_filtered.epg_sources_by_playlist
+        );
 
         std::fs::remove_dir_all(root).expect("fixture directory should be removable");
     }

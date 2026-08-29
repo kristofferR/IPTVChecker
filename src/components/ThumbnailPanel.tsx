@@ -436,7 +436,7 @@ export function ThumbnailPanel({
           {onOpenExternal && (
             <button
               type="button"
-              onClick={() => onOpenExternal(result)}
+              onClick={() => externalPlaybackResult && onOpenExternal(externalPlaybackResult)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-btn hover:bg-btn-hover text-text-primary border border-border-app shadow-sm transition-colors"
               title="Open in external player"
             >

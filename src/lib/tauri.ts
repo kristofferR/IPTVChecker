@@ -111,6 +111,10 @@ export async function loadEpg(
   return invoke("load_epg", { sources, tvgIds, forceRefresh });
 }
 
+export async function cancelEpgLoad(): Promise<void> {
+  return invoke("cancel_epg_load");
+}
+
 export async function getEpgProgrammes(
   sources: string[],
   tvgId: string,

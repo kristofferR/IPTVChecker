@@ -68,6 +68,9 @@ function ensureEpgLoaded(): Promise<void> {
       }
     },
     (error) => {
+      if (epgLoad?.key !== key || epgLoadRequest().key !== key) {
+        return;
+      }
       logger.warn("[EPG] Load failed:", error);
       if (epgLoad?.key === key) {
         epgLoad = null;

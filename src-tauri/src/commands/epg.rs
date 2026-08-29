@@ -1,14 +1,37 @@
 use std::collections::HashSet;
+use std::io::Read;
 use std::sync::Arc;
 
 use serde::Serialize;
 use tauri::Manager;
+use tokio_util::sync::CancellationToken;
 
 use crate::engine::epg::{self, EpgIndex, EpgProgramme};
 use crate::error::AppError;
 use crate::state::AppState;
 
 const MAX_EPG_SOURCES_PER_LOAD: usize = 32;
+
+struct CancellableReader<R> {
+    inner: R,
+    cancel: CancellationToken,
+}
+
+impl<R: Read> Read for CancellableReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        if self.cancel.is_cancelled() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "EPG load superseded",
+            ));
+        }
+        self.inner.read(buffer)
+    }
+}
+
+fn superseded_error() -> AppError {
+    AppError::Other("EPG load superseded".to_string())
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct EpgLoadSummary {
@@ -42,7 +65,16 @@ pub async fn load_epg(
         )));
     }
 
-    let _guard = state.epg_load_lock.lock().await;
+    let cancel = {
+        let mut current = state.epg_load_cancel.lock().await;
+        current.cancel();
+        *current = CancellationToken::new();
+        current.clone()
+    };
+    let _guard = tokio::select! {
+        _ = cancel.cancelled() => return Err(superseded_error()),
+        guard = state.epg_load_lock.lock() => guard,
+    };
     let sources_requested = sources.len();
     let wanted: HashSet<String> = tvg_ids.into_iter().filter(|id| !id.is_empty()).collect();
     if wanted.is_empty() {
@@ -64,17 +96,34 @@ pub async fn load_epg(
     let mut sources_loaded = 0usize;
 
     for source in sources {
+        if cancel.is_cancelled() {
+            return Err(superseded_error());
+        }
         let outcome = async {
-            let path =
-                epg::download_epg_source(&source, &cache_dir, accept_invalid_certs, force_refresh)
-                    .await?;
+            let path = epg::download_epg_source(
+                &source,
+                &cache_dir,
+                accept_invalid_certs,
+                force_refresh,
+                &cancel,
+            )
+            .await?;
             let wanted = wanted.clone();
             let source_identity = source.clone();
             let parse_path = path.clone();
+            let parse_cancel = cancel.clone();
             let parse_result = match tokio::task::spawn_blocking(move || {
                 let mut partial = EpgIndex::default();
                 let reader = epg::open_guide_file(&parse_path)?;
-                epg::parse_xmltv_into_with_source(reader, &wanted, &source_identity, &mut partial)?;
+                epg::parse_xmltv_into_with_source(
+                    CancellableReader {
+                        inner: reader,
+                        cancel: parse_cancel,
+                    },
+                    &wanted,
+                    &source_identity,
+                    &mut partial,
+                )?;
                 Ok::<EpgIndex, AppError>(partial)
             })
             .await
@@ -82,6 +131,9 @@ pub async fn load_epg(
                 Ok(result) => result,
                 Err(error) => Err(AppError::Other(format!("EPG parse task failed: {error}"))),
             };
+            if cancel.is_cancelled() {
+                return Err(superseded_error());
+            }
             if parse_result.is_err() {
                 let _ = std::fs::remove_file(path);
             }
@@ -89,6 +141,9 @@ pub async fn load_epg(
         }
         .await;
 
+        if cancel.is_cancelled() {
+            return Err(superseded_error());
+        }
         match outcome {
             Ok(partial) => {
                 index.merge(partial);
@@ -100,6 +155,10 @@ pub async fn load_epg(
                 failed_sources.push(source);
             }
         }
+    }
+
+    if cancel.is_cancelled() {
+        return Err(superseded_error());
     }
 
     let summary = EpgLoadSummary {
@@ -117,6 +176,12 @@ pub async fn load_epg(
     );
     *state.epg.lock().await = Some(Arc::new(index));
     Ok(summary)
+}
+
+#[tauri::command]
+pub async fn cancel_epg_load(state: tauri::State<'_, Arc<AppState>>) -> Result<(), AppError> {
+    state.epg_load_cancel.lock().await.cancel();
+    Ok(())
 }
 
 /// Programmes for one channel overlapping `[from, to)` (epoch seconds).
