@@ -4,7 +4,7 @@ import type { ChannelResult } from "./types";
 // archive rather than catch-up because playback.ts already uses "catch-up"
 // for its live-buffer drift helpers.
 
-type ArchiveFields = Pick<ChannelResult, "catchup" | "catchup_days">;
+type ArchiveFields = Pick<ChannelResult, "catchup" | "catchup_days" | "catchup_source">;
 
 export function hasArchive(result: ArchiveFields): boolean {
   return result.catchup != null || result.catchup_days != null;
@@ -24,7 +24,8 @@ export function archiveTitle(result: ArchiveFields): string | null {
     result.catchup_days != null
       ? `${result.catchup_days} day${result.catchup_days === 1 ? "" : "s"}`
       : "unknown depth";
-  return `Catch-up: ${type} · ${depth}`;
+  const source = result.catchup_source ? ` · Source: ${result.catchup_source}` : "";
+  return `Catch-up: ${type} · ${depth}${source}`;
 }
 
 /** Sort key: advertised depth in days; depth-less catch-up sorts below dated ones. */

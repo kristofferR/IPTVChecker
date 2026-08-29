@@ -1297,6 +1297,24 @@ struct ResumeState {
     scope_suffix: String,
 }
 
+fn refresh_resumed_catchup_metadata(
+    entries: &mut [resume::CheckpointResumeEntry],
+    channels: &[Channel],
+) {
+    let channels_by_index: HashMap<usize, &Channel> = channels
+        .iter()
+        .map(|channel| (channel.index, channel))
+        .collect();
+
+    for entry in entries {
+        if let Some(channel) = channels_by_index.get(&entry.result.index) {
+            entry.result.catchup = channel.catchup.clone();
+            entry.result.catchup_days = channel.catchup_days;
+            entry.result.catchup_source = channel.catchup_source.clone();
+        }
+    }
+}
+
 /// Derive the resume file paths for this scan scope, load any checkpoint
 /// entries that match the current channel set, and prune already-checked
 /// channels from `channels`. Starts fresh (truncates the log and removes the
@@ -1352,6 +1370,7 @@ async fn load_resume_state(
         .filter(|entry| channel_indices.contains(&entry.result.index))
         .collect::<Vec<_>>();
     resumed_entries.sort_by_key(|entry| entry.result.index);
+    refresh_resumed_catchup_metadata(&mut resumed_entries, channels);
 
     let resumed_indices: HashSet<usize> = resumed_entries
         .iter()
@@ -2915,6 +2934,31 @@ mod tests {
             error_reason: None,
             channel_log: ChannelDebugLog::default(),
         }
+    }
+
+    #[test]
+    fn resumed_results_use_current_catchup_metadata() {
+        let mut result = make_result(1, ChannelStatus::Alive, false, false);
+        result.catchup = Some("stale".to_string());
+        result.catchup_days = Some(1);
+        result.catchup_source = Some("https://old.example/archive".to_string());
+        let mut entries = vec![resume::CheckpointResumeEntry {
+            result,
+            channel_log: None,
+        }];
+        let mut channel = make_channel(1);
+        channel.catchup = Some("xc".to_string());
+        channel.catchup_days = Some(7);
+        channel.catchup_source = Some("https://new.example/archive".to_string());
+
+        refresh_resumed_catchup_metadata(&mut entries, &[channel]);
+
+        assert_eq!(entries[0].result.catchup.as_deref(), Some("xc"));
+        assert_eq!(entries[0].result.catchup_days, Some(7));
+        assert_eq!(
+            entries[0].result.catchup_source.as_deref(),
+            Some("https://new.example/archive")
+        );
     }
 
     #[test]

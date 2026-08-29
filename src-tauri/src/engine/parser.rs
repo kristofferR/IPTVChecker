@@ -253,7 +253,10 @@ fn catchup_metadata_from_attrs(
     let kind = attr_value(attrs, "catchup")
         .or_else(|| attr_value(attrs, "catchup-type"))
         .map(|value| value.to_ascii_lowercase());
-    if matches!(kind.as_deref(), Some("none" | "no" | "0" | "disabled")) {
+    if matches!(
+        kind.as_deref(),
+        Some("none" | "no" | "false" | "off" | "0" | "disabled")
+    ) {
         return (None, None, None);
     }
 
@@ -975,8 +978,11 @@ mod tests {
 
     #[test]
     fn test_catchup_metadata_respects_disabled_and_zero_values() {
-        let disabled = parse_extinf_attributes("#EXTINF:-1 catchup=\"none\" catchup-days=\"7\",Ch");
-        assert_eq!(catchup_metadata_from_attrs(&disabled), (None, None, None));
+        for value in ["none", "no", "false", "off", "0", "disabled"] {
+            let line = format!("#EXTINF:-1 catchup=\"{value}\" catchup-days=\"7\",Ch");
+            let disabled = parse_extinf_attributes(&line);
+            assert_eq!(catchup_metadata_from_attrs(&disabled), (None, None, None));
+        }
 
         let zero_days = parse_extinf_attributes("#EXTINF:-1 catchup-days=\"0\",Ch");
         assert_eq!(catchup_metadata_from_attrs(&zero_days), (None, None, None));

@@ -1,5 +1,6 @@
-import { memo, type ReactNode, startTransition, useMemo } from "react";
+import { memo, type ReactNode, startTransition, useDeferredValue, useMemo } from "react";
 import { hasArchive } from "../lib/archive";
+import { countStatusOptions, sharedSearchTextCache } from "../lib/filters";
 import { useAppStore } from "../store";
 import {
   SFCheckmarkCircleFill,
@@ -95,6 +96,8 @@ export const StatsPanel = memo(function StatsPanel() {
   const toggleReportPanel = useAppStore((s) => s.toggleReportPanel);
   const flatResults = useAppStore((s) => s.flatResults);
   const selectedChannelIndices = useAppStore((s) => s.selectedChannelIndices);
+  const search = useDeferredValue(useAppStore((s) => s.search));
+  const groupFilter = useAppStore((s) => s.groupFilter);
   const stats = summary ?? progress;
   const effectiveLowFpsCount = summary?.low_framerate ?? lowFpsCount;
   const effectiveMislabeledCount = summary?.mislabeled ?? mislabeledCount;
@@ -119,6 +122,17 @@ export const StatsPanel = memo(function StatsPanel() {
     }
     return count;
   }, [flatResults, selectedChannelIndices]);
+
+  const visibleCatchupCount = useMemo(
+    () =>
+      countStatusOptions(flatResults, search, groupFilter, undefined, sharedSearchTextCache)
+        .catchup,
+    [flatResults, search, groupFilter],
+  );
+  const catchupLabel =
+    visibleCatchupCount === catchupCount
+      ? `${catchupCount} catch-up`
+      : `${visibleCatchupCount} of ${catchupCount} catch-up`;
 
   const showSelectionInfo = selectedChannelIndices.length > 1 && catchupCount > 0;
   const showRightStatus =
@@ -192,7 +206,7 @@ export const StatsPanel = memo(function StatsPanel() {
       {catchupCount > 0 && (
         <Pill
           icon={<SFClockArrow className={iconSize} />}
-          label={`${catchupCount} catch-up`}
+          label={catchupLabel}
           color="violet"
           active={statusFilter === "catchup"}
           onClick={() => toggleFilter("catchup")}

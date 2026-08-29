@@ -636,7 +636,7 @@ export const Toolbar = memo(function Toolbar({
               {(statusOptionCounts.placeholder ?? 0) > 0 && (
                 <option value="placeholder">{statusLabel("placeholder", "Placeholder")}</option>
               )}
-              {(statusOptionCounts.catchup ?? 0) > 0 && (
+              {((statusOptionCounts.catchup ?? 0) > 0 || statusFilter === "catchup") && (
                 <option value="catchup">{statusLabel("catchup", "Catch-up")}</option>
               )}
               <option value="mislabeled">{statusLabel("mislabeled", "Mislabeled")}</option>
