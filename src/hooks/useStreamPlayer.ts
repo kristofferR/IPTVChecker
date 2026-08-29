@@ -76,7 +76,7 @@ export interface UseStreamPlayerReturn {
 }
 
 interface UseStreamPlayerOptions {
-  onPlaybackFailed?: (result: ChannelResult) => void;
+  onPlaybackFailed?: (result: ChannelResult, affectsChannelHealth: boolean) => void;
 }
 
 function readStoredVolume(): number {
@@ -413,10 +413,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       setIsPaused(false);
       setActiveChannelIndex(null);
       // A failed archive URL says nothing about the live channel's health, so
-      // never report it to the backend as a channel failure.
-      if (notifyBackend && !archiveSessionRef.current) {
-        onPlaybackFailedRef.current?.(result);
-      }
+      // let the caller distinguish it from a live channel failure.
+      onPlaybackFailedRef.current?.(result, notifyBackend && !archiveSessionRef.current);
       setArchiveSession(null);
     },
     [cleanup, clearRecoveryTimer, resetRecoveryUi],

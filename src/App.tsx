@@ -526,6 +526,8 @@ export default function App() {
   const viewMode = useAppStore((s) => s.viewMode);
   const verifyCatchupAfterScan = useAppStore((s) => s.verifyCatchupAfterScan);
   const scanState = useAppStore((s) => s.scanState);
+  const playIntentActive = useAppStore((s) => s.playIntentActive);
+  const castActive = useAppStore((s) => s.castActive);
   const verifyCatchupScanStartedRef = useRef(false);
 
   // Opt-in "Scan + Verify Catch-up": run the verification pass once the scan
@@ -537,12 +539,13 @@ export default function App() {
     }
     if (!verifyCatchupScanStartedRef.current) return;
     if (scanState === "complete") {
+      if ((playIntentActive || castActive) && isSingleConnectionPlaylist(playlist)) return;
       getStore().setVerifyCatchupAfterScan(false);
       void verifyAllArchives();
     } else if (scanState === "idle" || scanState === "cancelled") {
       getStore().setVerifyCatchupAfterScan(false);
     }
-  }, [verifyCatchupAfterScan, scanState]);
+  }, [verifyCatchupAfterScan, scanState, playIntentActive, castActive, playlist]);
   const sidebarWidth = useAppStore((s) => s.sidebarWidth);
   const showReportPanel = useAppStore((s) => s.showReportPanel);
   const reportSidebarWidth = useAppStore((s) => s.reportSidebarWidth);
@@ -565,7 +568,12 @@ export default function App() {
 
   const handlePlaybackFailedRef = useRef<((result: ChannelResult) => void) | undefined>(undefined);
   const streamPlayer = useStreamPlayer({
-    onPlaybackFailed: (result) => handlePlaybackFailedRef.current?.(result),
+    onPlaybackFailed: (result, affectsChannelHealth) => {
+      getStore().setPlayIntentActive(false);
+      if (affectsChannelHealth) {
+        handlePlaybackFailedRef.current?.(result);
+      }
+    },
   });
   const {
     activeChannelIndex: playbackChannelIndex,
