@@ -1,9 +1,10 @@
 import { CircleCheck, CircleX, LoaderCircle, Play } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ArchivePlayOptions, ArchiveSession } from "../hooks/useStreamPlayer";
-import { archiveTitle, buildArchiveUrl, hasArchive } from "../lib/archive";
+import { archiveTitle, hasArchive } from "../lib/archive";
+import { probeChannelArchive } from "../lib/archiveProbe";
 import { logger } from "../lib/logger";
-import { getEpgProgrammes, loadEpg, quickCheckChannel } from "../lib/tauri";
+import { getEpgProgrammes, loadEpg } from "../lib/tauri";
 import type { ChannelResult, EpgProgramme } from "../lib/types";
 import { useAppStore } from "../store";
 
@@ -66,65 +67,14 @@ function timeLabel(epochS: number): string {
   return new Date(epochS * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-interface ProbeOutcome {
-  label: string;
-  ok: boolean;
-  latencyMs: number | null;
-  error: string | null;
-}
-
 function ArchiveProbe({ result }: { result: ChannelResult }) {
-  const [running, setRunning] = useState(false);
-  const [outcomes, setOutcomes] = useState<ProbeOutcome[]>([]);
+  const entry = useAppStore((state) => state.archiveProbes[result.index]);
+  const setArchiveProbe = useAppStore((state) => state.setArchiveProbe);
+  const running = entry?.running ?? false;
+  const outcomes = entry?.outcomes ?? [];
 
-  const runProbe = async () => {
-    setRunning(true);
-    setOutcomes([]);
-    const now = Math.floor(Date.now() / 1000);
-    const depthDays = result.catchup_days;
-    const points: Array<{ label: string; startEpochS: number }> = [
-      { label: "Archive −1 h", startEpochS: now - 3600 },
-    ];
-    if (depthDays != null && depthDays > 0) {
-      points.push({
-        label: `Archive −${depthDays} d`,
-        startEpochS: now - depthDays * 86_400 + 1800,
-      });
-    }
-
-    const results: ProbeOutcome[] = [];
-    for (const point of points) {
-      const url = buildArchiveUrl(result, {
-        startEpochS: point.startEpochS,
-        durationS: 300,
-        nowEpochS: now,
-      });
-      if (!url) continue;
-      try {
-        const checked = await quickCheckChannel({
-          ...result,
-          url,
-          content_type: "movie",
-          stream_url: null,
-          status: "pending",
-        });
-        results.push({
-          label: point.label,
-          ok: checked.status === "alive",
-          latencyMs: checked.latency_ms,
-          error: checked.status === "alive" ? null : (checked.error_reason ?? checked.status),
-        });
-      } catch (error) {
-        results.push({
-          label: point.label,
-          ok: false,
-          latencyMs: null,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-      setOutcomes([...results]);
-    }
-    setRunning(false);
+  const runProbe = () => {
+    void probeChannelArchive(result, (update) => setArchiveProbe(result.index, update));
   };
 
   return (
@@ -147,7 +97,7 @@ function ArchiveProbe({ result }: { result: ChannelResult }) {
           {outcome.ok ? (
             <span className="flex items-center gap-1 font-medium text-green-400">
               <CircleCheck className="h-3 w-3" />
-              OK{outcome.latencyMs != null ? ` · ${outcome.latencyMs} ms` : ""}
+              OK{outcome.latencyMs != null ? ` \u00b7 ${outcome.latencyMs} ms` : ""}
             </span>
           ) : (
             <span
@@ -336,8 +286,7 @@ export function ArchiveCard({ result, archiveSession, onPlayArchive }: ArchiveCa
         <ArchivePicker result={result} onPlayArchive={onPlayArchive} />
       )}
 
-      {/* Keyed by channel so probe results never survive a selection change. */}
-      <ArchiveProbe key={result.index} result={result} />
+      <ArchiveProbe result={result} />
     </div>
   );
 }

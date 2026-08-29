@@ -1,4 +1,5 @@
 import type { ScanUiMetrics } from "../hooks/useScan.helpers";
+import type { ArchiveProbeEntry } from "../lib/archiveProbe";
 import type { Platform } from "../lib/platform";
 import type { ScanState } from "../lib/scanState";
 import type {
@@ -108,6 +109,14 @@ export interface FilterSlice {
 // ---------------------------------------------------------------------------
 // Selection
 // ---------------------------------------------------------------------------
+
+export interface ArchiveSlice {
+  /** Spot-probe results for catch-up channels, keyed by channel index. */
+  archiveProbes: Record<number, ArchiveProbeEntry>;
+
+  setArchiveProbe: (index: number, entry: ArchiveProbeEntry) => void;
+  clearArchiveProbes: () => void;
+}
 
 export interface SelectionSlice {
   selectedChannel: ChannelResult | null;
@@ -249,4 +258,5 @@ export type AppStore = PlaylistSlice &
   UiSlice &
   PlayerSlice &
   HistorySlice &
-  SettingsSlice;
+  SettingsSlice &
+  ArchiveSlice;

@@ -11,6 +11,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { resultAtIndex } from "../hooks/useScan.helpers";
+import { hasArchive } from "../lib/archive";
+import { probeChannelArchive } from "../lib/archiveProbe";
 import { channelRowHeightPixels } from "../lib/channelLogoSize";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { getChannelTableLayout } from "../lib/channelTableLayout";
@@ -920,6 +922,23 @@ export function ChannelTable({
     return completedResults.filter((r) => indexSet.has(r.index)).sort((a, b) => a.index - b.index);
   }, [selectedIndices, contextMenuState, completedResults]);
 
+  const handleTestCatchup = useCallback(() => {
+    const targets = getSelectedChannels().filter(hasArchive);
+    setContextMenuState(null);
+    if (targets.length === 0) {
+      return;
+    }
+    void (async () => {
+      // Sequential on purpose: IPTV providers commonly cap concurrent
+      // connections, and each probe already opens up to two archive URLs.
+      for (const target of targets) {
+        await probeChannelArchive(target, (entry) =>
+          useAppStore.getState().setArchiveProbe(target.index, entry),
+        );
+      }
+    })();
+  }, [getSelectedChannels]);
+
   const handleCopyChannelName = useCallback(async () => {
     if (!contextMenuState) return;
     const channels = getSelectedChannels();
@@ -1433,6 +1452,19 @@ export function ChannelTable({
               : "Scan"}{" "}
             Selected ({selectedIndices.size})
           </button>
+          {(() => {
+            const archiveCount = getSelectedChannels().filter(hasArchive).length;
+            if (archiveCount === 0) return null;
+            return (
+              <button
+                onClick={handleTestCatchup}
+                className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+                type="button"
+              >
+                Test Catch-up ({archiveCount})
+              </button>
+            );
+          })()}
           <div className="h-px my-1 bg-border-subtle" />
           <button
             onClick={handlePreviewChannel}

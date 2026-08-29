@@ -220,6 +220,7 @@ export function usePlaylistSources({
 
       state.setSelectedChannel(null);
       state.setSelectedChannelIndices([]);
+      state.clearArchiveProbes();
       state.setPendingPlaybackChannel(null);
 
       return true;
@@ -401,6 +402,7 @@ export function usePlaylistSources({
           // Keep app interaction predictable after a failed fresh open attempt.
           getStore().setSelectedChannel(null);
           getStore().setSelectedChannelIndices([]);
+          getStore().clearArchiveProbes();
           getStore().setPendingPlaybackChannel(null);
           getStore().setShowHistory(false);
           void refreshRecentPlaylists();
