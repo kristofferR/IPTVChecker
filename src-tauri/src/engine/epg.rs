@@ -255,41 +255,63 @@ pub fn parse_xmltv_into_with_source<R: Read>(
     let mut current: Option<(String, i64, Option<i64>)> = None;
     let mut current_title: Option<String> = None;
     let mut in_title = false;
+    let mut saw_xmltv_root = false;
 
     loop {
         buffer.clear();
         match reader.read_event_into(&mut buffer) {
-            Ok(Event::Start(element)) => match element.name().as_ref() {
-                b"programme" => {
-                    let mut channel = None;
-                    let mut start = None;
-                    let mut stop = None;
-                    for attribute in element.attributes().flatten() {
-                        let value = attribute
-                            .decode_and_unescape_value(reader.decoder())
-                            .unwrap_or_default();
-                        match attribute.key.as_ref() {
-                            b"channel" => channel = Some(value.into_owned()),
-                            b"start" => start = parse_xmltv_time(&value),
-                            b"stop" => stop = parse_xmltv_time(&value),
-                            _ => {}
-                        }
+            Ok(Event::Start(element)) => {
+                if !saw_xmltv_root {
+                    if element.name().as_ref() != b"tv" {
+                        return Err(AppError::Other(
+                            "Failed to parse XMLTV: document root is not <tv>".to_string(),
+                        ));
                     }
-                    current = match (channel, start, stop) {
-                        (Some(channel), Some(start), stop)
-                            if wanted.is_empty() || wanted.contains(&channel) =>
-                        {
-                            Some((channel, start, stop))
+                    saw_xmltv_root = true;
+                }
+
+                match element.name().as_ref() {
+                    b"programme" => {
+                        let mut channel = None;
+                        let mut start = None;
+                        let mut stop = None;
+                        for attribute in element.attributes().flatten() {
+                            let value = attribute
+                                .decode_and_unescape_value(reader.decoder())
+                                .unwrap_or_default();
+                            match attribute.key.as_ref() {
+                                b"channel" => channel = Some(value.into_owned()),
+                                b"start" => start = parse_xmltv_time(&value),
+                                b"stop" => stop = parse_xmltv_time(&value),
+                                _ => {}
+                            }
                         }
-                        _ => None,
-                    };
-                    current_title = None;
+                        current = match (channel, start, stop) {
+                            (Some(channel), Some(start), stop)
+                                if wanted.is_empty() || wanted.contains(&channel) =>
+                            {
+                                Some((channel, start, stop))
+                            }
+                            _ => None,
+                        };
+                        current_title = None;
+                    }
+                    b"title" if current.is_some() && current_title.is_none() => {
+                        in_title = true;
+                    }
+                    _ => {}
                 }
-                b"title" if current.is_some() && current_title.is_none() => {
-                    in_title = true;
+            }
+            Ok(Event::Empty(element)) => {
+                if !saw_xmltv_root {
+                    if element.name().as_ref() != b"tv" {
+                        return Err(AppError::Other(
+                            "Failed to parse XMLTV: document root is not <tv>".to_string(),
+                        ));
+                    }
+                    saw_xmltv_root = true;
                 }
-                _ => {}
-            },
+            }
             Ok(Event::Text(text)) => {
                 if in_title {
                     let value = text.unescape().unwrap_or_default().into_owned();
@@ -332,7 +354,14 @@ pub fn parse_xmltv_into_with_source<R: Read>(
                 b"title" => in_title = false,
                 _ => {}
             },
-            Ok(Event::Eof) => break,
+            Ok(Event::Eof) => {
+                if !saw_xmltv_root {
+                    return Err(AppError::Other(
+                        "Failed to parse XMLTV: missing <tv> root".to_string(),
+                    ));
+                }
+                break;
+            }
             Ok(_) => {}
             Err(error) => {
                 return Err(AppError::Other(format!("Failed to parse XMLTV: {error}")));
@@ -585,6 +614,28 @@ mod tests {
 
         let programmes = index.programmes_for("nrk1.no", 0, i64::MAX);
         assert_eq!(programmes[0].title, "News & Weather");
+    }
+
+    #[test]
+    fn accepts_an_empty_xmltv_guide() {
+        let mut index = EpgIndex::default();
+
+        parse_xmltv_into("<tv/>".as_bytes(), &HashSet::new(), &mut index)
+            .expect("empty XMLTV guide should parse");
+
+        assert_eq!(index.programme_count(), 0);
+    }
+
+    #[test]
+    fn rejects_documents_without_an_xmltv_root() {
+        for document in ["", "<html><body>Sign in</body></html>"] {
+            let mut index = EpgIndex::default();
+
+            let error = parse_xmltv_into(document.as_bytes(), &HashSet::new(), &mut index)
+                .expect_err("non-XMLTV document should fail");
+
+            assert!(error.to_string().contains("XMLTV"));
+        }
     }
 
     #[test]

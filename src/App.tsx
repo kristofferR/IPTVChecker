@@ -1183,22 +1183,8 @@ export default function App() {
     [playStream, setArchiveSession],
   );
 
-  const handlePlayArchive = useCallback(
+  const startArchivePlayback = useCallback(
     (result: ChannelResult, options: ArchivePlayOptions) => {
-      if (isScanActive(getStore().scanState) && getStore().playlist?.single_provider) {
-        setPendingArchivePlayback({ result, options });
-        setPendingPlaybackReason("scan");
-        return;
-      }
-      if (
-        getStore().playlist?.single_provider &&
-        Object.values(getStore().archiveProbes).some((probe) => probe.running)
-      ) {
-        setPendingArchivePlayback({ result, options });
-        setPendingPlaybackReason("archive_probe");
-        return;
-      }
-
       const nowEpochS = Math.floor(Date.now() / 1000);
       const windowEndEpochS = Math.min(options.endEpochS ?? nowEpochS, nowEpochS);
       const startEpochS = Math.min(Math.floor(options.startEpochS), windowEndEpochS - 1);
@@ -1242,6 +1228,27 @@ export default function App() {
     [setArchiveSession, streamPlayer.playArchive],
   );
 
+  const handlePlayArchive = useCallback(
+    (result: ChannelResult, options: ArchivePlayOptions) => {
+      if (isScanActive(getStore().scanState) && getStore().playlist?.single_provider) {
+        setPendingArchivePlayback({ result, options });
+        setPendingPlaybackReason("scan");
+        return;
+      }
+      if (
+        getStore().playlist?.single_provider &&
+        Object.values(getStore().archiveProbes).some((probe) => probe.running)
+      ) {
+        setPendingArchivePlayback({ result, options });
+        setPendingPlaybackReason("archive_probe");
+        return;
+      }
+
+      startArchivePlayback(result, options);
+    },
+    [startArchivePlayback],
+  );
+
   const handlePip = useCallback(() => {
     const video = playbackVideoElement;
     if (!video) return;
@@ -1256,8 +1263,7 @@ export default function App() {
     setPendingPlaybackReason(null);
     if (pendingArchivePlayback) {
       setPendingArchivePlayback(null);
-      getStore().setPlayIntentActive(true);
-      streamPlayer.playArchive(pendingArchivePlayback.result, pendingArchivePlayback.options);
+      startArchivePlayback(pendingArchivePlayback.result, pendingArchivePlayback.options);
       return;
     }
     if (!pendingPlaybackChannel) return;
@@ -1265,7 +1271,7 @@ export default function App() {
     getStore().setPendingPlaybackChannel(null);
     getStore().setPlayIntentActive(true);
     playStream(channel);
-  }, [pendingArchivePlayback, pendingPlaybackChannel, playStream, streamPlayer.playArchive]);
+  }, [pendingArchivePlayback, pendingPlaybackChannel, playStream, startArchivePlayback]);
 
   useEffect(() => {
     if (pendingPlaybackReason === "archive_probe" && !archiveProbeActive) {

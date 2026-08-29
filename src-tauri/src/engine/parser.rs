@@ -564,7 +564,7 @@ fn parse_playlist_reader<R: BufRead>(
         if line.ends_with('\r') {
             line.pop();
         }
-        let line = line.trim().to_string();
+        let line = line.trim().trim_start_matches('\u{feff}').to_string();
 
         if !pending_channel && line.starts_with("#EXTM3U") {
             for source in parse_header_epg_sources(&line) {
@@ -1017,6 +1017,21 @@ mod tests {
 
         assert!(parse_header_epg_sources("#EXTM3U").is_empty());
         assert!(parse_header_epg_sources("#EXTM3U x-tvg-url=\"not-a-url\"").is_empty());
+    }
+
+    #[test]
+    fn test_parse_m3u_reads_epg_sources_from_a_bom_prefixed_header() {
+        let playlist = "\u{feff}#EXTM3U x-tvg-url=\"http://epg.example.com/guide.xml\"\n\
+#EXTINF:-1,Channel One\n\
+http://example.com/one.m3u8\n";
+
+        let parsed = parse_m3u(playlist.as_bytes(), "bom.m3u8", &None, &None)
+            .expect("BOM-prefixed playlist should parse");
+
+        assert_eq!(
+            parsed.epg_sources,
+            vec!["http://epg.example.com/guide.xml".to_string()]
+        );
     }
 
     #[test]
