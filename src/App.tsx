@@ -1038,6 +1038,7 @@ export default function App() {
     (result: ChannelResult, options: ArchivePlayOptions) => {
       getStore().setSelectedChannel(result);
       getStore().setSelectedChannelIndices([result.index]);
+      getStore().setPlayIntentActive(true);
       streamPlayer.playArchive(result, options);
     },
     [streamPlayer.playArchive],
