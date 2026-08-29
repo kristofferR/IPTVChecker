@@ -169,8 +169,10 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
   const archiveVerifyRun = useAppStore((s) => s.archiveVerifyRun);
   const archiveGuideTestRunning = useAppStore((s) => s.archiveGuideTestRunning);
   const playIntentActive = useAppStore((s) => s.playIntentActive);
+  const castActive = useAppStore((s) => s.castActive);
   const archiveProbeRunning = Object.values(archiveProbes).some((entry) => entry.running);
-  const playbackBlocksVerification = playIntentActive && isSingleConnectionPlaylist(playlist);
+  const playbackBlocksVerification =
+    (playIntentActive || castActive) && isSingleConnectionPlaylist(playlist);
   const summary = useAppStore((s) => s.summary);
   const scanState = useAppStore((s) => s.scanState);
   // Every hook below must run unconditionally: the "no playlist" early return
@@ -236,9 +238,9 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
     }
     const buckets: Array<{ label: string; count: number }> = [
       { label: "<1 d", count: depths.filter((d) => d < 1).length },
-      { label: "1-2 d", count: depths.filter((d) => d >= 1 && d <= 2).length },
-      { label: "3-6 d", count: depths.filter((d) => d >= 3 && d <= 6).length },
-      { label: "7 d", count: depths.filter((d) => d === 7).length },
+      { label: "1-2 d", count: depths.filter((d) => d >= 1 && d < 3).length },
+      { label: "3-6 d", count: depths.filter((d) => d >= 3 && d < 7).length },
+      { label: "7 d", count: depths.filter((d) => d >= 7 && d < 8).length },
       { label: "8+ d", count: depths.filter((d) => d >= 8).length },
     ];
     const medianLatency = median(latencies);
@@ -601,7 +603,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                   {catchupStats.advertised}
                 </span>
                 <span className="text-text-tertiary uppercase text-[9px] tracking-[0.04em]">
-                  advertise
+                  advertised
                 </span>
               </div>
               <div className="rounded-md bg-input/60 px-2 py-1.5">

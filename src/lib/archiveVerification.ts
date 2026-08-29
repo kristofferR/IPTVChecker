@@ -26,6 +26,13 @@ export function archiveVerdict(
   if (!outcomes.some((outcome) => outcome.ok)) return "broken";
   const advertisedDays = result.catchup_days;
   if (advertisedDays == null) return "verified";
+  if (
+    outcomes.some(
+      (outcome) => outcome.ok && outcome.depthUnknown && outcome.daysBack >= advertisedDays,
+    )
+  ) {
+    return "advertised";
+  }
   return outcomes.some(
     (outcome) => outcome.ok && outcome.depthVerified && outcome.daysBack >= advertisedDays,
   )
@@ -86,11 +93,11 @@ export async function verifyChannelArchive(
     return push(null, true, false);
   }
   const near = await probeArchivePoint(result, probePointForDays(0, nowEpochS), nowEpochS);
-  if (!near?.ok) {
-    return push(near, true);
-  }
   if (shouldCancel()) {
     return push(near, true, false);
+  }
+  if (!near?.ok) {
+    return push(near, true);
   }
   push(near, false);
 
@@ -109,7 +116,10 @@ export async function verifyChannelArchive(
     nowEpochS,
   );
   const deep = probedDeep ? verifyArchiveDepthResponse(probedDeep, near) : null;
-  if (!deep || (deep.ok && deep.depthVerified) || shouldCancel()) {
+  if (shouldCancel()) {
+    return push(deep, true, false);
+  }
+  if (!deep || (deep.ok && (deep.depthVerified || deep.depthUnknown))) {
     return push(deep, true);
   }
   push(deep, false);
@@ -119,7 +129,7 @@ export async function verifyChannelArchive(
   let workingDays = 0;
   let failingDays = advertisedDays;
   for (let step = 0; step < MAX_BISECT_STEPS; step += 1) {
-    if (shouldCancel()) break;
+    if (shouldCancel()) return push(null, true, false);
     const midDays = Math.round((workingDays + failingDays) / 2);
     if (midDays <= workingDays || midDays >= failingDays) break;
     const probedOutcome = await probeArchivePoint(
@@ -128,6 +138,7 @@ export async function verifyChannelArchive(
       nowEpochS,
     );
     const outcome = probedOutcome ? verifyArchiveDepthResponse(probedOutcome, near) : null;
+    if (shouldCancel()) return push(outcome, true, false);
     if (!outcome) break;
     if (outcome.ok && outcome.depthVerified) {
       workingDays = midDays;

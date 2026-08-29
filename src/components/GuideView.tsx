@@ -237,13 +237,14 @@ export function GuideView({
     }
     const target = selection;
     const playlistAtStart = state.playlist;
+    const now = Math.floor(Date.now() / 1000);
+    if (target.programme.start > now) return;
     setTesting(true);
     setTestOutcome(null);
     state.setArchiveGuideTestRunning(true);
-    const now = Math.floor(Date.now() / 1000);
     const point = {
       label: timeLabel(target.programme.start),
-      daysBack: Math.max(0, Math.round((now - target.programme.start) / 86_400)),
+      daysBack: Math.round((now - target.programme.start) / 86_400),
       startEpochS: target.programme.start,
     };
     let outcome: ArchiveProbeOutcome | null = null;

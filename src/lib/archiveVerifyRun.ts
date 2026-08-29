@@ -20,7 +20,8 @@ export async function verifyAllArchives(): Promise<void> {
     isScanActive(initialState.scanState) ||
     initialState.archiveGuideTestRunning ||
     Object.values(initialState.archiveProbes).some((entry) => entry.running) ||
-    (initialState.playIntentActive && isSingleConnectionPlaylist(playlist))
+    ((initialState.playIntentActive || initialState.castActive) &&
+      isSingleConnectionPlaylist(playlist))
   ) {
     return;
   }
@@ -39,7 +40,7 @@ export async function verifyAllArchives(): Promise<void> {
       bulkCancelRequested ||
       state.playlist !== playlist ||
       isScanActive(state.scanState) ||
-      (state.playIntentActive && isSingleConnectionPlaylist(playlist))
+      ((state.playIntentActive || state.castActive) && isSingleConnectionPlaylist(playlist))
     );
   };
   setProgress(0);

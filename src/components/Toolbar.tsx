@@ -306,10 +306,10 @@ export const Toolbar = memo(function Toolbar({
   }, [inScanSession]);
 
   useEffect(() => {
-    if (scanDisabledReason !== null) {
+    if (inScanSession || scanDisabledReason !== null) {
       setScanMenuVisible(false);
     }
-  }, [scanDisabledReason]);
+  }, [inScanSession, scanDisabledReason]);
 
   useLayoutEffect(() => {
     const select = groupSelectRef.current;

@@ -118,6 +118,22 @@ describe("archiveVerdict", () => {
         ]),
       ),
     ).toBe("shallower");
+    expect(
+      archiveVerdict(ch, {
+        ...entry([
+          [0, true, 400],
+          [7, true, 700, false],
+        ]),
+        outcomes: [
+          responseOutcome(0, "https://host/live/segment-100.ts"),
+          {
+            ...responseOutcome(7, "https://host/archive/segment-20.ts"),
+            depthVerified: false,
+            depthUnknown: true,
+          },
+        ],
+      }),
+    ).toBe("advertised");
   });
 
   it("measures depth as the deepest answering point", () => {

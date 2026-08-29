@@ -230,9 +230,11 @@ export interface UiSlice {
 
 export interface PlayerSlice {
   playIntentActive: boolean;
+  castActive: boolean;
   pendingPlaybackChannel: ChannelResult | null;
 
   setPlayIntentActive: (active: boolean) => void;
+  setCastActive: (active: boolean) => void;
   setPendingPlaybackChannel: (channel: ChannelResult | null) => void;
 }
 

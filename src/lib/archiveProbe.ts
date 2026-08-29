@@ -9,6 +9,8 @@ export interface ArchiveProbeOutcome {
   ok: boolean;
   /** Whether this response identifies media distinct from the near probe. */
   depthVerified: boolean;
+  /** The probe reached through a proxy but cannot establish media identity. */
+  depthUnknown?: boolean;
   responseUrl: string | null;
   latencyMs: number | null;
   error: string | null;
@@ -112,6 +114,7 @@ export async function probeArchivePoint(
       daysBack: point.daysBack,
       ok: reachable,
       depthVerified: reachable && point.daysBack <= 0,
+      depthUnknown: checked.status === "geoblocked_confirmed" && point.daysBack > 0,
       responseUrl: checked.stream_url,
       latencyMs: checked.latency_ms,
       error: reachable ? null : (checked.error_reason ?? checked.status),

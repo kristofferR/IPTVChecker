@@ -589,6 +589,10 @@ export default function App() {
   const castSession = chromecast.session;
   const isCasting = isCastSessionActive(castSession);
 
+  useEffect(() => {
+    getStore().setCastActive(isCasting);
+  }, [isCasting]);
+
   const { settings, save: saveSettings, applyExternal: applyExternalSettings } = useSettings();
   const { start, cancel, pause, resume, initFromPlaylist, syncFromPlaylist, updateResult } =
     useScan();
