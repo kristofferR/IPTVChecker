@@ -835,15 +835,15 @@ pub(crate) async fn open_playlist_xtream_inner(
     let (archive_flags, pending_archive_task) = if let Some(mut task) = archive_task {
         match tokio::time::timeout(XTREAM_ARCHIVE_ENRICHMENT_GRACE_TIMEOUT, &mut task).await {
             Ok(Ok(Some(live_streams))) => (Some(xtream_archive_flags(&live_streams)), None),
-            Ok(Ok(None)) => (None, None),
+            Ok(Ok(None)) => (Some(HashMap::new()), None),
             Ok(Err(error)) => {
                 log::debug!("Xtream live-stream catalog task failed: {error}");
-                (None, None)
+                (Some(HashMap::new()), None)
             }
             Err(_) => (None, Some(task)),
         }
     } else {
-        (None, None)
+        (Some(HashMap::new()), None)
     };
     if let Some(archive_flags) = archive_flags {
         if !archive_flags.is_empty() {
@@ -861,9 +861,6 @@ pub(crate) async fn open_playlist_xtream_inner(
             match task.await {
                 Ok(Some(live_streams)) => {
                     let archive_flags = xtream_archive_flags(&live_streams);
-                    if archive_flags.is_empty() {
-                        return;
-                    }
                     let updates =
                         apply_xtream_archive_flags_with_updates(&mut channels, &archive_flags);
                     let is_current = app
@@ -884,9 +881,24 @@ pub(crate) async fn open_playlist_xtream_inner(
                         );
                     }
                 }
-                Ok(None) => {}
+                Ok(None) => {
+                    app.state::<Arc<AppState>>()
+                        .complete_xtream_archive_enrichment(
+                            &source_identity,
+                            archive_generation,
+                            HashMap::new(),
+                        )
+                        .await;
+                }
                 Err(error) => {
                     log::debug!("Xtream live-stream catalog task failed: {error}");
+                    app.state::<Arc<AppState>>()
+                        .complete_xtream_archive_enrichment(
+                            &source_identity,
+                            archive_generation,
+                            HashMap::new(),
+                        )
+                        .await;
                 }
             }
         });

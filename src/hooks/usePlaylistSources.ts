@@ -401,12 +401,9 @@ export function usePlaylistSources({
         const pendingArchiveEnrichment = loadedPreview.source_identity
           ? xtreamArchiveEnrichmentsRef.current.get(loadedPreview.source_identity)
           : undefined;
-        const cachedPreview = pendingArchiveEnrichment
+        let cachedPreview = pendingArchiveEnrichment
           ? applyXtreamArchiveUpdatesToPreview(loadedPreview, pendingArchiveEnrichment)
           : loadedPreview;
-        if (loadedPreview.source_identity) {
-          xtreamArchiveEnrichmentsRef.current.delete(loadedPreview.source_identity);
-        }
 
         const latestState = getStore();
         const savedEntry =
@@ -438,7 +435,7 @@ export function usePlaylistSources({
           );
         }
 
-        const preview = buildVisiblePreview(cachedPreview, normalizedSourceFilter);
+        let preview = buildVisiblePreview(cachedPreview, normalizedSourceFilter);
         const committed = await commitLoadedPlaylist(
           preview,
           cachedPreview,
@@ -449,6 +446,23 @@ export function usePlaylistSources({
         );
         if (!committed) {
           return supersededResult();
+        }
+        if (loadedPreview.source_identity) {
+          const latestArchiveEnrichment = xtreamArchiveEnrichmentsRef.current.get(
+            loadedPreview.source_identity,
+          );
+          if (latestArchiveEnrichment) {
+            cachedPreview = applyXtreamArchiveUpdatesToPreview(
+              cachedPreview,
+              latestArchiveEnrichment,
+            );
+            preview = buildVisiblePreview(cachedPreview, normalizedSourceFilter);
+            const state = getStore();
+            state.setPlaylist(preview);
+            state.setCachedSourcePreview(cachedPreview);
+            applyArchiveUpdates(latestArchiveEnrichment);
+          }
+          xtreamArchiveEnrichmentsRef.current.delete(loadedPreview.source_identity);
         }
         logger.info(
           `[Playlist] Loaded ${safeFileName}: visible=${preview.channels.length}, total=${cachedPreview.total_channels}, groups=${preview.groups.length}, preview=${canReuseCachedPreview ? "memory-cache" : "fresh"}, elapsed=${((performance.now() - loadStartedAt) / 1000).toFixed(1)}s`,

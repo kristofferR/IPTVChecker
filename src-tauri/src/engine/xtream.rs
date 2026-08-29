@@ -7,9 +7,11 @@ use crate::engine::remote_cache::{
     parse_http_url, PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT, PLAYLIST_DOWNLOAD_USER_AGENT,
 };
 use crate::error::AppError;
-use crate::models::channel::{Channel, ContentType};
+use crate::models::channel::{Channel, ChannelResult, ContentType};
 use crate::models::playlist::XtreamAccountInfo;
+use regex::Regex;
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::time::Duration;
 use url::Url;
 
@@ -401,15 +403,7 @@ pub(crate) fn apply_xtream_archive_flags(
         {
             continue;
         }
-        let Some(stream_id) = Url::parse(&channel.url).ok().and_then(|url| {
-            let file_name = url.path_segments()?.next_back()?;
-            Some(
-                file_name
-                    .rsplit_once('.')
-                    .map_or(file_name, |(stem, _)| stem)
-                    .to_string(),
-            )
-        }) else {
+        let Some(stream_id) = xtream_stream_id_from_url(&channel.url) else {
             continue;
         };
         let Some(days) = archive_flags.get(&stream_id) else {
@@ -426,6 +420,46 @@ pub(crate) fn apply_xtream_archive_flags(
         }
         append_xtream_archive_attrs(&mut channel.extinf_line, added_catchup, added_days);
     }
+}
+
+pub(crate) fn apply_xtream_archive_flags_to_results(
+    results: &mut [ChannelResult],
+    archive_flags: &HashMap<String, Option<u32>>,
+) {
+    for result in results {
+        if result.content_type != ContentType::Live
+            || extinf_explicitly_disables_catchup(&result.extinf_line)
+        {
+            continue;
+        }
+        let Some(stream_id) = xtream_stream_id_from_url(&result.url) else {
+            continue;
+        };
+        let Some(days) = archive_flags.get(&stream_id) else {
+            continue;
+        };
+
+        let added_catchup = result.catchup.is_none();
+        if added_catchup {
+            result.catchup = Some("xc".to_string());
+        }
+        let added_days = result.catchup_days.is_none().then_some(*days).flatten();
+        if result.catchup_days.is_none() {
+            result.catchup_days = *days;
+        }
+        append_xtream_archive_attrs(&mut result.extinf_line, added_catchup, added_days);
+    }
+}
+
+fn xtream_stream_id_from_url(url: &str) -> Option<String> {
+    let url = Url::parse(url).ok()?;
+    let file_name = url.path_segments()?.next_back()?;
+    Some(
+        file_name
+            .rsplit_once('.')
+            .map_or(file_name, |(stem, _)| stem)
+            .to_string(),
+    )
 }
 
 fn extinf_explicitly_disables_catchup(extinf_line: &str) -> bool {
@@ -450,9 +484,24 @@ fn append_xtream_archive_attrs(
     if !add_catchup && catchup_days.is_none() {
         return;
     }
-    let Some(comma) = crate::engine::parser::find_unquoted_comma(extinf_line) else {
+    let Some(mut comma) = crate::engine::parser::find_unquoted_comma(extinf_line) else {
         return;
     };
+
+    if catchup_days.is_some() {
+        static CATCHUP_DAYS_ATTR: OnceLock<Regex> = OnceLock::new();
+        let pattern = CATCHUP_DAYS_ATTR.get_or_init(|| {
+            Regex::new(
+                r#"(?i)\s+catchup-days\s*=\s*(?:\"(?:\\.|[^\"])*\"|'(?:\\.|[^'])*'|[^\s,]*)"#,
+            )
+            .expect("valid catchup-days attribute regex")
+        });
+        let header = pattern.replace_all(&extinf_line[..comma], "").into_owned();
+        if header.len() != comma {
+            extinf_line.replace_range(..comma, &header);
+            comma = header.len();
+        }
+    }
 
     let mut attrs = String::new();
     if add_catchup {
@@ -728,7 +777,8 @@ pub(crate) async fn fetch_xtream_account_info(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_xtream_streams_to_m3u, apply_xtream_archive_flags, build_xtream_download_url,
+        append_xtream_streams_to_m3u, apply_xtream_archive_flags,
+        apply_xtream_archive_flags_to_results, build_xtream_download_url,
         build_xtream_player_api_action_url, build_xtream_player_api_url, build_xtream_source_key,
         extract_xtream_account_info, extract_xtream_max_connections, normalize_xtream_server,
     };
@@ -827,6 +877,94 @@ mod tests {
         assert_eq!(
             channels[1].extinf_line,
             "#EXTINF:-1 catchup=\"append\" catchup-days=\"14\",Existing metadata"
+        );
+    }
+
+    #[test]
+    fn archive_flags_replace_invalid_catchup_days_attributes() {
+        let mut channels = vec![crate::models::channel::Channel {
+            index: 0,
+            playlist: "fixture.m3u".to_string(),
+            name: "Invalid depth".to_string(),
+            group: String::new(),
+            language: None,
+            tvg_id: None,
+            tvg_name: None,
+            tvg_logo: None,
+            tvg_chno: None,
+            catchup: Some("xc".to_string()),
+            catchup_days: None,
+            catchup_source: None,
+            url: "https://example.com/live/user/pass/42.ts".to_string(),
+            content_type: crate::models::channel::ContentType::Live,
+            extinf_line:
+                "#EXTINF:-1 catchup=\"xc\" catchup-days=\"0\" catchup-days='invalid',Invalid depth"
+                    .to_string(),
+            metadata_lines: Vec::new(),
+        }];
+        let flags = HashMap::from([("42".to_string(), Some(7))]);
+
+        apply_xtream_archive_flags(&mut channels, &flags);
+
+        assert_eq!(channels[0].catchup_days, Some(7));
+        assert_eq!(
+            channels[0].extinf_line,
+            "#EXTINF:-1 catchup=\"xc\" catchup-days=\"7\",Invalid depth"
+        );
+    }
+
+    #[test]
+    fn archive_flags_enrich_persisted_scan_results() {
+        let mut result = crate::models::channel::ChannelResult {
+            index: 0,
+            playlist: "fixture.m3u".to_string(),
+            name: "News".to_string(),
+            group: String::new(),
+            language: None,
+            tvg_id: None,
+            tvg_name: None,
+            tvg_logo: None,
+            tvg_chno: None,
+            catchup: None,
+            catchup_days: None,
+            catchup_source: None,
+            url: "https://example.com/live/user/pass/42.ts".to_string(),
+            content_type: crate::models::channel::ContentType::Live,
+            status: crate::models::channel::ChannelStatus::Alive,
+            codec: None,
+            resolution: None,
+            width: None,
+            height: None,
+            fps: None,
+            latency_ms: None,
+            hdr_format: None,
+            video_bitrate: None,
+            audio_bitrate: None,
+            audio_codec: None,
+            audio_channel_layout: None,
+            audio_only: false,
+            screenshot_path: None,
+            screenshot_error_reason: None,
+            label_mismatches: Vec::new(),
+            low_framerate: false,
+            error_message: None,
+            channel_id: "42".to_string(),
+            extinf_line: "#EXTINF:-1,News".to_string(),
+            metadata_lines: Vec::new(),
+            stream_url: None,
+            retry_count: None,
+            error_reason: None,
+            drm_system: None,
+        };
+        let flags = HashMap::from([("42".to_string(), Some(7))]);
+
+        apply_xtream_archive_flags_to_results(std::slice::from_mut(&mut result), &flags);
+
+        assert_eq!(result.catchup.as_deref(), Some("xc"));
+        assert_eq!(result.catchup_days, Some(7));
+        assert_eq!(
+            result.extinf_line,
+            "#EXTINF:-1 catchup=\"xc\" catchup-days=\"7\",News"
         );
     }
 

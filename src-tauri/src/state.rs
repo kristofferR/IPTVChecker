@@ -19,6 +19,7 @@ type XtreamArchiveFlags = HashMap<String, Option<u32>>;
 struct XtreamArchiveEnrichmentState {
     generation: u64,
     flags: Option<Arc<XtreamArchiveFlags>>,
+    notify: Arc<Notify>,
 }
 
 fn now_epoch_ms() -> u64 {
@@ -210,14 +211,59 @@ impl AppState {
         let generation = self
             .xtream_archive_generation
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.xtream_archive_enrichments.lock().await.insert(
+        let previous = self.xtream_archive_enrichments.lock().await.insert(
             source_identity,
             XtreamArchiveEnrichmentState {
                 generation,
                 flags: None,
+                notify: Arc::new(Notify::new()),
             },
         );
+        if let Some(previous) = previous {
+            previous.notify.notify_waiters();
+        }
         generation
+    }
+
+    pub async fn wait_for_xtream_archive_flags(
+        &self,
+        source_identity: &str,
+    ) -> Option<Arc<XtreamArchiveFlags>> {
+        let generation = self
+            .xtream_archive_enrichments
+            .lock()
+            .await
+            .get(source_identity)
+            .map(|enrichment| enrichment.generation)?;
+
+        loop {
+            let notify = {
+                let enrichments = self.xtream_archive_enrichments.lock().await;
+                let enrichment = enrichments.get(source_identity)?;
+                if enrichment.generation != generation {
+                    return None;
+                }
+                if let Some(flags) = &enrichment.flags {
+                    return Some(Arc::clone(flags));
+                }
+                Arc::clone(&enrichment.notify)
+            };
+
+            let notified = notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            {
+                let enrichments = self.xtream_archive_enrichments.lock().await;
+                let enrichment = enrichments.get(source_identity)?;
+                if enrichment.generation != generation {
+                    return None;
+                }
+                if let Some(flags) = &enrichment.flags {
+                    return Some(Arc::clone(flags));
+                }
+            }
+            notified.await;
+        }
     }
 
     pub async fn complete_xtream_archive_enrichment(
@@ -236,6 +282,7 @@ impl AppState {
                 return false;
             }
             enrichment.flags = Some(Arc::clone(&flags));
+            enrichment.notify.notify_waiters();
         }
 
         let mut cache = self.playlist_preview_cache.lock().await;
@@ -334,5 +381,28 @@ mod tests {
             .expect("cached preview");
         assert_eq!(cached.channels[0].catchup.as_deref(), Some("xc"));
         assert_eq!(cached.channels[0].catchup_days, Some(7));
+    }
+
+    #[tokio::test]
+    async fn scan_waits_for_pending_xtream_enrichment() {
+        let state = AppState::new();
+        let generation = state
+            .begin_xtream_archive_enrichment("xtream:provider".to_string())
+            .await;
+        let waiting_state = Arc::clone(&state);
+        let waiter = tokio::spawn(async move {
+            waiting_state
+                .wait_for_xtream_archive_flags("xtream:provider")
+                .await
+        });
+        tokio::task::yield_now().await;
+
+        let flags = HashMap::from([("42".to_string(), Some(7))]);
+        state
+            .complete_xtream_archive_enrichment("xtream:provider", generation, flags)
+            .await;
+
+        let received = waiter.await.expect("archive enrichment waiter").unwrap();
+        assert_eq!(received.get("42"), Some(&Some(7)));
     }
 }

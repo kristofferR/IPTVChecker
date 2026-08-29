@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::commands::history;
 use crate::commands::settings;
+use crate::engine::xtream::apply_xtream_archive_flags_to_results;
 use crate::engine::{checker, connectivity, disk, ffmpeg, parser, proxy, resume, stream_proxy};
 use crate::error::AppError;
 use crate::models::backend_perf::BackendPerfSample;
@@ -2486,7 +2487,7 @@ async fn execute_scan_run(
         log::warn!("Checkpoint writer task failed for {}: {}", run_id, error);
     }
 
-    let completed_scan = match event_result {
+    let mut completed_scan = match event_result {
         Ok(data) => data,
         Err(error) => {
             log::error!("Scan failed while dispatching progress events: {}", error);
@@ -2497,6 +2498,18 @@ async fn execute_scan_run(
             )));
         }
     };
+
+    if !cancel_token.is_cancelled() {
+        if let Some(source_identity) = config.source_identity.as_deref() {
+            if let Some(archive_flags) = state.wait_for_xtream_archive_flags(source_identity).await
+            {
+                apply_xtream_archive_flags_to_results(
+                    &mut completed_scan.results,
+                    archive_flags.as_ref(),
+                );
+            }
+        }
+    }
 
     let mut summary = completed_scan.summary.clone();
     summary.playlist_score = crate::engine::playlist_score::compute_playlist_score(
