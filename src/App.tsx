@@ -558,6 +558,7 @@ export default function App() {
   const {
     activeChannelIndex: playbackChannelIndex,
     play: playStream,
+    resumeArchive,
     stop: stopStream,
     setArchiveSession,
     videoElement: playbackVideoElement,
@@ -1141,13 +1142,16 @@ export default function App() {
   }, [stopStream]);
 
   const handleCastStart = useCallback(() => {
-    const archiveHandoff = streamPlayer.archiveSession !== null;
+    const archiveSession = streamPlayer.archiveSession;
     getStore().setPlayIntentActive(false);
     stopStream({ preserveArchiveSession: true });
-    if (archiveHandoff) {
-      return () => setArchiveSession(null);
+    if (archiveSession) {
+      return () => {
+        getStore().setPlayIntentActive(true);
+        resumeArchive(archiveSession);
+      };
     }
-  }, [setArchiveSession, stopStream, streamPlayer.archiveSession]);
+  }, [resumeArchive, stopStream, streamPlayer.archiveSession]);
 
   const handleOpenExternal = useCallback(
     async (result: ChannelResult) => {

@@ -123,6 +123,12 @@ describe("buildArchiveUrl", () => {
     expect(
       buildArchiveUrl(urlFields("http://h/video", "append", "-${start}-${duration}.m3u8"), WINDOW),
     ).toBe(`http://h/video-${START}-3600.m3u8`);
+    expect(
+      buildArchiveUrl(
+        urlFields("http://h/video#player", "append", "-${start}-${duration}.m3u8"),
+        WINDOW,
+      ),
+    ).toBe(`http://h/video-${START}-3600.m3u8#player`);
   });
 
   it("builds xtream timeshift URLs from live stream URLs", () => {

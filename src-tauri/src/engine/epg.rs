@@ -108,7 +108,8 @@ impl EpgIndex {
         tvg_ids
             .iter()
             .filter(|tvg_id| matched_ids.contains(tvg_id.as_str()))
-            .count()
+            .collect::<HashSet<_>>()
+            .len()
     }
 
     pub fn programme_count(&self) -> usize {
@@ -138,18 +139,17 @@ impl EpgIndex {
         from: i64,
         to: i64,
     ) -> Vec<EpgProgramme> {
-        let mut programmes = self
-            .programmes
+        let default_source = String::new();
+        let requested_sources = if sources.is_empty() {
+            std::slice::from_ref(&default_source)
+        } else {
+            sources
+        };
+        let tvg_id = tvg_id.to_string();
+        let mut programmes = requested_sources
             .iter()
-            .filter(|((source, id), _)| {
-                id == tvg_id
-                    && if sources.is_empty() {
-                        source.is_empty()
-                    } else {
-                        sources.contains(source)
-                    }
-            })
-            .flat_map(|(_, programmes)| programmes.iter())
+            .filter_map(|source| self.programmes.get(&(source.clone(), tvg_id.clone())))
+            .flat_map(|programmes| programmes.iter())
             .filter(|programme| programme.stop > from && programme.start < to)
             .cloned()
             .collect::<Vec<_>>();
@@ -160,30 +160,32 @@ impl EpgIndex {
 
     pub fn merge(&mut self, other: EpgIndex) {
         for (channel, mut programmes) in other.programmes {
-            self.programmes
-                .entry(channel)
-                .or_default()
-                .append(&mut programmes);
+            let merged = self.programmes.entry(channel).or_default();
+            merged.append(&mut programmes);
+            Self::finalize_programmes(merged);
         }
-        self.finalize();
     }
 
     fn finalize(&mut self) {
         for programmes in self.programmes.values_mut() {
-            programmes.sort_by_key(|programme| programme.start);
-            for index in 0..programmes.len() {
-                if programmes[index].stop == programmes[index].start {
-                    let start = programmes[index].start;
-                    let stop = programmes[index + 1..]
-                        .iter()
-                        .find(|programme| programme.start > start)
-                        .map(|programme| programme.start)
-                        .unwrap_or(start.saturating_add(EPG_MISSING_STOP_FALLBACK));
-                    programmes[index].stop = stop;
-                }
-            }
-            programmes.dedup();
+            Self::finalize_programmes(programmes);
         }
+    }
+
+    fn finalize_programmes(programmes: &mut Vec<EpgProgramme>) {
+        programmes.sort_by_key(|programme| programme.start);
+        for index in 0..programmes.len() {
+            if programmes[index].stop == programmes[index].start {
+                let start = programmes[index].start;
+                let stop = programmes[index + 1..]
+                    .iter()
+                    .find(|programme| programme.start > start)
+                    .map(|programme| programme.start)
+                    .unwrap_or(start.saturating_add(EPG_MISSING_STOP_FALLBACK));
+                programmes[index].stop = stop;
+            }
+        }
+        programmes.dedup();
     }
 }
 
@@ -414,7 +416,7 @@ pub fn open_guide_file(path: &Path) -> Result<Box<dyn Read + Send>, AppError> {
         .map_err(AppError::Io)?;
     if read == 2 && magic == [0x1f, 0x8b] {
         Ok(Box::new(LimitedReader::new(
-            flate2::read::GzDecoder::new(file),
+            flate2::read::MultiGzDecoder::new(file),
             EPG_MAX_DECOMPRESSED_BYTES,
         )))
     } else {
@@ -656,7 +658,7 @@ mod tests {
                 "nrk1.no".to_string(),
                 "unwanted.tv".to_string(),
             ]),
-            2
+            1
         );
         assert_eq!(index.programme_count(), 2);
         let programmes = index.programmes_for("nrk1.no", 0, i64::MAX);
@@ -960,6 +962,44 @@ mod tests {
         let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         encoder.write_all(xml.as_bytes()).expect("gzip write");
         std::fs::write(&path, encoder.finish().expect("gzip finish")).expect("write");
+
+        let mut index = EpgIndex::default();
+        parse_xmltv_into(
+            open_guide_file(&path).expect("open"),
+            &HashSet::new(),
+            &mut index,
+        )
+        .expect("parse");
+        assert_eq!(index.programme_count(), 1);
+
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn gunzips_concatenated_cached_guides_transparently() {
+        let chunks = [
+            "<tv><programme start=\"20260828200000\" stop=\"20260828210000\" channel=\"a\">",
+            "<title>T</title></programme></tv>",
+        ];
+        let compressed = chunks
+            .into_iter()
+            .flat_map(|chunk| {
+                let mut encoder =
+                    flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+                encoder.write_all(chunk.as_bytes()).expect("gzip write");
+                encoder.finish().expect("gzip finish")
+            })
+            .collect::<Vec<_>>();
+        let dir = std::env::temp_dir().join(format!(
+            "iptv-epg-multigzip-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("guide.xml.gz");
+        std::fs::write(&path, compressed).expect("write");
 
         let mut index = EpgIndex::default();
         parse_xmltv_into(

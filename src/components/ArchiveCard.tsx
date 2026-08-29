@@ -108,7 +108,9 @@ function ArchiveProbe({ result, isCasting }: Pick<ArchiveCardProps, "result" | "
   const streamActive = singleProvider && (isPlaying || isCasting);
   const outcomes = entry?.outcomes ?? [];
   const isCastingRef = useRef(isCasting);
-  isCastingRef.current = isCasting;
+  useEffect(() => {
+    isCastingRef.current = isCasting;
+  }, [isCasting]);
 
   const runProbe = () => {
     const initialState = useAppStore.getState();

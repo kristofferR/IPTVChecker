@@ -116,7 +116,10 @@ export function buildArchiveUrl(channel: ArchiveUrlFields, window: ArchiveWindow
       return appendQuery(channel.url, resolved.slice(1));
     }
     // Relative templates (catchup="append" and friends) attach to the URL.
-    return `${channel.url}${resolved}`;
+    const fragmentStart = channel.url.indexOf("#");
+    return fragmentStart === -1
+      ? `${channel.url}${resolved}`
+      : `${channel.url.slice(0, fragmentStart)}${resolved}${channel.url.slice(fragmentStart)}`;
   }
 
   switch (channel.catchup) {

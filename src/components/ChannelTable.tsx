@@ -675,7 +675,9 @@ export function ChannelTable({
   // backend cast_to_device call instead of one per keystroke.
   const castRedirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isCastingRef = useRef(isCasting);
-  isCastingRef.current = isCasting;
+  useEffect(() => {
+    isCastingRef.current = isCasting;
+  }, [isCasting]);
   useEffect(() => {
     return () => {
       if (castRedirectTimerRef.current) {

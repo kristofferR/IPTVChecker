@@ -68,6 +68,7 @@ export interface UseStreamPlayerReturn {
   streamMetadata: StreamMetadata | null;
   archiveSession: ArchiveSession | null;
   setArchiveSession: (session: ArchiveSession | null) => void;
+  resumeArchive: (session: ArchiveSession) => void;
   play: (result: ChannelResult) => void;
   retry: (result: ChannelResult) => void;
   playArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
@@ -135,9 +136,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const videoElement = videoElRef.current;
 
   const onPlaybackFailedRef = useRef(options?.onPlaybackFailed);
-  onPlaybackFailedRef.current = options?.onPlaybackFailed;
   const onPlaybackFinishedRef = useRef(options?.onPlaybackFinished);
-  onPlaybackFinishedRef.current = options?.onPlaybackFinished;
 
   const [playerState, setPlayerState] = useState<PlayerState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -151,7 +150,6 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const [streamMetadata, setStreamMetadata] = useState<StreamMetadata | null>(null);
   const [archiveSession, setArchiveSession] = useState<ArchiveSession | null>(null);
   const archiveSessionRef = useRef<ArchiveSession | null>(null);
-  archiveSessionRef.current = archiveSession;
 
   const lastErrorRef = useRef<string | null>(null);
   const playerStateRef = useRef<PlayerState>("idle");
@@ -170,6 +168,15 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const startupLatencyMsRef = useRef<number | null>(null);
   const playbackSessionIdRef = useRef(0);
   const startPlaybackAttemptRef = useRef<StartPlaybackAttempt | null>(null);
+
+  useEffect(() => {
+    onPlaybackFailedRef.current = options?.onPlaybackFailed;
+    onPlaybackFinishedRef.current = options?.onPlaybackFinished;
+  }, [options?.onPlaybackFailed, options?.onPlaybackFinished]);
+
+  useEffect(() => {
+    archiveSessionRef.current = archiveSession;
+  }, [archiveSession]);
 
   useEffect(() => {
     playerStateRef.current = playerState;
@@ -1052,6 +1059,19 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     [beginPlayback],
   );
 
+  const resumeArchive = useCallback(
+    (session: ArchiveSession) => {
+      setArchiveSession(session);
+      beginPlayback({
+        ...session.baseResult,
+        url: session.url,
+        content_type: "movie",
+        stream_url: null,
+      });
+    },
+    [beginPlayback],
+  );
+
   const seekArchive = useCallback(
     (toEpochS: number) => {
       const session = archiveSessionRef.current;
@@ -1128,6 +1148,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     streamMetadata,
     archiveSession,
     setArchiveSession,
+    resumeArchive,
     play,
     retry,
     playArchive,
