@@ -233,8 +233,8 @@
 <p>What the codebase already has and lacks:</p>
 <table class="doc">
 <tr><th>Source</th><th>Signal</th><th>Status today</th></tr>
-<tr><td>M3U EXTINF</td><td><code>catchup</code>, <code>catchup-days</code>, <code>catchup-source</code>, <code>timeshift</code>, <code>tvg-rec</code></td><td class="warn">Parsed into the attr list but never consumed</td></tr>
-<tr><td>Xtream API</td><td><code>tv_archive</code>, <code>tv_archive_duration</code>; timeshift URL scheme</td><td class="bad">Not requested from the API</td></tr>
+<tr><td>M3U EXTINF</td><td><code>catchup</code>, <code>catchup-days</code>, <code>catchup-source</code>, <code>timeshift</code>, <code>tvg-rec</code></td><td class="good">Consumed into channel metadata</td></tr>
+<tr><td>Xtream API</td><td><code>tv_archive</code>, <code>tv_archive_duration</code>; timeshift URL scheme</td><td class="good">Consumed from the JSON API fallback</td></tr>
 <tr><td>XMLTV EPG</td><td><code>x-tvg-url</code> header, programme titles and times</td><td class="bad">No EPG infrastructure at all</td></tr>
 </table>
 

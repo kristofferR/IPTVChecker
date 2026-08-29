@@ -152,6 +152,10 @@ fn sanitize_result_for_persistence(result: &ChannelResult) -> ChannelResult {
         .stream_url
         .as_deref()
         .map(sanitize_url_for_persistence);
+    sanitized.catchup_source = sanitized
+        .catchup_source
+        .as_deref()
+        .map(sanitize_url_for_persistence);
     sanitized
 }
 
@@ -597,13 +601,17 @@ mod tests {
     }
 
     #[test]
-    fn write_result_entry_redacts_url_and_stream_url() {
+    fn write_result_entry_redacts_result_urls() {
         let checkpoint_file = temp_file("resume-checkpoint-redaction");
 
         let mut result = make_result(8, "Secret", ChannelStatus::Alive);
         result.url = "https://demo:secret@example.com/live.m3u8?token=abc123".to_string();
         result.stream_url =
             Some("https://stream.example.com/hls.m3u8?auth=xyz987&session=abcd".to_string());
+        result.catchup_source = Some(
+            "https://archive:secret@example.com/timeshift?username=demo&password=hunter2"
+                .to_string(),
+        );
 
         write_result_entry(&checkpoint_file, &result).expect("result write should succeed");
 
@@ -611,9 +619,12 @@ mod tests {
             std::fs::read_to_string(&checkpoint_file).expect("checkpoint should be readable");
         assert!(!persisted.contains("abc123"));
         assert!(!persisted.contains("xyz987"));
+        assert!(!persisted.contains("hunter2"));
         assert!(persisted.contains("token=REDACTED"));
         assert!(persisted.contains("auth=REDACTED"));
         assert!(persisted.contains("session=REDACTED"));
+        assert!(persisted.contains("username=REDACTED"));
+        assert!(persisted.contains("password=REDACTED"));
 
         let loaded = load_checkpoint_results(&checkpoint_file);
         assert_eq!(loaded.len(), 1);
@@ -624,6 +635,10 @@ mod tests {
         assert_eq!(
             loaded[0].stream_url.as_deref(),
             Some("https://stream.example.com/hls.m3u8?auth=REDACTED&session=REDACTED")
+        );
+        assert_eq!(
+            loaded[0].catchup_source.as_deref(),
+            Some("https://example.com/timeshift?username=REDACTED&password=REDACTED")
         );
 
         let _ = std::fs::remove_file(&checkpoint_file);
