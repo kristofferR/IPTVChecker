@@ -1,5 +1,6 @@
 import { memo, type ReactNode, startTransition, useDeferredValue, useMemo } from "react";
 import { hasArchive } from "../lib/archive";
+import { computeCatchupScore, withCatchupScore } from "../lib/catchupScore";
 import type { Channel } from "../lib/types";
 import { useAppStore } from "../store";
 import {
@@ -88,6 +89,8 @@ export const StatsPanel = memo(function StatsPanel() {
   const progress = useAppStore((s) => s.progress);
   const summary = useAppStore((s) => s.summary);
   const playlist = useAppStore((s) => s.playlist);
+  const results = useAppStore((s) => s.flatResults);
+  const archiveProbes = useAppStore((s) => s.archiveProbes);
   const totalChannels = playlist?.total_channels ?? 0;
   const channels = playlist?.channels ?? noChannels;
   const scanState = useAppStore((s) => s.scanState);
@@ -103,6 +106,10 @@ export const StatsPanel = memo(function StatsPanel() {
   const stats = summary ?? progress;
   const effectiveLowFpsCount = summary?.low_framerate ?? lowFpsCount;
   const effectiveMislabeledCount = summary?.mislabeled ?? mislabeledCount;
+  const displayScore = useMemo(() => {
+    if (!summary?.playlist_score) return null;
+    return withCatchupScore(summary.playlist_score, computeCatchupScore(results, archiveProbes));
+  }, [summary?.playlist_score, results, archiveProbes]);
 
   const { catchupCount, visibleCatchupCount } = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -215,10 +222,10 @@ export const StatsPanel = memo(function StatsPanel() {
           onClick={() => toggleFilter("catchup")}
         />
       )}
-      {summary?.playlist_score && (
+      {displayScore && (
         <Pill
           icon={null}
-          label={`Score ${summary.playlist_score.overall.toFixed(1)}/10`}
+          label={`Score ${displayScore.overall.toFixed(1)}/10`}
           color="blue"
           onClick={toggleReportPanel}
         />

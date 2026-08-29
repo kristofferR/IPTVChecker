@@ -11,6 +11,10 @@ export interface ArchiveProbeOutcome {
   depthVerified: boolean;
   /** The probe reached through a proxy but cannot establish media identity. */
   depthUnknown?: boolean;
+  /** Archive start requested from the provider. */
+  requestedStartEpochS: number;
+  /** URL requested from the provider before redirects or manifest traversal. */
+  requestUrl: string;
   responseUrl: string | null;
   latencyMs: number | null;
   error: string | null;
@@ -39,7 +43,33 @@ function responseIdentity(responseUrl: string | null): string | null {
   }
 }
 
-/** A deep response proves depth when its successful request identifies a different archive window. */
+const MEDIA_TIME_TOLERANCE_SECONDS = 3600;
+
+function responseMediaTimeMatchesRequest(outcome: ArchiveProbeOutcome): boolean | null {
+  const response = responseIdentity(outcome.responseUrl);
+  const request = responseIdentity(outcome.requestUrl);
+  if (response == null || response === request) return null;
+
+  try {
+    const pathname = new URL(response).pathname;
+    const timestamps = Array.from(
+      pathname.matchAll(/(?:^|\D)(\d{13}|\d{10})(?=\D|$)/g),
+      (match) => {
+        const value = Number(match[1]);
+        return match[1].length === 13 ? value / 1000 : value;
+      },
+    );
+    if (timestamps.length === 0) return null;
+    return timestamps.some(
+      (timestamp) =>
+        Math.abs(timestamp - outcome.requestedStartEpochS) <= MEDIA_TIME_TOLERANCE_SECONDS,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** A deep response proves depth only when returned media identifies the requested archive time. */
 export function verifyArchiveDepthResponse(
   outcome: ArchiveProbeOutcome,
   near: ArchiveProbeOutcome | undefined,
@@ -47,9 +77,16 @@ export function verifyArchiveDepthResponse(
   if (!outcome.ok || outcome.daysBack <= 0) return outcome;
   const response = responseIdentity(outcome.responseUrl);
   const nearResponse = responseIdentity(near?.responseUrl ?? null);
+  const mediaTimeMatches = responseMediaTimeMatchesRequest(outcome);
+  const depthVerified =
+    response != null &&
+    nearResponse != null &&
+    response !== nearResponse &&
+    mediaTimeMatches === true;
   return {
     ...outcome,
-    depthVerified: response != null && nearResponse != null && response !== nearResponse,
+    depthVerified,
+    depthUnknown: outcome.depthUnknown || mediaTimeMatches == null,
   };
 }
 
@@ -100,6 +137,8 @@ export async function probeArchivePoint(
       ok: reachable,
       depthVerified: reachable && point.daysBack <= 0,
       depthUnknown: checked.status === "geoblocked_confirmed" && point.daysBack > 0,
+      requestedStartEpochS: point.startEpochS,
+      requestUrl: url,
       responseUrl: checked.stream_url,
       // The quick check keeps the failed direct request's latency when a proxy
       // confirms access, so it does not represent archive startup time.
@@ -112,6 +151,8 @@ export async function probeArchivePoint(
       daysBack: point.daysBack,
       ok: false,
       depthVerified: false,
+      requestedStartEpochS: point.startEpochS,
+      requestUrl: url,
       responseUrl: null,
       latencyMs: null,
       error: error instanceof Error ? error.message : String(error),

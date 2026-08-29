@@ -143,7 +143,6 @@ export function GuideView({
   );
   const playIntentActive = useAppStore((s) => s.playIntentActive);
   const castActive = useAppStore((s) => s.castActive);
-  const externalPlaybackActive = useAppStore((s) => s.externalPlaybackActive);
 
   const nowEpochS = useMemo(() => Math.floor(Date.now() / 1000), []);
 
@@ -236,11 +235,18 @@ export function GuideView({
       state.archiveVerifyRun ||
       state.archiveGuideTestRunning ||
       Object.values(state.archiveProbes).some((entry) => entry.running) ||
-      ((state.playIntentActive || state.castActive || state.externalPlaybackActive) &&
-        isSingleConnectionPlaylist(state.playlist))
+      ((state.playIntentActive || state.castActive) && isSingleConnectionPlaylist(state.playlist))
     ) {
       return;
     }
+    if (
+      state.externalPlaybackActive &&
+      isSingleConnectionPlaylist(state.playlist) &&
+      !window.confirm("Close the external player before testing catch-up. Continue?")
+    ) {
+      return;
+    }
+    state.setExternalPlaybackActive(false);
     const target = selection;
     const playlistAtStart = state.playlist;
     const now = Math.floor(Date.now() / 1000);
@@ -262,6 +268,8 @@ export function GuideView({
         daysBack: point.daysBack,
         ok: false,
         depthVerified: false,
+        requestedStartEpochS: point.startEpochS,
+        requestUrl: target.result.url,
         responseUrl: null,
         latencyMs: null,
         error: error instanceof Error ? error.message : String(error),
@@ -282,8 +290,7 @@ export function GuideView({
     archiveVerifyRun !== null ||
     archiveGuideTestRunning ||
     archiveProbeRunning ||
-    ((playIntentActive || castActive || externalPlaybackActive) &&
-      isSingleConnectionPlaylist(playlist));
+    ((playIntentActive || castActive) && isSingleConnectionPlaylist(playlist));
 
   const hourLabels = Array.from(
     { length: WINDOW_HOURS },

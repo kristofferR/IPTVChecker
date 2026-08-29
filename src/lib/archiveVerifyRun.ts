@@ -14,7 +14,9 @@ export function cancelArchiveVerification(): void {
 export function isArchiveVerificationBlockingPlayback(): boolean {
   const state = useAppStore.getState();
   return (
-    (state.archiveVerifyRun != null || state.archiveGuideTestRunning) &&
+    (state.archiveVerifyRun != null ||
+      state.archiveGuideTestRunning ||
+      Object.values(state.archiveProbes).some((entry) => entry.running)) &&
     isSingleConnectionPlaylist(state.playlist)
   );
 }

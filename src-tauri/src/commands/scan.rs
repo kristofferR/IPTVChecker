@@ -2825,10 +2825,19 @@ pub async fn quick_check_channel(
 
     let status = if checked_status == ChannelStatus::Geoblocked && settings.test_geoblock {
         match settings.proxy_file.as_deref() {
-            Some(proxy_file) => {
-                let proxies = proxy::load_proxy_list(proxy_file)?;
-                proxy::confirm_geoblock(&channel.url, &proxies, settings.timeout).await
-            }
+            Some(proxy_file) => match proxy::load_proxy_list(proxy_file) {
+                Ok(proxies) => {
+                    proxy::confirm_geoblock(&channel.url, &proxies, settings.timeout).await
+                }
+                Err(error) => {
+                    log::warn!(
+                        "[Quick Check] Could not confirm geoblock because proxy file '{}' failed to load: {}",
+                        proxy_file,
+                        error
+                    );
+                    checked_status
+                }
+            },
             None => checked_status,
         }
     } else {

@@ -43,6 +43,8 @@ function entry(
       daysBack,
       ok,
       depthVerified,
+      requestedStartEpochS: 1_700_000_000 - daysBack * 86_400,
+      requestUrl: `https://host/archive.ts?start=${1_700_000_000 - daysBack * 86_400}`,
       responseUrl: null,
       latencyMs,
       error: ok ? null : "dead",
@@ -50,12 +52,18 @@ function entry(
   };
 }
 
-function responseOutcome(daysBack: number, responseUrl: string): ArchiveProbeOutcome {
+function responseOutcome(
+  daysBack: number,
+  responseUrl: string,
+  requestedStartEpochS = 1_700_000_000 - daysBack * 86_400,
+): ArchiveProbeOutcome {
   return {
     label: `−${daysBack}d`,
     daysBack,
     ok: true,
     depthVerified: daysBack === 0,
+    requestedStartEpochS,
+    requestUrl: `https://host/archive.m3u8?start=${requestedStartEpochS}`,
     responseUrl,
     latencyMs: 100,
     error: null,
@@ -63,17 +71,25 @@ function responseOutcome(daysBack: number, responseUrl: string): ArchiveProbeOut
 }
 
 describe("verifyArchiveDepthResponse", () => {
-  const near = responseOutcome(0, "https://host/live/segment-100.ts");
+  const near = responseOutcome(0, "https://host/live/1700000000.ts");
 
-  it("accepts a deep probe that resolves to different media", () => {
-    const deep = responseOutcome(7, "https://host/archive/segment-20.ts");
+  it("accepts returned media whose timestamp matches the requested archive window", () => {
+    const deep = responseOutcome(7, "https://host/archive/1699395205.ts");
     expect(verifyArchiveDepthResponse(deep, near).depthVerified).toBe(true);
   });
 
-  it("accepts successful direct streams for distinct archive windows", () => {
+  it("does not treat differing direct request URLs as media verification", () => {
     const queryNear = responseOutcome(0, "https://host/live.ts?utc=100&lutc=200&token=x");
     const deep = responseOutcome(7, "https://host/live.ts?utc=10&lutc=200&token=x");
-    expect(verifyArchiveDepthResponse(deep, queryNear).depthVerified).toBe(true);
+    expect(verifyArchiveDepthResponse(deep, queryNear)).toMatchObject({
+      depthVerified: false,
+      depthUnknown: true,
+    });
+  });
+
+  it("rejects rotating live segments that do not match the requested archive time", () => {
+    const deep = responseOutcome(7, "https://host/live/1700000001.ts");
+    expect(verifyArchiveDepthResponse(deep, near).depthVerified).toBe(false);
   });
 
   it("ignores URL fragments when comparing responses", () => {
