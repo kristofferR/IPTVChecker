@@ -5,7 +5,7 @@ import {
   verifyArchiveDepthResponse,
 } from "../src/lib/archiveProbe";
 import { archiveVerdict, measuredDepthDays } from "../src/lib/archiveVerification";
-import { blendOverallScore, computeCatchupScore } from "../src/lib/catchupScore";
+import { computeCatchupScore } from "../src/lib/catchupScore";
 import type { ChannelResult } from "../src/lib/types";
 
 function channel(index: number, catchupDays: number | null, catchup = "xc"): ChannelResult {
@@ -211,18 +211,5 @@ describe("computeCatchupScore", () => {
     };
 
     expect(computeCatchupScore(results, probes)).toBe(7.5);
-  });
-});
-
-describe("blendOverallScore", () => {
-  const base = { overall: 7.0, ping: 6, content: 8, quality: 7 };
-
-  it("keeps the original overall without a catch-up component", () => {
-    expect(blendOverallScore(base, null)).toBe(7.0);
-  });
-
-  it("folds the catch-up component in at 15% weight", () => {
-    // 6*0.2 + 8*0.35 + 7*0.3 + 10*0.15 = 7.6
-    expect(blendOverallScore(base, 10)).toBeCloseTo(7.6, 5);
   });
 });

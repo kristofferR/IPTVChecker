@@ -145,10 +145,11 @@ pub async fn test_with_proxy(url: &str, proxy: &str, timeout: f64, retries: u32)
     )
     .await;
 
-    matches!(
-        outcome.map(|result| result.status),
-        Ok(ChannelStatus::Alive | ChannelStatus::Drm | ChannelStatus::Placeholder)
-    )
+    outcome.is_ok_and(|result| proxy_confirms_access(result.status))
+}
+
+fn proxy_confirms_access(status: ChannelStatus) -> bool {
+    matches!(status, ChannelStatus::Alive | ChannelStatus::Drm)
 }
 
 /// Confirm geoblock by testing with up to 3 random proxies.
@@ -178,7 +179,8 @@ pub async fn confirm_geoblock(
 
 #[cfg(test)]
 mod tests {
-    use super::load_proxy_list;
+    use super::{load_proxy_list, proxy_confirms_access};
+    use crate::models::channel::ChannelStatus;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn unique_temp_path(prefix: &str) -> std::path::PathBuf {
@@ -187,6 +189,13 @@ mod tests {
             .expect("system time should be monotonic")
             .as_nanos();
         std::env::temp_dir().join(format!("{prefix}-{unique}.txt"))
+    }
+
+    #[test]
+    fn proxy_confirmation_requires_playable_content() {
+        assert!(proxy_confirms_access(ChannelStatus::Alive));
+        assert!(proxy_confirms_access(ChannelStatus::Drm));
+        assert!(!proxy_confirms_access(ChannelStatus::Placeholder));
     }
 
     #[test]

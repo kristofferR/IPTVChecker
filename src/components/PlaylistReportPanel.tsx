@@ -3,7 +3,7 @@ import { memo, useMemo } from "react";
 import { hasArchive } from "../lib/archive";
 import { archiveVerdict, measuredDepthDays } from "../lib/archiveVerification";
 import { cancelArchiveVerification, verifyAllArchives } from "../lib/archiveVerifyRun";
-import { blendOverallScore, computeCatchupScore } from "../lib/catchupScore";
+import { computeCatchupScore } from "../lib/catchupScore";
 import { summarizeEpgCoverage } from "../lib/epgCoverage";
 import { summarizeLanguageDistribution } from "../lib/languageDistribution";
 import { isSingleConnectionPlaylist } from "../lib/playback";
@@ -305,7 +305,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
     playlist.channels.map((channel) => ({ language: channel.language })),
   );
   const displayScore = summary?.playlist_score ?? computedScore;
-  const ringScore = displayScore ? blendOverallScore(displayScore, catchupScore) : 0;
+  const ringScore = displayScore?.overall ?? 0;
   const ringPercent = clamp01(ringScore / 10);
   const ringRadius = 38;
   const ringCircumference = 2 * Math.PI * ringRadius;

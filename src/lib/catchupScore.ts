@@ -1,7 +1,7 @@
 import { hasArchive } from "./archive";
 import type { ArchiveProbeEntry } from "./archiveProbe";
 import { archiveVerdict, measuredDepthDays } from "./archiveVerification";
-import type { ChannelResult, PlaylistScore } from "./types";
+import type { ChannelResult } from "./types";
 
 // A week of archive is the customary full-marks depth; deeper is a bonus that
 // stops mattering, and depth stops counting past two weeks entirely.
@@ -13,8 +13,7 @@ function clampScore10(value: number): number {
 }
 
 /**
- * Catch-up score component, or null for playlists without any catch-up (the
- * component then shows N/A and the overall weights renormalize).
+ * Catch-up score component, or null for playlists without any catch-up.
  *
  * Before verification the score reflects advertised coverage only. Once
  * channels are probed it blends coverage, reliability (verified full marks,
@@ -67,18 +66,4 @@ export function computeCatchupScore(
   const verifiedScore = coverage * 0.5 + reliability * 0.35 + depthScore * 0.15;
   const testedFraction = tested / catchupChannels.length;
   return clampScore10((coverage * (1 - testedFraction) + verifiedScore * testedFraction) * 10);
-}
-
-/**
- * Overall score with catch-up as a fourth component (Ping 20 / Content 35 /
- * Quality 30 / Catch-up 15). Without a catch-up component the existing
- * three-component overall stands, so scores stay comparable.
- */
-export function blendOverallScore(score: PlaylistScore, catchupScore: number | null): number {
-  if (catchupScore == null) {
-    return score.overall;
-  }
-  return clampScore10(
-    score.ping * 0.2 + score.content * 0.35 + score.quality * 0.3 + catchupScore * 0.15,
-  );
 }
