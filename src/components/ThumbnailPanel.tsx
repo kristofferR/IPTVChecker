@@ -22,7 +22,7 @@ import { isScanActive, type ScanState } from "../lib/scanState";
 import { getThumbnailDisplayState } from "../lib/thumbnailState";
 import type { ChannelResult } from "../lib/types";
 import { ArchiveCard } from "./ArchiveCard";
-import { CastMenu } from "./CastMenu";
+import { CastMenu, type CastStartHandler } from "./CastMenu";
 import { StatusBadge } from "./StatusBadge";
 import { StreamPlayer } from "./StreamPlayer";
 
@@ -56,7 +56,7 @@ interface ThumbnailPanelProps {
   videoElement?: HTMLVideoElement;
   onTogglePause?: () => void;
   onStopPlayer?: () => void;
-  onCastStart?: () => void;
+  onCastStart?: CastStartHandler;
   onSetVolume?: (v: number) => void;
   onToggleMute?: () => void;
   onOpenExternal?: (result: ChannelResult) => void;
@@ -480,7 +480,13 @@ export function ThumbnailPanel({
             chromecast={chromecast}
             castRequest={castRequest}
             mode="inline"
-            onCastStart={onCastStart ?? onStopPlayer}
+            onCastStart={
+              onCastStart ??
+              (() => {
+                onStopPlayer?.();
+                return undefined;
+              })
+            }
           />
         );
       })()}

@@ -3,7 +3,7 @@
 //! multi-hundred-MB provider guide does not balloon into memory.
 
 use std::collections::{HashMap, HashSet};
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -12,6 +12,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::AppError;
@@ -552,7 +553,7 @@ pub async fn download_epg_source(
 
     let temp = temporary_cache_path(&target);
     let _partial_download = PartialEpgDownload { path: temp.clone() };
-    let mut file = std::fs::File::create(&temp).map_err(AppError::Io)?;
+    let mut file = tokio::fs::File::create(&temp).await.map_err(AppError::Io)?;
     let mut downloaded: u64 = 0;
     let mut stream = response;
     loop {
@@ -572,9 +573,9 @@ pub async fn download_epg_source(
                 EPG_MAX_DOWNLOAD_BYTES / (1024 * 1024)
             )));
         }
-        file.write_all(&chunk).map_err(AppError::Io)?;
+        file.write_all(&chunk).await.map_err(AppError::Io)?;
     }
-    file.flush().map_err(AppError::Io)?;
+    file.flush().await.map_err(AppError::Io)?;
     drop(file);
     crate::engine::disk::atomic_rename(&target, &temp)?;
     prune_epg_cache(cache_dir, &target, EPG_CACHE_MAX_BYTES);
@@ -588,6 +589,7 @@ pub async fn download_epg_source(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[test]
     fn parses_xmltv_timestamps_with_and_without_offsets() {

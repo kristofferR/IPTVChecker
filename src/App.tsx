@@ -21,6 +21,7 @@ import {
 } from "react";
 import { setLiquidGlassEffect } from "tauri-plugin-liquid-glass-api";
 import { AppBanners } from "./components/AppBanners";
+import type { CastStartHandler } from "./components/CastMenu";
 import { ChannelTable } from "./components/ChannelTable";
 import { FilterBar } from "./components/FilterBar";
 import { PlaylistReportPanel } from "./components/PlaylistReportPanel";
@@ -186,7 +187,7 @@ function SelectedChannelSidebar({
   onPlayArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
   onScanChannel: (indices: number[]) => void;
   onStopPlayer: () => void;
-  onCastStart: () => void;
+  onCastStart: CastStartHandler;
   onOpenExternal: (result: ChannelResult) => void;
   onPip?: () => void;
 }) {
@@ -1139,9 +1140,13 @@ export default function App() {
   }, [stopStream]);
 
   const handleCastStart = useCallback(() => {
+    const archiveHandoff = streamPlayer.archiveSession !== null;
     getStore().setPlayIntentActive(false);
     stopStream({ preserveArchiveSession: true });
-  }, [stopStream]);
+    if (archiveHandoff) {
+      return () => setArchiveSession(null);
+    }
+  }, [setArchiveSession, stopStream, streamPlayer.archiveSession]);
 
   const handleOpenExternal = useCallback(
     async (result: ChannelResult) => {

@@ -262,10 +262,10 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
     triggerRuntimeIssue("media_error", reason);
   });
   addHandler(videoElement, "ended", () => {
-    if (result.content_type !== "live") {
-      return;
-    }
-    triggerRuntimeIssue("ended", "Live stream ended unexpectedly");
+    triggerRuntimeIssue(
+      "ended",
+      result.content_type === "live" ? "Live stream ended unexpectedly" : "Playback ended",
+    );
   });
 
   const libCleanups: Array<() => void> = [];

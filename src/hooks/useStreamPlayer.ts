@@ -383,6 +383,29 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     videoElement.load();
   }, [clearLoadingTimer, cleanupRuntimeMonitor, cleanupMetadataListeners, videoElement]);
 
+  const stop = useCallback(
+    (options?: { preserveArchiveSession?: boolean }) => {
+      playbackSessionIdRef.current += 1;
+      isPausedRef.current = false;
+      clearRecoveryTimer();
+      currentChannelRef.current = null;
+      recoveryTimestampsRef.current = [];
+      hasStartedPlayingRef.current = false;
+      playbackStartedAtRef.current = null;
+      startupLatencyMsRef.current = null;
+      resetRecoveryUi();
+      cleanup();
+      setPlayerState("idle");
+      setErrorMessage(null);
+      setIsPaused(false);
+      setActiveChannelIndex(null);
+      if (!options?.preserveArchiveSession) {
+        setArchiveSession(null);
+      }
+    },
+    [cleanup, clearRecoveryTimer, resetRecoveryUi],
+  );
+
   const applyVolume = useCallback(() => {
     videoElement.volume = volume;
     videoElement.muted = muted;
@@ -441,6 +464,12 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         return;
       }
 
+      if (decision.kind === "finish") {
+        logger.info("[Player] Playback finished for", result.name);
+        stop();
+        return;
+      }
+
       if (decision.kind === "fail") {
         finalizePlaybackFailure(result, reason, true);
         return;
@@ -479,7 +508,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         void startAttempt(result, sessionId, "recovery", decision.nextAttempt);
       }, PLAYBACK_RECOVERY_DELAY_MS);
     },
-    [cleanup, clearRecoveryTimer, finalizePlaybackFailure, showRecoveryUi],
+    [cleanup, clearRecoveryTimer, finalizePlaybackFailure, showRecoveryUi, stop],
   );
 
   const setupRuntimeMonitor = useCallback(
@@ -1059,29 +1088,6 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     setArchiveSession(null);
     beginPlayback(session.baseResult);
   }, [beginPlayback]);
-
-  const stop = useCallback(
-    (options?: { preserveArchiveSession?: boolean }) => {
-      playbackSessionIdRef.current += 1;
-      isPausedRef.current = false;
-      clearRecoveryTimer();
-      currentChannelRef.current = null;
-      recoveryTimestampsRef.current = [];
-      hasStartedPlayingRef.current = false;
-      playbackStartedAtRef.current = null;
-      startupLatencyMsRef.current = null;
-      resetRecoveryUi();
-      cleanup();
-      setPlayerState("idle");
-      setErrorMessage(null);
-      setIsPaused(false);
-      setActiveChannelIndex(null);
-      if (!options?.preserveArchiveSession) {
-        setArchiveSession(null);
-      }
-    },
-    [cleanup, clearRecoveryTimer, resetRecoveryUi],
-  );
 
   const togglePause = useCallback(() => {
     if (videoElement.paused) {

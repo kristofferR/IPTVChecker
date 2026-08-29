@@ -1297,7 +1297,7 @@ struct ResumeState {
     scope_suffix: String,
 }
 
-fn refresh_resumed_catchup_metadata(
+fn refresh_resumed_playlist_metadata(
     entries: &mut [resume::CheckpointResumeEntry],
     channels: &[Channel],
 ) {
@@ -1308,6 +1308,7 @@ fn refresh_resumed_catchup_metadata(
 
     for entry in entries {
         if let Some(channel) = channels_by_index.get(&entry.result.index) {
+            entry.result.tvg_id = channel.tvg_id.clone();
             entry.result.catchup = channel.catchup.clone();
             entry.result.catchup_days = channel.catchup_days;
             entry.result.catchup_source = channel.catchup_source.clone();
@@ -1371,7 +1372,7 @@ async fn load_resume_state(
         .filter(|entry| channel_indices.contains(&entry.result.index))
         .collect::<Vec<_>>();
     resumed_entries.sort_by_key(|entry| entry.result.index);
-    refresh_resumed_catchup_metadata(&mut resumed_entries, channels);
+    refresh_resumed_playlist_metadata(&mut resumed_entries, channels);
 
     let resumed_indices: HashSet<usize> = resumed_entries
         .iter()
@@ -2939,7 +2940,7 @@ mod tests {
     }
 
     #[test]
-    fn resumed_results_use_current_catchup_metadata() {
+    fn resumed_results_use_current_playlist_metadata() {
         let mut result = make_result(1, ChannelStatus::Alive, false, false);
         result.catchup = Some("stale".to_string());
         result.catchup_days = Some(1);
@@ -2949,13 +2950,15 @@ mod tests {
             channel_log: None,
         }];
         let mut channel = make_channel(1);
+        channel.tvg_id = Some("current-epg-id".to_string());
         channel.catchup = Some("xc".to_string());
         channel.catchup_days = Some(7);
         channel.catchup_source = Some("https://new.example/archive".to_string());
         channel.extinf_line = "#EXTINF:-1 catchup=\"xc\" catchup-days=\"7\",Test".to_string();
 
-        refresh_resumed_catchup_metadata(&mut entries, std::slice::from_ref(&channel));
+        refresh_resumed_playlist_metadata(&mut entries, std::slice::from_ref(&channel));
 
+        assert_eq!(entries[0].result.tvg_id.as_deref(), Some("current-epg-id"));
         assert_eq!(entries[0].result.catchup.as_deref(), Some("xc"));
         assert_eq!(entries[0].result.catchup_days, Some(7));
         assert_eq!(

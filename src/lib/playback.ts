@@ -27,9 +27,14 @@ interface PlaybackRecoveryDecisionIgnore {
   kind: "ignore";
 }
 
+interface PlaybackRecoveryDecisionFinish {
+  kind: "finish";
+}
+
 export type PlaybackRecoveryDecision =
   | PlaybackRecoveryDecisionRetry
   | PlaybackRecoveryDecisionFail
+  | PlaybackRecoveryDecisionFinish
   | PlaybackRecoveryDecisionIgnore;
 
 export interface StreamMetadata {
@@ -393,7 +398,7 @@ export function decidePlaybackRecovery(
     return { kind: "ignore" };
   }
   if (input.issue === "ended" && input.contentType !== "live") {
-    return { kind: "ignore" };
+    return { kind: "finish" };
   }
   const nextAttempt = getNextPlaybackRecoveryAttempt(
     input.recoveryTimestamps,
