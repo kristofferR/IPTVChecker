@@ -69,6 +69,17 @@ function responseMediaTimeMatchesRequest(outcome: ArchiveProbeOutcome): boolean 
   }
 }
 
+/** A point is verified only when returned media identifies the requested archive time. */
+export function verifyArchivePointResponse(outcome: ArchiveProbeOutcome): ArchiveProbeOutcome {
+  if (!outcome.ok) return outcome;
+  const mediaTimeMatches = responseMediaTimeMatchesRequest(outcome);
+  return {
+    ...outcome,
+    depthVerified: mediaTimeMatches === true,
+    depthUnknown: outcome.depthUnknown || mediaTimeMatches == null,
+  };
+}
+
 /** A deep response proves depth only when returned media identifies the requested archive time. */
 export function verifyArchiveDepthResponse(
   outcome: ArchiveProbeOutcome,

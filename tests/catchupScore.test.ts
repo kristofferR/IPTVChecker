@@ -3,6 +3,7 @@ import {
   type ArchiveProbeEntry,
   type ArchiveProbeOutcome,
   verifyArchiveDepthResponse,
+  verifyArchivePointResponse,
 } from "../src/lib/archiveProbe";
 import {
   archiveDepthMidpoint,
@@ -96,6 +97,25 @@ describe("verifyArchiveDepthResponse", () => {
     const fragmentNear = responseOutcome(0, "https://host/live.ts?utc=100#near");
     const deep = responseOutcome(7, "https://host/live.ts?utc=100#deep");
     expect(verifyArchiveDepthResponse(deep, fragmentNear).depthVerified).toBe(false);
+  });
+});
+
+describe("verifyArchivePointResponse", () => {
+  it("verifies returned media whose timestamp matches the requested programme", () => {
+    const outcome = responseOutcome(1, "https://host/archive/1699913605.ts");
+    expect(verifyArchivePointResponse(outcome)).toMatchObject({
+      depthVerified: true,
+      depthUnknown: false,
+    });
+  });
+
+  it("leaves reachable media unverified without temporal evidence", () => {
+    const outcome = responseOutcome(1, "https://host/live/current.ts");
+    expect(verifyArchivePointResponse(outcome)).toMatchObject({
+      ok: true,
+      depthVerified: false,
+      depthUnknown: true,
+    });
   });
 });
 

@@ -3,7 +3,11 @@ import { ChevronLeft, ChevronRight, CircleCheck, CircleX, LoaderCircle, Play } f
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { ArchivePlayOptions } from "../hooks/useStreamPlayer";
 import { archiveBadgeText, hasArchive } from "../lib/archive";
-import { type ArchiveProbeOutcome, probeArchivePoint } from "../lib/archiveProbe";
+import {
+  type ArchiveProbeOutcome,
+  probeArchivePoint,
+  verifyArchivePointResponse,
+} from "../lib/archiveProbe";
 import { fetchGuideProgrammes } from "../lib/epgLoader";
 import { filterResultsShared } from "../lib/filters";
 import { isSingleConnectionPlaylist } from "../lib/playback";
@@ -20,6 +24,17 @@ const MAX_GUIDE_DEPTH_DAYS = 14;
 interface GuideSelection {
   result: ChannelResult;
   programme: EpgProgramme;
+}
+
+function isProgrammePlayable(selection: GuideSelection, nowEpochS: number): boolean {
+  const earliestPlayable =
+    selection.result.catchup_days != null
+      ? nowEpochS - selection.result.catchup_days * 86_400
+      : null;
+  return (
+    selection.programme.start <= nowEpochS &&
+    (earliestPlayable == null || selection.programme.start >= earliestPlayable)
+  );
 }
 
 function selectionKey(selection: GuideSelection | null): string | null {
@@ -246,11 +261,11 @@ export function GuideView({
     ) {
       return;
     }
-    state.setExternalPlaybackActive(false);
     const target = selection;
     const playlistAtStart = state.playlist;
     const now = Math.floor(Date.now() / 1000);
     if (target.programme.start > now) return;
+    state.setExternalPlaybackActive(false);
     setTesting(true);
     setTestOutcome(null);
     state.setArchiveGuideTestRunning(true);
@@ -261,7 +276,8 @@ export function GuideView({
     };
     let outcome: ArchiveProbeOutcome | null = null;
     try {
-      outcome = await probeArchivePoint(target.result, point, now);
+      const probed = await probeArchivePoint(target.result, point, now);
+      outcome = probed ? verifyArchivePointResponse(probed) : null;
     } catch (error) {
       outcome = {
         label: point.label,
@@ -291,6 +307,7 @@ export function GuideView({
     archiveGuideTestRunning ||
     archiveProbeRunning ||
     ((playIntentActive || castActive) && isSingleConnectionPlaylist(playlist));
+  const selectionPlayable = selection != null && isProgrammePlayable(selection, nowEpochS);
 
   const hourLabels = Array.from(
     { length: WINDOW_HOURS },
@@ -343,10 +360,15 @@ export function GuideView({
         </div>
         <div className="ml-auto flex min-w-0 items-center gap-2">
           {testOutcome &&
-            (testOutcome.ok ? (
+            (testOutcome.ok && testOutcome.depthVerified ? (
               <span className="flex items-center gap-1 text-[11px] font-medium text-green-400">
                 <CircleCheck className="h-3 w-3" />
                 OK{testOutcome.latencyMs != null ? ` · ${testOutcome.latencyMs} ms` : ""}
+              </span>
+            ) : testOutcome.ok ? (
+              <span className="flex items-center gap-1 text-[11px] font-medium text-amber-400">
+                <CircleCheck className="h-3 w-3" />
+                Unverified{testOutcome.latencyMs != null ? ` · ${testOutcome.latencyMs} ms` : ""}
               </span>
             ) : (
               <span
@@ -365,8 +387,10 @@ export function GuideView({
               </span>
               <button
                 type="button"
+                disabled={!selectionPlayable}
                 onClick={() => activate(selection)}
-                className="flex shrink-0 items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-500 transition-colors"
+                title={selectionPlayable ? undefined : "This programme is outside catch-up range"}
+                className="flex shrink-0 items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-500 transition-colors disabled:opacity-40"
               >
                 <Play className="h-3 w-3" />
                 Play

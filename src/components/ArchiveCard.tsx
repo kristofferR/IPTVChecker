@@ -4,6 +4,7 @@ import type { ArchivePlayOptions, ArchiveSession } from "../hooks/useStreamPlaye
 import { archiveTitle, hasArchive } from "../lib/archive";
 import { probeChannelArchive } from "../lib/archiveProbe";
 import { ensureEpgLoaded } from "../lib/epgLoader";
+import { isSingleConnectionPlaylist } from "../lib/playback";
 import { isScanActive } from "../lib/scanState";
 import { getEpgProgrammes } from "../lib/tauri";
 import { dayLabel, timeLabel } from "../lib/timeFormat";
@@ -21,11 +22,20 @@ function ArchiveProbe({ result }: { result: ChannelResult }) {
   const setArchiveProbe = useAppStore((state) => state.setArchiveProbe);
   const scanState = useAppStore((state) => state.scanState);
   const archiveGuideTestRunning = useAppStore((state) => state.archiveGuideTestRunning);
+  const playlist = useAppStore((state) => state.playlist);
+  const playIntentActive = useAppStore((state) => state.playIntentActive);
+  const castActive = useAppStore((state) => state.castActive);
   const anotherProbeRunning = useAppStore((state) =>
     Object.values(state.archiveProbes).some((probe) => probe.running),
   );
   const running = entry?.running ?? false;
-  const disabled = archiveGuideTestRunning || anotherProbeRunning || isScanActive(scanState);
+  const playbackBlocksProbe =
+    (playIntentActive || castActive) && isSingleConnectionPlaylist(playlist);
+  const disabled =
+    archiveGuideTestRunning ||
+    anotherProbeRunning ||
+    isScanActive(scanState) ||
+    playbackBlocksProbe;
   const outcomes = entry?.outcomes ?? [];
 
   const runProbe = () => {
@@ -33,7 +43,8 @@ function ArchiveProbe({ result }: { result: ChannelResult }) {
     if (
       isScanActive(state.scanState) ||
       state.archiveGuideTestRunning ||
-      Object.values(state.archiveProbes).some((probe) => probe.running)
+      Object.values(state.archiveProbes).some((probe) => probe.running) ||
+      ((state.playIntentActive || state.castActive) && isSingleConnectionPlaylist(state.playlist))
     ) {
       return;
     }
@@ -45,7 +56,13 @@ function ArchiveProbe({ result }: { result: ChannelResult }) {
       <button
         type="button"
         disabled={disabled}
-        title={isScanActive(scanState) ? "Wait for the scan to finish" : undefined}
+        title={
+          isScanActive(scanState)
+            ? "Wait for the scan to finish"
+            : playbackBlocksProbe
+              ? "Stop playback before testing catch-up"
+              : undefined
+        }
         onClick={runProbe}
         className="flex w-full items-center justify-center gap-1.5 rounded-md bg-btn px-3 py-1.5 text-[12px] font-medium text-text-primary border border-border-app shadow-sm hover:bg-btn-hover transition-colors disabled:opacity-40"
       >

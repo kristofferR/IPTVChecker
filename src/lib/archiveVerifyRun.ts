@@ -43,7 +43,9 @@ export async function verifyAllArchives(): Promise<void> {
     return;
   }
   initialState.setVerifyCatchupAfterScan(false);
-  initialState.setExternalPlaybackActive(false);
+  if (singleConnection) {
+    initialState.setExternalPlaybackActive(false);
+  }
   const targets = initialState.flatResults.filter(hasArchive);
   if (targets.length === 0) {
     return;
