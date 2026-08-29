@@ -43,7 +43,9 @@ function responseIdentity(responseUrl: string | null): string | null {
   }
 }
 
-const MEDIA_TIME_TOLERANCE_SECONDS = 3600;
+// The requested five-minute window may be segment-aligned, but must not
+// accept a live segment returned in place of the requested archive media.
+const MEDIA_TIME_TOLERANCE_SECONDS = 300;
 
 function responseMediaTimeMatchesRequest(outcome: ArchiveProbeOutcome): boolean | null {
   const response = responseIdentity(outcome.responseUrl);
@@ -185,7 +187,11 @@ export async function probeChannelArchive(
   onUpdate({ running: true, outcomes: [], checkedAt: null });
   for (const point of archiveProbePoints(result, nowEpochS)) {
     const probed = await probeArchivePoint(result, point, nowEpochS);
-    const outcome = probed ? verifyArchiveDepthResponse(probed, outcomes[0]) : null;
+    const outcome = probed
+      ? point.daysBack <= 0
+        ? verifyArchivePointResponse(probed)
+        : verifyArchiveDepthResponse(probed, outcomes[0])
+      : null;
     if (outcome) {
       outcomes.push(outcome);
       onUpdate({ running: true, outcomes: [...outcomes], checkedAt: null });

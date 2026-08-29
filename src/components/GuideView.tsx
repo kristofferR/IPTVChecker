@@ -159,7 +159,14 @@ export function GuideView({
   const playIntentActive = useAppStore((s) => s.playIntentActive);
   const castActive = useAppStore((s) => s.castActive);
 
-  const nowEpochS = useMemo(() => Math.floor(Date.now() / 1000), []);
+  const [nowEpochS, setNowEpochS] = useState(() => Math.floor(Date.now() / 1000));
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setNowEpochS(Math.floor(Date.now() / 1000));
+    }, 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   const channels = useMemo(
     () => filterResultsShared(flatResults, search, groupFilter, "all").filter(hasArchive),

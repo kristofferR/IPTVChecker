@@ -117,6 +117,14 @@ describe("verifyArchivePointResponse", () => {
       depthUnknown: true,
     });
   });
+
+  it("rejects a live segment returned one hour after the requested archive time", () => {
+    const outcome = responseOutcome(0, "https://host/live/1700003600.ts");
+    expect(verifyArchivePointResponse(outcome)).toMatchObject({
+      depthVerified: false,
+      depthUnknown: false,
+    });
+  });
 });
 
 describe("archiveVerdict", () => {
