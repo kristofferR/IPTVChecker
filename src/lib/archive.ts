@@ -115,22 +115,22 @@ export function buildArchiveUrl(channel: ArchiveUrlFields, window: ArchiveWindow
 
   switch (channel.catchup) {
     case "xc": {
-      const match = channel.url.match(XTREAM_LIVE_URL);
+      const suffixStart = channel.url.search(/[?#]/);
+      const streamUrl = suffixStart === -1 ? channel.url : channel.url.slice(0, suffixStart);
+      const suffix = suffixStart === -1 ? "" : channel.url.slice(suffixStart);
+      const match = streamUrl.match(XTREAM_LIVE_URL);
       if (!match) return defaultArchiveUrl(channel.url, window);
       const [, base, user, pass, id] = match;
       const durationMinutes = Math.max(1, Math.round(window.durationS / 60));
       return `${base}/timeshift/${user}/${pass}/${durationMinutes}/${formatXtreamStart(
         window.startEpochS,
-      )}/${id}.m3u8`;
+      )}/${id}.m3u8${suffix}`;
     }
     case "flussonic": {
       const start = Math.floor(window.startEpochS);
       const duration = Math.max(1, Math.floor(window.durationS));
       if (/\.m3u8(\?|$)/.test(channel.url)) {
-        return channel.url.replace(
-          /\/[^/?]+\.m3u8(\?|$)/,
-          `/archive-${start}-${duration}.m3u8$1`,
-        );
+        return channel.url.replace(/\/[^/?]+\.m3u8(\?|$)/, `/archive-${start}-${duration}.m3u8$1`);
       }
       if (/\.ts(\?|$)/.test(channel.url)) {
         return channel.url.replace(/\/[^/?]+\.ts(\?|$)/, `/timeshift_abs-${start}.ts$1`);

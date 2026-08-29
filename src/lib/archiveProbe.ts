@@ -78,18 +78,35 @@ export async function probeArchivePoint(
 export async function probeChannelArchive(
   result: ChannelResult,
   onUpdate: (entry: ArchiveProbeEntry) => void,
+  shouldContinue: () => boolean = () => true,
 ): Promise<ArchiveProbeEntry> {
+  if (!shouldContinue()) {
+    return { running: false, outcomes: [], checkedAt: null };
+  }
   const nowEpochS = Math.floor(Date.now() / 1000);
   const outcomes: ArchiveProbeOutcome[] = [];
+  let cancelled = false;
   onUpdate({ running: true, outcomes: [], checkedAt: null });
   for (const point of archiveProbePoints(result, nowEpochS)) {
+    if (!shouldContinue()) {
+      cancelled = true;
+      break;
+    }
     const outcome = await probeArchivePoint(result, point, nowEpochS);
+    if (!shouldContinue()) {
+      cancelled = true;
+      break;
+    }
     if (outcome) {
       outcomes.push(outcome);
       onUpdate({ running: true, outcomes: [...outcomes], checkedAt: null });
     }
   }
-  const entry: ArchiveProbeEntry = { running: false, outcomes, checkedAt: nowEpochS };
+  const entry: ArchiveProbeEntry = {
+    running: false,
+    outcomes,
+    checkedAt: cancelled ? null : nowEpochS,
+  };
   onUpdate(entry);
   return entry;
 }

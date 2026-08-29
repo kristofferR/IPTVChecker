@@ -504,6 +504,7 @@ export function ThumbnailPanel({
         <ArchiveCard
           result={result}
           archiveSession={archiveSession ?? null}
+          isCasting={isCastSessionActive(chromecast.session)}
           onPlayArchive={onPlayArchive}
         />
       )}

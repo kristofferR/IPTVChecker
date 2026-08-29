@@ -91,9 +91,9 @@ describe("buildArchiveUrl", () => {
       buildArchiveUrl(urlFields("http://h/s.m3u8?token=x", "shift", "?utc=${start}"), WINDOW),
     ).toBe(`http://h/s.m3u8?token=x&utc=${START}`);
     // A leading & normalizes to ? when the URL has no query yet.
-    expect(
-      buildArchiveUrl(urlFields("http://h/s.m3u8", "append", "&start=${start}"), WINDOW),
-    ).toBe(`http://h/s.m3u8?start=${START}`);
+    expect(buildArchiveUrl(urlFields("http://h/s.m3u8", "append", "&start=${start}"), WINDOW)).toBe(
+      `http://h/s.m3u8?start=${START}`,
+    );
     // Non-query relative templates concatenate verbatim.
     expect(
       buildArchiveUrl(urlFields("http://h/video", "append", "-${start}-${duration}.m3u8"), WINDOW),
@@ -108,6 +108,12 @@ describe("buildArchiveUrl", () => {
     expect(buildArchiveUrl(urlFields("http://host/alice/secret/42", "xc"), WINDOW)).toBe(
       "http://host/timeshift/alice/secret/60/2026-08-28:20-00/42.m3u8",
     );
+    expect(
+      buildArchiveUrl(
+        urlFields("https://host/live/alice/secret/42.ts?token=x#playback", "xc"),
+        WINDOW,
+      ),
+    ).toBe("https://host/timeshift/alice/secret/60/2026-08-28:20-00/42.m3u8?token=x#playback");
     // Non-xtream shapes fall back to the utc query convention.
     expect(buildArchiveUrl(urlFields("http://host/odd/path.m3u8", "xc"), WINDOW)).toBe(
       `http://host/odd/path.m3u8?utc=${START}&lutc=${START + 8000}`,
@@ -115,9 +121,9 @@ describe("buildArchiveUrl", () => {
   });
 
   it("builds flussonic archive URLs", () => {
-    expect(
-      buildArchiveUrl(urlFields("http://host/channel/index.m3u8", "flussonic"), WINDOW),
-    ).toBe(`http://host/channel/archive-${START}-3600.m3u8`);
+    expect(buildArchiveUrl(urlFields("http://host/channel/index.m3u8", "flussonic"), WINDOW)).toBe(
+      `http://host/channel/archive-${START}-3600.m3u8`,
+    );
     expect(
       buildArchiveUrl(urlFields("http://host/channel/mono.ts?tok=1", "flussonic"), WINDOW),
     ).toBe(`http://host/channel/timeshift_abs-${START}.ts?tok=1`);

@@ -144,6 +144,7 @@ export function ChannelTable({
   const isMac = useAppStore((s) => s.isMac);
   const channelLogoSize = useAppStore((s) => s.settings.channel_logo_size);
   const isPlaying = useAppStore((s) => s.playIntentActive);
+  const singleProvider = useAppStore((s) => s.playlist?.single_provider ?? false);
   const separatePlaceholder = useAppStore((s) => s.settings.separate_placeholder_status);
   const onSelectionChange = useAppStore((s) => s.setSelectedChannelIndices);
   const rawSearch = useAppStore((s) => s.search);
@@ -670,6 +671,8 @@ export function ChannelTable({
   // timer and schedules a new one, so a key burst coalesces into a single
   // backend cast_to_device call instead of one per keystroke.
   const castRedirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isCastingRef = useRef(isCasting);
+  isCastingRef.current = isCasting;
   useEffect(() => {
     return () => {
       if (castRedirectTimerRef.current) {
@@ -923,17 +926,43 @@ export function ChannelTable({
   }, [selectedIndices, contextMenuState, completedResults]);
 
   const handleTestCatchup = useCallback(() => {
+    const initialState = useAppStore.getState();
+    if (
+      isScanActive(initialState.scanState) ||
+      (initialState.playlist?.single_provider &&
+        (initialState.playIntentActive || isCastingRef.current))
+    ) {
+      setContextMenuState(null);
+      return;
+    }
     const targets = getSelectedChannels().filter(hasArchive);
+    const playlist = initialState.playlist;
     setContextMenuState(null);
     if (targets.length === 0) {
       return;
     }
+    const shouldContinue = () => {
+      const state = useAppStore.getState();
+      return (
+        state.playlist === playlist &&
+        !isScanActive(state.scanState) &&
+        !(state.playlist?.single_provider && (state.playIntentActive || isCastingRef.current))
+      );
+    };
     void (async () => {
       // Sequential on purpose: IPTV providers commonly cap concurrent
       // connections, and each probe already opens up to two archive URLs.
       for (const target of targets) {
-        await probeChannelArchive(target, (entry) =>
-          useAppStore.getState().setArchiveProbe(target.index, entry),
+        if (!shouldContinue()) break;
+        await probeChannelArchive(
+          target,
+          (entry) => {
+            const state = useAppStore.getState();
+            if (state.playlist === playlist) {
+              state.setArchiveProbe(target.index, entry);
+            }
+          },
+          shouldContinue,
         );
       }
     })();
@@ -1458,7 +1487,8 @@ export function ChannelTable({
             return (
               <button
                 onClick={handleTestCatchup}
-                className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+                disabled={isScanActive(scanState) || (singleProvider && (isPlaying || isCasting))}
+                className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
                 type="button"
               >
                 Test Catch-up ({archiveCount})

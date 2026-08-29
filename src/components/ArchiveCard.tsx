@@ -1,9 +1,10 @@
 import { CircleCheck, CircleX, LoaderCircle, Play } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ArchivePlayOptions, ArchiveSession } from "../hooks/useStreamPlayer";
 import { archiveTitle, hasArchive } from "../lib/archive";
 import { probeChannelArchive } from "../lib/archiveProbe";
 import { logger } from "../lib/logger";
+import { isScanActive } from "../lib/scanState";
 import { getEpgProgrammes, loadEpg } from "../lib/tauri";
 import type { ChannelResult, EpgProgramme } from "../lib/types";
 import { useAppStore } from "../store";
@@ -11,6 +12,7 @@ import { useAppStore } from "../store";
 interface ArchiveCardProps {
   result: ChannelResult;
   archiveSession: ArchiveSession | null;
+  isCasting: boolean;
   onPlayArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
 }
 
@@ -68,21 +70,52 @@ function timeLabel(epochS: number): string {
   return new Date(epochS * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function ArchiveProbe({ result }: { result: ChannelResult }) {
+function ArchiveProbe({ result, isCasting }: Pick<ArchiveCardProps, "result" | "isCasting">) {
   const entry = useAppStore((state) => state.archiveProbes[result.index]);
   const setArchiveProbe = useAppStore((state) => state.setArchiveProbe);
+  const scanState = useAppStore((state) => state.scanState);
+  const singleProvider = useAppStore((state) => state.playlist?.single_provider ?? false);
+  const isPlaying = useAppStore((state) => state.playIntentActive);
   const running = entry?.running ?? false;
+  const scanActive = isScanActive(scanState);
+  const streamActive = singleProvider && (isPlaying || isCasting);
   const outcomes = entry?.outcomes ?? [];
+  const isCastingRef = useRef(isCasting);
+  isCastingRef.current = isCasting;
 
   const runProbe = () => {
-    void probeChannelArchive(result, (update) => setArchiveProbe(result.index, update));
+    const initialState = useAppStore.getState();
+    if (
+      isScanActive(initialState.scanState) ||
+      (initialState.playlist?.single_provider &&
+        (initialState.playIntentActive || isCastingRef.current))
+    ) {
+      return;
+    }
+    const playlist = initialState.playlist;
+    void probeChannelArchive(
+      result,
+      (update) => {
+        if (useAppStore.getState().playlist === playlist) {
+          setArchiveProbe(result.index, update);
+        }
+      },
+      () => {
+        const state = useAppStore.getState();
+        return (
+          state.playlist === playlist &&
+          !isScanActive(state.scanState) &&
+          !(state.playlist?.single_provider && (state.playIntentActive || isCastingRef.current))
+        );
+      },
+    );
   };
 
   return (
     <div className="mt-2 border-t border-violet-500/15 pt-2">
       <button
         type="button"
-        disabled={running}
+        disabled={running || scanActive || streamActive}
         onClick={runProbe}
         className="flex w-full items-center justify-center gap-1.5 rounded-md bg-btn px-3 py-1.5 text-[12px] font-medium text-text-primary border border-border-app shadow-sm hover:bg-btn-hover transition-colors disabled:opacity-40"
       >
@@ -171,7 +204,12 @@ function ArchivePicker({
   );
 }
 
-export function ArchiveCard({ result, archiveSession, onPlayArchive }: ArchiveCardProps) {
+export function ArchiveCard({
+  result,
+  archiveSession,
+  isCasting,
+  onPlayArchive,
+}: ArchiveCardProps) {
   const [programmes, setProgrammes] = useState<EpgProgramme[] | null>(null);
 
   useEffect(() => {
@@ -287,7 +325,7 @@ export function ArchiveCard({ result, archiveSession, onPlayArchive }: ArchiveCa
         <ArchivePicker result={result} onPlayArchive={onPlayArchive} />
       )}
 
-      <ArchiveProbe result={result} />
+      <ArchiveProbe result={result} isCasting={isCasting} />
     </div>
   );
 }

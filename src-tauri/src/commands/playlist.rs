@@ -18,8 +18,9 @@ use crate::engine::stalker::{
     STALKER_API_TIMEOUT,
 };
 use crate::engine::xtream::{
-    apply_xtream_archive_flags, build_xtream_download_url, fetch_xtream_account_info,
-    fetch_xtream_live_streams, fetch_xtream_playlist_via_json_api, xtream_archive_flags,
+    apply_xtream_archive_flags, build_xtream_download_url, build_xtream_xmltv_url,
+    fetch_xtream_account_info, fetch_xtream_live_streams, fetch_xtream_playlist_via_json_api,
+    xtream_archive_flags,
 };
 use crate::error::AppError;
 use crate::models::channel::Channel;
@@ -790,6 +791,10 @@ pub(crate) async fn open_playlist_xtream_inner(
     } else {
         HashMap::new()
     };
+    let xmltv_source = build_xtream_xmltv_url(&server, &username, &password).to_string();
+    if !preview.epg_sources.contains(&xmltv_source) {
+        preview.epg_sources.push(xmltv_source);
+    }
     if !archive_flags.is_empty() {
         apply_xtream_archive_flags(&mut preview.channels, &archive_flags);
     }
