@@ -1,7 +1,7 @@
 import { CircleCheck, CircleX, LoaderCircle, Play } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ArchivePlayOptions, ArchiveSession } from "../hooks/useStreamPlayer";
-import { archiveTitle, hasArchive } from "../lib/archive";
+import { archiveTitle, hasArchive, MAX_CATCHUP_DAYS } from "../lib/archive";
 import { probeChannelArchive } from "../lib/archiveProbe";
 import { logger } from "../lib/logger";
 import { isScanActive } from "../lib/scanState";
@@ -19,7 +19,6 @@ interface ArchiveCardProps {
 // The EPG download can be hundreds of MB, so it loads lazily the first time a
 // catch-up channel's card opens, once per playlist, sources, and indexed IDs.
 let epgLoad: { key: string; promise: Promise<void> } | null = null;
-const MAX_CATCHUP_DAYS = 31;
 const MAX_RENDERED_PROGRAMMES = 2_000;
 
 function epgSourcesFor(result: ChannelResult): string[] {
@@ -27,7 +26,7 @@ function epgSourcesFor(result: ChannelResult): string[] {
   return playlist?.epg_sources_by_playlist[result.playlist] ?? playlist?.epg_sources ?? [];
 }
 
-function ensureEpgLoaded(): Promise<void> {
+function epgLoadRequest() {
   const state = useAppStore.getState();
   const sources = state.playlist?.epg_sources ?? [];
   const tvgIds = [
@@ -43,11 +42,19 @@ function ensureEpgLoaded(): Promise<void> {
     sources,
     tvgIds,
   ]);
+  return { key, sources, tvgIds };
+}
+
+function ensureEpgLoaded(): Promise<void> {
+  const { key, sources, tvgIds } = epgLoadRequest();
   if (epgLoad?.key === key) {
     return epgLoad.promise;
   }
   const promise = loadEpg(sources, tvgIds).then(
     (summary) => {
+      if (epgLoad?.key !== key || epgLoadRequest().key !== key) {
+        return;
+      }
       useAppStore.getState().setEpgLoadSummary(summary);
       logger.info(
         "[EPG] Loaded",

@@ -6,6 +6,8 @@ import type { ChannelResult } from "./types";
 
 type ArchiveFields = Pick<ChannelResult, "catchup" | "catchup_days" | "catchup_source">;
 
+export const MAX_CATCHUP_DAYS = 31;
+
 export function hasArchive(result: ArchiveFields): boolean {
   return result.catchup != null || result.catchup_days != null;
 }

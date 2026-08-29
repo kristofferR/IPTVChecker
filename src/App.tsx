@@ -37,6 +37,7 @@ import { useSettings } from "./hooks/useSettings";
 import { type ArchivePlayOptions, useStreamPlayer } from "./hooks/useStreamPlayer";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 import { buildArchiveUrl } from "./lib/archive";
+import { cancelArchiveProbes } from "./lib/archiveProbe";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
 import {
   checkFfmpegAvailable,
@@ -583,6 +584,18 @@ export default function App() {
   }, [chromecast]);
   const castSession = chromecast.session;
   const isCasting = isCastSessionActive(castSession);
+  const hadActiveCastRef = useRef(false);
+
+  useEffect(() => {
+    if (isCasting) {
+      hadActiveCastRef.current = true;
+      return;
+    }
+    if (hadActiveCastRef.current && streamPlayer.archiveSession) {
+      setArchiveSession(null);
+    }
+    hadActiveCastRef.current = false;
+  }, [isCasting, setArchiveSession, streamPlayer.archiveSession]);
 
   const { settings, save: saveSettings, applyExternal: applyExternalSettings } = useSettings();
   const { start, cancel, pause, resume, initFromPlaylist, syncFromPlaylist, updateResult } =
@@ -900,6 +913,14 @@ export default function App() {
       const applyResult = await ensureSourceFilterApplied();
       if (!applyResult.ok) {
         return false;
+      }
+
+      const appliedState = getStore();
+      if (
+        appliedState.playlist?.single_provider &&
+        Object.values(appliedState.archiveProbes).some((probe) => probe.running)
+      ) {
+        await cancelArchiveProbes();
       }
 
       const refreshedState = getStore();

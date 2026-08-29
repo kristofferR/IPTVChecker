@@ -1,4 +1,4 @@
-import { buildArchiveUrl } from "./archive";
+import { buildArchiveUrl, MAX_CATCHUP_DAYS } from "./archive";
 import { quickCheckChannel } from "./tauri";
 import type { ChannelResult } from "./types";
 
@@ -20,10 +20,23 @@ export interface ArchiveProbePoint {
   startEpochS: number;
 }
 
+let archiveProbeGeneration = 0;
+const inFlightArchiveChecks = new Set<Promise<void>>();
+
+/** Stop probe sequences and wait for their current backend checks to release the provider. */
+export async function cancelArchiveProbes(): Promise<void> {
+  archiveProbeGeneration += 1;
+  await Promise.all(inFlightArchiveChecks);
+}
+
 /** One hour back, plus a point just inside the advertised depth when known. */
-export function archiveProbePoints(result: ChannelResult, nowEpochS: number): ArchiveProbePoint[] {
+export function archiveProbePoints(
+  result: Pick<ChannelResult, "catchup_days">,
+  nowEpochS: number,
+): ArchiveProbePoint[] {
   const points: ArchiveProbePoint[] = [{ label: "Archive −1 h", startEpochS: nowEpochS - 3600 }];
-  const depthDays = result.catchup_days;
+  const depthDays =
+    result.catchup_days == null ? null : Math.min(MAX_CATCHUP_DAYS, result.catchup_days);
   if (depthDays != null && depthDays > 0) {
     points.push({
       label: `Archive −${depthDays} d`,
@@ -83,7 +96,9 @@ export async function probeChannelArchive(
   onUpdate: (entry: ArchiveProbeEntry) => void,
   shouldContinue: () => boolean = () => true,
 ): Promise<ArchiveProbeEntry> {
-  if (!shouldContinue()) {
+  const generation = archiveProbeGeneration;
+  const canContinue = () => generation === archiveProbeGeneration && shouldContinue();
+  if (!canContinue()) {
     return { running: false, outcomes: [], checkedAt: null };
   }
   const nowEpochS = Math.floor(Date.now() / 1000);
@@ -91,12 +106,18 @@ export async function probeChannelArchive(
   let cancelled = false;
   onUpdate({ running: true, outcomes: [], checkedAt: null });
   for (const point of archiveProbePoints(result, nowEpochS)) {
-    if (!shouldContinue()) {
+    if (!canContinue()) {
       cancelled = true;
       break;
     }
-    const outcome = await probeArchivePoint(result, point, nowEpochS);
-    if (!shouldContinue()) {
+    const pendingCheck = probeArchivePoint(result, point, nowEpochS);
+    const completion = pendingCheck.then(
+      () => undefined,
+      () => undefined,
+    );
+    inFlightArchiveChecks.add(completion);
+    const outcome = await pendingCheck.finally(() => inFlightArchiveChecks.delete(completion));
+    if (!canContinue()) {
       cancelled = true;
       break;
     }

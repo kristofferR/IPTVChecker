@@ -7,6 +7,7 @@ import {
   hasArchive,
   substituteArchiveTemplate,
 } from "../src/lib/archive";
+import { archiveProbePoints } from "../src/lib/archiveProbe";
 
 function fields(
   catchup: string | null,
@@ -44,6 +45,15 @@ describe("archive helpers", () => {
     expect(archiveSortValue(fields(null, null))).toBeNull();
     expect(archiveSortValue(fields("xc", null))).toBe(0);
     expect(archiveSortValue(fields("xc", 7))).toBe(7);
+  });
+
+  it("clamps archive probes to the supported retention depth", () => {
+    const nowEpochS = 1_800_000_000;
+
+    expect(archiveProbePoints({ catchup_days: 0xffff_ffff }, nowEpochS)).toEqual([
+      { label: "Archive −1 h", startEpochS: nowEpochS - 3600 },
+      { label: "Archive −31 d", startEpochS: nowEpochS - 31 * 86_400 + 1800 },
+    ]);
   });
 });
 

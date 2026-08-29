@@ -256,6 +256,8 @@ pub fn parse_xmltv_into_with_source<R: Read>(
     let mut current_title: Option<String> = None;
     let mut in_title = false;
     let mut saw_xmltv_root = false;
+    let mut closed_xmltv_root = false;
+    let mut element_depth = 0usize;
 
     loop {
         buffer.clear();
@@ -269,6 +271,7 @@ pub fn parse_xmltv_into_with_source<R: Read>(
                     }
                     saw_xmltv_root = true;
                 }
+                element_depth += 1;
 
                 match element.name().as_ref() {
                     b"programme" => {
@@ -310,6 +313,7 @@ pub fn parse_xmltv_into_with_source<R: Read>(
                         ));
                     }
                     saw_xmltv_root = true;
+                    closed_xmltv_root = true;
                 }
             }
             Ok(Event::Text(text)) => {
@@ -330,34 +334,46 @@ pub fn parse_xmltv_into_with_source<R: Read>(
                     in_title = false;
                 }
             }
-            Ok(Event::End(element)) => match element.name().as_ref() {
-                b"programme" => {
-                    if let Some((channel, start, stop)) = current.take() {
-                        if stop.is_none_or(|stop| stop > start) {
-                            index
-                                .programmes
-                                .entry((source_identity.to_string(), channel))
-                                .or_default()
-                                .push(EpgProgramme {
-                                    start,
-                                    // `start` is an internal sentinel for an omitted stop time;
-                                    // finalize replaces it with the following programme or fallback.
-                                    stop: stop.unwrap_or(start),
-                                    title: current_title
-                                        .take()
-                                        .unwrap_or_else(|| "Untitled".to_string()),
-                                });
+            Ok(Event::End(element)) => {
+                let closes_root = element_depth == 1 && element.name().as_ref() == b"tv";
+                match element.name().as_ref() {
+                    b"programme" => {
+                        if let Some((channel, start, stop)) = current.take() {
+                            if stop.is_none_or(|stop| stop > start) {
+                                index
+                                    .programmes
+                                    .entry((source_identity.to_string(), channel))
+                                    .or_default()
+                                    .push(EpgProgramme {
+                                        start,
+                                        // `start` is an internal sentinel for an omitted stop time;
+                                        // finalize replaces it with the following programme or fallback.
+                                        stop: stop.unwrap_or(start),
+                                        title: current_title
+                                            .take()
+                                            .unwrap_or_else(|| "Untitled".to_string()),
+                                    });
+                            }
                         }
+                        in_title = false;
                     }
-                    in_title = false;
+                    b"title" => in_title = false,
+                    _ => {}
                 }
-                b"title" => in_title = false,
-                _ => {}
-            },
+                if closes_root {
+                    closed_xmltv_root = true;
+                }
+                element_depth = element_depth.saturating_sub(1);
+            }
             Ok(Event::Eof) => {
                 if !saw_xmltv_root {
                     return Err(AppError::Other(
                         "Failed to parse XMLTV: missing <tv> root".to_string(),
+                    ));
+                }
+                if !closed_xmltv_root {
+                    return Err(AppError::Other(
+                        "Failed to parse XMLTV: document ended before </tv>".to_string(),
                     ));
                 }
                 break;
@@ -409,6 +425,7 @@ pub fn redact_epg_source(source: &str) -> String {
     };
     let _ = url.set_username("");
     let _ = url.set_password(None);
+    url.set_path("/");
     url.set_query(None);
     url.set_fragment(None);
     url.to_string()
@@ -425,6 +442,35 @@ fn cache_is_fresh(path: &Path) -> bool {
 fn temporary_cache_path(target: &Path) -> PathBuf {
     let id = NEXT_TEMP_FILE_ID.fetch_add(1, Ordering::Relaxed);
     target.with_extension(format!("{}.{}.part", std::process::id(), id))
+}
+
+fn remove_stale_partial_downloads(cache_dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(cache_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.starts_with("epg-") || !name.ends_with(".part") {
+            continue;
+        }
+        let is_stale = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age >= EPG_DOWNLOAD_TIMEOUT);
+        if is_stale {
+            if let Err(error) = std::fs::remove_file(&path) {
+                log::warn!(
+                    "Failed to remove stale partial EPG download {}: {error}",
+                    path.display()
+                );
+            }
+        }
+    }
 }
 
 fn prune_epg_cache(cache_dir: &Path, keep: &Path, max_bytes: u64) {
@@ -473,13 +519,14 @@ pub async fn download_epg_source(
     accept_invalid_certs: bool,
     force_refresh: bool,
 ) -> Result<PathBuf, AppError> {
+    std::fs::create_dir_all(cache_dir).map_err(AppError::Io)?;
+    remove_stale_partial_downloads(cache_dir);
     let target = cache_path_for(cache_dir, url);
     if !force_refresh && cache_is_fresh(&target) {
         log::info!("EPG cache hit for {}", redact_epg_source(url));
         return Ok(target);
     }
 
-    std::fs::create_dir_all(cache_dir).map_err(AppError::Io)?;
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(10))
         .connect_timeout(EPG_DOWNLOAD_CONNECT_TIMEOUT)
@@ -639,6 +686,17 @@ mod tests {
     }
 
     #[test]
+    fn rejects_xmltv_documents_with_an_unclosed_root() {
+        let xml = r#"<tv><programme start="20260828200000" stop="20260828210000" channel="news"><title>News</title></programme>"#;
+        let mut index = EpgIndex::default();
+
+        let error = parse_xmltv_into(xml.as_bytes(), &HashSet::new(), &mut index)
+            .expect_err("truncated XMLTV document should fail");
+
+        assert!(error.to_string().contains("before </tv>"));
+    }
+
+    #[test]
     fn parses_windows_1252_channel_ids_and_titles() {
         let xml = b"<?xml version=\"1.0\" encoding=\"windows-1252\"?><tv><programme start=\"20260828200000\" stop=\"20260828210000\" channel=\"caf\xe9\"><title>Caf\xe9 News</title></programme></tv>";
         let wanted = HashSet::from(["café".to_string()]);
@@ -681,7 +739,11 @@ mod tests {
             redact_epg_source(
                 "https://alice:secret@example.com/xmltv.php?username=alice&password=secret"
             ),
-            "https://example.com/xmltv.php"
+            "https://example.com/"
+        );
+        assert_eq!(
+            redact_epg_source("https://example.com/xmltv/alice/secret"),
+            "https://example.com/"
         );
     }
 
@@ -731,6 +793,32 @@ mod tests {
         assert!(!oldest.exists());
         assert!(newest.exists());
         assert!(keep.exists());
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn removes_stale_partial_epg_downloads() {
+        let dir = std::env::temp_dir().join(format!(
+            "iptv-epg-partial-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let stale = dir.join("epg-stale.1.0.part");
+        let unrelated = dir.join("other-stale.part");
+        std::fs::write(&stale, [0; 4]).expect("write stale partial");
+        std::fs::write(&unrelated, [0; 4]).expect("write unrelated partial");
+        std::fs::File::open(&stale)
+            .expect("open stale partial")
+            .set_modified(std::time::SystemTime::UNIX_EPOCH)
+            .expect("age stale partial");
+
+        remove_stale_partial_downloads(&dir);
+
+        assert!(!stale.exists());
+        assert!(unrelated.exists());
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 
