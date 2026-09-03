@@ -244,9 +244,13 @@ pub(crate) fn extract_xtream_account_info(
         max_connections: user
             .get("max_connections")
             .and_then(parse_max_connections_value),
+        timezone: payload
+            .get("server_info")
+            .and_then(|server| parse_optional_string(server.get("timezone"))),
     };
 
     let has_any = info.status.is_some()
+        || info.timezone.is_some()
         || info.expires_at_epoch.is_some()
         || info.created_at_epoch.is_some()
         || info.is_trial.is_some()
@@ -1262,9 +1266,13 @@ mod tests {
                 "is_trial": "1",
                 "active_cons": "2",
                 "max_connections": "4"
+            },
+            "server_info": {
+                "timezone": "Europe/Ljubljana"
             }
         });
         let info = extract_xtream_account_info(&payload).expect("account info should parse");
+        assert_eq!(info.timezone.as_deref(), Some("Europe/Ljubljana"));
         assert_eq!(info.status.as_deref(), Some("Active"));
         assert_eq!(info.expires_at_epoch, Some(1_735_689_600));
         assert_eq!(info.created_at_epoch, Some(1_704_067_200));

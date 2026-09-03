@@ -40,6 +40,7 @@ import { type ArchivePlayOptions, useStreamPlayer } from "./hooks/useStreamPlaye
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 import { resolveArchivePlayback } from "./lib/archive";
 import { cancelArchiveProbes } from "./lib/archiveProbe";
+import { registerArchiveTimezoneResolver } from "./lib/archiveTimezone";
 import { isArchiveVerificationBlockingPlayback, verifyAllArchives } from "./lib/archiveVerifyRun";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
 import {
@@ -99,6 +100,8 @@ const TABLE_PROFILER_ROW_LIMIT = 50_000;
 
 // Non-reactive store access for writes inside callbacks/effects.
 const getStore = () => useAppStore.getState();
+// Xtream panels interpret timeshift starts in their own timezone.
+registerArchiveTimezoneResolver(() => getStore().playlist?.xtream_account_info?.timezone ?? null);
 const ARCHIVE_VERIFICATION_PLAYBACK_ERROR = "Cancel catch-up verification before starting playback";
 
 function blockPlaybackDuringArchiveVerification(): boolean {

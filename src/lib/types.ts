@@ -124,6 +124,7 @@ export interface XtreamAccountInfo {
   is_trial: boolean | null;
   active_connections: number | null;
   max_connections: number | null;
+  timezone: string | null;
 }
 
 export interface XtreamOpenRequest {

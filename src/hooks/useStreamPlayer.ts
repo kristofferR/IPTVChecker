@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { resolveArchivePlayback } from "../lib/archive";
+import { describeArchiveFailure, resolveArchivePlayback } from "../lib/archive";
 import { normalizeCodecName, resolveResolutionLabel } from "../lib/format";
 import { logger } from "../lib/logger";
 import {
@@ -446,7 +446,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       recoveryTimestampsRef.current = [];
       logger.error("[Player] Playback failed for channel", result.name, "-", reason);
       setPlayerState("error");
-      setErrorMessage(reason);
+      // Archive failures are usually "the provider stored nothing for that
+      // time", not network faults; say so instead of surfacing hls.js codes.
+      setErrorMessage(archiveSessionRef.current ? describeArchiveFailure(reason) : reason);
       setIsPaused(false);
       setActiveChannelIndex(null);
       // A failed archive URL says nothing about the live channel's health, so

@@ -18,6 +18,10 @@ pub struct XtreamAccountInfo {
     pub active_connections: Option<u32>,
     #[serde(default)]
     pub max_connections: Option<u32>,
+    /// Panel timezone from `server_info`; Xtream timeshift starts are
+    /// interpreted in this zone, not UTC.
+    #[serde(default)]
+    pub timezone: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

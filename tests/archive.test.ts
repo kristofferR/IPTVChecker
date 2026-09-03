@@ -6,6 +6,7 @@ import {
   archiveSortValue,
   archiveTitle,
   buildArchiveUrl,
+  describeArchiveFailure,
   hasArchive,
   resolveArchivePlayback,
   substituteArchiveTemplate,
@@ -306,5 +307,42 @@ describe("archivePickerDefault", () => {
   it("rolls to yesterday when 59:30 back crosses midnight", () => {
     const now = new Date(2026, 7, 29, 0, 20, 0);
     expect(archivePickerDefault(now)).toEqual({ daysBack: 1, time: "23:20" });
+  });
+});
+
+describe("xtream timeshift start timezone", () => {
+  it("formats the start in the panel timezone when known", () => {
+    // 2026-08-28 20:00 UTC is 22:00 in Europe/Ljubljana (CEST)
+    expect(
+      buildArchiveUrl(urlFields("http://host/live/alice/secret/42.ts", "xc"), {
+        ...WINDOW,
+        timezone: "Europe/Ljubljana",
+      }),
+    ).toBe("http://host/timeshift/alice/secret/60/2026-08-28:22-00/42.m3u8");
+  });
+
+  it("falls back to UTC for unknown zones and when none is registered", () => {
+    expect(
+      buildArchiveUrl(urlFields("http://host/live/alice/secret/42.ts", "xc"), {
+        ...WINDOW,
+        timezone: "Not/AZone",
+      }),
+    ).toBe("http://host/timeshift/alice/secret/60/2026-08-28:20-00/42.m3u8");
+    expect(
+      buildArchiveUrl(urlFields("http://host/live/alice/secret/42.ts", "xc"), {
+        ...WINDOW,
+        timezone: null,
+      }),
+    ).toBe("http://host/timeshift/alice/secret/60/2026-08-28:20-00/42.m3u8");
+  });
+});
+
+describe("describeArchiveFailure", () => {
+  it("explains an empty archive instead of surfacing hls.js internals", () => {
+    expect(describeArchiveFailure("networkError: manifestParsingError")).toMatch(/no archive/);
+    expect(describeArchiveFailure("HLS playback timed out")).toMatch(/no archive/);
+    expect(describeArchiveFailure("mediaError: bufferStalled")).toBe(
+      "Archive playback failed: mediaError: bufferStalled",
+    );
   });
 });

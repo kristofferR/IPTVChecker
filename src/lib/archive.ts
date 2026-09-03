@@ -1,3 +1,4 @@
+import { currentArchiveTimezone } from "./archiveTimezone";
 import type { ChannelResult, PlaylistPreview, XtreamArchiveChannelUpdate } from "./types";
 
 // "Archive" = provider catch-up/replay of past programmes (issue #229). Named
@@ -47,6 +48,12 @@ export interface ArchiveWindow {
   durationS: number;
   /** Current time; offset-style templates need it. */
   nowEpochS: number;
+  /**
+   * IANA zone the provider interprets wall-clock starts in (Xtream panels use
+   * their own local time). Defaults to the current playlist's panel timezone,
+   * then UTC.
+   */
+  timezone?: string | null;
 }
 
 export interface ArchivePlaybackRange {
@@ -95,9 +102,32 @@ function appendQuery(url: string, query: string): string {
 }
 
 /** "YYYY-MM-DD:HH-MM" in UTC, the start format Xtream timeshift URLs expect. */
-function formatXtreamStart(epochS: number): string {
+/**
+ * "YYYY-MM-DD:HH-MM" as the Xtream panel expects it. Panels interpret the
+ * start in their own timezone (the server_info `timezone`), so a UTC clock
+ * would play the wrong programme by the panel's UTC offset.
+ */
+function formatXtreamStart(epochS: number, timezone: string | null | undefined): string {
   const date = new Date(epochS * 1000);
   const pad = (value: number) => String(value).padStart(2, "0");
+  if (timezone) {
+    try {
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: timezone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }).formatToParts(date);
+      const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+      const stamp = `${get("year")}-${get("month")}-${get("day")}:${get("hour")}-${get("minute")}`;
+      if (/^\d{4}-\d{2}-\d{2}:\d{2}-\d{2}$/.test(stamp)) return stamp;
+    } catch {
+      // Unknown zone name: fall through to UTC.
+    }
+  }
   return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}:${pad(
     date.getUTCHours(),
   )}-${pad(date.getUTCMinutes())}`;
@@ -148,6 +178,7 @@ export function buildArchiveUrl(channel: ArchiveUrlFields, window: ArchiveWindow
       const durationMinutes = Math.max(1, Math.ceil(window.durationS / 60));
       return `${base}${prefix}/timeshift/${user}/${pass}/${durationMinutes}/${formatXtreamStart(
         window.startEpochS,
+        window.timezone === undefined ? currentArchiveTimezone() : window.timezone,
       )}/${id}.m3u8${suffix}`;
     }
     case "flussonic": {
@@ -233,11 +264,26 @@ export function resolveArchivePlayback(
   channel: ArchiveUrlFields,
   range: ArchivePlaybackRange,
   nowEpochS: number = Math.floor(Date.now() / 1000),
+  timezone?: string | null,
 ): ResolvedArchivePlayback | null {
   const windowEndEpochS = Math.min(range.endEpochS ?? nowEpochS, nowEpochS);
   const requestedStartEpochS = Math.min(Math.floor(range.startEpochS), windowEndEpochS - 1);
   const durationS = Math.max(60, windowEndEpochS - requestedStartEpochS);
   const startEpochS = windowEndEpochS - durationS;
-  const url = buildArchiveUrl(channel, { startEpochS, durationS, nowEpochS });
+  const url = buildArchiveUrl(channel, { startEpochS, durationS, nowEpochS, timezone });
   return url ? { url, startEpochS, windowEndEpochS } : null;
+}
+
+/**
+ * Turn a player error into something a user can act on when it happened
+ * during archive playback: an empty or unparsable manifest means the provider
+ * served nothing for that time, which is far more common than a real network
+ * fault (flagged channels with no stored archive, or a start outside the
+ * retained window).
+ */
+export function describeArchiveFailure(reason: string): string {
+  if (/manifestParsingError|manifestLoadError|timed out|404|levelEmptyError|empty/i.test(reason)) {
+    return "The provider returned no archive for this time. The channel advertises catch-up, but nothing is stored for it (or the start is outside the retained window).";
+  }
+  return `Archive playback failed: ${reason}`;
 }
