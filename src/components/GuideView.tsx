@@ -1,8 +1,9 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ChevronLeft, ChevronRight, CircleCheck, CircleX, LoaderCircle, Play } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { CircleCheck, CircleX, Download, LoaderCircle, Play } from "lucide-react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ArchivePlayOptions } from "../hooks/useStreamPlayer";
-import { archiveBadgeText, hasArchive } from "../lib/archive";
+import { archiveBadgeText, hasArchive, resolveArchivePlayback } from "../lib/archive";
+import { startArchiveDownload } from "../lib/archiveDownload";
 import {
   type ArchiveProbeOutcome,
   probeArchivePoint,
@@ -17,10 +18,19 @@ import { dayLabel, startOfDayEpochS, timeLabel } from "../lib/timeFormat";
 import type { ChannelResult, EpgProgramme } from "../lib/types";
 import { useAppStore } from "../store";
 
+// The guide is one continuous canvas: trackpad scrolling moves through time
+// horizontally (left = into the past) and through channels vertically. The
+// channel column and the time axis stay pinned with position: sticky.
 const ROW_HEIGHT_PX = 32;
-const WINDOW_HOURS = 6;
+const AXIS_HEIGHT_PX = 22;
+const CHANNEL_COL_PX = 150;
+const PX_PER_HOUR = 240;
 const MAX_GUIDE_DEPTH_DAYS = 14;
 const GUIDE_CLOCK_INTERVAL_MS = 30_000;
+/** Programmes outside the viewport by more than this are not rendered. */
+const RENDER_BUFFER_S = 2 * 3600;
+/** Visible-range changes are quantized so scrolling does not re-render rows every frame. */
+const RENDER_STEP_S = 1800;
 
 interface GuideSelection {
   result: ChannelResult;
@@ -42,24 +52,38 @@ function selectionKey(selection: GuideSelection | null): string | null {
   return selection ? `${selection.result.index}:${selection.programme.start}` : null;
 }
 
+function playOptionsFor(selection: GuideSelection): ArchivePlayOptions {
+  return {
+    startEpochS: selection.programme.start,
+    endEpochS: selection.programme.stop,
+    title: selection.programme.title,
+  };
+}
+
 interface GuideRowProps {
   result: ChannelResult;
-  windowFrom: number;
-  windowTo: number;
+  spanFrom: number;
+  spanTo: number;
+  renderFrom: number;
+  renderTo: number;
   nowEpochS: number;
   selectedKey: string | null;
   onSelect: (selection: GuideSelection) => void;
   onActivate: (selection: GuideSelection) => void;
+  onContextMenu: (selection: GuideSelection, x: number, y: number) => void;
 }
 
 const GuideRow = memo(function GuideRow({
   result,
-  windowFrom,
-  windowTo,
+  spanFrom,
+  spanTo,
+  renderFrom,
+  renderTo,
   nowEpochS,
   selectedKey,
   onSelect,
   onActivate,
+  onContextMenu,
 }: GuideRowProps) {
   const [programmes, setProgrammes] = useState<EpgProgramme[] | null>(null);
   const epgSourceKey = useAppStore((state) =>
@@ -75,21 +99,24 @@ const GuideRow = memo(function GuideRow({
       setProgrammes([]);
       return;
     }
-    fetchGuideProgrammes(result, windowFrom, windowTo).then((list) => {
+    fetchGuideProgrammes(result, spanFrom, spanTo).then((list) => {
       if (!stale) setProgrammes(list);
     });
     return () => {
       stale = true;
     };
-  }, [result.playlist, result.tvg_id, epgSourceKey, windowFrom, windowTo]);
+  }, [result.playlist, result.tvg_id, epgSourceKey, spanFrom, spanTo]);
 
-  const windowLength = windowTo - windowFrom;
   const earliestPlayable =
     result.catchup_days != null ? nowEpochS - result.catchup_days * 86_400 : null;
+  const xOf = (epochS: number) => CHANNEL_COL_PX + ((epochS - spanFrom) / 3600) * PX_PER_HOUR;
 
   return (
     <div className="flex h-full items-stretch border-b border-border-subtle">
-      <div className="flex w-[150px] shrink-0 items-center gap-1.5 border-r border-border-subtle px-2">
+      <div
+        className="sticky left-0 z-10 flex shrink-0 items-center gap-1.5 border-r border-border-subtle bg-content px-2"
+        style={{ width: `${CHANNEL_COL_PX}px` }}
+      >
         <span className="min-w-0 flex-1 truncate text-[11px] font-semibold">{result.name}</span>
         <span className="shrink-0 text-[9px] font-bold uppercase text-violet-400">
           {archiveBadgeText(result)}
@@ -97,19 +124,25 @@ const GuideRow = memo(function GuideRow({
       </div>
       <div className="relative min-w-0 flex-1">
         {programmes === null ? (
-          <div className="flex h-full items-center px-2 text-[10px] text-text-tertiary">
+          <div
+            className="sticky flex h-full w-max items-center px-2 text-[10px] text-text-tertiary"
+            style={{ left: `${CHANNEL_COL_PX}px` }}
+          >
             <LoaderCircle className="mr-1.5 h-3 w-3 animate-spin" /> Loading...
           </div>
         ) : programmes.length === 0 ? (
-          <div className="flex h-full items-center px-2 text-[10px] text-text-tertiary">
+          <div
+            className="sticky flex h-full w-max items-center px-2 text-[10px] text-text-tertiary"
+            style={{ left: `${CHANNEL_COL_PX}px` }}
+          >
             {result.tvg_id ? "No programme data" : "No EPG id"}
           </div>
         ) : (
           programmes.map((programme) => {
-            const left = Math.max(0, (programme.start - windowFrom) / windowLength);
-            const right = Math.min(1, (programme.stop - windowFrom) / windowLength);
-            const width = right - left;
-            if (width <= 0.005) return null;
+            if (programme.stop < renderFrom || programme.start > renderTo) return null;
+            const left = xOf(Math.max(programme.start, spanFrom)) - CHANNEL_COL_PX;
+            const width = xOf(Math.min(programme.stop, spanTo)) - CHANNEL_COL_PX - left;
+            if (width < 2) return null;
             const playable =
               programme.start <= nowEpochS &&
               (earliestPlayable == null || programme.start >= earliestPlayable);
@@ -121,6 +154,12 @@ const GuideRow = memo(function GuideRow({
                 type="button"
                 onClick={() => onSelect(selection)}
                 onDoubleClick={() => playable && onActivate(selection)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onSelect(selection);
+                  onContextMenu(selection, event.clientX, event.clientY);
+                }}
                 title={`${timeLabel(programme.start)}–${timeLabel(programme.stop)} ${programme.title}${playable ? "" : " (unavailable)"}`}
                 className={`absolute inset-y-[3px] flex items-center gap-1 overflow-hidden rounded px-1.5 text-left text-[10.5px] transition-colors ${
                   selected
@@ -129,7 +168,7 @@ const GuideRow = memo(function GuideRow({
                       ? "bg-violet-500/12 text-text-primary ring-1 ring-violet-500/20 hover:bg-violet-500/25"
                       : "bg-panel-subtle text-text-tertiary ring-1 ring-border-subtle"
                 }`}
-                style={{ left: `${left * 100}%`, width: `${width * 100}%` }}
+                style={{ left: `${left}px`, width: `${width - 1}px` }}
               >
                 <span className="shrink-0 text-[9px] tabular-nums opacity-70">
                   {timeLabel(programme.start)}
@@ -143,6 +182,12 @@ const GuideRow = memo(function GuideRow({
     </div>
   );
 });
+
+interface ProgrammeMenuState {
+  selection: GuideSelection;
+  x: number;
+  y: number;
+}
 
 export function GuideView({
   onPlayArchive,
@@ -185,12 +230,17 @@ export function GuideView({
     return Math.min(MAX_GUIDE_DEPTH_DAYS, deepest);
   }, [channels]);
 
-  const [daysAgo, setDaysAgo] = useState(0);
-  const [windowStartHour, setWindowStartHour] = useState(() => {
-    const hour = new Date().getHours();
-    return Math.floor(hour / WINDOW_HOURS) * WINDOW_HOURS;
-  });
+  // The canvas spans local midnight `maxDepthDays` ago through the end of today.
+  const spanFrom = useMemo(() => startOfDayEpochS(maxDepthDays), [maxDepthDays]);
+  const spanTo = useMemo(() => startOfDayEpochS(0) + 86_400, []);
+  const totalWidthPx = CHANNEL_COL_PX + ((spanTo - spanFrom) / 3600) * PX_PER_HOUR;
+  const xOf = useCallback(
+    (epochS: number) => CHANNEL_COL_PX + ((epochS - spanFrom) / 3600) * PX_PER_HOUR,
+    [spanFrom],
+  );
+
   const [selection, setSelection] = useState<GuideSelection | null>(null);
+  const [menu, setMenu] = useState<ProgrammeMenuState | null>(null);
   const [testOutcome, setTestOutcome] = useState<ArchiveProbeOutcome | null>(null);
   const [testing, setTesting] = useState(false);
   const testRequestRef = useRef(0);
@@ -200,39 +250,23 @@ export function GuideView({
     testRequestRef.current += 1;
     selectionRef.current = null;
     setSelection(null);
+    setMenu(null);
     setTestOutcome(null);
   }, [playlist]);
 
-  const windowFrom = startOfDayEpochS(daysAgo) + windowStartHour * 3600;
-  const windowTo = windowFrom + WINDOW_HOURS * 3600;
-
-  const shiftWindow = (direction: -1 | 1) => {
-    const nextHour = windowStartHour + direction * WINDOW_HOURS;
-    if (nextHour < 0) {
-      if (daysAgo < maxDepthDays) {
-        setDaysAgo(daysAgo + 1);
-        setWindowStartHour(24 - WINDOW_HOURS);
-      }
-    } else if (nextHour >= 24) {
-      if (daysAgo > 0) {
-        setDaysAgo(daysAgo - 1);
-        setWindowStartHour(0);
-      }
-    } else {
-      setWindowStartHour(nextHour);
-    }
-  };
-
-  // Esc returns to the table view.
+  // Esc closes the menu, then returns to the table view.
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !isInputLikeTarget(event.target)) {
-        setViewMode("table");
+      if (event.key !== "Escape" || isInputLikeTarget(event.target)) return;
+      if (menu) {
+        setMenu(null);
+        return;
       }
+      setViewMode("table");
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [setViewMode]);
+  }, [setViewMode, menu]);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
@@ -240,7 +274,65 @@ export function GuideView({
     getScrollElement: () => parentRef.current,
     estimateSize: () => ROW_HEIGHT_PX,
     overscan: 10,
+    scrollMargin: AXIS_HEIGHT_PX,
   });
+
+  // Horizontal window actually rendered, quantized to keep row props stable.
+  const [renderRange, setRenderRange] = useState<{ from: number; to: number }>(() => ({
+    from: spanFrom,
+    to: spanTo,
+  }));
+  const updateRenderRange = useCallback(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    const fromS = spanFrom + ((el.scrollLeft - CHANNEL_COL_PX) / PX_PER_HOUR) * 3600;
+    const toS = spanFrom + ((el.scrollLeft + el.clientWidth) / PX_PER_HOUR) * 3600;
+    const from = Math.floor((fromS - RENDER_BUFFER_S) / RENDER_STEP_S) * RENDER_STEP_S;
+    const to = Math.ceil((toS + RENDER_BUFFER_S) / RENDER_STEP_S) * RENDER_STEP_S;
+    setRenderRange((prev) => (prev.from === from && prev.to === to ? prev : { from, to }));
+  }, [spanFrom]);
+
+  const scrollFrameRef = useRef<number | null>(null);
+  const handleScroll = useCallback(() => {
+    setMenu(null);
+    if (scrollFrameRef.current != null) return;
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      updateRenderRange();
+    });
+  }, [updateRenderRange]);
+  useEffect(
+    () => () => {
+      if (scrollFrameRef.current != null) window.cancelAnimationFrame(scrollFrameRef.current);
+    },
+    [],
+  );
+
+  const scrollToTime = useCallback(
+    (epochS: number, fraction = 0.7) => {
+      const el = parentRef.current;
+      if (!el) return;
+      const viewport = Math.max(0, el.clientWidth - CHANNEL_COL_PX);
+      el.scrollLeft = Math.max(0, xOf(epochS) - CHANNEL_COL_PX - viewport * fraction);
+      updateRenderRange();
+    },
+    [xOf, updateRenderRange],
+  );
+
+  // First paint: put "now" toward the right edge so the recent past fills the view.
+  const initialScrollDone = useRef(false);
+  useLayoutEffect(() => {
+    if (initialScrollDone.current) return;
+    initialScrollDone.current = true;
+    scrollToTime(Math.floor(Date.now() / 1000));
+  }, [scrollToTime]);
+  useEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(updateRenderRange);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [updateRenderRange]);
 
   // Right-click "Browse Catch-up" lands on the requested channel.
   useEffect(() => {
@@ -252,18 +344,25 @@ export function GuideView({
     setGuideFocusChannelIndex(null);
   }, [guideFocusChannelIndex, channels, virtualizer, setGuideFocusChannelIndex]);
 
+  // Close the programme menu on outside clicks.
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenu(null);
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [menu]);
+
   const activate = (target: GuideSelection) => {
     if (testing) return;
     if (!isProgrammePlayable(target, Math.floor(Date.now() / 1000))) return;
-    onPlayArchive(target.result, {
-      startEpochS: target.programme.start,
-      endEpochS: target.programme.stop,
-      title: target.programme.title,
-    });
+    onPlayArchive(target.result, playOptionsFor(target));
   };
 
-  const runTest = async () => {
-    if (!selection) return;
+  const runTest = async (target: GuideSelection | null = selection) => {
+    if (!target) return;
     const state = useAppStore.getState();
     if (
       isScanActive(state.scanState) ||
@@ -281,7 +380,6 @@ export function GuideView({
     ) {
       return;
     }
-    const target = selection;
     const testedSelectionKey = selectionKey(target);
     const requestId = ++testRequestRef.current;
     const playlistAtStart = state.playlist;
@@ -326,6 +424,14 @@ export function GuideView({
     }
   };
 
+  const copyArchiveUrl = async (target: GuideSelection) => {
+    const resolved = resolveArchivePlayback(target.result, {
+      startEpochS: target.programme.start,
+      endEpochS: target.programme.stop,
+    });
+    if (resolved) await navigator.clipboard.writeText(resolved.url);
+  };
+
   const testBlocked =
     testing ||
     isScanActive(scanState) ||
@@ -334,54 +440,55 @@ export function GuideView({
     archiveProbeRunning ||
     ((playIntentActive || castActive) && isSingleConnectionPlaylist(playlist));
   const selectionPlayable = selection != null && isProgrammePlayable(selection, nowEpochS);
+  const menuPlayable = menu != null && isProgrammePlayable(menu.selection, nowEpochS);
 
-  const hourLabels = Array.from(
-    { length: WINDOW_HOURS },
-    (_, index) => `${String(windowStartHour + index).padStart(2, "0")}:00`,
+  const select = (next: GuideSelection) => {
+    testRequestRef.current += 1;
+    selectionRef.current = next;
+    setSelection(next);
+    setTestOutcome(null);
+    setTesting(false);
+  };
+
+  // Hour ticks and day boundaries across the whole span.
+  const axis = useMemo(() => {
+    const hours: number[] = [];
+    for (let t = spanFrom; t < spanTo; t += 3600) hours.push(t);
+    const days: number[] = [];
+    for (let offset = maxDepthDays; offset >= 0; offset -= 1) days.push(startOfDayEpochS(offset));
+    return { hours, days };
+  }, [spanFrom, spanTo, maxDepthDays]);
+
+  const dayTabs = useMemo(
+    () => Array.from({ length: maxDepthDays + 1 }, (_, index) => maxDepthDays - index),
+    [maxDepthDays],
   );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* Control strip: date tabs, window pager, selection actions */}
+      {/* Control strip: day jumps, selection actions */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border-subtle bg-panel-muted px-3 py-1.5">
-        <div className="flex max-w-[40%] items-center gap-1 overflow-x-auto">
-          {Array.from({ length: maxDepthDays + 1 }, (_, index) => maxDepthDays - index).map(
-            (offset) => (
-              <button
-                key={offset}
-                type="button"
-                onClick={() => setDaysAgo(offset)}
-                className={`shrink-0 rounded-md px-2.5 py-0.5 text-[11px] transition-colors ${
-                  offset === daysAgo
-                    ? "bg-btn text-text-primary"
-                    : "text-text-secondary hover:bg-panel-subtle"
-                }`}
-              >
-                {dayLabel(startOfDayEpochS(offset) + 43_200)}
-              </button>
-            ),
-          )}
-        </div>
-        <div className="flex items-center gap-0.5 text-[11px] text-text-tertiary">
+        <div className="flex max-w-[55%] items-center gap-1 overflow-x-auto">
+          {dayTabs.map((offset) => (
+            <button
+              key={offset}
+              type="button"
+              onClick={() =>
+                offset === 0
+                  ? scrollToTime(nowEpochS)
+                  : scrollToTime(startOfDayEpochS(offset) + 6 * 3600, 0)
+              }
+              className="shrink-0 rounded-md px-2.5 py-0.5 text-[11px] text-text-secondary transition-colors hover:bg-panel-subtle hover:text-text-primary"
+            >
+              {dayLabel(startOfDayEpochS(offset) + 43_200)}
+            </button>
+          ))}
           <button
             type="button"
-            onClick={() => shiftWindow(-1)}
-            className="rounded p-0.5 hover:bg-panel-subtle hover:text-text-primary"
-            title="Earlier"
+            onClick={() => scrollToTime(nowEpochS)}
+            className="shrink-0 rounded-md bg-btn px-2.5 py-0.5 text-[11px] text-text-primary hover:bg-btn-hover"
           >
-            <ChevronLeft className="h-3.5 w-3.5" />
-          </button>
-          <span className="tabular-nums">
-            {hourLabels[0]} – {String((windowStartHour + WINDOW_HOURS) % 24 || 24).padStart(2, "0")}
-            :00
-          </span>
-          <button
-            type="button"
-            onClick={() => shiftWindow(1)}
-            className="rounded p-0.5 hover:bg-panel-subtle hover:text-text-primary"
-            title="Later"
-          >
-            <ChevronRight className="h-3.5 w-3.5" />
+            Now
           </button>
         </div>
         <div className="ml-auto flex min-w-0 items-center gap-2">
@@ -409,7 +516,8 @@ export function GuideView({
             <>
               <span className="min-w-0 truncate text-[11px] text-text-secondary">
                 <span className="font-medium text-violet-300">{selection.programme.title}</span> ·{" "}
-                {selection.result.name} · {timeLabel(selection.programme.start)}
+                {selection.result.name} · {dayLabel(selection.programme.start)}{" "}
+                {timeLabel(selection.programme.start)}
               </span>
               <button
                 type="button"
@@ -424,7 +532,7 @@ export function GuideView({
               <button
                 type="button"
                 disabled={testBlocked}
-                onClick={runTest}
+                onClick={() => void runTest()}
                 className="shrink-0 rounded-md border border-border-app bg-btn px-2.5 py-1 text-[11px] font-medium text-text-primary hover:bg-btn-hover transition-colors disabled:opacity-40"
               >
                 {testing ? "Testing..." : "Test"}
@@ -434,52 +542,151 @@ export function GuideView({
         </div>
       </div>
 
-      {/* Time axis */}
-      <div className="flex shrink-0 border-b border-border-subtle bg-panel-muted pl-[150px] text-[9px] text-text-tertiary">
-        {hourLabels.map((label) => (
-          <span key={label} className="flex-1 border-l border-border-subtle/50 px-1 py-0.5">
-            {label}
-          </span>
-        ))}
-      </div>
-
       {channels.length === 0 ? (
         <div className="flex flex-1 items-center justify-center text-sm text-text-tertiary">
           No catch-up channels match the current filters
         </div>
       ) : (
-        <div ref={parentRef} className="native-scroll min-h-0 flex-1 overflow-y-auto">
-          <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
-            {virtualizer.getVirtualItems().map((virtualRow) => {
-              const channel = channels[virtualRow.index];
-              return (
+        <div
+          ref={parentRef}
+          onScroll={handleScroll}
+          onContextMenu={(event) => event.preventDefault()}
+          className="native-scroll relative min-h-0 flex-1 overflow-auto"
+        >
+          <div style={{ width: `${totalWidthPx}px` }}>
+            {/* Time axis, pinned to the top while channels scroll */}
+            <div
+              className="sticky top-0 z-20 flex border-b border-border-subtle bg-panel-muted text-[9px] text-text-tertiary"
+              style={{ height: `${AXIS_HEIGHT_PX}px` }}
+            >
+              <div
+                className="sticky left-0 z-30 shrink-0 border-r border-border-subtle bg-panel-muted"
+                style={{ width: `${CHANNEL_COL_PX}px` }}
+              />
+              <div className="relative flex-1">
+                {axis.hours.map((hour) => (
+                  <span
+                    key={hour}
+                    className="absolute top-0 flex h-full items-end border-l border-border-subtle/50 px-1 pb-0.5 tabular-nums"
+                    style={{ left: `${xOf(hour) - CHANNEL_COL_PX}px` }}
+                  >
+                    {timeLabel(hour)}
+                  </span>
+                ))}
+                {axis.days.map((day) => (
+                  <span
+                    key={day}
+                    className="absolute top-0 border-l border-border-app px-1 text-[9px] font-semibold text-text-secondary"
+                    style={{ left: `${xOf(day) - CHANNEL_COL_PX}px` }}
+                  >
+                    {dayLabel(day + 43_200)}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Channel rows */}
+            <div className="relative" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+              {/* Now marker */}
+              {nowEpochS >= spanFrom && nowEpochS <= spanTo && (
                 <div
-                  key={channel.index}
-                  className="absolute inset-x-0"
-                  style={{
-                    height: `${virtualRow.size}px`,
-                    transform: `translateY(${virtualRow.start}px)`,
-                  }}
-                >
-                  <GuideRow
-                    result={channel}
-                    windowFrom={windowFrom}
-                    windowTo={windowTo}
-                    nowEpochS={nowEpochS}
-                    selectedKey={selectionKey(selection)}
-                    onSelect={(next) => {
-                      testRequestRef.current += 1;
-                      selectionRef.current = next;
-                      setSelection(next);
-                      setTestOutcome(null);
-                      setTesting(false);
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-0 z-[5] w-px bg-violet-400/80"
+                  style={{ left: `${xOf(nowEpochS)}px` }}
+                />
+              )}
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const channel = channels[virtualRow.index];
+                return (
+                  <div
+                    key={channel.index}
+                    className="absolute inset-x-0"
+                    style={{
+                      height: `${virtualRow.size}px`,
+                      transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
                     }}
-                    onActivate={activate}
-                  />
-                </div>
-              );
-            })}
+                  >
+                    <GuideRow
+                      result={channel}
+                      spanFrom={spanFrom}
+                      spanTo={spanTo}
+                      renderFrom={renderRange.from}
+                      renderTo={renderRange.to}
+                      nowEpochS={nowEpochS}
+                      selectedKey={selectionKey(selection)}
+                      onSelect={select}
+                      onActivate={activate}
+                      onContextMenu={(target, x, y) => setMenu({ selection: target, x, y })}
+                    />
+                  </div>
+                );
+              })}
+            </div>
           </div>
+        </div>
+      )}
+
+      {menu && (
+        <div
+          ref={menuRef}
+          data-no-window-drag
+          className="fixed z-50 w-56 rounded-lg border border-border-app bg-dropdown py-1 shadow-2xl"
+          style={{
+            top: `${Math.min(menu.y, window.innerHeight - 180)}px`,
+            left: `${Math.min(menu.x, window.innerWidth - 232)}px`,
+          }}
+        >
+          <div className="truncate px-3 pb-1 pt-1.5 text-[11px] text-text-tertiary">
+            {menu.selection.programme.title} · {timeLabel(menu.selection.programme.start)}
+          </div>
+          <button
+            type="button"
+            disabled={!menuPlayable || testing}
+            onClick={() => {
+              const target = menu.selection;
+              setMenu(null);
+              activate(target);
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
+          >
+            <Play className="h-3.5 w-3.5" /> Play
+          </button>
+          <button
+            type="button"
+            disabled={!menuPlayable}
+            onClick={() => {
+              const target = menu.selection;
+              setMenu(null);
+              void startArchiveDownload(target.result, playOptionsFor(target));
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
+          >
+            <Download className="h-3.5 w-3.5" /> Download…
+          </button>
+          <div className="my-1 h-px bg-border-subtle" />
+          <button
+            type="button"
+            disabled={testBlocked || !menuPlayable}
+            onClick={() => {
+              const target = menu.selection;
+              setMenu(null);
+              void runTest(target);
+            }}
+            className="w-full px-3 py-2 text-left text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
+          >
+            Test Catch-up
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const target = menu.selection;
+              setMenu(null);
+              void copyArchiveUrl(target);
+            }}
+            className="w-full px-3 py-2 text-left text-[13px] hover:bg-btn-hover"
+          >
+            Copy Archive URL
+          </button>
         </div>
       )}
     </div>
