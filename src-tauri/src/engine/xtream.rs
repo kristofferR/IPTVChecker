@@ -96,6 +96,24 @@ pub(crate) fn build_xtream_download_url(server: &Url, username: &str, password: 
     playlist_url
 }
 
+pub(crate) fn build_xtream_xmltv_url(server: &Url, username: &str, password: &str) -> Url {
+    let mut xmltv_url = server.clone();
+    let mut endpoint_path = xmltv_url.path().trim_end_matches('/').to_string();
+    if endpoint_path.is_empty() || endpoint_path == "/" {
+        endpoint_path = "/xmltv.php".to_string();
+    } else {
+        endpoint_path.push_str("/xmltv.php");
+    }
+    xmltv_url.set_path(&endpoint_path);
+    xmltv_url.set_query(None);
+    xmltv_url.set_fragment(None);
+    xmltv_url
+        .query_pairs_mut()
+        .append_pair("username", username)
+        .append_pair("password", password);
+    xmltv_url
+}
+
 pub(crate) fn build_xtream_player_api_url(server: &Url, username: &str, password: &str) -> Url {
     let mut api_url = server.clone();
     let mut endpoint_path = api_url.path().trim_end_matches('/').to_string();
@@ -589,7 +607,11 @@ pub(crate) async fn fetch_xtream_playlist_via_json_api(
 
     let estimated_total = live_streams.len() + vod_streams.len();
     let mut m3u = String::with_capacity(estimated_total * 200);
-    m3u.push_str("#EXTM3U\n");
+    let xmltv_url = build_xtream_xmltv_url(server, username, password);
+    m3u.push_str(&format!(
+        "#EXTM3U x-tvg-url=\"{}\"\n",
+        crate::engine::parser::escape_extinf_value(xmltv_url.as_str())
+    ));
 
     // Live streams → .ts extension
     let live_count =
@@ -730,9 +752,11 @@ mod tests {
     use super::{
         append_xtream_streams_to_m3u, apply_xtream_archive_flags, build_xtream_download_url,
         build_xtream_player_api_action_url, build_xtream_player_api_url, build_xtream_source_key,
-        extract_xtream_account_info, extract_xtream_max_connections, normalize_xtream_server,
+        build_xtream_xmltv_url, extract_xtream_account_info, extract_xtream_max_connections,
+        normalize_xtream_server,
     };
     use std::collections::HashMap;
+    use url::Url;
 
     #[test]
     fn generated_xtream_entries_carry_catchup_attributes() {
@@ -924,6 +948,17 @@ mod tests {
         let server = normalize_xtream_server("https://demo.example.com:8080/get.php/")
             .expect("server should normalize");
         assert_eq!(server.to_string(), "https://demo.example.com:8080/");
+    }
+
+    #[test]
+    fn builds_xtream_xmltv_url_with_encoded_credentials() {
+        let server = Url::parse("https://demo.example.com/provider/").expect("server URL");
+        let url = build_xtream_xmltv_url(&server, "user@example.com", "p&ss");
+
+        assert_eq!(
+            url.as_str(),
+            "https://demo.example.com/provider/xmltv.php?username=user%40example.com&password=p%26ss"
+        );
     }
 
     #[test]

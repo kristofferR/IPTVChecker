@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use tauri::{AppHandle, Emitter, Manager, Window};
@@ -29,6 +29,8 @@ const CHECKPOINT_FLUSH_INTERVAL_MS: u64 = 250;
 const CHECKPOINT_FLUSH_MAX_BATCH: usize = 128;
 const RESULT_BATCH_MAX_ITEMS: usize = 64;
 const MIN_SCREENSHOT_DIAGNOSTIC_TIMEOUT_SECS: f64 = 15.0;
+static DIAGNOSTIC_URL_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r#"(?i)\b(?:https?|rtsp|rtmp)://[^\s'"]+"#).unwrap());
 
 #[derive(Debug, Clone)]
 struct SharedUrlResult {
@@ -1297,7 +1299,7 @@ struct ResumeState {
     scope_suffix: String,
 }
 
-fn refresh_resumed_catchup_metadata(
+fn refresh_resumed_playlist_metadata(
     entries: &mut [resume::CheckpointResumeEntry],
     channels: &[Channel],
 ) {
@@ -1308,6 +1310,7 @@ fn refresh_resumed_catchup_metadata(
 
     for entry in entries {
         if let Some(channel) = channels_by_index.get(&entry.result.index) {
+            entry.result.tvg_id = channel.tvg_id.clone();
             entry.result.catchup = channel.catchup.clone();
             entry.result.catchup_days = channel.catchup_days;
             entry.result.catchup_source = channel.catchup_source.clone();
@@ -1371,7 +1374,7 @@ async fn load_resume_state(
         .filter(|entry| channel_indices.contains(&entry.result.index))
         .collect::<Vec<_>>();
     resumed_entries.sort_by_key(|entry| entry.result.index);
-    refresh_resumed_catchup_metadata(&mut resumed_entries, channels);
+    refresh_resumed_playlist_metadata(&mut resumed_entries, channels);
 
     let resumed_indices: HashSet<usize> = resumed_entries
         .iter()
@@ -2022,6 +2025,40 @@ async fn append_history_blocking(
     .await;
 }
 
+fn redact_channel_debug_log(mut channel_log: ChannelDebugLog) -> ChannelDebugLog {
+    channel_log.channel_url = stream_proxy::redact_url(&channel_log.channel_url);
+    channel_log.redirect_chain = channel_log
+        .redirect_chain
+        .into_iter()
+        .map(|url| stream_proxy::redact_url(&url))
+        .collect();
+    for attempt in &mut channel_log.attempts {
+        attempt.redirect_chain = attempt
+            .redirect_chain
+            .iter()
+            .map(|url| stream_proxy::redact_url(url))
+            .collect();
+    }
+    channel_log.diagnostics_output = channel_log
+        .diagnostics_output
+        .map(|text| redact_urls_in_text(&text));
+    channel_log.final_reason = channel_log
+        .final_reason
+        .map(|text| redact_urls_in_text(&text));
+    channel_log.screenshot_error_reason = channel_log
+        .screenshot_error_reason
+        .map(|text| redact_urls_in_text(&text));
+    channel_log
+}
+
+fn redact_urls_in_text(text: &str) -> String {
+    DIAGNOSTIC_URL_RE
+        .replace_all(text, |captures: &regex::Captures<'_>| {
+            stream_proxy::redact_url(&captures[0])
+        })
+        .into_owned()
+}
+
 /// Store the finished scan's debug log on the window scan state.
 async fn store_scan_log(
     state: &Arc<AppState>,
@@ -2044,7 +2081,10 @@ async fn store_scan_log(
                 started_at_epoch_ms,
                 finished_at_epoch_ms: now_epoch_ms(),
                 summary,
-                channels: channel_logs,
+                channels: channel_logs
+                    .into_iter()
+                    .map(redact_channel_debug_log)
+                    .collect(),
             });
         })
         .await;
@@ -2798,6 +2838,7 @@ pub async fn quick_check_channel(
         .await
     };
 
+    let redacted_url = stream_proxy::redact_url(&channel.url);
     let (status, stream_url, latency_ms, error_reason) = match outcome {
         Ok(o) => {
             log::info!(
@@ -2806,7 +2847,7 @@ pub async fn quick_check_channel(
                 channel.name,
                 o.status,
                 check_started_at.elapsed().as_secs_f64(),
-                channel.url,
+                redacted_url,
             );
             (o.status, o.stream_url, o.latency_ms, o.last_error_reason)
         }
@@ -2817,7 +2858,7 @@ pub async fn quick_check_channel(
                 channel.name,
                 check_started_at.elapsed().as_secs_f64(),
                 error,
-                channel.url,
+                redacted_url,
             );
             (ChannelStatus::Dead, None, None, None)
         }
@@ -2938,7 +2979,49 @@ mod tests {
     }
 
     #[test]
-    fn resumed_results_use_current_catchup_metadata() {
+    fn scan_debug_log_redacts_all_url_fields_before_storage() {
+        let sensitive_url = "http://provider.example/live/user/pass/42.ts?token=secret";
+        let redacted = redact_channel_debug_log(ChannelDebugLog {
+            channel_url: sensitive_url.to_string(),
+            redirect_chain: vec![sensitive_url.to_string()],
+            diagnostics_output: Some(format!(r#"{{"filename":"{sensitive_url}"}}"#)),
+            final_reason: Some(format!("Probe failed for {sensitive_url}")),
+            screenshot_error_reason: Some(format!("Screenshot failed for {sensitive_url}")),
+            attempts: vec![crate::models::scan_log::ChannelAttemptDebugLog {
+                redirect_chain: vec![sensitive_url.to_string()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+
+        assert_eq!(
+            redacted.channel_url,
+            "http://provider.example/live/***/***/42.ts?***"
+        );
+        assert_eq!(
+            redacted.redirect_chain.as_slice(),
+            std::slice::from_ref(&redacted.channel_url)
+        );
+        assert_eq!(
+            redacted.attempts[0].redirect_chain.as_slice(),
+            std::slice::from_ref(&redacted.channel_url)
+        );
+        assert_eq!(
+            redacted.diagnostics_output.as_deref(),
+            Some(r#"{"filename":"http://provider.example/live/***/***/42.ts?***"}"#)
+        );
+        assert_eq!(
+            redacted.final_reason.as_deref(),
+            Some("Probe failed for http://provider.example/live/***/***/42.ts?***")
+        );
+        assert_eq!(
+            redacted.screenshot_error_reason.as_deref(),
+            Some("Screenshot failed for http://provider.example/live/***/***/42.ts?***")
+        );
+    }
+
+    #[test]
+    fn resumed_results_use_current_playlist_metadata() {
         let mut result = make_result(1, ChannelStatus::Alive, false, false);
         result.catchup = Some("stale".to_string());
         result.catchup_days = Some(1);
@@ -2948,13 +3031,15 @@ mod tests {
             channel_log: None,
         }];
         let mut channel = make_channel(1);
+        channel.tvg_id = Some("current-epg-id".to_string());
         channel.catchup = Some("xc".to_string());
         channel.catchup_days = Some(7);
         channel.catchup_source = Some("https://new.example/archive".to_string());
         channel.extinf_line = "#EXTINF:-1 catchup=\"xc\" catchup-days=\"7\",Test".to_string();
 
-        refresh_resumed_catchup_metadata(&mut entries, std::slice::from_ref(&channel));
+        refresh_resumed_playlist_metadata(&mut entries, std::slice::from_ref(&channel));
 
+        assert_eq!(entries[0].result.tvg_id.as_deref(), Some("current-epg-id"));
         assert_eq!(entries[0].result.catchup.as_deref(), Some("xc"));
         assert_eq!(entries[0].result.catchup_days, Some(7));
         assert_eq!(

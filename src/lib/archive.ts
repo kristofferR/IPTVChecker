@@ -6,6 +6,8 @@ import type { ChannelResult } from "./types";
 
 type ArchiveFields = Pick<ChannelResult, "catchup" | "catchup_days" | "catchup_source">;
 
+export const MAX_CATCHUP_DAYS = 31;
+
 export function hasArchive(result: ArchiveFields): boolean {
   return result.catchup != null || result.catchup_days != null;
 }
@@ -71,7 +73,7 @@ export function substituteArchiveTemplate(template: string, window: ArchiveWindo
   const values: Record<string, number> = {
     start,
     utc: start,
-    timestamp: start,
+    timestamp: now,
     lutc: now,
     now,
     end: start + duration,
@@ -86,7 +88,10 @@ export function substituteArchiveTemplate(template: string, window: ArchiveWindo
 }
 
 function appendQuery(url: string, query: string): string {
-  return `${url}${url.includes("?") ? "&" : "?"}${query}`;
+  const fragmentStart = url.indexOf("#");
+  const requestUrl = fragmentStart === -1 ? url : url.slice(0, fragmentStart);
+  const fragment = fragmentStart === -1 ? "" : url.slice(fragmentStart);
+  return `${requestUrl}${requestUrl.includes("?") ? "&" : "?"}${query}${fragment}`;
 }
 
 /** "YYYY-MM-DD:HH-MM" in UTC, the start format Xtream timeshift URLs expect. */
@@ -98,8 +103,9 @@ function formatXtreamStart(epochS: number): string {
   )}-${pad(date.getUTCMinutes())}`;
 }
 
-/** `http(s)://host[/live]/user/pass/id[.ext]` — the Xtream live URL shape. */
-const XTREAM_LIVE_URL = /^(https?:\/\/[^/]+)(?:\/live)?\/([^/]+)\/([^/]+)\/(\d+)(?:\.\w+)?$/;
+/** `http(s)://host[/prefix][/live]/user/pass/id[.ext]` — Xtream live URL shape. */
+const XTREAM_LIVE_URL =
+  /^(https?:\/\/[^/]+)((?:\/[^/]+)*?)(?:\/live)?\/([^/]+)\/([^/]+)\/(\d+)(?:\.\w+)?$/i;
 
 function defaultArchiveUrl(url: string, window: ArchiveWindow): string {
   return appendQuery(url, substituteArchiveTemplate("utc=${start}&lutc=${now}", window));
@@ -115,33 +121,46 @@ export function buildArchiveUrl(channel: ArchiveUrlFields, window: ArchiveWindow
 
   const source = channel.catchup_source?.trim();
   if (source) {
-    const resolved = substituteArchiveTemplate(source, window);
-    if (/^https?:\/\//.test(resolved)) return resolved;
+    const resolved = substituteArchiveTemplate(source, window).replace(/&amp;/g, "&");
+    if (/^https?:\/\//i.test(resolved)) return resolved;
     if (resolved.startsWith("?") || resolved.startsWith("&")) {
       return appendQuery(channel.url, resolved.slice(1));
     }
     // Relative templates (catchup="append" and friends) attach to the URL.
-    return `${channel.url}${resolved}`;
+    const fragmentStart = channel.url.indexOf("#");
+    const withoutFragment =
+      fragmentStart === -1 ? channel.url : channel.url.slice(0, fragmentStart);
+    const fragment = fragmentStart === -1 ? "" : channel.url.slice(fragmentStart);
+    const queryStart = withoutFragment.indexOf("?");
+    const path = queryStart === -1 ? withoutFragment : withoutFragment.slice(0, queryStart);
+    const query = queryStart === -1 ? "" : withoutFragment.slice(queryStart);
+    return `${path}${resolved}${query}${fragment}`;
   }
 
   switch (channel.catchup) {
     case "xc": {
-      const match = channel.url.match(XTREAM_LIVE_URL);
+      const suffixStart = channel.url.search(/[?#]/);
+      const streamUrl = suffixStart === -1 ? channel.url : channel.url.slice(0, suffixStart);
+      const suffix = suffixStart === -1 ? "" : channel.url.slice(suffixStart);
+      const match = streamUrl.match(XTREAM_LIVE_URL);
       if (!match) return defaultArchiveUrl(channel.url, window);
-      const [, base, user, pass, id] = match;
-      const durationMinutes = Math.max(1, Math.round(window.durationS / 60));
-      return `${base}/timeshift/${user}/${pass}/${durationMinutes}/${formatXtreamStart(
+      const [, base, prefix, user, pass, id] = match;
+      const durationMinutes = Math.max(1, Math.ceil(window.durationS / 60));
+      return `${base}${prefix}/timeshift/${user}/${pass}/${durationMinutes}/${formatXtreamStart(
         window.startEpochS,
-      )}/${id}.m3u8`;
+      )}/${id}.m3u8${suffix}`;
     }
     case "flussonic": {
       const start = Math.floor(window.startEpochS);
       const duration = Math.max(1, Math.floor(window.durationS));
-      if (/\.m3u8(\?|$)/.test(channel.url)) {
-        return channel.url.replace(/\/[^/?]+\.m3u8(\?|$)/, `/archive-${start}-${duration}.m3u8$1`);
+      if (/\.m3u8([?#]|$)/.test(channel.url)) {
+        return channel.url.replace(
+          /\/[^/?#]+\.m3u8([?#]|$)/,
+          `/archive-${start}-${duration}.m3u8$1`,
+        );
       }
-      if (/\.ts(\?|$)/.test(channel.url)) {
-        return channel.url.replace(/\/[^/?]+\.ts(\?|$)/, `/timeshift_abs-${start}.ts$1`);
+      if (/\.ts([?#]|$)/.test(channel.url)) {
+        return channel.url.replace(/\/[^/?#]+\.ts([?#]|$)/, `/archive-${start}-${duration}.ts$1`);
       }
       return defaultArchiveUrl(channel.url, window);
     }

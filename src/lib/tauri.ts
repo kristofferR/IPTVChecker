@@ -111,12 +111,17 @@ export async function loadEpg(
   return invoke("load_epg", { sources, tvgIds, forceRefresh });
 }
 
+export async function cancelEpgLoad(): Promise<void> {
+  return invoke("cancel_epg_load");
+}
+
 export async function getEpgProgrammes(
+  sources: string[],
   tvgId: string,
   from: number,
   to: number,
 ): Promise<EpgProgramme[]> {
-  return invoke("get_epg_programmes", { tvgId, from, to });
+  return invoke("get_epg_programmes", { sources, tvgId, from, to });
 }
 
 export async function exportCsv(

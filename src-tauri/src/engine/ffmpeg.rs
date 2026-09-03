@@ -41,6 +41,8 @@ static FORMAT_BR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"bitrate:\s*(\d+)\s*kb/s").unwrap());
 static BYTES_READ_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(\d+)\s+bytes\s+read").unwrap());
+static FFMPEG_URL_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r#"(?i)\b(?:https?|rtsp|rtmp)://[^\s'"]+"#).unwrap());
 static AUDIO_LAYOUT_VALUE_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(\d+(?:\.\d+)?)").unwrap());
 
@@ -352,7 +354,11 @@ pub(crate) fn sanitize_ffmpeg_stderr_line(line: &str) -> String {
         }
         return "Input #<REDACTED> from '<REDACTED_URL>'".to_string();
     }
-    trimmed.to_string()
+    FFMPEG_URL_RE
+        .replace_all(trimmed, |captures: &regex::Captures<'_>| {
+            redact_url(&captures[0])
+        })
+        .into_owned()
 }
 
 fn should_route_tool_through_stream_proxy(url: &str) -> bool {
@@ -2116,10 +2122,11 @@ mod tests {
         format_ffmpeg_exit_reason, normalize_superscript, parse_bytes_read, parse_ffmpeg_stderr,
         parse_ffprobe_fps, parse_probe_snapshot, parse_stream_track_presence,
         proxy_upstream_source_url, resolution_label, resolve_binary_from_dir,
-        sanitize_screenshot_stem, screenshot_header_is_valid, should_retry_screenshot_as_png,
-        should_route_tool_through_stream_proxy, should_route_tool_through_stream_proxy_with_hint,
-        stderr_excerpt, unique_screenshot_output_path, validate_captured_screenshot,
-        ScreenshotFormat, MAX_SCREENSHOT_STEM_LEN, TARGET_TRIPLE,
+        sanitize_ffmpeg_stderr_line, sanitize_screenshot_stem, screenshot_header_is_valid,
+        should_retry_screenshot_as_png, should_route_tool_through_stream_proxy,
+        should_route_tool_through_stream_proxy_with_hint, stderr_excerpt,
+        unique_screenshot_output_path, validate_captured_screenshot, ScreenshotFormat,
+        MAX_SCREENSHOT_STEM_LEN, TARGET_TRIPLE,
     };
     use crate::error::AppError;
     use tokio_util::sync::CancellationToken;
@@ -2662,6 +2669,16 @@ Exiting with exit code -1482175992
         assert_eq!(
             stderr_excerpt(stderr),
             "server rejected ffmpeg connection (HTTP 5XX)"
+        );
+    }
+
+    #[test]
+    fn sanitize_ffmpeg_stderr_line_redacts_stream_url_credentials() {
+        assert_eq!(
+            sanitize_ffmpeg_stderr_line(
+                "[rtsp @ 0x123] Failed to open rtsp://alice:secret@example.com/live?token=value"
+            ),
+            "Failed to open rtsp://***@example.com/live?***"
         );
     }
 

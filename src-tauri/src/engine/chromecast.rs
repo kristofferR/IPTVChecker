@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use cast_sender::namespace::media::Media;
+use cast_sender::namespace::media::{IdleReason, Media, PlayerState};
 use cast_sender::namespace::{Custom, NamespaceUrn};
 use cast_sender::{App as CastApp, AppId, Payload, Receiver};
 use mdns_sd::{ServiceDaemon, ServiceEvent};
@@ -203,7 +203,7 @@ impl ActiveCastSession {
 
 /// Start a Cast session: connect, launch the default media receiver, load
 /// media. Spawns a tokio task that owns the `Receiver` and watches for stop
-/// signals or device disconnect.
+/// signals, device disconnect, or finite media completion.
 pub async fn start_session(
     app: AppHandle,
     device: ChromecastDevice,
@@ -321,11 +321,11 @@ async fn run_session_worker(
     )
     .await;
 
-    // For self-exit paths (device disconnected, error) we clear the stored
-    // session so a remounted frontend calling `get_cast_status()` doesn't see
-    // a stale Playing state. On manual stop the caller already cleared the
-    // session before sending Stop, so we skip. The uid match prevents
-    // clearing a successor session started after we exited.
+    // For self-exit paths (device disconnected or finite media completed) we
+    // clear the stored session so a remounted frontend calling
+    // `get_cast_status()` doesn't see a stale Playing state. On manual stop
+    // the caller already cleared the session before sending Stop, so we skip.
+    // The uid match prevents clearing a successor session started after exit.
     if !manual_stop {
         let app_for_cleanup = app.clone();
         tokio::spawn(async move {
@@ -381,7 +381,14 @@ fn build_load_payload(request: &CastMediaRequest, cast_url: &str, is_dash: bool)
     let mut media_obj = serde_json::Map::new();
     media_obj.insert("contentId".to_string(), json!(cast_url));
     media_obj.insert("contentType".to_string(), json!(content_type));
-    media_obj.insert("streamType".to_string(), json!("LIVE"));
+    media_obj.insert(
+        "streamType".to_string(),
+        json!(if request.is_finite {
+            "BUFFERED"
+        } else {
+            "LIVE"
+        }),
+    );
     media_obj.insert("metadata".to_string(), Value::Object(metadata));
 
     let mut fields = HashMap::new();
@@ -434,8 +441,40 @@ async fn send_load(
     Ok(())
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum BufferedPlaybackEnd {
+    Finished,
+    Failed(&'static str),
+}
+
+fn buffered_playback_end(payload: &Payload) -> Option<BufferedPlaybackEnd> {
+    let Payload::Media(Media::MediaStatus(response)) = payload else {
+        return None;
+    };
+
+    response.status.iter().find_map(|status| {
+        if !matches!(&status.player_state, PlayerState::Idle) {
+            return None;
+        }
+
+        match &status.idle_reason {
+            Some(IdleReason::Finished) => Some(BufferedPlaybackEnd::Finished),
+            Some(IdleReason::Error) => Some(BufferedPlaybackEnd::Failed(
+                "Chromecast reported a playback error",
+            )),
+            Some(IdleReason::Cancelled) => {
+                Some(BufferedPlaybackEnd::Failed("Chromecast cancelled playback"))
+            }
+            Some(IdleReason::Interrupted) => Some(BufferedPlaybackEnd::Failed(
+                "Chromecast interrupted playback",
+            )),
+            None => None,
+        }
+    })
+}
+
 /// Returns `true` if the session ended due to an explicit stop signal,
-/// `false` if the device disconnected on its own.
+/// `false` if it ended on its own.
 async fn drive_session(
     app: &AppHandle,
     device: &ChromecastDevice,
@@ -472,6 +511,56 @@ async fn drive_session(
                     log::info!("[Chromecast] Receiver connection lost on '{}'", device.friendly_name);
                     emit_state(app, device, CastSessionState::Stopped, &cast_url, &request, None);
                     return false;
+                }
+                if request.is_finite {
+                    match receiver
+                        .send_request(cast_app, Media::GetStatus(Default::default()))
+                        .await
+                    {
+                        Ok(response) => {
+                            if let Some(playback_end) = buffered_playback_end(&response.payload) {
+                                let _ = receiver.stop_app(cast_app).await;
+                                receiver.disconnect().await;
+                                match playback_end {
+                                    BufferedPlaybackEnd::Finished => {
+                                        emit_state(
+                                            app,
+                                            device,
+                                            CastSessionState::Stopped,
+                                            &cast_url,
+                                            &request,
+                                            None,
+                                        );
+                                        log::info!(
+                                            "[Chromecast] Buffered playback finished on '{}'",
+                                            device.friendly_name
+                                        );
+                                    }
+                                    BufferedPlaybackEnd::Failed(message) => {
+                                        emit_state(
+                                            app,
+                                            device,
+                                            CastSessionState::Error,
+                                            &cast_url,
+                                            &request,
+                                            Some(message.to_string()),
+                                        );
+                                        log::warn!(
+                                            "[Chromecast] Buffered playback failed on '{}': {message}",
+                                            device.friendly_name
+                                        );
+                                    }
+                                }
+                                return false;
+                            }
+                        }
+                        Err(error) => {
+                            log::debug!(
+                                "[Chromecast] Media status poll failed on '{}': {error}",
+                                device.friendly_name
+                            );
+                        }
+                    }
                 }
             }
             maybe_swap = swap_rx.recv() => {
@@ -545,5 +634,68 @@ pub struct CastSessionHandle(pub Mutex<Option<ActiveCastSession>>);
 impl CastSessionHandle {
     pub fn new() -> Arc<Self> {
         Arc::new(Self(Mutex::new(None)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn media_request(is_finite: bool) -> CastMediaRequest {
+        CastMediaRequest {
+            original_url: "https://example.com/stream.ts".to_string(),
+            channel_name: Some("Example".to_string()),
+            channel_logo: None,
+            stream_kind: CastStreamKind::MpegTs,
+            is_finite,
+        }
+    }
+
+    #[test]
+    fn finite_media_uses_buffered_cast_stream_type() {
+        let finite = build_load_payload(&media_request(true), "http://127.0.0.1/archive", false);
+        let live = build_load_payload(&media_request(false), "http://127.0.0.1/live", false);
+
+        assert_eq!(finite.fields["media"]["streamType"], "BUFFERED");
+        assert_eq!(live.fields["media"]["streamType"], "LIVE");
+    }
+
+    fn buffered_media_status(idle_reason: IdleReason) -> Payload {
+        use cast_sender::namespace::media::{MediaStatus, ResponseData};
+
+        let status = MediaStatus {
+            player_state: PlayerState::Idle,
+            idle_reason: Some(idle_reason),
+            ..Default::default()
+        };
+        Payload::Media(Media::MediaStatus(ResponseData {
+            status: vec![status],
+        }))
+    }
+
+    #[test]
+    fn detects_finished_buffered_media_status() {
+        let finished = buffered_media_status(IdleReason::Finished);
+
+        assert_eq!(
+            buffered_playback_end(&finished),
+            Some(BufferedPlaybackEnd::Finished)
+        );
+    }
+
+    #[test]
+    fn detects_failed_buffered_media_statuses() {
+        for reason in [
+            IdleReason::Error,
+            IdleReason::Cancelled,
+            IdleReason::Interrupted,
+        ] {
+            let failed = buffered_media_status(reason);
+
+            assert!(matches!(
+                buffered_playback_end(&failed),
+                Some(BufferedPlaybackEnd::Failed(_))
+            ));
+        }
     }
 }

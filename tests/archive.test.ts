@@ -8,6 +8,7 @@ import {
   resolveArchivePlayback,
   substituteArchiveTemplate,
 } from "../src/lib/archive";
+import { archiveProbePoints } from "../src/lib/archiveProbe";
 
 function fields(
   catchup: string | null,
@@ -46,6 +47,15 @@ describe("archive helpers", () => {
     expect(archiveSortValue(fields("xc", null))).toBe(0);
     expect(archiveSortValue(fields("xc", 7))).toBe(7);
   });
+
+  it("clamps archive probes to the supported retention depth", () => {
+    const nowEpochS = 1_800_000_000;
+
+    expect(archiveProbePoints({ catchup_days: 0xffff_ffff }, nowEpochS)).toEqual([
+      { label: "Archive −1 h", startEpochS: nowEpochS - 3600 },
+      { label: "Archive −31 d", startEpochS: nowEpochS - 31 * 86_400 + 1800 },
+    ]);
+  });
 });
 
 // 2026-08-28 20:00:00 UTC
@@ -72,6 +82,9 @@ describe("substituteArchiveTemplate", () => {
     expect(substituteArchiveTemplate("?offset=${offset}&end=${utcend}", WINDOW)).toBe(
       `?offset=8000&end=${START + 3600}`,
     );
+    expect(substituteArchiveTemplate("?utc=${start}&lutc=${timestamp}", WINDOW)).toBe(
+      `?utc=${START}&lutc=${START + 8000}`,
+    );
   });
 });
 
@@ -87,6 +100,22 @@ describe("buildArchiveUrl", () => {
         WINDOW,
       ),
     ).toBe(`http://h/replay/${START}-3600.m3u8`);
+    expect(
+      buildArchiveUrl(
+        urlFields("http://h/live/s.m3u8", "default", "HTTPS://h/replay/${start}.m3u8"),
+        WINDOW,
+      ),
+    ).toBe(`HTTPS://h/replay/${START}.m3u8`);
+    expect(
+      buildArchiveUrl(
+        urlFields(
+          "http://h/live/s.m3u8",
+          "default",
+          "http://h/replay?start=${start}&amp;duration=${duration}",
+        ),
+        WINDOW,
+      ),
+    ).toBe(`http://h/replay?start=${START}&duration=3600`);
     // Query templates attach to the stream URL, respecting existing queries.
     expect(
       buildArchiveUrl(urlFields("http://h/s.m3u8?token=x", "shift", "?utc=${start}"), WINDOW),
@@ -95,10 +124,31 @@ describe("buildArchiveUrl", () => {
     expect(buildArchiveUrl(urlFields("http://h/s.m3u8", "append", "&start=${start}"), WINDOW)).toBe(
       `http://h/s.m3u8?start=${START}`,
     );
+    expect(
+      buildArchiveUrl(urlFields("http://h/s.m3u8", "append", "&amp;start=${start}"), WINDOW),
+    ).toBe(`http://h/s.m3u8?start=${START}`);
+    expect(
+      buildArchiveUrl(
+        urlFields("http://h/s.m3u8?token=x#player", "shift", "?utc=${start}"),
+        WINDOW,
+      ),
+    ).toBe(`http://h/s.m3u8?token=x&utc=${START}#player`);
     // Non-query relative templates concatenate verbatim.
     expect(
       buildArchiveUrl(urlFields("http://h/video", "append", "-${start}-${duration}.m3u8"), WINDOW),
     ).toBe(`http://h/video-${START}-3600.m3u8`);
+    expect(
+      buildArchiveUrl(
+        urlFields("http://h/video#player", "append", "-${start}-${duration}.m3u8"),
+        WINDOW,
+      ),
+    ).toBe(`http://h/video-${START}-3600.m3u8#player`);
+    expect(
+      buildArchiveUrl(
+        urlFields("http://h/video?token=x#player", "append", "-${start}-${duration}.m3u8"),
+        WINDOW,
+      ),
+    ).toBe(`http://h/video-${START}-3600.m3u8?token=x#player`);
   });
 
   it("builds xtream timeshift URLs from live stream URLs", () => {
@@ -109,6 +159,24 @@ describe("buildArchiveUrl", () => {
     expect(buildArchiveUrl(urlFields("http://host/alice/secret/42", "xc"), WINDOW)).toBe(
       "http://host/timeshift/alice/secret/60/2026-08-28:20-00/42.m3u8",
     );
+    expect(
+      buildArchiveUrl(
+        urlFields("https://host/live/alice/secret/42.ts?token=x#playback", "xc"),
+        WINDOW,
+      ),
+    ).toBe("https://host/timeshift/alice/secret/60/2026-08-28:20-00/42.m3u8?token=x#playback");
+    expect(
+      buildArchiveUrl(urlFields("https://host/provider/live/alice/secret/42.ts", "xc"), WINDOW),
+    ).toBe("https://host/provider/timeshift/alice/secret/60/2026-08-28:20-00/42.m3u8");
+    expect(buildArchiveUrl(urlFields("HTTPS://host/live/alice/secret/42.ts", "xc"), WINDOW)).toBe(
+      "HTTPS://host/timeshift/alice/secret/60/2026-08-28:20-00/42.m3u8",
+    );
+    expect(
+      buildArchiveUrl(urlFields("https://host/provider/alice/secret/42.ts", "xc"), {
+        ...WINDOW,
+        durationS: 3629,
+      }),
+    ).toBe("https://host/provider/timeshift/alice/secret/61/2026-08-28:20-00/42.m3u8");
     // Non-xtream shapes fall back to the utc query convention.
     expect(buildArchiveUrl(urlFields("http://host/odd/path.m3u8", "xc"), WINDOW)).toBe(
       `http://host/odd/path.m3u8?utc=${START}&lutc=${START + 8000}`,
@@ -121,7 +189,13 @@ describe("buildArchiveUrl", () => {
     );
     expect(
       buildArchiveUrl(urlFields("http://host/channel/mono.ts?tok=1", "flussonic"), WINDOW),
-    ).toBe(`http://host/channel/timeshift_abs-${START}.ts?tok=1`);
+    ).toBe(`http://host/channel/archive-${START}-3600.ts?tok=1`);
+    expect(
+      buildArchiveUrl(urlFields("http://host/channel/index.m3u8#player", "flussonic"), WINDOW),
+    ).toBe(`http://host/channel/archive-${START}-3600.m3u8#player`);
+    expect(
+      buildArchiveUrl(urlFields("http://host/channel/mono.ts#player", "flussonic"), WINDOW),
+    ).toBe(`http://host/channel/archive-${START}-3600.ts#player`);
   });
 
   it("uses the utc query convention for default and shift types", () => {
@@ -130,6 +204,9 @@ describe("buildArchiveUrl", () => {
     );
     expect(buildArchiveUrl(urlFields("http://h/s.m3u8?a=1", "shift"), WINDOW)).toBe(
       `http://h/s.m3u8?a=1&utc=${START}&lutc=${START + 8000}`,
+    );
+    expect(buildArchiveUrl(urlFields("http://h/s.m3u8#player", "default"), WINDOW)).toBe(
+      `http://h/s.m3u8?utc=${START}&lutc=${START + 8000}#player`,
     );
   });
 });

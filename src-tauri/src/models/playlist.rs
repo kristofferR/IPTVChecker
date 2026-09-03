@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::channel::Channel;
@@ -44,5 +46,8 @@ pub struct PlaylistPreview {
     /// XMLTV EPG URLs advertised by the playlist header (`x-tvg-url` / `url-tvg`).
     #[serde(default)]
     pub epg_sources: Vec<String>,
+    /// XMLTV EPG sources keyed by the playlist each channel came from.
+    #[serde(default)]
+    pub epg_sources_by_playlist: BTreeMap<String, Vec<String>>,
     pub channels: Vec<Channel>,
 }

@@ -1,5 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { cancelArchiveProbes } from "../lib/archiveProbe";
 import { errorToString, formatPlaylistOpenError, formatSourceReloadError } from "../lib/errors";
 import { logger } from "../lib/logger";
 import { parseXtreamRecent, serializeXtreamRecent } from "../lib/recentPlaylists";
@@ -18,6 +19,7 @@ import {
 } from "../lib/sourceFilter";
 import {
   addRecentPlaylist,
+  cancelEpgLoad,
   clearRecentPlaylists,
   deleteSavedPlaylist,
   getRecentPlaylists,
@@ -129,6 +131,7 @@ export interface UsePlaylistSourcesParams {
     preserveExistingResults?: boolean,
     shouldApply?: () => boolean,
   ) => Promise<boolean>;
+  invalidatePendingArchivePlayback: () => void;
 }
 
 /** Playlist source management: opening file/URL/Xtream/Stalker sources,
@@ -136,6 +139,7 @@ export interface UsePlaylistSourcesParams {
 export function usePlaylistSources({
   initFromPlaylist,
   syncFromPlaylist,
+  invalidatePendingArchivePlayback,
 }: UsePlaylistSourcesParams) {
   const channelSearch = useAppStore((s) => s.channelSearch);
   const settingsHydrated = useAppStore((s) => s.settingsHydrated);
@@ -194,6 +198,12 @@ export function usePlaylistSources({
       appliedSourceFilter: string,
       shouldApply: () => boolean,
     ): Promise<boolean> => {
+      invalidatePendingArchivePlayback();
+      await cancelArchiveProbes();
+      if (!shouldApply()) {
+        return false;
+      }
+
       const initStartedAt = performance.now();
       logger.info(`[App] Preparing scan cache for ${preview.channels.length} visible channels`);
       const initialized = await initFromPlaylist(preview.channels, shouldApply);
@@ -202,6 +212,10 @@ export function usePlaylistSources({
       }
       logger.info(`[App] Scan cache ready in ${(performance.now() - initStartedAt).toFixed(1)}ms`);
 
+      await cancelEpgLoad().catch(() => {});
+      if (!shouldApply()) {
+        return false;
+      }
       const state = getStore();
       state.setPlaylist(preview);
       state.setCachedSourcePreview(cachedPreview);
@@ -225,7 +239,7 @@ export function usePlaylistSources({
 
       return true;
     },
-    [initFromPlaylist],
+    [initFromPlaylist, invalidatePendingArchivePlayback],
   );
 
   const loadFullSourcePreview = useCallback(
@@ -399,6 +413,11 @@ export function usePlaylistSources({
         getStore().setPlaylistOpenError(message);
 
         if (mode === "freshOpen") {
+          invalidatePendingArchivePlayback();
+          await cancelArchiveProbes();
+          if (!isCurrentLoad()) {
+            return supersededResult();
+          }
           // Keep app interaction predictable after a failed fresh open attempt.
           getStore().setSelectedChannel(null);
           getStore().setSelectedChannelIndices([]);
@@ -420,6 +439,7 @@ export function usePlaylistSources({
       buildVisiblePreview,
       channelSearch,
       commitLoadedPlaylist,
+      invalidatePendingArchivePlayback,
       loadFullSourcePreview,
       refreshRecentPlaylists,
     ],
@@ -438,42 +458,67 @@ export function usePlaylistSources({
     }
     previousHideVodContentRef.current = hideVodContent;
 
-    const state = getStore();
-    if (!state.cachedSourcePreview) {
+    const initialState = getStore();
+    const cachedSourcePreview = initialState.cachedSourcePreview;
+    const playlist = initialState.playlist;
+    if (!cachedSourcePreview) {
       return;
     }
 
-    const nextPreview = buildVisiblePreview(
-      state.cachedSourcePreview,
-      state.lastAppliedSourceFilter,
-    );
-    const visibleIndices = new Set(nextPreview.channels.map((channel) => channel.index));
-    const selectedIndex = state.selectedChannel?.index ?? null;
-    const pendingPlaybackIndex = state.pendingPlaybackChannel?.index ?? null;
-    const nextSelectedIndices = state.selectedChannelIndices.filter((index) =>
-      visibleIndices.has(index),
-    );
-
-    state.setPlaylist(nextPreview);
-    state.setGroupFilter(resolvePreservedGroupFilter(state.groupFilter, nextPreview.groups));
-    state.setSelectedChannelIndices(nextSelectedIndices);
-
-    if (selectedIndex == null || !visibleIndices.has(selectedIndex)) {
-      state.setSelectedChannel(null);
-    }
-    if (pendingPlaybackIndex == null || !visibleIndices.has(pendingPlaybackIndex)) {
-      state.setPendingPlaybackChannel(null);
-    }
-
-    void syncFromPlaylist(nextPreview.channels, true).then(() => {
-      if (selectedIndex == null || !visibleIndices.has(selectedIndex)) {
+    void cancelArchiveProbes().then(() => {
+      const state = getStore();
+      if (
+        previousHideVodContentRef.current !== hideVodContent ||
+        state.cachedSourcePreview !== cachedSourcePreview ||
+        state.playlist !== playlist
+      ) {
         return;
       }
 
-      const refreshed = selectResultByIndex(getStore(), selectedIndex);
-      if (refreshed) {
-        getStore().setSelectedChannel(refreshed);
+      const nextPreview = buildVisiblePreview(cachedSourcePreview, state.lastAppliedSourceFilter);
+      const visibleIndices = new Set(nextPreview.channels.map((channel) => channel.index));
+      const selectedIndex = state.selectedChannel?.index ?? null;
+      const pendingPlaybackIndex = state.pendingPlaybackChannel?.index ?? null;
+      const nextSelectedIndices = state.selectedChannelIndices.filter((index) =>
+        visibleIndices.has(index),
+      );
+
+      state.clearArchiveProbes();
+      state.setPlaylist(nextPreview);
+      state.setGroupFilter(resolvePreservedGroupFilter(state.groupFilter, nextPreview.groups));
+      state.setSelectedChannelIndices(nextSelectedIndices);
+
+      if (selectedIndex == null || !visibleIndices.has(selectedIndex)) {
+        state.setSelectedChannel(null);
       }
+      if (pendingPlaybackIndex == null || !visibleIndices.has(pendingPlaybackIndex)) {
+        state.setPendingPlaybackChannel(null);
+      }
+
+      const shouldApply = () => {
+        const latest = getStore();
+        return (
+          previousHideVodContentRef.current === hideVodContent &&
+          latest.cachedSourcePreview === cachedSourcePreview &&
+          latest.playlist === nextPreview
+        );
+      };
+
+      void syncFromPlaylist(nextPreview.channels, true, shouldApply).then((synced) => {
+        if (
+          !synced ||
+          !shouldApply() ||
+          selectedIndex == null ||
+          !visibleIndices.has(selectedIndex)
+        ) {
+          return;
+        }
+
+        const refreshed = selectResultByIndex(getStore(), selectedIndex);
+        if (refreshed) {
+          getStore().setSelectedChannel(refreshed);
+        }
+      });
     });
   }, [buildVisiblePreview, hideVodContent, settingsHydrated, syncFromPlaylist]);
 

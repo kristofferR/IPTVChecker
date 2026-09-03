@@ -1,35 +1,91 @@
 import { CircleCheck, CircleX, LoaderCircle, Play } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ArchivePlayOptions, ArchiveSession } from "../hooks/useStreamPlayer";
-import { archiveTitle, hasArchive } from "../lib/archive";
+import { archiveTitle, hasArchive, MAX_CATCHUP_DAYS } from "../lib/archive";
 import { probeChannelArchive } from "../lib/archiveProbe";
-import { ensureEpgLoaded } from "../lib/epgLoader";
+import { ensureEpgLoaded, epgSourcesFor } from "../lib/epgLoader";
+import { isScanActive } from "../lib/scanState";
 import { getEpgProgrammes } from "../lib/tauri";
-import { dayLabel, timeLabel } from "../lib/timeFormat";
 import type { ChannelResult, EpgProgramme } from "../lib/types";
 import { useAppStore } from "../store";
 
 interface ArchiveCardProps {
   result: ChannelResult;
   archiveSession: ArchiveSession | null;
+  isCasting: boolean;
   onPlayArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
 }
 
-function ArchiveProbe({ result }: { result: ChannelResult }) {
+// The EPG download can be hundreds of MB, so it loads lazily the first time a
+// catch-up channel's card opens, once per playlist, sources, and indexed IDs.
+
+const MAX_RENDERED_PROGRAMMES = 2_000;
+
+function dayLabel(epochS: number, now: Date): string {
+  const date = new Date(epochS * 1000);
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const dayDiff = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
+  if (dayDiff === 0) return "Today";
+  if (dayDiff === 1) return "Yesterday";
+  return date.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+}
+
+function timeLabel(epochS: number): string {
+  return new Date(epochS * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function ArchiveProbe({ result, isCasting }: Pick<ArchiveCardProps, "result" | "isCasting">) {
   const entry = useAppStore((state) => state.archiveProbes[result.index]);
+  const probeActive = useAppStore((state) =>
+    Object.values(state.archiveProbes).some((probe) => probe.running),
+  );
   const setArchiveProbe = useAppStore((state) => state.setArchiveProbe);
+  const scanState = useAppStore((state) => state.scanState);
+  const singleProvider = useAppStore((state) => state.playlist?.single_provider ?? false);
+  const isPlaying = useAppStore((state) => state.playIntentActive);
   const running = entry?.running ?? false;
+  const scanActive = isScanActive(scanState);
+  const streamActive = singleProvider && (isPlaying || isCasting);
   const outcomes = entry?.outcomes ?? [];
+  const isCastingRef = useRef(isCasting);
+  useEffect(() => {
+    isCastingRef.current = isCasting;
+  }, [isCasting]);
 
   const runProbe = () => {
-    void probeChannelArchive(result, (update) => setArchiveProbe(result.index, update));
+    const initialState = useAppStore.getState();
+    if (
+      isScanActive(initialState.scanState) ||
+      Object.values(initialState.archiveProbes).some((probe) => probe.running) ||
+      (initialState.playlist?.single_provider &&
+        (initialState.playIntentActive || isCastingRef.current))
+    ) {
+      return;
+    }
+    const playlist = initialState.playlist;
+    void probeChannelArchive(
+      result,
+      (update) => {
+        if (useAppStore.getState().playlist === playlist) {
+          setArchiveProbe(result.index, update);
+        }
+      },
+      () => {
+        const state = useAppStore.getState();
+        return (
+          state.playlist === playlist &&
+          !isScanActive(state.scanState) &&
+          !(state.playlist?.single_provider && (state.playIntentActive || isCastingRef.current))
+        );
+      },
+    );
   };
 
   return (
     <div className="mt-2 border-t border-violet-500/15 pt-2">
       <button
         type="button"
-        disabled={running}
+        disabled={probeActive || scanActive || streamActive}
         onClick={runProbe}
         className="flex w-full items-center justify-center gap-1.5 rounded-md bg-btn px-3 py-1.5 text-[12px] font-medium text-text-primary border border-border-app shadow-sm hover:bg-btn-hover transition-colors disabled:opacity-40"
       >
@@ -66,7 +122,7 @@ function ArchivePicker({
   result,
   onPlayArchive,
 }: Pick<ArchiveCardProps, "result" | "onPlayArchive">) {
-  const depthDays = Math.max(1, result.catchup_days ?? 1);
+  const depthDays = Math.min(MAX_CATCHUP_DAYS, Math.max(1, result.catchup_days ?? 1));
   const [daysBack, setDaysBack] = useState(0);
   const [time, setTime] = useState("20:00");
   const now = new Date();
@@ -75,9 +131,10 @@ function ArchivePicker({
     const [hours, minutes] = time.split(":").map((part) => Number.parseInt(part, 10));
     const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysBack);
     date.setHours(hours || 0, minutes || 0, 0, 0);
-    const startEpochS = Math.min(
-      Math.floor(date.getTime() / 1000),
-      Math.floor(Date.now() / 1000) - 60,
+    const nowEpochS = Math.floor(Date.now() / 1000);
+    const startEpochS = Math.max(
+      nowEpochS - depthDays * 86_400,
+      Math.min(Math.floor(date.getTime() / 1000), nowEpochS - 60),
     );
     onPlayArchive(result, { startEpochS });
   };
@@ -118,8 +175,14 @@ function ArchivePicker({
   );
 }
 
-export function ArchiveCard({ result, archiveSession, onPlayArchive }: ArchiveCardProps) {
+export function ArchiveCard({
+  result,
+  archiveSession,
+  isCasting,
+  onPlayArchive,
+}: ArchiveCardProps) {
   const [programmes, setProgrammes] = useState<EpgProgramme[] | null>(null);
+  const depthDays = Math.min(MAX_CATCHUP_DAYS, Math.max(1, result.catchup_days ?? 7));
 
   useEffect(() => {
     if (!hasArchive(result)) {
@@ -139,26 +202,33 @@ export function ArchiveCard({ result, archiveSession, onPlayArchive }: ArchiveCa
         return;
       }
       const now = Math.floor(Date.now() / 1000);
-      const depthDays = result.catchup_days ?? 7;
-      const list = await getEpgProgrammes(result.tvg_id, now - depthDays * 86_400, now).catch(
-        () => [] as EpgProgramme[],
-      );
+      const list = await getEpgProgrammes(
+        epgSourcesFor(result),
+        result.tvg_id,
+        now - depthDays * 86_400,
+        now,
+      ).catch(() => [] as EpgProgramme[]);
       if (!stale) setProgrammes(list);
     };
     void load();
     return () => {
       stale = true;
     };
-  }, [result]);
+  }, [depthDays, result]);
 
   const dayGroups = useMemo(() => {
     if (!programmes || programmes.length === 0) return [];
     const now = new Date();
     const nowEpochS = Math.floor(now.getTime() / 1000);
+    const retentionStartEpochS = nowEpochS - depthDays * 86_400;
     const groups: Array<{ label: string; entries: EpgProgramme[] }> = [];
+    const visibleProgrammes = programmes
+      .filter(
+        (programme) => programme.start >= retentionStartEpochS && programme.start <= nowEpochS,
+      )
+      .slice(-MAX_RENDERED_PROGRAMMES);
     // Newest day first, programmes within a day in airing order.
-    for (const programme of programmes) {
-      if (programme.start > nowEpochS) continue;
+    for (const programme of visibleProgrammes) {
       const label = dayLabel(programme.start, now);
       const group = groups.find((candidate) => candidate.label === label);
       if (group) {
@@ -169,7 +239,7 @@ export function ArchiveCard({ result, archiveSession, onPlayArchive }: ArchiveCa
     }
     groups.reverse();
     return groups;
-  }, [programmes]);
+  }, [depthDays, programmes]);
 
   if (!hasArchive(result)) {
     return null;
@@ -209,7 +279,7 @@ export function ArchiveCard({ result, archiveSession, onPlayArchive }: ArchiveCa
                 const playing = playingStart === programme.start;
                 return (
                   <button
-                    key={`${programme.start}-${programme.title}`}
+                    key={`${programme.start}-${programme.stop}-${programme.title}`}
                     type="button"
                     onClick={() =>
                       onPlayArchive(result, {
@@ -239,7 +309,7 @@ export function ArchiveCard({ result, archiveSession, onPlayArchive }: ArchiveCa
         <ArchivePicker result={result} onPlayArchive={onPlayArchive} />
       )}
 
-      <ArchiveProbe result={result} />
+      <ArchiveProbe result={result} isCasting={isCasting} />
     </div>
   );
 }

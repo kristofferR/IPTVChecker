@@ -160,29 +160,31 @@ pub(crate) fn redact_url(url: &str) -> String {
                 let _ = parsed.set_password(None);
             }
             // Xtream credentials live in path segments rather than URL userinfo:
-            // /live/{username}/{password}/{stream-id}.ts. Those URLs are the
-            // most common source of playback diagnostics, so query/userinfo
-            // redaction alone would still leak both credentials.
+            // /live/{username}/{password}/{stream-id}.ts and
+            // /timeshift/{username}/{password}/{duration}/{start}/{stream-id}.ts.
+            // Providers may also serve these paths below a prefix.
             let segments = parsed
                 .path_segments()
                 .map(|segments| segments.map(str::to_string).collect::<Vec<_>>())
                 .unwrap_or_default();
-            let credential_start = if segments.len() >= 4
-                && matches!(
-                    segments[0].to_ascii_lowercase().as_str(),
-                    "live" | "movie" | "series"
-                ) {
-                Some(1)
-            } else if segments.len() == 3
-                && segments[2]
-                    .split('.')
-                    .next()
-                    .is_some_and(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()))
-            {
-                Some(0)
-            } else {
-                None
-            };
+            let credential_start = segments
+                .iter()
+                .enumerate()
+                .find_map(|(index, segment)| {
+                    let remaining = segments.len() - index;
+                    match segment.to_ascii_lowercase().as_str() {
+                        "live" | "movie" | "series" if remaining >= 4 => Some(index + 1),
+                        "timeshift" if remaining >= 6 => Some(index + 1),
+                        _ => None,
+                    }
+                })
+                .or_else(|| {
+                    (segments.len() == 3
+                        && segments[2].split('.').next().is_some_and(|id| {
+                            !id.is_empty() && id.chars().all(|c| c.is_ascii_digit())
+                        }))
+                    .then_some(0)
+                });
             if let Some(start) = credential_start {
                 let redacted_segments = segments
                     .iter()
@@ -1534,6 +1536,12 @@ mod tests {
         assert_eq!(
             redact_url("https://provider.example/user/pass/67890?token=secret"),
             "https://provider.example/***/***/67890?***"
+        );
+        assert_eq!(
+            redact_url(
+                "https://provider.example/prefix/timeshift/user-name/pass-word/120/2026-08-29:12-00/12345.m3u8"
+            ),
+            "https://provider.example/prefix/timeshift/***/***/120/2026-08-29:12-00/12345.m3u8"
         );
     }
 

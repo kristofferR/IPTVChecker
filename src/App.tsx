@@ -21,6 +21,7 @@ import {
 } from "react";
 import { setLiquidGlassEffect } from "tauri-plugin-liquid-glass-api";
 import { AppBanners } from "./components/AppBanners";
+import type { CastStartHandler } from "./components/CastMenu";
 import { ChannelTable } from "./components/ChannelTable";
 import { FilterBar } from "./components/FilterBar";
 import { GuideView } from "./components/GuideView";
@@ -38,6 +39,7 @@ import { useSettings } from "./hooks/useSettings";
 import { type ArchivePlayOptions, useStreamPlayer } from "./hooks/useStreamPlayer";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 import { resolveArchivePlayback } from "./lib/archive";
+import { cancelArchiveProbes } from "./lib/archiveProbe";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
 import {
   checkFfmpegAvailable,
@@ -171,8 +173,10 @@ function SelectedChannelSidebar({
   streamPlayer,
   chromecast,
   onPlayChannel,
+  onPlayArchive,
   onScanChannel,
   onStopPlayer,
+  onCastStart,
   onOpenExternal,
   onPip,
 }: {
@@ -181,8 +185,10 @@ function SelectedChannelSidebar({
   streamPlayer: StreamPlayerController;
   chromecast: UseChromecastResult;
   onPlayChannel: (result: ChannelResult) => void;
+  onPlayArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
   onScanChannel: (indices: number[]) => void;
   onStopPlayer: () => void;
+  onCastStart: CastStartHandler;
   onOpenExternal: (result: ChannelResult) => void;
   onPip?: () => void;
 }) {
@@ -293,15 +299,16 @@ function SelectedChannelSidebar({
         muted={streamPlayer.muted}
         videoElement={streamPlayer.videoElement}
         archiveSession={streamPlayer.archiveSession}
-        onPlayArchive={streamPlayer.playArchive}
+        onPlayArchive={onPlayArchive}
         onSeekArchive={streamPlayer.seekArchive}
         onGoLive={streamPlayer.goLive}
         onTogglePause={streamPlayer.togglePause}
         onStopPlayer={onStopPlayer}
+        onCastStart={onCastStart}
         onSetVolume={streamPlayer.setVolume}
         onToggleMute={streamPlayer.toggleMute}
         onOpenExternal={onOpenExternal}
-        onRetryPlay={(result) => streamPlayer.play(result)}
+        onRetryPlay={streamPlayer.retry}
         onPip={document.pictureInPictureEnabled ? onPip : undefined}
       />
     </div>
@@ -523,6 +530,12 @@ export default function App() {
   const ffmpegWarning = useAppStore((s) => s.ffmpegWarning);
   const openSourceDialogState = useAppStore((s) => s.openSourceDialogState);
   const pendingPlaybackChannel = useAppStore((s) => s.pendingPlaybackChannel);
+  const [pendingPlaybackReason, setPendingPlaybackReason] = useState<
+    "scan" | "archive_probe" | null
+  >(null);
+  const archiveProbeActive = useAppStore((state) =>
+    Object.values(state.archiveProbes).some((probe) => probe.running),
+  );
   const liveSelectedChannel = useAppStore(selectLiveSelectedChannel);
   const showHistory = useAppStore((s) => s.showHistory);
   const historyEntries = useAppStore((s) => s.historyEntries);
@@ -539,11 +552,14 @@ export default function App() {
   const handlePlaybackFailedRef = useRef<((result: ChannelResult) => void) | undefined>(undefined);
   const streamPlayer = useStreamPlayer({
     onPlaybackFailed: (result) => handlePlaybackFailedRef.current?.(result),
+    onPlaybackFinished: () => getStore().setPlayIntentActive(false),
   });
   const {
     activeChannelIndex: playbackChannelIndex,
     play: playStream,
+    resumeArchive,
     stop: stopStream,
+    setArchiveSession,
     videoElement: playbackVideoElement,
   } = streamPlayer;
 
@@ -570,11 +586,26 @@ export default function App() {
   }, [chromecast]);
   const castSession = chromecast.session;
   const isCasting = isCastSessionActive(castSession);
+  const hadActiveCastRef = useRef(false);
+
+  useEffect(() => {
+    if (isCasting) {
+      hadActiveCastRef.current = true;
+      return;
+    }
+    if (hadActiveCastRef.current && streamPlayer.archiveSession) {
+      setArchiveSession(null);
+    }
+    hadActiveCastRef.current = false;
+  }, [isCasting, setArchiveSession, streamPlayer.archiveSession]);
 
   const { settings, save: saveSettings, applyExternal: applyExternalSettings } = useSettings();
   const { start, cancel, pause, resume, initFromPlaylist, syncFromPlaylist, updateResult } =
     useScan();
   const { checkForUpdates, installUpdate } = useUpdateCheck();
+  const invalidatePendingArchivePlayback = useCallback(() => {
+    pendingArchivePlaybackRef.current = null;
+  }, []);
   const {
     handleClearRecentPlaylists,
     handleOpen,
@@ -599,7 +630,15 @@ export default function App() {
     setSavedPlaylistEditorDraft,
     savedXtreamTestEntry,
     setSavedXtreamTestEntry,
-  } = usePlaylistSources({ initFromPlaylist, syncFromPlaylist });
+  } = usePlaylistSources({
+    initFromPlaylist,
+    syncFromPlaylist,
+    invalidatePendingArchivePlayback,
+  });
+
+  useEffect(() => {
+    pendingArchivePlaybackRef.current = null;
+  }, [playlist?.file_path, playlist?.source_identity]);
 
   useEffect(() => {
     document.documentElement.dataset.platform = platform;
@@ -885,6 +924,11 @@ export default function App() {
         return false;
       }
 
+      const appliedState = getStore();
+      if (Object.values(appliedState.archiveProbes).some((probe) => probe.running)) {
+        await cancelArchiveProbes();
+      }
+
       const refreshedState = getStore();
       const currentPlaylist = refreshedState.playlist;
       const currentChannelSearch = normalizeSourceFilter(refreshedState.channelSearch);
@@ -1100,13 +1144,39 @@ export default function App() {
     stopStream();
   }, [stopStream]);
 
+  const handleCastStart = useCallback(() => {
+    const archiveSession = streamPlayer.archiveSession;
+    const liveChannel =
+      archiveSession || playbackChannelIndex == null
+        ? null
+        : selectResultByIndex(getStore(), playbackChannelIndex);
+    getStore().setPlayIntentActive(false);
+    stopStream({ preserveArchiveSession: true });
+    if (archiveSession) {
+      return () => {
+        getStore().setPlayIntentActive(true);
+        resumeArchive(archiveSession);
+      };
+    }
+    if (liveChannel) {
+      return () => {
+        getStore().setPlayIntentActive(true);
+        playStream(liveChannel);
+      };
+    }
+  }, [playStream, playbackChannelIndex, resumeArchive, stopStream, streamPlayer.archiveSession]);
+
   const handleOpenExternal = useCallback(
     async (result: ChannelResult) => {
-      if (isSingleConnectionPlaylist(getStore().playlist)) {
-        handleStopPlayer();
-      }
-
       try {
+        if (isSingleConnectionPlaylist(getStore().playlist)) {
+          handleStopPlayer();
+          const currentChromecast = chromecastRef.current;
+          if (isCastSessionActive(currentChromecast.session)) {
+            await currentChromecast.stop();
+          }
+        }
+
         await openChannelInPlayer({
           extinf_line: result.extinf_line,
           metadata_lines: result.metadata_lines,
@@ -1124,7 +1194,18 @@ export default function App() {
     (result: ChannelResult) => {
       pendingArchivePlaybackRef.current = null;
       if (isScanActive(getStore().scanState) && getStore().playlist?.single_provider) {
+        pendingArchivePlaybackRef.current = null;
         getStore().setPendingPlaybackChannel(result);
+        setPendingPlaybackReason("scan");
+        return;
+      }
+      if (
+        getStore().playlist?.single_provider &&
+        Object.values(getStore().archiveProbes).some((probe) => probe.running)
+      ) {
+        pendingArchivePlaybackRef.current = null;
+        getStore().setPendingPlaybackChannel(result);
+        setPendingPlaybackReason("archive_probe");
         return;
       }
       // While a cast session is active, redirect the cast to the new channel
@@ -1138,7 +1219,10 @@ export default function App() {
           currentChromecast.devices.find((d) => d.id === session.deviceId) ??
           (lastCastDeviceRef.current?.id === session.deviceId ? lastCastDeviceRef.current : null);
         if (device) {
-          void currentChromecast.cast(device, buildCastRequest(result));
+          void currentChromecast
+            .cast(device, buildCastRequest(result))
+            .then(() => setArchiveSession(null))
+            .catch(() => {});
           return;
         }
         // Fall through to local play if we can't resolve the device — better
@@ -1147,7 +1231,7 @@ export default function App() {
       getStore().setPlayIntentActive(true);
       playStream(result);
     },
-    [playStream],
+    [playStream, setArchiveSession],
   );
 
   const playGuideArchive = useCallback(
@@ -1205,6 +1289,7 @@ export default function App() {
   }, [playbackVideoElement]);
 
   const handleProceedPlayback = useCallback(() => {
+    setPendingPlaybackReason(null);
     if (!pendingPlaybackChannel) return;
     const channel = pendingPlaybackChannel;
     const archiveOptions = pendingArchivePlaybackRef.current;
@@ -1218,11 +1303,25 @@ export default function App() {
     playStream(channel);
   }, [pendingPlaybackChannel, playGuideArchive, playStream]);
 
+  // A queued play waiting on catch-up probes resumes once they finish, unless
+  // a single-provider scan is still holding the connection.
+  useEffect(() => {
+    if (pendingPlaybackReason === "archive_probe" && !archiveProbeActive) {
+      const state = getStore();
+      if (isScanActive(state.scanState) && state.playlist?.single_provider) {
+        setPendingPlaybackReason("scan");
+        return;
+      }
+      handleProceedPlayback();
+    }
+  }, [archiveProbeActive, handleProceedPlayback, pendingPlaybackReason]);
+
   // Successful playback is itself a channel check. Keep the result row and
   // detail panel in sync with everything the active player can establish.
   useEffect(() => {
     const idx = streamPlayer.activeChannelIndex;
-    if (idx === null || streamPlayer.playerState !== "playing") return;
+    if (idx === null || streamPlayer.playerState !== "playing" || streamPlayer.archiveSession)
+      return;
 
     const state = getStore();
     const existing = selectResultByIndex(state, idx);
@@ -1242,6 +1341,7 @@ export default function App() {
   }, [
     settings.low_fps_threshold,
     streamPlayer.activeChannelIndex,
+    streamPlayer.archiveSession,
     streamPlayer.playerState,
     streamPlayer.streamMetadata,
     updateResult,
@@ -1364,6 +1464,8 @@ export default function App() {
         }
         if (state.pendingPlaybackChannel) {
           state.setPendingPlaybackChannel(null);
+          pendingArchivePlaybackRef.current = null;
+          setPendingPlaybackReason(null);
           return;
         }
         if (state.openSourceDialogState) {
@@ -1502,8 +1604,10 @@ export default function App() {
                 streamPlayer={streamPlayer}
                 chromecast={chromecast}
                 onPlayChannel={handlePlayInApp}
+                onPlayArchive={handleGuidePlayArchive}
                 onScanChannel={handleScanSelected}
                 onStopPlayer={handleStopPlayer}
+                onCastStart={handleCastStart}
                 onOpenExternal={handleOpenExternal}
                 onPip={handlePip}
               />
@@ -1653,26 +1757,37 @@ export default function App() {
       {pendingPlaybackChannel && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-xl rounded-xl border border-border-app bg-overlay p-5 shadow-2xl">
-            <h2 className="text-[16px] font-semibold mb-2">Scan currently running</h2>
+            <h2 className="text-[16px] font-semibold mb-2">
+              {pendingPlaybackReason === "archive_probe"
+                ? "Catch-up test currently running"
+                : "Scan currently running"}
+            </h2>
             <p className="text-[14px] text-text-secondary leading-relaxed">
-              A scan is currently running. Playing a channel while scanning may interfere with the
-              scan or cause playback issues if the server&apos;s max connection limit is exceeded.
+              {pendingPlaybackReason === "archive_probe"
+                ? "Playback will start when the catch-up test finishes, so a single-connection server is not interrupted."
+                : "A scan is currently running. Playing a channel while scanning may interfere with the scan or cause playback issues if the server&apos;s max connection limit is exceeded."}
             </p>
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
-                onClick={() => getStore().setPendingPlaybackChannel(null)}
+                onClick={() => {
+                  getStore().setPendingPlaybackChannel(null);
+                  pendingArchivePlaybackRef.current = null;
+                  setPendingPlaybackReason(null);
+                }}
                 className="macos-btn px-3 py-2 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
                 type="button"
               >
                 Cancel
               </button>
-              <button
-                onClick={handleProceedPlayback}
-                className="macos-btn macos-btn-primary px-3 py-2 min-h-9 text-[13px] font-medium bg-blue-600 hover:bg-blue-500 rounded-md"
-                type="button"
-              >
-                Proceed
-              </button>
+              {pendingPlaybackReason !== "archive_probe" && (
+                <button
+                  onClick={handleProceedPlayback}
+                  className="macos-btn macos-btn-primary px-3 py-2 min-h-9 text-[13px] font-medium bg-blue-600 hover:bg-blue-500 rounded-md"
+                  type="button"
+                >
+                  Proceed
+                </button>
+              )}
             </div>
           </div>
         </div>

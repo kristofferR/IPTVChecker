@@ -64,7 +64,7 @@ const GuideRow = memo(function GuideRow({
       setProgrammes([]);
       return;
     }
-    fetchGuideProgrammes(result.tvg_id, windowFrom, windowTo).then((list) => {
+    fetchGuideProgrammes(result, windowFrom, windowTo).then((list) => {
       if (!stale) setProgrammes(list);
     });
     return () => {
