@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { buildArchiveUrl, resolveArchivePlayback } from "../lib/archive";
+import { resolveArchivePlayback } from "../lib/archive";
 import { normalizeCodecName, resolveResolutionLabel } from "../lib/format";
 import { logger } from "../lib/logger";
 import {
@@ -1119,19 +1119,22 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         session.windowStartEpochS,
         Math.min(Math.floor(toEpochS), latestSeekable),
       );
-      const durationS = Math.max(60, session.windowEndEpochS - clamped);
-      const url = buildArchiveUrl(session.baseResult, {
-        startEpochS: clamped,
-        durationS,
-        nowEpochS: now,
-      });
-      if (!url) {
+      const playback = resolveArchivePlayback(
+        session.baseResult,
+        { startEpochS: clamped, endEpochS: session.windowEndEpochS },
+        now,
+      );
+      if (!playback) {
         return;
       }
-      setArchiveSession({ ...session, url, startEpochS: clamped });
+      setArchiveSession({
+        ...session,
+        url: playback.url,
+        startEpochS: playback.startEpochS,
+      });
       beginPlayback({
         ...session.baseResult,
-        url,
+        url: playback.url,
         content_type: "movie",
         stream_url: null,
       });

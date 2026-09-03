@@ -1312,6 +1312,7 @@ fn refresh_resumed_playlist_metadata(
 
     for entry in entries {
         if let Some(channel) = channels_by_index.get(&entry.result.index) {
+            entry.result.playlist = channel.playlist.clone();
             entry.result.tvg_id = channel.tvg_id.clone();
             entry.result.catchup = channel.catchup.clone();
             entry.result.catchup_days = channel.catchup_days;
@@ -3109,6 +3110,7 @@ mod tests {
             channel_log: None,
         }];
         let mut channel = make_channel(1);
+        channel.playlist = "provider/current.m3u".to_string();
         channel.tvg_id = Some("current-epg-id".to_string());
         channel.catchup = Some("xc".to_string());
         channel.catchup_days = Some(7);
@@ -3117,6 +3119,7 @@ mod tests {
 
         refresh_resumed_playlist_metadata(&mut entries, std::slice::from_ref(&channel));
 
+        assert_eq!(entries[0].result.playlist, channel.playlist);
         assert_eq!(entries[0].result.tvg_id.as_deref(), Some("current-epg-id"));
         assert_eq!(entries[0].result.catchup.as_deref(), Some("xc"));
         assert_eq!(entries[0].result.catchup_days, Some(7));

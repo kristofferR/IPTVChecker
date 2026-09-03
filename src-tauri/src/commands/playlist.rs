@@ -956,15 +956,13 @@ pub(crate) async fn open_playlist_xtream_inner(
     }
 
     let xmltv_source = build_xtream_xmltv_url(&server, &username, &password).to_string();
-    if !preview.epg_sources.contains(&xmltv_source) {
+    if preview.epg_sources.is_empty() {
         preview.epg_sources.push(xmltv_source.clone());
-    }
-    let playlist_sources = preview
-        .epg_sources_by_playlist
-        .entry(preview.file_name.clone())
-        .or_default();
-    if !playlist_sources.contains(&xmltv_source) {
-        playlist_sources.push(xmltv_source);
+        preview
+            .epg_sources_by_playlist
+            .entry(preview.file_name.clone())
+            .or_default()
+            .push(xmltv_source);
     }
     let server_host = server.host_str().unwrap_or("Xtream");
     preview.file_name = format!("{} ({})", server_host, username);

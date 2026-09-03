@@ -71,6 +71,7 @@ export function ensureEpgLoaded(): Promise<void> {
       if (epgLoad?.key === key) {
         epgLoad = null;
       }
+      throw error;
     },
   );
   epgLoad = { key, promise, summary: null, loadedAt: null };

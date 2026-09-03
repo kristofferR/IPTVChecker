@@ -38,9 +38,9 @@ import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
 import { type ArchivePlayOptions, useStreamPlayer } from "./hooks/useStreamPlayer";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
-import { isArchiveVerificationBlockingPlayback, verifyAllArchives } from "./lib/archiveVerifyRun";
 import { resolveArchivePlayback } from "./lib/archive";
 import { cancelArchiveProbes } from "./lib/archiveProbe";
+import { isArchiveVerificationBlockingPlayback, verifyAllArchives } from "./lib/archiveVerifyRun";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
 import {
   checkFfmpegAvailable,
@@ -1272,16 +1272,15 @@ export default function App() {
 
   const handlePlayInApp = useCallback(
     (result: ChannelResult) => {
-      if (blockPlaybackDuringArchiveVerification()) return;
       pendingArchivePlaybackRef.current = null;
-      if (isScanActive(getStore().scanState) && getStore().playlist?.single_provider) {
+      if (isScanActive(getStore().scanState) && isSingleConnectionPlaylist(getStore().playlist)) {
         pendingArchivePlaybackRef.current = null;
         getStore().setPendingPlaybackChannel(result);
         setPendingPlaybackReason("scan");
         return;
       }
       if (
-        getStore().playlist?.single_provider &&
+        isSingleConnectionPlaylist(getStore().playlist) &&
         Object.values(getStore().archiveProbes).some((probe) => probe.running)
       ) {
         pendingArchivePlaybackRef.current = null;
@@ -1289,6 +1288,7 @@ export default function App() {
         setPendingPlaybackReason("archive_probe");
         return;
       }
+      if (blockPlaybackDuringArchiveVerification()) return;
       // While a cast session is active, redirect the cast to the new channel
       // instead of starting a competing local stream. Single-connection IPTV
       // upstreams can only feed one consumer; starting local play would kick
@@ -1325,22 +1325,26 @@ export default function App() {
           (lastCastDeviceRef.current?.id === session.deviceId ? lastCastDeviceRef.current : null);
         const playback = resolveArchivePlayback(result, options);
         if (device && playback) {
-          void currentChromecast.cast(
-            device,
-            buildCastRequest({
-              ...result,
-              name: options.title ?? result.name,
-              url: playback.url,
-              stream_url: null,
-            }),
-          );
+          void currentChromecast
+            .cast(
+              device,
+              buildCastRequest({
+                ...result,
+                name: options.title ?? result.name,
+                url: playback.url,
+                content_type: "movie",
+                stream_url: null,
+              }),
+            )
+            .then(() => setArchiveSession(null))
+            .catch(() => {});
           return;
         }
       }
       getStore().setPlayIntentActive(true);
       streamPlayer.playArchive(result, options);
     },
-    [streamPlayer.playArchive],
+    [setArchiveSession, streamPlayer.playArchive],
   );
 
   // Guide playback also selects the channel so the sidebar player shows it.
@@ -1348,11 +1352,21 @@ export default function App() {
     (result: ChannelResult, options: ArchivePlayOptions) => {
       getStore().setSelectedChannel(result);
       getStore().setSelectedChannelIndices([result.index]);
-      if (isScanActive(getStore().scanState) && getStore().playlist?.single_provider) {
+      const state = getStore();
+      const singleConnection = isSingleConnectionPlaylist(state.playlist);
+      if (isScanActive(state.scanState) && singleConnection) {
         pendingArchivePlaybackRef.current = options;
-        getStore().setPendingPlaybackChannel(result);
+        state.setPendingPlaybackChannel(result);
+        setPendingPlaybackReason("scan");
         return;
       }
+      if (singleConnection && Object.values(state.archiveProbes).some((probe) => probe.running)) {
+        pendingArchivePlaybackRef.current = options;
+        state.setPendingPlaybackChannel(result);
+        setPendingPlaybackReason("archive_probe");
+        return;
+      }
+      if (blockPlaybackDuringArchiveVerification()) return;
       pendingArchivePlaybackRef.current = null;
       playGuideArchive(result, options);
     },
@@ -1390,7 +1404,7 @@ export default function App() {
   useEffect(() => {
     if (pendingPlaybackReason === "archive_probe" && !archiveProbeActive) {
       const state = getStore();
-      if (isScanActive(state.scanState) && state.playlist?.single_provider) {
+      if (isScanActive(state.scanState) && isSingleConnectionPlaylist(state.playlist)) {
         setPendingPlaybackReason("scan");
         return;
       }

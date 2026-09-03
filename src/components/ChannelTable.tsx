@@ -20,6 +20,7 @@ import type { SortDirection, SortField } from "../lib/filters";
 import { filterResultsShared, sortResults } from "../lib/filters";
 import { statusLabel } from "../lib/format";
 import { measureUiPerf } from "../lib/perf";
+import { isSingleConnectionPlaylist } from "../lib/playback";
 import { isScanActive } from "../lib/scanState";
 import { isInputLikeTarget, isPrimaryModifierPressed } from "../lib/shortcuts";
 import { detectChannelProtocol } from "../lib/streamProtocol";
@@ -148,7 +149,7 @@ export function ChannelTable({
   const isMac = useAppStore((s) => s.isMac);
   const channelLogoSize = useAppStore((s) => s.settings.channel_logo_size);
   const isPlaying = useAppStore((s) => s.playIntentActive);
-  const singleProvider = useAppStore((s) => s.playlist?.single_provider ?? false);
+  const singleConnection = useAppStore((s) => isSingleConnectionPlaylist(s.playlist));
   const externalPlaybackActive = useAppStore((s) => s.externalPlaybackActive);
   const separatePlaceholder = useAppStore((s) => s.settings.separate_placeholder_status);
   const onSelectionChange = useAppStore((s) => s.setSelectedChannelIndices);
@@ -949,7 +950,7 @@ export function ChannelTable({
       isScanActive(initialState.scanState) ||
       initialState.archiveGuideTestRunning ||
       Object.values(initialState.archiveProbes).some((probe) => probe.running) ||
-      (initialState.playlist?.single_provider &&
+      (isSingleConnectionPlaylist(initialState.playlist) &&
         (initialState.playIntentActive || isCastingRef.current))
     ) {
       setContextMenuState(null);
@@ -957,7 +958,7 @@ export function ChannelTable({
     }
     if (
       initialState.externalPlaybackActive &&
-      initialState.playlist?.single_provider &&
+      isSingleConnectionPlaylist(initialState.playlist) &&
       !window.confirm("Close the external player before testing catch-up. Continue?")
     ) {
       setContextMenuState(null);
@@ -978,7 +979,10 @@ export function ChannelTable({
         state.playlist === playlist &&
         !isScanActive(state.scanState) &&
         !state.archiveGuideTestRunning &&
-        !(state.playlist?.single_provider && (state.playIntentActive || isCastingRef.current)) &&
+        !(
+          isSingleConnectionPlaylist(state.playlist) &&
+          (state.playIntentActive || isCastingRef.current)
+        ) &&
         !state.externalPlaybackActive
       );
     };
@@ -1526,10 +1530,10 @@ export function ChannelTable({
                     isScanActive(scanState) ||
                     archiveGuideTestRunning ||
                     archiveProbeRunning ||
-                    (singleProvider && (isPlaying || isCasting))
+                    (singleConnection && (isPlaying || isCasting))
                   }
                   title={
-                    externalPlaybackActive && singleProvider
+                    externalPlaybackActive && singleConnection
                       ? "Confirm the external player is closed before testing catch-up"
                       : undefined
                   }

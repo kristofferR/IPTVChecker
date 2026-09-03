@@ -62,6 +62,11 @@ const GuideRow = memo(function GuideRow({
   onActivate,
 }: GuideRowProps) {
   const [programmes, setProgrammes] = useState<EpgProgramme[] | null>(null);
+  const epgSourceKey = useAppStore((state) =>
+    JSON.stringify(
+      state.playlist?.epg_sources_by_playlist[result.playlist] ?? state.playlist?.epg_sources ?? [],
+    ),
+  );
 
   useEffect(() => {
     let stale = false;
@@ -76,7 +81,7 @@ const GuideRow = memo(function GuideRow({
     return () => {
       stale = true;
     };
-  }, [result.tvg_id, windowFrom, windowTo]);
+  }, [result.playlist, result.tvg_id, epgSourceKey, windowFrom, windowTo]);
 
   const windowLength = windowTo - windowFrom;
   const earliestPlayable =

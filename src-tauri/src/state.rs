@@ -373,6 +373,8 @@ mod tests {
             movie_count: 0,
             series_count: 0,
             groups: vec!["News".to_string()],
+            epg_sources: Vec::new(),
+            epg_sources_by_playlist: Default::default(),
             channels: vec![Channel {
                 index: 0,
                 playlist: "Provider".to_string(),
