@@ -86,6 +86,7 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
     hasStartedPlayingRef,
     onRuntimeIssue,
   } = params;
+  const isLive = result.content_type === "live";
 
   let closed = false;
   const monitor = {
@@ -125,6 +126,7 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
 
   const tryLiveBufferResync = () => {
     if (
+      !isLive ||
       closed ||
       !mpegtsPlayerRef.current ||
       isPausedRef.current ||
@@ -158,7 +160,7 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
   };
 
   const adjustLiveBufferPlaybackRate = () => {
-    if (!mpegtsPlayerRef.current) return;
+    if (!isLive || !mpegtsPlayerRef.current) return;
     const ranges: BufferedTimeRange[] = [];
     for (let index = 0; index < videoElement.buffered.length; index += 1) {
       ranges.push({
@@ -180,7 +182,7 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
   };
 
   const trimExcessiveLiveLatency = () => {
-    if (!mpegtsPlayerRef.current || videoElement.buffered.length === 0) return false;
+    if (!isLive || !mpegtsPlayerRef.current || videoElement.buffered.length === 0) return false;
     const ranges: BufferedTimeRange[] = [];
     for (let index = 0; index < videoElement.buffered.length; index += 1) {
       ranges.push({
@@ -210,6 +212,7 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
   };
 
   const scheduleLiveBufferResync = () => {
+    if (!isLive) return;
     markPotentialStall();
     if (resyncTimer) return;
     resyncTimer = setTimeout(() => {
@@ -262,10 +265,10 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
     triggerRuntimeIssue("media_error", reason);
   });
   addHandler(videoElement, "ended", () => {
-    if (result.content_type !== "live") {
-      return;
-    }
-    triggerRuntimeIssue("ended", "Live stream ended unexpectedly");
+    triggerRuntimeIssue(
+      "ended",
+      result.content_type === "live" ? "Live stream ended unexpectedly" : "Playback ended",
+    );
   });
 
   const libCleanups: Array<() => void> = [];

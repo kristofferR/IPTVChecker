@@ -86,6 +86,8 @@ pub struct AppState {
     pub epg: Mutex<Option<std::sync::Arc<crate::engine::epg::EpgIndex>>>,
     /// Serializes concurrent load_epg calls so two loads never interleave.
     pub epg_load_lock: Mutex<()>,
+    /// Cancels the previous EPG load when the playlist or load request changes.
+    pub epg_load_cancel: Mutex<CancellationToken>,
     /// Rejects a second install immediately instead of queueing it behind the
     /// first one on `update_checking`.
     pub update_installing: std::sync::atomic::AtomicBool,
@@ -116,6 +118,7 @@ impl AppState {
             playlist_preview_cache: Mutex::new(HashMap::new()),
             epg: Mutex::new(None),
             epg_load_lock: Mutex::new(()),
+            epg_load_cancel: Mutex::new(CancellationToken::new()),
             update_installing: std::sync::atomic::AtomicBool::new(false),
             update_checking: Mutex::new(()),
             update_available: Mutex::new(None),

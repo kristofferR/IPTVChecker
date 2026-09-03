@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { buildArchiveUrl } from "../lib/archive";
+import { buildArchiveUrl, resolveArchivePlayback } from "../lib/archive";
 import { normalizeCodecName, resolveResolutionLabel } from "../lib/format";
 import { logger } from "../lib/logger";
 import {
@@ -36,6 +36,8 @@ export { MAX_PLAYBACK_RECOVERY_ATTEMPTS } from "../lib/playback";
  * seekable window. Present only while playing an archive URL. */
 export interface ArchiveSession {
   baseResult: ChannelResult;
+  /** Exact synthetic URL currently loaded by the player. */
+  url: string;
   /** Where the current archive URL starts, epoch seconds. */
   startEpochS: number;
   /** Earliest seekable point (programme start or the picked time). */
@@ -65,11 +67,14 @@ export interface UseStreamPlayerReturn {
   videoElement: HTMLVideoElement;
   streamMetadata: StreamMetadata | null;
   archiveSession: ArchiveSession | null;
+  setArchiveSession: (session: ArchiveSession | null) => void;
+  resumeArchive: (session: ArchiveSession) => void;
   play: (result: ChannelResult) => void;
+  retry: (result: ChannelResult) => void;
   playArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
   seekArchive: (toEpochS: number) => void;
   goLive: () => void;
-  stop: () => void;
+  stop: (options?: { preserveArchiveSession?: boolean }) => void;
   togglePause: () => void;
   setVolume: (v: number) => void;
   toggleMute: () => void;
@@ -77,6 +82,7 @@ export interface UseStreamPlayerReturn {
 
 interface UseStreamPlayerOptions {
   onPlaybackFailed?: (result: ChannelResult, affectsChannelHealth: boolean) => void;
+  onPlaybackFinished?: (result: ChannelResult) => void;
 }
 
 function readStoredVolume(): number {
@@ -130,7 +136,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const videoElement = videoElRef.current;
 
   const onPlaybackFailedRef = useRef(options?.onPlaybackFailed);
-  onPlaybackFailedRef.current = options?.onPlaybackFailed;
+  const onPlaybackFinishedRef = useRef(options?.onPlaybackFinished);
 
   const [playerState, setPlayerState] = useState<PlayerState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -142,9 +148,12 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
   const [activeChannelIndex, setActiveChannelIndex] = useState<number | null>(null);
   const [streamMetadata, setStreamMetadata] = useState<StreamMetadata | null>(null);
-  const [archiveSession, setArchiveSession] = useState<ArchiveSession | null>(null);
+  const [archiveSession, setArchiveSessionState] = useState<ArchiveSession | null>(null);
   const archiveSessionRef = useRef<ArchiveSession | null>(null);
-  archiveSessionRef.current = archiveSession;
+  const setArchiveSession = useCallback((session: ArchiveSession | null) => {
+    archiveSessionRef.current = session;
+    setArchiveSessionState(session);
+  }, []);
 
   const lastErrorRef = useRef<string | null>(null);
   const playerStateRef = useRef<PlayerState>("idle");
@@ -163,6 +172,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const startupLatencyMsRef = useRef<number | null>(null);
   const playbackSessionIdRef = useRef(0);
   const startPlaybackAttemptRef = useRef<StartPlaybackAttempt | null>(null);
+
+  useEffect(() => {
+    onPlaybackFailedRef.current = options?.onPlaybackFailed;
+    onPlaybackFinishedRef.current = options?.onPlaybackFinished;
+  }, [options?.onPlaybackFailed, options?.onPlaybackFinished]);
 
   useEffect(() => {
     playerStateRef.current = playerState;
@@ -379,6 +393,29 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     videoElement.load();
   }, [clearLoadingTimer, cleanupRuntimeMonitor, cleanupMetadataListeners, videoElement]);
 
+  const stop = useCallback(
+    (options?: { preserveArchiveSession?: boolean }) => {
+      playbackSessionIdRef.current += 1;
+      isPausedRef.current = false;
+      clearRecoveryTimer();
+      currentChannelRef.current = null;
+      recoveryTimestampsRef.current = [];
+      hasStartedPlayingRef.current = false;
+      playbackStartedAtRef.current = null;
+      startupLatencyMsRef.current = null;
+      resetRecoveryUi();
+      cleanup();
+      setPlayerState("idle");
+      setErrorMessage(null);
+      setIsPaused(false);
+      setActiveChannelIndex(null);
+      if (!options?.preserveArchiveSession) {
+        setArchiveSession(null);
+      }
+    },
+    [cleanup, clearRecoveryTimer, resetRecoveryUi],
+  );
+
   const applyVolume = useCallback(() => {
     videoElement.volume = volume;
     videoElement.muted = muted;
@@ -415,7 +452,6 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       // A failed archive URL says nothing about the live channel's health, so
       // let the caller distinguish it from a live channel failure.
       onPlaybackFailedRef.current?.(result, notifyBackend && !archiveSessionRef.current);
-      setArchiveSession(null);
     },
     [cleanup, clearRecoveryTimer, resetRecoveryUi],
   );
@@ -433,6 +469,13 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
       if (decision.kind === "ignore") {
         logger.info("[Player] Ignoring playback interruption for", result.name, "-", reason);
+        return;
+      }
+
+      if (decision.kind === "finish") {
+        logger.info("[Player] Playback finished for", result.name);
+        onPlaybackFinishedRef.current?.(result);
+        stop();
         return;
       }
 
@@ -474,7 +517,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         void startAttempt(result, sessionId, "recovery", decision.nextAttempt);
       }, PLAYBACK_RECOVERY_DELAY_MS);
     },
-    [cleanup, clearRecoveryTimer, finalizePlaybackFailure, showRecoveryUi],
+    [cleanup, clearRecoveryTimer, finalizePlaybackFailure, showRecoveryUi, stop],
   );
 
   const setupRuntimeMonitor = useCallback(
@@ -975,26 +1018,50 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     [beginPlayback],
   );
 
+  const retry = useCallback(
+    (result: ChannelResult) => {
+      const session = archiveSessionRef.current;
+      const currentChannel = currentChannelRef.current;
+      if (session && currentChannel && session.baseResult.index === result.index) {
+        beginPlayback(currentChannel);
+        return;
+      }
+      setArchiveSession(null);
+      beginPlayback(result);
+    },
+    [beginPlayback],
+  );
+
   const playArchive = useCallback(
     (result: ChannelResult, options: ArchivePlayOptions) => {
-      const now = Math.floor(Date.now() / 1000);
-      const windowEnd = Math.min(options.endEpochS ?? now, now);
-      const start = Math.min(Math.floor(options.startEpochS), windowEnd - 1);
-      const durationS = Math.max(60, windowEnd - start);
-      const url = buildArchiveUrl(result, { startEpochS: start, durationS, nowEpochS: now });
-      if (!url) {
+      const playback = resolveArchivePlayback(result, options);
+      if (!playback) {
         return;
       }
       setArchiveSession({
         baseResult: result,
-        startEpochS: start,
-        windowStartEpochS: start,
-        windowEndEpochS: windowEnd,
+        url: playback.url,
+        startEpochS: playback.startEpochS,
+        windowStartEpochS: playback.startEpochS,
+        windowEndEpochS: playback.windowEndEpochS,
         title: options.title ?? null,
       });
       // The archive URL rides through the normal route/recovery pipeline as a
       // synthetic channel; it is not live, so MPEG-TS routes get a VOD hint.
-      beginPlayback({ ...result, url, content_type: "movie", stream_url: null });
+      beginPlayback({ ...result, url: playback.url, content_type: "movie", stream_url: null });
+    },
+    [beginPlayback],
+  );
+
+  const resumeArchive = useCallback(
+    (session: ArchiveSession) => {
+      setArchiveSession(session);
+      beginPlayback({
+        ...session.baseResult,
+        url: session.url,
+        content_type: "movie",
+        stream_url: null,
+      });
     },
     [beginPlayback],
   );
@@ -1020,7 +1087,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       if (!url) {
         return;
       }
-      setArchiveSession({ ...session, startEpochS: clamped });
+      setArchiveSession({ ...session, url, startEpochS: clamped });
       beginPlayback({
         ...session.baseResult,
         url,
@@ -1039,24 +1106,6 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     setArchiveSession(null);
     beginPlayback(session.baseResult);
   }, [beginPlayback]);
-
-  const stop = useCallback(() => {
-    playbackSessionIdRef.current += 1;
-    isPausedRef.current = false;
-    clearRecoveryTimer();
-    currentChannelRef.current = null;
-    recoveryTimestampsRef.current = [];
-    hasStartedPlayingRef.current = false;
-    playbackStartedAtRef.current = null;
-    startupLatencyMsRef.current = null;
-    resetRecoveryUi();
-    cleanup();
-    setPlayerState("idle");
-    setErrorMessage(null);
-    setIsPaused(false);
-    setActiveChannelIndex(null);
-    setArchiveSession(null);
-  }, [cleanup, clearRecoveryTimer, resetRecoveryUi]);
 
   const togglePause = useCallback(() => {
     if (videoElement.paused) {
@@ -1092,7 +1141,10 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     videoElement,
     streamMetadata,
     archiveSession,
+    setArchiveSession,
+    resumeArchive,
     play,
+    retry,
     playArchive,
     seekArchive,
     goLive,

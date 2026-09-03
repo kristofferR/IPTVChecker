@@ -16,7 +16,7 @@ import type { UseChromecastResult } from "../hooks/useChromecast";
 import { type ArchiveSession, MAX_PLAYBACK_RECOVERY_ATTEMPTS } from "../hooks/useStreamPlayer";
 import { isCastSessionActive } from "../lib/cast";
 import type { CastMediaRequest } from "../lib/types";
-import { CastMenu } from "./CastMenu";
+import { CastMenu, type CastStartHandler } from "./CastMenu";
 
 function formatArchiveClock(epochS: number): string {
   return new Date(epochS * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -60,6 +60,7 @@ interface StreamPlayerProps {
   onGoLive?: () => void;
   onTogglePause: () => void;
   onStop: () => void;
+  onCastStart?: CastStartHandler;
   onSetVolume: (v: number) => void;
   onToggleMute: () => void;
   onOpenExternal: () => void;
@@ -87,6 +88,7 @@ export function StreamPlayer({
   onGoLive,
   onTogglePause,
   onStop,
+  onCastStart,
   onSetVolume,
   onToggleMute,
   onOpenExternal,
@@ -164,8 +166,12 @@ export function StreamPlayer({
     // ffmpeg every few seconds. Each reconnect introduces a DTS jump that
     // the Chromecast HLS player can't recover from cleanly, so the cast
     // session goes idle/error within seconds.
+    if (onCastStart) {
+      return onCastStart();
+    }
     onStop();
-  }, [onStop]);
+    return undefined;
+  }, [onCastStart, onStop]);
 
   return (
     <div
@@ -276,7 +282,16 @@ export function StreamPlayer({
               }}
               onKeyUp={(e) => {
                 if (
-                  (e.key === "ArrowLeft" || e.key === "ArrowRight") &&
+                  [
+                    "ArrowDown",
+                    "ArrowLeft",
+                    "ArrowRight",
+                    "ArrowUp",
+                    "End",
+                    "Home",
+                    "PageDown",
+                    "PageUp",
+                  ].includes(e.key) &&
                   archiveScrubEpochS != null
                 ) {
                   onSeekArchive(archiveScrubEpochS);

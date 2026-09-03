@@ -10,7 +10,11 @@ export function dayLabel(epochS: number, now: Date = new Date()): string {
 
 /** Local wall-clock time like "21:00". */
 export function timeLabel(epochS: number): string {
-  return new Date(epochS * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(epochS * 1000).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
 }
 
 /** Local midnight of the day `daysAgo` days before now, in epoch seconds. */

@@ -58,6 +58,7 @@ pub async fn cast_to_device(
             app.clone(),
             request.original_url.clone(),
             request.stream_kind,
+            request.is_finite,
         )
         .await
         {
@@ -126,6 +127,7 @@ pub async fn cast_to_device(
         app.clone(),
         request.original_url.clone(),
         request.stream_kind,
+        request.is_finite,
     )
     .await?;
     let cast_url = proxy_handle.url.clone();

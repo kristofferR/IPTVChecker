@@ -20,6 +20,7 @@ import { useAppStore } from "../store";
 const ROW_HEIGHT_PX = 32;
 const WINDOW_HOURS = 6;
 const MAX_GUIDE_DEPTH_DAYS = 14;
+const GUIDE_CLOCK_INTERVAL_MS = 30_000;
 
 interface GuideSelection {
   result: ChannelResult;
@@ -39,6 +40,17 @@ function isProgrammePlayable(selection: GuideSelection, nowEpochS: number): bool
 
 function selectionKey(selection: GuideSelection | null): string | null {
   return selection ? `${selection.result.index}:${selection.programme.start}` : null;
+}
+
+function isSelectionPlayable(selection: GuideSelection, nowEpochS: number): boolean {
+  const earliestPlayable =
+    selection.result.catchup_days != null
+      ? nowEpochS - selection.result.catchup_days * 86_400
+      : null;
+  return (
+    selection.programme.start <= nowEpochS &&
+    (earliestPlayable == null || selection.programme.start >= earliestPlayable)
+  );
 }
 
 interface GuideRowProps {
@@ -69,7 +81,7 @@ const GuideRow = memo(function GuideRow({
       setProgrammes([]);
       return;
     }
-    fetchGuideProgrammes(result.tvg_id, windowFrom, windowTo).then((list) => {
+    fetchGuideProgrammes(result, windowFrom, windowTo).then((list) => {
       if (!stale) setProgrammes(list);
     });
     return () => {
@@ -162,9 +174,18 @@ export function GuideView({
   const [nowEpochS, setNowEpochS] = useState(() => Math.floor(Date.now() / 1000));
 
   useEffect(() => {
+<<<<<<< HEAD
     const interval = window.setInterval(() => {
       setNowEpochS(Math.floor(Date.now() / 1000));
     }, 60_000);
+||||||| 31740de
+  const nowEpochS = useMemo(() => Math.floor(Date.now() / 1000), []);
+=======
+    const interval = window.setInterval(
+      () => setNowEpochS(Math.floor(Date.now() / 1000)),
+      GUIDE_CLOCK_INTERVAL_MS,
+    );
+>>>>>>> catchup-phase-3
     return () => window.clearInterval(interval);
   }, []);
 
@@ -186,6 +207,7 @@ export function GuideView({
   const [selection, setSelection] = useState<GuideSelection | null>(null);
   const [testOutcome, setTestOutcome] = useState<ArchiveProbeOutcome | null>(null);
   const [testing, setTesting] = useState(false);
+  const testRequestRef = useRef(0);
 
   useEffect(() => {
     setSelection(null);
@@ -242,6 +264,8 @@ export function GuideView({
   }, [guideFocusChannelIndex, channels, virtualizer, setGuideFocusChannelIndex]);
 
   const activate = (target: GuideSelection) => {
+    if (testing) return;
+    if (!isSelectionPlayable(target, Math.floor(Date.now() / 1000))) return;
     onPlayArchive(target.result, {
       startEpochS: target.programme.start,
       endEpochS: target.programme.stop,
@@ -251,6 +275,7 @@ export function GuideView({
 
   const runTest = async () => {
     if (!selection) return;
+<<<<<<< HEAD
     const state = useAppStore.getState();
     if (
       isScanActive(state.scanState) ||
@@ -273,8 +298,13 @@ export function GuideView({
     const now = Math.floor(Date.now() / 1000);
     if (target.programme.start > now) return;
     state.setExternalPlaybackActive(false);
+||||||| 31740de
+=======
+    const requestId = ++testRequestRef.current;
+>>>>>>> catchup-phase-3
     setTesting(true);
     setTestOutcome(null);
+<<<<<<< HEAD
     state.setArchiveGuideTestRunning(true);
     const point = {
       label: timeLabel(target.programme.start),
@@ -303,10 +333,28 @@ export function GuideView({
       if (currentState.playlist === playlistAtStart) {
         setTestOutcome(outcome);
       }
+||||||| 31740de
+    const outcome = await probeArchivePoint(
+      selection.result,
+      { label: timeLabel(selection.programme.start), startEpochS: selection.programme.start },
+      Math.floor(Date.now() / 1000),
+    );
+    setTestOutcome(outcome);
+    setTesting(false);
+=======
+    const outcome = await probeArchivePoint(
+      selection.result,
+      { label: timeLabel(selection.programme.start), startEpochS: selection.programme.start },
+      Math.floor(Date.now() / 1000),
+    );
+    if (requestId === testRequestRef.current) {
+      setTestOutcome(outcome);
+>>>>>>> catchup-phase-3
       setTesting(false);
     }
   };
 
+<<<<<<< HEAD
   const testBlocked =
     testing ||
     isScanActive(scanState) ||
@@ -315,6 +363,10 @@ export function GuideView({
     archiveProbeRunning ||
     ((playIntentActive || castActive) && isSingleConnectionPlaylist(playlist));
   const selectionPlayable = selection != null && isProgrammePlayable(selection, nowEpochS);
+||||||| 31740de
+=======
+  const selectionPlayable = selection ? isSelectionPlayable(selection, nowEpochS) : false;
+>>>>>>> catchup-phase-3
 
   const hourLabels = Array.from(
     { length: WINDOW_HOURS },
@@ -394,10 +446,21 @@ export function GuideView({
               </span>
               <button
                 type="button"
+<<<<<<< HEAD
                 disabled={!selectionPlayable}
+||||||| 31740de
+=======
+                disabled={!selectionPlayable || testing}
+>>>>>>> catchup-phase-3
                 onClick={() => activate(selection)}
+<<<<<<< HEAD
                 title={selectionPlayable ? undefined : "This programme is outside catch-up range"}
                 className="flex shrink-0 items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-500 transition-colors disabled:opacity-40"
+||||||| 31740de
+                className="flex shrink-0 items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-500 transition-colors"
+=======
+                className="flex shrink-0 items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-500 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+>>>>>>> catchup-phase-3
               >
                 <Play className="h-3 w-3" />
                 Play
@@ -449,8 +512,10 @@ export function GuideView({
                     nowEpochS={nowEpochS}
                     selectedKey={selectionKey(selection)}
                     onSelect={(next) => {
+                      testRequestRef.current += 1;
                       setSelection(next);
                       setTestOutcome(null);
+                      setTesting(false);
                     }}
                     onActivate={activate}
                   />

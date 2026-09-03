@@ -22,7 +22,7 @@ import { isScanActive, type ScanState } from "../lib/scanState";
 import { getThumbnailDisplayState } from "../lib/thumbnailState";
 import type { ChannelResult } from "../lib/types";
 import { ArchiveCard } from "./ArchiveCard";
-import { CastMenu } from "./CastMenu";
+import { CastMenu, type CastStartHandler } from "./CastMenu";
 import { StatusBadge } from "./StatusBadge";
 import { StreamPlayer } from "./StreamPlayer";
 
@@ -56,6 +56,7 @@ interface ThumbnailPanelProps {
   videoElement?: HTMLVideoElement;
   onTogglePause?: () => void;
   onStopPlayer?: () => void;
+  onCastStart?: CastStartHandler;
   onSetVolume?: (v: number) => void;
   onToggleMute?: () => void;
   onOpenExternal?: (result: ChannelResult) => void;
@@ -91,6 +92,7 @@ export function ThumbnailPanel({
   videoElement,
   onTogglePause,
   onStopPlayer,
+  onCastStart,
   onSetVolume,
   onToggleMute,
   onOpenExternal,
@@ -216,11 +218,32 @@ export function ThumbnailPanel({
   // return lives after them — bailing out first would change the hook count
   // between renders as soon as a channel is selected.
   const resolvedUrl = result?.stream_url?.trim() || null;
+  const activeArchiveSession =
+    archiveSession && archiveSession.baseResult.index === result?.index ? archiveSession : null;
 
   // Memoized so the prop identity is stable across renders — without this, any
   // useEffect downstream of `castRequest` would tear down and re-fire on every
   // parent re-render even when none of its inputs actually changed.
-  const castRequest = useMemo(() => (result ? buildCastRequest(result) : null), [result]);
+  const castRequest = useMemo(() => {
+    if (!result) return null;
+    if (!activeArchiveSession) return buildCastRequest(result);
+    return buildCastRequest({
+      ...activeArchiveSession.baseResult,
+      url: activeArchiveSession.url,
+      content_type: "movie",
+      stream_url: null,
+    });
+  }, [activeArchiveSession, result]);
+
+  const externalPlaybackResult = useMemo(() => {
+    if (!activeArchiveSession) return result;
+    return {
+      ...activeArchiveSession.baseResult,
+      url: activeArchiveSession.url,
+      content_type: "movie" as const,
+      stream_url: null,
+    };
+  }, [activeArchiveSession, result]);
 
   const handleCopyResolvedUrl = useCallback(async () => {
     if (!resolvedUrl) return;
@@ -298,14 +321,15 @@ export function ThumbnailPanel({
           onStop={onStopPlayer}
           onSetVolume={onSetVolume}
           onToggleMute={onToggleMute}
-          onOpenExternal={() => onOpenExternal?.(result)}
+          onCastStart={onCastStart}
+          onOpenExternal={() => externalPlaybackResult && onOpenExternal?.(externalPlaybackResult)}
           onRetry={() => onRetryPlay?.(result)}
           onFullscreen={() => onLightboxChange(true)}
           onPip={onPip}
           castRequest={castRequest}
           compact
           chromecast={chromecast}
-          archiveSession={archiveSession}
+          archiveSession={activeArchiveSession}
           videoElement={videoElement}
           onSeekArchive={onSeekArchive}
           onGoLive={onGoLive}
@@ -414,7 +438,7 @@ export function ThumbnailPanel({
           {onOpenExternal && (
             <button
               type="button"
-              onClick={() => onOpenExternal(result)}
+              onClick={() => externalPlaybackResult && onOpenExternal(externalPlaybackResult)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-btn hover:bg-btn-hover text-text-primary border border-border-app shadow-sm transition-colors"
               title="Open in external player"
             >
@@ -458,7 +482,13 @@ export function ThumbnailPanel({
             chromecast={chromecast}
             castRequest={castRequest}
             mode="inline"
-            onCastStart={() => onStopPlayer?.()}
+            onCastStart={
+              onCastStart ??
+              (() => {
+                onStopPlayer?.();
+                return undefined;
+              })
+            }
           />
         );
       })()}
@@ -503,7 +533,8 @@ export function ThumbnailPanel({
       {onPlayArchive && (
         <ArchiveCard
           result={result}
-          archiveSession={archiveSession ?? null}
+          archiveSession={activeArchiveSession}
+          isCasting={isCastSessionActive(chromecast.session)}
           onPlayArchive={onPlayArchive}
         />
       )}
@@ -632,7 +663,10 @@ export function ThumbnailPanel({
                     onStop={onStopPlayer}
                     onSetVolume={onSetVolume}
                     onToggleMute={onToggleMute}
-                    onOpenExternal={() => onOpenExternal?.(result)}
+                    onCastStart={onCastStart}
+                    onOpenExternal={() =>
+                      externalPlaybackResult && onOpenExternal?.(externalPlaybackResult)
+                    }
                     onRetry={() => onRetryPlay?.(result)}
                     onPip={
                       onPip
@@ -644,7 +678,7 @@ export function ThumbnailPanel({
                     }
                     castRequest={castRequest}
                     chromecast={chromecast}
-                    archiveSession={archiveSession}
+                    archiveSession={activeArchiveSession}
                     videoElement={videoElement}
                     onSeekArchive={onSeekArchive}
                     onGoLive={onGoLive}

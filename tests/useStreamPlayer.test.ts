@@ -176,7 +176,7 @@ describe("useStreamPlayer helpers", () => {
     ).toEqual({ kind: "ignore" });
   });
 
-  it("does not auto-recover when VOD reaches a natural end", () => {
+  it("finishes VOD instead of recovering when playback reaches a natural end", () => {
     expect(
       decidePlaybackRecovery({
         issue: "ended",
@@ -185,7 +185,7 @@ describe("useStreamPlayer helpers", () => {
         isPaused: false,
         contentType: "movie",
       }),
-    ).toEqual({ kind: "ignore" });
+    ).toEqual({ kind: "finish" });
 
     expect(
       decidePlaybackRecovery({

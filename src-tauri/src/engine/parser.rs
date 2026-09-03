@@ -1,6 +1,8 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::BufRead;
 use std::path::Path;
+
+use url::Url;
 
 use crate::engine::search_pattern::ChannelSearchPattern;
 use crate::error::AppError;
@@ -9,6 +11,33 @@ use crate::models::playlist::PlaylistPreview;
 
 const PLAYLIST_GROUP_PREFIX: &str = "Playlist: ";
 const MAX_PLAYLIST_DISCOVERY_DEPTH: usize = 64;
+
+fn epg_sources_for_channels(
+    epg_sources: &[String],
+    epg_sources_by_playlist: &BTreeMap<String, Vec<String>>,
+    channels: &[Channel],
+) -> (Vec<String>, BTreeMap<String, Vec<String>>) {
+    let represented_playlists = channels
+        .iter()
+        .map(|channel| channel.playlist.as_str())
+        .collect::<BTreeSet<_>>();
+    let filtered_by_playlist = epg_sources_by_playlist
+        .iter()
+        .filter(|(playlist, _)| represented_playlists.contains(playlist.as_str()))
+        .map(|(playlist, sources)| (playlist.clone(), sources.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let represented_sources = filtered_by_playlist
+        .values()
+        .flatten()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let filtered_sources = epg_sources
+        .iter()
+        .filter(|source| represented_sources.contains(source.as_str()))
+        .cloned()
+        .collect();
+    (filtered_sources, filtered_by_playlist)
+}
 
 /// Escape provider-supplied text before embedding it in a generated EXTINF
 /// line. Newlines are flattened so a value cannot inject extra playlist tags.
@@ -52,15 +81,7 @@ pub fn find_unquoted_comma(input: &str) -> Option<usize> {
     None
 }
 
-/// Parse key-value attributes from an #EXTINF line header.
-pub fn parse_extinf_attributes(extinf_line: &str) -> Vec<(String, String)> {
-    let header_end = find_unquoted_comma(extinf_line).unwrap_or(extinf_line.len());
-    let header = &extinf_line[..header_end];
-    let payload = header
-        .split_once(':')
-        .map(|(_, after_colon)| after_colon)
-        .unwrap_or(header);
-
+fn parse_attributes(payload: &str, comma_terminates_unquoted_value: bool) -> Vec<(String, String)> {
     let bytes = payload.as_bytes();
     let mut i = 0usize;
     let mut attrs = Vec::new();
@@ -144,7 +165,10 @@ pub fn parse_extinf_attributes(extinf_line: &str) -> Vec<(String, String)> {
             raw.trim().to_string()
         } else {
             let value_start = i;
-            while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b',' {
+            while i < bytes.len()
+                && !bytes[i].is_ascii_whitespace()
+                && (!comma_terminates_unquoted_value || bytes[i] != b',')
+            {
                 i += 1;
             }
             payload[value_start..i].trim().to_string()
@@ -157,6 +181,17 @@ pub fn parse_extinf_attributes(extinf_line: &str) -> Vec<(String, String)> {
     }
 
     attrs
+}
+
+/// Parse key-value attributes from an #EXTINF line header.
+pub fn parse_extinf_attributes(extinf_line: &str) -> Vec<(String, String)> {
+    let header_end = find_unquoted_comma(extinf_line).unwrap_or(extinf_line.len());
+    let header = &extinf_line[..header_end];
+    let payload = header
+        .split_once(':')
+        .map(|(_, after_colon)| after_colon)
+        .unwrap_or(header);
+    parse_attributes(payload, true)
 }
 
 /// Extract channel name from #EXTINF line (text after the last comma).
@@ -236,17 +271,15 @@ pub fn extract_tvg_metadata(
 /// Both `x-tvg-url` and `url-tvg` occur in the wild, each possibly holding a
 /// comma-separated list of URLs.
 fn parse_header_epg_sources(header_line: &str) -> Vec<String> {
-    // parse_extinf_attributes drops everything before the first ':', which in
-    // an #EXTM3U header would be the colon of the first quoted URL. Insert a
-    // separator right after the tag so the attribute payload survives intact.
-    let doctored = header_line.replacen("#EXTM3U", "#EXTM3U:", 1);
-    let attrs = parse_extinf_attributes(&doctored);
+    let payload = header_line.strip_prefix("#EXTM3U").unwrap_or(header_line);
+    let attrs = parse_attributes(payload, false);
     let mut sources = Vec::new();
     for key in ["x-tvg-url", "url-tvg"] {
         if let Some(value) = attr_value(&attrs, key) {
+            let value = value.replace("&amp;", "&");
             for url in value.split(',') {
                 let url = url.trim();
-                if (url.starts_with("http://") || url.starts_with("https://"))
+                if Url::parse(url).is_ok_and(|parsed| matches!(parsed.scheme(), "http" | "https"))
                     && !sources.iter().any(|existing| existing == url)
                 {
                     sources.push(url.to_string());
@@ -506,6 +539,18 @@ pub fn filter_playlist_preview(
     }
 
     let (live_count, movie_count, series_count) = content_type_totals(&channels);
+    let (epg_sources, epg_sources_by_playlist) = if source_is_directory {
+        epg_sources_for_channels(
+            &preview.epg_sources,
+            &preview.epg_sources_by_playlist,
+            &channels,
+        )
+    } else {
+        (
+            preview.epg_sources.clone(),
+            preview.epg_sources_by_playlist.clone(),
+        )
+    };
     Ok(PlaylistPreview {
         file_path: preview.file_path.clone(),
         file_name: preview.file_name.clone(),
@@ -520,7 +565,8 @@ pub fn filter_playlist_preview(
         movie_count,
         series_count,
         groups: preview.groups.clone(),
-        epg_sources: preview.epg_sources.clone(),
+        epg_sources,
+        epg_sources_by_playlist,
         channels,
     })
 }
@@ -563,7 +609,7 @@ fn parse_playlist_reader<R: BufRead>(
         if line.ends_with('\r') {
             line.pop();
         }
-        let line = line.trim().to_string();
+        let line = line.trim().trim_start_matches('\u{feff}').to_string();
 
         if !pending_channel && line.starts_with("#EXTM3U") {
             for source in parse_header_epg_sources(&line) {
@@ -662,10 +708,12 @@ fn parse_playlist_reader<R: BufRead>(
         groups.len()
     );
     let (live_count, movie_count, series_count) = content_type_totals(&channels);
+    let epg_sources_by_playlist = BTreeMap::from([(playlist_name.clone(), epg_sources.clone())]);
     Ok(PlaylistPreview {
         file_path: file_path.to_string(),
         file_name: playlist_name,
         epg_sources,
+        epg_sources_by_playlist,
         source_identity: None,
         saved_playlist_id: None,
         server_location: None,
@@ -767,6 +815,7 @@ fn parse_playlist_directory(
     let mut source_index = 0usize;
     let mut parsed_progress = ParseProgress::default();
     let mut epg_sources: Vec<String> = Vec::new();
+    let mut epg_sources_by_playlist = BTreeMap::new();
 
     for file in files {
         let last_reported = std::cell::Cell::new(ParseProgress::default());
@@ -783,11 +832,17 @@ fn parse_playlist_directory(
             }
         };
         let parsed = parse_playlist_with_progress(&file, &None, &None, Some(&child_progress))?;
+        let playlist_id = Path::new(&file)
+            .strip_prefix(dir_path)
+            .unwrap_or_else(|_| Path::new(&file))
+            .to_string_lossy()
+            .replace('\\', "/");
         for source in &parsed.epg_sources {
             if !epg_sources.contains(source) {
                 epg_sources.push(source.clone());
             }
         }
+        epg_sources_by_playlist.insert(playlist_id.clone(), parsed.epg_sources.clone());
         let last = last_reported.get();
         parsed_progress = ParseProgress {
             channels_found: base_progress.channels_found + last.channels_found,
@@ -796,6 +851,7 @@ fn parse_playlist_directory(
             series_found: base_progress.series_found + last.series_found,
         };
         for mut channel in parsed.channels {
+            channel.playlist.clone_from(&playlist_id);
             let playlist_group = format!("{}{}", PLAYLIST_GROUP_PREFIX, channel.playlist);
             groups.insert(channel.group.clone());
             groups.insert(playlist_group.clone());
@@ -829,10 +885,13 @@ fn parse_playlist_directory(
         .unwrap_or_else(|| dir_path.to_string());
 
     let (live_count, movie_count, series_count) = content_type_totals(&channels);
+    let (epg_sources, epg_sources_by_playlist) =
+        epg_sources_for_channels(&epg_sources, &epg_sources_by_playlist, &channels);
     Ok(PlaylistPreview {
         file_path: dir_path.to_string(),
         file_name: dir_name,
         epg_sources,
+        epg_sources_by_playlist,
         source_identity: None,
         saved_playlist_id: None,
         server_location: None,
@@ -1003,8 +1062,44 @@ mod tests {
             ]
         );
 
+        assert_eq!(
+            parse_header_epg_sources(
+                "#EXTM3U x-tvg-url=http://a/epg.xml,http://b/epg.xml url-tvg=http://c/epg.xml"
+            ),
+            vec![
+                "http://a/epg.xml".to_string(),
+                "http://b/epg.xml".to_string(),
+                "http://c/epg.xml".to_string()
+            ]
+        );
+
         assert!(parse_header_epg_sources("#EXTM3U").is_empty());
         assert!(parse_header_epg_sources("#EXTM3U x-tvg-url=\"not-a-url\"").is_empty());
+        assert_eq!(
+            parse_header_epg_sources("#EXTM3U x-tvg-url=\"HTTPS://epg.example.com/guide.xml\""),
+            vec!["HTTPS://epg.example.com/guide.xml".to_string()]
+        );
+        assert_eq!(
+            parse_header_epg_sources(
+                "#EXTM3U x-tvg-url=\"https://epg.example.com/xmltv.php?username=u&amp;password=p\""
+            ),
+            vec!["https://epg.example.com/xmltv.php?username=u&password=p".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_parse_m3u_reads_epg_sources_from_a_bom_prefixed_header() {
+        let playlist = "\u{feff}#EXTM3U x-tvg-url=\"http://epg.example.com/guide.xml\"\n\
+#EXTINF:-1,Channel One\n\
+http://example.com/one.m3u8\n";
+
+        let parsed = parse_m3u(playlist.as_bytes(), "bom.m3u8", &None, &None)
+            .expect("BOM-prefixed playlist should parse");
+
+        assert_eq!(
+            parsed.epg_sources,
+            vec!["http://epg.example.com/guide.xml".to_string()]
+        );
     }
 
     #[test]
@@ -1214,12 +1309,12 @@ http://example.com/three.m3u8
         let nested = root.join("nested");
         std::fs::create_dir_all(&nested).expect("nested fixture dir should be created");
 
-        let first = root.join("first.m3u8");
-        let second = nested.join("second.m3u");
+        let first = root.join("live.m3u8");
+        let second = nested.join("live.m3u8");
         std::fs::write(
             &first,
             "\
-#EXTM3U
+#EXTM3U x-tvg-url=\"http://provider-a.example/epg.xml\"
 #EXTINF:-1 group-title=\"Sports\",Alpha
 http://example.com/alpha.m3u8
 ",
@@ -1228,7 +1323,7 @@ http://example.com/alpha.m3u8
         std::fs::write(
             &second,
             "\
-#EXTM3U
+#EXTM3U x-tvg-url=\"http://provider-b.example/epg.xml\"
 #EXTINF:-1 group-title=\"News\",Beta
 http://example.com/beta.m3u8
 ",
@@ -1252,22 +1347,55 @@ http://example.com/beta.m3u8
                 .iter()
                 .map(|channel| channel.playlist.clone())
                 .collect::<Vec<_>>(),
-            vec!["first.m3u8".to_string(), "second.m3u".to_string()]
+            vec!["live.m3u8".to_string(), "nested/live.m3u8".to_string()]
         );
         assert!(preview.groups.contains(&"Sports".to_string()));
         assert!(preview.groups.contains(&"News".to_string()));
-        assert!(preview.groups.contains(&"Playlist: first.m3u8".to_string()));
-        assert!(preview.groups.contains(&"Playlist: second.m3u".to_string()));
+        assert!(preview.groups.contains(&"Playlist: live.m3u8".to_string()));
+        assert!(preview
+            .groups
+            .contains(&"Playlist: nested/live.m3u8".to_string()));
+        assert_eq!(
+            preview.epg_sources_by_playlist.get("live.m3u8"),
+            Some(&vec!["http://provider-a.example/epg.xml".to_string()])
+        );
+        assert_eq!(
+            preview.epg_sources_by_playlist.get("nested/live.m3u8"),
+            Some(&vec!["http://provider-b.example/epg.xml".to_string()])
+        );
 
         let playlist_filtered = parse_playlist(
             &root.to_string_lossy(),
-            &Some("Playlist: second.m3u".to_string()),
+            &Some("Playlist: nested/live.m3u8".to_string()),
             &None,
         )
         .expect("playlist-filtered directory parse should succeed");
         assert_eq!(playlist_filtered.total_channels, 1);
         assert_eq!(playlist_filtered.channels[0].name, "Beta");
         assert_eq!(playlist_filtered.channels[0].index, 1);
+        assert_eq!(
+            playlist_filtered.epg_sources,
+            vec!["http://provider-b.example/epg.xml".to_string()]
+        );
+        assert_eq!(playlist_filtered.epg_sources_by_playlist.len(), 1);
+        assert_eq!(
+            playlist_filtered
+                .epg_sources_by_playlist
+                .get("nested/live.m3u8"),
+            Some(&vec!["http://provider-b.example/epg.xml".to_string()])
+        );
+
+        let cached_filtered = filter_playlist_preview(
+            &preview,
+            &Some("Playlist: nested/live.m3u8".to_string()),
+            &None,
+        )
+        .expect("cached directory preview should filter");
+        assert_eq!(cached_filtered.epg_sources, playlist_filtered.epg_sources);
+        assert_eq!(
+            cached_filtered.epg_sources_by_playlist,
+            playlist_filtered.epg_sources_by_playlist
+        );
 
         std::fs::remove_dir_all(root).expect("fixture directory should be removable");
     }

@@ -729,6 +729,7 @@ pub(crate) fn build_stalker_preview(
         series_count,
         groups: groups.into_iter().collect(),
         epg_sources: Vec::new(),
+        epg_sources_by_playlist: std::collections::BTreeMap::new(),
         channels,
     })
 }
