@@ -223,12 +223,28 @@
   .ring2 span{width:42px;height:42px;border-radius:50%;background:var(--surface);display:grid;place-items:center;font-size:13px;font-weight:600}
   .srow{display:flex;justify-content:space-between;align-items:center;background:rgba(39,39,42,.6);border-radius:6px;padding:2px 8px;font-size:10.5px;color:var(--t3)}
   .srow b{color:var(--t1);font-weight:500;display:inline-flex;align-items:center;gap:4px}
+  /* batch verification (section V) */
+  .b.vio{background:var(--vio500);color:#fff}
+  .pbar{display:flex;align-items:center;gap:10px;padding:6px 12px;border-top:1px solid var(--border);background:var(--panel50);font-size:11px}
+  .pbar .trk{flex:1;height:8px;background:var(--border);border-radius:5px;overflow:hidden}
+  .pbar .trk i{display:block;height:100%;background:var(--vio500);border-radius:5px}
+  .pbar .tally{display:flex;gap:8px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .pbar .cancel{border:1px solid var(--border);border-radius:5px;padding:1px 8px;color:var(--t1)}
+  .dd .sec{padding:5px 10px 2px;font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--t3)}
+  .dd .mi .rd{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--t3);flex:none;display:inline-block;margin-right:6px}
+  .dd .mi .rd.on{border-color:var(--vio);box-shadow:inset 0 0 0 2.5px var(--panel);background:var(--vio)}
+  .chip.cu.p{background:rgba(63,63,70,.4);color:var(--t2);box-shadow:inset 0 0 0 1px var(--border)}
+  .rsn{font-size:10px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dlg{width:420px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;box-shadow:0 24px 60px rgba(0,0,0,.7);font-size:12px}
+  .dlg h5{margin:0 0 4px;font-size:13px}
+  .dlg .row{display:flex;gap:6px;margin-top:10px}
+  .dlg .row .b{padding:5px 10px;font-size:11.5px}
 </style>
 </head>
 <body>
 <main>
 <h1>Catch-up analysis, design</h1>
-<p class="sub">Issue #229. See which channels offer catch-up (archive/timeshift), count them playlist-wide / on screen / in selection, verify the archive actually works, and watch it. Every mock below is a full app screenshot; violet numbered dots mark where you click and the list under each screenshot explains the flow. Catch-up accent: violet, unused by any existing status. <b style="color:#fff">The Final design section shows the agreed end state; Foundation, C, and D below carry per-part detail. The planned IPTV Player flavor lives in its own document, linked from issue #231.</b></p>
+<p class="sub">Issue #229. See which channels offer catch-up (archive/timeshift), count them playlist-wide / on screen / in selection, verify the archive actually works, and watch it. Every mock below is a full app screenshot; violet numbered dots mark where you click and the list under each screenshot explains the flow. Catch-up accent: violet, unused by any existing status. <b style="color:#fff">The Final design section shows the agreed end state, followed by the batch fake-vs-real verification flow added after live testing; Foundation, C, and D below carry per-part detail. The planned IPTV Player flavor lives in its own document, linked from issue #231.</b></p>
 
 <p>What the codebase already has and lacks:</p>
 <table class="doc">
@@ -453,6 +469,318 @@
   </div>
 </div></div>
 <p class="cap">Guide mode after verification: depth tags in the channel column carry the verified state. Details and interaction notes in section C below.</p>
+
+<!-- ================= BATCH VERIFICATION ================= -->
+<h2><span class="tag">★</span>Batch verification: fake vs real catch-up</h2>
+<p>Providers flag channels as catch-up that keep nothing. Live testing on the "Strong" panel showed flagged channels answering every timeshift request with an empty 200, and other panels quietly serve the live stream for any archive URL. Sorting those out for a whole playlist is the point of this app, so verification gets the same footing as Scan: an obvious trigger with a scope, a progress row with live tallies, a verdict per channel that says <i>why</i> it is fake, filter entries, and an export of the channels that actually work.</p>
+<p>The probe engine from section D already exists on the branch (−1 h point, advertised depth, bisect, media-time check). What is new here is the flow around it and the fake taxonomy.</p>
+
+<table class="doc">
+<tr><th>Verdict</th><th>Chip</th><th>Rule</th><th>Cost</th></tr>
+<tr><td class="good"><b>Real</b></td><td><span class="chip cu v">✓ 7 D</span></td><td>−1 h probe returns media whose time matches the request (not the live segment). Full mode also confirms the advertised depth.</td><td>1 request (quick) · 2 (full)</td></tr>
+<tr><td class="warn"><b>Shallower</b></td><td><span class="chip cu w">⚠ 3 / 7 D</span></td><td>Real archive, but the advertised depth fails; bisect finds what is actually kept.</td><td>3-5 requests, full mode only</td></tr>
+<tr><td class="bad"><b>Fake · empty</b></td><td><span class="chip cu x">✕ EMPTY</span></td><td>200 with no segments, for −1 h and −1 d alike. The Strong-panel case.</td><td>2 requests</td></tr>
+<tr><td class="bad"><b>Fake · live</b></td><td><span class="chip cu x">✕ LIVE</span></td><td>Archive URL serves the live stream: media time does not match, or the response is byte-identical to live.</td><td>1 request</td></tr>
+<tr><td class="bad"><b>Fake · error</b></td><td><span class="chip cu x">✕ 404</span></td><td>HTTP 4xx/5xx or timeout on the archive URL while the live URL works. The status code is the chip text (<code>✕ TIMEOUT</code> for no answer).</td><td>1 request</td></tr>
+<tr><td class="vio"><b>Untested</b></td><td><span class="chip cu">7 D</span></td><td>Advertised, not probed yet, or the run was cancelled before reaching it.</td><td>0</td></tr>
+</table>
+<p class="cap">Quick mode stops after the −1 h point, so fake vs real costs one request per channel: about 7 minutes for 418 channels on a single-connection provider. Full mode adds the depth probes for channels that passed.</p>
+
+<h3>V1 · Trigger</h3>
+<div class="frame"><div class="app" style="min-width:1040px">
+  <div class="tbar">
+    <span class="b pri">▶ Scan ▾</span>
+    <span class="b vio" style="z-index:7">⏪ Verify ▾<span class="co" style="position:absolute;top:-7px;right:-7px">1</span>
+      <span class="dd" style="font-weight:400;width:262px">
+        <span class="sec">Mode <span class="co">2</span></span>
+        <span class="mi"><span><span class="rd on"></span>Quick · real vs fake</span><span class="k">1 req / ch</span></span>
+        <span class="mi"><span><span class="rd"></span>Full · measure depth</span><span class="k">2-5 req / ch</span></span>
+        <span class="sec">Scope <span class="co">3</span></span>
+        <span class="mi"><span><span class="rd on"></span>All advertised</span><span class="k">418 · ~7 min</span></span>
+        <span class="mi"><span><span class="rd"></span>Filtered</span><span class="k">212</span></span>
+        <span class="mi"><span><span class="rd"></span>Selected</span><span class="k">3</span></span>
+        <span class="msep"></span>
+        <span class="mi hov" style="justify-content:center;background:var(--vio500);color:#fff;font-weight:600">Start verification</span>
+      </span>
+    </span>
+    <span class="b">Open ▾</span><span class="b">Save</span>
+    <span class="seg" style="margin-left:10px"><span class="sg on gr">☰ Table</span><span class="sg">⏪ Guide</span></span>
+    <span class="plname">nordic-full.m3u</span>
+    <span class="selc">All Groups</span><span class="selc"><b>Catch-up</b></span>
+    <span class="search">Search...</span>
+    <span class="ib">⇩</span><span class="ib">▤</span><span class="ib">⚙</span>
+  </div>
+  <div class="body" style="min-height:300px">
+    <div class="maincol">
+      <div class="th cols8">
+        <span>#</span><span>STATUS</span><span>CHANNEL NAME</span><span>GROUP</span><span class="ctr">RES</span><span class="ctr">FPS</span><span class="rgt">BITRATE</span><span class="ctr">CATCH-UP</span>
+      </div>
+      <div class="tr cols8"><span class="mut3 num">1</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK1 HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">8.2 Mbps</span><span class="ctr"><span class="chip cu">7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">2</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK2 HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">7.9 Mbps</span><span class="ctr"><span class="chip cu">7 D</span></span></div>
+      <div class="tr sel cols8"><span class="mut3 num">3</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV 2 Direkte HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">6.9 Mbps</span><span class="ctr"><span class="chip cu">7 D</span></span></div>
+      <div class="tr sel cols8"><span class="mut3 num">4</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV3 Norge</span></span><span class="mut">Norge</span><span class="mut num ctr">720p</span><span class="mut num ctr">25</span><span class="mut num rgt">4.1 Mbps</span><span class="ctr"><span class="chip cu">3 D</span></span></div>
+      <div class="tr sel cols8"><span class="mut3 num">5</span><span><span class="dot dy"></span></span><span class="nm"><span class="logo">TV</span><span>BBC One FHD</span></span><span class="mut">UK</span><span class="mut num ctr">1080p</span><span class="mut num ctr">25</span><span class="mut num rgt">5.4 Mbps</span><span class="ctr"><span class="chip cu">14 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">7</span><span><span class="dot dr"></span></span><span class="nm"><span class="logo">TV</span><span>Sky Sports Main Event</span></span><span class="mut">Sport</span><span class="mut3 ctr">—</span><span class="mut3 ctr">—</span><span class="mut3 rgt">—</span><span class="ctr"><span class="chip cu">7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">8</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>Discovery Channel Norge</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">25</span><span class="mut num rgt">5.8 Mbps</span><span class="ctr"><span class="chip cu">7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">9</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV 2 Zebra</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">6.1 Mbps</span><span class="ctr"><span class="chip cu">7 D</span></span></div>
+    </div>
+  </div>
+  <div class="stats">
+    <span class="pill pn">☰ 1,264 total</span>
+    <span class="pill pg">✓ 1,102</span>
+    <span class="pill pr">✕ 118</span>
+    <span class="pill py">🔒 44</span>
+    <span class="pill pv on">⏪ 418 catch-up</span>
+    <span class="pill pb">Score 7.4/10</span>
+    <span class="rightst"><span>3 selected · <span class="vio">3 with catch-up</span></span></span>
+  </div>
+</div></div>
+<ul class="legend">
+  <li><span class="co">1</span><span><b>Verify</b> is a violet split button beside Scan, shown only when the playlist advertises catch-up. It does not need a scan first: it runs on the loaded playlist. The Scan dropdown keeps "Scan + Verify Catch-up" for the one-shot combo, and right-click keeps "Test Catch-up (n)".</span></li>
+  <li><span class="co">2</span><span><b>Mode.</b> Quick answers real vs fake with one request per channel. Full adds the depth probes for channels that pass, so shallower providers show up too. Remembered between runs.</span></li>
+  <li><span class="co">3</span><span><b>Scope</b> mirrors Scan: every advertising channel, the current Group/Status/Search filter, or the selection. Counts and the quick-mode estimate are live.</span></li>
+</ul>
+
+<h3>V2 · Running</h3>
+<div class="frame"><div class="app" style="min-width:1040px">
+  <div class="tbar">
+    <span class="b pri" style="opacity:.5">▶ Scan ▾</span>
+    <span class="b vio">⏪ Verifying…</span>
+    <span class="b">Open ▾</span><span class="b">Save</span>
+    <span class="seg" style="margin-left:10px"><span class="sg on gr">☰ Table</span><span class="sg">⏪ Guide</span></span>
+    <span class="plname">nordic-full.m3u</span>
+    <span class="selc">All Groups</span><span class="selc"><b>Catch-up</b></span>
+    <span class="search">Search...</span>
+    <span class="ib">⇩</span><span class="ib">▤</span><span class="ib">⚙</span>
+  </div>
+  <div class="body" style="min-height:280px">
+    <div class="maincol">
+      <div class="th cols8">
+        <span>#</span><span>STATUS</span><span>CHANNEL NAME</span><span>GROUP</span><span class="ctr">RES</span><span class="ctr">FPS</span><span class="rgt">BITRATE</span><span class="ctr">CATCH-UP <span class="co">2</span></span>
+      </div>
+      <div class="tr cols8"><span class="mut3 num">1</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK1 HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">8.2 Mbps</span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">2</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK2 HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">7.9 Mbps</span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">3</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV 2 Direkte HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">6.9 Mbps</span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">4</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV3 Norge</span></span><span class="mut">Norge</span><span class="mut num ctr">720p</span><span class="mut num ctr">25</span><span class="mut num rgt">4.1 Mbps</span><span class="ctr"><span class="chip cu x">✕ LIVE</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">5</span><span><span class="dot dy"></span></span><span class="nm"><span class="logo">TV</span><span>BBC One FHD</span></span><span class="mut">UK</span><span class="mut num ctr">1080p</span><span class="mut num ctr">25</span><span class="mut num rgt">5.4 Mbps</span><span class="ctr"><span class="chip cu v">✓ 14 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">7</span><span><span class="dot dr"></span></span><span class="nm"><span class="logo">TV</span><span>Sky Sports Main Event</span></span><span class="mut">Sport</span><span class="mut3 ctr">—</span><span class="mut3 ctr">—</span><span class="mut3 rgt">—</span><span class="ctr"><span class="chip cu x">✕ EMPTY</span></span></div>
+      <div class="tr sel cols8"><span class="mut3 num">8</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>Discovery Channel Norge</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">25</span><span class="mut num rgt">5.8 Mbps</span><span class="ctr"><span class="chip cu p">⋯ −1 H</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">9</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV 2 Zebra</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">6.1 Mbps</span><span class="ctr"><span class="chip cu">7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">10</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK3</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">7.4 Mbps</span><span class="ctr"><span class="chip cu">7 D</span></span></div>
+    </div>
+  </div>
+  <div class="pbar" style="position:relative">
+    <span class="co" style="position:absolute;top:-7px;left:6px">1</span>
+    <span class="vio" style="white-space:nowrap">Verifying catch-up</span>
+    <span class="trk"><i style="width:20%"></i></span>
+    <span class="num mut">84/418 (20%)</span>
+    <span class="tally"><span class="good">✓ 61 real</span><span class="bad">✕ 12 fake</span><span class="warn">⚠ 11 shallower</span></span>
+    <span class="mut3 num" style="white-space:nowrap">8 ch/min · ~7 min remaining</span>
+    <span class="cancel">Cancel</span>
+  </div>
+  <div class="stats">
+    <span class="pill pn">☰ 1,264 total</span>
+    <span class="pill pg">✓ 1,102</span>
+    <span class="pill pr">✕ 118</span>
+    <span class="pill py">🔒 44</span>
+    <span class="pill pv on">⏪ 61 real · 12 fake · 345 untested <span class="co" style="position:absolute;top:-7px;right:-7px">3</span></span>
+    <span class="pill pb">Score 7.4/10</span>
+  </div>
+</div></div>
+<ul class="legend">
+  <li><span class="co">1</span><span><b>Progress row</b> in the slot the scan bar uses, violet so it cannot be mistaken for a scan. Live real / fake / shallower tally, throughput and ETA from the same telemetry as scan, Cancel keeps verdicts gathered so far. Scan is disabled while it runs; on single-connection providers playback is too, with the existing "cancel verification first" message.</span></li>
+  <li><span class="co">2</span><span><b>Chips update in place</b> as each channel finishes; the channel under test shows the point being probed. The table follows the sort you had, so with Catch-up sorted the fakes cluster as they appear.</span></li>
+  <li><span class="co">3</span><span><b>Pill</b> switches to the verdict tally for the run. The verification is remembered with the scan results, so reopening the playlist keeps the verdicts.</span></li>
+</ul>
+
+<h3>V3 · Results: filter to fake, see why, export the real ones</h3>
+<div class="frame"><div class="app" style="min-width:1040px">
+  <div class="tbar">
+    <span class="b pri">▶ Scan ▾</span>
+    <span class="b vio">⏪ Verify ▾</span>
+    <span class="b">Open ▾</span><span class="b">Save</span>
+    <span class="seg" style="margin-left:10px"><span class="sg on gr">☰ Table</span><span class="sg">⏪ Guide</span></span>
+    <span class="plname">nordic-full.m3u</span>
+    <span class="selc">All Groups</span>
+    <span class="selc"><b>Fake catch-up</b><span class="co" style="position:absolute;top:-7px;right:-7px">1</span></span>
+    <span class="search">Search...</span>
+    <span class="ib">⇩</span><span class="ib ring">▤</span><span class="ib">⚙</span>
+  </div>
+  <div class="body">
+    <div class="side">
+      <div class="shead"><span class="dot dr"></span><span>Sky Sports Main Event</span></div>
+      <div class="vid"><div class="play">▶</div></div>
+      <div class="acts"><span class="ab gr">▶ Play</span><span class="ab gr">↗</span><span class="ab gr">↻ Rescan</span></div>
+      <div class="castrow">Cast to device ▾</div>
+      <div class="meta2">
+        <div><span class="l">Status</span><p>Dead</p></div>
+        <div><span class="l">Group</span><p>Sport</p></div>
+        <div><span class="l">Video</span><p>—</p></div>
+        <div><span class="l">Audio</span><p>—</p></div>
+      </div>
+      <div class="card cardv">
+        <h4><span class="co">3</span> Archive <span class="chip cu x">✕ EMPTY</span></h4>
+        <p style="font-size:10.5px;color:var(--t2);margin:0 0 6px;line-height:1.4">Flagged 7 d, keeps nothing. Every archive request returns 200 with no media.</p>
+        <div class="kv"><span>−1 h</span><b class="bad">200 · empty · 410 ms</b></div>
+        <div class="kv"><span>−1 d</span><b class="bad">200 · empty · 395 ms</b></div>
+        <div class="kv"><span>Live</span><b class="bad">dead</b></div>
+        <div class="kv" style="margin-top:4px"><span>Checked</span><b>today 15:52</b></div>
+        <a class="abtn sec">Re-test</a>
+      </div>
+    </div>
+    <div class="maincol">
+      <div class="th cols6" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px">
+        <span>#</span><span>STATUS</span><span>CHANNEL NAME</span><span>GROUP</span><span class="ctr">RES</span><span class="ctr">CATCH-UP <span class="co">2</span></span>
+      </div>
+      <div class="tr cols6 sel" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px"><span class="mut3 num">7</span><span><span class="dot dr"></span></span><span class="nm"><span class="logo">TV</span><span>Sky Sports Main Event</span></span><span class="mut">Sport</span><span class="mut3 ctr">—</span><span class="ctr"><span class="chip cu x">✕ EMPTY</span></span></div>
+      <div class="tr cols6" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px"><span class="mut3 num">4</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV3 Norge</span></span><span class="mut">Norge</span><span class="mut num ctr">720p</span><span class="ctr"><span class="chip cu x">✕ LIVE</span></span></div>
+      <div class="tr cols6" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px"><span class="mut3 num">41</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>IL: Channel 13 FHD</span></span><span class="mut">Israel</span><span class="mut num ctr">1080p</span><span class="ctr"><span class="chip cu x">✕ EMPTY</span></span></div>
+      <div class="tr cols6" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px"><span class="mut3 num">58</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>SE: TV6</span></span><span class="mut">Sverige</span><span class="mut num ctr">1080p</span><span class="ctr"><span class="chip cu x">✕ EMPTY</span></span></div>
+      <div class="tr cols6" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px"><span class="mut3 num">102</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>Viasat Sport Premium</span></span><span class="mut">Sport</span><span class="mut num ctr">1080p</span><span class="ctr"><span class="chip cu x">✕ LIVE</span></span></div>
+      <div class="tr cols6" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px"><span class="mut3 num">133</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>DR1</span></span><span class="mut">Danmark</span><span class="mut num ctr">1080p</span><span class="ctr"><span class="chip cu x">✕ 404</span></span></div>
+      <div class="tr cols6" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px"><span class="mut3 num">210</span><span><span class="dot dy"></span></span><span class="nm"><span class="logo">TV</span><span>ITV1 HD</span></span><span class="mut">UK</span><span class="mut num ctr">1080p</span><span class="ctr"><span class="chip cu x">✕ TIMEOUT</span></span></div>
+      <div class="tr cols6" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px"><span class="mut3 num">287</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>Kanal 5 HD</span></span><span class="mut">Sverige</span><span class="mut num ctr">1080p</span><span class="ctr"><span class="chip cu x">✕ EMPTY</span></span></div>
+    </div>
+    <div class="rep">
+      <h4 style="margin-top:0">Health Score</h4>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:2px">
+        <div class="ring2"><span>7.3</span></div>
+        <div style="flex:1;display:grid;gap:3px;min-width:0">
+          <div class="srow"><span>Ping</span><b>6.9</b></div>
+          <div class="srow"><span>Content</span><b>7.8</b></div>
+          <div class="srow"><span>Quality</span><b>7.2</b></div>
+          <div class="srow" style="box-shadow:inset 0 0 0 1px rgba(139,92,246,.35)"><span class="vio">Catch-up</span><b class="vio">6.4</b></div>
+        </div>
+      </div>
+      <h4>Catch-up · verified today 15:52</h4>
+      <div class="tiles">
+        <div class="tile"><b class="good">341</b><span>real</span></div>
+        <div class="tile"><b class="bad">61</b><span>fake</span></div>
+        <div class="tile"><b class="warn">16</b><span>shallower</span></div>
+        <div class="tile"><b class="vio">418</b><span>advertised</span></div>
+      </div>
+      <h4>Why fake <span class="co">4</span></h4>
+      <div class="hbar"><span class="lb" style="width:52px">empty</span><div class="tr2"><div class="fl" style="width:62%;background:#ef4444"></div></div><span class="n2">38</span></div>
+      <div class="hbar"><span class="lb" style="width:52px">serves live</span><div class="tr2"><div class="fl" style="width:28%;background:#ef4444"></div></div><span class="n2">17</span></div>
+      <div class="hbar"><span class="lb" style="width:52px">http error</span><div class="tr2"><div class="fl" style="width:7%;background:#ef4444"></div></div><span class="n2">4</span></div>
+      <div class="hbar"><span class="lb" style="width:52px">timeout</span><div class="tr2"><div class="fl" style="width:3%;background:#ef4444"></div></div><span class="n2">2</span></div>
+      <h4>Real depth · 357 playable</h4>
+      <div class="hbar"><span class="lb">1-2 d</span><div class="tr2"><div class="fl" style="width:12%"></div></div><span class="n2">31</span></div>
+      <div class="hbar"><span class="lb">3-6 d</span><div class="tr2"><div class="fl" style="width:30%"></div></div><span class="n2">88</span></div>
+      <div class="hbar"><span class="lb">7 d</span><div class="tr2"><div class="fl" style="width:72%"></div></div><span class="n2">207</span></div>
+      <div class="hbar"><span class="lb">14 d+</span><div class="tr2"><div class="fl" style="width:12%"></div></div><span class="n2">31</span></div>
+      <a class="abtn sec" style="margin-top:9px">⇩ Export real catch-up · M3U (357) <span class="co" style="position:absolute;top:-7px;right:-7px">5</span></a>
+      <a class="abtn sec">⇩ Export playlist, fake flags stripped</a>
+    </div>
+  </div>
+  <div class="stats">
+    <span class="pill pn">☰ 1,264 total</span>
+    <span class="pill pg">✓ 1,102</span>
+    <span class="pill pr">✕ 118</span>
+    <span class="pill py">🔒 44</span>
+    <span class="pill pv">⏪ 341 real · 61 fake <span class="co" style="position:absolute;top:-7px;right:-7px">6</span></span>
+    <span class="pill pb">Score 7.3/10</span>
+    <span class="rightst"><span>61 shown</span></span>
+  </div>
+</div></div>
+<div class="frame"><div class="app" style="min-width:1040px">
+  <div class="tbar">
+    <span class="b pri">▶ Scan ▾</span>
+    <span class="b vio">⏪ Verify ▾</span>
+    <span class="b">Open ▾</span><span class="b">Save</span>
+    <span class="seg" style="margin-left:10px"><span class="sg on gr">☰ Table</span><span class="sg">⏪ Guide</span></span>
+    <span class="plname">nordic-full.m3u</span>
+    <span class="selc">All Groups</span>
+    <span class="selc" style="z-index:7"><b>All Status</b><span class="co" style="position:absolute;top:-7px;right:-7px">1</span>
+      <span class="dd" style="width:210px;color:var(--t1);font-size:11.5px">
+        <span class="mi"><span>All Status</span></span>
+        <span class="mi"><span>Alive</span><span class="k">1,102</span></span>
+        <span class="mi"><span>Dead</span><span class="k">118</span></span>
+        <span class="mi"><span>Geoblocked</span><span class="k">44</span></span>
+        <span class="msep"></span>
+        <span class="mi"><span class="vio">Catch-up · any</span><span class="k">418</span></span>
+        <span class="mi"><span class="good">Real</span><span class="k">341</span></span>
+        <span class="mi"><span class="warn">Shallower</span><span class="k">16</span></span>
+        <span class="mi hov"><span class="bad">Fake</span><span class="k">61</span></span>
+        <span class="mi"><span class="mut">Untested</span><span class="k">0</span></span>
+      </span>
+    </span>
+    <span class="search">Search...</span>
+    <span class="ib">⇩</span><span class="ib">▤</span><span class="ib">⚙</span>
+  </div>
+  <div class="body" style="min-height:275px"><div class="maincol">
+    <div class="th cols8"><span>#</span><span>STATUS</span><span>CHANNEL NAME</span><span>GROUP</span><span class="ctr">RES</span><span class="ctr">FPS</span><span class="rgt">BITRATE</span><span class="ctr">CATCH-UP</span></div>
+    <div class="tr cols8"><span class="mut3 num">1</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK1 HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">8.2 Mbps</span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+    <div class="tr cols8"><span class="mut3 num">2</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK2 HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">7.9 Mbps</span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+    <div class="tr cols8"><span class="mut3 num">3</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV 2 Direkte HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">6.9 Mbps</span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+    <div class="tr cols8"><span class="mut3 num">4</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV3 Norge</span></span><span class="mut">Norge</span><span class="mut num ctr">720p</span><span class="mut num ctr">25</span><span class="mut num rgt">4.1 Mbps</span><span class="ctr"><span class="chip cu x">✕ LIVE</span></span></div>
+  </div></div>
+</div></div>
+<p class="cap">The Status filter opened, as used to reach the screenshot above.</p>
+<ul class="legend">
+  <li><span class="co">1</span><span><b>Status filter</b> grows a Catch-up group: any, Real, Shallower, Fake, Untested, each with its count. Fake selected here. Groups and Search combine with it as today.</span></li>
+  <li><span class="co">2</span><span><b>Chip carries the reason</b> for fakes: EMPTY, LIVE, the HTTP status, or TIMEOUT. Tooltip has the full sentence and the probe times. Sorting the column groups the reasons.</span></li>
+  <li><span class="co">3</span><span><b>Archive card</b> for a fake channel drops the programme list and explains the verdict with the probe lines, plus Re-test. Live status is shown too, since a dead channel with a dead archive is a different provider problem than a live channel with a fake flag.</span></li>
+  <li><span class="co">4</span><span><b>Why fake</b> breakdown in the report panel, under the verdict tiles. A provider whose fakes are all "serves live" is lying in one specific way, which is worth knowing when comparing providers.</span></li>
+  <li><span class="co">5</span><span><b>Export</b>: an M3U with only the channels whose archive works (real + shallower, with <code>catchup-days</code> rewritten to the measured depth), or the full playlist with the catch-up attributes removed from fake channels so players stop offering replay on them. Both also live in the toolbar export menu with the usual scopes.</span></li>
+  <li><span class="co">6</span><span><b>Pill</b> reads real · fake after a run; click cycles the filter through Real and Fake.</span></li>
+</ul>
+
+<h3>V3b · Alternative: finish banner instead of relying on the pill</h3>
+<div class="frame"><div class="app" style="min-width:1040px">
+  <div class="tbar">
+    <span class="b pri">▶ Scan ▾</span>
+    <span class="b vio">⏪ Verify ▾</span>
+    <span class="b">Open ▾</span><span class="b">Save</span>
+    <span class="seg" style="margin-left:10px"><span class="sg on gr">☰ Table</span><span class="sg">⏪ Guide</span></span>
+    <span class="plname">nordic-full.m3u</span>
+    <span class="selc">All Groups</span><span class="selc">All Status</span>
+    <span class="search">Search...</span>
+    <span class="ib">⇩</span><span class="ib">▤</span><span class="ib">⚙</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;background:rgba(139,92,246,.12);border-bottom:1px solid rgba(139,92,246,.3);font-size:11.5px;position:relative">
+    <span class="co" style="position:absolute;top:-7px;left:6px">1</span>
+    <span class="vio" style="font-weight:600">Catch-up verified</span>
+    <span class="num">418 channels in 6 m 40 s · <span class="good">341 real</span> · <span class="warn">16 shallower</span> · <span class="bad">61 fake</span></span>
+    <span class="b" style="margin-left:auto;padding:3px 9px">Show fake (61)</span>
+    <span class="b" style="padding:3px 9px">Export real catch-up</span>
+    <span class="mut3" style="padding:0 4px">✕</span>
+  </div>
+  <div class="body" style="min-height:150px">
+    <div class="maincol">
+      <div class="th cols8">
+        <span>#</span><span>STATUS</span><span>CHANNEL NAME</span><span>GROUP</span><span class="ctr">RES</span><span class="ctr">FPS</span><span class="rgt">BITRATE</span><span class="ctr">CATCH-UP</span>
+      </div>
+      <div class="tr cols8"><span class="mut3 num">1</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK1 HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">8.2 Mbps</span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">2</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK2 HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">7.9 Mbps</span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">3</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV 2 Direkte HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">6.9 Mbps</span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">4</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV3 Norge</span></span><span class="mut">Norge</span><span class="mut num ctr">720p</span><span class="mut num ctr">25</span><span class="mut num rgt">4.1 Mbps</span><span class="ctr"><span class="chip cu x">✕ LIVE</span></span></div>
+    </div>
+  </div>
+  <div class="stats">
+    <span class="pill pn">☰ 1,264 total</span>
+    <span class="pill pg">✓ 1,102</span>
+    <span class="pill pr">✕ 118</span>
+    <span class="pill py">🔒 44</span>
+    <span class="pill pv">⏪ 341 real · 61 fake</span>
+    <span class="pill pb">Score 7.3/10</span>
+  </div>
+</div></div>
+<ul class="legend">
+  <li><span class="co">1</span><span><b>Finish banner</b> in the existing app-banner slot: totals, one-click jump to the fakes, one-click export, dismiss. Uses the same slot as the scan-complete and update banners, so nothing new to build layout-wise. Optional on top of V3; the pill and report panel already carry the numbers.</span></li>
+</ul>
+
+<h3>What this adds over section D</h3>
+<table class="doc">
+<tr><th>Piece</th><th>Built</th><th>New</th></tr>
+<tr><td>Probe engine</td><td class="good">−1 h + depth + bisect, media-time check, cancel</td><td>Quick mode (stop after −1 h); capture the failure class (empty / live / status / timeout) instead of a bare "broken"</td></tr>
+<tr><td>Trigger</td><td>Report-panel Verify button, Scan + Verify Catch-up, right-click Test</td><td>Toolbar Verify split button with mode + scope; report-panel button becomes a shortcut to it</td></tr>
+<tr><td>Progress</td><td>"84/418 · Cancel" text in the report panel</td><td>Progress row with tally, throughput, ETA in the scan-bar slot; scan disabled during the run</td></tr>
+<tr><td>Verdicts</td><td>advertised / verified / shallower / broken chips</td><td>"broken" splits into fake reasons shown on the chip and in the Archive card; Status filter entries per verdict; verdicts saved with the scan</td></tr>
+<tr><td>Report</td><td>Tiles, real-depth histogram, latency</td><td>Why-fake breakdown, verified-at time, two export buttons</td></tr>
+<tr><td>Export</td><td>—</td><td>Real-catch-up M3U (measured depth written back), fake-flags-stripped playlist; both in the export menu with scopes</td></tr>
+</table>
+<p><b>Recommendation:</b> build V1 + V2 + V3 as one phase (they are one feature), and add the V3b banner only if the pill turns out too quiet in use. Quick mode is the default because that is the fake-vs-real question; Full stays one click away for provider comparisons.</p>
 
 <!-- ================= FOUNDATION ================= -->
 <h2><span class="tag">0</span>Foundation: detect, show, count, filter</h2>
@@ -863,6 +1191,7 @@
 <tr><td><b>2 Playback</b></td><td>XMLTV EPG store, archive URL builder, player seek work, sidebar Archive card (programme list, picker fallback), spot probes</td><td>Longest-lead phase; card ships once, in final form.</td></tr>
 <tr><td><b>3 Guide</b></td><td>Table/Guide switch, dense EPG grid, right-click entry</td><td>Built as a shared component; doubles as the Player flavor's guide.</td></tr>
 <tr><td><b>4 Verification</b></td><td>Opt-in scan phase, graduated chips, report section, fourth score component</td><td>Checker-only; nothing in the Player flavor depends on it.</td></tr>
+<tr><td><b>5 Fake vs real</b></td><td>Verify split button (quick/full, scope), progress row, fake reasons on chips, verdict filters, why-fake breakdown, exports</td><td>Section ★ Batch verification. Reuses the phase-4 engine; adds quick mode and failure classes.</td></tr>
 </table>
 <p>Tracked in the checklist comment on issue #229. The IPTV Player flavor is a separate track (issue #231) with its own design document; phases 2-3 build its shared core (archive URL builder, XMLTV store, seek player, Guide grid) as checker-independent modules.</p>
 </main>
