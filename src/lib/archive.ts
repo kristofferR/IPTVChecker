@@ -186,7 +186,6 @@ export function archivePickerDefault(now: Date = new Date()): { daysBack: number
   const pad = (value: number) => String(value).padStart(2, "0");
   return { daysBack, time: `${pad(start.getHours())}:${pad(start.getMinutes())}` };
 }
-
 type ArchiveUpdateTarget = Pick<
   ChannelResult,
   "index" | "catchup" | "catchup_days" | "extinf_line"
