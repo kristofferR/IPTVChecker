@@ -96,6 +96,26 @@ pub(crate) fn build_xtream_download_url(server: &Url, username: &str, password: 
     playlist_url
 }
 
+/// XMLTV guide endpoint. Xtream serves the EPG separately from the playlist
+/// (`xmltv.php`), and few panels advertise it in the M3U header.
+pub(crate) fn build_xtream_epg_url(server: &Url, username: &str, password: &str) -> Url {
+    let mut epg_url = server.clone();
+    let mut endpoint_path = epg_url.path().trim_end_matches('/').to_string();
+    if endpoint_path.is_empty() || endpoint_path == "/" {
+        endpoint_path = "/xmltv.php".to_string();
+    } else {
+        endpoint_path.push_str("/xmltv.php");
+    }
+    epg_url.set_path(&endpoint_path);
+    epg_url.set_query(None);
+    epg_url.set_fragment(None);
+    epg_url
+        .query_pairs_mut()
+        .append_pair("username", username)
+        .append_pair("password", password);
+    epg_url
+}
+
 pub(crate) fn build_xtream_player_api_url(server: &Url, username: &str, password: &str) -> Url {
     let mut api_url = server.clone();
     let mut endpoint_path = api_url.path().trim_end_matches('/').to_string();
@@ -733,6 +753,22 @@ mod tests {
         extract_xtream_account_info, extract_xtream_max_connections, normalize_xtream_server,
     };
     use std::collections::HashMap;
+    use url::Url;
+
+    #[test]
+    fn epg_url_targets_xmltv_endpoint_with_credentials() {
+        let server = Url::parse("https://provider.example.com/panel").expect("url");
+        let url = super::build_xtream_epg_url(&server, "alice", "s3cret");
+        assert_eq!(
+            url.as_str(),
+            "https://provider.example.com/panel/xmltv.php?username=alice&password=s3cret"
+        );
+        let root = Url::parse("https://provider.example.com").expect("url");
+        assert_eq!(
+            super::build_xtream_epg_url(&root, "alice", "s3cret").path(),
+            "/xmltv.php"
+        );
+    }
 
     #[test]
     fn generated_xtream_entries_carry_catchup_attributes() {

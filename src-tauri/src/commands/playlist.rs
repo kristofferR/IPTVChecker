@@ -18,8 +18,9 @@ use crate::engine::stalker::{
     STALKER_API_TIMEOUT,
 };
 use crate::engine::xtream::{
-    apply_xtream_archive_flags, build_xtream_download_url, fetch_xtream_account_info,
-    fetch_xtream_live_streams, fetch_xtream_playlist_via_json_api, xtream_archive_flags,
+    apply_xtream_archive_flags, build_xtream_download_url, build_xtream_epg_url,
+    fetch_xtream_account_info, fetch_xtream_live_streams, fetch_xtream_playlist_via_json_api,
+    xtream_archive_flags,
 };
 use crate::error::AppError;
 use crate::models::channel::Channel;
@@ -795,6 +796,12 @@ pub(crate) async fn open_playlist_xtream_inner(
     }
     let server_host = server.host_str().unwrap_or("Xtream");
     preview.file_name = format!("{} ({})", server_host, username);
+    // Xtream serves its guide from xmltv.php rather than advertising it in the
+    // playlist header, so the source is derived from the account instead.
+    let epg_url = build_xtream_epg_url(&server, &username, &password).to_string();
+    if !preview.epg_sources.iter().any(|source| source == &epg_url) {
+        preview.epg_sources.insert(0, epg_url);
+    }
     preview.source_identity = Some(source_identity_override.unwrap_or(source_key));
     preview.xtream_max_connections = xtream_account_info
         .as_ref()

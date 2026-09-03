@@ -67,7 +67,10 @@ pub async fn load_epg(
                 sources_loaded += 1;
             }
             Err(error) => {
-                log::warn!("EPG source {source} failed: {error}");
+                log::warn!(
+                    "EPG source {} failed: {error}",
+                    crate::engine::resume::sanitize_url_for_persistence(&source)
+                );
                 failed_sources.push(source);
             }
         }

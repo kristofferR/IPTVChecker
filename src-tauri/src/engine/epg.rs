@@ -269,7 +269,10 @@ pub async fn download_epg_source(
 ) -> Result<PathBuf, AppError> {
     let target = cache_path_for(cache_dir, url);
     if !force_refresh && cache_is_fresh(&target) {
-        log::info!("EPG cache hit for {url}");
+        log::info!(
+            "EPG cache hit for {}",
+            crate::engine::resume::sanitize_url_for_persistence(url)
+        );
         return Ok(target);
     }
 
@@ -314,7 +317,10 @@ pub async fn download_epg_source(
     file.flush().map_err(AppError::Io)?;
     drop(file);
     std::fs::rename(&temp, &target).map_err(AppError::Io)?;
-    log::info!("Downloaded EPG {url} ({downloaded} bytes)");
+    log::info!(
+        "Downloaded EPG {} ({downloaded} bytes)",
+        crate::engine::resume::sanitize_url_for_persistence(url)
+    );
     Ok(target)
 }
 
