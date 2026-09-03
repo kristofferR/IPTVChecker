@@ -1,4 +1,4 @@
-import { buildArchiveUrl } from "./archive";
+import { buildArchiveUrl, MAX_CATCHUP_DAYS } from "./archive";
 import { cancelQuickCheck, quickCheckChannel } from "./tauri";
 import type { ChannelResult } from "./types";
 
@@ -53,13 +53,25 @@ function responseMediaTimeMatchesRequest(outcome: ArchiveProbeOutcome): boolean 
 
   try {
     const pathname = new URL(response).pathname;
-    const timestamps = Array.from(
+    const numericTimestamps = Array.from(
       pathname.matchAll(/(?:^|\D)(\d{13}|\d{10})(?=\D|$)/g),
       (match) => {
         const value = Number(match[1]);
         return match[1].length === 13 ? value / 1000 : value;
       },
     );
+    const xtreamTimestamps = Array.from(
+      pathname.matchAll(/(\d{4})-(\d{2})-(\d{2}):(\d{2})-(\d{2})/g),
+      (match) =>
+        Date.UTC(
+          Number(match[1]),
+          Number(match[2]) - 1,
+          Number(match[3]),
+          Number(match[4]),
+          Number(match[5]),
+        ) / 1000,
+    );
+    const timestamps = [...numericTimestamps, ...xtreamTimestamps];
     if (timestamps.length === 0) return null;
     return timestamps.some(
       (timestamp) =>
@@ -102,12 +114,31 @@ export function verifyArchiveDepthResponse(
   };
 }
 
+let archiveProbeGeneration = 0;
+const inFlightArchiveChecks = new Set<Promise<void>>();
+
+/** Keep a multi-channel sequence tied to the generation in which it started. */
+export function createArchiveProbeSequenceGuard(): () => boolean {
+  const generation = archiveProbeGeneration;
+  return () => generation === archiveProbeGeneration;
+}
+
+/** Stop probe sequences and wait for their current backend checks to release the provider. */
+export async function cancelArchiveProbes(): Promise<void> {
+  archiveProbeGeneration += 1;
+  await Promise.all(inFlightArchiveChecks);
+}
+
 /** One hour back, plus a point just inside the advertised depth when known. */
-export function archiveProbePoints(result: ChannelResult, nowEpochS: number): ArchiveProbePoint[] {
+export function archiveProbePoints(
+  result: Pick<ChannelResult, "catchup_days">,
+  nowEpochS: number,
+): ArchiveProbePoint[] {
   const points: ArchiveProbePoint[] = [
     { label: "Archive −1 h", daysBack: 0, startEpochS: nowEpochS - 3600 },
   ];
-  const depthDays = result.catchup_days;
+  const depthDays =
+    result.catchup_days == null ? null : Math.min(MAX_CATCHUP_DAYS, result.catchup_days);
   if (depthDays != null && depthDays > 0) {
     points.push({
       label: `Archive −${depthDays} d`,
@@ -194,12 +225,33 @@ export async function probeArchivePoint(
 export async function probeChannelArchive(
   result: ChannelResult,
   onUpdate: (entry: ArchiveProbeEntry) => void,
+  shouldContinue: () => boolean = () => true,
 ): Promise<ArchiveProbeEntry> {
+  const generation = archiveProbeGeneration;
+  const canContinue = () => generation === archiveProbeGeneration && shouldContinue();
+  if (!canContinue()) {
+    return { running: false, outcomes: [], checkedAt: null };
+  }
   const nowEpochS = Math.floor(Date.now() / 1000);
   const outcomes: ArchiveProbeOutcome[] = [];
+  let cancelled = false;
   onUpdate({ running: true, outcomes: [], checkedAt: null });
   for (const point of archiveProbePoints(result, nowEpochS)) {
-    const probed = await probeArchivePoint(result, point, nowEpochS);
+    if (!canContinue()) {
+      cancelled = true;
+      break;
+    }
+    const pendingCheck = probeArchivePoint(result, point, nowEpochS);
+    const completion = pendingCheck.then(
+      () => undefined,
+      () => undefined,
+    );
+    inFlightArchiveChecks.add(completion);
+    const probed = await pendingCheck.finally(() => inFlightArchiveChecks.delete(completion));
+    if (!canContinue()) {
+      cancelled = true;
+      break;
+    }
     const outcome = probed
       ? point.daysBack <= 0
         ? verifyArchivePointResponse(probed)
@@ -210,7 +262,11 @@ export async function probeChannelArchive(
       onUpdate({ running: true, outcomes: [...outcomes], checkedAt: null });
     }
   }
-  const entry: ArchiveProbeEntry = { running: false, outcomes, checkedAt: nowEpochS };
+  const entry: ArchiveProbeEntry = {
+    running: false,
+    outcomes,
+    checkedAt: cancelled ? null : nowEpochS,
+  };
   onUpdate(entry);
   return entry;
 }

@@ -18,7 +18,7 @@ use crate::engine::stalker::{
     STALKER_API_TIMEOUT,
 };
 use crate::engine::xtream::{
-    apply_xtream_archive_flags, build_xtream_download_url, build_xtream_epg_url,
+    apply_xtream_archive_flags, build_xtream_download_url, build_xtream_xmltv_url,
     fetch_xtream_account_info, fetch_xtream_live_streams, fetch_xtream_playlist_via_json_api,
     xtream_archive_flags,
 };
@@ -954,14 +954,20 @@ pub(crate) async fn open_playlist_xtream_inner(
             }
         });
     }
+
+    let xmltv_source = build_xtream_xmltv_url(&server, &username, &password).to_string();
+    if !preview.epg_sources.contains(&xmltv_source) {
+        preview.epg_sources.push(xmltv_source.clone());
+    }
+    let playlist_sources = preview
+        .epg_sources_by_playlist
+        .entry(preview.file_name.clone())
+        .or_default();
+    if !playlist_sources.contains(&xmltv_source) {
+        playlist_sources.push(xmltv_source);
+    }
     let server_host = server.host_str().unwrap_or("Xtream");
     preview.file_name = format!("{} ({})", server_host, username);
-    // Xtream serves its guide from xmltv.php rather than advertising it in the
-    // playlist header, so the source is derived from the account instead.
-    let epg_url = build_xtream_epg_url(&server, &username, &password).to_string();
-    if !preview.epg_sources.iter().any(|source| source == &epg_url) {
-        preview.epg_sources.insert(0, epg_url);
-    }
     preview.source_identity = Some(source_identity);
     preview.xtream_max_connections = xtream_account_info
         .as_ref()

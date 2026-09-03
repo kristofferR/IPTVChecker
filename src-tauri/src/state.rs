@@ -98,6 +98,8 @@ pub struct AppState {
     pub epg_load_lock: Mutex<()>,
     xtream_archive_enrichments: Mutex<HashMap<String, XtreamArchiveEnrichmentState>>,
     xtream_archive_generation: std::sync::atomic::AtomicU64,
+    /// Cancels the previous EPG load when the playlist or load request changes.
+    pub epg_load_cancel: Mutex<CancellationToken>,
     /// Rejects a second install immediately instead of queueing it behind the
     /// first one on `update_checking`.
     pub update_installing: std::sync::atomic::AtomicBool,
@@ -130,6 +132,7 @@ impl AppState {
             epg_load_lock: Mutex::new(()),
             xtream_archive_enrichments: Mutex::new(HashMap::new()),
             xtream_archive_generation: std::sync::atomic::AtomicU64::new(0),
+            epg_load_cancel: Mutex::new(CancellationToken::new()),
             update_installing: std::sync::atomic::AtomicBool::new(false),
             update_checking: Mutex::new(()),
             update_available: Mutex::new(None),

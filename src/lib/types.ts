@@ -87,6 +87,7 @@ export interface PlaylistPreview {
   series_count: number;
   groups: string[];
   epg_sources: string[];
+  epg_sources_by_playlist: Record<string, string[]>;
   channels: Channel[];
 }
 
@@ -497,6 +498,7 @@ export interface CastMediaRequest {
   channelName: string | null;
   channelLogo: string | null;
   streamKind: CastStreamKind;
+  isFinite: boolean;
 }
 
 export type UpdateInstallKind = "built-in" | "manual";

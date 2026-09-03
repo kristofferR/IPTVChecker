@@ -25,6 +25,7 @@ export function buildCastRequest(channel: ChannelResult): CastMediaRequest {
     channelName: channel.name || null,
     channelLogo: channel.tvg_logo || null,
     streamKind: detectStreamKind(url),
+    isFinite: channel.content_type !== "live",
   };
 }
 

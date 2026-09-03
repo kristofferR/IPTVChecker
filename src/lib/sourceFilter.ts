@@ -42,6 +42,35 @@ function visibleGroups(channels: Channel[]): string[] {
     .sort((left, right) => left.localeCompare(right));
 }
 
+function filterEpgSourcesToChannels(
+  preview: PlaylistPreview,
+  channels: Channel[],
+): Pick<PlaylistPreview, "epg_sources" | "epg_sources_by_playlist"> {
+  const representedPlaylists = new Set(channels.map((channel) => channel.playlist));
+  const everyRepresentedPlaylistMapped = [...representedPlaylists].every((playlist) =>
+    Object.hasOwn(preview.epg_sources_by_playlist, playlist),
+  );
+  const epg_sources_by_playlist = Object.fromEntries(
+    Object.entries(preview.epg_sources_by_playlist).filter(([playlist]) =>
+      representedPlaylists.has(playlist),
+    ),
+  );
+  const representedEpgSources = new Set(Object.values(epg_sources_by_playlist).flat());
+  const shouldFilterEpgSources =
+    Object.keys(preview.epg_sources_by_playlist).length > 0 &&
+    (channels.length === 0 || everyRepresentedPlaylistMapped);
+
+  return shouldFilterEpgSources
+    ? {
+        epg_sources: preview.epg_sources.filter((source) => representedEpgSources.has(source)),
+        epg_sources_by_playlist,
+      }
+    : {
+        epg_sources: preview.epg_sources,
+        epg_sources_by_playlist: preview.epg_sources_by_playlist,
+      };
+}
+
 export function normalizeSourceFilter(value: string | null | undefined): string {
   return value?.trim() ?? "";
 }
@@ -75,6 +104,7 @@ export function applySourceFilterToPreview(
 
   const channels = preview.channels.filter((channel) => matcher.test(channel.name));
   const totals = contentTypeTotals(channels);
+  const epgSources = filterEpgSourcesToChannels(preview, channels);
 
   return {
     ...preview,
@@ -85,6 +115,7 @@ export function applySourceFilterToPreview(
     channels,
     // Keep the full group list to mirror backend source-filter semantics.
     groups: [...preview.groups],
+    ...epgSources,
   };
 }
 
@@ -98,6 +129,7 @@ export function applyContentVisibilityToPreview(
 
   const channels = preview.channels.filter((channel) => channel.content_type === "live");
   const totals = contentTypeTotals(channels);
+  const epgSources = filterEpgSourcesToChannels(preview, channels);
 
   return {
     ...preview,
@@ -107,6 +139,7 @@ export function applyContentVisibilityToPreview(
     series_count: totals.series_count,
     groups: visibleGroups(channels),
     channels,
+    ...epgSources,
   };
 }
 

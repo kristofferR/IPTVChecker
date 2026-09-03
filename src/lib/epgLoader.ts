@@ -2,42 +2,52 @@ import { useAppStore } from "../store";
 import { hasArchive } from "./archive";
 import { logger } from "./logger";
 import { getEpgProgrammes, loadEpg } from "./tauri";
-import type { EpgProgramme } from "./types";
+import type { ChannelResult, EpgLoadSummary, EpgProgramme } from "./types";
 
-// The EPG download can be hundreds of MB, so it loads lazily the first time a
-// catch-up surface opens, once per playlist+sources combination.
-let epgLoad: { key: string; promise: Promise<void> } | null = null;
-// Programme window cache; invalidated together with the load key.
-let programmeCache = new Map<string, Promise<EpgProgramme[]>>();
+// Shared by the sidebar Archive card and the Guide view so one XMLTV download
+// backs both surfaces; provider guides run to hundreds of megabytes.
+let epgLoad: {
+  key: string;
+  promise: Promise<void>;
+  summary: EpgLoadSummary | null;
+  loadedAt: number | null;
+} | null = null;
+const EPG_LOAD_TTL_MS = 6 * 60 * 60 * 1_000;
 
-function currentEpgKey(): string | null {
+function epgLoadRequest() {
   const state = useAppStore.getState();
   const sources = state.playlist?.epg_sources ?? [];
-  if (sources.length === 0) {
-    return null;
-  }
-  return `${state.playlist?.source_identity ?? state.playlist?.file_path ?? ""}|${sources.join(",")}`;
+  const tvgIds = state.flatResults
+    .filter(hasArchive)
+    .map((result) => result.tvg_id)
+    .filter((id): id is string => !!id)
+    .sort();
+  const key = JSON.stringify([
+    state.playlist?.source_identity ?? state.playlist?.file_path ?? "",
+    sources,
+    tvgIds,
+  ]);
+  return { key, sources, tvgIds };
 }
 
 export function ensureEpgLoaded(): Promise<void> {
-  const key = currentEpgKey();
-  if (key == null) {
-    return Promise.resolve();
-  }
-  if (epgLoad?.key === key) {
+  const { key, sources, tvgIds } = epgLoadRequest();
+  if (
+    epgLoad?.key === key &&
+    (epgLoad.loadedAt == null || Date.now() - epgLoad.loadedAt < EPG_LOAD_TTL_MS)
+  ) {
+    if (epgLoad.summary) {
+      useAppStore.getState().setEpgLoadSummary(epgLoad.summary);
+    }
     return epgLoad.promise;
   }
-  const state = useAppStore.getState();
-  const tvgIds = [
-    ...new Set(
-      state.flatResults
-        .filter(hasArchive)
-        .map((result) => result.tvg_id)
-        .filter((id): id is string => !!id),
-    ),
-  ];
-  const promise = loadEpg(state.playlist?.epg_sources ?? [], tvgIds).then(
+  const promise = loadEpg(sources, tvgIds).then(
     (summary) => {
+      if (epgLoad?.key !== key || epgLoadRequest().key !== key) {
+        return;
+      }
+      epgLoad.summary = summary;
+      epgLoad.loadedAt = Date.now();
       useAppStore.getState().setEpgLoadSummary(summary);
       logger.info(
         "[EPG] Loaded",
@@ -46,30 +56,44 @@ export function ensureEpgLoaded(): Promise<void> {
         summary.channels_matched,
         "channels",
       );
+      if (summary.failed_sources.length > 0) {
+        logger.warn("[EPG] Some sources failed to load:", summary.failed_sources.length);
+        if (summary.sources_loaded === 0 && epgLoad?.key === key) {
+          epgLoad = null;
+        }
+      }
     },
     (error) => {
+      if (epgLoad?.key !== key || epgLoadRequest().key !== key) {
+        return;
+      }
       logger.warn("[EPG] Load failed:", error);
+      if (epgLoad?.key === key) {
+        epgLoad = null;
+      }
     },
   );
-  epgLoad = { key, promise };
-  programmeCache = new Map();
+  epgLoad = { key, promise, summary: null, loadedAt: null };
   return promise;
 }
 
-/** Programmes for one channel in a window, deduped across concurrent callers. */
+/** EPG sources for a channel: its own playlist's, falling back to the set. */
+export function epgSourcesFor(result: ChannelResult): string[] {
+  const playlist = useAppStore.getState().playlist;
+  return playlist?.epg_sources_by_playlist[result.playlist] ?? playlist?.epg_sources ?? [];
+}
+
+/** Programmes for one channel in a window, after the guide has loaded. */
 export function fetchGuideProgrammes(
-  tvgId: string,
+  result: ChannelResult,
   from: number,
   to: number,
 ): Promise<EpgProgramme[]> {
-  const cacheKey = `${tvgId}|${from}|${to}`;
-  const cached = programmeCache.get(cacheKey);
-  if (cached) {
-    return cached;
+  if (!result.tvg_id) {
+    return Promise.resolve([]);
   }
-  const promise = ensureEpgLoaded()
-    .then(() => getEpgProgrammes(tvgId, from, to))
+  const tvgId = result.tvg_id;
+  return ensureEpgLoaded()
+    .then(() => getEpgProgrammes(epgSourcesFor(result), tvgId, from, to))
     .catch(() => [] as EpgProgramme[]);
-  programmeCache.set(cacheKey, promise);
-  return promise;
 }
