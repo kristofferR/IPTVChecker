@@ -8,6 +8,7 @@ export const createArchiveSlice: StateCreator<AppStore, [], [], ArchiveSlice> = 
   epgLoadSummary: null,
   archiveVerifyRun: null,
   verifyCatchupAfterScan: false,
+  archiveDownloads: {},
 
   setArchiveProbe: (generation, index, entry) =>
     set((state) => {
@@ -20,6 +21,22 @@ export const createArchiveSlice: StateCreator<AppStore, [], [], ArchiveSlice> = 
   setEpgLoadSummary: (epgLoadSummary) => set({ epgLoadSummary }),
   setArchiveVerifyRun: (archiveVerifyRun) => set({ archiveVerifyRun }),
   setVerifyCatchupAfterScan: (verifyCatchupAfterScan) => set({ verifyCatchupAfterScan }),
+  upsertArchiveDownload: (download) =>
+    set((state) => ({
+      archiveDownloads: { ...state.archiveDownloads, [download.id]: download },
+    })),
+  patchArchiveDownload: (id, patch) =>
+    set((state) => {
+      const current = state.archiveDownloads[id];
+      if (!current) return state;
+      return { archiveDownloads: { ...state.archiveDownloads, [id]: { ...current, ...patch } } };
+    }),
+  removeArchiveDownload: (id) =>
+    set((state) => {
+      if (!(id in state.archiveDownloads)) return state;
+      const { [id]: _removed, ...rest } = state.archiveDownloads;
+      return { archiveDownloads: rest };
+    }),
   clearArchiveProbes: () =>
     set((state) => ({
       archiveProbes: {},

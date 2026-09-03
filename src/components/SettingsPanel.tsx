@@ -1,6 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { Gauge, Layers, Network, SlidersHorizontal, Wrench } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { formatBytes } from "../lib/format";
 import {
   clearScreenshotCache,
   deleteScanPreset,
@@ -80,18 +81,6 @@ function applyScanPresetConfig(base: AppSettings, config: ScanPresetConfig): App
     low_fps_threshold: config.low_fps_threshold,
     screenshot_format: config.screenshot_format,
   };
-}
-
-function formatBytes(totalBytes: number): string {
-  if (totalBytes < 1024) return `${totalBytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = totalBytes / 1024;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  return `${value.toFixed(1)} ${units[unitIndex]}`;
 }
 
 function Switch({

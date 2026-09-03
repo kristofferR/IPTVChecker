@@ -295,7 +295,7 @@ fn truncate_stderr_summary(summary: &str) -> String {
     excerpt
 }
 
-fn stderr_excerpt(stderr: &str) -> String {
+pub(crate) fn stderr_excerpt(stderr: &str) -> String {
     let trimmed = stderr.trim();
     if trimmed.is_empty() {
         return "no stderr output".to_string();

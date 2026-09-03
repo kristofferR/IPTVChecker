@@ -1051,6 +1051,8 @@ pub fn run() {
             commands::epg::load_epg,
             commands::epg::cancel_epg_load,
             commands::epg::get_epg_programmes,
+            commands::download::download_archive,
+            commands::download::cancel_archive_download,
             commands::export::export_csv,
             commands::export::export_split,
             commands::export::export_renamed,

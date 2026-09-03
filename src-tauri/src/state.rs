@@ -90,6 +90,7 @@ pub struct AppState {
     pub cast_lifecycle_lock: Mutex<()>,
     window_scan_states: Mutex<HashMap<String, WindowScanState>>,
     quick_check_tokens: Mutex<HashMap<String, CancellationToken>>,
+    archive_download_tokens: Mutex<HashMap<String, CancellationToken>>,
     backend_perf_samples: Mutex<VecDeque<BackendPerfSample>>,
     playlist_preview_cache: Mutex<HashMap<String, CachedPlaylistPreview>>,
     /// Programme index from the most recent load_epg call.
@@ -126,6 +127,7 @@ impl AppState {
             cast_lifecycle_lock: Mutex::new(()),
             window_scan_states: Mutex::new(HashMap::new()),
             quick_check_tokens: Mutex::new(HashMap::new()),
+            archive_download_tokens: Mutex::new(HashMap::new()),
             backend_perf_samples: Mutex::new(VecDeque::new()),
             playlist_preview_cache: Mutex::new(HashMap::new()),
             epg: Mutex::new(None),
@@ -179,6 +181,20 @@ impl AppState {
 
     pub async fn unregister_quick_check(&self, request_id: &str) {
         self.quick_check_tokens.lock().await.remove(request_id);
+    }
+
+    pub async fn register_archive_download(&self, id: String, token: CancellationToken) {
+        self.archive_download_tokens.lock().await.insert(id, token);
+    }
+
+    pub async fn cancel_archive_download(&self, id: &str) {
+        if let Some(token) = self.archive_download_tokens.lock().await.get(id) {
+            token.cancel();
+        }
+    }
+
+    pub async fn unregister_archive_download(&self, id: &str) {
+        self.archive_download_tokens.lock().await.remove(id);
     }
 
     pub async fn push_backend_perf_sample(&self, sample: BackendPerfSample) {

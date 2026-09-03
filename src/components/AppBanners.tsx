@@ -1,6 +1,8 @@
 import { Download, ExternalLink, Info, X } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { dismissUpdateNotice } from "../hooks/useUpdateCheck";
+import { type ArchiveDownload, cancelArchiveDownload } from "../lib/archiveDownload";
+import { formatBytes } from "../lib/format";
 import { validateSourceFilterPattern } from "../lib/sourceFilter";
 import {
   isManualInstall,
@@ -31,6 +33,68 @@ function useAutoDismiss(
   }, [value, enabled]);
 }
 
+function downloadLabel(download: ArchiveDownload): string {
+  return download.title ? `${download.title} (${download.channelName})` : download.channelName;
+}
+
+/** One banner per recording: progress while running, then the outcome until dismissed. */
+function ArchiveDownloadBanner({ download }: { download: ArchiveDownload }) {
+  const dismiss = () => getStore().removeArchiveDownload(download.id);
+  useAutoDismiss(download.status === "done", 12_000, dismiss);
+  if (download.status === "running") {
+    const percent = Math.min(
+      100,
+      Math.round((download.outTimeS / Math.max(1, download.durationS)) * 100),
+    );
+    return (
+      <div className="flex items-center gap-3 px-4 py-2 bg-violet-500/10 border-b border-violet-500/20 text-violet-300 text-[13px]">
+        <Download className="w-4 h-4 shrink-0" />
+        <span className="min-w-0 truncate">Recording {downloadLabel(download)}</span>
+        <div className="flex-1 h-1.5 min-w-16 rounded-full bg-violet-500/20 overflow-hidden">
+          <div className="h-full bg-violet-400 rounded-full" style={{ width: `${percent}%` }} />
+        </div>
+        <span className="tabular-nums shrink-0 text-violet-200">
+          {percent}% · {formatBytes(download.bytes)}
+        </span>
+        <button
+          onClick={() => void cancelArchiveDownload(download.id)}
+          className="shrink-0 rounded border border-violet-400/40 px-2 py-0.5 text-[12px] hover:bg-violet-500/20 transition-colors"
+          type="button"
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
+  const tone =
+    download.status === "done"
+      ? "bg-green-500/10 border-green-500/20 text-green-400"
+      : download.status === "failed"
+        ? "bg-red-500/10 border-red-500/20 text-red-400"
+        : "bg-panel-muted border-border-subtle text-text-secondary";
+  const message =
+    download.status === "done"
+      ? `Saved ${downloadLabel(download)} to ${download.path}`
+      : download.status === "failed"
+        ? `Recording ${downloadLabel(download)} failed: ${download.error ?? "unknown error"}`
+        : `Recording ${downloadLabel(download)} cancelled`;
+  return (
+    <div className={`flex items-center gap-2 px-4 py-2 border-b text-[13px] ${tone}`}>
+      <span className="flex-1 min-w-0 truncate" title={message}>
+        {message}
+      </span>
+      <button
+        onClick={dismiss}
+        className="p-1 rounded hover:bg-white/10 transition-colors"
+        type="button"
+        aria-label="Dismiss recording notice"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
 interface AppBannersProps {
   /** Installs the discovered update, or opens the distribution's update page
    *  for package-manager-owned installations. */
@@ -51,6 +115,7 @@ export function AppBanners({ onInstallUpdate }: AppBannersProps) {
   const updatePhase = useAppStore((s) => s.updatePhase);
   const appVersion = useAppStore((s) => s.appVersion);
   const channelSearch = useAppStore((s) => s.channelSearch);
+  const archiveDownloads = useAppStore((s) => s.archiveDownloads);
   const channelSearchError = useMemo(
     () => validateSourceFilterPattern(channelSearch),
     [channelSearch],
@@ -83,6 +148,9 @@ export function AppBanners({ onInstallUpdate }: AppBannersProps) {
 
   return (
     <>
+      {Object.values(archiveDownloads).map((download) => (
+        <ArchiveDownloadBanner key={download.id} download={download} />
+      ))}
       {scanError && !errorDismissed && (
         <div className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 border-b border-red-500/20 text-red-400 text-[13px]">
           <span className="flex-1">{scanError}</span>

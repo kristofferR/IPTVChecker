@@ -102,7 +102,8 @@ const TABLE_PROFILER_ROW_LIMIT = 50_000;
 const getStore = () => useAppStore.getState();
 // Xtream panels interpret timeshift starts in their own timezone.
 registerArchiveTimezoneResolver(() => getStore().playlist?.xtream_account_info?.timezone ?? null);
-const ARCHIVE_VERIFICATION_PLAYBACK_ERROR = "Cancel catch-up verification before starting playback";
+const ARCHIVE_VERIFICATION_PLAYBACK_ERROR =
+  "Cancel the running catch-up verification or download before starting playback";
 
 function blockPlaybackDuringArchiveVerification(): boolean {
   if (!isArchiveVerificationBlockingPlayback()) return false;

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { toCommandChannelResult } from "./channelResults";
 import type {
   AppSettings,
+  ArchiveDownloadRequest,
   CastMediaRequest,
   CastSession,
   ChannelResult,
@@ -119,6 +120,14 @@ export async function loadEpg(
   forceRefresh = false,
 ): Promise<EpgLoadSummary> {
   return invoke("load_epg", { sources, tvgIds, forceRefresh });
+}
+
+export async function downloadArchive(request: ArchiveDownloadRequest): Promise<void> {
+  return invoke("download_archive", { request });
+}
+
+export async function cancelArchiveDownload(id: string): Promise<void> {
+  return invoke("cancel_archive_download", { id });
 }
 
 export async function cancelEpgLoad(): Promise<void> {

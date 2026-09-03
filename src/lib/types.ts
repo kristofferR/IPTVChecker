@@ -105,6 +105,19 @@ export interface EpgLoadSummary {
   programme_count: number;
 }
 
+export interface ArchiveDownloadRequest {
+  id: string;
+  url: string;
+  path: string;
+  duration_s: number;
+}
+
+export interface ArchiveDownloadProgress {
+  id: string;
+  out_time_s: number;
+  bytes: number;
+}
+
 export interface XtreamArchiveChannelUpdate {
   index: number;
   catchup: string | null;

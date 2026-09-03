@@ -1,4 +1,5 @@
 import type { ScanUiMetrics } from "../hooks/useScan.helpers";
+import type { ArchiveDownload } from "../lib/archiveDownload";
 import type { ArchiveProbeEntry } from "../lib/archiveProbe";
 import type { Platform } from "../lib/platform";
 import type { ScanState } from "../lib/scanState";
@@ -124,12 +125,17 @@ export interface ArchiveSlice {
   archiveVerifyRun: { running: boolean; done: number; total: number } | null;
   /** When set, a full verification pass starts after the scan completes. */
   verifyCatchupAfterScan: boolean;
+  /** Programme recordings in flight or recently finished, keyed by id. */
+  archiveDownloads: Record<string, ArchiveDownload>;
 
   setArchiveProbe: (generation: number, index: number, entry: ArchiveProbeEntry) => void;
   setArchiveGuideTestRunning: (running: boolean) => void;
   setEpgLoadSummary: (summary: EpgLoadSummary | null) => void;
   setArchiveVerifyRun: (run: { running: boolean; done: number; total: number } | null) => void;
   setVerifyCatchupAfterScan: (value: boolean) => void;
+  upsertArchiveDownload: (download: ArchiveDownload) => void;
+  patchArchiveDownload: (id: string, patch: Partial<ArchiveDownload>) => void;
+  removeArchiveDownload: (id: string) => void;
   /** Reset all per-playlist archive state (probes and EPG summary). */
   clearArchiveProbes: () => void;
 }

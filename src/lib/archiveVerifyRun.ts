@@ -1,5 +1,6 @@
 import { useAppStore } from "../store";
 import { hasArchive } from "./archive";
+import { isArchiveDownloadRunning } from "./archiveDownload";
 import { verifyChannelArchive } from "./archiveVerification";
 import { isSingleConnectionPlaylist } from "./playback";
 import { isScanActive } from "./scanState";
@@ -18,6 +19,7 @@ export function isArchiveVerificationBlockingPlayback(): boolean {
   return (
     (state.archiveVerifyRun != null ||
       state.archiveGuideTestRunning ||
+      isArchiveDownloadRunning(state.archiveDownloads) ||
       Object.values(state.archiveProbes).some((entry) => entry.running)) &&
     isSingleConnectionPlaylist(state.playlist)
   );
@@ -34,6 +36,7 @@ export async function verifyAllArchives(): Promise<void> {
     isScanActive(initialState.scanState) ||
     initialState.archiveGuideTestRunning ||
     Object.values(initialState.archiveProbes).some((entry) => entry.running) ||
+    (isArchiveDownloadRunning(initialState.archiveDownloads) && singleConnection) ||
     ((initialState.playIntentActive || initialState.castActive) && singleConnection)
   ) {
     return;
