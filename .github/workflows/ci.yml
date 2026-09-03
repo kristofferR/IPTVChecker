@@ -114,6 +114,9 @@ jobs:
 
       - name: Setup Rust (nightly for cargo-fuzz)
         uses: dtolnay/rust-toolchain@7c8d7d138f5c09cef361f8214cf96882cd029cdb # nightly
+        with:
+          # Newer nightlies reject the xcap version required by tauri-plugin-mcp.
+          toolchain: nightly-2025-10-19
 
       - name: Rust cache
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -130,12 +133,12 @@ jobs:
 
       - name: Fuzz parse_m3u (20s)
         working-directory: src-tauri
-        run: cargo +nightly fuzz run parse_m3u --sanitizer none -- -max_total_time=20
+        run: cargo +nightly-2025-10-19 fuzz run parse_m3u --sanitizer none -- -max_total_time=20
 
       - name: Fuzz extinf_attributes (20s)
         working-directory: src-tauri
-        run: cargo +nightly fuzz run extinf_attributes --sanitizer none -- -max_total_time=20
+        run: cargo +nightly-2025-10-19 fuzz run extinf_attributes --sanitizer none -- -max_total_time=20
 
       - name: Fuzz playlist_discovery_depth (20s)
         working-directory: src-tauri
-        run: cargo +nightly fuzz run playlist_discovery_depth --sanitizer none -- -max_total_time=20
+        run: cargo +nightly-2025-10-19 fuzz run playlist_discovery_depth --sanitizer none -- -max_total_time=20
