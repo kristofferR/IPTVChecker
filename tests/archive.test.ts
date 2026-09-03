@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  applyXtreamArchiveUpdates,
   archiveBadgeText,
   archivePickerDefault,
   archiveSortValue,
@@ -45,6 +46,38 @@ describe("archive helpers", () => {
     expect(archiveSortValue(fields(null, null))).toBeNull();
     expect(archiveSortValue(fields("xc", null))).toBe(0);
     expect(archiveSortValue(fields("xc", 7))).toBe(7);
+  });
+
+  it("applies late Xtream archive metadata without replacing unrelated fields", () => {
+    const items = [
+      {
+        index: 42,
+        name: "News",
+        catchup: null,
+        catchup_days: null,
+        extinf_line: "#EXTINF:-1,News",
+      },
+    ];
+
+    const updated = applyXtreamArchiveUpdates(items, [
+      {
+        index: 42,
+        catchup: "xc",
+        catchup_days: 7,
+        extinf_line: '#EXTINF:-1 catchup="xc" catchup-days="7",News',
+      },
+    ]);
+
+    expect(updated).toEqual([
+      {
+        index: 42,
+        name: "News",
+        catchup: "xc",
+        catchup_days: 7,
+        extinf_line: '#EXTINF:-1 catchup="xc" catchup-days="7",News',
+      },
+    ]);
+    expect(applyXtreamArchiveUpdates(updated, [])).toBe(updated);
   });
 });
 

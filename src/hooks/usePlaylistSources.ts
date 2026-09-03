@@ -1,5 +1,7 @@
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { applyXtreamArchiveUpdates, applyXtreamArchiveUpdatesToPreview } from "../lib/archive";
 import { errorToString, formatPlaylistOpenError, formatSourceReloadError } from "../lib/errors";
 import { logger } from "../lib/logger";
 import { parseXtreamRecent, serializeXtreamRecent } from "../lib/recentPlaylists";
@@ -37,6 +39,8 @@ import type {
   SavedPlaylistDraft,
   SavedPlaylistEntry,
   StalkerOpenRequest,
+  XtreamArchiveChannelUpdate,
+  XtreamArchiveEnrichment,
   XtreamOpenRequest,
 } from "../lib/types";
 import { selectResultByIndex, useAppStore } from "../store";
@@ -129,6 +133,8 @@ export interface UsePlaylistSourcesParams {
     preserveExistingResults?: boolean,
     shouldApply?: () => boolean,
   ) => Promise<boolean>;
+  /** From useScan: applies delayed archive metadata without desynchronizing scan state. */
+  applyArchiveUpdates: (updates: XtreamArchiveChannelUpdate[]) => void;
 }
 
 /** Playlist source management: opening file/URL/Xtream/Stalker sources,
@@ -136,6 +142,7 @@ export interface UsePlaylistSourcesParams {
 export function usePlaylistSources({
   initFromPlaylist,
   syncFromPlaylist,
+  applyArchiveUpdates,
 }: UsePlaylistSourcesParams) {
   const channelSearch = useAppStore((s) => s.channelSearch);
   const settingsHydrated = useAppStore((s) => s.settingsHydrated);
@@ -146,6 +153,64 @@ export function usePlaylistSources({
     useState<SavedPlaylistDraft | null>(null);
   const [savedXtreamTestEntry, setSavedXtreamTestEntry] = useState<SavedPlaylistEntry | null>(null);
   const sourceLoadGenerationRef = useRef(0);
+  const xtreamArchiveEnrichmentsRef = useRef(new Map<string, XtreamArchiveChannelUpdate[]>());
+
+  useEffect(() => {
+    let cancelled = false;
+    const unlisteners: (() => void)[] = [];
+
+    void Promise.all([
+      listen<string>("playlist://xtream-archive-enrichment-started", (event) => {
+        xtreamArchiveEnrichmentsRef.current.delete(event.payload);
+      }),
+      listen<XtreamArchiveEnrichment>("playlist://xtream-archive-enrichment", (event) => {
+        const enrichment = event.payload;
+        xtreamArchiveEnrichmentsRef.current.set(enrichment.source_identity, enrichment.channels);
+
+        const state = getStore();
+        if (state.cachedSourcePreview?.source_identity === enrichment.source_identity) {
+          state.setCachedSourcePreview(
+            applyXtreamArchiveUpdatesToPreview(state.cachedSourcePreview, enrichment.channels),
+          );
+        }
+        if (state.playlist?.source_identity !== enrichment.source_identity) {
+          return;
+        }
+
+        state.setPlaylist(applyXtreamArchiveUpdatesToPreview(state.playlist, enrichment.channels));
+        applyArchiveUpdates(enrichment.channels);
+        if (state.selectedChannel) {
+          const [selectedChannel] = applyXtreamArchiveUpdates(
+            [state.selectedChannel],
+            enrichment.channels,
+          );
+          state.setSelectedChannel(selectedChannel ?? null);
+        }
+        if (state.pendingPlaybackChannel) {
+          const [pendingPlaybackChannel] = applyXtreamArchiveUpdates(
+            [state.pendingPlaybackChannel],
+            enrichment.channels,
+          );
+          state.setPendingPlaybackChannel(pendingPlaybackChannel ?? null);
+        }
+      }),
+    ])
+      .then((registered) => {
+        if (cancelled) {
+          for (const off of registered) off();
+        } else {
+          unlisteners.push(...registered);
+        }
+      })
+      .catch((error) => {
+        logger.warn("[Playlist] Failed to register Xtream archive enrichment listener:", error);
+      });
+
+    return () => {
+      cancelled = true;
+      for (const unlisten of unlisteners) unlisten();
+    };
+  }, [applyArchiveUpdates]);
 
   const refreshRecentPlaylists = useCallback(async () => {
     try {
@@ -328,12 +393,18 @@ export function usePlaylistSources({
         const canReuseCachedPreview =
           mode === "reapplySourceFilter" && state.cachedSourcePreview != null;
 
-        const cachedPreview = canReuseCachedPreview
+        const loadedPreview = canReuseCachedPreview
           ? state.cachedSourcePreview!
           : await loadFullSourcePreview(descriptor);
         if (!isCurrentLoad()) {
           return supersededResult();
         }
+        const pendingArchiveEnrichment = loadedPreview.source_identity
+          ? xtreamArchiveEnrichmentsRef.current.get(loadedPreview.source_identity)
+          : undefined;
+        let cachedPreview = pendingArchiveEnrichment
+          ? applyXtreamArchiveUpdatesToPreview(loadedPreview, pendingArchiveEnrichment)
+          : loadedPreview;
 
         const latestState = getStore();
         const savedEntry =
@@ -365,7 +436,7 @@ export function usePlaylistSources({
           );
         }
 
-        const preview = buildVisiblePreview(cachedPreview, normalizedSourceFilter);
+        let preview = buildVisiblePreview(cachedPreview, normalizedSourceFilter);
         const committed = await commitLoadedPlaylist(
           preview,
           cachedPreview,
@@ -376,6 +447,23 @@ export function usePlaylistSources({
         );
         if (!committed) {
           return supersededResult();
+        }
+        if (loadedPreview.source_identity) {
+          const latestArchiveEnrichment = xtreamArchiveEnrichmentsRef.current.get(
+            loadedPreview.source_identity,
+          );
+          if (latestArchiveEnrichment) {
+            cachedPreview = applyXtreamArchiveUpdatesToPreview(
+              cachedPreview,
+              latestArchiveEnrichment,
+            );
+            preview = buildVisiblePreview(cachedPreview, normalizedSourceFilter);
+            const state = getStore();
+            state.setPlaylist(preview);
+            state.setCachedSourcePreview(cachedPreview);
+            applyArchiveUpdates(latestArchiveEnrichment);
+          }
+          xtreamArchiveEnrichmentsRef.current.delete(loadedPreview.source_identity);
         }
         logger.info(
           `[Playlist] Loaded ${safeFileName}: visible=${preview.channels.length}, total=${cachedPreview.total_channels}, groups=${preview.groups.length}, preview=${canReuseCachedPreview ? "memory-cache" : "fresh"}, elapsed=${((performance.now() - loadStartedAt) / 1000).toFixed(1)}s`,

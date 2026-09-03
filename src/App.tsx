@@ -619,8 +619,16 @@ export default function App() {
   }, [isCasting]);
 
   const { settings, save: saveSettings, applyExternal: applyExternalSettings } = useSettings();
-  const { start, cancel, pause, resume, initFromPlaylist, syncFromPlaylist, updateResult } =
-    useScan();
+  const {
+    start,
+    cancel,
+    pause,
+    resume,
+    initFromPlaylist,
+    syncFromPlaylist,
+    updateResult,
+    applyArchiveUpdates,
+  } = useScan();
   const { checkForUpdates, installUpdate } = useUpdateCheck();
   const {
     handleClearRecentPlaylists,
@@ -646,7 +654,7 @@ export default function App() {
     setSavedPlaylistEditorDraft,
     savedXtreamTestEntry,
     setSavedXtreamTestEntry,
-  } = usePlaylistSources({ initFromPlaylist, syncFromPlaylist });
+  } = usePlaylistSources({ initFromPlaylist, syncFromPlaylist, applyArchiveUpdates });
 
   useEffect(() => {
     document.documentElement.dataset.platform = platform;

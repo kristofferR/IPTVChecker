@@ -104,6 +104,18 @@ export interface EpgLoadSummary {
   programme_count: number;
 }
 
+export interface XtreamArchiveChannelUpdate {
+  index: number;
+  catchup: string | null;
+  catchup_days: number | null;
+  extinf_line: string;
+}
+
+export interface XtreamArchiveEnrichment {
+  source_identity: string;
+  channels: XtreamArchiveChannelUpdate[];
+}
+
 export interface XtreamAccountInfo {
   status: string | null;
   expires_at_epoch: number | null;

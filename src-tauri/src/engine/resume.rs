@@ -24,8 +24,8 @@ pub(crate) fn sanitize_url_for_persistence(url: &str) -> String {
             .map_or((without_fragment, None), |(base, query)| {
                 (base, Some(query))
             });
-        let sanitized_base =
-            redact_provider_path_credentials(base).unwrap_or_else(|| base.to_string());
+        let base = strip_url_authority_userinfo(base);
+        let sanitized_base = redact_provider_path_credentials(&base).unwrap_or(base);
         let Some(query) = query else {
             return sanitized_base;
         };
@@ -60,6 +60,27 @@ pub(crate) fn sanitize_url_for_persistence(url: &str) -> String {
     }
 
     parsed.to_string()
+}
+
+fn strip_url_authority_userinfo(url: &str) -> String {
+    let Some(scheme_end) = url.find("://") else {
+        return url.to_string();
+    };
+    let authority_start = scheme_end + 3;
+    let authority_end = url[authority_start..]
+        .find('/')
+        .map_or(url.len(), |offset| authority_start + offset);
+    let authority = &url[authority_start..authority_end];
+    let Some(userinfo_end) = authority.rfind('@') else {
+        return url.to_string();
+    };
+
+    format!(
+        "{}{}{}",
+        &url[..authority_start],
+        &authority[userinfo_end + 1..],
+        &url[authority_end..]
+    )
 }
 
 fn redact_provider_path_credentials(path: &str) -> Option<String> {
@@ -682,6 +703,21 @@ mod tests {
             sanitize_url_for_persistence("archive/path?username=demo&password=hunter2"),
             "archive/path?username=REDACTED&password=REDACTED"
         );
+    }
+
+    #[test]
+    fn sanitize_url_for_persistence_redacts_credentials_when_url_parsing_fails() {
+        let sanitized = sanitize_url_for_persistence(
+            "https://alice:secret@example.com:invalid-port/live?token=private",
+        );
+
+        assert_eq!(
+            sanitized,
+            "https://example.com:invalid-port/live?token=REDACTED"
+        );
+        assert!(!sanitized.contains("alice"));
+        assert!(!sanitized.contains("secret"));
+        assert!(!sanitized.contains("private"));
     }
 
     #[test]
