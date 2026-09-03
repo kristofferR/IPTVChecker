@@ -140,3 +140,19 @@ export function buildArchiveUrl(channel: ArchiveUrlFields, window: ArchiveWindow
       return defaultArchiveUrl(channel.url, window);
   }
 }
+
+/** How far back the sidebar picker starts: just under an hour ago. */
+export const ARCHIVE_PICKER_DEFAULT_BACK_S = 59 * 60 + 30;
+
+/**
+ * Default picker position: 59:30 before `now`, expressed as the day offset
+ * and local HH:MM the picker's controls use. A start in the future can never
+ * play, so the default always lands inside the archive.
+ */
+export function archivePickerDefault(now: Date = new Date()): { daysBack: number; time: string } {
+  const start = new Date(now.getTime() - ARCHIVE_PICKER_DEFAULT_BACK_S * 1000);
+  const dayOf = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const daysBack = Math.round((dayOf(now).getTime() - dayOf(start).getTime()) / 86_400_000);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return { daysBack, time: `${pad(start.getHours())}:${pad(start.getMinutes())}` };
+}

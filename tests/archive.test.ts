@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   archiveBadgeText,
+  archivePickerDefault,
   archiveSortValue,
   archiveTitle,
   buildArchiveUrl,
@@ -130,5 +131,17 @@ describe("buildArchiveUrl", () => {
     expect(buildArchiveUrl(urlFields("http://h/s.m3u8?a=1", "shift"), WINDOW)).toBe(
       `http://h/s.m3u8?a=1&utc=${START}&lutc=${START + 8000}`,
     );
+  });
+});
+
+describe("archivePickerDefault", () => {
+  it("starts 59:30 before now on the same day", () => {
+    const now = new Date(2026, 7, 29, 14, 7, 0);
+    expect(archivePickerDefault(now)).toEqual({ daysBack: 0, time: "13:07" });
+  });
+
+  it("rolls to yesterday when 59:30 back crosses midnight", () => {
+    const now = new Date(2026, 7, 29, 0, 20, 0);
+    expect(archivePickerDefault(now)).toEqual({ daysBack: 1, time: "23:20" });
   });
 });
