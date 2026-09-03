@@ -156,8 +156,8 @@ describe("archiveVerdict", () => {
     ).toBe("advertised");
   });
 
-  it("classifies broken, verified, and shallower archives", () => {
-    expect(archiveVerdict(ch, entry([[0, false, null]]))).toBe("broken");
+  it("classifies fake, verified, and shallower archives", () => {
+    expect(archiveVerdict(ch, entry([[0, false, null]]))).toBe("fake");
     expect(
       archiveVerdict(
         ch,
@@ -260,9 +260,9 @@ describe("computeCatchupScore", () => {
     // Full coverage, full reliability, full depth.
     expect(computeCatchupScore(results, probes)).toBe(10);
 
-    const broken = { 0: entry([[0, false, null]]), 1: entry([[0, false, null]]) };
+    const fake = { 0: entry([[0, false, null]]), 1: entry([[0, false, null]]) };
     // Full coverage but nothing works: only the coverage half survives.
-    expect(computeCatchupScore(results, broken as Record<number, ArchiveProbeEntry>)).toBe(5);
+    expect(computeCatchupScore(results, fake as Record<number, ArchiveProbeEntry>)).toBe(5);
   });
 
   it("retains the advertised baseline for untested catch-up channels", () => {

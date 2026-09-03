@@ -1,8 +1,17 @@
+import { save } from "@tauri-apps/plugin-dialog";
 import { BarChart3, X } from "lucide-react";
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import { hasArchive } from "../lib/archive";
-import { archiveVerdict, measuredDepthDays } from "../lib/archiveVerification";
+import { realCatchupResults, stripFakeCatchupResults } from "../lib/archiveExport";
+import {
+  type ArchiveFailure,
+  archiveFailure,
+  archiveVerdict,
+  measuredDepthDays,
+} from "../lib/archiveVerification";
 import { cancelArchiveVerification, verifyAllArchives } from "../lib/archiveVerifyRun";
+import { logger } from "../lib/logger";
+import { exportM3u } from "../lib/tauri";
 import { computeCatchupScore, withCatchupScore } from "../lib/catchupScore";
 import { summarizeEpgCoverage } from "../lib/epgCoverage";
 import { summarizeLanguageDistribution } from "../lib/languageDistribution";
@@ -42,6 +51,19 @@ function clampScore10(value: number): number {
 
 function round1(value: number): number {
   return Math.round(value * 10) / 10;
+}
+
+function formatVerifiedAt(epochS: number): string {
+  const date = new Date(epochS * 1000);
+  const today = new Date();
+  const sameDay =
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate();
+  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  return sameDay
+    ? `today ${time}`
+    : `${date.toLocaleDateString([], { day: "numeric", month: "short" })} ${time}`;
 }
 
 function median(values: number[]): number | null {
@@ -216,12 +238,23 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
     if (channels.length === 0) return null;
     let verified = 0;
     let shallower = 0;
-    let broken = 0;
+    let fake = 0;
+    let verifiedAt: number | null = null;
+    const failures: Record<ArchiveFailure["kind"], number> = {
+      empty: 0,
+      live: 0,
+      http: 0,
+      timeout: 0,
+      unreachable: 0,
+    };
     const depths: number[] = [];
     const latencies: number[] = [];
     for (const channel of channels) {
       const entry = archiveProbes[channel.index];
       const verdict = archiveVerdict(channel, entry);
+      if (verdict !== "advertised" && entry?.checkedAt != null) {
+        verifiedAt = Math.max(verifiedAt ?? 0, entry.checkedAt);
+      }
       if (verdict === "verified") {
         verified += 1;
         depths.push(Math.min(channel.catchup_days ?? measuredDepthDays(entry) ?? 1, 14));
@@ -229,8 +262,10 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
         shallower += 1;
         const measured = measuredDepthDays(entry);
         if (measured != null) depths.push(Math.min(measured, 14));
-      } else if (verdict === "broken") {
-        broken += 1;
+      } else if (verdict === "fake") {
+        fake += 1;
+        const failure = archiveFailure(entry);
+        if (failure) failures[failure.kind] += 1;
       }
       for (const outcome of entry?.outcomes ?? []) {
         if (outcome.ok && outcome.latencyMs != null) latencies.push(outcome.latencyMs);
@@ -243,17 +278,51 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
       { label: "7 d", count: depths.filter((d) => d >= 7 && d < 8).length },
       { label: "8+ d", count: depths.filter((d) => d >= 8).length },
     ];
+    const fakeReasons: Array<{ label: string; count: number }> = [
+      { label: "empty", count: failures.empty },
+      { label: "serves live", count: failures.live },
+      { label: "http error", count: failures.http },
+      { label: "timeout", count: failures.timeout },
+      { label: "unreachable", count: failures.unreachable },
+    ].filter((reason) => reason.count > 0);
     const medianLatency = median(latencies);
     return {
       advertised: channels.length,
       verified,
       shallower,
-      broken,
-      tested: verified + shallower + broken,
+      fake,
+      tested: verified + shallower + fake,
+      verifiedAt,
+      fakeReasons,
       buckets,
       medianLatency,
     };
   }, [results, archiveProbes]);
+
+  const [catchupExportBusy, setCatchupExportBusy] = useState(false);
+  const exportCatchupPlaylist = async (variant: "real" | "stripped") => {
+    if (!playlist || catchupExportBusy) return;
+    const exported =
+      variant === "real"
+        ? realCatchupResults(results, archiveProbes)
+        : stripFakeCatchupResults(results, archiveProbes);
+    if (exported.length === 0) return;
+    const stem = playlist.file_name.replace(/\.[^.]+$/, "") || "playlist";
+    const path = await save({
+      defaultPath: `${stem}_${variant === "real" ? "real-catchup" : "no-fake-catchup"}.m3u8`,
+      filters: [{ name: "M3U Playlist", extensions: ["m3u8", "m3u"] }],
+    });
+    if (!path) return;
+    setCatchupExportBusy(true);
+    try {
+      await exportM3u(exported, path);
+      logger.info(`[Export] Wrote ${exported.length} channels (${variant} catch-up) to ${path}`);
+    } catch (error) {
+      logger.warn(`[Export] Catch-up export failed: ${String(error)}`);
+    } finally {
+      setCatchupExportBusy(false);
+    }
+  };
 
   const protocolSummary = useMemo(() => {
     let http = 0;
@@ -564,7 +633,15 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
         {catchupStats && (
           <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
             <div className="mb-2 flex items-center justify-between">
-              <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary">Catch-up</p>
+              <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary">
+                Catch-up
+                {catchupStats.verifiedAt != null && (
+                  <span className="normal-case tracking-normal text-text-tertiary/80">
+                    {" "}
+                    · verified {formatVerifiedAt(catchupStats.verifiedAt)}
+                  </span>
+                )}
+              </p>
               {archiveVerifyRun ? (
                 <button
                   type="button"
@@ -594,25 +671,25 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                   }
                   className="rounded-md border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/20 transition-colors disabled:opacity-40 disabled:pointer-events-none"
                 >
-                  Verify ({catchupStats.advertised})
+                  Verify all ({catchupStats.advertised})
                 </button>
               )}
             </div>
             <div className="grid grid-cols-2 gap-2 text-[11px]">
               <div className="rounded-md bg-input/60 px-2 py-1.5">
-                <span className="block text-[15px] font-semibold text-violet-300 tabular-nums">
-                  {catchupStats.advertised}
-                </span>
-                <span className="text-text-tertiary uppercase text-[9px] tracking-[0.04em]">
-                  advertised
-                </span>
-              </div>
-              <div className="rounded-md bg-input/60 px-2 py-1.5">
                 <span className="block text-[15px] font-semibold text-green-400 tabular-nums">
                   {catchupStats.verified}
                 </span>
                 <span className="text-text-tertiary uppercase text-[9px] tracking-[0.04em]">
-                  verified
+                  real
+                </span>
+              </div>
+              <div className="rounded-md bg-input/60 px-2 py-1.5">
+                <span className="block text-[15px] font-semibold text-red-400 tabular-nums">
+                  {catchupStats.fake}
+                </span>
+                <span className="text-text-tertiary uppercase text-[9px] tracking-[0.04em]">
+                  fake
                 </span>
               </div>
               <div className="rounded-md bg-input/60 px-2 py-1.5">
@@ -624,14 +701,37 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                 </span>
               </div>
               <div className="rounded-md bg-input/60 px-2 py-1.5">
-                <span className="block text-[15px] font-semibold text-red-400 tabular-nums">
-                  {catchupStats.broken}
+                <span className="block text-[15px] font-semibold text-violet-300 tabular-nums">
+                  {catchupStats.advertised}
                 </span>
                 <span className="text-text-tertiary uppercase text-[9px] tracking-[0.04em]">
-                  broken
+                  advertised
                 </span>
               </div>
             </div>
+            {catchupStats.fakeReasons.length > 0 && (
+              <>
+                <p className="mt-3 mb-1 text-[11px] uppercase tracking-[0.08em] text-text-tertiary">
+                  Why fake
+                </p>
+                {catchupStats.fakeReasons.map((reason) => (
+                  <div key={reason.label} className="mb-1 flex items-center gap-2 text-[10px]">
+                    <span className="w-14 shrink-0 text-right text-text-secondary">
+                      {reason.label}
+                    </span>
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-btn/40">
+                      <div
+                        className="h-full rounded-full bg-red-500"
+                        style={{ width: `${(reason.count / catchupStats.fake) * 100}%` }}
+                      />
+                    </div>
+                    <span className="w-7 shrink-0 text-text-tertiary tabular-nums">
+                      {reason.count}
+                    </span>
+                  </div>
+                ))}
+              </>
+            )}
             {catchupStats.tested > 0 && (
               <>
                 <p className="mt-3 mb-1 text-[11px] uppercase tracking-[0.08em] text-text-tertiary">
@@ -673,6 +773,26 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                         : "N/A"}
                     </span>
                   </div>
+                </div>
+                <div className="mt-3 space-y-1.5">
+                  <button
+                    type="button"
+                    disabled={catchupExportBusy || catchupStats.verified + catchupStats.shallower === 0}
+                    onClick={() => void exportCatchupPlaylist("real")}
+                    title="Only channels whose archive answered, with the measured depth written back"
+                    className="w-full rounded-md border border-border-app bg-btn px-2 py-1.5 text-[11.5px] font-medium text-text-primary hover:bg-btn-hover transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    Export real catch-up · M3U ({catchupStats.verified + catchupStats.shallower})
+                  </button>
+                  <button
+                    type="button"
+                    disabled={catchupExportBusy || catchupStats.fake === 0}
+                    onClick={() => void exportCatchupPlaylist("stripped")}
+                    title="The full playlist with catch-up attributes removed from fake channels"
+                    className="w-full rounded-md border border-border-app bg-btn px-2 py-1.5 text-[11.5px] font-medium text-text-primary hover:bg-btn-hover transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    Export playlist, fake flags stripped
+                  </button>
                 </div>
               </>
             )}

@@ -17,7 +17,7 @@ function clampScore10(value: number): number {
  *
  * Before verification the score reflects advertised coverage only. Once
  * channels are probed it blends coverage, reliability (verified full marks,
- * shallower partial credit, broken none), and measured depth.
+ * shallower partial credit, fake none), and measured depth.
  */
 export function computeCatchupScore(
   results: ChannelResult[],

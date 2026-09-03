@@ -1,9 +1,44 @@
 import { useAppStore } from "../store";
 import { hasArchive } from "./archive";
 import { isArchiveDownloadRunning } from "./archiveDownload";
-import { verifyChannelArchive } from "./archiveVerification";
+import {
+  type ArchiveVerifyMode,
+  archiveVerdict,
+  verifyChannelArchive,
+} from "./archiveVerification";
 import { isSingleConnectionPlaylist } from "./playback";
 import { isScanActive } from "./scanState";
+import type { ChannelResult } from "./types";
+
+export interface ArchiveVerifyRun {
+  running: boolean;
+  mode: ArchiveVerifyMode;
+  done: number;
+  total: number;
+  real: number;
+  shallower: number;
+  fake: number;
+  /** Wall-clock start, for throughput and ETA. */
+  startedAtMs: number;
+}
+
+const VERIFY_MODE_STORAGE_KEY = "catchup-verify-mode";
+
+export function readArchiveVerifyMode(): ArchiveVerifyMode {
+  try {
+    return localStorage.getItem(VERIFY_MODE_STORAGE_KEY) === "full" ? "full" : "quick";
+  } catch {
+    return "quick";
+  }
+}
+
+export function storeArchiveVerifyMode(mode: ArchiveVerifyMode): void {
+  try {
+    localStorage.setItem(VERIFY_MODE_STORAGE_KEY, mode);
+  } catch {
+    // Preference only; nothing to recover.
+  }
+}
 
 let bulkRunActive = false;
 let bulkCancelRequested = false;
@@ -25,8 +60,19 @@ export function isArchiveVerificationBlockingPlayback(): boolean {
   );
 }
 
-/** Verify every catch-up channel sequentially, with progress in the store. */
-export async function verifyAllArchives(): Promise<void> {
+/** Verify every catch-up channel in the loaded playlist. */
+export function verifyAllArchives(mode: ArchiveVerifyMode = readArchiveVerifyMode()): Promise<void> {
+  return verifyArchives(useAppStore.getState().flatResults, mode);
+}
+
+/**
+ * Verify the catch-up channels among `candidates` sequentially (provider
+ * connection limits), keeping a live tally in the store.
+ */
+export async function verifyArchives(
+  candidates: ChannelResult[],
+  mode: ArchiveVerifyMode = readArchiveVerifyMode(),
+): Promise<void> {
   const initialState = useAppStore.getState();
   const playlist = initialState.playlist;
   const generation = initialState.archiveProbeGeneration;
@@ -52,7 +98,7 @@ export async function verifyAllArchives(): Promise<void> {
   if (singleConnection) {
     initialState.setExternalPlaybackActive(false);
   }
-  const targets = initialState.flatResults.filter(hasArchive);
+  const targets = candidates.filter(hasArchive);
   if (targets.length === 0) {
     return;
   }
@@ -68,8 +114,17 @@ export async function verifyAllArchives(): Promise<void> {
       abortController.abort();
     }
   });
-  const setProgress = (done: number) =>
-    useAppStore.getState().setArchiveVerifyRun({ running: true, done, total: targets.length });
+  const run: ArchiveVerifyRun = {
+    running: true,
+    mode,
+    done: 0,
+    total: targets.length,
+    real: 0,
+    shallower: 0,
+    fake: 0,
+    startedAtMs: Date.now(),
+  };
+  const publish = () => useAppStore.getState().setArchiveVerifyRun({ ...run });
   const shouldCancel = () => {
     const state = useAppStore.getState();
     return (
@@ -80,24 +135,37 @@ export async function verifyAllArchives(): Promise<void> {
         singleConnection)
     );
   };
-  setProgress(0);
+  publish();
   try {
-    let done = 0;
     for (const target of targets) {
       if (shouldCancel()) {
         break;
       }
-      await verifyChannelArchive(
+      const entry = await verifyChannelArchive(
         target,
-        (entry) => {
-          useAppStore.getState().setArchiveProbe(generation, target.index, entry);
+        (update) => {
+          useAppStore.getState().setArchiveProbe(generation, target.index, update);
         },
         shouldCancel,
         abortController.signal,
+        mode,
       );
       if (shouldCancel()) break;
-      done += 1;
-      setProgress(done);
+      run.done += 1;
+      switch (archiveVerdict(target, entry)) {
+        case "verified":
+          run.real += 1;
+          break;
+        case "shallower":
+          run.shallower += 1;
+          break;
+        case "fake":
+          run.fake += 1;
+          break;
+        default:
+          break;
+      }
+      publish();
     }
   } finally {
     unsubscribeGeneration();

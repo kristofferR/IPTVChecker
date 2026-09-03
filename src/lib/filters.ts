@@ -1,6 +1,22 @@
 import { archiveSortValue, hasArchive } from "./archive";
+import type { ArchiveProbeEntry } from "./archiveProbe";
+import { type ArchiveVerdict, archiveVerdict } from "./archiveVerification";
 import { getChannelErrorReason } from "./channelResults";
 import type { ChannelResult, ChannelStatus } from "./types";
+
+export type ArchiveProbes = Record<number, ArchiveProbeEntry>;
+
+/** Status-filter values that select catch-up channels by verification verdict. */
+export const CATCHUP_VERDICT_FILTERS: Record<string, ArchiveVerdict> = {
+  catchup_real: "verified",
+  catchup_shallower: "shallower",
+  catchup_fake: "fake",
+  catchup_untested: "advertised",
+};
+
+export function isCatchupStatusFilter(statusFilter: string): boolean {
+  return statusFilter === "catchup" || statusFilter in CATCHUP_VERDICT_FILTERS;
+}
 
 export type SortField =
   | "index"
@@ -38,6 +54,10 @@ export interface StatusOptionCounts {
   duplicates: number;
   pending: number;
   catchup: number;
+  catchup_real: number;
+  catchup_shallower: number;
+  catchup_fake: number;
+  catchup_untested: number;
 }
 
 const STATUS_ORDER: Record<ChannelStatus, number> = {
@@ -154,6 +174,7 @@ function matchesStatusFilter(
   statusFilter: string,
   duplicateIndices?: Set<number>,
   separatePlaceholder?: boolean,
+  archiveProbes?: ArchiveProbes,
 ): boolean {
   if (statusFilter === "" || statusFilter === "all") {
     return true;
@@ -166,6 +187,12 @@ function matchesStatusFilter(
   }
   if (statusFilter === "catchup") {
     return hasArchive(result);
+  }
+  const verdictFilter = CATCHUP_VERDICT_FILTERS[statusFilter];
+  if (verdictFilter) {
+    return (
+      hasArchive(result) && archiveVerdict(result, archiveProbes?.[result.index]) === verdictFilter
+    );
   }
   if (statusFilter === "mislabeled") {
     return result.label_mismatches.length > 0;
@@ -303,6 +330,7 @@ export function filterResults(
   duplicateIndices?: Set<number>,
   searchTextCache?: SearchTextCache,
   separatePlaceholder?: boolean,
+  archiveProbes?: ArchiveProbes,
 ): ChannelResult[] {
   const normalizedSearch = search.trim().toLowerCase();
   const hasSearch = normalizedSearch.length > 0;
@@ -328,7 +356,7 @@ export function filterResults(
     }
     if (
       hasStatusFilter &&
-      !matchesStatusFilter(r, statusFilter, duplicateIndices, separatePlaceholder)
+      !matchesStatusFilter(r, statusFilter, duplicateIndices, separatePlaceholder, archiveProbes)
     ) {
       return false;
     }
@@ -350,6 +378,7 @@ type SharedFilterKey = {
   statusFilter: string;
   duplicateIndices: Set<number> | undefined;
   separatePlaceholder: boolean | undefined;
+  archiveProbes: ArchiveProbes | undefined;
 };
 
 let sharedFilterKey: SharedFilterKey | null = null;
@@ -362,7 +391,11 @@ export function filterResultsShared(
   statusFilter: string,
   duplicateIndices?: Set<number>,
   separatePlaceholder?: boolean,
+  archiveProbes?: ArchiveProbes,
 ): ChannelResult[] {
+  // Verdict filters are the only ones that read probes, so probe churn during
+  // verification must not invalidate the memo for every other filter.
+  const probesKey = statusFilter in CATCHUP_VERDICT_FILTERS ? archiveProbes : undefined;
   const key = sharedFilterKey;
   if (
     key &&
@@ -371,7 +404,8 @@ export function filterResultsShared(
     key.groupFilter === groupFilter &&
     key.statusFilter === statusFilter &&
     key.duplicateIndices === duplicateIndices &&
-    key.separatePlaceholder === separatePlaceholder
+    key.separatePlaceholder === separatePlaceholder &&
+    key.archiveProbes === probesKey
   ) {
     return sharedFilterValue;
   }
@@ -384,6 +418,7 @@ export function filterResultsShared(
     duplicateIndices,
     sharedSearchTextCache,
     separatePlaceholder,
+    probesKey,
   );
   sharedFilterKey = {
     results,
@@ -392,6 +427,7 @@ export function filterResultsShared(
     statusFilter,
     duplicateIndices,
     separatePlaceholder,
+    archiveProbes: probesKey,
   };
   sharedFilterValue = value;
   return value;
@@ -404,6 +440,7 @@ export function countStatusOptions(
   duplicateIndices?: Set<number>,
   searchTextCache?: SearchTextCache,
   separatePlaceholder?: boolean,
+  archiveProbes?: ArchiveProbes,
 ): StatusOptionCounts {
   const normalizedSearch = search.trim().toLowerCase();
   const hasSearch = normalizedSearch.length > 0;
@@ -420,6 +457,10 @@ export function countStatusOptions(
     duplicates: 0,
     pending: 0,
     catchup: 0,
+    catchup_real: 0,
+    catchup_shallower: 0,
+    catchup_fake: 0,
+    catchup_untested: 0,
   };
 
   for (const result of results) {
@@ -471,6 +512,19 @@ export function countStatusOptions(
 
     if (hasArchive(result)) {
       counts.catchup += 1;
+      switch (archiveVerdict(result, archiveProbes?.[result.index])) {
+        case "verified":
+          counts.catchup_real += 1;
+          break;
+        case "shallower":
+          counts.catchup_shallower += 1;
+          break;
+        case "fake":
+          counts.catchup_fake += 1;
+          break;
+        default:
+          counts.catchup_untested += 1;
+      }
     }
 
     if (duplicateIndices?.has(result.index)) {

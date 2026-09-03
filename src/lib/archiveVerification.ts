@@ -8,12 +8,83 @@ import {
 } from "./archiveProbe";
 import type { ChannelResult } from "./types";
 
-export type ArchiveVerdict = "advertised" | "verified" | "shallower" | "broken";
+export type ArchiveVerdict = "advertised" | "verified" | "shallower" | "fake";
+
+/** Quick answers real vs fake from the −1 h point; full also measures depth. */
+export type ArchiveVerifyMode = "quick" | "full";
+
+/**
+ * Why an advertised archive is fake:
+ * - `empty`: the provider answers but serves no media for any time
+ * - `live`: the archive URL serves the live stream instead of the requested time
+ * - `http`: the archive URL fails with an HTTP status while live works
+ * - `timeout`: the archive URL never answers
+ * - `unreachable`: any other failure to fetch the archive
+ */
+export interface ArchiveFailure {
+  kind: "empty" | "live" | "http" | "timeout" | "unreachable";
+  status?: number;
+}
+
+function nearOutcome(entry: ArchiveProbeEntry | undefined): ArchiveProbeOutcome | undefined {
+  return entry?.outcomes.find((outcome) => outcome.daysBack <= 0);
+}
+
+/** Classify a failed probe from the checker's error text and media-time check. */
+export function classifyArchiveFailure(outcome: ArchiveProbeOutcome): ArchiveFailure | null {
+  if (outcome.ok) {
+    return outcome.depthVerified || outcome.depthUnknown ? null : { kind: "live" };
+  }
+  const error = outcome.error ?? "";
+  if (/empty manifest|no playable uri|no segments|empty/i.test(error)) return { kind: "empty" };
+  const status = error.match(/HTTP\s+(\d{3})/i);
+  if (status) return { kind: "http", status: Number(status[1]) };
+  if (/timed? ?out|timeout/i.test(error)) return { kind: "timeout" };
+  return { kind: "unreachable" };
+}
+
+/** Why a channel's archive was judged fake, from its near probe. */
+export function archiveFailure(entry: ArchiveProbeEntry | undefined): ArchiveFailure | null {
+  const near = nearOutcome(entry);
+  if (!near || entry?.running || entry?.checkedAt == null) return null;
+  return classifyArchiveFailure(near);
+}
+
+/** Short chip text for a fake archive: EMPTY, LIVE, 404, TIMEOUT, ERROR. */
+export function archiveFailureLabel(failure: ArchiveFailure): string {
+  switch (failure.kind) {
+    case "empty":
+      return "EMPTY";
+    case "live":
+      return "LIVE";
+    case "http":
+      return failure.status != null ? String(failure.status) : "HTTP";
+    case "timeout":
+      return "TIMEOUT";
+    default:
+      return "ERROR";
+  }
+}
+
+export function archiveFailureSentence(failure: ArchiveFailure): string {
+  switch (failure.kind) {
+    case "empty":
+      return "The provider answers archive requests but serves no media. The channel is flagged for catch-up yet keeps nothing.";
+    case "live":
+      return "Archive requests return the live stream instead of the requested time. The provider ignores the catch-up start.";
+    case "http":
+      return `Archive requests fail with HTTP ${failure.status ?? "error"} while the channel itself answers.`;
+    case "timeout":
+      return "Archive requests never answer.";
+    default:
+      return "Archive requests fail before any media arrives.";
+  }
+}
 
 /**
  * Derive a channel's verification verdict from its probe outcomes:
  * - no completed probes → still just "advertised"
- * - nothing reachable → "broken"
+ * - the −1 h point fails or serves live instead of archive → "fake"
  * - the advertised depth answered → "verified"
  * - otherwise the archive works but is shallower than advertised.
  */
@@ -24,10 +95,14 @@ export function archiveVerdict(
   if (!hasArchive(result)) return "advertised";
   const outcomes = entry?.outcomes ?? [];
   if (entry?.running || entry?.checkedAt == null || outcomes.length === 0) return "advertised";
-  if (!outcomes.some((outcome) => outcome.ok)) return "broken";
+  if (!outcomes.some((outcome) => outcome.ok)) return "fake";
+  const near = nearOutcome(entry);
+  if (near?.ok && !near.depthVerified && !near.depthUnknown) return "fake";
   if (!outcomes.some((outcome) => outcome.ok && outcome.depthVerified)) return "advertised";
   const advertisedDays = result.catchup_days;
   if (advertisedDays == null) return "verified";
+  // Quick mode stops after the near point: real, but depth not measured.
+  if (!outcomes.some((outcome) => outcome.daysBack > 0)) return "verified";
   if (
     outcomes.some(
       (outcome) => outcome.ok && outcome.depthUnknown && outcome.daysBack >= advertisedDays,
@@ -40,6 +115,11 @@ export function archiveVerdict(
   )
     ? "verified"
     : "shallower";
+}
+
+/** Whether the entry established depth beyond the near point (full mode). */
+export function archiveDepthMeasured(entry: ArchiveProbeEntry | undefined): boolean {
+  return (entry?.outcomes ?? []).some((outcome) => outcome.daysBack > 0);
 }
 
 /** Deepest point that answered, in days; null without any successful probe. */
@@ -74,15 +154,17 @@ export function archiveDepthMidpoint(workingDays: number, failingDays: number): 
 }
 
 /**
- * Verify one channel's archive: probe −1 h, then the advertised depth, and on
- * a mismatch bisect a few points to estimate the real depth. Streams partial
- * entries through `onUpdate`; points run sequentially (provider limits).
+ * Verify one channel's archive: probe −1 h (quick mode stops here with a
+ * real-or-fake answer), then the advertised depth, and on a mismatch bisect a
+ * few points to estimate the real depth. Streams partial entries through
+ * `onUpdate`; points run sequentially (provider limits).
  */
 export async function verifyChannelArchive(
   result: ChannelResult,
   onUpdate: (entry: ArchiveProbeEntry) => void,
   shouldCancel: () => boolean = () => false,
   signal?: AbortSignal,
+  mode: ArchiveVerifyMode = "full",
 ): Promise<ArchiveProbeEntry> {
   const nowEpochS = Math.floor(Date.now() / 1000);
   const outcomes: ArchiveProbeOutcome[] = [];
@@ -112,6 +194,9 @@ export async function verifyChannelArchive(
     return push(near, true, false);
   }
   if (!near?.ok) {
+    return push(near, true);
+  }
+  if (mode === "quick") {
     return push(near, true);
   }
   push(near, false);

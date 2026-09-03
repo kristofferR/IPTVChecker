@@ -1,7 +1,8 @@
 import { memo, type ReactNode, startTransition, useDeferredValue, useMemo } from "react";
 import { hasArchive } from "../lib/archive";
 import { computeCatchupScore, withCatchupScore } from "../lib/catchupScore";
-import { filterResultsShared } from "../lib/filters";
+import { archiveVerdict } from "../lib/archiveVerification";
+import { filterResultsShared, isCatchupStatusFilter } from "../lib/filters";
 import type { Channel } from "../lib/types";
 import { useAppStore } from "../store";
 import {
@@ -125,9 +126,31 @@ export const StatsPanel = memo(function StatsPanel() {
         statusFilter,
         duplicateIndices,
         separatePlaceholder,
+        archiveProbes,
       ).filter(hasArchive).length,
-    [completedResults, search, groupFilter, statusFilter, duplicateIndices, separatePlaceholder],
+    [
+      completedResults,
+      search,
+      groupFilter,
+      statusFilter,
+      duplicateIndices,
+      separatePlaceholder,
+      archiveProbes,
+    ],
   );
+  const verdictTally = useMemo(() => {
+    let real = 0;
+    let fake = 0;
+    let untested = 0;
+    for (const channel of channels) {
+      if (!hasArchive(channel)) continue;
+      const verdict = archiveVerdict(channel, archiveProbes[channel.index]);
+      if (verdict === "verified" || verdict === "shallower") real += 1;
+      else if (verdict === "fake") fake += 1;
+      else untested += 1;
+    }
+    return { real, fake, untested, tested: real + fake };
+  }, [channels, archiveProbes]);
 
   const selectedCatchupCount = useMemo(() => {
     if (selectedChannelIndices.length < 2) return 0;
@@ -139,9 +162,28 @@ export const StatsPanel = memo(function StatsPanel() {
     return count;
   }, [channels, selectedChannelIndices]);
   const catchupLabel =
-    visibleCatchupCount === catchupCount
-      ? `${catchupCount} catch-up`
-      : `${visibleCatchupCount} of ${catchupCount} catch-up`;
+    verdictTally.tested > 0
+      ? `${verdictTally.real} real · ${verdictTally.fake} fake${
+          verdictTally.untested > 0 ? ` · ${verdictTally.untested} untested` : ""
+        }`
+      : visibleCatchupCount === catchupCount
+        ? `${catchupCount} catch-up`
+        : `${visibleCatchupCount} of ${catchupCount} catch-up`;
+  // Before verification the pill toggles the catch-up filter; after it, clicks
+  // cycle through the real and fake verdicts.
+  const cycleCatchupFilter = () => {
+    if (verdictTally.tested === 0) {
+      toggleFilter("catchup");
+      return;
+    }
+    const next =
+      statusFilter === "catchup_real"
+        ? "catchup_fake"
+        : statusFilter === "catchup_fake"
+          ? "all"
+          : "catchup_real";
+    startTransition(() => setStatusFilter(next));
+  };
 
   const showSelectionInfo = selectedChannelIndices.length > 1 && catchupCount > 0;
   const showRightStatus =
@@ -217,8 +259,8 @@ export const StatsPanel = memo(function StatsPanel() {
           icon={<SFClockArrow className={iconSize} />}
           label={catchupLabel}
           color="violet"
-          active={statusFilter === "catchup"}
-          onClick={() => toggleFilter("catchup")}
+          active={isCatchupStatusFilter(statusFilter)}
+          onClick={cycleCatchupFilter}
         />
       )}
       {displayScore && (

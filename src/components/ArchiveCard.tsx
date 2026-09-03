@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ArchivePlayOptions, ArchiveSession } from "../hooks/useStreamPlayer";
 import { archivePickerDefault, archiveTitle, hasArchive, MAX_CATCHUP_DAYS } from "../lib/archive";
 import { probeChannelArchive } from "../lib/archiveProbe";
+import { archiveFailure, archiveFailureSentence, archiveVerdict } from "../lib/archiveVerification";
 import { ensureEpgLoaded, epgSourcesFor } from "../lib/epgLoader";
 import { isSingleConnectionPlaylist } from "../lib/playback";
 import { isScanActive } from "../lib/scanState";
@@ -55,6 +56,7 @@ function ArchiveProbe({ result, isCasting }: Pick<ArchiveCardProps, "result" | "
     isScanActive(scanState) ||
     playbackBlocksProbe;
   const outcomes = entry?.outcomes ?? [];
+  const failure = archiveVerdict(result, entry) === "fake" ? archiveFailure(entry) : null;
 
   const runProbe = () => {
     const state = useAppStore.getState();
@@ -120,6 +122,11 @@ function ArchiveProbe({ result, isCasting }: Pick<ArchiveCardProps, "result" | "
         {running && <LoaderCircle className="h-3 w-3 animate-spin" />}
         {running ? "Testing catch-up..." : "Test catch-up"}
       </button>
+      {failure && (
+        <p className="mt-2 text-[11px] leading-snug text-red-300">
+          <span className="font-semibold">Fake catch-up.</span> {archiveFailureSentence(failure)}
+        </p>
+      )}
       {outcomes.map((outcome) => (
         <div
           key={outcome.label}
