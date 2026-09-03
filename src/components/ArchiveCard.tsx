@@ -1,7 +1,7 @@
 import { CircleCheck, CircleX, LoaderCircle, Play } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ArchivePlayOptions, ArchiveSession } from "../hooks/useStreamPlayer";
-import { archiveTitle, hasArchive, MAX_CATCHUP_DAYS } from "../lib/archive";
+import { archivePickerDefault, archiveTitle, hasArchive, MAX_CATCHUP_DAYS } from "../lib/archive";
 import { probeChannelArchive } from "../lib/archiveProbe";
 import { logger } from "../lib/logger";
 import { isScanActive } from "../lib/scanState";
@@ -197,8 +197,8 @@ function ArchivePicker({
   onPlayArchive,
 }: Pick<ArchiveCardProps, "result" | "onPlayArchive">) {
   const depthDays = Math.min(MAX_CATCHUP_DAYS, Math.max(1, result.catchup_days ?? 1));
-  const [daysBack, setDaysBack] = useState(0);
-  const [time, setTime] = useState("20:00");
+  const [daysBack, setDaysBack] = useState(() => archivePickerDefault().daysBack);
+  const [time, setTime] = useState(() => archivePickerDefault().time);
   const now = new Date();
 
   const watchFrom = () => {
