@@ -922,6 +922,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       };
 
       if (preferNativeHls) {
+        logger.info("[Player] Trying native HLS for", result.name);
         lastErrorRef.current = null;
         const nativeOk = await tryNativePlayback(
           url,
@@ -932,8 +933,15 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           return;
         }
         if (nativeOk && (await handleSuccessfulStart())) {
+          logger.info("[Player] Playing via native HLS:", result.name);
           return;
         }
+        logger.info(
+          "[Player] Native HLS did not start for",
+          result.name,
+          "-",
+          lastErrorRef.current ?? "no media error reported",
+        );
       }
 
       // A playlist URL that answers with raw media (timeshift `.m3u8` redirecting
