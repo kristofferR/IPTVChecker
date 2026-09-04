@@ -47,14 +47,20 @@ interface GuideSelection {
   programme: EpgProgramme;
 }
 
+/**
+ * Archive channels can replay any programme inside their depth. Channels
+ * without catch-up can only play the programme airing right now, live.
+ */
 function isProgrammePlayable(selection: GuideSelection, nowEpochS: number): boolean {
+  const { result, programme } = selection;
+  if (!hasArchive(result)) {
+    return programme.start <= nowEpochS && programme.stop > nowEpochS;
+  }
   const earliestPlayable =
-    selection.result.catchup_days != null
-      ? nowEpochS - selection.result.catchup_days * 86_400
-      : null;
+    result.catchup_days != null ? nowEpochS - result.catchup_days * 86_400 : null;
   return (
-    selection.programme.start <= nowEpochS &&
-    (earliestPlayable == null || selection.programme.start >= earliestPlayable)
+    programme.start <= nowEpochS &&
+    (earliestPlayable == null || programme.start >= earliestPlayable)
   );
 }
 
@@ -117,20 +123,20 @@ const GuideRow = memo(function GuideRow({
     };
   }, [result.playlist, result.tvg_id, epgSourceKey, spanFrom, spanTo]);
 
-  const earliestPlayable =
-    result.catchup_days != null ? nowEpochS - result.catchup_days * 86_400 : null;
   const xOf = (epochS: number) => CHANNEL_COL_PX + ((epochS - spanFrom) / 3600) * PX_PER_HOUR;
 
   return (
     <div className="flex h-full items-stretch border-b border-border-subtle">
       <div
-        className="sticky left-0 z-10 flex shrink-0 items-center gap-1.5 border-r border-border-subtle bg-content px-2"
-        style={{ width: `${CHANNEL_COL_PX}px` }}
+        className="sticky left-0 z-10 flex shrink-0 items-center gap-1.5 border-r border-border-subtle px-2"
+        style={{ width: `${CHANNEL_COL_PX}px`, background: "var(--dropdown-bg)" }}
       >
         <span className="min-w-0 flex-1 truncate text-[11px] font-semibold">{result.name}</span>
-        <span className="shrink-0 text-[9px] font-bold uppercase text-violet-400">
-          {archiveBadgeText(result)}
-        </span>
+        {hasArchive(result) && (
+          <span className="shrink-0 text-[9px] font-bold uppercase text-violet-400">
+            {archiveBadgeText(result)}
+          </span>
+        )}
       </div>
       <div className="relative min-w-0 flex-1">
         {programmes === null ? (
@@ -153,10 +159,8 @@ const GuideRow = memo(function GuideRow({
             const left = xOf(Math.max(programme.start, spanFrom)) - CHANNEL_COL_PX;
             const width = xOf(Math.min(programme.stop, spanTo)) - CHANNEL_COL_PX - left;
             if (width < 2) return null;
-            const playable =
-              programme.start <= nowEpochS &&
-              (earliestPlayable == null || programme.start >= earliestPlayable);
             const selection: GuideSelection = { result, programme };
+            const playable = isProgrammePlayable(selection, nowEpochS);
             const selected = selectedKey === `${result.index}:${programme.start}`;
             return (
               <button
@@ -170,7 +174,9 @@ const GuideRow = memo(function GuideRow({
                   onSelect(selection);
                   onContextMenu(selection, event.clientX, event.clientY);
                 }}
-                title={`${timeLabel(programme.start)}–${timeLabel(programme.stop)} ${programme.title}${playable ? "" : " (unavailable)"}`}
+                title={`${timeLabel(programme.start)}–${timeLabel(programme.stop)} ${programme.title}${
+                  playable ? (hasArchive(result) ? "" : " (live now)") : " (unavailable)"
+                }`}
                 className={`absolute inset-y-[3px] flex items-center gap-1 overflow-hidden rounded px-1.5 text-left text-[10.5px] transition-colors ${
                   selected
                     ? "bg-violet-500/35 text-violet-100 ring-1 ring-violet-400/70"
@@ -204,9 +210,12 @@ interface ProgrammeMenuState {
 
 export function GuideView({
   onPlayArchive,
+  onPlayLive,
   headerPortalRef,
 }: {
   onPlayArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
+  /** Channels without catch-up play live when their current programme is activated. */
+  onPlayLive: (result: ChannelResult) => void;
   /**
    * macOS: the toolbar slot the table's column header normally fills. The
    * control strip renders there so the glass toolbar keeps the same height in
@@ -219,6 +228,10 @@ export function GuideView({
   const playlist = useAppStore((s) => s.playlist);
   const search = useAppStore((s) => s.search);
   const groupFilter = useAppStore((s) => s.groupFilter);
+  const statusFilter = useAppStore((s) => s.statusFilter);
+  const duplicateIndices = useAppStore((s) => s.duplicateIndices);
+  const separatePlaceholder = useAppStore((s) => s.settings.separate_placeholder_status);
+  const archiveProbes = useAppStore((s) => s.archiveProbes);
   const setViewMode = useAppStore((s) => s.setViewMode);
   const guideFocusChannelIndex = useAppStore((s) => s.guideFocusChannelIndex);
   const setGuideFocusChannelIndex = useAppStore((s) => s.setGuideFocusChannelIndex);
@@ -241,13 +254,34 @@ export function GuideView({
     return () => window.clearInterval(interval);
   }, []);
 
+  // Every live channel that matches the toolbar filters; catch-up is not required.
   const channels = useMemo(
-    () => filterResultsShared(flatResults, search, groupFilter, "all").filter(hasArchive),
-    [flatResults, search, groupFilter],
+    () =>
+      filterResultsShared(
+        flatResults,
+        search,
+        groupFilter,
+        statusFilter,
+        duplicateIndices,
+        separatePlaceholder,
+        archiveProbes,
+      ).filter((result) => result.content_type === "live"),
+    [
+      flatResults,
+      search,
+      groupFilter,
+      statusFilter,
+      duplicateIndices,
+      separatePlaceholder,
+      archiveProbes,
+    ],
   );
 
   const maxDepthDays = useMemo(() => {
-    const deepest = channels.reduce((max, channel) => Math.max(max, channel.catchup_days ?? 1), 1);
+    const deepest = channels.reduce(
+      (max, channel) => Math.max(max, hasArchive(channel) ? (channel.catchup_days ?? 1) : 0),
+      1,
+    );
     return Math.min(MAX_GUIDE_DEPTH_DAYS, deepest);
   }, [channels]);
 
@@ -379,6 +413,10 @@ export function GuideView({
   const activate = (target: GuideSelection) => {
     if (testing) return;
     if (!isProgrammePlayable(target, Math.floor(Date.now() / 1000))) return;
+    if (!hasArchive(target.result)) {
+      onPlayLive(target.result);
+      return;
+    }
     onPlayArchive(target.result, playOptionsFor(target));
   };
 
@@ -462,6 +500,7 @@ export function GuideView({
     ((playIntentActive || castActive) && isSingleConnectionPlaylist(playlist));
   const selectionPlayable = selection != null && isProgrammePlayable(selection, nowEpochS);
   const menuPlayable = menu != null && isProgrammePlayable(menu.selection, nowEpochS);
+  const menuArchive = menu != null && hasArchive(menu.selection.result);
 
   const select = (next: GuideSelection) => {
     testRequestRef.current += 1;
@@ -477,7 +516,7 @@ export function GuideView({
     for (let t = spanFrom; t < spanTo; t += 3600) hours.push(t);
     const days: number[] = [];
     for (let offset = maxDepthDays; offset >= 0; offset -= 1) days.push(startOfDayEpochS(offset));
-    return { hours, days };
+    return { hours, days, dayStarts: new Set(days) };
   }, [spanFrom, spanTo, maxDepthDays]);
 
   const dayTabs = useMemo(
@@ -576,7 +615,7 @@ export function GuideView({
 
       {channels.length === 0 ? (
         <div className="flex flex-1 items-center justify-center text-sm text-text-tertiary">
-          No catch-up channels match the current filters
+          No channels match the current filters
         </div>
       ) : (
         <div
@@ -592,8 +631,8 @@ export function GuideView({
               style={{ height: `${AXIS_HEIGHT_PX}px` }}
             >
               <div
-                className="sticky left-0 z-30 shrink-0 border-r border-border-subtle bg-panel-muted"
-                style={{ width: `${CHANNEL_COL_PX}px` }}
+                className="sticky left-0 z-30 shrink-0 border-r border-border-subtle"
+                style={{ width: `${CHANNEL_COL_PX}px`, background: "var(--dropdown-bg)" }}
               />
               <div className="relative flex-1">
                 {axis.hours.map((hour) => (
@@ -602,16 +641,16 @@ export function GuideView({
                     className="absolute top-0 flex h-full items-end border-l border-border-subtle/50 px-1 pb-0.5 tabular-nums"
                     style={{ left: `${xOf(hour) - CHANNEL_COL_PX}px` }}
                   >
-                    {timeLabel(hour)}
+                    {axis.dayStarts.has(hour) ? "" : timeLabel(hour)}
                   </span>
                 ))}
                 {axis.days.map((day) => (
                   <span
                     key={day}
-                    className="absolute top-0 border-l border-border-app px-1 text-[9px] font-semibold text-text-secondary"
+                    className="absolute top-0 flex h-full items-end border-l border-border-app px-1 pb-0.5 text-[9px] font-semibold text-text-secondary"
                     style={{ left: `${xOf(day) - CHANNEL_COL_PX}px` }}
                   >
-                    {dayLabel(day + 43_200)}
+                    {dayLabel(day + 43_200)} 00:00
                   </span>
                 ))}
               </div>
@@ -681,24 +720,26 @@ export function GuideView({
             }}
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
           >
-            <Play className="h-3.5 w-3.5" /> Play
+            <Play className="h-3.5 w-3.5" /> {menuArchive ? "Play" : "Play live"}
           </button>
-          <button
-            type="button"
-            disabled={!menuPlayable}
-            onClick={() => {
-              const target = menu.selection;
-              setMenu(null);
-              void startArchiveDownload(target.result, playOptionsFor(target));
-            }}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
-          >
-            <Download className="h-3.5 w-3.5" /> Download…
-          </button>
+          {menuArchive && (
+            <button
+              type="button"
+              disabled={!menuPlayable}
+              onClick={() => {
+                const target = menu.selection;
+                setMenu(null);
+                void startArchiveDownload(target.result, playOptionsFor(target));
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
+            >
+              <Download className="h-3.5 w-3.5" /> Download…
+            </button>
+          )}
           <div className="my-1 h-px bg-border-subtle" />
           <button
             type="button"
-            disabled={testBlocked || !menuPlayable}
+            disabled={testBlocked || !menuPlayable || !menuArchive}
             onClick={() => {
               const target = menu.selection;
               setMenu(null);
@@ -713,11 +754,15 @@ export function GuideView({
             onClick={() => {
               const target = menu.selection;
               setMenu(null);
-              void copyArchiveUrl(target);
+              if (menuArchive) {
+                void copyArchiveUrl(target);
+              } else {
+                void navigator.clipboard.writeText(target.result.url);
+              }
             }}
             className="w-full px-3 py-2 text-left text-[13px] hover:bg-btn-hover"
           >
-            Copy Archive URL
+            {menuArchive ? "Copy Archive URL" : "Copy URL"}
           </button>
         </div>
       )}

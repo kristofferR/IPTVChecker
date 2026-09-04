@@ -155,7 +155,24 @@ impl EpgIndex {
             .collect::<Vec<_>>();
         programmes.sort_by_key(|programme| programme.start);
         programmes.dedup();
+        Self::drop_overlaps(&mut programmes);
         programmes
+    }
+
+    /// Guides sometimes list a slot twice with slightly different times (two
+    /// listings merged, or a provider's own duplicates). Keep the earlier
+    /// entry and drop anything that starts inside it; a minute of overlap is
+    /// tolerated as rounding.
+    fn drop_overlaps(programmes: &mut Vec<EpgProgramme>) {
+        const OVERLAP_TOLERANCE_S: i64 = 60;
+        let mut last_stop = i64::MIN;
+        programmes.retain(|programme| {
+            if programme.start < last_stop.saturating_sub(OVERLAP_TOLERANCE_S) {
+                return false;
+            }
+            last_stop = last_stop.max(programme.stop);
+            true
+        });
     }
 
     pub fn merge(&mut self, other: EpgIndex) {
@@ -623,6 +640,35 @@ pub async fn download_epg_source(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn overlapping_listings_keep_the_earlier_entry() {
+        let mut programmes = vec![
+            EpgProgramme {
+                start: 100,
+                stop: 200,
+                title: "A".into(),
+            },
+            EpgProgramme {
+                start: 130,
+                stop: 220,
+                title: "A again".into(),
+            },
+            EpgProgramme {
+                start: 199,
+                stop: 300,
+                title: "B (rounded)".into(),
+            },
+            EpgProgramme {
+                start: 300,
+                stop: 400,
+                title: "C".into(),
+            },
+        ];
+        EpgIndex::drop_overlaps(&mut programmes);
+        let titles: Vec<&str> = programmes.iter().map(|p| p.title.as_str()).collect();
+        assert_eq!(titles, vec!["A", "B (rounded)", "C"]);
+    }
+
     use super::*;
     use std::io::Write;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

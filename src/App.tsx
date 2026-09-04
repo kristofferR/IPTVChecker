@@ -1748,6 +1748,7 @@ export default function App() {
                 viewMode === "guide" ? (
                   <GuideView
                     onPlayArchive={handleGuidePlayArchive}
+                    onPlayLive={handlePlayInApp}
                     headerPortalRef={isMac ? headerPortalRef : undefined}
                   />
                 ) : tableProfilerEnabled ? (

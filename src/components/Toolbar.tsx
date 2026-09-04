@@ -825,8 +825,8 @@ export const Toolbar = memo(function Toolbar({
         </button>
       </div>
 
-      {/* Table / Guide mode switch; only meaningful with catch-up channels */}
-      {hasPlaylist && ((statusOptionCounts.catchup ?? 0) > 0 || viewMode === "guide") && (
+      {/* Table / Guide mode switch */}
+      {hasPlaylist && (
         <div
           data-no-window-drag
           className="ml-1.5 flex shrink-0 items-center gap-0.5 rounded-lg border border-border-app bg-input p-0.5"

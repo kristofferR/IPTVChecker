@@ -1,5 +1,4 @@
 import { useAppStore } from "../store";
-import { hasArchive } from "./archive";
 import { logger } from "./logger";
 import { getEpgProgrammes, loadEpg } from "./tauri";
 import type { ChannelResult, EpgLoadSummary, EpgProgramme } from "./types";
@@ -17,11 +16,15 @@ const EPG_LOAD_TTL_MS = 6 * 60 * 60 * 1_000;
 function epgLoadRequest() {
   const state = useAppStore.getState();
   const sources = state.playlist?.epg_sources ?? [];
-  const tvgIds = state.flatResults
-    .filter(hasArchive)
-    .map((result) => result.tvg_id)
-    .filter((id): id is string => !!id)
-    .sort();
+  // The guide lists every channel, so the index must cover all of them.
+  const tvgIds = Array.from(
+    new Set(
+      state.flatResults
+        .filter((result) => result.content_type === "live")
+        .map((result) => result.tvg_id)
+        .filter((id): id is string => !!id),
+    ),
+  ).sort();
   const key = JSON.stringify([
     state.playlist?.source_identity ?? state.playlist?.file_path ?? "",
     sources,
