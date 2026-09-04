@@ -42,7 +42,9 @@ fn validate(request: &ArchiveDownloadRequest) -> Result<(), AppError> {
         ));
     }
     if request.path.trim().is_empty() {
-        return Err(AppError::Validation("Choose where to save the recording".to_string()));
+        return Err(AppError::Validation(
+            "Choose where to save the recording".to_string(),
+        ));
     }
     if request.duration_s == 0 || request.duration_s > MAX_DOWNLOAD_DURATION_S {
         return Err(AppError::Validation(format!(

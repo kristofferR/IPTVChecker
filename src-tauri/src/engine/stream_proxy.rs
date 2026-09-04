@@ -145,11 +145,7 @@ const STREAM_KIND_HEADER: &str = "x-iptv-stream-kind";
 /// panels redirect timeshift `.m3u8` URLs straight to a `.ts` stream). Buffering
 /// that body would only stall hls.js until the size cap; the player has an
 /// MPEG-TS route for it instead.
-fn manifest_request_served_media(
-    requested_url: &str,
-    content_type: &str,
-    final_url: &str,
-) -> bool {
+fn manifest_request_served_media(requested_url: &str, content_type: &str, final_url: &str) -> bool {
     if !is_m3u8_response("", requested_url) || is_m3u8_response(content_type, final_url) {
         return false;
     }
@@ -1486,7 +1482,11 @@ mod tests {
             "http://cdn/hls/abc/2026-09-03:21-00.ts"
         ));
         // A real playlist answer, whatever the content type.
-        assert!(!manifest_request_served_media(m3u8, "application/octet-stream", m3u8));
+        assert!(!manifest_request_served_media(
+            m3u8,
+            "application/octet-stream",
+            m3u8
+        ));
         assert!(!manifest_request_served_media(
             m3u8,
             "application/vnd.apple.mpegurl",
