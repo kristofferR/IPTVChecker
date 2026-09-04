@@ -240,7 +240,7 @@ mod tests {
             inner: std::io::Cursor::new(b"<tv></tv>".to_vec()),
             cancel,
         });
-        let error = reader.fill_buf().err().expect("cancelled read must fail");
+        let error = reader.fill_buf().expect_err("cancelled read must fail");
         assert_ne!(error.kind(), std::io::ErrorKind::Interrupted);
     }
 }
