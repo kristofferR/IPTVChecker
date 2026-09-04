@@ -7,9 +7,11 @@ import {
   classifyStream,
   decidePlaybackRecovery,
   formatPlaybackRecoveryMessage,
+  getArchiveFallbackRoutes,
   getMpegtsPlaybackRoutes,
   type HlsErrorPayload,
   isHlsManifestRejection,
+  isHlsMediaRejection,
   MAX_PLAYBACK_RECOVERY_ATTEMPTS,
   type PlaybackRecoveryIssue,
   type PlaybackStartMode,
@@ -967,6 +969,31 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             "[Player] Playlist URL served raw media; trying MPEG-TS routes for",
             result.name,
           );
+        } else if (result.content_type !== "live" && isHlsMediaRejection(lastErrorRef.current)) {
+          // Catch-up media hls.js cannot play (HEVC in TS): raw timeshift
+          // stream via mpegts.js, then an ffmpeg remux of the playlist.
+          let proxyPort = 0;
+          try {
+            proxyPort = await getStreamingProxyPort();
+          } catch {
+            logger.warn("[Player] Could not get streaming proxy port");
+          }
+          for (const route of getArchiveFallbackRoutes(url, proxyPort)) {
+            logger.info(
+              route.kind === "remux"
+                ? "[Player] Trying ffmpeg remux of the archive playlist for"
+                : "[Player] Trying raw timeshift stream via mpegts.js for",
+              result.name,
+            );
+            lastErrorRef.current = null;
+            const mpegtsOk = await tryMpegtsPlayback(route.url, abortController.signal, false);
+            if (!isCurrentPlayback()) {
+              return;
+            }
+            if (mpegtsOk && (await handleSuccessfulStart())) {
+              return;
+            }
+          }
         }
       }
 
