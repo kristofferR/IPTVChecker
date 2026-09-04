@@ -20,10 +20,10 @@ struct CancellableReader<R> {
 impl<R: Read> Read for CancellableReader<R> {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         if self.cancel.is_cancelled() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Interrupted,
-                "EPG load superseded",
-            ));
+            // Not `Interrupted`: BufReader and the XML parser retry that kind
+            // forever, which kept a superseded load spinning while holding
+            // the load lock.
+            return Err(std::io::Error::other("EPG load superseded"));
         }
         self.inner.read(buffer)
     }
@@ -225,4 +225,22 @@ pub async fn get_epg_programmes(
     Ok(index
         .map(|index| index.programmes_for_sources(&sources, &tvg_id, from, to))
         .unwrap_or_default())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::BufRead;
+
+    #[test]
+    fn cancelled_reader_fails_instead_of_retrying() {
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let mut reader = std::io::BufReader::new(CancellableReader {
+            inner: std::io::Cursor::new(b"<tv></tv>".to_vec()),
+            cancel,
+        });
+        let error = reader.fill_buf().err().expect("cancelled read must fail");
+        assert_ne!(error.kind(), std::io::ErrorKind::Interrupted);
+    }
 }
