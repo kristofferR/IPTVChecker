@@ -323,20 +323,30 @@ export function GuideView({
     return () => window.removeEventListener("keydown", handler);
   }, [setViewMode, menu]);
 
-  const parentRef = useRef<HTMLDivElement>(null);
+  // The scroller mounts only once there are channels (catch-up flags can
+  // arrive after the playlist), so it is tracked as state: effects that need
+  // it must re-run when it appears, not just on first render.
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const parentRef = useRef<HTMLDivElement | null>(null);
+  const attachScrollEl = useCallback((el: HTMLDivElement | null) => {
+    parentRef.current = el;
+    setScrollEl(el);
+  }, []);
   const virtualizer = useVirtualizer({
     count: channels.length,
-    getScrollElement: () => parentRef.current,
+    getScrollElement: () => scrollEl,
     estimateSize: () => ROW_HEIGHT_PX,
     overscan: 10,
     scrollMargin: AXIS_HEIGHT_PX,
   });
 
   // Horizontal window actually rendered, quantized to keep row props stable.
-  const [renderRange, setRenderRange] = useState<{ from: number; to: number }>(() => ({
-    from: spanFrom,
-    to: spanTo,
-  }));
+  // Until the scroller reports its viewport, render only the hours around now;
+  // the full span would put thousands of programme boxes in the DOM.
+  const [renderRange, setRenderRange] = useState<{ from: number; to: number }>(() => {
+    const now = Math.floor(Date.now() / 1000);
+    return { from: now - 8 * 3600, to: now + 3 * 3600 };
+  });
   const updateRenderRange = useCallback(() => {
     const el = parentRef.current;
     if (!el) return;
@@ -377,17 +387,16 @@ export function GuideView({
   // First paint: put "now" toward the right edge so the recent past fills the view.
   const initialScrollDone = useRef(false);
   useLayoutEffect(() => {
-    if (initialScrollDone.current) return;
+    if (!scrollEl || initialScrollDone.current) return;
     initialScrollDone.current = true;
     scrollToTime(Math.floor(Date.now() / 1000));
-  }, [scrollToTime]);
+  }, [scrollEl, scrollToTime]);
   useEffect(() => {
-    const el = parentRef.current;
-    if (!el) return;
+    if (!scrollEl) return;
     const observer = new ResizeObserver(updateRenderRange);
-    observer.observe(el);
+    observer.observe(scrollEl);
     return () => observer.disconnect();
-  }, [updateRenderRange]);
+  }, [scrollEl, updateRenderRange]);
 
   // Right-click "Browse Catch-up" lands on the requested channel.
   useEffect(() => {
@@ -619,7 +628,7 @@ export function GuideView({
         </div>
       ) : (
         <div
-          ref={parentRef}
+          ref={attachScrollEl}
           onScroll={handleScroll}
           onContextMenu={(event) => event.preventDefault()}
           className="native-scroll relative min-h-0 flex-1 overflow-auto"
@@ -635,15 +644,17 @@ export function GuideView({
                 style={{ width: `${CHANNEL_COL_PX}px`, background: "var(--dropdown-bg)" }}
               />
               <div className="relative flex-1">
-                {axis.hours.map((hour) => (
-                  <span
-                    key={hour}
-                    className="absolute top-0 flex h-full items-end border-l border-border-subtle/50 px-1 pb-0.5 tabular-nums"
-                    style={{ left: `${xOf(hour) - CHANNEL_COL_PX}px` }}
-                  >
-                    {axis.dayStarts.has(hour) ? "" : timeLabel(hour)}
-                  </span>
-                ))}
+                {axis.hours.map((hour) =>
+                  hour < renderRange.from || hour > renderRange.to ? null : (
+                    <span
+                      key={hour}
+                      className="absolute top-0 flex h-full items-end border-l border-border-subtle/50 px-1 pb-0.5 tabular-nums"
+                      style={{ left: `${xOf(hour) - CHANNEL_COL_PX}px` }}
+                    >
+                      {axis.dayStarts.has(hour) ? "" : timeLabel(hour)}
+                    </span>
+                  ),
+                )}
                 {axis.days.map((day) => (
                   <span
                     key={day}
