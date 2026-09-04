@@ -9,6 +9,7 @@ import {
   formatPlaybackRecoveryMessage,
   getMpegtsPlaybackRoutes,
   type HlsErrorPayload,
+  isHlsManifestRejection,
   MAX_PLAYBACK_RECOVERY_ATTEMPTS,
   type PlaybackRecoveryIssue,
   type PlaybackStartMode,
@@ -935,6 +936,10 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       }
 
+      // A playlist URL that answers with raw media (timeshift `.m3u8` redirecting
+      // to `.ts`) is rejected by the proxy up front; hls.js then reports a
+      // manifest error, and the MPEG-TS routes below take over.
+      let hlsManifestRejected = false;
       if (streamType === "hls") {
         logger.info("[Player] Trying hls.js via proxy for", result.name);
         lastErrorRef.current = null;
@@ -948,6 +953,13 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             return;
           }
         }
+        hlsManifestRejected = isHlsManifestRejection(lastErrorRef.current);
+        if (hlsManifestRejected) {
+          logger.info(
+            "[Player] Playlist URL served raw media; trying MPEG-TS routes for",
+            result.name,
+          );
+        }
       }
 
       // Xtream HLS is the WebView-native path and normally starts quickly.
@@ -960,7 +972,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         return;
       }
 
-      if (streamType === "mpegts" || streamType === "unknown") {
+      if (streamType === "mpegts" || streamType === "unknown" || hlsManifestRejected) {
         const isLive = result.content_type === "live";
         let proxyPort = 0;
         try {
@@ -994,7 +1006,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       }
 
-      if (streamType !== "hls") {
+      if (streamType !== "hls" || hlsManifestRejected) {
         lastErrorRef.current = null;
         const nativeOk = await tryNativePlayback(
           url,

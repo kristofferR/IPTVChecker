@@ -414,3 +414,13 @@ export function decidePlaybackRecovery(
     nextAttempt,
   };
 }
+
+/**
+ * hls.js gave up on the playlist itself rather than on media: the proxy's 409
+ * for playlist URLs that serve raw MPEG-TS, or an unparsable manifest body.
+ */
+export function isHlsManifestRejection(reason: string | null | undefined): boolean {
+  return /manifestLoadError|manifestParsingError|manifestIncompatibleCodecsError/i.test(
+    reason ?? "",
+  );
+}

@@ -138,6 +138,35 @@ fn is_m3u8_response(content_type: &str, url: &str) -> bool {
     crate::engine::proxy_common::is_m3u8_response(content_type, url)
 }
 
+/// Header telling the player what a rejected manifest request really served.
+const STREAM_KIND_HEADER: &str = "x-iptv-stream-kind";
+
+/// True when a request for a playlist URL was answered with raw media (some
+/// panels redirect timeshift `.m3u8` URLs straight to a `.ts` stream). Buffering
+/// that body would only stall hls.js until the size cap; the player has an
+/// MPEG-TS route for it instead.
+fn manifest_request_served_media(
+    requested_url: &str,
+    content_type: &str,
+    final_url: &str,
+) -> bool {
+    if !is_m3u8_response("", requested_url) || is_m3u8_response(content_type, final_url) {
+        return false;
+    }
+    let ct = content_type.to_lowercase();
+    if ct.starts_with("video/") || ct.starts_with("audio/") {
+        return true;
+    }
+    url::Url::parse(final_url)
+        .map(|parsed| {
+            let path = parsed.path().to_lowercase();
+            [".ts", ".m2ts", ".mp4", ".mkv"]
+                .iter()
+                .any(|ext| path.ends_with(ext))
+        })
+        .unwrap_or(false)
+}
+
 /// Rewrite URIs in an HLS manifest so they go through the stream proxy.
 fn rewrite_m3u8_manifest(body: &str, base_url: &str) -> String {
     crate::engine::proxy_common::rewrite_hls_manifest(body, base_url, &|resolved| {
@@ -420,6 +449,20 @@ pub async fn handle_proxy_request(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_string();
+
+    if status < 400 && manifest_request_served_media(&original_url, &content_type, &final_url) {
+        log::info!(
+            "Stream proxy: playlist URL {} answered with media ({}); leaving it to the MPEG-TS route",
+            redact_url(&original_url),
+            if content_type.is_empty() { "no content-type" } else { content_type.as_str() }
+        );
+        drop(upstream_response);
+        let mut response = error_response(409, "Playlist URL served a media stream");
+        if let Ok(value) = HeaderValue::from_str("mpegts") {
+            response.headers_mut().insert(STREAM_KIND_HEADER, value);
+        }
+        return response;
+    }
 
     let body =
         match crate::engine::proxy_common::read_capped(upstream_response, PROXY_BUFFERED_MAX_BYTES)
@@ -1428,6 +1471,35 @@ fn parse_stream_request(request: &str) -> Option<StreamRequest> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn manifest_request_served_media_detects_ts_redirects_only() {
+        use super::manifest_request_served_media;
+        let m3u8 = "http://panel/timeshift/u/p/60/2026-09-03:21-00/1.m3u8";
+        assert!(manifest_request_served_media(
+            m3u8,
+            "video/mp2t",
+            "http://cdn/hls/abc/2026-09-03:21-00.ts?token=1"
+        ));
+        assert!(manifest_request_served_media(
+            m3u8,
+            "",
+            "http://cdn/hls/abc/2026-09-03:21-00.ts"
+        ));
+        // A real playlist answer, whatever the content type.
+        assert!(!manifest_request_served_media(m3u8, "application/octet-stream", m3u8));
+        assert!(!manifest_request_served_media(
+            m3u8,
+            "application/vnd.apple.mpegurl",
+            "http://cdn/variant.ts"
+        ));
+        // Segment requests are media by design.
+        assert!(!manifest_request_served_media(
+            "http://cdn/seg1.ts",
+            "video/mp2t",
+            "http://cdn/seg1.ts"
+        ));
+    }
+
     use super::*;
     use std::time::{Duration, Instant};
     use tokio::io::AsyncReadExt;
