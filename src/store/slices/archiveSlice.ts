@@ -37,6 +37,7 @@ export const createArchiveSlice: StateCreator<AppStore, [], [], ArchiveSlice> = 
       const { [id]: _removed, ...rest } = state.archiveDownloads;
       return { archiveDownloads: rest };
     }),
+  restoreArchiveProbes: (archiveProbes) => set({ archiveProbes }),
   clearArchiveProbes: () =>
     set((state) => ({
       archiveProbes: {},

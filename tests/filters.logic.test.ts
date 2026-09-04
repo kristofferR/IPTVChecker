@@ -147,6 +147,10 @@ describe("filterResults", () => {
       duplicates: 2,
       pending: 1,
       catchup: 0,
+      catchup_real: 0,
+      catchup_shallower: 0,
+      catchup_fake: 0,
+      catchup_untested: 0,
     });
   });
 

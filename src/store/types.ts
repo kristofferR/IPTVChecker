@@ -1,6 +1,7 @@
 import type { ScanUiMetrics } from "../hooks/useScan.helpers";
 import type { ArchiveDownload } from "../lib/archiveDownload";
 import type { ArchiveProbeEntry } from "../lib/archiveProbe";
+import type { ArchiveVerifyRun } from "../lib/archiveVerifyRun";
 import type { Platform } from "../lib/platform";
 import type { ScanState } from "../lib/scanState";
 import type {
@@ -122,7 +123,7 @@ export interface ArchiveSlice {
   /** Result of the most recent XMLTV load for the current playlist. */
   epgLoadSummary: EpgLoadSummary | null;
   /** Progress of a playlist-wide catch-up verification run. */
-  archiveVerifyRun: { running: boolean; done: number; total: number } | null;
+  archiveVerifyRun: ArchiveVerifyRun | null;
   /** When set, a full verification pass starts after the scan completes. */
   verifyCatchupAfterScan: boolean;
   /** Programme recordings in flight or recently finished, keyed by id. */
@@ -131,11 +132,13 @@ export interface ArchiveSlice {
   setArchiveProbe: (generation: number, index: number, entry: ArchiveProbeEntry) => void;
   setArchiveGuideTestRunning: (running: boolean) => void;
   setEpgLoadSummary: (summary: EpgLoadSummary | null) => void;
-  setArchiveVerifyRun: (run: { running: boolean; done: number; total: number } | null) => void;
+  setArchiveVerifyRun: (run: ArchiveVerifyRun | null) => void;
   setVerifyCatchupAfterScan: (value: boolean) => void;
   upsertArchiveDownload: (download: ArchiveDownload) => void;
   patchArchiveDownload: (id: string, patch: Partial<ArchiveDownload>) => void;
   removeArchiveDownload: (id: string) => void;
+  /** Replace probe entries wholesale (restoring persisted verdicts). */
+  restoreArchiveProbes: (probes: Record<number, ArchiveProbeEntry>) => void;
   /** Reset all per-playlist archive state (probes and EPG summary). */
   clearArchiveProbes: () => void;
 }
