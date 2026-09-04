@@ -146,6 +146,7 @@ export function ChannelTable({
   const archiveProbeRunning = useAppStore((s) =>
     Object.values(s.archiveProbes).some((entry) => entry.running),
   );
+  const archiveProbes = useAppStore((s) => s.archiveProbes);
   const isMac = useAppStore((s) => s.isMac);
   const channelLogoSize = useAppStore((s) => s.settings.channel_logo_size);
   const isPlaying = useAppStore((s) => s.playIntentActive);
@@ -330,6 +331,7 @@ export function ChannelTable({
             statusFilter,
             duplicateIndices,
             separatePlaceholder,
+            archiveProbes,
           );
           return sortResults(filtered, sortField, sortDir);
         },
@@ -350,6 +352,7 @@ export function ChannelTable({
       sortField,
       sortDir,
       separatePlaceholder,
+      archiveProbes,
     ],
   );
 

@@ -21,6 +21,7 @@ import {
 } from "react";
 import { setLiquidGlassEffect } from "tauri-plugin-liquid-glass-api";
 import { AppBanners } from "./components/AppBanners";
+import { ArchiveVerifyBar } from "./components/ArchiveVerifyBar";
 import type { CastStartHandler } from "./components/CastMenu";
 import { ChannelTable } from "./components/ChannelTable";
 import { FilterBar } from "./components/FilterBar";
@@ -40,6 +41,11 @@ import { type ArchivePlayOptions, useStreamPlayer } from "./hooks/useStreamPlaye
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 import { resolveArchivePlayback } from "./lib/archive";
 import { cancelArchiveProbes } from "./lib/archiveProbe";
+import {
+  archiveProbeStorageKey,
+  loadArchiveProbes,
+  saveArchiveProbes,
+} from "./lib/archiveProbeStorage";
 import { registerArchiveTimezoneResolver } from "./lib/archiveTimezone";
 import { isArchiveVerificationBlockingPlayback, verifyAllArchives } from "./lib/archiveVerifyRun";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
@@ -717,6 +723,32 @@ export default function App() {
       cancelled = true;
     };
   }, [platform]);
+
+  // Catch-up verdicts persist per playlist: restore on open, save as they change.
+  useEffect(() => {
+    if (!playlist) return;
+    const key = archiveProbeStorageKey(playlist);
+    const state = getStore();
+    if (Object.keys(state.archiveProbes).length === 0) {
+      const restored = loadArchiveProbes(key, state.flatResults);
+      if (restored) state.restoreArchiveProbes(restored);
+    }
+    let timer: number | null = null;
+    const unsubscribe = useAppStore.subscribe((next, previous) => {
+      if (next.archiveProbes === previous.archiveProbes || next.playlist !== playlist) return;
+      if (timer != null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = null;
+        const latest = getStore();
+        if (latest.playlist !== playlist) return;
+        saveArchiveProbes(key, latest.archiveProbes, latest.flatResults);
+      }, 1000);
+    });
+    return () => {
+      unsubscribe();
+      if (timer != null) window.clearTimeout(timer);
+    };
+  }, [playlist]);
 
   useEffect(() => {
     const title = playlist ? `${playlist.file_name} | IPTV Checker` : "IPTV Checker";
@@ -1752,6 +1784,7 @@ export default function App() {
           </div>
 
           <StatsPanel />
+          <ArchiveVerifyBar />
           <ProgressBar />
         </div>
       </div>

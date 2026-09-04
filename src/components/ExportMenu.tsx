@@ -1,6 +1,8 @@
 import { save } from "@tauri-apps/plugin-dialog";
 import { ChevronDown, CircleAlert, CircleCheck, Download, Info, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { realCatchupResults, stripFakeCatchupResults } from "../lib/archiveExport";
+import type { ArchiveProbeEntry } from "../lib/archiveProbe";
 import { type ExportScope, exportScopeFileSuffix, exportScopeLabel } from "../lib/exportScope";
 import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "../lib/haptics";
 import { logger } from "../lib/logger";
@@ -23,6 +25,9 @@ interface ExportMenuProps {
   } | null;
   scanState: ScanState;
   isMac?: boolean;
+  /** Catch-up verdicts; enables the verdict-based playlist exports once any exist. */
+  archiveProbes?: Record<number, ArchiveProbeEntry>;
+  catchupVerdictsAvailable?: boolean;
 }
 
 interface ExportFeedback {
@@ -40,6 +45,8 @@ export function ExportMenu({
   menuRequest,
   scanState,
   isMac,
+  archiveProbes,
+  catchupVerdictsAvailable = false,
 }: ExportMenuProps) {
   const IconExport = isMac ? SFSquareArrowUp : Download;
   const IconChevron = isMac ? SFChevronDown : ChevronDown;
@@ -246,6 +253,48 @@ export function ExportMenu({
     }
   }, [scope, sourceStem, resolveScopedResults, showFeedback]);
 
+  const exportCatchupPlaylist = useCallback(
+    async (variant: "real" | "stripped") => {
+      const scoped = resolveScopedResults();
+      if (!scoped) return;
+      setOpen(false);
+      const probes = archiveProbes ?? {};
+      const results =
+        variant === "real"
+          ? realCatchupResults(scoped, probes)
+          : stripFakeCatchupResults(scoped, probes);
+      if (results.length === 0) {
+        showFeedback({ kind: "info", message: "No verified catch-up channels to export." });
+        return;
+      }
+      const suffix = variant === "real" ? "real-catchup" : "no-fake-catchup";
+      const path = await save({
+        defaultPath: `${sourceStem}_${exportScopeFileSuffix(scope)}_${suffix}.m3u8`,
+        filters: [{ name: "M3U Playlist", extensions: ["m3u8", "m3u"] }],
+      });
+      if (!path) {
+        showFeedback({ kind: "info", message: "M3U export cancelled." });
+        return;
+      }
+      setBusyAction("m3u");
+      try {
+        await exportM3u(results, path);
+        showFeedback({
+          kind: "success",
+          message:
+            variant === "real"
+              ? `Exported ${results.length} channels with working catch-up to ${path}.`
+              : `Exported ${results.length} channels with fake catch-up flags removed to ${path}.`,
+        });
+      } catch (err) {
+        showFeedback({ kind: "error", message: `M3U export failed: ${String(err)}` });
+      } finally {
+        setBusyAction(null);
+      }
+    },
+    [archiveProbes, resolveScopedResults, scope, showFeedback, sourceStem],
+  );
+
   const handleExportScanLog = useCallback(async () => {
     if (scanState === "idle") {
       showFeedback({
@@ -415,6 +464,26 @@ export function ExportMenu({
           >
             Export M3U/M3U8
           </button>
+          {catchupVerdictsAvailable && (
+            <>
+              <button
+                onClick={() => void exportCatchupPlaylist("real")}
+                disabled={exporting}
+                className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
+                title="Only channels whose archive answered, with the measured depth written back"
+              >
+                Real Catch-up Only (M3U)
+              </button>
+              <button
+                onClick={() => void exportCatchupPlaylist("stripped")}
+                disabled={exporting}
+                className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
+                title="The full list with catch-up attributes removed from fake channels"
+              >
+                Playlist Without Fake Catch-up
+              </button>
+            </>
+          )}
           <button
             onClick={handleExportScanLog}
             disabled={exporting || scanState === "idle"}

@@ -30,8 +30,19 @@ import {
   useState,
 } from "react";
 import { hasArchive } from "../lib/archive";
+import { type ArchiveVerifyMode, archiveVerdict } from "../lib/archiveVerification";
+import {
+  readArchiveVerifyMode,
+  storeArchiveVerifyMode,
+  verifyArchives,
+} from "../lib/archiveVerifyRun";
 import type { ExportScope } from "../lib/exportScope";
-import { countStatusOptions, filterResultsShared, sharedSearchTextCache } from "../lib/filters";
+import {
+  CATCHUP_VERDICT_FILTERS,
+  countStatusOptions,
+  filterResultsShared,
+  sharedSearchTextCache,
+} from "../lib/filters";
 import { measureUiPerf } from "../lib/perf";
 import { validateSourceFilterPattern } from "../lib/sourceFilter";
 import type { ChannelResult } from "../lib/types";
@@ -143,6 +154,7 @@ export const Toolbar = memo(function Toolbar({
   const archiveProbeRunning = useAppStore((s) =>
     Object.values(s.archiveProbes).some((entry) => entry.running),
   );
+  const archiveProbes = useAppStore((s) => s.archiveProbes);
   const completedResults = useAppStore((s) => s.flatResults);
   const duplicateIndices = useAppStore((s) => s.duplicateIndices);
   const menuExportRequest = useAppStore((s) => s.menuExportRequest);
@@ -160,6 +172,10 @@ export const Toolbar = memo(function Toolbar({
   const [openMenuVisible, setOpenMenuVisible] = useState(false);
   const scanMenuRef = useRef<HTMLDivElement | null>(null);
   const [scanMenuVisible, setScanMenuVisible] = useState(false);
+  const verifyMenuRef = useRef<HTMLDivElement | null>(null);
+  const [verifyMenuVisible, setVerifyMenuVisible] = useState(false);
+  const [verifyMode, setVerifyMode] = useState<ArchiveVerifyMode>(readArchiveVerifyMode);
+  const [verifyScope, setVerifyScope] = useState<ExportScope>("all");
   const [groupSelectWidth, setGroupSelectWidth] = useState<number | null>(null);
 
   const filteredExportResults = useMemo(
@@ -174,6 +190,7 @@ export const Toolbar = memo(function Toolbar({
             statusFilter,
             duplicateIndices,
             separatePlaceholder,
+            archiveProbes,
           ),
         {
           rows: completedResults.length,
@@ -189,6 +206,7 @@ export const Toolbar = memo(function Toolbar({
       statusFilter,
       duplicateIndices,
       separatePlaceholder,
+      archiveProbes,
     ],
   );
 
@@ -201,13 +219,51 @@ export const Toolbar = memo(function Toolbar({
         duplicateIndices,
         sharedSearchTextCache,
         separatePlaceholder,
+        archiveProbes,
       ),
-    [completedResults, deferredSearch, groupFilter, duplicateIndices, separatePlaceholder],
+    [
+      completedResults,
+      deferredSearch,
+      groupFilter,
+      duplicateIndices,
+      separatePlaceholder,
+      archiveProbes,
+    ],
   );
   const catchupChannelCount = useMemo(
     () => completedResults.filter(hasArchive).length,
     [completedResults],
   );
+  const catchupVerdictsAvailable = useMemo(
+    () =>
+      completedResults.some(
+        (result) =>
+          hasArchive(result) &&
+          archiveVerdict(result, archiveProbes[result.index]) !== "advertised",
+      ),
+    [completedResults, archiveProbes],
+  );
+  const verifyScopeCounts = useMemo(() => {
+    const selected = new Set(selectedIndices);
+    return {
+      all: catchupChannelCount,
+      filtered: filteredExportResults.filter(hasArchive).length,
+      selected: completedResults.filter(
+        (result) => selected.has(result.index) && hasArchive(result),
+      ).length,
+    };
+  }, [catchupChannelCount, filteredExportResults, completedResults, selectedIndices]);
+  const startVerification = () => {
+    setVerifyMenuVisible(false);
+    const selected = new Set(selectedIndices);
+    const targets =
+      verifyScope === "all"
+        ? completedResults
+        : verifyScope === "filtered"
+          ? filteredExportResults
+          : completedResults.filter((result) => selected.has(result.index));
+    void verifyArchives(targets, verifyMode);
+  };
 
   const exportContextRef = useRef({
     all: completedResults,
@@ -231,12 +287,16 @@ export const Toolbar = memo(function Toolbar({
       if (scanMenuRef.current && !scanMenuRef.current.contains(event.target as Node)) {
         setScanMenuVisible(false);
       }
+      if (verifyMenuRef.current && !verifyMenuRef.current.contains(event.target as Node)) {
+        setVerifyMenuVisible(false);
+      }
     };
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setOpenMenuVisible(false);
         setScanMenuVisible(false);
+        setVerifyMenuVisible(false);
       }
     };
 
@@ -293,6 +353,13 @@ export const Toolbar = memo(function Toolbar({
     : archiveVerifyRun || archiveGuideTestRunning || archiveProbeRunning
       ? "Wait for catch-up verification to finish"
       : scanBlockedReason;
+  const verifyDisabledReason = archiveVerifyRun
+    ? "Verification running; cancel it from the progress row"
+    : inScanSession
+      ? "Wait for the scan to finish"
+      : archiveGuideTestRunning || archiveProbeRunning
+        ? "Another catch-up test is running"
+        : null;
   const canSavePlaylist =
     hasPlaylist && currentSourceDescriptor !== null && currentSourceDescriptor.kind !== "stalker";
   const filtersDisabled = !hasPlaylist;
@@ -352,6 +419,7 @@ export const Toolbar = memo(function Toolbar({
   const IconSavedPlaylists = Library;
   const IconPlay = isMac ? SFPlayFill : Play;
   const IconScan = Radar;
+  const IconVerify = History;
   const IconPause = isMac ? SFPauseFill : Pause;
   const IconStop = isMac ? SFStopFill : Square;
   const IconSettings = isMac ? SFGearshape : Settings;
@@ -555,6 +623,108 @@ export const Toolbar = memo(function Toolbar({
         )}
       </div>
 
+      {/* Catch-up verification: real vs fake, scoped like Scan */}
+      {hasPlaylist && catchupChannelCount > 0 && (
+        <div className={isMac ? "toolbar-group" : "flex items-center gap-1.5"}>
+          <div className="relative flex items-center" ref={verifyMenuRef} data-no-window-drag>
+            <button
+              type="button"
+              onClick={() => setVerifyMenuVisible((visible) => !visible)}
+              disabled={verifyDisabledReason !== null}
+              title={verifyDisabledReason ?? "Verify catch-up: real vs fake"}
+              className={btnWithOptionalText("toolbar-btn-verify gap-1.5")}
+              aria-label="Verify catch-up"
+              aria-haspopup="menu"
+              aria-expanded={verifyMenuVisible}
+            >
+              <IconVerify className="w-[22px] h-[22px]" />
+              {showButtonText && (archiveVerifyRun ? "Verifying…" : "Verify")}
+              {showButtonText && !archiveVerifyRun && (
+                <IconChevron className="h-3 w-3 opacity-70" />
+              )}
+            </button>
+            {verifyMenuVisible && (
+              <div className="absolute left-0 top-full z-50 mt-1 w-72 rounded-lg border border-border-app bg-dropdown py-1 shadow-2xl text-[13px]">
+                <p className="px-3 pt-1.5 pb-1 text-[10px] uppercase tracking-[0.08em] text-text-tertiary">
+                  Mode
+                </p>
+                {(
+                  [
+                    ["quick", "Quick · real vs fake", "1 request / channel"],
+                    ["full", "Full · measure depth", "2-5 requests / channel"],
+                  ] as const
+                ).map(([value, label, cost]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => {
+                      setVerifyMode(value);
+                      storeArchiveVerifyMode(value);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-btn-hover"
+                  >
+                    <span
+                      className={`h-3 w-3 rounded-full border ${
+                        verifyMode === value
+                          ? "border-violet-400 bg-violet-500 ring-2 ring-inset ring-dropdown"
+                          : "border-text-tertiary"
+                      }`}
+                    />
+                    <span className="flex-1">{label}</span>
+                    <span className="text-[11px] text-text-tertiary">{cost}</span>
+                  </button>
+                ))}
+                <p className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-[0.08em] text-text-tertiary">
+                  Scope
+                </p>
+                {(
+                  [
+                    ["all", "All advertised"],
+                    ["filtered", "Filtered"],
+                    ["selected", "Selected"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setVerifyScope(value)}
+                    disabled={verifyScopeCounts[value] === 0}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-btn-hover disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    <span
+                      className={`h-3 w-3 rounded-full border ${
+                        verifyScope === value
+                          ? "border-violet-400 bg-violet-500 ring-2 ring-inset ring-dropdown"
+                          : "border-text-tertiary"
+                      }`}
+                    />
+                    <span className="flex-1">{label}</span>
+                    <span className="text-[11px] tabular-nums text-text-tertiary">
+                      {verifyScopeCounts[value]}
+                      {value === verifyScope &&
+                      verifyMode === "quick" &&
+                      verifyScopeCounts[value] > 0
+                        ? ` · ~${Math.max(1, Math.round(verifyScopeCounts[value] / 60))} min`
+                        : ""}
+                    </span>
+                  </button>
+                ))}
+                <div className="px-2 pt-2 pb-1">
+                  <button
+                    type="button"
+                    onClick={startVerification}
+                    disabled={verifyScopeCounts[verifyScope] === 0}
+                    className="w-full rounded-md bg-violet-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-violet-500 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    Start verification ({verifyScopeCounts[verifyScope]})
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Source group: Open actions */}
       <div className={isMac ? "toolbar-group" : "flex items-center gap-1.5"}>
         <div className="relative" ref={openMenuRef} data-no-window-drag>
@@ -738,6 +908,18 @@ export const Toolbar = memo(function Toolbar({
               {((statusOptionCounts.catchup ?? 0) > 0 || statusFilter === "catchup") && (
                 <option value="catchup">{statusLabel("catchup", "Catch-up")}</option>
               )}
+              {(catchupVerdictsAvailable || statusFilter in CATCHUP_VERDICT_FILTERS) && (
+                <optgroup label="Catch-up verdict">
+                  <option value="catchup_real">{statusLabel("catchup_real", "Real")}</option>
+                  <option value="catchup_shallower">
+                    {statusLabel("catchup_shallower", "Shallower")}
+                  </option>
+                  <option value="catchup_fake">{statusLabel("catchup_fake", "Fake")}</option>
+                  <option value="catchup_untested">
+                    {statusLabel("catchup_untested", "Untested")}
+                  </option>
+                </optgroup>
+              )}
               <option value="mislabeled">{statusLabel("mislabeled", "Mislabeled")}</option>
               <option value="audio_only">{statusLabel("audio_only", "Audio Only")}</option>
               <option value="duplicates">{statusLabel("duplicates", "Duplicates")}</option>
@@ -772,6 +954,8 @@ export const Toolbar = memo(function Toolbar({
             menuRequest={menuExportRequest}
             scanState={scanState}
             isMac={isMac}
+            archiveProbes={archiveProbes}
+            catchupVerdictsAvailable={catchupVerdictsAvailable}
           />
 
           <button

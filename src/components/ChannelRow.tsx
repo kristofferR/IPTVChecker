@@ -1,7 +1,14 @@
 import { Radio, Tv } from "lucide-react";
 import { memo, useEffect, useMemo, useState } from "react";
 import { archiveBadgeText, archiveTitle } from "../lib/archive";
-import { archiveVerdict, measuredDepthDays } from "../lib/archiveVerification";
+import {
+  archiveDepthMeasured,
+  archiveFailure,
+  archiveFailureLabel,
+  archiveFailureSentence,
+  archiveVerdict,
+  measuredDepthDays,
+} from "../lib/archiveVerification";
 import { channelLogoPixels, channelRowHeightPixels } from "../lib/channelLogoSize";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { extractTvgLogoUrl, normalizeTvgLogoUrl } from "../lib/extinf";
@@ -208,11 +215,12 @@ function ChannelRowImpl({
           return <span className="text-text-secondary tabular-nums">—</span>;
         }
         const verdict = archiveVerdict(result, probeEntry);
+        const failure = verdict === "fake" ? archiveFailure(probeEntry) : null;
         const chipClass = {
           advertised: "bg-violet-500/15 text-violet-300 ring-violet-500/30",
           verified: "bg-green-500/15 text-green-300 ring-green-500/30",
           shallower: "bg-amber-500/15 text-amber-300 ring-amber-500/30",
-          broken: "bg-red-500/15 text-red-300 ring-red-500/30",
+          fake: "bg-red-500/15 text-red-300 ring-red-500/30",
         }[verdict];
         const measured = verdict === "shallower" ? measuredDepthDays(probeEntry) : null;
         const measuredLabel = measured != null && measured < 1 ? "<1" : measured;
@@ -221,8 +229,8 @@ function ChannelRowImpl({
             ? `✓ ${badge}`
             : verdict === "shallower"
               ? `⚠ ${measuredLabel ?? "?"}/${result.catchup_days ?? "?"}d`
-              : verdict === "broken"
-                ? `✕ ${badge}`
+              : verdict === "fake"
+                ? `✕ ${failure ? archiveFailureLabel(failure) : badge}`
                 : badge;
         const verdictTitle =
           verdict === "advertised"
@@ -231,7 +239,11 @@ function ChannelRowImpl({
               ? measured != null && measured < 1
                 ? `Verified depth less than 1 of ${result.catchup_days ?? "?"} days`
                 : `Verified depth ${measured ?? "?"} of ${result.catchup_days ?? "?"} days`
-              : `Archive ${verdict}`;
+              : verdict === "fake"
+                ? `Fake catch-up: ${failure ? archiveFailureSentence(failure) : "the archive does not answer"}`
+                : archiveDepthMeasured(probeEntry)
+                  ? "Archive verified at the advertised depth"
+                  : "Archive verified one hour back (quick check)";
         return (
           <span
             className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] ring-1 tabular-nums ${chipClass}`}
