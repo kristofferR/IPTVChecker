@@ -132,6 +132,26 @@ describe("verifyArchivePointResponse", () => {
     });
   });
 
+  it("accepts a panel that echoes the requested local wall-clock stamp", () => {
+    // Europe/Ljubljana panel: 00:51 UTC is asked for as 02:51 local and echoed as such.
+    const outcome: ArchiveProbeOutcome = {
+      ...responseOutcome(0, "http://cdn/hls/abc/2026-09-04:02-51.ts?token=1", 1_788_483_079),
+      requestUrl: "http://panel/timeshift/u/p/5/2026-09-04:02-51/238852.m3u8",
+    };
+    expect(verifyArchivePointResponse(outcome)).toMatchObject({
+      depthVerified: true,
+      depthUnknown: false,
+    });
+    const live: ArchiveProbeOutcome = {
+      ...outcome,
+      responseUrl: "http://cdn/hls/abc/2026-09-04:04-50.ts?token=1",
+    };
+    expect(verifyArchivePointResponse(live)).toMatchObject({
+      depthVerified: false,
+      depthUnknown: false,
+    });
+  });
+
   it("rejects a live segment returned one hour after the requested archive time", () => {
     const outcome = responseOutcome(0, "https://host/live/1700003600.ts");
     expect(verifyArchivePointResponse(outcome)).toMatchObject({

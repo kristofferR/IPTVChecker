@@ -47,39 +47,59 @@ function responseIdentity(responseUrl: string | null): string | null {
 // accept a live segment returned in place of the requested archive media.
 const MEDIA_TIME_TOLERANCE_SECONDS = 300;
 
-function responseMediaTimeMatchesRequest(outcome: ArchiveProbeOutcome): boolean | null {
-  const response = responseIdentity(outcome.responseUrl);
-  if (response == null) return null;
+/**
+ * Xtream-style `YYYY-MM-DD:HH-MM` stamps in a path, as naive epoch seconds.
+ * Panels write these in their own local time, so they are only comparable
+ * with each other (request vs response), never with a real UTC epoch.
+ */
+function xtreamStampsNaive(pathname: string): number[] {
+  return Array.from(
+    pathname.matchAll(/(\d{4})-(\d{2})-(\d{2}):(\d{2})-(\d{2})/g),
+    (match) =>
+      Date.UTC(
+        Number(match[1]),
+        Number(match[2]) - 1,
+        Number(match[3]),
+        Number(match[4]),
+        Number(match[5]),
+      ) / 1000,
+  );
+}
 
+function pathnameOf(url: string | null): string | null {
+  if (!url) return null;
   try {
-    const pathname = new URL(response).pathname;
-    const numericTimestamps = Array.from(
-      pathname.matchAll(/(?:^|\D)(\d{13}|\d{10})(?=\D|$)/g),
-      (match) => {
-        const value = Number(match[1]);
-        return match[1].length === 13 ? value / 1000 : value;
-      },
-    );
-    const xtreamTimestamps = Array.from(
-      pathname.matchAll(/(\d{4})-(\d{2})-(\d{2}):(\d{2})-(\d{2})/g),
-      (match) =>
-        Date.UTC(
-          Number(match[1]),
-          Number(match[2]) - 1,
-          Number(match[3]),
-          Number(match[4]),
-          Number(match[5]),
-        ) / 1000,
-    );
-    const timestamps = [...numericTimestamps, ...xtreamTimestamps];
-    if (timestamps.length === 0) return null;
-    return timestamps.some(
-      (timestamp) =>
-        Math.abs(timestamp - outcome.requestedStartEpochS) <= MEDIA_TIME_TOLERANCE_SECONDS,
-    );
+    return new URL(url).pathname;
   } catch {
     return null;
   }
+}
+
+function responseMediaTimeMatchesRequest(outcome: ArchiveProbeOutcome): boolean | null {
+  const response = responseIdentity(outcome.responseUrl);
+  const pathname = pathnameOf(response);
+  if (pathname == null) return null;
+
+  const withinTolerance = (a: number, b: number) => Math.abs(a - b) <= MEDIA_TIME_TOLERANCE_SECONDS;
+  const numericMatches = Array.from(
+    pathname.matchAll(/(?:^|\D)(\d{13}|\d{10})(?=\D|$)/g),
+    (match) => {
+      const value = Number(match[1]);
+      return match[1].length === 13 ? value / 1000 : value;
+    },
+  ).map((timestamp) => withinTolerance(timestamp, outcome.requestedStartEpochS));
+  // The panel echoes the wall-clock stamp we asked for; compare against the
+  // request's stamp in the same naive frame, or the UTC epoch when the
+  // request carried no stamp.
+  const requestStamps = xtreamStampsNaive(pathnameOf(outcome.requestUrl) ?? "");
+  const xtreamMatches = xtreamStampsNaive(pathname).map((stamp) =>
+    requestStamps.length > 0
+      ? requestStamps.some((requested) => withinTolerance(stamp, requested))
+      : withinTolerance(stamp, outcome.requestedStartEpochS),
+  );
+  const matches = [...numericMatches, ...xtreamMatches];
+  if (matches.length === 0) return null;
+  return matches.some(Boolean);
 }
 
 /** A point is verified only when returned media identifies the requested archive time. */
