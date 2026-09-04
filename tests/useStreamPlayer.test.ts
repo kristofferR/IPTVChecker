@@ -267,3 +267,22 @@ describe("useStreamPlayer helpers", () => {
     expect(areStreamMetadataEqual(metadata, null)).toBe(false);
   });
 });
+
+describe("archive fallback routes", () => {
+  it("offers the raw timeshift stream and an ffmpeg remux for Xtream playlists", async () => {
+    const { getArchiveFallbackRoutes, xtreamTimeshiftTsVariant } = await import(
+      "../src/lib/playback"
+    );
+    const m3u8 = "http://panel:8080/timeshift/u/p/60/2026-09-04:10-00/162121.m3u8";
+    expect(xtreamTimeshiftTsVariant(m3u8)).toBe(
+      "http://panel:8080/timeshift/u/p/60/2026-09-04:10-00/162121.ts",
+    );
+    expect(xtreamTimeshiftTsVariant("http://host/archive.m3u8?utc=1")).toBeNull();
+    const routes = getArchiveFallbackRoutes(m3u8, 4321);
+    expect(routes.map((route) => route.kind)).toEqual(["direct", "remux"]);
+    expect(routes[0].url).toContain("162121.ts");
+    expect(
+      getArchiveFallbackRoutes("http://host/archive.m3u8?utc=1", 4321).map((r) => r.kind),
+    ).toEqual(["remux"]);
+  });
+});
