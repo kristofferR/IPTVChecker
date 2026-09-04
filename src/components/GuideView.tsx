@@ -1,6 +1,16 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { CircleCheck, CircleX, Download, LoaderCircle, Play } from "lucide-react";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 import type { ArchivePlayOptions } from "../hooks/useStreamPlayer";
 import { archiveBadgeText, hasArchive, resolveArchivePlayback } from "../lib/archive";
 import { startArchiveDownload } from "../lib/archiveDownload";
@@ -191,8 +201,16 @@ interface ProgrammeMenuState {
 
 export function GuideView({
   onPlayArchive,
+  headerPortalRef,
 }: {
   onPlayArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
+  /**
+   * macOS: the toolbar slot the table's column header normally fills. The
+   * control strip renders there so the glass toolbar keeps the same height in
+   * both modes; WebKit's glass layer does not shrink when the toolbar does,
+   * and would otherwise cover the top of the guide.
+   */
+  headerPortalRef?: RefObject<HTMLDivElement | null>;
 }) {
   const flatResults = useAppStore((s) => s.flatResults);
   const playlist = useAppStore((s) => s.playlist);
@@ -464,83 +482,94 @@ export function GuideView({
     [maxDepthDays],
   );
 
+  const portalTarget = headerPortalRef?.current ?? null;
+  // Control strip: day jumps, selection actions.
+  const controlStrip = (
+    <div
+      className={
+        portalTarget
+          ? "flex h-8 select-none items-center gap-2 px-3"
+          : "flex shrink-0 items-center gap-2 border-b border-border-subtle bg-panel-muted px-3 py-1.5"
+      }
+    >
+      <div className="flex max-w-[55%] items-center gap-1 overflow-x-auto">
+        {dayTabs.map((offset) => (
+          <button
+            key={offset}
+            type="button"
+            onClick={() =>
+              offset === 0
+                ? scrollToTime(nowEpochS)
+                : scrollToTime(startOfDayEpochS(offset) + 6 * 3600, 0)
+            }
+            className="shrink-0 rounded-md px-2.5 py-0.5 text-[11px] text-text-secondary transition-colors hover:bg-panel-subtle hover:text-text-primary"
+          >
+            {dayLabel(startOfDayEpochS(offset) + 43_200)}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => scrollToTime(nowEpochS)}
+          className="shrink-0 rounded-md bg-btn px-2.5 py-0.5 text-[11px] text-text-primary hover:bg-btn-hover"
+        >
+          Now
+        </button>
+      </div>
+      <div className="ml-auto flex min-w-0 items-center gap-2">
+        {testOutcome &&
+          (testOutcome.ok && testOutcome.depthVerified ? (
+            <span className="flex items-center gap-1 text-[11px] font-medium text-green-400">
+              <CircleCheck className="h-3 w-3" />
+              OK{testOutcome.latencyMs != null ? ` · ${testOutcome.latencyMs} ms` : ""}
+            </span>
+          ) : testOutcome.ok ? (
+            <span className="flex items-center gap-1 text-[11px] font-medium text-amber-400">
+              <CircleCheck className="h-3 w-3" />
+              Unverified{testOutcome.latencyMs != null ? ` · ${testOutcome.latencyMs} ms` : ""}
+            </span>
+          ) : (
+            <span
+              className="flex items-center gap-1 text-[11px] font-medium text-red-400"
+              title={testOutcome.error ?? undefined}
+            >
+              <CircleX className="h-3 w-3" />
+              Failed
+            </span>
+          ))}
+        {selection && (
+          <>
+            <span className="min-w-0 truncate text-[11px] text-text-secondary">
+              <span className="font-medium text-violet-300">{selection.programme.title}</span> ·{" "}
+              {selection.result.name} · {dayLabel(selection.programme.start)}{" "}
+              {timeLabel(selection.programme.start)}
+            </span>
+            <button
+              type="button"
+              disabled={!selectionPlayable || testing}
+              onClick={() => activate(selection)}
+              title={selectionPlayable ? undefined : "This programme is outside catch-up range"}
+              className="flex shrink-0 items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-500 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Play className="h-3 w-3" />
+              Play
+            </button>
+            <button
+              type="button"
+              disabled={testBlocked}
+              onClick={() => void runTest()}
+              className="shrink-0 rounded-md border border-border-app bg-btn px-2.5 py-1 text-[11px] font-medium text-text-primary hover:bg-btn-hover transition-colors disabled:opacity-40"
+            >
+              {testing ? "Testing..." : "Test"}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* Control strip: day jumps, selection actions */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border-subtle bg-panel-muted px-3 py-1.5">
-        <div className="flex max-w-[55%] items-center gap-1 overflow-x-auto">
-          {dayTabs.map((offset) => (
-            <button
-              key={offset}
-              type="button"
-              onClick={() =>
-                offset === 0
-                  ? scrollToTime(nowEpochS)
-                  : scrollToTime(startOfDayEpochS(offset) + 6 * 3600, 0)
-              }
-              className="shrink-0 rounded-md px-2.5 py-0.5 text-[11px] text-text-secondary transition-colors hover:bg-panel-subtle hover:text-text-primary"
-            >
-              {dayLabel(startOfDayEpochS(offset) + 43_200)}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => scrollToTime(nowEpochS)}
-            className="shrink-0 rounded-md bg-btn px-2.5 py-0.5 text-[11px] text-text-primary hover:bg-btn-hover"
-          >
-            Now
-          </button>
-        </div>
-        <div className="ml-auto flex min-w-0 items-center gap-2">
-          {testOutcome &&
-            (testOutcome.ok && testOutcome.depthVerified ? (
-              <span className="flex items-center gap-1 text-[11px] font-medium text-green-400">
-                <CircleCheck className="h-3 w-3" />
-                OK{testOutcome.latencyMs != null ? ` · ${testOutcome.latencyMs} ms` : ""}
-              </span>
-            ) : testOutcome.ok ? (
-              <span className="flex items-center gap-1 text-[11px] font-medium text-amber-400">
-                <CircleCheck className="h-3 w-3" />
-                Unverified{testOutcome.latencyMs != null ? ` · ${testOutcome.latencyMs} ms` : ""}
-              </span>
-            ) : (
-              <span
-                className="flex items-center gap-1 text-[11px] font-medium text-red-400"
-                title={testOutcome.error ?? undefined}
-              >
-                <CircleX className="h-3 w-3" />
-                Failed
-              </span>
-            ))}
-          {selection && (
-            <>
-              <span className="min-w-0 truncate text-[11px] text-text-secondary">
-                <span className="font-medium text-violet-300">{selection.programme.title}</span> ·{" "}
-                {selection.result.name} · {dayLabel(selection.programme.start)}{" "}
-                {timeLabel(selection.programme.start)}
-              </span>
-              <button
-                type="button"
-                disabled={!selectionPlayable || testing}
-                onClick={() => activate(selection)}
-                title={selectionPlayable ? undefined : "This programme is outside catch-up range"}
-                className="flex shrink-0 items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-500 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <Play className="h-3 w-3" />
-                Play
-              </button>
-              <button
-                type="button"
-                disabled={testBlocked}
-                onClick={() => void runTest()}
-                className="shrink-0 rounded-md border border-border-app bg-btn px-2.5 py-1 text-[11px] font-medium text-text-primary hover:bg-btn-hover transition-colors disabled:opacity-40"
-              >
-                {testing ? "Testing..." : "Test"}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
+      {portalTarget ? createPortal(controlStrip, portalTarget) : controlStrip}
 
       {channels.length === 0 ? (
         <div className="flex flex-1 items-center justify-center text-sm text-text-tertiary">

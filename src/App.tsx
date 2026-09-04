@@ -1746,7 +1746,10 @@ export default function App() {
               {!isMac && <FilterBar onApply={handleApplySourceFilter} />}
               {playlist ? (
                 viewMode === "guide" ? (
-                  <GuideView onPlayArchive={handleGuidePlayArchive} />
+                  <GuideView
+                    onPlayArchive={handleGuidePlayArchive}
+                    headerPortalRef={isMac ? headerPortalRef : undefined}
+                  />
                 ) : tableProfilerEnabled ? (
                   <Profiler id="ChannelTable" onRender={handleTableProfilerRender}>
                     {channelTableElement}
