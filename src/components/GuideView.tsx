@@ -179,11 +179,14 @@ const GuideRow = memo(function GuideRow({
                       : "bg-panel-subtle text-text-tertiary ring-1 ring-border-subtle"
                 }`}
                 style={{ left: `${left}px`, width: `${width - 1}px` }}
+                dir="ltr"
               >
                 <span className="shrink-0 text-[9px] tabular-nums opacity-70">
                   {timeLabel(programme.start)}
                 </span>
-                <span className="truncate">{programme.title}</span>
+                <span className="truncate" dir="auto">
+                  {programme.title}
+                </span>
               </button>
             );
           })
