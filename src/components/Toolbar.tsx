@@ -638,9 +638,11 @@ export const Toolbar = memo(function Toolbar({
               aria-expanded={verifyMenuVisible}
             >
               <IconVerify className="w-[22px] h-[22px]" />
-              {showButtonText && (archiveVerifyRun ? "Verifying…" : "Verify")}
-              {showButtonText && !archiveVerifyRun && (
-                <IconChevron className="h-3 w-3 opacity-70" />
+              {showButtonText && (
+                <span className="inline-flex items-center gap-1 leading-none">
+                  <span>{archiveVerifyRun ? "Verifying…" : "Verify"}</span>
+                  {!archiveVerifyRun && <IconChevron className="h-3 w-3 opacity-70" />}
+                </span>
               )}
             </button>
             {verifyMenuVisible && (
