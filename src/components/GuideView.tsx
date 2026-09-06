@@ -88,6 +88,7 @@ interface GuideRowProps {
   selectedKey: string | null;
   onSelect: (selection: GuideSelection) => void;
   onActivate: (selection: GuideSelection) => void;
+  onPlayLive: (result: ChannelResult) => void;
   onContextMenu: (selection: GuideSelection, x: number, y: number) => void;
 }
 
@@ -162,6 +163,7 @@ const GuideRow = memo(function GuideRow({
   selectedKey,
   onSelect,
   onActivate,
+  onPlayLive,
   onContextMenu,
 }: GuideRowProps) {
   const [programmes, setProgrammes] = useState<EpgProgramme[] | null>(null);
@@ -198,18 +200,35 @@ const GuideRow = memo(function GuideRow({
   return (
     <div className="flex h-full items-stretch border-b border-border-subtle">
       <div
-        className="sticky left-0 z-10 flex shrink-0 items-center gap-1.5 border-r border-border-subtle px-2"
+        className="sticky left-0 z-10 shrink-0 border-r border-border-subtle"
         style={{ width: `${CHANNEL_COL_PX}px`, background: "var(--dropdown-bg)" }}
       >
-        <ChannelLogo result={result} size={20} />
-        <span className="min-w-0 flex-1 truncate text-[11px] font-semibold" title={result.name}>
-          {result.name}
-        </span>
-        {hasArchive(result) && (
-          <span className="shrink-0 text-[9px] font-bold uppercase text-violet-400">
-            {archiveBadgeText(result)}
+        <button
+          type="button"
+          className="channel-row flex h-full w-full items-center gap-1.5 px-2 text-left hover:bg-panel-subtle"
+          onClick={() => {
+            useAppStore.getState().setSelectedChannel(result);
+            useAppStore.getState().setSelectedChannelIndices([result.index]);
+          }}
+          onDoubleClick={() => onPlayLive(result)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              onPlayLive(result);
+            }
+          }}
+          title={`Play ${result.name} live`}
+        >
+          <ChannelLogo result={result} size={20} />
+          <span className="min-w-0 flex-1 truncate text-[11px] font-semibold" title={result.name}>
+            {result.name}
           </span>
-        )}
+          {hasArchive(result) && (
+            <span className="shrink-0 text-[9px] font-bold uppercase text-violet-400">
+              {archiveBadgeText(result)}
+            </span>
+          )}
+        </button>
       </div>
       <div className="relative min-w-0 flex-1">
         {programmes === null ? (
@@ -401,11 +420,17 @@ export function GuideView({
     const now = Math.floor(Date.now() / 1000);
     return { from: now - 8 * 3600, to: now + 3 * 3600 };
   });
+  const [activeDay, setActiveDay] = useState(() => startOfDayEpochS(0));
+  const activeDayButtonRef = useRef<HTMLButtonElement | null>(null);
   const lastScrollLeft = useRef<number | null>(null);
   const updateRenderRange = useCallback(() => {
     const el = parentRef.current;
     if (!el) return;
     lastScrollLeft.current = el.scrollLeft;
+    // The pinned channel column covers the canvas prefix. The first visible
+    // programme time is therefore scrollLeft pixels beyond spanFrom.
+    const firstVisibleTime = spanFrom + (el.scrollLeft / PX_PER_HOUR) * 3600;
+    setActiveDay(startOfDayEpochS(0, new Date(firstVisibleTime * 1000)));
     const fromS = spanFrom + ((el.scrollLeft - CHANNEL_COL_PX) / PX_PER_HOUR) * 3600;
     const toS = spanFrom + ((el.scrollLeft + el.clientWidth - CHANNEL_COL_PX) / PX_PER_HOUR) * 3600;
     const from = Math.floor((fromS - RENDER_BUFFER_S) / RENDER_STEP_S) * RENDER_STEP_S;
@@ -620,34 +645,46 @@ export function GuideView({
   );
 
   const portalTarget = headerPortalRef?.current ?? null;
+  useEffect(() => {
+    activeDayButtonRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeDay, maxDepthDays, portalTarget]);
+
   // Control strip: day jumps, selection actions.
   const controlStrip = (
     <div
       className={
         portalTarget
           ? "flex h-8 select-none items-center gap-2 px-3"
-          : "flex shrink-0 items-center gap-2 border-b border-border-subtle bg-panel-muted px-3 py-1.5"
+          : "flex shrink-0 select-none items-center gap-2 border-b border-border-subtle bg-panel-muted px-3 py-1.5"
       }
     >
       <div className="flex max-w-[55%] items-center gap-1 overflow-x-auto">
-        {dayTabs.map((offset) => (
-          <button
-            key={offset}
-            type="button"
-            onClick={() =>
-              offset === 0
-                ? scrollToTime(nowEpochS)
-                : scrollToTime(startOfDayEpochS(offset) + 6 * 3600, 0)
-            }
-            className="shrink-0 rounded-md px-2.5 py-0.5 text-[11px] text-text-secondary transition-colors hover:bg-panel-subtle hover:text-text-primary"
-          >
-            {dayLabel(startOfDayEpochS(offset) + 43_200)}
-          </button>
-        ))}
+        {dayTabs.map((offset) => {
+          const day = startOfDayEpochS(offset, new Date(nowEpochS * 1000));
+          const active = day === activeDay;
+          return (
+            <button
+              key={day}
+              ref={active ? activeDayButtonRef : undefined}
+              type="button"
+              aria-pressed={active}
+              onClick={() =>
+                offset === 0 ? scrollToTime(nowEpochS) : scrollToTime(day + 6 * 3600, 0)
+              }
+              className={`shrink-0 rounded-md px-2.5 py-0.5 text-[11px] transition-colors ${
+                active
+                  ? "bg-btn text-text-primary"
+                  : "text-text-secondary hover:bg-panel-subtle hover:text-text-primary"
+              }`}
+            >
+              {dayLabel(day + 43_200, new Date(nowEpochS * 1000))}
+            </button>
+          );
+        })}
         <button
           type="button"
           onClick={() => scrollToTime(nowEpochS)}
-          className="shrink-0 rounded-md bg-btn px-2.5 py-0.5 text-[11px] text-text-primary hover:bg-btn-hover"
+          className="shrink-0 rounded-md px-2.5 py-0.5 text-[11px] text-text-primary hover:bg-panel-subtle"
         >
           Now
         </button>
@@ -705,7 +742,7 @@ export function GuideView({
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 select-none flex-col">
       {portalTarget ? createPortal(controlStrip, portalTarget) : controlStrip}
 
       {channels.length === 0 ? (
@@ -786,6 +823,7 @@ export function GuideView({
                       }
                       onSelect={select}
                       onActivate={activateStable}
+                      onPlayLive={onPlayLive}
                       onContextMenu={openProgrammeMenu}
                     />
                   </div>

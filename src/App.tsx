@@ -1308,6 +1308,9 @@ export default function App() {
 
   const handlePlayInApp = useCallback(
     (result: ChannelResult) => {
+      getStore().setSelectedChannel(result);
+      getStore().setSelectedChannelIndices([result.index]);
+      getStore().setSidebarHidden(false);
       pendingArchivePlaybackRef.current = null;
       if (isScanActive(getStore().scanState) && isSingleConnectionPlaylist(getStore().playlist)) {
         pendingArchivePlaybackRef.current = null;
@@ -1388,6 +1391,7 @@ export default function App() {
     (result: ChannelResult, options: ArchivePlayOptions) => {
       getStore().setSelectedChannel(result);
       getStore().setSelectedChannelIndices([result.index]);
+      getStore().setSidebarHidden(false);
       const state = getStore();
       const singleConnection = isSingleConnectionPlaylist(state.playlist);
       if (isScanActive(state.scanState) && singleConnection) {
