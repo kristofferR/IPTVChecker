@@ -56,7 +56,7 @@ export function ensureEpgLoaded(): Promise<void> {
     epgLoad?.key === key &&
     (epgLoad.loadedAt == null || Date.now() - epgLoad.loadedAt < EPG_LOAD_TTL_MS)
   ) {
-    if (epgLoad.summary) {
+    if (epgLoad.summary && useAppStore.getState().epgLoadSummary !== epgLoad.summary) {
       useAppStore.getState().setEpgLoadSummary(epgLoad.summary);
     }
     return epgLoad.promise;

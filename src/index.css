@@ -201,20 +201,6 @@ body {
   color: rgb(239 68 68);
 }
 
-/* Catch-up verification: violet, the catch-up accent, so it never reads as Scan. */
-:root:not([data-platform="macos"]) .toolbar-btn-verify {
-  background: rgb(124 58 237);
-  color: white;
-}
-
-:root:not([data-platform="macos"]) .toolbar-btn-verify:hover {
-  background: rgb(109 40 217);
-}
-
-[data-platform="macos"] .toolbar-btn-verify {
-  color: rgb(167 139 250);
-}
-
 :root:not([data-platform="macos"]) .toolbar-btn-stop:hover {
   background: rgb(239 68 68 / 0.12);
 }
@@ -397,7 +383,20 @@ body {
   white-space: nowrap;
 }
 
-[data-platform="macos"] .channel-row:hover {
+.guide-row:hover .guide-channel-button {
+  background: var(--panel-bg-subtle);
+}
+
+.guide-day-tabs {
+  scrollbar-width: none;
+}
+
+.guide-day-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+[data-platform="macos"] .channel-row:hover,
+[data-platform="macos"] .guide-row:hover .guide-channel-button {
   background: rgb(0 0 0 / 0.045);
 }
 
@@ -485,7 +484,8 @@ body {
       inset 0 0.5px 1px rgb(0 0 0 / 0.2);
   }
 
-  [data-platform="macos"] .channel-row:hover {
+  [data-platform="macos"] .channel-row:hover,
+  [data-platform="macos"] .guide-row:hover .guide-channel-button {
     background: rgb(255 255 255 / 0.06);
   }
 
