@@ -615,6 +615,12 @@ export const Toolbar = memo(function Toolbar({
           <div className="relative flex items-center" ref={scanMenuRef} data-no-window-drag>
             <button
               onClick={() => onStartScan(false)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                if (scanDisabledReason === null && catchupChannelCount > 0) {
+                  setScanMenuVisible(true);
+                }
+              }}
               disabled={scanDisabledReason !== null}
               title={scanDisabledReason ?? "Scan"}
               className={btnWithOptionalText("toolbar-btn-primary")}
@@ -634,6 +640,10 @@ export const Toolbar = memo(function Toolbar({
               <button
                 type="button"
                 onClick={() => setScanMenuVisible((visible) => !visible)}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  if (scanDisabledReason === null) setScanMenuVisible(true);
+                }}
                 disabled={scanDisabledReason !== null}
                 className={`absolute flex items-center justify-center rounded-sm hover:bg-white/10 disabled:opacity-40 disabled:pointer-events-none ${isMac ? "text-text-primary" : "text-white"} ${showButtonText ? "bottom-0.5 right-2 h-5 w-5" : "right-1.5 top-1/2 h-6 w-6 -translate-y-1/2"}`}
                 title="Scan options"
@@ -681,6 +691,10 @@ export const Toolbar = memo(function Toolbar({
             <button
               type="button"
               onClick={() => setVerifyMenuVisible((visible) => !visible)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                if (verifyDisabledReason === null) setVerifyMenuVisible(true);
+              }}
               disabled={verifyDisabledReason !== null}
               title={verifyDisabledReason ?? "Verify catch-up: real vs fake"}
               className={btnWithOptionalText("gap-1.5")}
@@ -797,6 +811,10 @@ export const Toolbar = memo(function Toolbar({
           <button
             type="button"
             onClick={() => setOpenMenuVisible((visible) => !visible)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              if (!inScanSession) setOpenMenuVisible(true);
+            }}
             disabled={inScanSession}
             className={btnWithOptionalText("gap-1.5")}
             title="Open Playlist Source"
