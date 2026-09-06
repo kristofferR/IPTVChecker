@@ -132,6 +132,15 @@ describe("verifyArchivePointResponse", () => {
     });
   });
 
+  it("ignores digit runs that cannot be an epoch near the request", () => {
+    // A ten-digit stream id in the path is not media time; verdict stays unknown.
+    const outcome = responseOutcome(0, "https://cdn/hls/1234567890/user/pass/index.m3u8");
+    expect(verifyArchivePointResponse(outcome)).toMatchObject({
+      depthVerified: false,
+      depthUnknown: true,
+    });
+  });
+
   it("accepts a panel that echoes the requested local wall-clock stamp", () => {
     // Europe/Ljubljana panel: 00:51 UTC is asked for as 02:51 local and echoed as such.
     const outcome: ArchiveProbeOutcome = {

@@ -19,26 +19,52 @@ const CATCHUP_ATTR_PATTERN = new RegExp(
   "gi",
 );
 
-/** Remove every catch-up attribute from an EXTINF line. */
+/**
+ * Index of the comma that separates EXTINF attributes from the title, ignoring
+ * commas inside quoted attribute values (`group-title="Sports, US"`).
+ */
+export function findUnquotedComma(line: string): number {
+  let quote: string | null = null;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (quote) {
+      if (char === "\\") index += 1;
+      else if (char === quote) quote = null;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === ",") {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function splitExtinf(extinf: string): { attrs: string; title: string } {
+  const comma = findUnquotedComma(extinf);
+  return comma === -1
+    ? { attrs: extinf, title: "" }
+    : { attrs: extinf.slice(0, comma), title: extinf.slice(comma) };
+}
+
+/** Remove every catch-up attribute from an EXTINF line, leaving the title alone. */
 export function stripCatchupAttributes(extinf: string): string {
-  return extinf.replace(CATCHUP_ATTR_PATTERN, "");
+  const { attrs, title } = splitExtinf(extinf);
+  return attrs.replace(CATCHUP_ATTR_PATTERN, "") + title;
 }
 
 /** Rewrite the advertised depth attributes to `days`, adding one when absent. */
 export function setCatchupDays(extinf: string, days: number): string {
   const value = String(Math.max(1, Math.round(days)));
+  const { attrs, title } = splitExtinf(extinf);
   let touched = false;
-  const rewritten = extinf.replace(
+  const rewritten = attrs.replace(
     /(\s(?:catchup-days|tvg-rec|timeshift)=)(?:"[^"]*"|'[^']*'|[^\s,]*)/gi,
     (_match, prefix: string) => {
       touched = true;
       return `${prefix}"${value}"`;
     },
   );
-  if (touched) return rewritten;
-  const comma = rewritten.indexOf(",");
-  const insertAt = comma === -1 ? rewritten.length : comma;
-  return `${rewritten.slice(0, insertAt)} catchup-days="${value}"${rewritten.slice(insertAt)}`;
+  return touched ? rewritten + title : `${rewritten} catchup-days="${value}"${title}`;
 }
 
 /**

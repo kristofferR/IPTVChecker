@@ -1,4 +1,4 @@
-import { hasArchive } from "./archive";
+import { hasArchive, MAX_CATCHUP_DAYS } from "./archive";
 import {
   type ArchiveProbeEntry,
   type ArchiveProbeOutcome,
@@ -105,13 +105,17 @@ export function archiveVerdict(
   if (!outcomes.some((outcome) => outcome.daysBack > 0)) return "verified";
   if (
     outcomes.some(
-      (outcome) => outcome.ok && outcome.depthUnknown && outcome.daysBack >= advertisedDays,
+      (outcome) =>
+        outcome.ok &&
+        outcome.depthUnknown &&
+        outcome.daysBack >= Math.min(MAX_CATCHUP_DAYS, advertisedDays),
     )
   ) {
     return "advertised";
   }
+  const measurableDays = Math.min(MAX_CATCHUP_DAYS, advertisedDays);
   return outcomes.some(
-    (outcome) => outcome.ok && outcome.depthVerified && outcome.daysBack >= advertisedDays,
+    (outcome) => outcome.ok && outcome.depthVerified && outcome.daysBack >= measurableDays,
   )
     ? "verified"
     : "shallower";
@@ -201,7 +205,8 @@ export async function verifyChannelArchive(
   }
   push(near, false);
 
-  const advertisedDays = result.catchup_days;
+  const advertisedDays =
+    result.catchup_days == null ? null : Math.min(MAX_CATCHUP_DAYS, result.catchup_days);
   if (advertisedDays == null || advertisedDays <= 0) {
     return push(null, true);
   }

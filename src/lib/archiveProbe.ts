@@ -81,13 +81,19 @@ function responseMediaTimeMatchesRequest(outcome: ArchiveProbeOutcome): boolean 
   if (pathname == null) return null;
 
   const withinTolerance = (a: number, b: number) => Math.abs(a - b) <= MEDIA_TIME_TOLERANCE_SECONDS;
+  // Only digit runs that look like an epoch near the request count; stream
+  // and session ids of the same length must not flip a working archive to
+  // "serves live".
+  const plausibleWindowS = 400 * 86_400;
   const numericMatches = Array.from(
     pathname.matchAll(/(?:^|\D)(\d{13}|\d{10})(?=\D|$)/g),
     (match) => {
       const value = Number(match[1]);
       return match[1].length === 13 ? value / 1000 : value;
     },
-  ).map((timestamp) => withinTolerance(timestamp, outcome.requestedStartEpochS));
+  )
+    .filter((timestamp) => Math.abs(timestamp - outcome.requestedStartEpochS) <= plausibleWindowS)
+    .map((timestamp) => withinTolerance(timestamp, outcome.requestedStartEpochS));
   // The panel echoes the wall-clock stamp we asked for; compare against the
   // request's stamp in the same naive frame, or the UTC epoch when the
   // request carried no stamp.
