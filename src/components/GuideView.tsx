@@ -198,14 +198,14 @@ const GuideRow = memo(function GuideRow({
   );
 
   return (
-    <div className="flex h-full items-stretch border-b border-border-subtle">
+    <div className="channel-row guide-row flex h-full items-stretch border-b border-border-subtle hover:bg-panel-subtle">
       <div
         className="sticky left-0 z-10 shrink-0 border-r border-border-subtle"
         style={{ width: `${CHANNEL_COL_PX}px`, background: "var(--dropdown-bg)" }}
       >
         <button
           type="button"
-          className="channel-row flex h-full w-full items-center gap-1.5 px-2 text-left hover:bg-panel-subtle"
+          className="guide-channel-button flex h-full w-full items-center gap-1.5 px-2 text-left"
           onClick={() => {
             useAppStore.getState().setSelectedChannel(result);
             useAppStore.getState().setSelectedChannelIndices([result.index]);
@@ -661,7 +661,7 @@ export function GuideView({
           : "flex shrink-0 select-none items-center gap-2 border-b border-border-subtle bg-panel-muted px-3 py-1.5"
       }
     >
-      <div className="flex max-w-[55%] items-center gap-1 overflow-x-auto">
+      <div className="guide-day-tabs flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
         {dayTabs.map((offset) => {
           const day = startOfDayEpochS(offset, new Date(nowEpochS * 1000));
           const active = day === activeDay;
@@ -692,7 +692,7 @@ export function GuideView({
           Now
         </button>
       </div>
-      <div className="ml-auto flex min-w-0 items-center gap-2">
+      <div className="ml-auto flex min-w-0 max-w-[45%] items-center gap-2">
         {testOutcome &&
           (testOutcome.ok && testOutcome.depthVerified ? (
             <span className="flex items-center gap-1 text-[11px] font-medium text-green-400">

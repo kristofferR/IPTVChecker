@@ -621,20 +621,29 @@ export const Toolbar = memo(function Toolbar({
               aria-label={scanLabel}
             >
               <IconScan className="w-[22px] h-[22px]" />
-              {showButtonText && scanLabel}
+              {showButtonText ? (
+                <span className="inline-flex items-center gap-1 leading-none">
+                  <span>{scanLabel}</span>
+                  {catchupChannelCount > 0 && <span aria-hidden="true" className="h-3 w-3" />}
+                </span>
+              ) : catchupChannelCount > 0 ? (
+                <span aria-hidden="true" className="h-3.5 w-3.5" />
+              ) : null}
             </button>
             {catchupChannelCount > 0 && (
               <button
                 type="button"
                 onClick={() => setScanMenuVisible((visible) => !visible)}
                 disabled={scanDisabledReason !== null}
-                className="toolbar-btn rounded-md px-0.5 py-2 disabled:opacity-40 disabled:pointer-events-none"
+                className={`absolute flex items-center justify-center rounded-sm hover:bg-white/10 disabled:opacity-40 disabled:pointer-events-none ${isMac ? "text-text-primary" : "text-white"} ${showButtonText ? "bottom-0.5 right-2 h-5 w-5" : "right-1.5 top-1/2 h-6 w-6 -translate-y-1/2"}`}
                 title="Scan options"
                 aria-label="Scan options"
                 aria-haspopup="menu"
                 aria-expanded={scanMenuVisible}
               >
-                <SFChevronDown className="w-3 h-3" />
+                <IconChevron
+                  className={showButtonText ? "h-3 w-3 opacity-70" : "h-3.5 w-3.5 opacity-70"}
+                />
               </button>
             )}
             {scanMenuVisible && (
@@ -674,7 +683,7 @@ export const Toolbar = memo(function Toolbar({
               onClick={() => setVerifyMenuVisible((visible) => !visible)}
               disabled={verifyDisabledReason !== null}
               title={verifyDisabledReason ?? "Verify catch-up: real vs fake"}
-              className={btnWithOptionalText("toolbar-btn-verify gap-1.5")}
+              className={btnWithOptionalText("gap-1.5")}
               aria-label="Verify catch-up"
               aria-haspopup="dialog"
               aria-expanded={verifyMenuVisible}
