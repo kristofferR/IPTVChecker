@@ -82,7 +82,11 @@ pub async fn load_epg(
         .cloned()
         .collect();
     if wanted.is_empty() {
-        *state.epg.lock().await = Some(Arc::new(EpgIndex::default()));
+        // Nothing to index (results not populated yet, or a superseded call):
+        // leave whatever guide is loaded rather than replacing it with nothing.
+        if cancel.is_cancelled() {
+            return Err(superseded_error());
+        }
         return Ok(EpgLoadSummary {
             sources_requested,
             sources_loaded: 0,
