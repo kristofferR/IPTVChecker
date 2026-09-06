@@ -9,8 +9,8 @@ import {
   formatPlaybackRecoveryMessage,
   getHlsFatalRecoveryAction,
   getMpegtsPlaybackRoutes,
-  hasPresentedVideoFrame,
   getNextPlaybackRecoveryAttempt,
+  hasPresentedVideoFrame,
   isSingleConnectionPlaylist,
   PLAYBACK_RECOVERY_WINDOW_MS,
   prunePlaybackRecoveryHistory,
@@ -36,7 +36,9 @@ function canPlayTypes(
 describe("useStreamPlayer helpers", () => {
   it("does not accept native video when every decoded frame was dropped", () => {
     expect(hasPresentedVideoFrame({ totalVideoFrames: 0, droppedVideoFrames: 0 })).toBe(false);
-    expect(hasPresentedVideoFrame({ totalVideoFrames: 1249, droppedVideoFrames: 1249 })).toBe(false);
+    expect(hasPresentedVideoFrame({ totalVideoFrames: 1249, droppedVideoFrames: 1249 })).toBe(
+      false,
+    );
     expect(hasPresentedVideoFrame({ totalVideoFrames: 234, droppedVideoFrames: 0 })).toBe(true);
     expect(hasPresentedVideoFrame({ totalVideoFrames: 234, droppedVideoFrames: 233 })).toBe(true);
   });

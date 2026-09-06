@@ -217,7 +217,7 @@ const GuideRow = memo(function GuideRow({
               onPlayLive(result);
             }
           }}
-          title={`Play ${result.name} live`}
+          title={`Select ${result.name}; double-click or press Enter to play live`}
         >
           <ChannelLogo result={result} size={20} />
           <span className="min-w-0 flex-1 truncate text-[11px] font-semibold" title={result.name}>
@@ -350,13 +350,14 @@ export function GuideView({
   }, [channels]);
 
   // The canvas spans local midnight `maxDepthDays` ago through the end of today.
-  const spanFrom = useMemo(() => startOfDayEpochS(maxDepthDays), [maxDepthDays]);
+  const today = startOfDayEpochS(0, new Date(nowEpochS * 1000));
+  const spanFrom = useMemo(
+    () => startOfDayEpochS(maxDepthDays, new Date(today * 1000)),
+    [maxDepthDays, today],
+  );
   // End of the current day, tracked from the ticking clock so an app left
   // open past midnight keeps today's programmes and the now marker.
-  const spanTo = useMemo(
-    () => startOfDayEpochS(0, new Date(nowEpochS * 1000)) + 86_400,
-    [nowEpochS],
-  );
+  const spanTo = useMemo(() => startOfDayEpochS(-1, new Date(today * 1000)), [today]);
   const totalWidthPx = CHANNEL_COL_PX + ((spanTo - spanFrom) / 3600) * PX_PER_HOUR;
   const xOf = useCallback(
     (epochS: number) => CHANNEL_COL_PX + ((epochS - spanFrom) / 3600) * PX_PER_HOUR,
@@ -478,7 +479,7 @@ export function GuideView({
     const delta = previousSpanFrom.current - spanFrom;
     previousSpanFrom.current = spanFrom;
     if (delta === 0 || !scrollEl) return;
-    // The canvas grew to the left; keep the same wall-clock time on screen.
+    // Keep the same wall-clock time visible when the canvas start moves.
     scrollEl.scrollLeft += (delta / 3600) * PX_PER_HOUR;
     updateRenderRange();
   }, [spanFrom, scrollEl, updateRenderRange]);
@@ -635,9 +636,11 @@ export function GuideView({
     const hours: number[] = [];
     for (let t = spanFrom; t < spanTo; t += 3600) hours.push(t);
     const days: number[] = [];
-    for (let offset = maxDepthDays; offset >= 0; offset -= 1) days.push(startOfDayEpochS(offset));
+    for (let offset = maxDepthDays; offset >= 0; offset -= 1) {
+      days.push(startOfDayEpochS(offset, new Date(today * 1000)));
+    }
     return { hours, days, dayStarts: new Set(days) };
-  }, [spanFrom, spanTo, maxDepthDays]);
+  }, [spanFrom, spanTo, maxDepthDays, today]);
 
   const dayTabs = useMemo(
     () => Array.from({ length: maxDepthDays + 1 }, (_, index) => maxDepthDays - index),
