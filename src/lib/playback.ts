@@ -7,6 +7,12 @@ import type { ContentType, PlaylistPreview } from "./types";
 export type PlayerState = "idle" | "loading" | "playing" | "error";
 export type StreamType = "hls" | "mpegts" | "unknown";
 export type PlaybackStartMode = "manual" | "recovery";
+
+export function hasPresentedVideoFrame(
+  quality: Pick<VideoPlaybackQuality, "totalVideoFrames" | "droppedVideoFrames">,
+): boolean {
+  return quality.totalVideoFrames > quality.droppedVideoFrames;
+}
 export type PlaybackRecoveryIssue =
   | "startup_failure"
   | "media_error"

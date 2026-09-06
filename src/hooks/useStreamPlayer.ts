@@ -9,6 +9,7 @@ import {
   formatPlaybackRecoveryMessage,
   getArchiveFallbackRoutes,
   getMpegtsPlaybackRoutes,
+  hasPresentedVideoFrame,
   type HlsErrorPayload,
   isHlsManifestRejection,
   isHlsMediaRejection,
@@ -595,17 +596,40 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
         let settled = false;
         let timer: ReturnType<typeof setTimeout> | null = null;
+        let frameTimer: ReturnType<typeof setInterval> | null = null;
         const finish = (value: boolean) => {
           if (settled) return;
           settled = true;
           if (timer) clearTimeout(timer);
+          if (frameTimer) clearInterval(frameTimer);
           videoElement.removeEventListener("canplay", onCanPlay);
           videoElement.removeEventListener("error", onError);
           signal.removeEventListener("abort", onAbort);
           resolve(value);
         };
         const onCanPlay = () => {
-          finish(true);
+          // Native HLS can advance audio while dropping every video frame.
+          // Start playback before accepting it so the MSE fallback still runs.
+          if (!videoElement.videoWidth || !videoElement.getVideoPlaybackQuality) {
+            finish(true);
+            return;
+          }
+          const startedAt = performance.now();
+          void videoElement.play().catch(() => finish(true));
+          frameTimer = setInterval(() => {
+            if (
+              document.visibilityState === "hidden" ||
+              hasPresentedVideoFrame(videoElement.getVideoPlaybackQuality())
+            ) {
+              finish(true);
+            } else if (performance.now() - startedAt >= 2_000) {
+              lastErrorRef.current = "Native playback did not produce a video frame";
+              finish(false);
+              videoElement.pause();
+              videoElement.removeAttribute("src");
+              videoElement.load();
+            }
+          }, 100);
         };
         const onError = () => {
           lastErrorRef.current = readMediaErrorMessage(videoElement.error);
