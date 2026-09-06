@@ -13,8 +13,23 @@ let epgLoad: {
 } | null = null;
 const EPG_LOAD_TTL_MS = 6 * 60 * 60 * 1_000;
 
+// Every guide row asks for the load key on mount; deriving it means walking
+// tens of thousands of results, so it is cached per results array identity.
+let requestCache: {
+  playlist: unknown;
+  results: unknown;
+  value: { key: string; sources: string[]; tvgIds: string[] };
+} | null = null;
+
 function epgLoadRequest() {
   const state = useAppStore.getState();
+  if (
+    requestCache &&
+    requestCache.playlist === state.playlist &&
+    requestCache.results === state.flatResults
+  ) {
+    return requestCache.value;
+  }
   const sources = state.playlist?.epg_sources ?? [];
   // The guide lists every channel, so the index must cover all of them.
   const tvgIds = Array.from(
@@ -30,7 +45,9 @@ function epgLoadRequest() {
     sources,
     tvgIds,
   ]);
-  return { key, sources, tvgIds };
+  const value = { key, sources, tvgIds };
+  requestCache = { playlist: state.playlist, results: state.flatResults, value };
+  return value;
 }
 
 export function ensureEpgLoaded(): Promise<void> {
@@ -87,6 +104,11 @@ export function epgSourcesFor(result: ChannelResult): string[] {
   return playlist?.epg_sources_by_playlist[result.playlist] ?? playlist?.epg_sources ?? [];
 }
 
+// Guide rows unmount and remount while scrolling; answering repeats from
+// memory avoids an IPC round trip per row. Scoped to the current load.
+const PROGRAMME_CACHE_LIMIT = 4000;
+let programmeCache: { loadKey: string; entries: Map<string, EpgProgramme[]> } | null = null;
+
 /** Programmes for one channel in a window, after the guide has loaded. */
 export function fetchGuideProgrammes(
   result: ChannelResult,
@@ -98,6 +120,20 @@ export function fetchGuideProgrammes(
   }
   const tvgId = result.tvg_id;
   return ensureEpgLoaded()
-    .then(() => getEpgProgrammes(epgSourcesFor(result), tvgId, from, to))
+    .then(async () => {
+      const loadKey = epgLoadRequest().key;
+      if (programmeCache?.loadKey !== loadKey) {
+        programmeCache = { loadKey, entries: new Map() };
+      }
+      const cacheKey = `${result.playlist}\u0000${tvgId}\u0000${from}\u0000${to}`;
+      const cached = programmeCache.entries.get(cacheKey);
+      if (cached) return cached;
+      const programmes = await getEpgProgrammes(epgSourcesFor(result), tvgId, from, to);
+      if (programmeCache.entries.size >= PROGRAMME_CACHE_LIMIT) {
+        programmeCache.entries.clear();
+      }
+      programmeCache.entries.set(cacheKey, programmes);
+      return programmes;
+    })
     .catch(() => [] as EpgProgramme[]);
 }
