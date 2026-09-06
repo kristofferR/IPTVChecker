@@ -13,7 +13,7 @@ import {
 import { createPortal } from "react-dom";
 import type { ArchivePlayOptions } from "../hooks/useStreamPlayer";
 import { archiveBadgeText, hasArchive, resolveArchivePlayback } from "../lib/archive";
-import { startArchiveDownload } from "../lib/archiveDownload";
+import { isArchiveDownloadRunning, startArchiveDownload } from "../lib/archiveDownload";
 import {
   type ArchiveProbeOutcome,
   probeArchivePoint,
@@ -287,7 +287,12 @@ export function GuideView({
 
   // The canvas spans local midnight `maxDepthDays` ago through the end of today.
   const spanFrom = useMemo(() => startOfDayEpochS(maxDepthDays), [maxDepthDays]);
-  const spanTo = useMemo(() => startOfDayEpochS(0) + 86_400, []);
+  // End of the current day, tracked from the ticking clock so an app left
+  // open past midnight keeps today's programmes and the now marker.
+  const spanTo = useMemo(
+    () => startOfDayEpochS(0, new Date(nowEpochS * 1000)) + 86_400,
+    [nowEpochS],
+  );
   const totalWidthPx = CHANNEL_COL_PX + ((spanTo - spanFrom) / 3600) * PX_PER_HOUR;
   const xOf = useCallback(
     (epochS: number) => CHANNEL_COL_PX + ((epochS - spanFrom) / 3600) * PX_PER_HOUR,
@@ -328,8 +333,11 @@ export function GuideView({
   // it must re-run when it appears, not just on first render.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const parentRef = useRef<HTMLDivElement | null>(null);
+  const initialScrollDone = useRef(false);
   const attachScrollEl = useCallback((el: HTMLDivElement | null) => {
     parentRef.current = el;
+    // A remounted scroller (filters emptied and refilled) starts over at now.
+    if (!el) initialScrollDone.current = false;
     setScrollEl(el);
   }, []);
   const virtualizer = useVirtualizer({
@@ -351,7 +359,7 @@ export function GuideView({
     const el = parentRef.current;
     if (!el) return;
     const fromS = spanFrom + ((el.scrollLeft - CHANNEL_COL_PX) / PX_PER_HOUR) * 3600;
-    const toS = spanFrom + ((el.scrollLeft + el.clientWidth) / PX_PER_HOUR) * 3600;
+    const toS = spanFrom + ((el.scrollLeft + el.clientWidth - CHANNEL_COL_PX) / PX_PER_HOUR) * 3600;
     const from = Math.floor((fromS - RENDER_BUFFER_S) / RENDER_STEP_S) * RENDER_STEP_S;
     const to = Math.ceil((toS + RENDER_BUFFER_S) / RENDER_STEP_S) * RENDER_STEP_S;
     setRenderRange((prev) => (prev.from === from && prev.to === to ? prev : { from, to }));
@@ -385,12 +393,20 @@ export function GuideView({
   );
 
   // First paint: put "now" toward the right edge so the recent past fills the view.
-  const initialScrollDone = useRef(false);
   useLayoutEffect(() => {
     if (!scrollEl || initialScrollDone.current) return;
     initialScrollDone.current = true;
     scrollToTime(Math.floor(Date.now() / 1000));
   }, [scrollEl, scrollToTime]);
+  const previousSpanFrom = useRef(spanFrom);
+  useLayoutEffect(() => {
+    const delta = previousSpanFrom.current - spanFrom;
+    previousSpanFrom.current = spanFrom;
+    if (delta === 0 || !scrollEl) return;
+    // The canvas grew to the left; keep the same wall-clock time on screen.
+    scrollEl.scrollLeft += (delta / 3600) * PX_PER_HOUR;
+    updateRenderRange();
+  }, [spanFrom, scrollEl, updateRenderRange]);
   useEffect(() => {
     if (!scrollEl) return;
     const observer = new ResizeObserver(updateRenderRange);
@@ -400,13 +416,13 @@ export function GuideView({
 
   // Right-click "Browse Catch-up" lands on the requested channel.
   useEffect(() => {
-    if (guideFocusChannelIndex == null) return;
+    if (guideFocusChannelIndex == null || !scrollEl) return;
     const rowIndex = channels.findIndex((channel) => channel.index === guideFocusChannelIndex);
     if (rowIndex >= 0) {
       virtualizer.scrollToIndex(rowIndex, { align: "center" });
     }
     setGuideFocusChannelIndex(null);
-  }, [guideFocusChannelIndex, channels, virtualizer, setGuideFocusChannelIndex]);
+  }, [guideFocusChannelIndex, channels, virtualizer, setGuideFocusChannelIndex, scrollEl]);
 
   // Close the programme menu on outside clicks.
   const menuRef = useRef<HTMLDivElement>(null);
@@ -418,6 +434,22 @@ export function GuideView({
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [menu]);
+
+  /** Single-connection providers cannot take a second stream while one is busy. */
+  const providerBusy = () => {
+    const state = useAppStore.getState();
+    return (
+      isScanActive(state.scanState) ||
+      state.archiveVerifyRun != null ||
+      state.archiveGuideTestRunning ||
+      Object.values(state.archiveProbes).some((entry) => entry.running) ||
+      (isSingleConnectionPlaylist(state.playlist) &&
+        (state.playIntentActive ||
+          state.castActive ||
+          state.externalPlaybackActive ||
+          isArchiveDownloadRunning(state.archiveDownloads)))
+    );
+  };
 
   const activate = (target: GuideSelection) => {
     if (testing) return;
@@ -433,18 +465,15 @@ export function GuideView({
     if (!target) return;
     const state = useAppStore.getState();
     if (
-      isScanActive(state.scanState) ||
-      state.archiveVerifyRun ||
-      state.archiveGuideTestRunning ||
-      Object.values(state.archiveProbes).some((entry) => entry.running) ||
-      ((state.playIntentActive || state.castActive) && isSingleConnectionPlaylist(state.playlist))
+      state.externalPlaybackActive &&
+      isSingleConnectionPlaylist(state.playlist) &&
+      !window.confirm("Close the external player before testing catch-up. Continue?")
     ) {
       return;
     }
     if (
-      state.externalPlaybackActive &&
-      isSingleConnectionPlaylist(state.playlist) &&
-      !window.confirm("Close the external player before testing catch-up. Continue?")
+      providerBusy() &&
+      !(state.externalPlaybackActive && isSingleConnectionPlaylist(state.playlist))
     ) {
       return;
     }
@@ -511,13 +540,20 @@ export function GuideView({
   const menuPlayable = menu != null && isProgrammePlayable(menu.selection, nowEpochS);
   const menuArchive = menu != null && hasArchive(menu.selection.result);
 
-  const select = (next: GuideSelection) => {
+  const select = useCallback((next: GuideSelection) => {
     testRequestRef.current += 1;
     selectionRef.current = next;
     setSelection(next);
     setTestOutcome(null);
     setTesting(false);
-  };
+  }, []);
+  const openProgrammeMenu = useCallback(
+    (target: GuideSelection, x: number, y: number) => setMenu({ selection: target, x, y }),
+    [],
+  );
+  const activateRef = useRef(activate);
+  activateRef.current = activate;
+  const activateStable = useCallback((target: GuideSelection) => activateRef.current(target), []);
 
   // Hour ticks and day boundaries across the whole span.
   const axis = useMemo(() => {
@@ -697,8 +733,8 @@ export function GuideView({
                       nowEpochS={nowEpochS}
                       selectedKey={selectionKey(selection)}
                       onSelect={select}
-                      onActivate={activate}
-                      onContextMenu={(target, x, y) => setMenu({ selection: target, x, y })}
+                      onActivate={activateStable}
+                      onContextMenu={openProgrammeMenu}
                     />
                   </div>
                 );
@@ -740,6 +776,14 @@ export function GuideView({
               onClick={() => {
                 const target = menu.selection;
                 setMenu(null);
+                if (providerBusy()) {
+                  useAppStore
+                    .getState()
+                    .setMenuInfo(
+                      "Stop playback, scans, and tests before recording on this provider.",
+                    );
+                  return;
+                }
                 void startArchiveDownload(target.result, playOptionsFor(target));
               }}
               className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"

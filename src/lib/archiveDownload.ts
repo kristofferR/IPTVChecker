@@ -24,12 +24,14 @@ export interface ArchiveDownload {
 const PROGRESS_EVENT = "archive-download://progress";
 let progressListener: Promise<() => void> | null = null;
 
-function ensureProgressListener(): void {
-  if (progressListener) return;
-  progressListener = listen<ArchiveDownloadProgress>(PROGRESS_EVENT, (event) => {
-    const { id, out_time_s, bytes } = event.payload;
-    useAppStore.getState().patchArchiveDownload(id, { outTimeS: out_time_s, bytes });
-  });
+function ensureProgressListener(): Promise<unknown> {
+  if (!progressListener) {
+    progressListener = listen<ArchiveDownloadProgress>(PROGRESS_EVENT, (event) => {
+      const { id, out_time_s, bytes } = event.payload;
+      useAppStore.getState().patchArchiveDownload(id, { outTimeS: out_time_s, bytes });
+    });
+  }
+  return progressListener.catch(() => undefined);
 }
 
 /** Filesystem-safe stem for the default recording name. */
@@ -78,7 +80,8 @@ export async function startArchiveDownload(
   });
   if (!path) return;
 
-  ensureProgressListener();
+  // Registered before the command starts so the first progress events land.
+  await ensureProgressListener();
   const id = crypto.randomUUID();
   const store = useAppStore.getState();
   store.upsertArchiveDownload({
