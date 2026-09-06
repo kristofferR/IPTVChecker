@@ -21,6 +21,7 @@ import {
 } from "../lib/archiveProbe";
 import { fetchGuideProgrammes } from "../lib/epgLoader";
 import { filterResultsShared } from "../lib/filters";
+import { guideProgrammesInWindow, indexGuideProgrammes } from "../lib/guideProgrammes";
 import { isSingleConnectionPlaylist } from "../lib/playback";
 import { isScanActive } from "../lib/scanState";
 import { isInputLikeTarget } from "../lib/shortcuts";
@@ -90,6 +91,67 @@ interface GuideRowProps {
   onContextMenu: (selection: GuideSelection, x: number, y: number) => void;
 }
 
+interface GuideProgrammeProps
+  extends Pick<
+    GuideRowProps,
+    "result" | "spanFrom" | "spanTo" | "nowEpochS" | "onSelect" | "onActivate" | "onContextMenu"
+  > {
+  programme: EpgProgramme;
+  selected: boolean;
+}
+
+// Most programmes stay on screen when the buffered window moves. Memoizing
+// each button lets those cells keep their rendered content and handlers.
+const GuideProgramme = memo(function GuideProgramme({
+  result,
+  programme,
+  spanFrom,
+  spanTo,
+  nowEpochS,
+  selected,
+  onSelect,
+  onActivate,
+  onContextMenu,
+}: GuideProgrammeProps) {
+  const left = ((Math.max(programme.start, spanFrom) - spanFrom) / 3600) * PX_PER_HOUR;
+  const width = ((Math.min(programme.stop, spanTo) - spanFrom) / 3600) * PX_PER_HOUR - left;
+  if (width < 2) return null;
+  const selection: GuideSelection = { result, programme };
+  const playable = isProgrammePlayable(selection, nowEpochS);
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(selection)}
+      onDoubleClick={() => playable && onActivate(selection)}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onSelect(selection);
+        onContextMenu(selection, event.clientX, event.clientY);
+      }}
+      title={`${timeLabel(programme.start)}–${timeLabel(programme.stop)} ${programme.title}${
+        playable ? (hasArchive(result) ? "" : " (live now)") : " (unavailable)"
+      }`}
+      className={`absolute inset-y-[3px] flex items-center gap-1 overflow-hidden rounded px-1.5 text-left text-[10.5px] transition-colors ${
+        selected
+          ? "bg-violet-500/35 text-violet-100 ring-1 ring-violet-400/70"
+          : playable
+            ? "bg-violet-500/12 text-text-primary ring-1 ring-violet-500/20 hover:bg-violet-500/25"
+            : "bg-panel-subtle text-text-tertiary ring-1 ring-border-subtle"
+      }`}
+      style={{ left: `${left}px`, width: `${width - 1}px` }}
+      dir="ltr"
+    >
+      <span className="shrink-0 text-[9px] tabular-nums opacity-70">
+        {timeLabel(programme.start)}
+      </span>
+      <span className="truncate" dir="auto">
+        {programme.title}
+      </span>
+    </button>
+  );
+});
+
 const GuideRow = memo(function GuideRow({
   result,
   spanFrom,
@@ -124,7 +186,14 @@ const GuideRow = memo(function GuideRow({
     };
   }, [result.playlist, result.tvg_id, epgSourceKey, spanFrom, spanTo]);
 
-  const xOf = (epochS: number) => CHANNEL_COL_PX + ((epochS - spanFrom) / 3600) * PX_PER_HOUR;
+  const programmeIndex = useMemo(
+    () => (programmes ? indexGuideProgrammes(programmes) : null),
+    [programmes],
+  );
+  const visibleProgrammes = useMemo(
+    () => (programmeIndex ? guideProgrammesInWindow(programmeIndex, renderFrom, renderTo) : []),
+    [programmeIndex, renderFrom, renderTo],
+  );
 
   return (
     <div className="flex h-full items-stretch border-b border-border-subtle">
@@ -158,48 +227,20 @@ const GuideRow = memo(function GuideRow({
             {result.tvg_id ? "No programme data" : "No EPG id"}
           </div>
         ) : (
-          programmes.map((programme) => {
-            if (programme.stop < renderFrom || programme.start > renderTo) return null;
-            const left = xOf(Math.max(programme.start, spanFrom)) - CHANNEL_COL_PX;
-            const width = xOf(Math.min(programme.stop, spanTo)) - CHANNEL_COL_PX - left;
-            if (width < 2) return null;
-            const selection: GuideSelection = { result, programme };
-            const playable = isProgrammePlayable(selection, nowEpochS);
-            const selected = selectedKey === `${result.index}:${programme.start}`;
-            return (
-              <button
-                key={programme.start}
-                type="button"
-                onClick={() => onSelect(selection)}
-                onDoubleClick={() => playable && onActivate(selection)}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onSelect(selection);
-                  onContextMenu(selection, event.clientX, event.clientY);
-                }}
-                title={`${timeLabel(programme.start)}–${timeLabel(programme.stop)} ${programme.title}${
-                  playable ? (hasArchive(result) ? "" : " (live now)") : " (unavailable)"
-                }`}
-                className={`absolute inset-y-[3px] flex items-center gap-1 overflow-hidden rounded px-1.5 text-left text-[10.5px] transition-colors ${
-                  selected
-                    ? "bg-violet-500/35 text-violet-100 ring-1 ring-violet-400/70"
-                    : playable
-                      ? "bg-violet-500/12 text-text-primary ring-1 ring-violet-500/20 hover:bg-violet-500/25"
-                      : "bg-panel-subtle text-text-tertiary ring-1 ring-border-subtle"
-                }`}
-                style={{ left: `${left}px`, width: `${width - 1}px` }}
-                dir="ltr"
-              >
-                <span className="shrink-0 text-[9px] tabular-nums opacity-70">
-                  {timeLabel(programme.start)}
-                </span>
-                <span className="truncate" dir="auto">
-                  {programme.title}
-                </span>
-              </button>
-            );
-          })
+          visibleProgrammes.map((programme) => (
+            <GuideProgramme
+              key={programme.start}
+              result={result}
+              programme={programme}
+              spanFrom={spanFrom}
+              spanTo={spanTo}
+              nowEpochS={nowEpochS}
+              selected={selectedKey === `${result.index}:${programme.start}`}
+              onSelect={onSelect}
+              onActivate={onActivate}
+              onContextMenu={onContextMenu}
+            />
+          ))
         )}
       </div>
     </div>
@@ -350,6 +391,7 @@ export function GuideView({
     estimateSize: () => ROW_HEIGHT_PX,
     overscan: 10,
     scrollMargin: AXIS_HEIGHT_PX,
+    useFlushSync: false,
   });
 
   // Horizontal window actually rendered, quantized to keep row props stable.
@@ -359,9 +401,11 @@ export function GuideView({
     const now = Math.floor(Date.now() / 1000);
     return { from: now - 8 * 3600, to: now + 3 * 3600 };
   });
+  const lastScrollLeft = useRef<number | null>(null);
   const updateRenderRange = useCallback(() => {
     const el = parentRef.current;
     if (!el) return;
+    lastScrollLeft.current = el.scrollLeft;
     const fromS = spanFrom + ((el.scrollLeft - CHANNEL_COL_PX) / PX_PER_HOUR) * 3600;
     const toS = spanFrom + ((el.scrollLeft + el.clientWidth - CHANNEL_COL_PX) / PX_PER_HOUR) * 3600;
     const from = Math.floor((fromS - RENDER_BUFFER_S) / RENDER_STEP_S) * RENDER_STEP_S;
@@ -372,6 +416,8 @@ export function GuideView({
   const scrollFrameRef = useRef<number | null>(null);
   const handleScroll = useCallback(() => {
     setMenu(null);
+    // Vertical scrolling only changes the virtual rows, not the time window.
+    if (parentRef.current?.scrollLeft === lastScrollLeft.current) return;
     if (scrollFrameRef.current != null) return;
     scrollFrameRef.current = window.requestAnimationFrame(() => {
       scrollFrameRef.current = null;
@@ -735,7 +781,9 @@ export function GuideView({
                       renderFrom={renderRange.from}
                       renderTo={renderRange.to}
                       nowEpochS={nowEpochS}
-                      selectedKey={selectionKey(selection)}
+                      selectedKey={
+                        selection?.result.index === channel.index ? selectionKey(selection) : null
+                      }
                       onSelect={select}
                       onActivate={activateStable}
                       onContextMenu={openProgrammeMenu}

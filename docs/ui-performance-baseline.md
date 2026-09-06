@@ -75,7 +75,46 @@ leave ordinary filters unchanged retain the sorted array and virtualizer keys.
 The selection visibility index is built only when there is a selection or anchor
 to reconcile.
 
-## 4) Runtime UI Sampling (Dev Builds)
+## 4) Guide Scrolling
+
+Run the programme-window microbenchmark:
+
+```bash
+bun run scripts/benchmark-guide-window.ts
+```
+
+It compares a full-history scan with indexed window selection over 60 rows,
+14 days of 15-minute programmes per row, and 120 horizontal windows. The indexed
+case includes constructing the index. On the Linux workstation with Bun 1.4.2,
+median time fell from **20.05 ms to 1.64 ms**, returning the same 302,400 listings
+over the full run. This measures selection work, not rendering.
+
+A separate headless Chromium check mounted the actual `GuideView` in Vite dev
+mode with mocked Tauri EPG responses: 1,000 channels, a 14-day archive depth,
+15-minute programmes, and a 1440×900 viewport. Each pass used 120 animation-frame
+steps, moving 40 px horizontally or 160 px vertically. Results below are medians
+of three passes, comparing `a124122` with the guide changes:
+
+| Measurement per pass | Before | After |
+|----------------------|-------:|------:|
+| Horizontal React render time | 686 ms | 323 ms |
+| Vertical React commits | 241 | 198 |
+| Redundant EPG summary store updates during vertical scrolling | 600 | 0 |
+| Vertical frame interval p95 | 23.9 ms | 23.9 ms |
+| Frames with gaps in mounted row coverage | 0 | 0 |
+
+Programme indexing alone changed horizontal render time only modestly; retaining
+unchanged programme buttons with `memo` produced most of the rendering reduction.
+Vertical frame timing did not materially improve in this fixture. The extra
+memoized cell components also add mounting work: median vertical React render
+time was 642 ms before and 697 ms after. These development-mode measurements do
+not establish native WebKit frame rates or real-provider loading performance.
+
+Browser interaction checks covered day/Now jumps, changing selection between
+rows, playback arguments, context-menu dismissal, resizing, filters that replace
+a row without changing the row count, and remounting after an empty filter.
+
+## 5) Runtime UI Sampling (Dev Builds)
 
 In dev builds, the app records UI perf samples in memory:
 
@@ -105,7 +144,7 @@ To re-enable:
 localStorage.removeItem("iptv-checker.ui-perf.disabled")
 ```
 
-## 5) Manual UI Checks
+## 6) Manual UI Checks
 
 1. Start app: `bun tauri dev`
 2. Open each baseline playlist
