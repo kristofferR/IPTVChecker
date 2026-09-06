@@ -48,6 +48,29 @@ function makeResult(
 }
 
 describe("sortResults bitrate/audio determinism", () => {
+  it.each(["bitrate", "audio", "audio_layout"] as const)(
+    "preserves equal-value ordering, nulls last, and input identity for %s",
+    (field) => {
+      const input = [8, 2, 5, 3].map((index) => ({
+        ...makeResult(index, index === 5 ? null : "128.5 kbps", "128.5 kbps"),
+        audio_bitrate: index === 5 ? null : "128.5 kbps",
+        audio_channel_layout: index === 5 ? null : "stereo",
+      }));
+      const original = [...input];
+      for (const [direction, indices] of [
+        ["asc", [2, 3, 8, 5]],
+        ["desc", [8, 3, 2, 5]],
+      ] as const) {
+        const sorted = sortResults(input, field, direction);
+        expect(sorted.map((result) => result.index)).toEqual([...indices]);
+        for (const result of sorted) {
+          expect(result).toBe(input.find((item) => item.index === result.index)!);
+        }
+        expect(input).toEqual(original);
+      }
+    },
+  );
+
   const sample = [
     makeResult(0, "1200", "192"),
     makeResult(1, "800 kbps", "128 kbps"),

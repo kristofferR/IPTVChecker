@@ -97,6 +97,12 @@ function parseAudioLayout(value: string | null | undefined): number | null {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+const PARSED_SORT_VALUES = {
+  bitrate: (result: ChannelResult) => parseBitrateKbps(result.video_bitrate),
+  audio: (result: ChannelResult) => parseBitrateKbps(result.audio_bitrate),
+  audio_layout: (result: ChannelResult) => parseAudioLayout(result.audio_channel_layout),
+};
+
 function compareOptionalNumber(
   left: number | null,
   right: number | null,
@@ -226,8 +232,19 @@ export function sortResults(
     return [...results].reverse();
   }
 
-  const sorted = [...results];
   const dir = direction === "asc" ? 1 : -1;
+
+  if (field === "bitrate" || field === "audio" || field === "audio_layout") {
+    // Parse once per channel instead of twice per comparison (O(n log n)).
+    const valueFor = PARSED_SORT_VALUES[field];
+    const keyed = results.map((result) => ({ result, value: valueFor(result) }));
+    keyed.sort((a, b) =>
+      compareOptionalNumber(a.value, b.value, dir, a.result.index, b.result.index),
+    );
+    return keyed.map(({ result }) => result);
+  }
+
+  const sorted = [...results];
 
   sorted.sort((a, b) => {
     switch (field) {
@@ -272,32 +289,8 @@ export function sortResults(
         }
         return (aLatency - bLatency) * dir;
       }
-      case "bitrate":
-        return compareOptionalNumber(
-          parseBitrateKbps(a.video_bitrate),
-          parseBitrateKbps(b.video_bitrate),
-          dir,
-          a.index,
-          b.index,
-        );
-      case "audio":
-        return compareOptionalNumber(
-          parseBitrateKbps(a.audio_bitrate),
-          parseBitrateKbps(b.audio_bitrate),
-          dir,
-          a.index,
-          b.index,
-        );
       case "audio_codec":
         return (a.audio_codec ?? "").localeCompare(b.audio_codec ?? "") * dir;
-      case "audio_layout":
-        return compareOptionalNumber(
-          parseAudioLayout(a.audio_channel_layout),
-          parseAudioLayout(b.audio_channel_layout),
-          dir,
-          a.index,
-          b.index,
-        );
       case "catchup":
         return compareOptionalNumber(
           archiveSortValue(a),

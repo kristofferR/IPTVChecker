@@ -44,11 +44,43 @@ of pure store bookkeeping to ~0.2s:
 Measured on an Apple Silicon dev machine; treat the ratio, not the absolute
 numbers, as the baseline.
 
-## 3) Runtime UI Sampling (Dev Builds)
+## 3) Numeric Sorting and Guide Labels
+
+Run:
+
+```bash
+bun run scripts/benchmark-ui-hotpaths.ts
+```
+
+Uses 50,000 synthetic channels with deterministic, shuffled bitrates and mixed
+audio layouts, plus 1,000 guide time labels. Each case warms up five times and
+reports the median and p95 of 25 iterations.
+
+Measured on the Linux workstation with Bun 1.4.2, comparing the implementation
+at `147bab0` with parsing numeric sort keys once per channel and reusing guide
+date/time formatters:
+
+| Operation | Before median | After median |
+|-----------|--------------:|-------------:|
+| Sort video bitrate | 74.29 ms | 9.33 ms |
+| Sort audio bitrate | 58.04 ms | 7.12 ms |
+| Sort audio layout | 11.87 ms | 4.02 ms |
+| Format 1,000 time labels | 12.24 ms | 0.27 ms |
+
+These measure JavaScript functions in Bun, not native webview frame times or
+network scan throughput. Compare runs on the same machine and runtime.
+
+Table filtering and sorting are also memoized separately: probe updates that
+leave ordinary filters unchanged retain the sorted array and virtualizer keys.
+The selection visibility index is built only when there is a selection or anchor
+to reconcile.
+
+## 4) Runtime UI Sampling (Dev Builds)
 
 In dev builds, the app records UI perf samples in memory:
 
-- `table.filter-sort` (ChannelTable filter+sort pipeline)
+- `table.filter` (ChannelTable filtering)
+- `table.sort` (ChannelTable sorting, only when filtered results or sort order change)
 - `app.completed-results`
 - `app.duplicate-detection`
 - `app.export-filter`
@@ -73,7 +105,7 @@ To re-enable:
 localStorage.removeItem("iptv-checker.ui-perf.disabled")
 ```
 
-## 4) Manual UI Checks
+## 5) Manual UI Checks
 
 1. Start app: `bun tauri dev`
 2. Open each baseline playlist

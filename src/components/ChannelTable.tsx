@@ -319,12 +319,12 @@ export function ChannelTable({
     [columns, columnWidths, effectiveNameWidth],
   );
 
-  const filteredResults = useMemo(
+  const unsortedResults = useMemo(
     () =>
       measureUiPerf(
-        "table.filter-sort",
-        () => {
-          const filtered = filterResultsShared(
+        "table.filter",
+        () =>
+          filterResultsShared(
             completedResults,
             search,
             groupFilter,
@@ -332,15 +332,12 @@ export function ChannelTable({
             duplicateIndices,
             separatePlaceholder,
             archiveProbes,
-          );
-          return sortResults(filtered, sortField, sortDir);
-        },
+          ),
         {
           rows: completedResults.length,
           search: search.length,
           group: groupFilter,
           status: statusFilter,
-          sort: `${sortField}:${sortDir}`,
         },
       ),
     [
@@ -349,11 +346,20 @@ export function ChannelTable({
       groupFilter,
       statusFilter,
       duplicateIndices,
-      sortField,
-      sortDir,
       separatePlaceholder,
       archiveProbes,
     ],
+  );
+
+  // Probe updates leave ordinary filters unchanged. Keep their sorted array
+  // stable too, so the virtualizer does not rebuild its measurements.
+  const filteredResults = useMemo(
+    () =>
+      measureUiPerf("table.sort", () => sortResults(unsortedResults, sortField, sortDir), {
+        rows: unsortedResults.length,
+        sort: `${sortField}:${sortDir}`,
+      }),
+    [unsortedResults, sortField, sortDir],
   );
 
   const estimatedRowHeight = channelRowHeightPixels(channelLogoSize);
@@ -412,15 +418,19 @@ export function ChannelTable({
   );
 
   useEffect(() => {
-    const visible = new Set(filteredResults.map((r) => r.index));
+    let visible: Set<number> | undefined;
+    const isVisible = (index: number) => {
+      visible ??= new Set(filteredResults.map((r) => r.index));
+      return visible.has(index);
+    };
 
     updateSelection((prev) => {
       if (prev.size === 0) return prev;
-      const next = new Set(Array.from(prev).filter((idx) => visible.has(idx)));
+      const next = new Set(Array.from(prev).filter(isVisible));
       return next.size === prev.size ? prev : next;
     });
 
-    setSelectionAnchor((prev) => (prev !== null && visible.has(prev) ? prev : null));
+    setSelectionAnchor((prev) => (prev !== null && isVisible(prev) ? prev : null));
 
     const previous = focusedRowRef.current;
     const next =
