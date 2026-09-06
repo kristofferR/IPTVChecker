@@ -12,7 +12,9 @@ pub const MAX_JSON_API_BYTES: u64 = 64 * 1024 * 1024;
 /// Whether a response is an HLS manifest, by content type or .m3u8 path.
 pub fn is_m3u8_response(content_type: &str, url: &str) -> bool {
     let ct = content_type.to_lowercase();
-    if ct.contains("application/vnd.apple.mpegurl") || ct.contains("application/x-mpegurl") {
+    // Panels also serve playlists as audio/x-mpegurl, audio/mpegurl, or
+    // video/x-mpegurl; anything mpegurl-flavoured is a manifest.
+    if ct.contains("mpegurl") {
         return true;
     }
     if let Ok(parsed) = Url::parse(url) {

@@ -183,14 +183,23 @@ impl AppState {
         self.quick_check_tokens.lock().await.remove(request_id);
     }
 
+    /// A cancel that arrived before registration leaves a cancelled
+    /// tombstone; honour it so the recording never outlives its Cancel click.
     pub async fn register_archive_download(&self, id: String, token: CancellationToken) {
-        self.archive_download_tokens.lock().await.insert(id, token);
+        let mut tokens = self.archive_download_tokens.lock().await;
+        if tokens.get(&id).is_some_and(CancellationToken::is_cancelled) {
+            token.cancel();
+        }
+        tokens.insert(id, token);
     }
 
     pub async fn cancel_archive_download(&self, id: &str) {
-        if let Some(token) = self.archive_download_tokens.lock().await.get(id) {
-            token.cancel();
-        }
+        self.archive_download_tokens
+            .lock()
+            .await
+            .entry(id.to_string())
+            .or_insert_with(CancellationToken::new)
+            .cancel();
     }
 
     pub async fn unregister_archive_download(&self, id: &str) {

@@ -87,27 +87,48 @@ pub async fn download_archive(
     request: ArchiveDownloadRequest,
 ) -> Result<(), AppError> {
     validate(&request)?;
-    let (ffmpeg_available, _) = ffmpeg::check_availability(&app).await;
-    if !ffmpeg_available {
-        return Err(AppError::FfmpegNotAvailable);
-    }
-    let user_agent = state.settings.lock().await.user_agent.clone();
+    // Register before any slow step so an early Cancel is not lost.
     let cancel = CancellationToken::new();
     state
         .register_archive_download(request.id.clone(), cancel.clone())
         .await;
-    let result = run_download(&app, &request, &user_agent, &cancel).await;
-    state.unregister_archive_download(&request.id).await;
-    if result.is_err() {
-        // A cancelled or failed recording leaves a useless partial file behind.
-        let _ = std::fs::remove_file(&request.path);
+    let result = async {
+        let (ffmpeg_available, _) = ffmpeg::check_availability(&app).await;
+        if !ffmpeg_available {
+            return Err(AppError::FfmpegNotAvailable);
+        }
+        if cancel.is_cancelled() {
+            return Err(AppError::Cancelled);
+        }
+        let user_agent = state.settings.lock().await.user_agent.clone();
+        // Record into a sibling .part file so a failure never touches an
+        // existing file at the chosen path, then move it into place.
+        let part_path = partial_path(&request.path);
+        let outcome = run_download(&app, &request, &part_path, &user_agent, &cancel).await;
+        match outcome {
+            Ok(()) => crate::engine::disk::atomic_rename(
+                std::path::Path::new(&request.path),
+                std::path::Path::new(&part_path),
+            ),
+            Err(error) => {
+                let _ = std::fs::remove_file(&part_path);
+                Err(error)
+            }
+        }
     }
+    .await;
+    state.unregister_archive_download(&request.id).await;
     result
+}
+
+fn partial_path(path: &str) -> String {
+    format!("{path}.part")
 }
 
 async fn run_download(
     app: &AppHandle,
     request: &ArchiveDownloadRequest,
+    output_path: &str,
     user_agent: &str,
     cancel: &CancellationToken,
 ) -> Result<(), AppError> {
@@ -133,7 +154,7 @@ async fn run_download(
         "mpegts",
         "-progress",
         "pipe:1",
-        &request.path,
+        output_path,
     ];
     let resolved_bin = ffmpeg::resolve_binary(app, "ffmpeg");
     let mut command = tokio::process::Command::new(&resolved_bin);
