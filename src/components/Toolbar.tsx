@@ -29,6 +29,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { hasArchive } from "../lib/archive";
 import { type ArchiveVerifyMode, archiveVerdict } from "../lib/archiveVerification";
 import {
@@ -173,6 +174,8 @@ export const Toolbar = memo(function Toolbar({
   const scanMenuRef = useRef<HTMLDivElement | null>(null);
   const [scanMenuVisible, setScanMenuVisible] = useState(false);
   const verifyMenuRef = useRef<HTMLDivElement | null>(null);
+  const verifyPopoverRef = useRef<HTMLDivElement | null>(null);
+  const [verifyPosition, setVerifyPosition] = useState<{ top: number; left: number } | null>(null);
   const [verifyMenuVisible, setVerifyMenuVisible] = useState(false);
   const [verifyMode, setVerifyMode] = useState<ArchiveVerifyMode>(readArchiveVerifyMode);
   const [verifyScope, setVerifyScope] = useState<ExportScope>("all");
@@ -279,6 +282,38 @@ export const Toolbar = memo(function Toolbar({
     };
   }, [completedResults, filteredExportResults, selectedIndices]);
 
+  useLayoutEffect(() => {
+    if (!verifyMenuVisible) {
+      setVerifyPosition(null);
+      return;
+    }
+    const anchor = verifyMenuRef.current;
+    const popover = verifyPopoverRef.current;
+    if (!anchor || !popover) return;
+    const update = () => {
+      const rect = anchor.getBoundingClientRect();
+      setVerifyPosition({
+        top: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - popover.offsetHeight - 8)),
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - popover.offsetWidth - 8)),
+      });
+    };
+    update();
+    const focusFrame = requestAnimationFrame(() => {
+      popover.querySelector<HTMLButtonElement>("button")?.focus();
+    });
+    const observer = new ResizeObserver(update);
+    observer.observe(anchor);
+    observer.observe(popover);
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      cancelAnimationFrame(focusFrame);
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [verifyMenuVisible]);
+
   useEffect(() => {
     const handlePointerDownOutside = (event: MouseEvent) => {
       if (openMenuRef.current && !openMenuRef.current.contains(event.target as Node)) {
@@ -287,13 +322,20 @@ export const Toolbar = memo(function Toolbar({
       if (scanMenuRef.current && !scanMenuRef.current.contains(event.target as Node)) {
         setScanMenuVisible(false);
       }
-      if (verifyMenuRef.current && !verifyMenuRef.current.contains(event.target as Node)) {
+      if (
+        verifyMenuRef.current &&
+        !verifyMenuRef.current.contains(event.target as Node) &&
+        !verifyPopoverRef.current?.contains(event.target as Node)
+      ) {
         setVerifyMenuVisible(false);
       }
     };
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (verifyPopoverRef.current) {
+          verifyMenuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+        }
         setOpenMenuVisible(false);
         setScanMenuVisible(false);
         setVerifyMenuVisible(false);
@@ -634,7 +676,7 @@ export const Toolbar = memo(function Toolbar({
               title={verifyDisabledReason ?? "Verify catch-up: real vs fake"}
               className={btnWithOptionalText("toolbar-btn-verify gap-1.5")}
               aria-label="Verify catch-up"
-              aria-haspopup="menu"
+              aria-haspopup="dialog"
               aria-expanded={verifyMenuVisible}
             >
               <IconVerify className="w-[22px] h-[22px]" />
@@ -645,84 +687,97 @@ export const Toolbar = memo(function Toolbar({
                 </span>
               )}
             </button>
-            {verifyMenuVisible && (
-              <div className="absolute left-0 top-full z-50 mt-1 w-72 rounded-lg border border-border-app bg-dropdown py-1 shadow-2xl text-[13px]">
-                <p className="px-3 pt-1.5 pb-1 text-[10px] uppercase tracking-[0.08em] text-text-tertiary">
-                  Mode
-                </p>
-                {(
-                  [
-                    ["quick", "Quick · real vs fake", "1 request / channel"],
-                    ["full", "Full · measure depth", "2-5 requests / channel"],
-                  ] as const
-                ).map(([value, label, cost]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => {
-                      setVerifyMode(value);
-                      storeArchiveVerifyMode(value);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-btn-hover"
-                  >
-                    <span
-                      className={`h-3 w-3 rounded-full border ${
-                        verifyMode === value
-                          ? "border-violet-400 bg-violet-500 ring-2 ring-inset ring-dropdown"
-                          : "border-text-tertiary"
-                      }`}
-                    />
-                    <span className="flex-1">{label}</span>
-                    <span className="text-[11px] text-text-tertiary">{cost}</span>
-                  </button>
-                ))}
-                <p className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-[0.08em] text-text-tertiary">
-                  Scope
-                </p>
-                {(
-                  [
-                    ["all", "All advertised"],
-                    ["filtered", "Filtered"],
-                    ["selected", "Selected"],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setVerifyScope(value)}
-                    disabled={verifyScopeCounts[value] === 0}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-btn-hover disabled:opacity-40 disabled:pointer-events-none"
-                  >
-                    <span
-                      className={`h-3 w-3 rounded-full border ${
-                        verifyScope === value
-                          ? "border-violet-400 bg-violet-500 ring-2 ring-inset ring-dropdown"
-                          : "border-text-tertiary"
-                      }`}
-                    />
-                    <span className="flex-1">{label}</span>
-                    <span className="text-[11px] tabular-nums text-text-tertiary">
-                      {verifyScopeCounts[value]}
-                      {value === verifyScope &&
-                      verifyMode === "quick" &&
-                      verifyScopeCounts[value] > 0
-                        ? ` · ~${Math.max(1, Math.round(verifyScopeCounts[value] / 60))} min`
-                        : ""}
-                    </span>
-                  </button>
-                ))}
-                <div className="px-2 pt-2 pb-1">
-                  <button
-                    type="button"
-                    onClick={startVerification}
-                    disabled={verifyScopeCounts[verifyScope] === 0}
-                    className="w-full rounded-md bg-violet-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-violet-500 transition-colors disabled:opacity-40 disabled:pointer-events-none"
-                  >
-                    Start verification ({verifyScopeCounts[verifyScope]})
-                  </button>
-                </div>
-              </div>
-            )}
+            {verifyMenuVisible &&
+              createPortal(
+                <div
+                  ref={verifyPopoverRef}
+                  data-no-window-drag
+                  className="macos-popover fixed z-50 w-96 max-w-[calc(100vw-16px)] max-h-[calc(100vh-16px)] overflow-y-auto rounded-lg border border-border-app bg-dropdown py-1 shadow-2xl text-[13px]"
+                  style={{
+                    top: verifyPosition?.top ?? 0,
+                    left: verifyPosition?.left ?? 0,
+                    visibility: verifyPosition ? "visible" : "hidden",
+                  }}
+                  role="dialog"
+                  aria-label="Verify catch-up"
+                >
+                  <p className="px-3 pt-1.5 pb-1 text-[10px] uppercase tracking-[0.08em] text-text-tertiary">
+                    Mode
+                  </p>
+                  {(
+                    [
+                      ["quick", "Quick · real vs fake", "1 request / channel"],
+                      ["full", "Full · measure depth", "2-5 requests / channel"],
+                    ] as const
+                  ).map(([value, label, cost]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => {
+                        setVerifyMode(value);
+                        storeArchiveVerifyMode(value);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-btn-hover"
+                    >
+                      <span
+                        className={`h-3 w-3 rounded-full border ${
+                          verifyMode === value
+                            ? "border-violet-400 bg-violet-500 ring-2 ring-inset ring-dropdown"
+                            : "border-text-tertiary"
+                        }`}
+                      />
+                      <span className="flex-1">{label}</span>
+                      <span className="text-[11px] text-text-tertiary">{cost}</span>
+                    </button>
+                  ))}
+                  <p className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-[0.08em] text-text-tertiary">
+                    Scope
+                  </p>
+                  {(
+                    [
+                      ["all", "All advertised"],
+                      ["filtered", "Filtered"],
+                      ["selected", "Selected"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setVerifyScope(value)}
+                      disabled={verifyScopeCounts[value] === 0}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-btn-hover disabled:opacity-40 disabled:pointer-events-none"
+                    >
+                      <span
+                        className={`h-3 w-3 rounded-full border ${
+                          verifyScope === value
+                            ? "border-violet-400 bg-violet-500 ring-2 ring-inset ring-dropdown"
+                            : "border-text-tertiary"
+                        }`}
+                      />
+                      <span className="flex-1">{label}</span>
+                      <span className="text-[11px] tabular-nums text-text-tertiary">
+                        {verifyScopeCounts[value]}
+                        {value === verifyScope &&
+                        verifyMode === "quick" &&
+                        verifyScopeCounts[value] > 0
+                          ? ` · ~${Math.max(1, Math.round(verifyScopeCounts[value] / 60))} min`
+                          : ""}
+                      </span>
+                    </button>
+                  ))}
+                  <div className="px-2 pt-2 pb-1">
+                    <button
+                      type="button"
+                      onClick={startVerification}
+                      disabled={verifyScopeCounts[verifyScope] === 0}
+                      className="w-full rounded-md bg-violet-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-violet-500 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                    >
+                      Start verification ({verifyScopeCounts[verifyScope]})
+                    </button>
+                  </div>
+                </div>,
+                document.body,
+              )}
           </div>
         </div>
       )}
