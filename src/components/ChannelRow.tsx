@@ -1,5 +1,4 @@
-import { Radio, Tv } from "lucide-react";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useMemo } from "react";
 import { archiveBadgeText, archiveTitle } from "../lib/archive";
 import {
   archiveDepthMeasured,
@@ -11,12 +10,11 @@ import {
 } from "../lib/archiveVerification";
 import { channelLogoPixels, channelRowHeightPixels } from "../lib/channelLogoSize";
 import { getChannelErrorReason } from "../lib/channelResults";
-import { extractTvgLogoUrl, normalizeTvgLogoUrl } from "../lib/extinf";
-import { useLogoCacheStatus } from "../lib/logoCache";
 import { detectChannelProtocol } from "../lib/streamProtocol";
 import type { ColumnDefinition } from "../lib/tableColumns";
 import type { ChannelLogoSize, ChannelResult } from "../lib/types";
 import { useAppStore } from "../store";
+import { ChannelLogo } from "./ChannelLogo";
 import { StatusBadge } from "./StatusBadge";
 
 function formatLatency(latencyMs: number): string {
@@ -66,23 +64,12 @@ function ChannelRowImpl({
   onRowContextMenu,
 }: ChannelRowProps) {
   const isAlive = result.status === "alive";
-  const logoUrl = useMemo(
-    () => normalizeTvgLogoUrl(result.tvg_logo) ?? extractTvgLogoUrl(result.extinf_line),
-    [result.extinf_line, result.tvg_logo],
-  );
-  const logoStatus = useLogoCacheStatus(logoUrl);
-  const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   const logoSizePx = useMemo(() => channelLogoPixels(channelLogoSize), [channelLogoSize]);
   const rowHeightPx = useMemo(() => channelRowHeightPixels(channelLogoSize), [channelLogoSize]);
-  const kindIconSizePx = useMemo(() => Math.max(12, Math.round(logoSizePx * 0.68)), [logoSizePx]);
   const errorReason = getChannelErrorReason(result);
   const drmStatusTitle = result.drm_system ? `DRM: ${result.drm_system}` : "DRM-protected stream";
   const streamProtocol = useMemo(() => detectChannelProtocol(result), [result]);
   const probeEntry = useAppStore((s) => s.archiveProbes[result.index]);
-
-  useEffect(() => {
-    setLogoLoadFailed(false);
-  }, [logoUrl]);
 
   const renderCell = (column: ColumnDefinition) => {
     switch (column.key) {
@@ -114,37 +101,9 @@ function ChannelRowImpl({
           </span>
         );
       case "name": {
-        const ChannelKindIcon = result.audio_only ? Radio : Tv;
-        const kindLabel = result.audio_only ? "Audio-only stream" : "Video stream";
-        const logoFrameClass =
-          "grid shrink-0 place-items-center rounded-sm ring-1 ring-border-subtle bg-panel-subtle";
         return (
           <span className="inline-flex min-w-0 items-center gap-1.5 px-2 font-medium">
-            {logoUrl && !logoLoadFailed && logoStatus === "ready" ? (
-              <img
-                src={logoUrl}
-                alt={`${result.name} logo`}
-                className={`${logoFrameClass} object-contain`}
-                style={{ width: `${logoSizePx}px`, height: `${logoSizePx}px` }}
-                loading="lazy"
-                decoding="async"
-                referrerPolicy="no-referrer"
-                onError={() => {
-                  setLogoLoadFailed(true);
-                }}
-              />
-            ) : (
-              <span
-                className={`${logoFrameClass} ${
-                  result.audio_only ? "text-cyan-400" : "text-text-tertiary"
-                }`}
-                aria-label={kindLabel}
-                title={kindLabel}
-                style={{ width: `${logoSizePx}px`, height: `${logoSizePx}px` }}
-              >
-                <ChannelKindIcon size={kindIconSizePx} aria-hidden="true" />
-              </span>
-            )}
+            <ChannelLogo result={result} size={logoSizePx} />
             <span className="truncate">{result.name}</span>
           </span>
         );

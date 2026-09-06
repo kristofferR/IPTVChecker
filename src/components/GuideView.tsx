@@ -27,13 +27,14 @@ import { isInputLikeTarget } from "../lib/shortcuts";
 import { dayLabel, startOfDayEpochS, timeLabel } from "../lib/timeFormat";
 import type { ChannelResult, EpgProgramme } from "../lib/types";
 import { useAppStore } from "../store";
+import { ChannelLogo } from "./ChannelLogo";
 
 // The guide is one continuous canvas: trackpad scrolling moves through time
 // horizontally (left = into the past) and through channels vertically. The
 // channel column and the time axis stay pinned with position: sticky.
 const ROW_HEIGHT_PX = 32;
 const AXIS_HEIGHT_PX = 22;
-const CHANNEL_COL_PX = 150;
+const CHANNEL_COL_PX = 180;
 const PX_PER_HOUR = 240;
 const MAX_GUIDE_DEPTH_DAYS = 14;
 const GUIDE_CLOCK_INTERVAL_MS = 30_000;
@@ -131,7 +132,10 @@ const GuideRow = memo(function GuideRow({
         className="sticky left-0 z-10 flex shrink-0 items-center gap-1.5 border-r border-border-subtle px-2"
         style={{ width: `${CHANNEL_COL_PX}px`, background: "var(--dropdown-bg)" }}
       >
-        <span className="min-w-0 flex-1 truncate text-[11px] font-semibold">{result.name}</span>
+        <ChannelLogo result={result} size={20} />
+        <span className="min-w-0 flex-1 truncate text-[11px] font-semibold" title={result.name}>
+          {result.name}
+        </span>
         {hasArchive(result) && (
           <span className="shrink-0 text-[9px] font-bold uppercase text-violet-400">
             {archiveBadgeText(result)}
