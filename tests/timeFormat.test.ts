@@ -28,4 +28,28 @@ describe("guide time labels", () => {
       );
     }
   });
+
+  it("follows system time-zone changes after the formatters have been cached", () => {
+    const previousTimeZone = process.env.TZ;
+    try {
+      for (const timeZone of ["Europe/Oslo", "America/New_York", "Asia/Kolkata"]) {
+        process.env.TZ = timeZone;
+        for (const date of [new Date("2026-01-15T23:30:00Z"), new Date("2026-07-15T23:30:00Z")]) {
+          expect(timeLabel(date.getTime() / 1000)).toBe(
+            date.toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+              hourCycle: "h23",
+            }),
+          );
+          expect(dayLabel(date.getTime() / 1000, new Date("2026-08-01T12:00:00Z"))).toBe(
+            date.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" }),
+          );
+        }
+      }
+    } finally {
+      if (previousTimeZone === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTimeZone;
+    }
+  });
 });

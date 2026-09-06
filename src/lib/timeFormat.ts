@@ -1,6 +1,12 @@
 let dayFormatter: Intl.DateTimeFormat | undefined;
 let timeFormatter: Intl.DateTimeFormat | undefined;
 
+// Format local wall-clock values in UTC so cached formatters never retain an
+// old system time zone. Date's offset follows zone changes and the input's DST.
+function localWallClockEpochMs(date: Date): number {
+  return date.getTime() - date.getTimezoneOffset() * 60_000;
+}
+
 /** "Today", "Yesterday", or a short local date like "Wed 28 Aug". */
 export function dayLabel(epochS: number, now: Date = new Date()): string {
   const date = new Date(epochS * 1000);
@@ -12,8 +18,9 @@ export function dayLabel(epochS: number, now: Date = new Date()): string {
     weekday: "short",
     day: "numeric",
     month: "short",
+    timeZone: "UTC",
   });
-  return dayFormatter.format(date);
+  return dayFormatter.format(localWallClockEpochMs(date));
 }
 
 /** Local wall-clock time like "21:00". */
@@ -24,8 +31,9 @@ export function timeLabel(epochS: number): string {
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
+    timeZone: "UTC",
   });
-  return timeFormatter.format(epochS * 1000);
+  return timeFormatter.format(localWallClockEpochMs(new Date(epochS * 1000)));
 }
 
 /** Local midnight of the day `daysAgo` days before now, in epoch seconds. */
