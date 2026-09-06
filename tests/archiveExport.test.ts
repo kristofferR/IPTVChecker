@@ -100,3 +100,17 @@ describe("verdict-based exports", () => {
     expect(exported[4]).toBe(plain);
   });
 });
+
+describe("EXTINF titles with commas", () => {
+  it("inserts and strips attributes without touching quoted commas or the title", async () => {
+    const { findUnquotedComma } = await import("../src/lib/archiveExport");
+    const line = '#EXTINF:-1 tvg-id="a" group-title="Sports, US" catchup="xc",Sky catchup=1';
+    expect(findUnquotedComma(line)).toBe(line.indexOf(",Sky"));
+    expect(setCatchupDays(line, 3)).toBe(
+      '#EXTINF:-1 tvg-id="a" group-title="Sports, US" catchup="xc" catchup-days="3",Sky catchup=1',
+    );
+    expect(stripCatchupAttributes(line)).toBe(
+      '#EXTINF:-1 tvg-id="a" group-title="Sports, US",Sky catchup=1',
+    );
+  });
+});

@@ -140,16 +140,18 @@ export const StatsPanel = memo(function StatsPanel() {
   );
   const verdictTally = useMemo(() => {
     let real = 0;
+    let shallower = 0;
     let fake = 0;
     let untested = 0;
     for (const channel of channels) {
       if (!hasArchive(channel)) continue;
       const verdict = archiveVerdict(channel, archiveProbes[channel.index]);
-      if (verdict === "verified" || verdict === "shallower") real += 1;
+      if (verdict === "verified") real += 1;
+      else if (verdict === "shallower") shallower += 1;
       else if (verdict === "fake") fake += 1;
       else untested += 1;
     }
-    return { real, fake, untested, tested: real + fake };
+    return { real, shallower, fake, untested, tested: real + shallower + fake };
   }, [channels, archiveProbes]);
 
   const selectedCatchupCount = useMemo(() => {
@@ -163,7 +165,9 @@ export const StatsPanel = memo(function StatsPanel() {
   }, [channels, selectedChannelIndices]);
   const catchupLabel =
     verdictTally.tested > 0
-      ? `${verdictTally.real} real · ${verdictTally.fake} fake${
+      ? `${verdictTally.real} real${
+          verdictTally.shallower > 0 ? ` · ${verdictTally.shallower} shallower` : ""
+        } · ${verdictTally.fake} fake${
           verdictTally.untested > 0 ? ` · ${verdictTally.untested} untested` : ""
         }`
       : visibleCatchupCount === catchupCount
@@ -176,12 +180,11 @@ export const StatsPanel = memo(function StatsPanel() {
       toggleFilter("catchup");
       return;
     }
-    const next =
-      statusFilter === "catchup_real"
-        ? "catchup_fake"
-        : statusFilter === "catchup_fake"
-          ? "all"
-          : "catchup_real";
+    const cycle = ["catchup_real", "catchup_shallower", "catchup_fake"].filter(
+      (filter) => filter !== "catchup_shallower" || verdictTally.shallower > 0,
+    );
+    const position = cycle.indexOf(statusFilter);
+    const next = position === -1 ? cycle[0] : (cycle[position + 1] ?? "all");
     startTransition(() => setStatusFilter(next));
   };
 
