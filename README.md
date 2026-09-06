@@ -157,6 +157,8 @@ bun tauri dev
 
 ## Building
 
+Linux AppImage builds require `patchelf` to be available on `PATH`.
+
 ```bash
 # Production build (creates platform-specific installer)
 bun tauri build

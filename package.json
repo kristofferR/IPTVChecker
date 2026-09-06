@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --build && vite build",
     "preview": "vite preview",
-    "tauri": "tauri",
+    "tauri": "bun scripts/run-tauri.ts",
     "typecheck": "tsc --noEmit",
     "test:frontend": "bun test tests",
     "perf:ui-filter": "bun run scripts/benchmark-ui-filter.ts",
