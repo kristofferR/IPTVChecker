@@ -27,9 +27,14 @@ interface PlaybackRecoveryDecisionIgnore {
   kind: "ignore";
 }
 
+interface PlaybackRecoveryDecisionFinish {
+  kind: "finish";
+}
+
 export type PlaybackRecoveryDecision =
   | PlaybackRecoveryDecisionRetry
   | PlaybackRecoveryDecisionFail
+  | PlaybackRecoveryDecisionFinish
   | PlaybackRecoveryDecisionIgnore;
 
 export interface StreamMetadata {
@@ -393,7 +398,7 @@ export function decidePlaybackRecovery(
     return { kind: "ignore" };
   }
   if (input.issue === "ended" && input.contentType !== "live") {
-    return { kind: "ignore" };
+    return { kind: "finish" };
   }
   const nextAttempt = getNextPlaybackRecoveryAttempt(
     input.recoveryTimestamps,
@@ -408,4 +413,52 @@ export function decidePlaybackRecovery(
     kind: "retry",
     nextAttempt,
   };
+}
+
+/**
+ * hls.js gave up on the playlist itself rather than on media: the proxy's 409
+ * for playlist URLs that serve raw MPEG-TS, or an unparsable manifest body.
+ */
+export function isHlsManifestRejection(reason: string | null | undefined): boolean {
+  return /manifestLoadError|manifestParsingError|manifestIncompatibleCodecsError/i.test(
+    reason ?? "",
+  );
+}
+
+/**
+ * hls.js could load the playlist but not play its media: codecs its TS
+ * demuxer cannot handle (HEVC on 4K catch-up), or nothing decodable arrived
+ * before the route timeout.
+ */
+export function isHlsMediaRejection(reason: string | null | undefined): boolean {
+  return /fragParsingError|bufferAddCodecError|bufferAppendError|bufferIncompatibleCodecsError|timed out/i.test(
+    reason ?? "",
+  );
+}
+
+const XTREAM_TIMESHIFT_M3U8 = /(\/timeshift\/[^/]+\/[^/]+\/\d+\/[^/]+\/\d+)\.m3u8(?=[?#]|$)/i;
+
+/** The raw MPEG-TS form of an Xtream timeshift playlist URL, if it is one. */
+export function xtreamTimeshiftTsVariant(url: string): string | null {
+  return XTREAM_TIMESHIFT_M3U8.test(url) ? url.replace(XTREAM_TIMESHIFT_M3U8, "$1.ts") : null;
+}
+
+/**
+ * Routes for catch-up media that hls.js rejected: the panel's raw `.ts`
+ * timeshift stream through mpegts.js (which demuxes HEVC), then an ffmpeg
+ * remux of the original playlist through the streaming proxy.
+ */
+export function getArchiveFallbackRoutes(url: string, proxyPort: number): MpegtsPlaybackRoute[] {
+  const routes: MpegtsPlaybackRoute[] = [];
+  const tsVariant = xtreamTimeshiftTsVariant(url);
+  if (tsVariant) {
+    routes.push({
+      kind: "direct",
+      url: proxyPort > 0 ? toStreamingProxyUrl(tsVariant, proxyPort, false, false) : tsVariant,
+    });
+  }
+  if (proxyPort > 0) {
+    routes.push({ kind: "remux", url: toStreamingProxyUrl(url, proxyPort, false, true) });
+  }
+  return routes;
 }

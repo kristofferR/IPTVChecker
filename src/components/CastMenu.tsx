@@ -13,12 +13,17 @@ interface UseChromecastShape {
   stop: () => Promise<void>;
 }
 
+export type CastStartHandler = () => (() => void) | undefined;
+
 interface CastMenuProps {
   chromecast: UseChromecastShape;
   castRequest: CastMediaRequest;
   mode: "popover" | "inline";
-  /** Fired after a cast successfully starts — e.g. to pause the local player. */
-  onCastStart?: () => void;
+  /**
+   * Fired before cast startup so the local stream can release its upstream
+   * connection. May return a rollback to run if startup fails.
+   */
+  onCastStart?: CastStartHandler;
   /**
    * Popover-mode only: fired when the menu opens or closes so the parent can
    * suppress auto-hide of surrounding chrome while the picker is visible.
@@ -92,11 +97,12 @@ function CastMenuPopover({
       // ffmpeg), and it also flips playIntentActive=false so arrow-key
       // navigation in the channel table won't auto-start a new local stream
       // mid-handshake.
-      onCastStart?.();
+      const rollBackCastStart = onCastStart?.();
       try {
         await chromecast.cast(device, castRequest);
         setOpen(false);
       } catch {
+        rollBackCastStart?.();
         // error surfaces via chromecast.error; keep menu open so the user sees it
       } finally {
         setStarting(false);
@@ -221,10 +227,11 @@ function CastMenuInline({ chromecast, castRequest, onCastStart }: Omit<CastMenuP
       // Fire onCastStart BEFORE the network round-trip — see CastMenuPopover
       // for the rationale (release upstream slot + suppress arrow-key
       // auto-play during the cast handshake).
-      onCastStart?.();
+      const rollBackCastStart = onCastStart?.();
       try {
         await chromecast.cast(device, castRequest);
       } catch {
+        rollBackCastStart?.();
         // error surfaces via chromecast.error; row stays expanded
       } finally {
         setStarting(false);

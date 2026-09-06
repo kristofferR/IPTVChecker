@@ -1,9 +1,10 @@
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use url::Url;
 
 use crate::error::AppError;
+use crate::models::channel::ChannelStatus;
+use crate::models::scan::RetryBackoff;
 
 fn is_valid_proxy_entry(candidate: &str) -> bool {
     let parsed = match Url::parse(candidate) {
@@ -116,6 +117,21 @@ pub fn load_proxy_list(proxy_file: &str) -> Result<Vec<String>, AppError> {
 
 /// Test stream access through a specific proxy.
 pub async fn test_with_proxy(url: &str, proxy: &str, timeout: f64, retries: u32) -> bool {
+    let cancel = tokio_util::sync::CancellationToken::new();
+    test_with_proxy_cancellable(url, proxy, timeout, retries, &cancel).await
+}
+
+async fn test_with_proxy_cancellable(
+    url: &str,
+    proxy: &str,
+    timeout: f64,
+    retries: u32,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> bool {
+    if cancel.is_cancelled() {
+        return false;
+    }
+
     let proxy_url = match reqwest::Proxy::all(proxy) {
         Ok(p) => p,
         Err(_) => return false,
@@ -131,65 +147,23 @@ pub async fn test_with_proxy(url: &str, proxy: &str, timeout: f64, retries: u32)
         Err(_) => return false,
     };
 
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        USER_AGENT,
-        HeaderValue::from_static("TiviMate/5.1.6 (Android 12)"),
-    );
+    let outcome = crate::engine::checker::check_channel_status_with_debug(
+        &client,
+        url,
+        timeout,
+        retries.max(1).saturating_sub(1),
+        RetryBackoff::None,
+        None,
+        "TiviMate/5.1.6 (Android 12)",
+        cancel,
+    )
+    .await;
 
-    let stream_extensions = [".ts", ".m2ts", ".m4s", ".mp4", ".aac", ".m3u8"];
+    outcome.is_ok_and(|result| proxy_confirms_access(result.status))
+}
 
-    for attempt in 0..retries.max(1) {
-        let resp = match client.get(url).headers(headers.clone()).send().await {
-            Ok(r) => r,
-            Err(_) => {
-                if attempt + 1 < retries.max(1) {
-                    tokio::time::sleep(Duration::from_secs_f64(0.5 * (attempt as f64 + 1.0))).await;
-                }
-                continue;
-            }
-        };
-
-        if resp.status() != 200 {
-            continue;
-        }
-
-        let content_type = resp
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .to_lowercase();
-
-        let stream_path = Url::parse(resp.url().as_str())
-            .map(|u| u.path().to_lowercase())
-            .unwrap_or_default();
-
-        let is_stream = content_type.starts_with("video/")
-            || content_type.starts_with("audio/")
-            || content_type.contains("application/vnd.apple.mpegurl")
-            || content_type.contains("application/x-mpegurl")
-            || content_type.contains("application/octet-stream")
-            || content_type.contains("application/mp4")
-            || stream_extensions
-                .iter()
-                .any(|ext| stream_path.ends_with(ext));
-
-        if is_stream {
-            // Read 500KB to verify
-            use futures::StreamExt;
-            let mut stream = resp.bytes_stream();
-            let mut read = 0u64;
-            while let Some(Ok(chunk)) = stream.next().await {
-                read += chunk.len() as u64;
-                if read >= 1024 * 500 {
-                    return true;
-                }
-            }
-        }
-    }
-
-    false
+fn proxy_confirms_access(status: ChannelStatus) -> bool {
+    matches!(status, ChannelStatus::Alive | ChannelStatus::Drm)
 }
 
 /// Confirm geoblock by testing with up to 3 random proxies.
@@ -197,6 +171,7 @@ pub async fn confirm_geoblock(
     url: &str,
     proxy_list: &[String],
     timeout: f64,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> crate::models::channel::ChannelStatus {
     use rand::seq::IndexedRandom;
 
@@ -208,8 +183,11 @@ pub async fn confirm_geoblock(
     };
 
     for proxy in &sample {
+        if cancel.is_cancelled() {
+            break;
+        }
         log::debug!("Testing geoblock via proxy: {}", proxy);
-        if test_with_proxy(url, proxy, timeout, 3).await {
+        if test_with_proxy_cancellable(url, proxy, timeout, 3, cancel).await {
             return crate::models::channel::ChannelStatus::GeoblockedConfirmed;
         }
     }
@@ -219,7 +197,8 @@ pub async fn confirm_geoblock(
 
 #[cfg(test)]
 mod tests {
-    use super::load_proxy_list;
+    use super::{load_proxy_list, proxy_confirms_access};
+    use crate::models::channel::ChannelStatus;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn unique_temp_path(prefix: &str) -> std::path::PathBuf {
@@ -228,6 +207,13 @@ mod tests {
             .expect("system time should be monotonic")
             .as_nanos();
         std::env::temp_dir().join(format!("{prefix}-{unique}.txt"))
+    }
+
+    #[test]
+    fn proxy_confirmation_requires_playable_content() {
+        assert!(proxy_confirms_access(ChannelStatus::Alive));
+        assert!(proxy_confirms_access(ChannelStatus::Drm));
+        assert!(!proxy_confirms_access(ChannelStatus::Placeholder));
     }
 
     #[test]

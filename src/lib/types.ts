@@ -21,6 +21,9 @@ export interface Channel {
   tvg_name: string | null;
   tvg_logo: string | null;
   tvg_chno: string | null;
+  catchup: string | null;
+  catchup_days: number | null;
+  catchup_source: string | null;
   url: string;
   content_type: ContentType;
   extinf_line: string;
@@ -37,6 +40,9 @@ export interface ChannelResult {
   tvg_name: string | null;
   tvg_logo: string | null;
   tvg_chno: string | null;
+  catchup: string | null;
+  catchup_days: number | null;
+  catchup_source: string | null;
   url: string;
   content_type: ContentType;
   status: ChannelStatus;
@@ -80,7 +86,48 @@ export interface PlaylistPreview {
   movie_count: number;
   series_count: number;
   groups: string[];
+  epg_sources: string[];
+  epg_sources_by_playlist: Record<string, string[]>;
   channels: Channel[];
+}
+
+export interface EpgProgramme {
+  start: number;
+  stop: number;
+  title: string;
+}
+
+export interface EpgLoadSummary {
+  sources_requested: number;
+  sources_loaded: number;
+  failed_sources: string[];
+  channels_matched: number;
+  programme_count: number;
+}
+
+export interface ArchiveDownloadRequest {
+  id: string;
+  url: string;
+  path: string;
+  duration_s: number;
+}
+
+export interface ArchiveDownloadProgress {
+  id: string;
+  out_time_s: number;
+  bytes: number;
+}
+
+export interface XtreamArchiveChannelUpdate {
+  index: number;
+  catchup: string | null;
+  catchup_days: number | null;
+  extinf_line: string;
+}
+
+export interface XtreamArchiveEnrichment {
+  source_identity: string;
+  channels: XtreamArchiveChannelUpdate[];
 }
 
 export interface XtreamAccountInfo {
@@ -90,6 +137,7 @@ export interface XtreamAccountInfo {
   is_trial: boolean | null;
   active_connections: number | null;
   max_connections: number | null;
+  timezone: string | null;
 }
 
 export interface XtreamOpenRequest {
@@ -464,6 +512,7 @@ export interface CastMediaRequest {
   channelName: string | null;
   channelLogo: string | null;
   streamKind: CastStreamKind;
+  isFinite: boolean;
 }
 
 export type UpdateInstallKind = "built-in" | "manual";

@@ -1,5 +1,8 @@
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { applyXtreamArchiveUpdates, applyXtreamArchiveUpdatesToPreview } from "../lib/archive";
+import { cancelArchiveProbes } from "../lib/archiveProbe";
 import { errorToString, formatPlaylistOpenError, formatSourceReloadError } from "../lib/errors";
 import { logger } from "../lib/logger";
 import { parseXtreamRecent, serializeXtreamRecent } from "../lib/recentPlaylists";
@@ -18,6 +21,7 @@ import {
 } from "../lib/sourceFilter";
 import {
   addRecentPlaylist,
+  cancelEpgLoad,
   clearRecentPlaylists,
   deleteSavedPlaylist,
   getRecentPlaylists,
@@ -37,6 +41,8 @@ import type {
   SavedPlaylistDraft,
   SavedPlaylistEntry,
   StalkerOpenRequest,
+  XtreamArchiveChannelUpdate,
+  XtreamArchiveEnrichment,
   XtreamOpenRequest,
 } from "../lib/types";
 import { selectResultByIndex, useAppStore } from "../store";
@@ -129,6 +135,9 @@ export interface UsePlaylistSourcesParams {
     preserveExistingResults?: boolean,
     shouldApply?: () => boolean,
   ) => Promise<boolean>;
+  /** From useScan: applies delayed archive metadata without desynchronizing scan state. */
+  applyArchiveUpdates: (updates: XtreamArchiveChannelUpdate[]) => void;
+  invalidatePendingArchivePlayback: () => void;
 }
 
 /** Playlist source management: opening file/URL/Xtream/Stalker sources,
@@ -136,6 +145,8 @@ export interface UsePlaylistSourcesParams {
 export function usePlaylistSources({
   initFromPlaylist,
   syncFromPlaylist,
+  applyArchiveUpdates,
+  invalidatePendingArchivePlayback,
 }: UsePlaylistSourcesParams) {
   const channelSearch = useAppStore((s) => s.channelSearch);
   const settingsHydrated = useAppStore((s) => s.settingsHydrated);
@@ -146,6 +157,64 @@ export function usePlaylistSources({
     useState<SavedPlaylistDraft | null>(null);
   const [savedXtreamTestEntry, setSavedXtreamTestEntry] = useState<SavedPlaylistEntry | null>(null);
   const sourceLoadGenerationRef = useRef(0);
+  const xtreamArchiveEnrichmentsRef = useRef(new Map<string, XtreamArchiveChannelUpdate[]>());
+
+  useEffect(() => {
+    let cancelled = false;
+    const unlisteners: (() => void)[] = [];
+
+    void Promise.all([
+      listen<string>("playlist://xtream-archive-enrichment-started", (event) => {
+        xtreamArchiveEnrichmentsRef.current.delete(event.payload);
+      }),
+      listen<XtreamArchiveEnrichment>("playlist://xtream-archive-enrichment", (event) => {
+        const enrichment = event.payload;
+        xtreamArchiveEnrichmentsRef.current.set(enrichment.source_identity, enrichment.channels);
+
+        const state = getStore();
+        if (state.cachedSourcePreview?.source_identity === enrichment.source_identity) {
+          state.setCachedSourcePreview(
+            applyXtreamArchiveUpdatesToPreview(state.cachedSourcePreview, enrichment.channels),
+          );
+        }
+        if (state.playlist?.source_identity !== enrichment.source_identity) {
+          return;
+        }
+
+        state.setPlaylist(applyXtreamArchiveUpdatesToPreview(state.playlist, enrichment.channels));
+        applyArchiveUpdates(enrichment.channels);
+        if (state.selectedChannel) {
+          const [selectedChannel] = applyXtreamArchiveUpdates(
+            [state.selectedChannel],
+            enrichment.channels,
+          );
+          state.setSelectedChannel(selectedChannel ?? null);
+        }
+        if (state.pendingPlaybackChannel) {
+          const [pendingPlaybackChannel] = applyXtreamArchiveUpdates(
+            [state.pendingPlaybackChannel],
+            enrichment.channels,
+          );
+          state.setPendingPlaybackChannel(pendingPlaybackChannel ?? null);
+        }
+      }),
+    ])
+      .then((registered) => {
+        if (cancelled) {
+          for (const off of registered) off();
+        } else {
+          unlisteners.push(...registered);
+        }
+      })
+      .catch((error) => {
+        logger.warn("[Playlist] Failed to register Xtream archive enrichment listener:", error);
+      });
+
+    return () => {
+      cancelled = true;
+      for (const unlisten of unlisteners) unlisten();
+    };
+  }, [applyArchiveUpdates]);
 
   const refreshRecentPlaylists = useCallback(async () => {
     try {
@@ -194,6 +263,12 @@ export function usePlaylistSources({
       appliedSourceFilter: string,
       shouldApply: () => boolean,
     ): Promise<boolean> => {
+      invalidatePendingArchivePlayback();
+      await cancelArchiveProbes();
+      if (!shouldApply()) {
+        return false;
+      }
+
       const initStartedAt = performance.now();
       logger.info(`[App] Preparing scan cache for ${preview.channels.length} visible channels`);
       const initialized = await initFromPlaylist(preview.channels, shouldApply);
@@ -202,6 +277,10 @@ export function usePlaylistSources({
       }
       logger.info(`[App] Scan cache ready in ${(performance.now() - initStartedAt).toFixed(1)}ms`);
 
+      await cancelEpgLoad().catch(() => {});
+      if (!shouldApply()) {
+        return false;
+      }
       const state = getStore();
       state.setPlaylist(preview);
       state.setCachedSourcePreview(cachedPreview);
@@ -220,11 +299,12 @@ export function usePlaylistSources({
 
       state.setSelectedChannel(null);
       state.setSelectedChannelIndices([]);
+      state.clearArchiveProbes();
       state.setPendingPlaybackChannel(null);
 
       return true;
     },
-    [initFromPlaylist],
+    [initFromPlaylist, invalidatePendingArchivePlayback],
   );
 
   const loadFullSourcePreview = useCallback(
@@ -327,12 +407,18 @@ export function usePlaylistSources({
         const canReuseCachedPreview =
           mode === "reapplySourceFilter" && state.cachedSourcePreview != null;
 
-        const cachedPreview = canReuseCachedPreview
+        const loadedPreview = canReuseCachedPreview
           ? state.cachedSourcePreview!
           : await loadFullSourcePreview(descriptor);
         if (!isCurrentLoad()) {
           return supersededResult();
         }
+        const pendingArchiveEnrichment = loadedPreview.source_identity
+          ? xtreamArchiveEnrichmentsRef.current.get(loadedPreview.source_identity)
+          : undefined;
+        let cachedPreview = pendingArchiveEnrichment
+          ? applyXtreamArchiveUpdatesToPreview(loadedPreview, pendingArchiveEnrichment)
+          : loadedPreview;
 
         const latestState = getStore();
         const savedEntry =
@@ -364,7 +450,7 @@ export function usePlaylistSources({
           );
         }
 
-        const preview = buildVisiblePreview(cachedPreview, normalizedSourceFilter);
+        let preview = buildVisiblePreview(cachedPreview, normalizedSourceFilter);
         const committed = await commitLoadedPlaylist(
           preview,
           cachedPreview,
@@ -375,6 +461,23 @@ export function usePlaylistSources({
         );
         if (!committed) {
           return supersededResult();
+        }
+        if (loadedPreview.source_identity) {
+          const latestArchiveEnrichment = xtreamArchiveEnrichmentsRef.current.get(
+            loadedPreview.source_identity,
+          );
+          if (latestArchiveEnrichment) {
+            cachedPreview = applyXtreamArchiveUpdatesToPreview(
+              cachedPreview,
+              latestArchiveEnrichment,
+            );
+            preview = buildVisiblePreview(cachedPreview, normalizedSourceFilter);
+            const state = getStore();
+            state.setPlaylist(preview);
+            state.setCachedSourcePreview(cachedPreview);
+            applyArchiveUpdates(latestArchiveEnrichment);
+          }
+          xtreamArchiveEnrichmentsRef.current.delete(loadedPreview.source_identity);
         }
         logger.info(
           `[Playlist] Loaded ${safeFileName}: visible=${preview.channels.length}, total=${cachedPreview.total_channels}, groups=${preview.groups.length}, preview=${canReuseCachedPreview ? "memory-cache" : "fresh"}, elapsed=${((performance.now() - loadStartedAt) / 1000).toFixed(1)}s`,
@@ -398,9 +501,15 @@ export function usePlaylistSources({
         getStore().setPlaylistOpenError(message);
 
         if (mode === "freshOpen") {
+          invalidatePendingArchivePlayback();
+          await cancelArchiveProbes();
+          if (!isCurrentLoad()) {
+            return supersededResult();
+          }
           // Keep app interaction predictable after a failed fresh open attempt.
           getStore().setSelectedChannel(null);
           getStore().setSelectedChannelIndices([]);
+          getStore().clearArchiveProbes();
           getStore().setPendingPlaybackChannel(null);
           getStore().setShowHistory(false);
           void refreshRecentPlaylists();
@@ -418,6 +527,7 @@ export function usePlaylistSources({
       buildVisiblePreview,
       channelSearch,
       commitLoadedPlaylist,
+      invalidatePendingArchivePlayback,
       loadFullSourcePreview,
       refreshRecentPlaylists,
     ],
@@ -436,44 +546,76 @@ export function usePlaylistSources({
     }
     previousHideVodContentRef.current = hideVodContent;
 
-    const state = getStore();
-    if (!state.cachedSourcePreview) {
+    const initialState = getStore();
+    const cachedSourcePreview = initialState.cachedSourcePreview;
+    const playlist = initialState.playlist;
+    if (!cachedSourcePreview) {
       return;
     }
 
-    const nextPreview = buildVisiblePreview(
-      state.cachedSourcePreview,
-      state.lastAppliedSourceFilter,
-    );
-    const visibleIndices = new Set(nextPreview.channels.map((channel) => channel.index));
-    const selectedIndex = state.selectedChannel?.index ?? null;
-    const pendingPlaybackIndex = state.pendingPlaybackChannel?.index ?? null;
-    const nextSelectedIndices = state.selectedChannelIndices.filter((index) =>
-      visibleIndices.has(index),
-    );
-
-    state.setPlaylist(nextPreview);
-    state.setGroupFilter(resolvePreservedGroupFilter(state.groupFilter, nextPreview.groups));
-    state.setSelectedChannelIndices(nextSelectedIndices);
-
-    if (selectedIndex == null || !visibleIndices.has(selectedIndex)) {
-      state.setSelectedChannel(null);
-    }
-    if (pendingPlaybackIndex == null || !visibleIndices.has(pendingPlaybackIndex)) {
-      state.setPendingPlaybackChannel(null);
-    }
-
-    void syncFromPlaylist(nextPreview.channels, true).then(() => {
-      if (selectedIndex == null || !visibleIndices.has(selectedIndex)) {
+    invalidatePendingArchivePlayback();
+    void cancelArchiveProbes().then(() => {
+      const state = getStore();
+      if (
+        previousHideVodContentRef.current !== hideVodContent ||
+        state.cachedSourcePreview !== cachedSourcePreview ||
+        state.playlist !== playlist
+      ) {
         return;
       }
 
-      const refreshed = selectResultByIndex(getStore(), selectedIndex);
-      if (refreshed) {
-        getStore().setSelectedChannel(refreshed);
+      const nextPreview = buildVisiblePreview(cachedSourcePreview, state.lastAppliedSourceFilter);
+      const visibleIndices = new Set(nextPreview.channels.map((channel) => channel.index));
+      const selectedIndex = state.selectedChannel?.index ?? null;
+      const pendingPlaybackIndex = state.pendingPlaybackChannel?.index ?? null;
+      const nextSelectedIndices = state.selectedChannelIndices.filter((index) =>
+        visibleIndices.has(index),
+      );
+
+      state.clearArchiveProbes();
+      state.setPlaylist(nextPreview);
+      state.setGroupFilter(resolvePreservedGroupFilter(state.groupFilter, nextPreview.groups));
+      state.setSelectedChannelIndices(nextSelectedIndices);
+
+      if (selectedIndex == null || !visibleIndices.has(selectedIndex)) {
+        state.setSelectedChannel(null);
       }
+      if (pendingPlaybackIndex == null || !visibleIndices.has(pendingPlaybackIndex)) {
+        state.setPendingPlaybackChannel(null);
+      }
+
+      const shouldApply = () => {
+        const latest = getStore();
+        return (
+          previousHideVodContentRef.current === hideVodContent &&
+          latest.cachedSourcePreview === cachedSourcePreview &&
+          latest.playlist === nextPreview
+        );
+      };
+
+      void syncFromPlaylist(nextPreview.channels, true, shouldApply).then((synced) => {
+        if (
+          !synced ||
+          !shouldApply() ||
+          selectedIndex == null ||
+          !visibleIndices.has(selectedIndex)
+        ) {
+          return;
+        }
+
+        const refreshed = selectResultByIndex(getStore(), selectedIndex);
+        if (refreshed) {
+          getStore().setSelectedChannel(refreshed);
+        }
+      });
     });
-  }, [buildVisiblePreview, hideVodContent, settingsHydrated, syncFromPlaylist]);
+  }, [
+    buildVisiblePreview,
+    hideVodContent,
+    invalidatePendingArchivePlayback,
+    settingsHydrated,
+    syncFromPlaylist,
+  ]);
 
   const patchCurrentPlaylistMetadata = useCallback(
     (displayName: string, savedPlaylistId?: string | null) => {

@@ -18,10 +18,12 @@ use crate::engine::stalker::{
     STALKER_API_TIMEOUT,
 };
 use crate::engine::xtream::{
-    build_xtream_download_url, fetch_xtream_account_info, fetch_xtream_playlist_via_json_api,
+    apply_xtream_archive_flags, build_xtream_download_url, build_xtream_xmltv_url,
+    fetch_xtream_account_info, fetch_xtream_live_streams, fetch_xtream_playlist_via_json_api,
+    xtream_archive_flags,
 };
 use crate::error::AppError;
-use crate::models::channel::Channel;
+use crate::models::channel::{Channel, ContentType};
 use crate::models::playlist::PlaylistPreview;
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
@@ -64,8 +66,101 @@ pub enum PlaylistLoadProgress {
     },
 }
 
+#[derive(Clone, Serialize)]
+struct XtreamArchiveChannelUpdate {
+    index: usize,
+    catchup: Option<String>,
+    catchup_days: Option<u32>,
+    extinf_line: String,
+}
+
+struct XtreamArchiveChannelSnapshot {
+    index: usize,
+    content_type: ContentType,
+    url: String,
+    catchup: Option<String>,
+    catchup_days: Option<u32>,
+    extinf_line: String,
+}
+
+#[derive(Clone, Serialize)]
+struct XtreamArchiveEnrichment {
+    source_identity: String,
+    channels: Vec<XtreamArchiveChannelUpdate>,
+}
+
+struct XtreamArchiveEnrichmentGuard {
+    state: Arc<AppState>,
+    source_identity: String,
+    generation: u64,
+    completed: bool,
+}
+
+impl XtreamArchiveEnrichmentGuard {
+    fn new(app: &tauri::AppHandle, source_identity: String, generation: u64) -> Self {
+        Self {
+            state: app.state::<Arc<AppState>>().inner().clone(),
+            source_identity,
+            generation,
+            completed: false,
+        }
+    }
+
+    async fn complete(&mut self, flags: HashMap<String, Option<u32>>) -> bool {
+        let is_current = self
+            .state
+            .complete_xtream_archive_enrichment(&self.source_identity, self.generation, flags)
+            .await;
+        self.completed = true;
+        is_current
+    }
+}
+
+impl Drop for XtreamArchiveEnrichmentGuard {
+    fn drop(&mut self) {
+        if self.completed {
+            return;
+        }
+
+        let state = Arc::clone(&self.state);
+        let source_identity = self.source_identity.clone();
+        let generation = self.generation;
+        tauri::async_runtime::spawn(async move {
+            state
+                .complete_xtream_archive_enrichment(&source_identity, generation, HashMap::new())
+                .await;
+        });
+    }
+}
+
 pub(crate) const PROGRESS_THROTTLE: Duration = Duration::from_millis(100);
 const PROGRESS_LOG_THROTTLE: Duration = Duration::from_secs(1);
+const XTREAM_ARCHIVE_ENRICHMENT_GRACE_TIMEOUT: Duration = Duration::from_secs(2);
+
+fn apply_xtream_archive_flags_with_updates(
+    channels: &mut [XtreamArchiveChannelSnapshot],
+    archive_flags: &HashMap<String, Option<u32>>,
+) -> Vec<XtreamArchiveChannelUpdate> {
+    channels
+        .iter_mut()
+        .filter_map(|channel| {
+            let changed = crate::engine::xtream::apply_xtream_archive_fields(
+                channel.content_type,
+                &channel.url,
+                &mut channel.catchup,
+                &mut channel.catchup_days,
+                &mut channel.extinf_line,
+                archive_flags,
+            );
+            changed.then(|| XtreamArchiveChannelUpdate {
+                index: channel.index,
+                catchup: channel.catchup.clone(),
+                catchup_days: channel.catchup_days,
+                extinf_line: channel.extinf_line.clone(),
+            })
+        })
+        .collect()
+}
 
 #[derive(Default)]
 struct PlaylistProgressLogState {
@@ -698,12 +793,32 @@ pub(crate) async fn open_playlist_xtream_inner(
 
     let server = normalize_xtream_server(&source.server)?;
     let source_key = build_xtream_source_key(&server, &username);
+    let source_identity = source_identity_override.unwrap_or_else(|| source_key.clone());
+    let archive_generation = app
+        .state::<Arc<AppState>>()
+        .begin_xtream_archive_enrichment(source_identity.clone())
+        .await;
+    let mut archive_enrichment =
+        XtreamArchiveEnrichmentGuard::new(app, source_identity.clone(), archive_generation);
+    let _ = app.emit(
+        "playlist://xtream-archive-enrichment-started",
+        source_identity.clone(),
+    );
     let download_url = build_xtream_download_url(&server, &username, &password);
     let data_dir = app_data_dir(app)?;
     let cache_path = remote_playlist_cache_path_from_data_dir(&data_dir, &source_key)?;
     let accept_invalid_certs = accepts_invalid_certs(Some(app)).await;
 
-    // Try /get.php and account info in parallel.
+    // Keep the potentially large live-stream catalog running independently so
+    // it can enrich the parsed playlist without imposing its full timeout.
+    let live_streams_task = {
+        let server = server.clone();
+        let username = username.clone();
+        let password = password.clone();
+        tokio::spawn(async move {
+            fetch_xtream_live_streams(&server, &username, &password, accept_invalid_certs).await
+        })
+    };
     let (xtream_account_info, m3u_result) = tokio::join!(
         fetch_xtream_account_info(&server, &username, &password, accept_invalid_certs),
         download_playlist_to_cache_in_data_dir(
@@ -713,44 +828,145 @@ pub(crate) async fn open_playlist_xtream_inner(
             &download_url,
             "Xtream playlist",
             accept_invalid_certs,
-        )
+        ),
     );
 
     // If /get.php failed, fall back to the JSON API.
-    let cached_path = match m3u_result {
-        Ok(path) => path,
+    let (cached_path, archive_task) = match m3u_result {
+        Ok(path) => (path, Some(live_streams_task)),
         Err(get_php_error) => {
             log::info!(
                 "Xtream /get.php download failed ({}), falling back to JSON API",
                 get_php_error
             );
-            let m3u_bytes = fetch_xtream_playlist_via_json_api(
+            let live_streams = live_streams_task.await.ok().flatten();
+            let m3u_bytes = match fetch_xtream_playlist_via_json_api(
                 &server,
                 &username,
                 &password,
                 accept_invalid_certs,
+                live_streams,
             )
-            .await?;
+            .await
+            {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    archive_enrichment.complete(HashMap::new()).await;
+                    return Err(error);
+                }
+            };
             // Same rule as the normal download path: a potentially large
             // synchronous cache write belongs on a blocking thread.
             {
                 let cache_path = cache_path.clone();
-                tokio::task::spawn_blocking(move || write_bytes_to_cache(&cache_path, &m3u_bytes))
-                    .await
-                    .map_err(|err| {
-                        AppError::Other(format!("Playlist cache write task failed: {err}"))
-                    })??;
+                let write_result = tokio::task::spawn_blocking(move || {
+                    write_bytes_to_cache(&cache_path, &m3u_bytes)
+                })
+                .await
+                .map_err(|err| AppError::Other(format!("Playlist cache write task failed: {err}")))
+                .and_then(|result| result);
+                if let Err(error) = write_result {
+                    archive_enrichment.complete(HashMap::new()).await;
+                    return Err(error);
+                }
             }
-            cache_path.to_string_lossy().to_string()
+            (cache_path.to_string_lossy().to_string(), None)
         }
     };
 
-    let mut preview =
-        parse_playlist_off_thread(Some(app), cached_path.clone(), group_filter, channel_search)
-            .await?;
+    let mut preview = match parse_playlist_off_thread(
+        Some(app),
+        cached_path.clone(),
+        group_filter,
+        channel_search,
+    )
+    .await
+    {
+        Ok(preview) => preview,
+        Err(error) => {
+            if let Some(task) = archive_task {
+                task.abort();
+            }
+            archive_enrichment.complete(HashMap::new()).await;
+            return Err(error);
+        }
+    };
+    let (archive_flags, pending_archive_task) = if let Some(mut task) = archive_task {
+        match tokio::time::timeout(XTREAM_ARCHIVE_ENRICHMENT_GRACE_TIMEOUT, &mut task).await {
+            Ok(Ok(Some(live_streams))) => (Some(xtream_archive_flags(&live_streams)), None),
+            Ok(Ok(None)) => (Some(HashMap::new()), None),
+            Ok(Err(error)) => {
+                log::debug!("Xtream live-stream catalog task failed: {error}");
+                (Some(HashMap::new()), None)
+            }
+            Err(_) => (None, Some(task)),
+        }
+    } else {
+        (Some(HashMap::new()), None)
+    };
+    if let Some(archive_flags) = archive_flags {
+        if !archive_flags.is_empty() {
+            apply_xtream_archive_flags(&mut preview.channels, &archive_flags);
+        }
+        archive_enrichment.complete(archive_flags).await;
+    }
+    if let Some(task) = pending_archive_task {
+        let app = app.clone();
+        let source_identity = source_identity.clone();
+        let mut channels = preview
+            .channels
+            .iter()
+            .filter(|channel| channel.content_type == ContentType::Live)
+            .map(|channel| XtreamArchiveChannelSnapshot {
+                index: channel.index,
+                content_type: channel.content_type,
+                url: channel.url.clone(),
+                catchup: channel.catchup.clone(),
+                catchup_days: channel.catchup_days,
+                extinf_line: channel.extinf_line.clone(),
+            })
+            .collect::<Vec<_>>();
+        let mut archive_enrichment = archive_enrichment;
+        tokio::spawn(async move {
+            match task.await {
+                Ok(Some(live_streams)) => {
+                    let archive_flags = xtream_archive_flags(&live_streams);
+                    let updates =
+                        apply_xtream_archive_flags_with_updates(&mut channels, &archive_flags);
+                    let is_current = archive_enrichment.complete(archive_flags).await;
+                    if is_current && !updates.is_empty() {
+                        let _ = app.emit(
+                            "playlist://xtream-archive-enrichment",
+                            XtreamArchiveEnrichment {
+                                source_identity,
+                                channels: updates,
+                            },
+                        );
+                    }
+                }
+                Ok(None) => {
+                    archive_enrichment.complete(HashMap::new()).await;
+                }
+                Err(error) => {
+                    log::debug!("Xtream live-stream catalog task failed: {error}");
+                    archive_enrichment.complete(HashMap::new()).await;
+                }
+            }
+        });
+    }
+
+    let xmltv_source = build_xtream_xmltv_url(&server, &username, &password).to_string();
+    if preview.epg_sources.is_empty() {
+        preview.epg_sources.push(xmltv_source.clone());
+        preview
+            .epg_sources_by_playlist
+            .entry(preview.file_name.clone())
+            .or_default()
+            .push(xmltv_source);
+    }
     let server_host = server.host_str().unwrap_or("Xtream");
     preview.file_name = format!("{} ({})", server_host, username);
-    preview.source_identity = Some(source_identity_override.unwrap_or(source_key));
+    preview.source_identity = Some(source_identity);
     preview.xtream_max_connections = xtream_account_info
         .as_ref()
         .and_then(|account| account.max_connections);
@@ -779,6 +995,9 @@ mod tests {
             tvg_name: None,
             tvg_logo: None,
             tvg_chno: None,
+            catchup: None,
+            catchup_days: None,
+            catchup_source: None,
             url: url.to_string(),
             content_type: ContentType::Live,
             extinf_line: "#EXTINF:-1,Channel".to_string(),
@@ -824,6 +1043,9 @@ mod tests {
             tvg_name: None,
             tvg_logo: None,
             tvg_chno: None,
+            catchup: None,
+            catchup_days: None,
+            catchup_source: None,
             url: url.to_string(),
             content_type: ContentType::Live,
             extinf_line: "#EXTINF:-1,Channel".to_string(),
@@ -850,6 +1072,9 @@ mod tests {
             tvg_name: None,
             tvg_logo: None,
             tvg_chno: None,
+            catchup: None,
+            catchup_days: None,
+            catchup_source: None,
             url: url.to_string(),
             content_type: ContentType::Live,
             extinf_line: "#EXTINF:-1,Channel".to_string(),
@@ -876,6 +1101,9 @@ mod tests {
             tvg_name: None,
             tvg_logo: None,
             tvg_chno: None,
+            catchup: None,
+            catchup_days: None,
+            catchup_source: None,
             url: url.to_string(),
             content_type: ContentType::Live,
             extinf_line: "#EXTINF:-1,Channel".to_string(),
@@ -903,6 +1131,9 @@ mod tests {
             tvg_name: None,
             tvg_logo: None,
             tvg_chno: None,
+            catchup: None,
+            catchup_days: None,
+            catchup_source: None,
             url: url.to_string(),
             content_type: ContentType::Live,
             extinf_line: "#EXTINF:-1,Channel".to_string(),

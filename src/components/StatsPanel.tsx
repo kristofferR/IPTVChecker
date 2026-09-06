@@ -1,7 +1,13 @@
-import { memo, type ReactNode, startTransition } from "react";
+import { memo, type ReactNode, startTransition, useDeferredValue, useMemo } from "react";
+import { hasArchive } from "../lib/archive";
+import { archiveVerdict } from "../lib/archiveVerification";
+import { computeCatchupScore, withCatchupScore } from "../lib/catchupScore";
+import { filterResultsShared, isCatchupStatusFilter } from "../lib/filters";
+import type { Channel } from "../lib/types";
 import { useAppStore } from "../store";
 import {
   SFCheckmarkCircleFill,
+  SFClockArrow,
   SFDocOnDocFill,
   SFExclamationTriangleFill,
   SFListNumber,
@@ -54,6 +60,10 @@ function Pill({
       base: "text-orange-400 bg-orange-400/10",
       active: "text-orange-300 bg-orange-400/25 ring-1 ring-orange-400/50",
     },
+    violet: {
+      base: "text-violet-400 bg-violet-400/10",
+      active: "text-violet-300 bg-violet-400/25 ring-1 ring-violet-400/50",
+    },
   };
 
   const colors = colorMap[color] ?? colorMap.neutral;
@@ -75,27 +85,117 @@ function Pill({
 }
 
 const iconSize = "w-3 h-3";
+const noChannels: Channel[] = [];
 
 export const StatsPanel = memo(function StatsPanel() {
   const progress = useAppStore((s) => s.progress);
   const summary = useAppStore((s) => s.summary);
-  const totalChannels = useAppStore((s) => s.playlist?.total_channels ?? 0);
+  const playlist = useAppStore((s) => s.playlist);
+  const results = useAppStore((s) => s.flatResults);
+  const archiveProbes = useAppStore((s) => s.archiveProbes);
+  const totalChannels = playlist?.total_channels ?? 0;
+  const channels = playlist?.channels ?? noChannels;
   const scanState = useAppStore((s) => s.scanState);
   const lowFpsCount = useAppStore((s) => s.uiMetrics.lowFpsCount);
   const mislabeledCount = useAppStore((s) => s.uiMetrics.mislabeledCount);
   const duplicateCount = useAppStore((s) => s.duplicateIndices.size);
+  const duplicateIndices = useAppStore((s) => s.duplicateIndices);
+  const completedResults = useAppStore((s) => s.flatResults);
   const statusFilter = useAppStore((s) => s.statusFilter);
   const setStatusFilter = useAppStore((s) => s.setStatusFilter);
   const toggleReportPanel = useAppStore((s) => s.toggleReportPanel);
+  const selectedChannelIndices = useAppStore((s) => s.selectedChannelIndices);
+  const search = useDeferredValue(useAppStore((s) => s.search));
+  const groupFilter = useAppStore((s) => s.groupFilter);
+  const separatePlaceholder = useAppStore((s) => s.settings.separate_placeholder_status);
   const stats = summary ?? progress;
   const effectiveLowFpsCount = summary?.low_framerate ?? lowFpsCount;
   const effectiveMislabeledCount = summary?.mislabeled ?? mislabeledCount;
+  const displayScore = useMemo(() => {
+    if (!summary?.playlist_score) return null;
+    return withCatchupScore(summary.playlist_score, computeCatchupScore(results, archiveProbes));
+  }, [summary?.playlist_score, results, archiveProbes]);
+
+  const catchupCount = useMemo(() => channels.filter(hasArchive).length, [channels]);
+  const visibleCatchupCount = useMemo(
+    () =>
+      filterResultsShared(
+        completedResults,
+        search,
+        groupFilter,
+        statusFilter,
+        duplicateIndices,
+        separatePlaceholder,
+        archiveProbes,
+      ).filter(hasArchive).length,
+    [
+      completedResults,
+      search,
+      groupFilter,
+      statusFilter,
+      duplicateIndices,
+      separatePlaceholder,
+      archiveProbes,
+    ],
+  );
+  const verdictTally = useMemo(() => {
+    let real = 0;
+    let shallower = 0;
+    let fake = 0;
+    let untested = 0;
+    for (const channel of channels) {
+      if (!hasArchive(channel)) continue;
+      const verdict = archiveVerdict(channel, archiveProbes[channel.index]);
+      if (verdict === "verified") real += 1;
+      else if (verdict === "shallower") shallower += 1;
+      else if (verdict === "fake") fake += 1;
+      else untested += 1;
+    }
+    return { real, shallower, fake, untested, tested: real + shallower + fake };
+  }, [channels, archiveProbes]);
+
+  const selectedCatchupCount = useMemo(() => {
+    if (selectedChannelIndices.length < 2) return 0;
+    const selected = new Set(selectedChannelIndices);
+    let count = 0;
+    for (const channel of channels) {
+      if (selected.has(channel.index) && hasArchive(channel)) count += 1;
+    }
+    return count;
+  }, [channels, selectedChannelIndices]);
+  const catchupLabel =
+    verdictTally.tested > 0
+      ? `${verdictTally.real} real${
+          verdictTally.shallower > 0 ? ` · ${verdictTally.shallower} shallower` : ""
+        } · ${verdictTally.fake} fake${
+          verdictTally.untested > 0 ? ` · ${verdictTally.untested} untested` : ""
+        }`
+      : visibleCatchupCount === catchupCount
+        ? `${catchupCount} catch-up`
+        : `${visibleCatchupCount} of ${catchupCount} catch-up`;
+  // Before verification the pill toggles the catch-up filter; after it, clicks
+  // cycle through the real and fake verdicts.
+  const cycleCatchupFilter = () => {
+    if (verdictTally.tested === 0) {
+      toggleFilter("catchup");
+      return;
+    }
+    const cycle = ["catchup_real", "catchup_shallower", "catchup_fake"].filter(
+      (filter) => filter !== "catchup_shallower" || verdictTally.shallower > 0,
+    );
+    const position = cycle.indexOf(statusFilter);
+    const next = position === -1 ? cycle[0] : (cycle[position + 1] ?? "all");
+    startTransition(() => setStatusFilter(next));
+  };
+
+  const showSelectionInfo = selectedChannelIndices.length > 1 && catchupCount > 0;
   const showRightStatus =
     scanState === "cancelling" ||
     scanState === "paused" ||
     effectiveLowFpsCount > 0 ||
     effectiveMislabeledCount > 0 ||
-    duplicateCount > 0;
+    duplicateCount > 0 ||
+    showSelectionInfo;
 
   function handleStatusChange(value: string) {
     startTransition(() => setStatusFilter(value));
@@ -157,16 +257,31 @@ export const StatsPanel = memo(function StatsPanel() {
           )}
         </>
       )}
-      {summary?.playlist_score && (
+      {catchupCount > 0 && (
+        <Pill
+          icon={<SFClockArrow className={iconSize} />}
+          label={catchupLabel}
+          color="violet"
+          active={isCatchupStatusFilter(statusFilter)}
+          onClick={cycleCatchupFilter}
+        />
+      )}
+      {displayScore && (
         <Pill
           icon={null}
-          label={`Score ${summary.playlist_score.overall.toFixed(1)}/10`}
+          label={`Score ${displayScore.overall.toFixed(1)}/10`}
           color="blue"
           onClick={toggleReportPanel}
         />
       )}
       {showRightStatus && (
         <div className="ml-auto flex items-center gap-2">
+          {showSelectionInfo && (
+            <span className="text-[12px] text-text-tertiary tabular-nums">
+              {selectedChannelIndices.length} selected ·{" "}
+              <span className="text-violet-400">{selectedCatchupCount} with catch-up</span>
+            </span>
+          )}
           {scanState === "paused" && (
             <span className="text-[12px] text-yellow-400 font-medium uppercase tracking-[0.04em]">
               Paused

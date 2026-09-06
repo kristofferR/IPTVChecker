@@ -11,6 +11,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { resultAtIndex } from "../hooks/useScan.helpers";
+import { hasArchive } from "../lib/archive";
+import { createArchiveProbeSequenceGuard, probeChannelArchive } from "../lib/archiveProbe";
 import { channelRowHeightPixels } from "../lib/channelLogoSize";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { getChannelTableLayout } from "../lib/channelTableLayout";
@@ -18,6 +20,7 @@ import type { SortDirection, SortField } from "../lib/filters";
 import { filterResultsShared, sortResults } from "../lib/filters";
 import { statusLabel } from "../lib/format";
 import { measureUiPerf } from "../lib/perf";
+import { isSingleConnectionPlaylist } from "../lib/playback";
 import { isScanActive } from "../lib/scanState";
 import { isInputLikeTarget, isPrimaryModifierPressed } from "../lib/shortcuts";
 import { detectChannelProtocol } from "../lib/streamProtocol";
@@ -139,9 +142,16 @@ export function ChannelTable({
   const groupFilter = useAppStore((s) => s.groupFilter);
   const statusFilter = useAppStore((s) => s.statusFilter);
   const scanState = useAppStore((s) => s.scanState);
+  const archiveGuideTestRunning = useAppStore((s) => s.archiveGuideTestRunning);
+  const archiveProbeRunning = useAppStore((s) =>
+    Object.values(s.archiveProbes).some((entry) => entry.running),
+  );
+  const archiveProbes = useAppStore((s) => s.archiveProbes);
   const isMac = useAppStore((s) => s.isMac);
   const channelLogoSize = useAppStore((s) => s.settings.channel_logo_size);
   const isPlaying = useAppStore((s) => s.playIntentActive);
+  const singleConnection = useAppStore((s) => isSingleConnectionPlaylist(s.playlist));
+  const externalPlaybackActive = useAppStore((s) => s.externalPlaybackActive);
   const separatePlaceholder = useAppStore((s) => s.settings.separate_placeholder_status);
   const onSelectionChange = useAppStore((s) => s.setSelectedChannelIndices);
   const rawSearch = useAppStore((s) => s.search);
@@ -321,6 +331,7 @@ export function ChannelTable({
             statusFilter,
             duplicateIndices,
             separatePlaceholder,
+            archiveProbes,
           );
           return sortResults(filtered, sortField, sortDir);
         },
@@ -341,6 +352,7 @@ export function ChannelTable({
       sortField,
       sortDir,
       separatePlaceholder,
+      archiveProbes,
     ],
   );
 
@@ -668,6 +680,10 @@ export function ChannelTable({
   // timer and schedules a new one, so a key burst coalesces into a single
   // backend cast_to_device call instead of one per keystroke.
   const castRedirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isCastingRef = useRef(isCasting);
+  useEffect(() => {
+    isCastingRef.current = isCasting;
+  }, [isCasting]);
   useEffect(() => {
     return () => {
       if (castRedirectTimerRef.current) {
@@ -919,6 +935,79 @@ export function ChannelTable({
     const indexSet = selectedIndices;
     return completedResults.filter((r) => indexSet.has(r.index)).sort((a, b) => a.index - b.index);
   }, [selectedIndices, contextMenuState, completedResults]);
+
+  const handleBrowseCatchup = useCallback(() => {
+    const channel = contextMenuState?.channel;
+    setContextMenuState(null);
+    if (!channel || !hasArchive(channel)) {
+      return;
+    }
+    const store = useAppStore.getState();
+    store.setGuideFocusChannelIndex(channel.index);
+    store.setViewMode("guide");
+  }, [contextMenuState]);
+
+  const handleTestCatchup = useCallback(() => {
+    const initialState = useAppStore.getState();
+    if (
+      isScanActive(initialState.scanState) ||
+      initialState.archiveGuideTestRunning ||
+      Object.values(initialState.archiveProbes).some((probe) => probe.running) ||
+      (isSingleConnectionPlaylist(initialState.playlist) &&
+        (initialState.playIntentActive || isCastingRef.current))
+    ) {
+      setContextMenuState(null);
+      return;
+    }
+    if (
+      initialState.externalPlaybackActive &&
+      isSingleConnectionPlaylist(initialState.playlist) &&
+      !window.confirm("Close the external player before testing catch-up. Continue?")
+    ) {
+      setContextMenuState(null);
+      return;
+    }
+    initialState.setExternalPlaybackActive(false);
+    const targets = getSelectedChannels().filter(hasArchive);
+    const playlist = initialState.playlist;
+    setContextMenuState(null);
+    if (targets.length === 0) {
+      return;
+    }
+    const sequenceIsCurrent = createArchiveProbeSequenceGuard();
+    const shouldContinue = () => {
+      const state = useAppStore.getState();
+      return (
+        sequenceIsCurrent() &&
+        state.playlist === playlist &&
+        !isScanActive(state.scanState) &&
+        !state.archiveGuideTestRunning &&
+        !(
+          isSingleConnectionPlaylist(state.playlist) &&
+          (state.playIntentActive || isCastingRef.current)
+        ) &&
+        !state.externalPlaybackActive
+      );
+    };
+    void (async () => {
+      const generation = useAppStore.getState().archiveProbeGeneration;
+      // Sequential on purpose: IPTV providers commonly cap concurrent
+      // connections, and each probe already opens up to two archive URLs.
+      for (const target of targets) {
+        if (!shouldContinue()) break;
+        await probeChannelArchive(
+          target,
+          (entry) => {
+            const state = useAppStore.getState();
+            if (state.playlist === playlist) {
+              state.setArchiveProbe(generation, target.index, entry);
+            }
+          },
+          shouldContinue,
+        );
+      }
+    })();
+  }, [getSelectedChannels]);
 
   const handleCopyChannelName = useCallback(async () => {
     if (!contextMenuState) return;
@@ -1433,6 +1522,41 @@ export function ChannelTable({
               : "Scan"}{" "}
             Selected ({selectedIndices.size})
           </button>
+          {(() => {
+            const archiveCount = getSelectedChannels().filter(hasArchive).length;
+            if (archiveCount === 0) return null;
+            return (
+              <>
+                <button
+                  onClick={handleTestCatchup}
+                  disabled={
+                    isScanActive(scanState) ||
+                    archiveGuideTestRunning ||
+                    archiveProbeRunning ||
+                    (singleConnection && (isPlaying || isCasting))
+                  }
+                  title={
+                    externalPlaybackActive && singleConnection
+                      ? "Confirm the external player is closed before testing catch-up"
+                      : undefined
+                  }
+                  className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
+                  type="button"
+                >
+                  Test Catch-up ({archiveCount})
+                </button>
+                {hasArchive(contextMenuState.channel) && (
+                  <button
+                    onClick={handleBrowseCatchup}
+                    className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+                    type="button"
+                  >
+                    Browse Catch-up
+                  </button>
+                )}
+              </>
+            );
+          })()}
           <div className="h-px my-1 bg-border-subtle" />
           <button
             onClick={handlePreviewChannel}

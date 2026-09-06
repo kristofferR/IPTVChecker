@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::channel::Channel;
@@ -16,6 +18,10 @@ pub struct XtreamAccountInfo {
     pub active_connections: Option<u32>,
     #[serde(default)]
     pub max_connections: Option<u32>,
+    /// Panel timezone from `server_info`; Xtream timeshift starts are
+    /// interpreted in this zone, not UTC.
+    #[serde(default)]
+    pub timezone: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,5 +47,11 @@ pub struct PlaylistPreview {
     #[serde(default)]
     pub series_count: usize,
     pub groups: Vec<String>,
+    /// XMLTV EPG URLs advertised by the playlist header (`x-tvg-url` / `url-tvg`).
+    #[serde(default)]
+    pub epg_sources: Vec<String>,
+    /// XMLTV EPG sources keyed by the playlist each channel came from.
+    #[serde(default)]
+    pub epg_sources_by_playlist: BTreeMap<String, Vec<String>>,
     pub channels: Vec<Channel>,
 }

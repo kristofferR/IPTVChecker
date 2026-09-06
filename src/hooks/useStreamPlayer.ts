@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { describeArchiveFailure, resolveArchivePlayback } from "../lib/archive";
 import { normalizeCodecName, resolveResolutionLabel } from "../lib/format";
 import { logger } from "../lib/logger";
 import {
@@ -6,8 +7,11 @@ import {
   classifyStream,
   decidePlaybackRecovery,
   formatPlaybackRecoveryMessage,
+  getArchiveFallbackRoutes,
   getMpegtsPlaybackRoutes,
   type HlsErrorPayload,
+  isHlsManifestRejection,
+  isHlsMediaRejection,
   MAX_PLAYBACK_RECOVERY_ATTEMPTS,
   type PlaybackRecoveryIssue,
   type PlaybackStartMode,
@@ -31,6 +35,28 @@ import { canUseBlobWorkers } from "../lib/workerSupport";
 // alongside the hook. The implementation lives in lib/playback.
 export { MAX_PLAYBACK_RECOVERY_ATTEMPTS } from "../lib/playback";
 
+/** Active catch-up playback: which channel, where in its archive, and the
+ * seekable window. Present only while playing an archive URL. */
+export interface ArchiveSession {
+  baseResult: ChannelResult;
+  /** Exact synthetic URL currently loaded by the player. */
+  url: string;
+  /** Where the current archive URL starts, epoch seconds. */
+  startEpochS: number;
+  /** Earliest seekable point (programme start or the picked time). */
+  windowStartEpochS: number;
+  /** Latest seekable point (programme end, clamped to launch time). */
+  windowEndEpochS: number;
+  title: string | null;
+}
+
+export interface ArchivePlayOptions {
+  startEpochS: number;
+  /** Programme end; defaults to now (watch from start up to live edge). */
+  endEpochS?: number;
+  title?: string;
+}
+
 export interface UseStreamPlayerReturn {
   playerState: PlayerState;
   errorMessage: string | null;
@@ -43,15 +69,23 @@ export interface UseStreamPlayerReturn {
   activeChannelIndex: number | null;
   videoElement: HTMLVideoElement;
   streamMetadata: StreamMetadata | null;
+  archiveSession: ArchiveSession | null;
+  setArchiveSession: (session: ArchiveSession | null) => void;
+  resumeArchive: (session: ArchiveSession) => void;
   play: (result: ChannelResult) => void;
-  stop: () => void;
+  retry: (result: ChannelResult) => void;
+  playArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
+  seekArchive: (toEpochS: number) => void;
+  goLive: () => void;
+  stop: (options?: { preserveArchiveSession?: boolean }) => void;
   togglePause: () => void;
   setVolume: (v: number) => void;
   toggleMute: () => void;
 }
 
 interface UseStreamPlayerOptions {
-  onPlaybackFailed?: (result: ChannelResult) => void;
+  onPlaybackFailed?: (result: ChannelResult, affectsChannelHealth: boolean) => void;
+  onPlaybackFinished?: (result: ChannelResult) => void;
 }
 
 function readStoredVolume(): number {
@@ -105,7 +139,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const videoElement = videoElRef.current;
 
   const onPlaybackFailedRef = useRef(options?.onPlaybackFailed);
-  onPlaybackFailedRef.current = options?.onPlaybackFailed;
+  const onPlaybackFinishedRef = useRef(options?.onPlaybackFinished);
 
   const [playerState, setPlayerState] = useState<PlayerState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -117,6 +151,12 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
   const [activeChannelIndex, setActiveChannelIndex] = useState<number | null>(null);
   const [streamMetadata, setStreamMetadata] = useState<StreamMetadata | null>(null);
+  const [archiveSession, setArchiveSessionState] = useState<ArchiveSession | null>(null);
+  const archiveSessionRef = useRef<ArchiveSession | null>(null);
+  const setArchiveSession = useCallback((session: ArchiveSession | null) => {
+    archiveSessionRef.current = session;
+    setArchiveSessionState(session);
+  }, []);
 
   const lastErrorRef = useRef<string | null>(null);
   const playerStateRef = useRef<PlayerState>("idle");
@@ -135,6 +175,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const startupLatencyMsRef = useRef<number | null>(null);
   const playbackSessionIdRef = useRef(0);
   const startPlaybackAttemptRef = useRef<StartPlaybackAttempt | null>(null);
+
+  useEffect(() => {
+    onPlaybackFailedRef.current = options?.onPlaybackFailed;
+    onPlaybackFinishedRef.current = options?.onPlaybackFinished;
+  }, [options?.onPlaybackFailed, options?.onPlaybackFinished]);
 
   useEffect(() => {
     playerStateRef.current = playerState;
@@ -351,6 +396,29 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     videoElement.load();
   }, [clearLoadingTimer, cleanupRuntimeMonitor, cleanupMetadataListeners, videoElement]);
 
+  const stop = useCallback(
+    (options?: { preserveArchiveSession?: boolean }) => {
+      playbackSessionIdRef.current += 1;
+      isPausedRef.current = false;
+      clearRecoveryTimer();
+      currentChannelRef.current = null;
+      recoveryTimestampsRef.current = [];
+      hasStartedPlayingRef.current = false;
+      playbackStartedAtRef.current = null;
+      startupLatencyMsRef.current = null;
+      resetRecoveryUi();
+      cleanup();
+      setPlayerState("idle");
+      setErrorMessage(null);
+      setIsPaused(false);
+      setActiveChannelIndex(null);
+      if (!options?.preserveArchiveSession) {
+        setArchiveSession(null);
+      }
+    },
+    [cleanup, clearRecoveryTimer, resetRecoveryUi],
+  );
+
   const applyVolume = useCallback(() => {
     videoElement.volume = volume;
     videoElement.muted = muted;
@@ -381,12 +449,14 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       recoveryTimestampsRef.current = [];
       logger.error("[Player] Playback failed for channel", result.name, "-", reason);
       setPlayerState("error");
-      setErrorMessage(reason);
+      // Archive failures are usually "the provider stored nothing for that
+      // time", not network faults; say so instead of surfacing hls.js codes.
+      setErrorMessage(archiveSessionRef.current ? describeArchiveFailure(reason) : reason);
       setIsPaused(false);
       setActiveChannelIndex(null);
-      if (notifyBackend) {
-        onPlaybackFailedRef.current?.(result);
-      }
+      // A failed archive URL says nothing about the live channel's health, so
+      // let the caller distinguish it from a live channel failure.
+      onPlaybackFailedRef.current?.(result, notifyBackend && !archiveSessionRef.current);
     },
     [cleanup, clearRecoveryTimer, resetRecoveryUi],
   );
@@ -407,6 +477,13 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         return;
       }
 
+      if (decision.kind === "finish") {
+        logger.info("[Player] Playback finished for", result.name);
+        onPlaybackFinishedRef.current?.(result);
+        stop();
+        return;
+      }
+
       if (decision.kind === "fail") {
         finalizePlaybackFailure(result, reason, true);
         return;
@@ -420,9 +497,42 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         reason,
       );
 
+      let recoveryResult = result;
+      const archiveSession = archiveSessionRef.current;
+      const elapsedS = Math.floor(videoElement.currentTime);
+      if (archiveSession && elapsedS > 0) {
+        const nowEpochS = Math.floor(now / 1000);
+        const latestStartEpochS = Math.min(archiveSession.windowEndEpochS, nowEpochS) - 1;
+        const requestedStartEpochS = Math.max(
+          archiveSession.windowStartEpochS,
+          Math.min(archiveSession.startEpochS + elapsedS, latestStartEpochS),
+        );
+        const playback = resolveArchivePlayback(
+          archiveSession.baseResult,
+          {
+            startEpochS: requestedStartEpochS,
+            endEpochS: archiveSession.windowEndEpochS,
+          },
+          nowEpochS,
+        );
+        if (playback) {
+          setArchiveSession({
+            ...archiveSession,
+            url: playback.url,
+            startEpochS: playback.startEpochS,
+          });
+          recoveryResult = {
+            ...archiveSession.baseResult,
+            url: playback.url,
+            content_type: "movie",
+            stream_url: null,
+          };
+        }
+      }
+
       clearRecoveryTimer();
       cleanup();
-      currentChannelRef.current = result;
+      currentChannelRef.current = recoveryResult;
       recoveryTimestampsRef.current = recordPlaybackRecoveryAttempt(
         recoveryTimestampsRef.current,
         now,
@@ -432,7 +542,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       setPlayerState("loading");
       setErrorMessage(null);
       setIsPaused(false);
-      setActiveChannelIndex(result.index);
+      setActiveChannelIndex(recoveryResult.index);
 
       recoveryTimerRef.current = setTimeout(() => {
         if (playbackSessionIdRef.current !== sessionId) {
@@ -442,10 +552,18 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         if (!startAttempt) {
           return;
         }
-        void startAttempt(result, sessionId, "recovery", decision.nextAttempt);
+        void startAttempt(recoveryResult, sessionId, "recovery", decision.nextAttempt);
       }, PLAYBACK_RECOVERY_DELAY_MS);
     },
-    [cleanup, clearRecoveryTimer, finalizePlaybackFailure, showRecoveryUi],
+    [
+      cleanup,
+      clearRecoveryTimer,
+      finalizePlaybackFailure,
+      setArchiveSession,
+      showRecoveryUi,
+      stop,
+      videoElement,
+    ],
   );
 
   const setupRuntimeMonitor = useCallback(
@@ -806,6 +924,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       };
 
       if (preferNativeHls) {
+        logger.info("[Player] Trying native HLS for", result.name);
         lastErrorRef.current = null;
         const nativeOk = await tryNativePlayback(
           url,
@@ -816,10 +935,21 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           return;
         }
         if (nativeOk && (await handleSuccessfulStart())) {
+          logger.info("[Player] Playing via native HLS:", result.name);
           return;
         }
+        logger.info(
+          "[Player] Native HLS did not start for",
+          result.name,
+          "-",
+          lastErrorRef.current ?? "no media error reported",
+        );
       }
 
+      // A playlist URL that answers with raw media (timeshift `.m3u8` redirecting
+      // to `.ts`) is rejected by the proxy up front; hls.js then reports a
+      // manifest error, and the MPEG-TS routes below take over.
+      let hlsManifestRejected = false;
       if (streamType === "hls") {
         logger.info("[Player] Trying hls.js via proxy for", result.name);
         lastErrorRef.current = null;
@@ -831,6 +961,38 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           logger.info("[Player] Playing via hls.js proxy:", result.name);
           if (await handleSuccessfulStart()) {
             return;
+          }
+        }
+        hlsManifestRejected = isHlsManifestRejection(lastErrorRef.current);
+        if (hlsManifestRejected) {
+          logger.info(
+            "[Player] Playlist URL served raw media; trying MPEG-TS routes for",
+            result.name,
+          );
+        } else if (result.content_type !== "live" && isHlsMediaRejection(lastErrorRef.current)) {
+          // Catch-up media hls.js cannot play (HEVC in TS): raw timeshift
+          // stream via mpegts.js, then an ffmpeg remux of the playlist.
+          let proxyPort = 0;
+          try {
+            proxyPort = await getStreamingProxyPort();
+          } catch {
+            logger.warn("[Player] Could not get streaming proxy port");
+          }
+          for (const route of getArchiveFallbackRoutes(url, proxyPort)) {
+            logger.info(
+              route.kind === "remux"
+                ? "[Player] Trying ffmpeg remux of the archive playlist for"
+                : "[Player] Trying raw timeshift stream via mpegts.js for",
+              result.name,
+            );
+            lastErrorRef.current = null;
+            const mpegtsOk = await tryMpegtsPlayback(route.url, abortController.signal, false);
+            if (!isCurrentPlayback()) {
+              return;
+            }
+            if (mpegtsOk && (await handleSuccessfulStart())) {
+              return;
+            }
           }
         }
       }
@@ -845,7 +1007,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         return;
       }
 
-      if (streamType === "mpegts" || streamType === "unknown") {
+      if (streamType === "mpegts" || streamType === "unknown" || hlsManifestRejected) {
         const isLive = result.content_type === "live";
         let proxyPort = 0;
         try {
@@ -879,7 +1041,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       }
 
-      if (streamType !== "hls") {
+      if (streamType !== "hls" || hlsManifestRejected) {
         lastErrorRef.current = null;
         const nativeOk = await tryNativePlayback(
           url,
@@ -921,7 +1083,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     };
   }, [cleanup, clearRecoveryTimer]);
 
-  const play = useCallback(
+  const beginPlayback = useCallback(
     (result: ChannelResult) => {
       playbackSessionIdRef.current += 1;
       isPausedRef.current = false;
@@ -938,22 +1100,105 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     [clearRecoveryTimer, resetRecoveryUi, startPlaybackAttempt],
   );
 
-  const stop = useCallback(() => {
-    playbackSessionIdRef.current += 1;
-    isPausedRef.current = false;
-    clearRecoveryTimer();
-    currentChannelRef.current = null;
-    recoveryTimestampsRef.current = [];
-    hasStartedPlayingRef.current = false;
-    playbackStartedAtRef.current = null;
-    startupLatencyMsRef.current = null;
-    resetRecoveryUi();
-    cleanup();
-    setPlayerState("idle");
-    setErrorMessage(null);
-    setIsPaused(false);
-    setActiveChannelIndex(null);
-  }, [cleanup, clearRecoveryTimer, resetRecoveryUi]);
+  const play = useCallback(
+    (result: ChannelResult) => {
+      setArchiveSession(null);
+      beginPlayback(result);
+    },
+    [beginPlayback],
+  );
+
+  const retry = useCallback(
+    (result: ChannelResult) => {
+      const session = archiveSessionRef.current;
+      const currentChannel = currentChannelRef.current;
+      if (session && currentChannel && session.baseResult.index === result.index) {
+        beginPlayback(currentChannel);
+        return;
+      }
+      setArchiveSession(null);
+      beginPlayback(result);
+    },
+    [beginPlayback],
+  );
+
+  const playArchive = useCallback(
+    (result: ChannelResult, options: ArchivePlayOptions) => {
+      const playback = resolveArchivePlayback(result, options);
+      if (!playback) {
+        return;
+      }
+      setArchiveSession({
+        baseResult: result,
+        url: playback.url,
+        startEpochS: playback.startEpochS,
+        windowStartEpochS: playback.startEpochS,
+        windowEndEpochS: playback.windowEndEpochS,
+        title: options.title ?? null,
+      });
+      // The archive URL rides through the normal route/recovery pipeline as a
+      // synthetic channel; it is not live, so MPEG-TS routes get a VOD hint.
+      beginPlayback({ ...result, url: playback.url, content_type: "movie", stream_url: null });
+    },
+    [beginPlayback],
+  );
+
+  const resumeArchive = useCallback(
+    (session: ArchiveSession) => {
+      setArchiveSession(session);
+      beginPlayback({
+        ...session.baseResult,
+        url: session.url,
+        content_type: "movie",
+        stream_url: null,
+      });
+    },
+    [beginPlayback],
+  );
+
+  const seekArchive = useCallback(
+    (toEpochS: number) => {
+      const session = archiveSessionRef.current;
+      if (!session) {
+        return;
+      }
+      const now = Math.floor(Date.now() / 1000);
+      const latestSeekable = Math.min(session.windowEndEpochS, now) - 10;
+      const clamped = Math.max(
+        session.windowStartEpochS,
+        Math.min(Math.floor(toEpochS), latestSeekable),
+      );
+      const playback = resolveArchivePlayback(
+        session.baseResult,
+        { startEpochS: clamped, endEpochS: session.windowEndEpochS },
+        now,
+      );
+      if (!playback) {
+        return;
+      }
+      setArchiveSession({
+        ...session,
+        url: playback.url,
+        startEpochS: playback.startEpochS,
+      });
+      beginPlayback({
+        ...session.baseResult,
+        url: playback.url,
+        content_type: "movie",
+        stream_url: null,
+      });
+    },
+    [beginPlayback],
+  );
+
+  const goLive = useCallback(() => {
+    const session = archiveSessionRef.current;
+    if (!session) {
+      return;
+    }
+    setArchiveSession(null);
+    beginPlayback(session.baseResult);
+  }, [beginPlayback]);
 
   const togglePause = useCallback(() => {
     if (videoElement.paused) {
@@ -988,7 +1233,14 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     activeChannelIndex,
     videoElement,
     streamMetadata,
+    archiveSession,
+    setArchiveSession,
+    resumeArchive,
     play,
+    retry,
+    playArchive,
+    seekArchive,
+    goLive,
     stop,
     togglePause,
     setVolume,

@@ -53,6 +53,7 @@ const CAST_READ_TIMEOUT: Duration = Duration::from_secs(20);
 const MANIFEST_FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 const REMUX_PLAYLIST_READY_TIMEOUT: Duration = Duration::from_secs(20);
 const REMUX_PLAYLIST_POLL_INTERVAL: Duration = Duration::from_millis(150);
+const REMUX_PLAYLIST_SEGMENTS: &str = "6";
 /// Hard cap on manifest body buffered into memory before rewriting. Real HLS
 /// playlists are well under a megabyte; this exists so a misclassified upstream
 /// (URL ends in `.m3u8` but body is actually a long-running MPEG-TS or live
@@ -161,6 +162,7 @@ pub async fn start(
     app: AppHandle,
     upstream_url: String,
     stream_kind: CastStreamKind,
+    is_finite: bool,
 ) -> Result<CastProxyHandle, AppError> {
     let token = generate_token();
     let lan_ip = detect_lan_ip()
@@ -204,6 +206,7 @@ pub async fn start(
             cancel.clone(),
             remux_state.clone(),
             client.clone(),
+            is_finite,
         )
         .await?;
         (
@@ -296,6 +299,25 @@ struct RemuxStartInfo {
     is_dash: bool,
 }
 
+fn hls_muxer_options(is_finite: bool) -> (&'static str, &'static str) {
+    if is_finite {
+        ("0", "independent_segments")
+    } else {
+        (
+            REMUX_PLAYLIST_SEGMENTS,
+            "delete_segments+omit_endlist+independent_segments",
+        )
+    }
+}
+
+fn dash_window_size(is_finite: bool) -> &'static str {
+    if is_finite {
+        "0"
+    } else {
+        REMUX_PLAYLIST_SEGMENTS
+    }
+}
+
 /// Spawn ffmpeg to remux the upstream MPEG-TS into a sliding-window HLS
 /// playlist on disk. Waits for the playlist file to appear (so the Cast
 /// device's first GET doesn't 404) before returning.
@@ -306,6 +328,7 @@ async fn start_remux(
     cancel: CancellationToken,
     remux_state: Arc<Mutex<Option<RemuxState>>>,
     client: Arc<reqwest::Client>,
+    is_finite: bool,
 ) -> Result<RemuxStartInfo, AppError> {
     let tmpdir = std::env::temp_dir().join(format!("iptv-cast-{token}"));
     std::fs::create_dir_all(&tmpdir).map_err(AppError::Io)?;
@@ -373,6 +396,12 @@ async fn start_remux(
 
     cmd.arg("-hide_banner").arg("-loglevel").arg("warning");
     cmd.arg("-fflags").arg("+genpts+discardcorrupt");
+    // Archive endpoints may deliver the complete recording as fast as the
+    // connection allows. Pace them so the receiver can consume each segment
+    // before the sliding HLS/DASH window removes it.
+    if is_finite {
+        cmd.arg("-re");
+    }
     if is_hevc {
         cmd.arg("-f").arg("mpegts");
         cmd.arg("-i").arg("pipe:0");
@@ -418,15 +447,16 @@ async fn start_remux(
         // which the muxer rejects.
         cmd.arg("-avoid_negative_ts").arg("make_zero");
 
-        // DASH muxer: sliding-window live profile, fMP4 segments under
-        // SegmentTemplate so Shaka can index by $Number$. `remove_at_exit`
-        // pairs with `extra_window_size` so segments stay on disk a couple
-        // of windows past the manifest tail (covers receiver reconnects).
+        // Live streams use a bounded sliding window. Finite streams retain
+        // every segment so receiver-side pauses and buffering cannot make an
+        // earlier segment disappear before it is fetched.
         cmd.arg("-f").arg("dash");
         cmd.arg("-seg_duration").arg("4");
-        cmd.arg("-window_size").arg("6");
-        cmd.arg("-extra_window_size").arg("2");
-        cmd.arg("-remove_at_exit").arg("1");
+        cmd.arg("-window_size").arg(dash_window_size(is_finite));
+        if !is_finite {
+            cmd.arg("-extra_window_size").arg("2");
+            cmd.arg("-remove_at_exit").arg("1");
+        }
         cmd.arg("-use_template").arg("1");
         cmd.arg("-use_timeline").arg("1");
         cmd.arg("-init_seg_name")
@@ -448,11 +478,11 @@ async fn start_remux(
             cmd.arg("-c:a").arg("copy");
         }
         let segment_pattern = tmpdir.join("seg_%05d.ts");
+        let (playlist_size, hls_flags) = hls_muxer_options(is_finite);
         cmd.arg("-f").arg("hls");
         cmd.arg("-hls_time").arg("4");
-        cmd.arg("-hls_list_size").arg("6");
-        cmd.arg("-hls_flags")
-            .arg("delete_segments+omit_endlist+independent_segments");
+        cmd.arg("-hls_list_size").arg(playlist_size);
+        cmd.arg("-hls_flags").arg(hls_flags);
         cmd.arg("-hls_segment_filename").arg(&segment_pattern);
     }
     cmd.arg(&manifest_path);
@@ -488,6 +518,7 @@ async fn start_remux(
                 client.clone(),
                 stdin,
                 cancel.clone(),
+                is_finite,
             );
         }
     }
@@ -529,6 +560,9 @@ async fn start_remux(
                             "[CastProxy/ffmpeg] Exited cleanly for {}",
                             redact_url(&upstream_for_worker)
                         );
+                        if is_finite {
+                            return;
+                        }
                     }
                     Ok(s) => {
                         log::warn!(
@@ -545,8 +579,9 @@ async fn start_remux(
                         log::warn!("[CastProxy/ffmpeg] wait() failed: {err}");
                     }
                 }
-                // ffmpeg ended on its own — also cancel the listener so the
-                // session tears down rather than serving a dead playlist.
+                // A completed finite remux must remain available while the
+                // receiver consumes its final segments. Other exits tear down
+                // the listener rather than leaving a dead live playlist.
                 cancel_for_worker.cancel();
                 let mut guard = remux_state_for_worker.lock().await;
                 if let Some(state) = guard.take() {
@@ -651,6 +686,7 @@ fn spawn_upstream_pump(
     client: Arc<reqwest::Client>,
     mut stdin: tokio::process::ChildStdin,
     cancel: CancellationToken,
+    is_finite: bool,
 ) {
     tokio::spawn(async move {
         use futures::StreamExt;
@@ -741,12 +777,24 @@ fn spawn_upstream_pump(
                                 }
                             }
                             Some(Err(err)) => {
+                                if is_finite {
+                                    log::warn!(
+                                        "[CastProxy/pump] Upstream read error ({label}): {err}; finite stream terminated"
+                                    );
+                                    break 'session;
+                                }
                                 log::info!(
                                     "[CastProxy/pump] Upstream read error ({label}): {err}; reconnecting"
                                 );
                                 break;
                             }
                             None => {
+                                if is_finite {
+                                    log::info!(
+                                        "[CastProxy/pump] Upstream EOF ({label}); finite stream complete"
+                                    );
+                                    break 'session;
+                                }
                                 log::info!(
                                     "[CastProxy/pump] Upstream EOF ({label}); reconnecting"
                                 );
@@ -1550,6 +1598,22 @@ mod tests {
         assert!(token
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+    }
+
+    #[test]
+    fn finite_hls_remux_keeps_all_segments_and_endlist() {
+        let (playlist_size, flags) = hls_muxer_options(true);
+
+        assert_eq!(playlist_size, "0");
+        assert!(!flags.split('+').any(|flag| flag == "delete_segments"));
+        assert!(!flags.split('+').any(|flag| flag == "omit_endlist"));
+        assert!(flags.split('+').any(|flag| flag == "independent_segments"));
+    }
+
+    #[test]
+    fn finite_dash_remux_keeps_all_segments() {
+        assert_eq!(dash_window_size(true), "0");
+        assert_eq!(dash_window_size(false), REMUX_PLAYLIST_SEGMENTS);
     }
 
     #[test]

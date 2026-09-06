@@ -7,18 +7,45 @@ use crate::models::channel::ChannelResult;
 use crate::models::scan_log::{ChannelAttemptDebugLog, ChannelDebugLog};
 
 const REDACTED_QUERY_VALUE: &str = "REDACTED";
+const REDACTED_PATH_SEGMENT: &str = "REDACTED";
 static URL_IN_TEXT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r#"https?://[^\s"'<>]+"#).expect("valid URL regex"));
+static CATCHUP_SOURCE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?i)(catchup-source\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s,]+))"#)
+        .expect("valid catch-up source regex")
+});
 
-fn sanitize_url_for_persistence(url: &str) -> String {
+pub(crate) fn sanitize_url_for_persistence(url: &str) -> String {
     let trimmed = url.trim();
     let Ok(mut parsed) = url::Url::parse(trimmed) else {
-        return trimmed.to_string();
+        let without_fragment = trimmed.split_once('#').map_or(trimmed, |(value, _)| value);
+        let (base, query) = without_fragment
+            .split_once('?')
+            .map_or((without_fragment, None), |(base, query)| {
+                (base, Some(query))
+            });
+        let base = strip_url_authority_userinfo(base);
+        let sanitized_base = redact_provider_path_credentials(&base).unwrap_or(base);
+        let Some(query) = query else {
+            return sanitized_base;
+        };
+        if query.is_empty() {
+            return sanitized_base;
+        }
+
+        let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+        for (key, _) in url::form_urlencoded::parse(query.as_bytes()) {
+            serializer.append_pair(&key, REDACTED_QUERY_VALUE);
+        }
+        return format!("{}?{}", sanitized_base, serializer.finish());
     };
 
     let _ = parsed.set_username("");
     let _ = parsed.set_password(None);
     parsed.set_fragment(None);
+    if let Some(path) = redact_provider_path_credentials(parsed.path()) {
+        parsed.set_path(&path);
+    }
 
     let query_keys: Vec<String> = parsed
         .query_pairs()
@@ -33,6 +60,89 @@ fn sanitize_url_for_persistence(url: &str) -> String {
     }
 
     parsed.to_string()
+}
+
+fn strip_url_authority_userinfo(url: &str) -> String {
+    let Some(scheme_end) = url.find("://") else {
+        return url.to_string();
+    };
+    let authority_start = scheme_end + 3;
+    let authority_end = url[authority_start..]
+        .find('/')
+        .map_or(url.len(), |offset| authority_start + offset);
+    let authority = &url[authority_start..authority_end];
+    let Some(userinfo_end) = authority.rfind('@') else {
+        return url.to_string();
+    };
+
+    format!(
+        "{}{}{}",
+        &url[..authority_start],
+        &authority[userinfo_end + 1..],
+        &url[authority_end..]
+    )
+}
+
+fn redact_provider_path_credentials(path: &str) -> Option<String> {
+    let mut segments: Vec<String> = path.split('/').map(str::to_string).collect();
+    let credential_positions = segments.iter().enumerate().find_map(|(index, segment)| {
+        if !segment.eq_ignore_ascii_case("timeshift") || segments.len() < index + 6 {
+            return None;
+        }
+
+        let duration = &segments[index + 3];
+        let start = &segments[index + 4];
+        let stream_id = segments[index + 5].split('.').next().unwrap_or_default();
+        let valid_duration = duration == "${duration}"
+            || duration.eq_ignore_ascii_case("$%7Bduration%7D")
+            || duration.eq_ignore_ascii_case("%24%7Bduration%7D")
+            || (!duration.is_empty()
+                && duration.chars().all(|character| character.is_ascii_digit()));
+        let valid_start = start == "${start}"
+            || start.eq_ignore_ascii_case("$%7Bstart%7D")
+            || start.eq_ignore_ascii_case("%24%7Bstart%7D")
+            || start == "${offset}"
+            || start.eq_ignore_ascii_case("$%7Boffset%7D")
+            || start.eq_ignore_ascii_case("%24%7Boffset%7D")
+            || (!start.is_empty() && start.chars().all(|character| character.is_ascii_digit()));
+        let valid_stream_id = !stream_id.is_empty()
+            && stream_id
+                .chars()
+                .all(|character| character.is_ascii_digit());
+
+        (valid_duration && valid_start && valid_stream_id).then_some((index + 1, index + 2))
+    });
+
+    let (username, password) = credential_positions?;
+    segments[username] = REDACTED_PATH_SEGMENT.to_string();
+    segments[password] = REDACTED_PATH_SEGMENT.to_string();
+    Some(segments.join("/"))
+}
+
+pub(crate) fn sanitize_extinf_for_persistence(extinf_line: &str) -> String {
+    CATCHUP_SOURCE_RE
+        .replace_all(extinf_line, |captures: &regex::Captures<'_>| {
+            let value = captures
+                .get(2)
+                .or_else(|| captures.get(3))
+                .or_else(|| captures.get(4))
+                .map_or("", |capture| capture.as_str());
+            let quote = if captures.get(2).is_some() {
+                "\""
+            } else if captures.get(3).is_some() {
+                "'"
+            } else {
+                ""
+            };
+            format!(
+                "{}{}{}{}",
+                &captures[1],
+                quote,
+                sanitize_url_for_persistence(value),
+                quote
+            )
+        })
+        .into_owned()
 }
 
 fn sanitize_log_entry(entry: &str) -> String {
@@ -152,6 +262,11 @@ fn sanitize_result_for_persistence(result: &ChannelResult) -> ChannelResult {
         .stream_url
         .as_deref()
         .map(sanitize_url_for_persistence);
+    sanitized.catchup_source = sanitized
+        .catchup_source
+        .as_deref()
+        .map(sanitize_url_for_persistence);
+    sanitized.extinf_line = sanitize_extinf_for_persistence(&sanitized.extinf_line);
     sanitized
 }
 
@@ -398,6 +513,9 @@ mod tests {
             tvg_name: None,
             tvg_logo: None,
             tvg_chno: None,
+            catchup: None,
+            catchup_days: None,
+            catchup_source: None,
             url: format!("https://example.com/stream/{}", index),
             content_type: crate::models::channel::ContentType::Live,
             status,
@@ -576,6 +694,75 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_url_for_persistence_redacts_relative_query_values() {
+        assert_eq!(
+            sanitize_url_for_persistence("?token=abc123&start=${start}#fragment"),
+            "?token=REDACTED&start=REDACTED"
+        );
+        assert_eq!(
+            sanitize_url_for_persistence("archive/path?username=demo&password=hunter2"),
+            "archive/path?username=REDACTED&password=REDACTED"
+        );
+    }
+
+    #[test]
+    fn sanitize_url_for_persistence_redacts_credentials_when_url_parsing_fails() {
+        let sanitized = sanitize_url_for_persistence(
+            "https://alice:secret@example.com:invalid-port/live?token=private",
+        );
+
+        assert_eq!(
+            sanitized,
+            "https://example.com:invalid-port/live?token=REDACTED"
+        );
+        assert!(!sanitized.contains("alice"));
+        assert!(!sanitized.contains("secret"));
+        assert!(!sanitized.contains("private"));
+    }
+
+    #[test]
+    fn sanitize_url_for_persistence_redacts_provider_path_credentials() {
+        let sanitized = sanitize_url_for_persistence(
+            "https://provider.example/timeshift/path-user/path-pass/${duration}/${start}/42.ts",
+        );
+        assert!(
+            sanitized.contains("/timeshift/REDACTED/REDACTED/"),
+            "{sanitized}"
+        );
+        assert!(!sanitized.contains("path-user"));
+        assert!(!sanitized.contains("path-pass"));
+        assert_eq!(
+            sanitize_url_for_persistence(
+                "/timeshift/relative-user/relative-pass/${duration}/${start}/42.ts"
+            ),
+            "/timeshift/REDACTED/REDACTED/${duration}/${start}/42.ts"
+        );
+        for offset in ["${offset}", "$%7Boffset%7D", "%24%7Boffset%7D"] {
+            let url = format!(
+                "https://provider.example/timeshift/offset-user/offset-pass/${{duration}}/{offset}/42.ts"
+            );
+            let sanitized = sanitize_url_for_persistence(&url);
+            assert!(!sanitized.contains("offset-user"), "{sanitized}");
+            assert!(!sanitized.contains("offset-pass"), "{sanitized}");
+        }
+
+        let extinf = sanitize_extinf_for_persistence(
+            "#EXTINF:-1 catchup-source=\"https://provider.example/timeshift/extinf-user/extinf-pass/${duration}/${start}/42.ts\",Channel",
+        );
+        assert!(extinf.contains("/timeshift/REDACTED/REDACTED/"));
+        assert!(!extinf.contains("extinf-user"));
+        assert!(!extinf.contains("extinf-pass"));
+    }
+
+    #[test]
+    fn sanitize_url_for_persistence_preserves_ordinary_stream_paths() {
+        assert_eq!(
+            sanitize_url_for_persistence("https://cdn.example/live/sports/channel/42.ts"),
+            "https://cdn.example/live/sports/channel/42.ts"
+        );
+    }
+
+    #[test]
     fn write_log_entry_redacts_raw_secrets_in_urls() {
         let log_file = temp_file("resume-log-redaction");
 
@@ -594,13 +781,20 @@ mod tests {
     }
 
     #[test]
-    fn write_result_entry_redacts_url_and_stream_url() {
+    fn write_result_entry_redacts_result_urls() {
         let checkpoint_file = temp_file("resume-checkpoint-redaction");
 
         let mut result = make_result(8, "Secret", ChannelStatus::Alive);
         result.url = "https://demo:secret@example.com/live.m3u8?token=abc123".to_string();
         result.stream_url =
             Some("https://stream.example.com/hls.m3u8?auth=xyz987&session=abcd".to_string());
+        result.catchup_source = Some(
+            "https://archive:secret@example.com/timeshift?username=demo&password=hunter2"
+                .to_string(),
+        );
+        result.extinf_line =
+            "#EXTINF:-1 catchup-source=\"?token=checkpoint-secret&start=${start}\",Secret"
+                .to_string();
 
         write_result_entry(&checkpoint_file, &result).expect("result write should succeed");
 
@@ -608,9 +802,13 @@ mod tests {
             std::fs::read_to_string(&checkpoint_file).expect("checkpoint should be readable");
         assert!(!persisted.contains("abc123"));
         assert!(!persisted.contains("xyz987"));
+        assert!(!persisted.contains("hunter2"));
+        assert!(!persisted.contains("checkpoint-secret"));
         assert!(persisted.contains("token=REDACTED"));
         assert!(persisted.contains("auth=REDACTED"));
         assert!(persisted.contains("session=REDACTED"));
+        assert!(persisted.contains("username=REDACTED"));
+        assert!(persisted.contains("password=REDACTED"));
 
         let loaded = load_checkpoint_results(&checkpoint_file);
         assert_eq!(loaded.len(), 1);
@@ -621,6 +819,14 @@ mod tests {
         assert_eq!(
             loaded[0].stream_url.as_deref(),
             Some("https://stream.example.com/hls.m3u8?auth=REDACTED&session=REDACTED")
+        );
+        assert_eq!(
+            loaded[0].catchup_source.as_deref(),
+            Some("https://example.com/timeshift?username=REDACTED&password=REDACTED")
+        );
+        assert_eq!(
+            loaded[0].extinf_line,
+            "#EXTINF:-1 catchup-source=\"?token=REDACTED&start=REDACTED\",Secret"
         );
 
         let _ = std::fs::remove_file(&checkpoint_file);

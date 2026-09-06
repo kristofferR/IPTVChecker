@@ -1,10 +1,14 @@
 import type { ScanUiMetrics } from "../hooks/useScan.helpers";
+import type { ArchiveDownload } from "../lib/archiveDownload";
+import type { ArchiveProbeEntry } from "../lib/archiveProbe";
+import type { ArchiveVerifyRun } from "../lib/archiveVerifyRun";
 import type { Platform } from "../lib/platform";
 import type { ScanState } from "../lib/scanState";
 import type {
   AppSettings,
   ChannelResult,
   CurrentSourceDescriptor,
+  EpgLoadSummary,
   PlaylistLoadProgress,
   PlaylistPreview,
   RecentPlaylistEntry,
@@ -109,6 +113,36 @@ export interface FilterSlice {
 // Selection
 // ---------------------------------------------------------------------------
 
+export interface ArchiveSlice {
+  /** Spot-probe results for catch-up channels, keyed by channel index. */
+  archiveProbes: Record<number, ArchiveProbeEntry>;
+  /** Changes whenever per-playlist archive state is reset. */
+  archiveProbeGeneration: number;
+  /** Whether a programme selected in the Guide is being tested. */
+  archiveGuideTestRunning: boolean;
+  /** Result of the most recent XMLTV load for the current playlist. */
+  epgLoadSummary: EpgLoadSummary | null;
+  /** Progress of a playlist-wide catch-up verification run. */
+  archiveVerifyRun: ArchiveVerifyRun | null;
+  /** When set, a full verification pass starts after the scan completes. */
+  verifyCatchupAfterScan: boolean;
+  /** Programme recordings in flight or recently finished, keyed by id. */
+  archiveDownloads: Record<string, ArchiveDownload>;
+
+  setArchiveProbe: (generation: number, index: number, entry: ArchiveProbeEntry) => void;
+  setArchiveGuideTestRunning: (running: boolean) => void;
+  setEpgLoadSummary: (summary: EpgLoadSummary | null) => void;
+  setArchiveVerifyRun: (run: ArchiveVerifyRun | null) => void;
+  setVerifyCatchupAfterScan: (value: boolean) => void;
+  upsertArchiveDownload: (download: ArchiveDownload) => void;
+  patchArchiveDownload: (id: string, patch: Partial<ArchiveDownload>) => void;
+  removeArchiveDownload: (id: string) => void;
+  /** Replace probe entries wholesale (restoring persisted verdicts). */
+  restoreArchiveProbes: (probes: Record<number, ArchiveProbeEntry>) => void;
+  /** Reset all per-playlist archive state (probes and EPG summary). */
+  clearArchiveProbes: () => void;
+}
+
 export interface SelectionSlice {
   selectedChannel: ChannelResult | null;
   selectedChannelIndices: number[];
@@ -137,8 +171,14 @@ export interface MenuExportRequest {
 
 export type { UpdateNotice, UpdatePhase } from "../lib/updateState";
 
+export type MainViewMode = "table" | "guide";
+
 export interface UiSlice {
   platform: Platform;
+  /** Table shows all channels; guide is the catch-up EPG grid. */
+  viewMode: MainViewMode;
+  /** Channel the guide should scroll to when opened via right-click. */
+  guideFocusChannelIndex: number | null;
   isMac: boolean;
   sidebarHidden: boolean;
   sidebarWidth: number;
@@ -164,6 +204,8 @@ export interface UiSlice {
 
   setPlatform: (platform: Platform) => void;
   setSidebarHidden: (hidden: boolean) => void;
+  setViewMode: (mode: MainViewMode) => void;
+  setGuideFocusChannelIndex: (index: number | null) => void;
   setSidebarWidth: (width: number) => void;
   toggleReportPanel: () => void;
   setReportPanelManually: (visible: boolean) => void;
@@ -199,9 +241,13 @@ export interface UiSlice {
 
 export interface PlayerSlice {
   playIntentActive: boolean;
+  castActive: boolean;
+  externalPlaybackActive: boolean;
   pendingPlaybackChannel: ChannelResult | null;
 
   setPlayIntentActive: (active: boolean) => void;
+  setCastActive: (active: boolean) => void;
+  setExternalPlaybackActive: (active: boolean) => void;
   setPendingPlaybackChannel: (channel: ChannelResult | null) => void;
 }
 
@@ -249,4 +295,5 @@ export type AppStore = PlaylistSlice &
   UiSlice &
   PlayerSlice &
   HistorySlice &
-  SettingsSlice;
+  SettingsSlice &
+  ArchiveSlice;

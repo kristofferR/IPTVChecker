@@ -2,10 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { toCommandChannelResult } from "./channelResults";
 import type {
   AppSettings,
+  ArchiveDownloadRequest,
   CastMediaRequest,
   CastSession,
   ChannelResult,
   ChromecastDevice,
+  EpgLoadSummary,
+  EpgProgramme,
   PlaylistPreview,
   RecentPlaylistEntry,
   RecentPlaylistKind,
@@ -97,8 +100,47 @@ export async function resetScan(): Promise<void> {
   return invoke("reset_scan");
 }
 
-export async function quickCheckChannel(channel: ChannelResult): Promise<ChannelResult> {
-  return invoke("quick_check_channel", { channel: toCommandChannelResult(channel) });
+export async function quickCheckChannel(
+  channel: ChannelResult,
+  requestId?: string,
+): Promise<ChannelResult> {
+  return invoke("quick_check_channel", {
+    channel: toCommandChannelResult(channel),
+    requestId,
+  });
+}
+
+export async function cancelQuickCheck(requestId: string): Promise<void> {
+  return invoke("cancel_quick_check", { requestId });
+}
+
+export async function loadEpg(
+  sources: string[],
+  tvgIds: string[],
+  forceRefresh = false,
+): Promise<EpgLoadSummary> {
+  return invoke("load_epg", { sources, tvgIds, forceRefresh });
+}
+
+export async function downloadArchive(request: ArchiveDownloadRequest): Promise<void> {
+  return invoke("download_archive", { request });
+}
+
+export async function cancelArchiveDownload(id: string): Promise<void> {
+  return invoke("cancel_archive_download", { id });
+}
+
+export async function cancelEpgLoad(): Promise<void> {
+  return invoke("cancel_epg_load");
+}
+
+export async function getEpgProgrammes(
+  sources: string[],
+  tvgId: string,
+  from: number,
+  to: number,
+): Promise<EpgProgramme[]> {
+  return invoke("get_epg_programmes", { sources, tvgId, from, to });
 }
 
 export async function exportCsv(

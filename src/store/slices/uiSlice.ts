@@ -10,6 +10,8 @@ export const createUiSlice: StateCreator<AppStore, [], [], UiSlice> = (set, get)
   platform: initialPlatform,
   isMac: initialPlatform === "macos",
   sidebarHidden: false,
+  viewMode: "table",
+  guideFocusChannelIndex: null,
   sidebarWidth: (() => {
     const saved = localStorage.getItem("sidebar-width");
     return saved ? Math.max(100, Math.min(600, Number(saved))) : 288;
@@ -39,6 +41,8 @@ export const createUiSlice: StateCreator<AppStore, [], [], UiSlice> = (set, get)
 
   setPlatform: (platform) => set({ platform, isMac: platform === "macos" }),
   setSidebarHidden: (sidebarHidden) => set({ sidebarHidden }),
+  setViewMode: (viewMode) => set({ viewMode }),
+  setGuideFocusChannelIndex: (guideFocusChannelIndex) => set({ guideFocusChannelIndex }),
   setSidebarWidth: (sidebarWidth) => set({ sidebarWidth }),
   // Manual visibility changes own the auto-reveal bookkeeping so every
   // entry point (toolbar, menu, stats bar) behaves identically: during an

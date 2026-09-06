@@ -288,13 +288,21 @@ fn save_v2_index(base_dir: &Path, index: &HistoryIndexV2) -> Result<(), AppError
 fn write_run_file(
     base_dir: &Path,
     run_id: &str,
-    results: &[ChannelResult],
+    mut results: Vec<ChannelResult>,
 ) -> Result<(), AppError> {
     let runs_dir = v2_runs_dir(base_dir);
     std::fs::create_dir_all(&runs_dir).map_err(AppError::Io)?;
 
     let run_path = v2_run_file_path(base_dir, run_id);
-    let bytes = serde_json::to_vec(results).map_err(|error| {
+    for result in &mut results {
+        result.catchup_source = result
+            .catchup_source
+            .as_deref()
+            .map(crate::engine::resume::sanitize_url_for_persistence);
+        result.extinf_line =
+            crate::engine::resume::sanitize_extinf_for_persistence(&result.extinf_line);
+    }
+    let bytes = serde_json::to_vec(&results).map_err(|error| {
         AppError::Parse(format!(
             "Failed to serialize run file {}: {}",
             run_id, error
@@ -360,7 +368,7 @@ fn migrate_v1_to_v2(base_dir: &Path) -> Result<(), AppError> {
 
     // Write per-run files
     for entry in &v1_store.entries {
-        if let Err(error) = write_run_file(base_dir, &entry.id, &entry.results) {
+        if let Err(error) = write_run_file(base_dir, &entry.id, entry.results.clone()) {
             log::warn!(
                 "Failed to write per-run file during migration for {}: {}",
                 entry.id,
@@ -537,7 +545,7 @@ fn append_scan_history_at_dir(
     };
 
     // Write per-run file
-    write_run_file(base_dir, run_id, &results)?;
+    write_run_file(base_dir, run_id, results)?;
 
     // Add new entry to index
     let new_entry = IndexEntryV2 {
@@ -688,6 +696,9 @@ mod tests {
             tvg_name: None,
             tvg_logo: None,
             tvg_chno: None,
+            catchup: None,
+            catchup_days: None,
+            catchup_source: None,
             url: url.to_string(),
             content_type: crate::models::channel::ContentType::Live,
             status,
@@ -764,6 +775,9 @@ mod tests {
             tvg_name: channel.tvg_name.clone(),
             tvg_logo: channel.tvg_logo.clone(),
             tvg_chno: channel.tvg_chno.clone(),
+            catchup: channel.catchup.clone(),
+            catchup_days: channel.catchup_days,
+            catchup_source: channel.catchup_source.clone(),
             url: channel.url.clone(),
             content_type: channel.content_type,
             status,
@@ -959,6 +973,39 @@ mod tests {
         // Verify per-run files exist
         assert!(v2_run_file_path(&test_root, "run-1").exists());
         assert!(v2_run_file_path(&test_root, "run-2").exists());
+
+        let _ = std::fs::remove_dir_all(&test_root);
+    }
+
+    #[test]
+    fn v2_run_files_redact_catchup_source_credentials() {
+        let test_root = create_test_root_dir("v2-catchup-source-redaction");
+        std::fs::create_dir_all(&test_root).unwrap();
+
+        let mut result = sample_result("http://example.com/a", ChannelStatus::Alive);
+        result.catchup_source = Some(
+            "https://archive:secret@example.com/timeshift?username=demo&token=abc123".to_string(),
+        );
+        result.extinf_line = "#EXTINF:-1 catchup-source='https://archive:extinf-secret@example.com/timeshift?token=extinf-token',Channel".to_string();
+
+        write_run_file(&test_root, "run-1", vec![result]).unwrap();
+
+        let persisted = std::fs::read_to_string(v2_run_file_path(&test_root, "run-1")).unwrap();
+        assert!(!persisted.contains("secret"));
+        assert!(!persisted.contains("demo"));
+        assert!(!persisted.contains("abc123"));
+        assert!(!persisted.contains("extinf-secret"));
+        assert!(!persisted.contains("extinf-token"));
+
+        let loaded = load_run_file(&test_root, "run-1").unwrap();
+        assert_eq!(
+            loaded[0].catchup_source.as_deref(),
+            Some("https://example.com/timeshift?username=REDACTED&token=REDACTED")
+        );
+        assert_eq!(
+            loaded[0].extinf_line,
+            "#EXTINF:-1 catchup-source='https://example.com/timeshift?token=REDACTED',Channel"
+        );
 
         let _ = std::fs::remove_dir_all(&test_root);
     }

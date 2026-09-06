@@ -138,6 +138,31 @@ fn is_m3u8_response(content_type: &str, url: &str) -> bool {
     crate::engine::proxy_common::is_m3u8_response(content_type, url)
 }
 
+/// Header telling the player what a rejected manifest request really served.
+const STREAM_KIND_HEADER: &str = "x-iptv-stream-kind";
+
+/// True when a request for a playlist URL was answered with raw media (some
+/// panels redirect timeshift `.m3u8` URLs straight to a `.ts` stream). Buffering
+/// that body would only stall hls.js until the size cap; the player has an
+/// MPEG-TS route for it instead.
+fn manifest_request_served_media(requested_url: &str, content_type: &str, final_url: &str) -> bool {
+    if !is_m3u8_response("", requested_url) || is_m3u8_response(content_type, final_url) {
+        return false;
+    }
+    let ct = content_type.to_lowercase();
+    if ct.starts_with("video/") || ct.starts_with("audio/") {
+        return true;
+    }
+    url::Url::parse(final_url)
+        .map(|parsed| {
+            let path = parsed.path().to_lowercase();
+            [".ts", ".m2ts", ".mp4", ".mkv"]
+                .iter()
+                .any(|ext| path.ends_with(ext))
+        })
+        .unwrap_or(false)
+}
+
 /// Rewrite URIs in an HLS manifest so they go through the stream proxy.
 fn rewrite_m3u8_manifest(body: &str, base_url: &str) -> String {
     crate::engine::proxy_common::rewrite_hls_manifest(body, base_url, &|resolved| {
@@ -160,29 +185,31 @@ pub(crate) fn redact_url(url: &str) -> String {
                 let _ = parsed.set_password(None);
             }
             // Xtream credentials live in path segments rather than URL userinfo:
-            // /live/{username}/{password}/{stream-id}.ts. Those URLs are the
-            // most common source of playback diagnostics, so query/userinfo
-            // redaction alone would still leak both credentials.
+            // /live/{username}/{password}/{stream-id}.ts and
+            // /timeshift/{username}/{password}/{duration}/{start}/{stream-id}.ts.
+            // Providers may also serve these paths below a prefix.
             let segments = parsed
                 .path_segments()
                 .map(|segments| segments.map(str::to_string).collect::<Vec<_>>())
                 .unwrap_or_default();
-            let credential_start = if segments.len() >= 4
-                && matches!(
-                    segments[0].to_ascii_lowercase().as_str(),
-                    "live" | "movie" | "series"
-                ) {
-                Some(1)
-            } else if segments.len() == 3
-                && segments[2]
-                    .split('.')
-                    .next()
-                    .is_some_and(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()))
-            {
-                Some(0)
-            } else {
-                None
-            };
+            let credential_start = segments
+                .iter()
+                .enumerate()
+                .find_map(|(index, segment)| {
+                    let remaining = segments.len() - index;
+                    match segment.to_ascii_lowercase().as_str() {
+                        "live" | "movie" | "series" if remaining >= 4 => Some(index + 1),
+                        "timeshift" if remaining >= 6 => Some(index + 1),
+                        _ => None,
+                    }
+                })
+                .or_else(|| {
+                    (segments.len() == 3
+                        && segments[2].split('.').next().is_some_and(|id| {
+                            !id.is_empty() && id.chars().all(|c| c.is_ascii_digit())
+                        }))
+                    .then_some(0)
+                });
             if let Some(start) = credential_start {
                 let redacted_segments = segments
                     .iter()
@@ -418,6 +445,20 @@ pub async fn handle_proxy_request(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_string();
+
+    if status < 400 && manifest_request_served_media(&original_url, &content_type, &final_url) {
+        log::info!(
+            "Stream proxy: playlist URL {} answered with media ({}); leaving it to the MPEG-TS route",
+            redact_url(&original_url),
+            if content_type.is_empty() { "no content-type" } else { content_type.as_str() }
+        );
+        drop(upstream_response);
+        let mut response = error_response(409, "Playlist URL served a media stream");
+        if let Ok(value) = HeaderValue::from_str("mpegts") {
+            response.headers_mut().insert(STREAM_KIND_HEADER, value);
+        }
+        return response;
+    }
 
     let body =
         match crate::engine::proxy_common::read_capped(upstream_response, PROXY_BUFFERED_MAX_BYTES)
@@ -1426,6 +1467,39 @@ fn parse_stream_request(request: &str) -> Option<StreamRequest> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn manifest_request_served_media_detects_ts_redirects_only() {
+        use super::manifest_request_served_media;
+        let m3u8 = "http://panel/timeshift/u/p/60/2026-09-03:21-00/1.m3u8";
+        assert!(manifest_request_served_media(
+            m3u8,
+            "video/mp2t",
+            "http://cdn/hls/abc/2026-09-03:21-00.ts?token=1"
+        ));
+        assert!(manifest_request_served_media(
+            m3u8,
+            "",
+            "http://cdn/hls/abc/2026-09-03:21-00.ts"
+        ));
+        // A real playlist answer, whatever the content type.
+        assert!(!manifest_request_served_media(
+            m3u8,
+            "application/octet-stream",
+            m3u8
+        ));
+        assert!(!manifest_request_served_media(
+            m3u8,
+            "application/vnd.apple.mpegurl",
+            "http://cdn/variant.ts"
+        ));
+        // Segment requests are media by design.
+        assert!(!manifest_request_served_media(
+            "http://cdn/seg1.ts",
+            "video/mp2t",
+            "http://cdn/seg1.ts"
+        ));
+    }
+
     use super::*;
     use std::time::{Duration, Instant};
     use tokio::io::AsyncReadExt;
@@ -1534,6 +1608,12 @@ mod tests {
         assert_eq!(
             redact_url("https://provider.example/user/pass/67890?token=secret"),
             "https://provider.example/***/***/67890?***"
+        );
+        assert_eq!(
+            redact_url(
+                "https://provider.example/prefix/timeshift/user-name/pass-word/120/2026-08-29:12-00/12345.m3u8"
+            ),
+            "https://provider.example/prefix/timeshift/***/***/120/2026-08-29:12-00/12345.m3u8"
         );
     }
 

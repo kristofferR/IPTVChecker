@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::Instant;
+use std::sync::{Arc, LazyLock};
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager, Window};
 use tokio::sync::Semaphore;
@@ -10,6 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::commands::history;
 use crate::commands::settings;
+use crate::engine::xtream::apply_xtream_archive_flags_to_results;
 use crate::engine::{checker, connectivity, disk, ffmpeg, parser, proxy, resume, stream_proxy};
 use crate::error::AppError;
 use crate::models::backend_perf::BackendPerfSample;
@@ -29,6 +30,9 @@ const CHECKPOINT_FLUSH_INTERVAL_MS: u64 = 250;
 const CHECKPOINT_FLUSH_MAX_BATCH: usize = 128;
 const RESULT_BATCH_MAX_ITEMS: usize = 64;
 const MIN_SCREENSHOT_DIAGNOSTIC_TIMEOUT_SECS: f64 = 15.0;
+const XTREAM_ARCHIVE_SCAN_COMPLETION_TIMEOUT: Duration = Duration::from_secs(2);
+static DIAGNOSTIC_URL_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r#"(?i)\b(?:https?|rtsp|rtmp)://[^\s'"]+"#).unwrap());
 
 #[derive(Debug, Clone)]
 struct SharedUrlResult {
@@ -290,7 +294,7 @@ async fn compute_shared_url_result(
     let status = if checked_status == ChannelStatus::Geoblocked && test_geoblock {
         if let Some(proxies) = proxy_list {
             if !proxies.is_empty() {
-                proxy::confirm_geoblock(channel_url, proxies, timeout).await
+                proxy::confirm_geoblock(channel_url, proxies, timeout, cancel).await
             } else {
                 checked_status
             }
@@ -1297,6 +1301,27 @@ struct ResumeState {
     scope_suffix: String,
 }
 
+fn refresh_resumed_playlist_metadata(
+    entries: &mut [resume::CheckpointResumeEntry],
+    channels: &[Channel],
+) {
+    let channels_by_index: HashMap<usize, &Channel> = channels
+        .iter()
+        .map(|channel| (channel.index, channel))
+        .collect();
+
+    for entry in entries {
+        if let Some(channel) = channels_by_index.get(&entry.result.index) {
+            entry.result.playlist = channel.playlist.clone();
+            entry.result.tvg_id = channel.tvg_id.clone();
+            entry.result.catchup = channel.catchup.clone();
+            entry.result.catchup_days = channel.catchup_days;
+            entry.result.catchup_source = channel.catchup_source.clone();
+            entry.result.extinf_line = channel.extinf_line.clone();
+        }
+    }
+}
+
 /// Derive the resume file paths for this scan scope, load any checkpoint
 /// entries that match the current channel set, and prune already-checked
 /// channels from `channels`. Starts fresh (truncates the log and removes the
@@ -1352,6 +1377,7 @@ async fn load_resume_state(
         .filter(|entry| channel_indices.contains(&entry.result.index))
         .collect::<Vec<_>>();
     resumed_entries.sort_by_key(|entry| entry.result.index);
+    refresh_resumed_playlist_metadata(&mut resumed_entries, channels);
 
     let resumed_indices: HashSet<usize> = resumed_entries
         .iter()
@@ -1932,6 +1958,9 @@ fn build_channel_result(channel: &Channel, shared: &SharedUrlResult) -> ChannelR
         tvg_name: channel.tvg_name.clone(),
         tvg_logo: channel.tvg_logo.clone(),
         tvg_chno: channel.tvg_chno.clone(),
+        catchup: channel.catchup.clone(),
+        catchup_days: channel.catchup_days,
+        catchup_source: channel.catchup_source.clone(),
         url: channel.url.clone(),
         content_type: channel.content_type,
         status: shared.status,
@@ -1999,6 +2028,40 @@ async fn append_history_blocking(
     .await;
 }
 
+fn redact_channel_debug_log(mut channel_log: ChannelDebugLog) -> ChannelDebugLog {
+    channel_log.channel_url = stream_proxy::redact_url(&channel_log.channel_url);
+    channel_log.redirect_chain = channel_log
+        .redirect_chain
+        .into_iter()
+        .map(|url| stream_proxy::redact_url(&url))
+        .collect();
+    for attempt in &mut channel_log.attempts {
+        attempt.redirect_chain = attempt
+            .redirect_chain
+            .iter()
+            .map(|url| stream_proxy::redact_url(url))
+            .collect();
+    }
+    channel_log.diagnostics_output = channel_log
+        .diagnostics_output
+        .map(|text| redact_urls_in_text(&text));
+    channel_log.final_reason = channel_log
+        .final_reason
+        .map(|text| redact_urls_in_text(&text));
+    channel_log.screenshot_error_reason = channel_log
+        .screenshot_error_reason
+        .map(|text| redact_urls_in_text(&text));
+    channel_log
+}
+
+fn redact_urls_in_text(text: &str) -> String {
+    DIAGNOSTIC_URL_RE
+        .replace_all(text, |captures: &regex::Captures<'_>| {
+            stream_proxy::redact_url(&captures[0])
+        })
+        .into_owned()
+}
+
 /// Store the finished scan's debug log on the window scan state.
 async fn store_scan_log(
     state: &Arc<AppState>,
@@ -2021,7 +2084,10 @@ async fn store_scan_log(
                 started_at_epoch_ms,
                 finished_at_epoch_ms: now_epoch_ms(),
                 summary,
-                channels: channel_logs,
+                channels: channel_logs
+                    .into_iter()
+                    .map(redact_channel_debug_log)
+                    .collect(),
             });
         })
         .await;
@@ -2463,7 +2529,7 @@ async fn execute_scan_run(
         log::warn!("Checkpoint writer task failed for {}: {}", run_id, error);
     }
 
-    let completed_scan = match event_result {
+    let mut completed_scan = match event_result {
         Ok(data) => data,
         Err(error) => {
             log::error!("Scan failed while dispatching progress events: {}", error);
@@ -2474,6 +2540,22 @@ async fn execute_scan_run(
             )));
         }
     };
+
+    if !cancel_token.is_cancelled() {
+        if let Some(source_identity) = config.source_identity.as_deref() {
+            let archive_flags = tokio::select! {
+                flags = state.wait_for_xtream_archive_flags(source_identity) => flags,
+                _ = cancel_token.cancelled() => None,
+                _ = tokio::time::sleep(XTREAM_ARCHIVE_SCAN_COMPLETION_TIMEOUT) => None,
+            };
+            if let Some(archive_flags) = archive_flags {
+                apply_xtream_archive_flags_to_results(
+                    &mut completed_scan.results,
+                    archive_flags.as_ref(),
+                );
+            }
+        }
+    }
 
     let mut summary = completed_scan.summary.clone();
     summary.playlist_score = crate::engine::playlist_score::compute_playlist_score(
@@ -2736,46 +2818,68 @@ fn get_quick_check_client(accept_invalid_certs: bool) -> reqwest::Client {
 pub async fn quick_check_channel(
     app: AppHandle,
     channel: ChannelResult,
+    request_id: Option<String>,
 ) -> Result<ChannelResult, AppError> {
     let check_started_at = Instant::now();
     let state = app.state::<Arc<AppState>>();
     let settings = state.settings.lock().await.clone();
 
     let cancel_token = CancellationToken::new();
+    if let Some(request_id) = request_id.as_ref() {
+        state
+            .register_quick_check(request_id.clone(), cancel_token.clone())
+            .await;
+    }
     let client = get_quick_check_client(settings.accept_invalid_certs);
 
-    let ffprobe_ok = {
+    let uses_ffprobe_liveness = checker::uses_ffprobe_liveness(&channel.url);
+    let ffprobe_ok = if uses_ffprobe_liveness {
         let (_, fp) = ffmpeg::check_availability(&app).await;
         fp
-    };
-
-    let outcome = if checker::uses_ffprobe_liveness(&channel.url) {
-        checker::check_channel_status_with_ffprobe_debug(
-            &app,
-            &channel.url,
-            settings.ffprobe_timeout_secs,
-            settings.retries,
-            settings.retry_backoff,
-            None,
-            ffprobe_ok,
-            &cancel_token,
-        )
-        .await
     } else {
-        checker::check_channel_status_with_debug(
-            &client,
-            &channel.url,
-            settings.timeout,
-            settings.retries,
-            settings.retry_backoff,
-            settings.extended_timeout,
-            &settings.user_agent,
-            &cancel_token,
-        )
-        .await
+        false
     };
 
-    let (status, stream_url, latency_ms, error_reason) = match outcome {
+    let outcome = tokio::select! {
+        _ = cancel_token.cancelled() => Err(AppError::Cancelled),
+        outcome = async {
+            if uses_ffprobe_liveness {
+                checker::check_channel_status_with_ffprobe_debug(
+                    &app,
+                    &channel.url,
+                    settings.ffprobe_timeout_secs,
+                    settings.retries,
+                    settings.retry_backoff,
+                    None,
+                    ffprobe_ok,
+                    &cancel_token,
+                )
+                .await
+            } else {
+                checker::check_channel_status_with_debug(
+                    &client,
+                    &channel.url,
+                    settings.timeout,
+                    settings.retries,
+                    settings.retry_backoff,
+                    settings.extended_timeout,
+                    &settings.user_agent,
+                    &cancel_token,
+                )
+                .await
+            }
+        } => outcome,
+    };
+
+    if matches!(outcome, Err(AppError::Cancelled)) {
+        if let Some(request_id) = request_id.as_deref() {
+            state.unregister_quick_check(request_id).await;
+        }
+        return Err(AppError::Cancelled);
+    }
+
+    let redacted_url = stream_proxy::redact_url(&channel.url);
+    let (checked_status, stream_url, latency_ms, error_reason) = match outcome {
         Ok(o) => {
             log::info!(
                 "[Quick Check] #{} {} → {} in {:.1}s (url: {})",
@@ -2783,7 +2887,7 @@ pub async fn quick_check_channel(
                 channel.name,
                 o.status,
                 check_started_at.elapsed().as_secs_f64(),
-                channel.url,
+                redacted_url,
             );
             (o.status, o.stream_url, o.latency_ms, o.last_error_reason)
         }
@@ -2794,11 +2898,40 @@ pub async fn quick_check_channel(
                 channel.name,
                 check_started_at.elapsed().as_secs_f64(),
                 error,
-                channel.url,
+                redacted_url,
             );
             (ChannelStatus::Dead, None, None, None)
         }
     };
+
+    let status = if checked_status == ChannelStatus::Geoblocked && settings.test_geoblock {
+        match settings.proxy_file.as_deref() {
+            Some(proxy_file) => match proxy::load_proxy_list(proxy_file) {
+                Ok(proxies) => {
+                    proxy::confirm_geoblock(&channel.url, &proxies, settings.timeout, &cancel_token)
+                        .await
+                }
+                Err(error) => {
+                    log::warn!(
+                        "[Quick Check] Could not confirm geoblock because proxy file '{}' failed to load: {}",
+                        proxy_file,
+                        error
+                    );
+                    checked_status
+                }
+            },
+            None => checked_status,
+        }
+    } else {
+        checked_status
+    };
+
+    if cancel_token.is_cancelled() {
+        if let Some(request_id) = request_id.as_deref() {
+            state.unregister_quick_check(request_id).await;
+        }
+        return Err(AppError::Cancelled);
+    }
 
     let mut result = channel;
     result.status = status;
@@ -2806,7 +2939,17 @@ pub async fn quick_check_channel(
     result.latency_ms = latency_ms;
     result.error_reason = error_reason;
     result.screenshot_error_reason = None;
+    if let Some(request_id) = request_id.as_deref() {
+        state.unregister_quick_check(request_id).await;
+    }
     Ok(result)
+}
+
+#[tauri::command]
+pub async fn cancel_quick_check(app: AppHandle, request_id: String) {
+    app.state::<Arc<AppState>>()
+        .cancel_quick_check(&request_id)
+        .await;
 }
 
 #[cfg(test)]
@@ -2830,6 +2973,9 @@ mod tests {
             tvg_name: None,
             tvg_logo: None,
             tvg_chno: None,
+            catchup: None,
+            catchup_days: None,
+            catchup_source: None,
             url: format!("http://example.com/{}.m3u8", index),
             content_type: crate::models::channel::ContentType::Live,
             status,
@@ -2875,6 +3021,9 @@ mod tests {
             tvg_name: None,
             tvg_logo: None,
             tvg_chno: None,
+            catchup: None,
+            catchup_days: None,
+            catchup_source: None,
             url: format!("http://example.com/{}.m3u8", index),
             content_type: crate::models::channel::ContentType::Live,
             extinf_line: "#EXTINF:-1,Test".to_string(),
@@ -2906,6 +3055,79 @@ mod tests {
             error_reason: None,
             channel_log: ChannelDebugLog::default(),
         }
+    }
+
+    #[test]
+    fn scan_debug_log_redacts_all_url_fields_before_storage() {
+        let sensitive_url = "http://provider.example/live/user/pass/42.ts?token=secret";
+        let redacted = redact_channel_debug_log(ChannelDebugLog {
+            channel_url: sensitive_url.to_string(),
+            redirect_chain: vec![sensitive_url.to_string()],
+            diagnostics_output: Some(format!(r#"{{"filename":"{sensitive_url}"}}"#)),
+            final_reason: Some(format!("Probe failed for {sensitive_url}")),
+            screenshot_error_reason: Some(format!("Screenshot failed for {sensitive_url}")),
+            attempts: vec![crate::models::scan_log::ChannelAttemptDebugLog {
+                redirect_chain: vec![sensitive_url.to_string()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+
+        assert_eq!(
+            redacted.channel_url,
+            "http://provider.example/live/***/***/42.ts?***"
+        );
+        assert_eq!(
+            redacted.redirect_chain.as_slice(),
+            std::slice::from_ref(&redacted.channel_url)
+        );
+        assert_eq!(
+            redacted.attempts[0].redirect_chain.as_slice(),
+            std::slice::from_ref(&redacted.channel_url)
+        );
+        assert_eq!(
+            redacted.diagnostics_output.as_deref(),
+            Some(r#"{"filename":"http://provider.example/live/***/***/42.ts?***"}"#)
+        );
+        assert_eq!(
+            redacted.final_reason.as_deref(),
+            Some("Probe failed for http://provider.example/live/***/***/42.ts?***")
+        );
+        assert_eq!(
+            redacted.screenshot_error_reason.as_deref(),
+            Some("Screenshot failed for http://provider.example/live/***/***/42.ts?***")
+        );
+    }
+
+    #[test]
+    fn resumed_results_use_current_playlist_metadata() {
+        let mut result = make_result(1, ChannelStatus::Alive, false, false);
+        result.catchup = Some("stale".to_string());
+        result.catchup_days = Some(1);
+        result.catchup_source = Some("https://old.example/archive".to_string());
+        let mut entries = vec![resume::CheckpointResumeEntry {
+            result,
+            channel_log: None,
+        }];
+        let mut channel = make_channel(1);
+        channel.playlist = "provider/current.m3u".to_string();
+        channel.tvg_id = Some("current-epg-id".to_string());
+        channel.catchup = Some("xc".to_string());
+        channel.catchup_days = Some(7);
+        channel.catchup_source = Some("https://new.example/archive".to_string());
+        channel.extinf_line = "#EXTINF:-1 catchup=\"xc\" catchup-days=\"7\",Test".to_string();
+
+        refresh_resumed_playlist_metadata(&mut entries, std::slice::from_ref(&channel));
+
+        assert_eq!(entries[0].result.playlist, channel.playlist);
+        assert_eq!(entries[0].result.tvg_id.as_deref(), Some("current-epg-id"));
+        assert_eq!(entries[0].result.catchup.as_deref(), Some("xc"));
+        assert_eq!(entries[0].result.catchup_days, Some(7));
+        assert_eq!(
+            entries[0].result.catchup_source.as_deref(),
+            Some("https://new.example/archive")
+        );
+        assert_eq!(entries[0].result.extinf_line, channel.extinf_line);
     }
 
     #[test]
@@ -3183,6 +3405,19 @@ mod tests {
             .await;
 
         cancel_scan_token(state.as_ref(), scan_scope).await;
+        assert!(token.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn cancel_quick_check_cancels_registered_token() {
+        let state = AppState::new();
+        let token = CancellationToken::new();
+
+        state
+            .register_quick_check("archive-probe".to_string(), token.clone())
+            .await;
+        state.cancel_quick_check("archive-probe").await;
+
         assert!(token.is_cancelled());
     }
 

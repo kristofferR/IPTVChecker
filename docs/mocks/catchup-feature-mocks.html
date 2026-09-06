@@ -1,0 +1,1199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IPTV Checker: Catch-up feature mocks</title>
+<style>
+  :root{
+    --surface:#18181b; --panel:#27272a; --panel50:rgba(39,39,42,.5); --panel30:rgba(39,39,42,.3);
+    --border:#3f3f46; --border50:rgba(63,63,70,.5);
+    --t1:#f4f4f5; --t2:#a1a1aa; --t3:#71717a;
+    --blue:#3b82f6; --blue600:#2563eb;
+    --green:#4ade80; --red:#f87171; --amber:#fbbf24;
+    --vio:#a78bfa; --vio300:#c4b5fd; --vio500:#8b5cf6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#000;color:#fff;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px 16px 80px}
+  main{max-width:1120px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 4px}
+  h2{font-size:15px;margin:44px 0 6px;padding-top:18px;border-top:1px solid #27272a}
+  h2 .tag{display:inline-block;min-width:20px;text-align:center;background:var(--vio500);color:#fff;border-radius:5px;padding:1px 7px;font-size:12px;margin-right:8px;vertical-align:1px}
+  h3{font-size:13px;color:var(--t2);margin:18px 0 4px;font-weight:600}
+  p{color:#d4d4d8;margin:6px 0;max-width:80ch}
+  .sub{color:var(--t2);font-size:13px}
+  ul{color:#d4d4d8;margin:8px 0;padding-left:20px;max-width:82ch}
+  li{margin:3px 0}
+  code{background:#1c1c1f;border:1px solid #2c2c30;border-radius:4px;padding:1px 5px;font-size:12px;color:#e4e4e7}
+  table.doc{border-collapse:collapse;font-size:13px;margin:10px 0;width:100%}
+  table.doc th{color:var(--t2);font-weight:600;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+  table.doc th,table.doc td{border-bottom:1px solid #27272a;padding:6px 10px 6px 0;vertical-align:top;color:#d4d4d8}
+  .good{color:var(--green)} .warn{color:var(--amber)} .bad{color:var(--red)} .vio{color:var(--vio)}
+  .cap{color:var(--t3);font-size:12px;margin:6px 0 0}
+
+  /* callouts */
+  .co{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--vio500);color:#fff;font-size:9.5px;font-weight:700;vertical-align:middle;margin:0 2px;flex:none;line-height:1}
+  .legend{list-style:none;padding:0;margin:10px 0 0;font-size:13px;color:#d4d4d8;max-width:82ch}
+  .legend li{display:flex;gap:8px;margin:4px 0;align-items:baseline}
+  .legend .co{position:relative;top:2px}
+  .ring{box-shadow:0 0 0 1.5px var(--vio) !important;border-radius:6px}
+
+  /* ---------- app mock chrome ---------- */
+  .frame{overflow-x:auto;margin:14px 0;border-radius:12px}
+  .app{min-width:960px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--surface);font-size:12px;color:var(--t1)}
+  .tbar{display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--panel);border-bottom:1px solid var(--border)}
+  .b{display:inline-flex;align-items:center;gap:5px;background:var(--border);border-radius:6px;padding:4px 10px;font-size:12px;color:var(--t1);position:relative}
+  .b.pri{background:var(--blue600);color:#fff}
+  .ib{display:inline-flex;align-items:center;justify-content:center;width:26px;height:24px;border-radius:6px;color:var(--t2);font-size:13px;position:relative}
+  .selc{display:inline-flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--t2);position:relative}
+  .selc b{color:var(--t1);font-weight:500}
+  .selc:after{content:"▾";font-size:9px;color:var(--t3)}
+  .search{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--t3);min-width:100px}
+  .plname{color:var(--t3);font-size:11px;margin:0 auto;padding:0 10px;white-space:nowrap}
+  .body{display:flex;min-height:0;position:relative}
+  .maincol{flex:1;min-width:0;display:flex;flex-direction:column}
+  .th{display:grid;align-items:center;height:26px;padding:0 12px;font-size:10px;font-weight:600;color:var(--t2);background:var(--panel);border-bottom:1px solid var(--border);gap:6px}
+  .tr{display:grid;align-items:center;height:31px;padding:0 12px;border-bottom:1px solid var(--border50);font-size:12px;gap:6px}
+  .tr.sel{background:var(--panel50)}
+  .tr:last-child{border-bottom:none}
+  .cols8{grid-template-columns:30px 36px minmax(0,1fr) 110px 52px 40px 72px 90px}
+  .cols6{grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 84px}
+  .cols4{grid-template-columns:26px 32px minmax(0,1fr) 104px}
+  .tr .nm{font-weight:500;display:flex;align-items:center;gap:6px;min-width:0}
+  .tr .nm span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .logo{width:15px;height:15px;border-radius:3px;background:var(--panel);border:1px solid var(--border50);flex:none;display:grid;place-items:center;font-size:8px;color:var(--t3)}
+  .mut{color:var(--t2)} .mut3{color:var(--t3)}
+  .num{font-variant-numeric:tabular-nums}
+  .ctr{text-align:center}.rgt{text-align:right}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+  .dg{background:#22c55e}.dr{background:#ef4444}.dy{background:#eab308}
+  .chip{display:inline-flex;align-items:center;gap:3px;border-radius:4px;padding:1px 6px;font-size:9.5px;font-weight:600;letter-spacing:.05em;white-space:nowrap}
+  .cu{background:rgba(139,92,246,.15);color:var(--vio300);box-shadow:inset 0 0 0 1px rgba(139,92,246,.3)}
+  .cu.v{background:rgba(74,222,128,.12);color:#86efac;box-shadow:inset 0 0 0 1px rgba(74,222,128,.28)}
+  .cu.w{background:rgba(251,191,36,.12);color:#fcd34d;box-shadow:inset 0 0 0 1px rgba(251,191,36,.3)}
+  .cu.x{background:rgba(248,113,113,.12);color:#fca5a5;box-shadow:inset 0 0 0 1px rgba(248,113,113,.3)}
+  .stats{display:flex;align-items:center;gap:6px;padding:5px 12px;border-top:1px solid var(--border);background:var(--panel50);font-size:11px;flex-wrap:wrap}
+  .pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 9px;font-variant-numeric:tabular-nums;position:relative}
+  .pn{color:var(--t2);background:rgba(63,63,70,.6)}
+  .pg{color:var(--green);background:rgba(74,222,128,.1)}
+  .pr{color:var(--red);background:rgba(248,113,113,.1)}
+  .py{color:var(--amber);background:rgba(251,191,36,.1)}
+  .pb{color:#60a5fa;background:rgba(96,165,250,.1)}
+  .pv{color:var(--vio);background:rgba(167,139,250,.1)}
+  .pv.on{color:var(--vio300);background:rgba(167,139,250,.25);box-shadow:0 0 0 1px rgba(167,139,250,.5)}
+  .rightst{margin-left:auto;display:flex;align-items:center;gap:10px;color:var(--t3)}
+
+  /* sidebar */
+  .side{width:272px;flex:none;border-right:1px solid var(--border);background:var(--panel30);padding:10px;overflow:hidden}
+  .vid{position:relative;aspect-ratio:16/9;border:1px solid var(--border);border-radius:8px;background:linear-gradient(135deg,#101014,#1b1b22 60%,#14141a);overflow:hidden;margin-bottom:8px}
+  .vid .play{position:absolute;inset:0;display:grid;place-items:center;color:rgba(255,255,255,.7);font-size:22px}
+  .badge{position:absolute;top:6px;left:6px;background:rgba(139,92,246,.9);color:#fff;font-size:9.5px;font-weight:600;border-radius:4px;padding:2px 6px;max-width:85%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ctrls{position:absolute;left:0;right:0;bottom:0;padding:5px 8px 6px;background:linear-gradient(to top,rgba(0,0,0,.75),transparent)}
+  .seek{position:relative;height:3px;background:rgba(255,255,255,.22);border-radius:2px;margin-bottom:5px}
+  .seek .fill{position:absolute;left:0;top:0;bottom:0;width:62%;background:var(--vio);border-radius:2px}
+  .seek .tick{position:absolute;top:-2px;width:1px;height:7px;background:rgba(255,255,255,.45)}
+  .seek .knob{position:absolute;left:62%;top:50%;width:9px;height:9px;border-radius:50%;background:#fff;transform:translate(-50%,-50%)}
+  .cbar{display:flex;align-items:center;gap:8px;color:#fff;font-size:10px}
+  .cbar .liveb{margin-left:auto;border:1px solid rgba(255,255,255,.4);border-radius:4px;padding:1px 6px;font-size:9px;color:#fff}
+  .cbar .vol{width:24px;height:3px;background:rgba(255,255,255,.25);border-radius:2px;position:relative;flex:none}
+  .cbar .vol i{position:absolute;left:0;top:0;bottom:0;width:65%;background:#fff;border-radius:2px}
+  .cbar .spk{font-size:9px}
+  .golive{position:absolute;top:6px;right:6px;border:1px solid rgba(255,255,255,.45);background:rgba(0,0,0,.45);border-radius:4px;padding:2px 6px;font-size:9px;color:#fff;font-weight:600}
+  .sname{font-size:13px;font-weight:600;margin:2px 0 6px;display:flex;align-items:center;gap:6px}
+  .meta{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:10.5px;margin-bottom:4px}
+  .meta div{background:rgba(39,39,42,.6);border-radius:5px;padding:4px 7px}
+  .meta b{display:block;font-weight:400;color:var(--t3);font-size:9px;text-transform:uppercase;letter-spacing:.05em}
+  .card{border:1px solid var(--border50);background:var(--panel50);border-radius:8px;padding:8px;margin-top:8px;position:relative}
+  .card h4{margin:0 0 6px;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);font-weight:600;display:flex;align-items:center;gap:5px}
+  .card h4 .chip{margin-left:auto;letter-spacing:0}
+  .kv{display:flex;justify-content:space-between;font-size:11px;padding:2px 0;color:var(--t2);gap:8px}
+  .kv b{color:var(--t1);font-weight:500;white-space:nowrap}
+  .abtn{display:flex;align-items:center;justify-content:center;gap:5px;width:100%;background:var(--blue600);color:#fff;border-radius:6px;padding:5px 0;font-size:11.5px;font-weight:500;margin-top:7px;position:relative}
+  .abtn.sec{background:var(--border);color:var(--t1)}
+  .field{display:flex;align-items:center;gap:6px;margin-top:7px}
+  .field .in{flex:1;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--t1);white-space:nowrap}
+
+  /* existing sidebar chrome */
+  .shead{display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:13px;font-weight:600;min-width:0}
+  .shead span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .acts{display:flex;justify-content:center;align-items:center;gap:6px;margin:2px 0 6px}
+  .ab{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;font-size:11px;font-weight:500;border-radius:6px}
+  .ab.stop{background:#dc2626;color:#fff}
+  .ab.gr{background:var(--border);color:var(--t1)}
+  .castrow{display:flex;justify-content:center;align-items:center;gap:5px;background:var(--panel50);border:1px solid var(--border50);border-radius:6px;padding:4px 0;font-size:10.5px;color:var(--t2);margin-bottom:6px}
+  .meta2{display:grid;grid-template-columns:1fr 1fr;gap:6px 8px;margin:4px 0 2px}
+  .meta2 .l{display:block;color:var(--t3);font-size:10px}
+  .meta2 p{margin:0;font-weight:500;font-size:11px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .card.cardv{background:rgba(139,92,246,.08);border-color:rgba(139,92,246,.22)}
+  .card.cardv h4{color:var(--vio300)}
+  .cardp{background:var(--panel50);border:1px solid var(--border50);border-radius:8px;padding:8px;margin-top:8px}
+  .cardp .ph{display:flex;justify-content:space-between;align-items:center;font-size:11px;font-weight:600}
+  .cardp p{margin:3px 0 0;font-size:10px;color:var(--t2);word-break:break-all}
+
+  /* programme list */
+  .day{font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin:8px 0 2px;font-weight:600}
+  .prog{display:flex;align-items:center;gap:7px;padding:3px 6px;border-radius:6px;font-size:11px}
+  .prog.now{background:rgba(139,92,246,.13);box-shadow:inset 0 0 0 1px rgba(139,92,246,.3)}
+  .prog .t{color:var(--t3);font-variant-numeric:tabular-nums;flex:none;width:33px}
+  .prog .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .prog .ic{color:var(--t3);flex:none;font-size:10px}
+  .prog.dis{opacity:.38}
+
+  /* menus */
+  .menu{position:absolute;width:225px;background:var(--panel);border:1px solid var(--border);border-radius:9px;box-shadow:0 18px 40px rgba(0,0,0,.65);padding:4px;font-size:12px;z-index:5}
+  .mi{padding:5px 10px;border-radius:5px;color:var(--t1);display:flex;justify-content:space-between;gap:8px;align-items:center}
+  .mi.hov{background:var(--border)}
+  .mi .k{color:var(--t3);font-size:10px}
+  .msep{height:1px;background:var(--border50);margin:4px 6px}
+  .dd{position:absolute;top:calc(100% + 4px);left:0;width:235px;background:var(--panel);border:1px solid var(--border);border-radius:9px;box-shadow:0 18px 40px rgba(0,0,0,.65);padding:4px;font-size:12px;z-index:6;color:var(--t1)}
+
+  /* EPG overlay (variant C) */
+  .ovl{position:absolute;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;padding:16px;z-index:4}
+  .epg{width:100%;max-width:880px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--surface);font-size:11px;box-shadow:0 24px 60px rgba(0,0,0,.7)}
+  .epghead{display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--panel);border-bottom:1px solid var(--border)}
+  .daytabs{display:flex;gap:4px;margin-left:12px}
+  .dtab{border-radius:6px;padding:3px 10px;color:var(--t2);font-size:11px}
+  .dtab.on{background:var(--border);color:var(--t1)}
+  .epgrow{display:flex;align-items:stretch;border-bottom:1px solid var(--border50)}
+  .epgch{width:140px;flex:none;padding:7px 10px;border-right:1px solid var(--border50);display:flex;flex-direction:column;justify-content:center;gap:2px}
+  .epgch .cn{font-weight:600;font-size:11px;display:flex;gap:6px;align-items:center;min-width:0}
+  .epgch .cn span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lane{flex:1;display:flex;gap:2px;padding:6px;min-width:0;overflow:hidden}
+  .blk{border-radius:5px;background:rgba(139,92,246,.14);box-shadow:inset 0 0 0 1px rgba(139,92,246,.25);padding:3px 8px;overflow:hidden;flex:none;display:flex;flex-direction:column;justify-content:center}
+  .blk .bt{font-size:9px;color:var(--t3);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .blk .bn{font-size:10.5px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .blk.on{background:rgba(139,92,246,.35);box-shadow:inset 0 0 0 1px rgba(167,139,250,.7)}
+  .blk.dead{background:rgba(63,63,70,.25);box-shadow:inset 0 0 0 1px var(--border50)}
+  .blk.dead .bn{color:var(--t3)}
+  .timeax{display:flex;padding:3px 6px 3px 146px;color:var(--t3);font-size:9px;background:var(--panel30);border-bottom:1px solid var(--border50)}
+  .timeax span{flex:1}
+  .epgfoot{display:flex;align-items:center;gap:10px;padding:7px 14px;background:var(--panel30);border-top:1px solid var(--border);color:var(--t2);font-size:11px}
+
+  /* view mode switcher */
+  .seg{display:inline-flex;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:2px;gap:2px;position:relative}
+  .seg .sg{display:inline-flex;align-items:center;gap:5px;padding:3px 13px;border-radius:6px;font-size:11.5px;color:var(--t2)}
+  .seg .sg.on{background:var(--vio500);color:#fff;font-weight:600}
+  .seg .sg.on.gr{background:var(--border);color:var(--t1)}
+
+  /* dense EPG view (variant C v2) */
+  .ctl{display:flex;align-items:center;gap:8px;padding:4px 10px;background:var(--panel30);border-bottom:1px solid var(--border50);font-size:11px}
+  .ctl .dtab{padding:2px 9px;font-size:10.5px}
+  .row2{display:flex;align-items:stretch;border-bottom:1px solid var(--border50);height:30px}
+  .ch2{width:132px;flex:none;display:flex;align-items:center;gap:5px;padding:0 8px;border-right:1px solid var(--border50);font-size:10.5px;font-weight:600;min-width:0}
+  .ch2 span.nm2{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ch2 .dp{margin-left:auto;font-size:8.5px;color:var(--vio);font-weight:700;flex:none}
+  .ch2 .dp.no{color:var(--t3)}
+  .lane2{flex:1;display:flex;gap:1px;padding:2px;min-width:0;overflow:hidden}
+  .bk{display:flex;align-items:center;gap:5px;border-radius:3px;background:rgba(139,92,246,.12);box-shadow:inset 0 0 0 1px rgba(139,92,246,.2);padding:0 6px;overflow:hidden;flex:none;font-size:10px;min-width:0}
+  .bk .t2{color:var(--t3);font-variant-numeric:tabular-nums;font-size:9px;flex:none}
+  .bk .n3{color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bk.on{background:rgba(139,92,246,.35);box-shadow:inset 0 0 0 1px rgba(167,139,250,.7)}
+  .bk.dead{background:rgba(63,63,70,.22);box-shadow:inset 0 0 0 1px var(--border50)}
+  .bk.dead .n3{color:var(--t3)}
+  .timeax2{display:flex;padding:2px 3px 2px 132px;color:var(--t3);font-size:9px;background:var(--panel30);border-bottom:1px solid var(--border50)}
+  .timeax2 span{flex:1}
+
+  /* player fork */
+  .pside{width:224px;flex:none;border-right:1px solid var(--border);background:var(--panel30);padding:8px 6px;display:flex;flex-direction:column;gap:2px}
+  .chl{display:flex;align-items:center;gap:7px;padding:3px 8px;border-radius:6px;font-size:11.5px;min-width:0}
+  .chl.on{background:rgba(139,92,246,.16);box-shadow:inset 0 0 0 1px rgba(139,92,246,.3)}
+  .chl .cw{min-width:0;flex:1}
+  .chl .cw i{display:block;font-style:normal;font-size:9.5px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chl .cw b{display:block;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chl .st{color:var(--amber);font-size:10px;flex:none}
+  .nn{display:flex;gap:8px;padding:8px 2px 2px;font-size:11px}
+  .nn .nb{flex:1;background:var(--panel50);border:1px solid var(--border50);border-radius:7px;padding:6px 9px;min-width:0}
+  .nn .nb b{display:block;font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .nn .nb span{color:var(--t3);font-size:10px}
+
+  /* report panel */
+  .rep{width:270px;flex:none;border-left:1px solid var(--border);background:var(--panel30);padding:10px;font-size:11px}
+  .rep h4{margin:10px 0 6px;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--t3)}
+  .rep h4:first-child{margin-top:0}
+  .tiles{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .tile{background:rgba(39,39,42,.6);border-radius:6px;padding:5px 8px}
+  .tile b{display:block;font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+  .tile span{color:var(--t3);font-size:9px;text-transform:uppercase;letter-spacing:.04em}
+  .hbar{display:flex;align-items:center;gap:7px;margin:3px 0;color:var(--t2);font-size:10px}
+  .hbar .lb{width:32px;flex:none;text-align:right;font-variant-numeric:tabular-nums}
+  .hbar .tr2{flex:1;height:7px;background:rgba(63,63,70,.4);border-radius:4px;overflow:hidden}
+  .hbar .fl{height:100%;background:var(--vio500);border-radius:4px}
+  .hbar .n2{width:26px;flex:none;font-variant-numeric:tabular-nums;color:var(--t3)}
+  .ring2{width:58px;height:58px;border-radius:50%;background:conic-gradient(#38bdf8 0 76%,rgba(148,163,184,.22) 0);display:grid;place-items:center;flex:none}
+  .ring2 span{width:42px;height:42px;border-radius:50%;background:var(--surface);display:grid;place-items:center;font-size:13px;font-weight:600}
+  .srow{display:flex;justify-content:space-between;align-items:center;background:rgba(39,39,42,.6);border-radius:6px;padding:2px 8px;font-size:10.5px;color:var(--t3)}
+  .srow b{color:var(--t1);font-weight:500;display:inline-flex;align-items:center;gap:4px}
+  /* batch verification (section V) */
+  .b.vio{background:var(--vio500);color:#fff}
+  .pbar{display:flex;align-items:center;gap:10px;padding:6px 12px;border-top:1px solid var(--border);background:var(--panel50);font-size:11px}
+  .pbar .trk{flex:1;height:8px;background:var(--border);border-radius:5px;overflow:hidden}
+  .pbar .trk i{display:block;height:100%;background:var(--vio500);border-radius:5px}
+  .pbar .tally{display:flex;gap:8px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .pbar .cancel{border:1px solid var(--border);border-radius:5px;padding:1px 8px;color:var(--t1)}
+  .dd .sec{padding:5px 10px 2px;font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--t3)}
+  .dd .mi .rd{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--t3);flex:none;display:inline-block;margin-right:6px}
+  .dd .mi .rd.on{border-color:var(--vio);box-shadow:inset 0 0 0 2.5px var(--panel);background:var(--vio)}
+  .chip.cu.p{background:rgba(63,63,70,.4);color:var(--t2);box-shadow:inset 0 0 0 1px var(--border)}
+  .rsn{font-size:10px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dlg{width:420px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;box-shadow:0 24px 60px rgba(0,0,0,.7);font-size:12px}
+  .dlg h5{margin:0 0 4px;font-size:13px}
+  .dlg .row{display:flex;gap:6px;margin-top:10px}
+  .dlg .row .b{padding:5px 10px;font-size:11.5px}
+</style>
+</head>
+<body>
+<main>
+<h1>Catch-up analysis, design</h1>
+<p class="sub">Issue #229. See which channels offer catch-up (archive/timeshift), count them playlist-wide / on screen / in selection, verify the archive actually works, and watch it. Every mock below is a full app screenshot; violet numbered dots mark where you click and the list under each screenshot explains the flow. Catch-up accent: violet, unused by any existing status. <b style="color:#fff">The Final design section shows the agreed end state, followed by the batch fake-vs-real verification flow added after live testing; Foundation, C, and D below carry per-part detail. The planned IPTV Player flavor lives in its own document, linked from issue #231.</b></p>
+
+<p>What the codebase already has and lacks:</p>
+<table class="doc">
+<tr><th>Source</th><th>Signal</th><th>Status today</th></tr>
+<tr><td>M3U EXTINF</td><td><code>catchup</code>, <code>catchup-days</code>, <code>catchup-source</code>, <code>timeshift</code>, <code>tvg-rec</code></td><td class="good">Consumed into channel metadata</td></tr>
+<tr><td>Xtream API</td><td><code>tv_archive</code>, <code>tv_archive_duration</code>; timeshift URL scheme</td><td class="good">Consumed from the JSON API fallback</td></tr>
+<tr><td>XMLTV EPG</td><td><code>x-tvg-url</code> header, programme titles and times</td><td class="bad">No EPG infrastructure at all</td></tr>
+</table>
+
+<!-- ================= FINAL ================= -->
+<h2><span class="tag">★</span>Final design: how it will actually be</h2>
+<p>The end state after all four phases. Two modes via the toolbar switch. Below: Table mode with a channel playing from the archive and the report panel open, then Guide mode.</p>
+
+<h3>Table mode</h3>
+<div class="frame"><div class="app" style="min-width:1040px">
+  <div class="tbar">
+    <span class="b pri">▶ Scan ▾</span><span class="b">Open ▾</span><span class="b">Save</span>
+    <span class="seg" style="margin-left:10px"><span class="sg on gr">☰ Table</span><span class="sg">⏪ Guide</span><span class="co" style="position:absolute;top:-7px;right:-7px">1</span></span>
+    <span class="plname">nordic-full.m3u</span>
+    <span class="selc">All Groups</span><span class="selc">All Status</span>
+    <span class="search">Search...</span>
+    <span class="ib">⇩</span><span class="ib ring">▤</span><span class="ib">⚙</span>
+  </div>
+  <div class="body">
+    <div class="side">
+      <div class="shead"><span class="dot dg"></span><span>TV 2 Direkte HD</span></div>
+      <div class="vid">
+        <span class="badge">⏪ Nyhetene · Wed 21:00</span>
+        <span class="golive">GO LIVE</span>
+        <div class="play">▶</div>
+        <div class="ctrls">
+          <div class="seek"><div class="fill" style="width:38%"></div><div class="tick" style="left:52%"></div><div class="knob" style="left:38%"></div></div>
+          <div class="cbar"><span>⏸</span><span>■</span><span class="spk" style="margin-left:auto">🔊</span><span class="vol"><i></i></span><span>⧉</span><span>⛶</span></div>
+        </div>
+      </div>
+      <div class="acts"><span class="ab stop">■ Stop</span><span class="ab gr">↗</span><span class="ab gr">↻ Rescan</span></div>
+      <div class="castrow">Cast to device ▾</div>
+      <div class="meta2">
+        <div><span class="l">Status</span><p>Alive</p></div>
+        <div><span class="l">Group</span><p>Norge</p></div>
+        <div><span class="l">Video</span><p>H.264 · 6.9 Mbps</p></div>
+        <div><span class="l">Audio</span><p>AAC · 256 kbps</p></div>
+        <div><span class="l">Resolution</span><p>1920x1080</p></div>
+        <div><span class="l">Frame Rate</span><p>50 fps</p></div>
+      </div>
+      <div class="card cardv">
+        <h4><span class="co">3</span> Archive <span class="chip cu v">✓ 7 D</span></h4>
+        <div class="day" style="margin-top:2px">Today</div>
+        <div class="prog"><span class="t num">06:30</span><span class="n">God morgen Norge</span><span class="ic">▶</span></div>
+        <div class="prog"><span class="t num">10:00</span><span class="n">Hotel Cæsar</span><span class="ic">▶</span></div>
+        <div class="day">Yesterday · Wed 28 Aug</div>
+        <div class="prog now"><span class="t num">21:00</span><span class="n"><b>Nyhetene</b> · playing</span><span class="ic vio">⏵</span></div>
+        <div class="prog"><span class="t num">21:40</span><span class="n">Været</span><span class="ic">▶</span></div>
+        <div class="prog"><span class="t num">22:00</span><span class="n">Farmen</span><span class="ic">▶</span></div>
+        <div class="kv" style="margin-top:6px;border-top:1px solid rgba(139,92,246,.18);padding-top:6px"><span>Verified depth</span><b>≥ 7 d · 640 ms</b></div>
+        <a class="abtn sec">Test catch-up</a>
+      </div>
+    </div>
+    <div class="maincol">
+      <div class="th cols4">
+        <span>#</span><span>STATUS</span><span>CHANNEL NAME</span><span class="ctr">CATCH-UP <span class="co">2</span></span>
+      </div>
+      <div class="tr cols4"><span class="mut3 num">1</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK1 HD</span></span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+      <div class="tr cols4"><span class="mut3 num">2</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK2 HD</span></span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+      <div class="tr sel cols4"><span class="mut3 num">3</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV 2 Direkte HD</span></span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+      <div class="tr cols4"><span class="mut3 num">4</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV3 Norge</span></span><span class="ctr"><span class="chip cu w">⚠ 1 / 3 D</span></span></div>
+      <div class="tr cols4"><span class="mut3 num">5</span><span><span class="dot dy"></span></span><span class="nm"><span class="logo">TV</span><span>BBC One FHD</span></span><span class="ctr"><span class="chip cu w">⚠ 9 / 14 D</span></span></div>
+      <div class="tr cols4"><span class="mut3 num">6</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>Eurosport 1 Norge</span></span><span class="mut3 ctr">—</span></div>
+      <div class="tr cols4"><span class="mut3 num">7</span><span><span class="dot dr"></span></span><span class="nm"><span class="logo">TV</span><span>Sky Sports Main Event</span></span><span class="ctr"><span class="chip cu x">✕ 7 D</span></span></div>
+      <div class="tr cols4"><span class="mut3 num">8</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>Discovery Channel Norge</span></span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+      <div class="tr cols4"><span class="mut3 num">9</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV 2 Zebra</span></span><span class="ctr"><span class="chip cu">7 D</span></span></div>
+      <div class="tr cols4"><span class="mut3 num">10</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK3</span></span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+      <div class="tr cols4"><span class="mut3 num">11</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>MAX HD</span></span><span class="mut3 ctr">—</span></div>
+      <div class="tr cols4"><span class="mut3 num">12</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV 2 Sport 1</span></span><span class="ctr"><span class="chip cu">2 D</span></span></div>
+    </div>
+    <div class="rep">
+      <h4 style="margin-top:0">Health Score</h4>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:2px">
+        <div class="ring2"><span>7.6</span></div>
+        <div style="flex:1;display:grid;gap:3px;min-width:0">
+          <div class="srow"><span>Ping</span><b>6.9</b></div>
+          <div class="srow"><span>Content</span><b>7.8</b></div>
+          <div class="srow"><span>Quality</span><b>7.2</b></div>
+          <div class="srow" style="box-shadow:inset 0 0 0 1px rgba(139,92,246,.35)"><span class="vio">Catch-up</span><b class="vio">8.1</b></div>
+        </div>
+      </div>
+      <h4>Catch-up <span class="co">4</span></h4>
+      <div class="tiles">
+        <div class="tile"><b class="vio">418</b><span>advertised</span></div>
+        <div class="tile"><b class="good">361</b><span>verified</span></div>
+        <div class="tile"><b class="warn">39</b><span>shallower</span></div>
+        <div class="tile"><b class="bad">18</b><span>broken</span></div>
+      </div>
+      <h4>Real depth · 400 playable</h4>
+      <div class="hbar"><span class="lb">1-2 d</span><div class="tr2"><div class="fl" style="width:18%"></div></div><span class="n2">54</span></div>
+      <div class="hbar"><span class="lb">3-6 d</span><div class="tr2"><div class="fl" style="width:34%"></div></div><span class="n2">102</span></div>
+      <div class="hbar"><span class="lb">7 d</span><div class="tr2"><div class="fl" style="width:71%"></div></div><span class="n2">213</span></div>
+      <div class="hbar"><span class="lb">14 d+</span><div class="tr2"><div class="fl" style="width:14%"></div></div><span class="n2">31</span></div>
+      <h4>Performance</h4>
+      <div class="kv"><span>Median archive start</span><b>640 ms</b></div>
+      <div class="kv"><span>Median live start</span><b>310 ms</b></div>
+    </div>
+  </div>
+  <div class="stats">
+    <span class="pill pn">☰ 1,264 total</span>
+    <span class="pill pg">✓ 1,102</span>
+    <span class="pill pr">✕ 118</span>
+    <span class="pill py">🔒 44</span>
+    <span class="pill pv">⏪ 361/418 catch-up <span class="co" style="position:absolute;top:-7px;right:-7px">5</span></span>
+    <span class="pill pb">Score 7.6/10</span>
+  </div>
+</div></div>
+<ul class="legend">
+  <li><span class="co">1</span><span><b>Table / Guide switch</b> in the toolbar; Guide mode below. Everything else in the toolbar is unchanged.</span></li>
+  <li><span class="co">2</span><span><b>Catch-up column</b> with the chip lifecycle: violet = advertised (untested), green ✓ = verified, amber ⚠ real/advertised = shallower than advertised, red ✕ = broken. Sortable; also a Status-filter entry.</span></li>
+  <li><span class="co">3</span><span><b>Archive card</b> in the otherwise-unchanged sidebar: EPG programme list grouped by day, click to replay; playing show highlighted, player gets seek bar + time badge + corner GO LIVE. Channels without EPG data get a date/time picker here instead; verified depth and a Test button sit at the card's foot.</span></li>
+  <li><span class="co">4</span><span><b>Report panel</b>: Catch-up as fourth score component (N/A + renormalized weights when the playlist has none) plus the Catch-up section with tiles, real-depth histogram, and start-latency stats.</span></li>
+  <li><span class="co">5</span><span><b>Pill</b> reads verified/advertised after verification, plain count before; clicking filters the table. Selection counts appear bottom-right when multi-selecting.</span></li>
+</ul>
+
+<div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap;margin-top:14px">
+  <div style="width:250px;flex:none">
+    <div class="card cardv" style="margin-top:0">
+      <h4>Archive <span class="chip cu">XC · 7 D</span></h4>
+      <p style="font-size:10px;color:var(--t3);margin:0 0 2px">No EPG match for this channel</p>
+      <div class="field" style="margin-top:5px"><span class="in">Wed 28 Aug ▾</span><span class="in" style="flex:0 0 56px">18:30</span></div>
+      <a class="abtn">▶ Watch from here</a>
+      <a class="abtn sec">Test catch-up</a>
+    </div>
+    <p class="cap">The same Archive card when the channel has no EPG match: a date/time picker replaces the programme list. Same player, same probe.</p>
+  </div>
+  <ul style="flex:1;min-width:280px;margin:0">
+    <li><b>EPG infra</b> (phase 2): XMLTV download + parse in Rust, streamed and gzip-aware (provider files reach hundreds of MB), disk-cached per source, indexed by <code>tvg-id</code>. Also upgrades the report panel's EPG coverage stat to real programme data.</li>
+    <li><b>Archive URL builder</b>: per catch-up type (<code>default</code> / <code>append</code> / <code>shift</code> / <code>flussonic</code> / <code>xc</code>) with <code>${start}</code>/<code>${offset}</code> template vars. Named "archive" internally; <code>playback.ts</code> already uses "catch-up" for live-buffer drift helpers.</li>
+    <li><b>Probe</b>: archive URL at −1 h and at advertised depth, ffprobe both; on mismatch, bisect a few points to estimate real depth. 2-4 requests per channel.</li>
+  </ul>
+</div>
+
+<h3>Guide mode</h3>
+<div class="frame"><div class="app">
+  <div class="tbar">
+    <span class="b pri">▶ Scan ▾</span><span class="b">Open ▾</span><span class="b">Save</span>
+    <span class="seg" style="margin-left:10px"><span class="sg">☰ Table</span><span class="sg on">⏪ Guide</span></span>
+    <span class="plname">nordic-full.m3u</span>
+    <span class="selc">All Groups</span><span class="selc">All Status</span>
+    <span class="search">Search...</span>
+    <span class="ib">⇩</span><span class="ib">▤</span><span class="ib">⚙</span>
+  </div>
+  <div class="body"><div class="maincol">
+    <div class="ctl">
+      <span class="dtab">Mon</span><span class="dtab">Tue</span><span class="dtab on">Wed 28</span><span class="dtab">Thu</span><span class="dtab">Today</span>
+      <span class="mut3">‹ 18:00 – 24:00 ›</span>
+      <span class="search" style="min-width:90px">Filter channels...</span>
+      <span style="margin-left:auto;display:flex;align-items:center;gap:6px">
+        <span class="mut"><b style="color:var(--vio300)">Exit</b> · NRK1 · 20:25 · 95 min</span>
+        <span class="b pri" style="padding:2px 9px;font-size:11px">▶ Play</span>
+        <span class="b" style="padding:2px 9px;font-size:11px">Test</span>
+      </span>
+    </div>
+    <div class="timeax2"><span>18:00</span><span>19:00</span><span>20:00</span><span>21:00</span><span>22:00</span><span>23:00</span></div>
+    <div class="row2">
+      <div class="ch2"><span class="logo">TV</span><span class="nm2">NRK1 HD</span><span class="dp" style="color:#86efac">✓7D</span></div>
+      <div class="lane2">
+        <div class="bk" style="width:22%"><span class="t2">18:00</span><span class="n3">Dagsrevyen</span></div>
+        <div class="bk" style="width:12%"><span class="t2">19:45</span><span class="n3">Norge i dag</span></div>
+        <div class="bk on" style="width:28%"><span class="t2">20:25</span><span class="n3">Exit</span></div>
+        <div class="bk" style="width:24%"><span class="t2">22:00</span><span class="n3">Kveldsnytt</span></div>
+        <div class="bk" style="width:12%"><span class="t2">23:15</span><span class="n3">Debatten</span></div>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="ch2"><span class="logo">TV</span><span class="nm2">NRK2 HD</span><span class="dp" style="color:#86efac">✓7D</span></div>
+      <div class="lane2">
+        <div class="bk" style="width:14%"><span class="t2">18:30</span><span class="n3">Oddasat</span></div>
+        <div class="bk" style="width:24%"><span class="t2">19:00</span><span class="n3">Studio 2</span></div>
+        <div class="bk" style="width:28%"><span class="t2">20:00</span><span class="n3">Brennpunkt</span></div>
+        <div class="bk" style="width:32%"><span class="t2">21:30</span><span class="n3">Filmklubben</span></div>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="ch2"><span class="logo">TV</span><span class="nm2">TV 2 Direkte HD</span><span class="dp" style="color:#86efac">✓7D</span></div>
+      <div class="lane2">
+        <div class="bk" style="width:32%"><span class="t2">18:30</span><span class="n3">Oppgrader!</span></div>
+        <div class="bk" style="width:12%"><span class="t2">21:00</span><span class="n3">Nyhetene</span></div>
+        <div class="bk" style="width:38%"><span class="t2">21:40</span><span class="n3">Farmen</span></div>
+        <div class="bk" style="width:14%"><span class="t2">23:30</span><span class="n3">Siste nytt</span></div>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="ch2"><span class="logo">TV</span><span class="nm2">TV3 Norge</span><span class="dp" style="color:#fcd34d">⚠1D</span></div>
+      <div class="lane2">
+        <div class="bk dead" style="width:28%"><span class="t2">18:00</span><span class="n3">Luksusfellen</span></div>
+        <div class="bk" style="width:34%"><span class="t2">20:00</span><span class="n3">Paradise Hotel</span></div>
+        <div class="bk" style="width:34%"><span class="t2">22:15</span><span class="n3">Kongen befaler</span></div>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="ch2"><span class="logo">TV</span><span class="nm2">Discovery Norge</span><span class="dp" style="color:#86efac">✓7D</span></div>
+      <div class="lane2">
+        <div class="bk" style="width:30%"><span class="t2">18:00</span><span class="n3">Gullrushet</span></div>
+        <div class="bk" style="width:36%"><span class="t2">20:00</span><span class="n3">Deadliest Catch</span></div>
+        <div class="bk" style="width:30%"><span class="t2">22:00</span><span class="n3">Naked and Afraid</span></div>
+      </div>
+    </div>
+    <div class="row2" style="border-bottom:none">
+      <div class="ch2"><span class="logo">TV</span><span class="nm2">BBC One FHD</span><span class="dp" style="color:#fcd34d">⚠9D</span></div>
+      <div class="lane2">
+        <div class="bk" style="width:18%"><span class="t2">18:00</span><span class="n3">The One Show</span></div>
+        <div class="bk" style="width:16%"><span class="t2">19:00</span><span class="n3">EastEnders</span></div>
+        <div class="bk" style="width:42%"><span class="t2">20:00</span><span class="n3">Silent Witness</span></div>
+        <div class="bk" style="width:20%"><span class="t2">22:00</span><span class="n3">News at Ten</span></div>
+      </div>
+    </div>
+  </div></div>
+  <div class="stats">
+    <span class="pill pn">☰ 1,264 total</span>
+    <span class="pill pg">✓ 1,102</span>
+    <span class="pill pr">✕ 118</span>
+    <span class="pill py">🔒 44</span>
+    <span class="pill pv">⏪ 361/418 catch-up</span>
+    <span class="pill pb">Score 7.6/10</span>
+  </div>
+</div></div>
+<p class="cap">Guide mode after verification: depth tags in the channel column carry the verified state. Details and interaction notes in section C below.</p>
+
+<!-- ================= BATCH VERIFICATION ================= -->
+<h2><span class="tag">★</span>Batch verification: fake vs real catch-up</h2>
+<p>Providers flag channels as catch-up that keep nothing. Live testing on the "Strong" panel showed flagged channels answering every timeshift request with an empty 200, and other panels quietly serve the live stream for any archive URL. Sorting those out for a whole playlist is the point of this app, so verification gets the same footing as Scan: an obvious trigger with a scope, a progress row with live tallies, a verdict per channel that says <i>why</i> it is fake, filter entries, and an export of the channels that actually work.</p>
+<p>The probe engine from section D already exists on the branch (−1 h point, advertised depth, bisect, media-time check). What is new here is the flow around it and the fake taxonomy.</p>
+
+<table class="doc">
+<tr><th>Verdict</th><th>Chip</th><th>Rule</th><th>Cost</th></tr>
+<tr><td class="good"><b>Real</b></td><td><span class="chip cu v">✓ 7 D</span></td><td>−1 h probe returns media whose time matches the request (not the live segment). Full mode also confirms the advertised depth.</td><td>1 request (quick) · 2 (full)</td></tr>
+<tr><td class="warn"><b>Shallower</b></td><td><span class="chip cu w">⚠ 3 / 7 D</span></td><td>Real archive, but the advertised depth fails; bisect finds what is actually kept.</td><td>3-5 requests, full mode only</td></tr>
+<tr><td class="bad"><b>Fake · empty</b></td><td><span class="chip cu x">✕ EMPTY</span></td><td>200 with no segments, for −1 h and −1 d alike. The Strong-panel case.</td><td>2 requests</td></tr>
+<tr><td class="bad"><b>Fake · live</b></td><td><span class="chip cu x">✕ LIVE</span></td><td>Archive URL serves the live stream: media time does not match, or the response is byte-identical to live.</td><td>1 request</td></tr>
+<tr><td class="bad"><b>Fake · error</b></td><td><span class="chip cu x">✕ 404</span></td><td>HTTP 4xx/5xx or timeout on the archive URL while the live URL works. The status code is the chip text (<code>✕ TIMEOUT</code> for no answer).</td><td>1 request</td></tr>
+<tr><td class="vio"><b>Untested</b></td><td><span class="chip cu">7 D</span></td><td>Advertised, not probed yet, or the run was cancelled before reaching it.</td><td>0</td></tr>
+</table>
+<p class="cap">Quick mode stops after the −1 h point, so fake vs real costs one request per channel: about 7 minutes for 418 channels on a single-connection provider. Full mode adds the depth probes for channels that passed.</p>
+
+<h3>V1 · Trigger</h3>
+<div class="frame"><div class="app" style="min-width:1040px">
+  <div class="tbar">
+    <span class="b pri">▶ Scan ▾</span>
+    <span class="b vio" style="z-index:7">⏪ Verify ▾<span class="co" style="position:absolute;top:-7px;right:-7px">1</span>
+      <span class="dd" style="font-weight:400;width:262px">
+        <span class="sec">Mode <span class="co">2</span></span>
+        <span class="mi"><span><span class="rd on"></span>Quick · real vs fake</span><span class="k">1 req / ch</span></span>
+        <span class="mi"><span><span class="rd"></span>Full · measure depth</span><span class="k">2-5 req / ch</span></span>
+        <span class="sec">Scope <span class="co">3</span></span>
+        <span class="mi"><span><span class="rd on"></span>All advertised</span><span class="k">418 · ~7 min</span></span>
+        <span class="mi"><span><span class="rd"></span>Filtered</span><span class="k">212</span></span>
+        <span class="mi"><span><span class="rd"></span>Selected</span><span class="k">3</span></span>
+        <span class="msep"></span>
+        <span class="mi hov" style="justify-content:center;background:var(--vio500);color:#fff;font-weight:600">Start verification</span>
+      </span>
+    </span>
+    <span class="b">Open ▾</span><span class="b">Save</span>
+    <span class="seg" style="margin-left:10px"><span class="sg on gr">☰ Table</span><span class="sg">⏪ Guide</span></span>
+    <span class="plname">nordic-full.m3u</span>
+    <span class="selc">All Groups</span><span class="selc"><b>Catch-up</b></span>
+    <span class="search">Search...</span>
+    <span class="ib">⇩</span><span class="ib">▤</span><span class="ib">⚙</span>
+  </div>
+  <div class="body" style="min-height:300px">
+    <div class="maincol">
+      <div class="th cols8">
+        <span>#</span><span>STATUS</span><span>CHANNEL NAME</span><span>GROUP</span><span class="ctr">RES</span><span class="ctr">FPS</span><span class="rgt">BITRATE</span><span class="ctr">CATCH-UP</span>
+      </div>
+      <div class="tr cols8"><span class="mut3 num">1</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK1 HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">8.2 Mbps</span><span class="ctr"><span class="chip cu">7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">2</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK2 HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">7.9 Mbps</span><span class="ctr"><span class="chip cu">7 D</span></span></div>
+      <div class="tr sel cols8"><span class="mut3 num">3</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV 2 Direkte HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">6.9 Mbps</span><span class="ctr"><span class="chip cu">7 D</span></span></div>
+      <div class="tr sel cols8"><span class="mut3 num">4</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV3 Norge</span></span><span class="mut">Norge</span><span class="mut num ctr">720p</span><span class="mut num ctr">25</span><span class="mut num rgt">4.1 Mbps</span><span class="ctr"><span class="chip cu">3 D</span></span></div>
+      <div class="tr sel cols8"><span class="mut3 num">5</span><span><span class="dot dy"></span></span><span class="nm"><span class="logo">TV</span><span>BBC One FHD</span></span><span class="mut">UK</span><span class="mut num ctr">1080p</span><span class="mut num ctr">25</span><span class="mut num rgt">5.4 Mbps</span><span class="ctr"><span class="chip cu">14 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">7</span><span><span class="dot dr"></span></span><span class="nm"><span class="logo">TV</span><span>Sky Sports Main Event</span></span><span class="mut">Sport</span><span class="mut3 ctr">—</span><span class="mut3 ctr">—</span><span class="mut3 rgt">—</span><span class="ctr"><span class="chip cu">7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">8</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>Discovery Channel Norge</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">25</span><span class="mut num rgt">5.8 Mbps</span><span class="ctr"><span class="chip cu">7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">9</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV 2 Zebra</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">6.1 Mbps</span><span class="ctr"><span class="chip cu">7 D</span></span></div>
+    </div>
+  </div>
+  <div class="stats">
+    <span class="pill pn">☰ 1,264 total</span>
+    <span class="pill pg">✓ 1,102</span>
+    <span class="pill pr">✕ 118</span>
+    <span class="pill py">🔒 44</span>
+    <span class="pill pv on">⏪ 418 catch-up</span>
+    <span class="pill pb">Score 7.4/10</span>
+    <span class="rightst"><span>3 selected · <span class="vio">3 with catch-up</span></span></span>
+  </div>
+</div></div>
+<ul class="legend">
+  <li><span class="co">1</span><span><b>Verify</b> is a violet split button beside Scan, shown only when the playlist advertises catch-up. It does not need a scan first: it runs on the loaded playlist. The Scan dropdown keeps "Scan + Verify Catch-up" for the one-shot combo, and right-click keeps "Test Catch-up (n)".</span></li>
+  <li><span class="co">2</span><span><b>Mode.</b> Quick answers real vs fake with one request per channel. Full adds the depth probes for channels that pass, so shallower providers show up too. Remembered between runs.</span></li>
+  <li><span class="co">3</span><span><b>Scope</b> mirrors Scan: every advertising channel, the current Group/Status/Search filter, or the selection. Counts and the quick-mode estimate are live.</span></li>
+</ul>
+
+<h3>V2 · Running</h3>
+<div class="frame"><div class="app" style="min-width:1040px">
+  <div class="tbar">
+    <span class="b pri" style="opacity:.5">▶ Scan ▾</span>
+    <span class="b vio">⏪ Verifying…</span>
+    <span class="b">Open ▾</span><span class="b">Save</span>
+    <span class="seg" style="margin-left:10px"><span class="sg on gr">☰ Table</span><span class="sg">⏪ Guide</span></span>
+    <span class="plname">nordic-full.m3u</span>
+    <span class="selc">All Groups</span><span class="selc"><b>Catch-up</b></span>
+    <span class="search">Search...</span>
+    <span class="ib">⇩</span><span class="ib">▤</span><span class="ib">⚙</span>
+  </div>
+  <div class="body" style="min-height:280px">
+    <div class="maincol">
+      <div class="th cols8">
+        <span>#</span><span>STATUS</span><span>CHANNEL NAME</span><span>GROUP</span><span class="ctr">RES</span><span class="ctr">FPS</span><span class="rgt">BITRATE</span><span class="ctr">CATCH-UP <span class="co">2</span></span>
+      </div>
+      <div class="tr cols8"><span class="mut3 num">1</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK1 HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">8.2 Mbps</span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">2</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK2 HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">7.9 Mbps</span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">3</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV 2 Direkte HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">6.9 Mbps</span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">4</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV3 Norge</span></span><span class="mut">Norge</span><span class="mut num ctr">720p</span><span class="mut num ctr">25</span><span class="mut num rgt">4.1 Mbps</span><span class="ctr"><span class="chip cu x">✕ LIVE</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">5</span><span><span class="dot dy"></span></span><span class="nm"><span class="logo">TV</span><span>BBC One FHD</span></span><span class="mut">UK</span><span class="mut num ctr">1080p</span><span class="mut num ctr">25</span><span class="mut num rgt">5.4 Mbps</span><span class="ctr"><span class="chip cu v">✓ 14 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">7</span><span><span class="dot dr"></span></span><span class="nm"><span class="logo">TV</span><span>Sky Sports Main Event</span></span><span class="mut">Sport</span><span class="mut3 ctr">—</span><span class="mut3 ctr">—</span><span class="mut3 rgt">—</span><span class="ctr"><span class="chip cu x">✕ EMPTY</span></span></div>
+      <div class="tr sel cols8"><span class="mut3 num">8</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>Discovery Channel Norge</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">25</span><span class="mut num rgt">5.8 Mbps</span><span class="ctr"><span class="chip cu p">⋯ −1 H</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">9</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV 2 Zebra</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">6.1 Mbps</span><span class="ctr"><span class="chip cu">7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">10</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK3</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">7.4 Mbps</span><span class="ctr"><span class="chip cu">7 D</span></span></div>
+    </div>
+  </div>
+  <div class="pbar" style="position:relative">
+    <span class="co" style="position:absolute;top:-7px;left:6px">1</span>
+    <span class="vio" style="white-space:nowrap">Verifying catch-up</span>
+    <span class="trk"><i style="width:20%"></i></span>
+    <span class="num mut">84/418 (20%)</span>
+    <span class="tally"><span class="good">✓ 61 real</span><span class="bad">✕ 12 fake</span><span class="warn">⚠ 11 shallower</span></span>
+    <span class="mut3 num" style="white-space:nowrap">8 ch/min · ~7 min remaining</span>
+    <span class="cancel">Cancel</span>
+  </div>
+  <div class="stats">
+    <span class="pill pn">☰ 1,264 total</span>
+    <span class="pill pg">✓ 1,102</span>
+    <span class="pill pr">✕ 118</span>
+    <span class="pill py">🔒 44</span>
+    <span class="pill pv on">⏪ 61 real · 12 fake · 345 untested <span class="co" style="position:absolute;top:-7px;right:-7px">3</span></span>
+    <span class="pill pb">Score 7.4/10</span>
+  </div>
+</div></div>
+<ul class="legend">
+  <li><span class="co">1</span><span><b>Progress row</b> in the slot the scan bar uses, violet so it cannot be mistaken for a scan. Live real / fake / shallower tally, throughput and ETA from the same telemetry as scan, Cancel keeps verdicts gathered so far. Scan is disabled while it runs; on single-connection providers playback is too, with the existing "cancel verification first" message.</span></li>
+  <li><span class="co">2</span><span><b>Chips update in place</b> as each channel finishes; the channel under test shows the point being probed. The table follows the sort you had, so with Catch-up sorted the fakes cluster as they appear.</span></li>
+  <li><span class="co">3</span><span><b>Pill</b> switches to the verdict tally for the run. The verification is remembered with the scan results, so reopening the playlist keeps the verdicts.</span></li>
+</ul>
+
+<h3>V3 · Results: filter to fake, see why, export the real ones</h3>
+<div class="frame"><div class="app" style="min-width:1040px">
+  <div class="tbar">
+    <span class="b pri">▶ Scan ▾</span>
+    <span class="b vio">⏪ Verify ▾</span>
+    <span class="b">Open ▾</span><span class="b">Save</span>
+    <span class="seg" style="margin-left:10px"><span class="sg on gr">☰ Table</span><span class="sg">⏪ Guide</span></span>
+    <span class="plname">nordic-full.m3u</span>
+    <span class="selc">All Groups</span>
+    <span class="selc"><b>Fake catch-up</b><span class="co" style="position:absolute;top:-7px;right:-7px">1</span></span>
+    <span class="search">Search...</span>
+    <span class="ib">⇩</span><span class="ib ring">▤</span><span class="ib">⚙</span>
+  </div>
+  <div class="body">
+    <div class="side">
+      <div class="shead"><span class="dot dr"></span><span>Sky Sports Main Event</span></div>
+      <div class="vid"><div class="play">▶</div></div>
+      <div class="acts"><span class="ab gr">▶ Play</span><span class="ab gr">↗</span><span class="ab gr">↻ Rescan</span></div>
+      <div class="castrow">Cast to device ▾</div>
+      <div class="meta2">
+        <div><span class="l">Status</span><p>Dead</p></div>
+        <div><span class="l">Group</span><p>Sport</p></div>
+        <div><span class="l">Video</span><p>—</p></div>
+        <div><span class="l">Audio</span><p>—</p></div>
+      </div>
+      <div class="card cardv">
+        <h4><span class="co">3</span> Archive <span class="chip cu x">✕ EMPTY</span></h4>
+        <p style="font-size:10.5px;color:var(--t2);margin:0 0 6px;line-height:1.4">Flagged 7 d, keeps nothing. Every archive request returns 200 with no media.</p>
+        <div class="kv"><span>−1 h</span><b class="bad">200 · empty · 410 ms</b></div>
+        <div class="kv"><span>−1 d</span><b class="bad">200 · empty · 395 ms</b></div>
+        <div class="kv"><span>Live</span><b class="bad">dead</b></div>
+        <div class="kv" style="margin-top:4px"><span>Checked</span><b>today 15:52</b></div>
+        <a class="abtn sec">Re-test</a>
+      </div>
+    </div>
+    <div class="maincol">
+      <div class="th cols6" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px">
+        <span>#</span><span>STATUS</span><span>CHANNEL NAME</span><span>GROUP</span><span class="ctr">RES</span><span class="ctr">CATCH-UP <span class="co">2</span></span>
+      </div>
+      <div class="tr cols6 sel" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px"><span class="mut3 num">7</span><span><span class="dot dr"></span></span><span class="nm"><span class="logo">TV</span><span>Sky Sports Main Event</span></span><span class="mut">Sport</span><span class="mut3 ctr">—</span><span class="ctr"><span class="chip cu x">✕ EMPTY</span></span></div>
+      <div class="tr cols6" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px"><span class="mut3 num">4</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV3 Norge</span></span><span class="mut">Norge</span><span class="mut num ctr">720p</span><span class="ctr"><span class="chip cu x">✕ LIVE</span></span></div>
+      <div class="tr cols6" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px"><span class="mut3 num">41</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>IL: Channel 13 FHD</span></span><span class="mut">Israel</span><span class="mut num ctr">1080p</span><span class="ctr"><span class="chip cu x">✕ EMPTY</span></span></div>
+      <div class="tr cols6" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px"><span class="mut3 num">58</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>SE: TV6</span></span><span class="mut">Sverige</span><span class="mut num ctr">1080p</span><span class="ctr"><span class="chip cu x">✕ EMPTY</span></span></div>
+      <div class="tr cols6" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px"><span class="mut3 num">102</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>Viasat Sport Premium</span></span><span class="mut">Sport</span><span class="mut num ctr">1080p</span><span class="ctr"><span class="chip cu x">✕ LIVE</span></span></div>
+      <div class="tr cols6" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px"><span class="mut3 num">133</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>DR1</span></span><span class="mut">Danmark</span><span class="mut num ctr">1080p</span><span class="ctr"><span class="chip cu x">✕ 404</span></span></div>
+      <div class="tr cols6" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px"><span class="mut3 num">210</span><span><span class="dot dy"></span></span><span class="nm"><span class="logo">TV</span><span>ITV1 HD</span></span><span class="mut">UK</span><span class="mut num ctr">1080p</span><span class="ctr"><span class="chip cu x">✕ TIMEOUT</span></span></div>
+      <div class="tr cols6" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px"><span class="mut3 num">287</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>Kanal 5 HD</span></span><span class="mut">Sverige</span><span class="mut num ctr">1080p</span><span class="ctr"><span class="chip cu x">✕ EMPTY</span></span></div>
+    </div>
+    <div class="rep">
+      <h4 style="margin-top:0">Health Score</h4>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:2px">
+        <div class="ring2"><span>7.3</span></div>
+        <div style="flex:1;display:grid;gap:3px;min-width:0">
+          <div class="srow"><span>Ping</span><b>6.9</b></div>
+          <div class="srow"><span>Content</span><b>7.8</b></div>
+          <div class="srow"><span>Quality</span><b>7.2</b></div>
+          <div class="srow" style="box-shadow:inset 0 0 0 1px rgba(139,92,246,.35)"><span class="vio">Catch-up</span><b class="vio">6.4</b></div>
+        </div>
+      </div>
+      <h4>Catch-up · verified today 15:52</h4>
+      <div class="tiles">
+        <div class="tile"><b class="good">341</b><span>real</span></div>
+        <div class="tile"><b class="bad">61</b><span>fake</span></div>
+        <div class="tile"><b class="warn">16</b><span>shallower</span></div>
+        <div class="tile"><b class="vio">418</b><span>advertised</span></div>
+      </div>
+      <h4>Why fake <span class="co">4</span></h4>
+      <div class="hbar"><span class="lb" style="width:52px">empty</span><div class="tr2"><div class="fl" style="width:62%;background:#ef4444"></div></div><span class="n2">38</span></div>
+      <div class="hbar"><span class="lb" style="width:52px">serves live</span><div class="tr2"><div class="fl" style="width:28%;background:#ef4444"></div></div><span class="n2">17</span></div>
+      <div class="hbar"><span class="lb" style="width:52px">http error</span><div class="tr2"><div class="fl" style="width:7%;background:#ef4444"></div></div><span class="n2">4</span></div>
+      <div class="hbar"><span class="lb" style="width:52px">timeout</span><div class="tr2"><div class="fl" style="width:3%;background:#ef4444"></div></div><span class="n2">2</span></div>
+      <h4>Real depth · 357 playable</h4>
+      <div class="hbar"><span class="lb">1-2 d</span><div class="tr2"><div class="fl" style="width:12%"></div></div><span class="n2">31</span></div>
+      <div class="hbar"><span class="lb">3-6 d</span><div class="tr2"><div class="fl" style="width:30%"></div></div><span class="n2">88</span></div>
+      <div class="hbar"><span class="lb">7 d</span><div class="tr2"><div class="fl" style="width:72%"></div></div><span class="n2">207</span></div>
+      <div class="hbar"><span class="lb">14 d+</span><div class="tr2"><div class="fl" style="width:12%"></div></div><span class="n2">31</span></div>
+      <a class="abtn sec" style="margin-top:9px">⇩ Export real catch-up · M3U (357) <span class="co" style="position:absolute;top:-7px;right:-7px">5</span></a>
+      <a class="abtn sec">⇩ Export playlist, fake flags stripped</a>
+    </div>
+  </div>
+  <div class="stats">
+    <span class="pill pn">☰ 1,264 total</span>
+    <span class="pill pg">✓ 1,102</span>
+    <span class="pill pr">✕ 118</span>
+    <span class="pill py">🔒 44</span>
+    <span class="pill pv">⏪ 341 real · 61 fake <span class="co" style="position:absolute;top:-7px;right:-7px">6</span></span>
+    <span class="pill pb">Score 7.3/10</span>
+    <span class="rightst"><span>61 shown</span></span>
+  </div>
+</div></div>
+<div class="frame"><div class="app" style="min-width:1040px">
+  <div class="tbar">
+    <span class="b pri">▶ Scan ▾</span>
+    <span class="b vio">⏪ Verify ▾</span>
+    <span class="b">Open ▾</span><span class="b">Save</span>
+    <span class="seg" style="margin-left:10px"><span class="sg on gr">☰ Table</span><span class="sg">⏪ Guide</span></span>
+    <span class="plname">nordic-full.m3u</span>
+    <span class="selc">All Groups</span>
+    <span class="selc" style="z-index:7"><b>All Status</b><span class="co" style="position:absolute;top:-7px;right:-7px">1</span>
+      <span class="dd" style="width:210px;color:var(--t1);font-size:11.5px">
+        <span class="mi"><span>All Status</span></span>
+        <span class="mi"><span>Alive</span><span class="k">1,102</span></span>
+        <span class="mi"><span>Dead</span><span class="k">118</span></span>
+        <span class="mi"><span>Geoblocked</span><span class="k">44</span></span>
+        <span class="msep"></span>
+        <span class="mi"><span class="vio">Catch-up · any</span><span class="k">418</span></span>
+        <span class="mi"><span class="good">Real</span><span class="k">341</span></span>
+        <span class="mi"><span class="warn">Shallower</span><span class="k">16</span></span>
+        <span class="mi hov"><span class="bad">Fake</span><span class="k">61</span></span>
+        <span class="mi"><span class="mut">Untested</span><span class="k">0</span></span>
+      </span>
+    </span>
+    <span class="search">Search...</span>
+    <span class="ib">⇩</span><span class="ib">▤</span><span class="ib">⚙</span>
+  </div>
+  <div class="body" style="min-height:275px"><div class="maincol">
+    <div class="th cols8"><span>#</span><span>STATUS</span><span>CHANNEL NAME</span><span>GROUP</span><span class="ctr">RES</span><span class="ctr">FPS</span><span class="rgt">BITRATE</span><span class="ctr">CATCH-UP</span></div>
+    <div class="tr cols8"><span class="mut3 num">1</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK1 HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">8.2 Mbps</span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+    <div class="tr cols8"><span class="mut3 num">2</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK2 HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">7.9 Mbps</span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+    <div class="tr cols8"><span class="mut3 num">3</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV 2 Direkte HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">6.9 Mbps</span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+    <div class="tr cols8"><span class="mut3 num">4</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV3 Norge</span></span><span class="mut">Norge</span><span class="mut num ctr">720p</span><span class="mut num ctr">25</span><span class="mut num rgt">4.1 Mbps</span><span class="ctr"><span class="chip cu x">✕ LIVE</span></span></div>
+  </div></div>
+</div></div>
+<p class="cap">The Status filter opened, as used to reach the screenshot above.</p>
+<ul class="legend">
+  <li><span class="co">1</span><span><b>Status filter</b> grows a Catch-up group: any, Real, Shallower, Fake, Untested, each with its count. Fake selected here. Groups and Search combine with it as today.</span></li>
+  <li><span class="co">2</span><span><b>Chip carries the reason</b> for fakes: EMPTY, LIVE, the HTTP status, or TIMEOUT. Tooltip has the full sentence and the probe times. Sorting the column groups the reasons.</span></li>
+  <li><span class="co">3</span><span><b>Archive card</b> for a fake channel drops the programme list and explains the verdict with the probe lines, plus Re-test. Live status is shown too, since a dead channel with a dead archive is a different provider problem than a live channel with a fake flag.</span></li>
+  <li><span class="co">4</span><span><b>Why fake</b> breakdown in the report panel, under the verdict tiles. A provider whose fakes are all "serves live" is lying in one specific way, which is worth knowing when comparing providers.</span></li>
+  <li><span class="co">5</span><span><b>Export</b>: an M3U with only the channels whose archive works (real + shallower, with <code>catchup-days</code> rewritten to the measured depth), or the full playlist with the catch-up attributes removed from fake channels so players stop offering replay on them. Both also live in the toolbar export menu with the usual scopes.</span></li>
+  <li><span class="co">6</span><span><b>Pill</b> reads real · fake after a run; click cycles the filter through Real and Fake.</span></li>
+</ul>
+
+<h3>V3b · Alternative: finish banner instead of relying on the pill</h3>
+<div class="frame"><div class="app" style="min-width:1040px">
+  <div class="tbar">
+    <span class="b pri">▶ Scan ▾</span>
+    <span class="b vio">⏪ Verify ▾</span>
+    <span class="b">Open ▾</span><span class="b">Save</span>
+    <span class="seg" style="margin-left:10px"><span class="sg on gr">☰ Table</span><span class="sg">⏪ Guide</span></span>
+    <span class="plname">nordic-full.m3u</span>
+    <span class="selc">All Groups</span><span class="selc">All Status</span>
+    <span class="search">Search...</span>
+    <span class="ib">⇩</span><span class="ib">▤</span><span class="ib">⚙</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;background:rgba(139,92,246,.12);border-bottom:1px solid rgba(139,92,246,.3);font-size:11.5px;position:relative">
+    <span class="co" style="position:absolute;top:-7px;left:6px">1</span>
+    <span class="vio" style="font-weight:600">Catch-up verified</span>
+    <span class="num">418 channels in 6 m 40 s · <span class="good">341 real</span> · <span class="warn">16 shallower</span> · <span class="bad">61 fake</span></span>
+    <span class="b" style="margin-left:auto;padding:3px 9px">Show fake (61)</span>
+    <span class="b" style="padding:3px 9px">Export real catch-up</span>
+    <span class="mut3" style="padding:0 4px">✕</span>
+  </div>
+  <div class="body" style="min-height:150px">
+    <div class="maincol">
+      <div class="th cols8">
+        <span>#</span><span>STATUS</span><span>CHANNEL NAME</span><span>GROUP</span><span class="ctr">RES</span><span class="ctr">FPS</span><span class="rgt">BITRATE</span><span class="ctr">CATCH-UP</span>
+      </div>
+      <div class="tr cols8"><span class="mut3 num">1</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK1 HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">8.2 Mbps</span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">2</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>NRK2 HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">7.9 Mbps</span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">3</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV 2 Direkte HD</span></span><span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">6.9 Mbps</span><span class="ctr"><span class="chip cu v">✓ 7 D</span></span></div>
+      <div class="tr cols8"><span class="mut3 num">4</span><span><span class="dot dg"></span></span><span class="nm"><span class="logo">TV</span><span>TV3 Norge</span></span><span class="mut">Norge</span><span class="mut num ctr">720p</span><span class="mut num ctr">25</span><span class="mut num rgt">4.1 Mbps</span><span class="ctr"><span class="chip cu x">✕ LIVE</span></span></div>
+    </div>
+  </div>
+  <div class="stats">
+    <span class="pill pn">☰ 1,264 total</span>
+    <span class="pill pg">✓ 1,102</span>
+    <span class="pill pr">✕ 118</span>
+    <span class="pill py">🔒 44</span>
+    <span class="pill pv">⏪ 341 real · 61 fake</span>
+    <span class="pill pb">Score 7.3/10</span>
+  </div>
+</div></div>
+<ul class="legend">
+  <li><span class="co">1</span><span><b>Finish banner</b> in the existing app-banner slot: totals, one-click jump to the fakes, one-click export, dismiss. Uses the same slot as the scan-complete and update banners, so nothing new to build layout-wise. Optional on top of V3; the pill and report panel already carry the numbers.</span></li>
+</ul>
+
+<h3>What this adds over section D</h3>
+<table class="doc">
+<tr><th>Piece</th><th>Built</th><th>New</th></tr>
+<tr><td>Probe engine</td><td class="good">−1 h + depth + bisect, media-time check, cancel</td><td>Quick mode (stop after −1 h); capture the failure class (empty / live / status / timeout) instead of a bare "broken"</td></tr>
+<tr><td>Trigger</td><td>Report-panel Verify button, Scan + Verify Catch-up, right-click Test</td><td>Toolbar Verify split button with mode + scope; report-panel button becomes a shortcut to it</td></tr>
+<tr><td>Progress</td><td>"84/418 · Cancel" text in the report panel</td><td>Progress row with tally, throughput, ETA in the scan-bar slot; scan disabled during the run</td></tr>
+<tr><td>Verdicts</td><td>advertised / verified / shallower / broken chips</td><td>"broken" splits into fake reasons shown on the chip and in the Archive card; Status filter entries per verdict; verdicts saved with the scan</td></tr>
+<tr><td>Report</td><td>Tiles, real-depth histogram, latency</td><td>Why-fake breakdown, verified-at time, two export buttons</td></tr>
+<tr><td>Export</td><td>—</td><td>Real-catch-up M3U (measured depth written back), fake-flags-stripped playlist; both in the export menu with scopes</td></tr>
+</table>
+<p><b>Recommendation:</b> build V1 + V2 + V3 as one phase (they are one feature), and add the V3b banner only if the pill turns out too quiet in use. Quick mode is the default because that is the fake-vs-real question; Full stays one click away for provider comparisons.</p>
+
+<!-- ================= FOUNDATION ================= -->
+<h2><span class="tag">0</span>Foundation: detect, show, count, filter</h2>
+<p>Phase 1. Nothing to enter: catch-up info appears passively after loading a playlist, exactly like resolution or codec does today. Detection reads EXTINF attrs and Xtream <code>tv_archive</code>, no probing.</p>
+
+<div class="frame"><div class="app">
+  <div class="tbar">
+    <span class="b pri">▶ Scan</span><span class="b">Open ▾</span><span class="b">Save</span>
+    <span class="plname">nordic-full.m3u</span>
+    <span class="selc">All Groups</span>
+    <span class="selc ring">Status: <b style="color:var(--vio300)">Catch-up (418)</b><span class="co" style="position:absolute;top:-7px;right:-7px">2</span></span>
+    <span class="search">Search...</span>
+    <span class="ib">⇩</span><span class="ib">▤</span><span class="ib">⚙</span>
+  </div>
+  <div class="body"><div class="maincol">
+    <div class="th cols8">
+      <span>#</span><span>STATUS</span><span>CHANNEL NAME</span><span>GROUP</span><span class="ctr">RES</span><span class="ctr">FPS</span><span class="rgt">BITRATE</span><span class="ctr">CATCH-UP <span class="co">1</span></span>
+    </div>
+    <div class="tr cols8">
+      <span class="mut3 num">1</span><span><span class="dot dg"></span></span>
+      <span class="nm"><span class="logo">TV</span><span>NRK1 HD</span></span>
+      <span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">8.2 Mbps</span>
+      <span class="ctr"><span class="chip cu">7 D</span></span>
+    </div>
+    <div class="tr cols8">
+      <span class="mut3 num">2</span><span><span class="dot dg"></span></span>
+      <span class="nm"><span class="logo">TV</span><span>NRK2 HD</span></span>
+      <span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">7.6 Mbps</span>
+      <span class="ctr"><span class="chip cu">7 D</span></span>
+    </div>
+    <div class="tr sel cols8">
+      <span class="mut3 num">3</span><span><span class="dot dg"></span></span>
+      <span class="nm"><span class="logo">TV</span><span>TV 2 Direkte HD</span></span>
+      <span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">6.9 Mbps</span>
+      <span class="ctr"><span class="chip cu">7 D</span></span>
+    </div>
+    <div class="tr sel cols8">
+      <span class="mut3 num">4</span><span><span class="dot dg"></span></span>
+      <span class="nm"><span class="logo">TV</span><span>TV3 Norge</span></span>
+      <span class="mut">Norge</span><span class="mut num ctr">720p</span><span class="mut num ctr">25</span><span class="mut num rgt">4.1 Mbps</span>
+      <span class="ctr"><span class="chip cu">3 D</span></span>
+    </div>
+    <div class="tr sel cols8">
+      <span class="mut3 num">5</span><span><span class="dot dy"></span></span>
+      <span class="nm"><span class="logo">TV</span><span>BBC One FHD</span></span>
+      <span class="mut">UK</span><span class="mut num ctr">1080p</span><span class="mut num ctr">25</span><span class="mut num rgt">5.4 Mbps</span>
+      <span class="ctr"><span class="chip cu">14 D</span></span>
+    </div>
+    <div class="tr cols8">
+      <span class="mut3 num">6</span><span><span class="dot dg"></span></span>
+      <span class="nm"><span class="logo">TV</span><span>Discovery Channel Norge</span></span>
+      <span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">25</span><span class="mut num rgt">5.8 Mbps</span>
+      <span class="ctr"><span class="chip cu">7 D</span></span>
+    </div>
+    <div class="tr cols8">
+      <span class="mut3 num">7</span><span><span class="dot dr"></span></span>
+      <span class="nm"><span class="logo">TV</span><span>Sky Sports Main Event</span></span>
+      <span class="mut">Sport</span><span class="mut3 ctr">—</span><span class="mut3 ctr">—</span><span class="mut3 rgt">—</span>
+      <span class="ctr"><span class="chip cu">7 D</span></span>
+    </div>
+    <div class="tr cols8">
+      <span class="mut3 num">8</span><span><span class="dot dg"></span></span>
+      <span class="nm"><span class="logo">TV</span><span>V Sport 1 HD</span></span>
+      <span class="mut">Sport</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">9.1 Mbps</span>
+      <span class="ctr"><span class="chip cu">2 D</span></span>
+    </div>
+  </div></div>
+  <div class="stats">
+    <span class="pill pn">☰ 1,264 total</span>
+    <span class="pill pg">✓ 1,102</span>
+    <span class="pill pr">✕ 118</span>
+    <span class="pill py">🔒 44</span>
+    <span class="pill pv on">⏪ 418 catch-up<span class="co" style="position:absolute;top:-7px;right:-7px">3</span></span>
+    <span class="pill pb">Score 7.4/10</span>
+    <span class="rightst"><span>3 selected · <span class="vio">3 with catch-up</span> <span class="co">4</span></span></span>
+  </div>
+</div></div>
+<ul class="legend">
+  <li><span class="co">1</span><span>New <b>Catch-up column</b> (in the normal column system: sortable, hideable, draggable). Chip = advertised depth from <code>catchup-days</code> / Xtream <code>tv_archive_duration</code>; tooltip shows type (<code>xc</code>, <code>flussonic</code>, <code>shift</code>, ...) and source template. <code>—</code> = no catch-up.</span></li>
+  <li><span class="co">2</span><span><b>Status dropdown</b> gains a "Catch-up (418)" entry next to Alive/Dead/etc. In this screenshot it is active, so the table shows only archive-capable channels: that is the "how many on screen" view.</span></li>
+  <li><span class="co">3</span><span><b>Stats pill</b>, clickable like every other pill: toggles the same filter. Count is playlist-wide; while other filters are active it reads "96 of 418".</span></li>
+  <li><span class="co">4</span><span><b>Selection counter</b>: with a multi-select active (rows 3-5 here), bottom-right shows how many of the selected channels have catch-up.</span></li>
+</ul>
+<p class="cap">Rust: read the already-parsed attrs into new Channel fields and request two extra Xtream fields. Small change.</p>
+
+<!-- ================= VARIANT C ================= -->
+<h2><span class="tag">C</span>Full EPG timeline browser</h2>
+<p>A full <b>view</b> for browsing archives across channels, not a floating dialog: a segmented <b>Table / Guide switch</b> sits front and center in the toolbar and swaps the table for the grid edge to edge, so every pixel is rows. One slim control strip carries the day tabs, channel filter, and the actions for the selected programme. Toolbar and stats bar stay.</p>
+
+<div class="frame"><div class="app">
+  <div class="tbar">
+    <span class="b pri">▶ Scan</span><span class="b">Open ▾</span><span class="b">Save</span>
+    <span class="seg" style="margin-left:10px"><span class="sg">☰ Table</span><span class="sg on">⏪ Guide</span><span class="co" style="position:absolute;top:-7px;right:-7px">1</span></span>
+    <span class="plname">nordic-full.m3u</span>
+    <span class="selc">All Groups</span><span class="selc">All Status</span>
+    <span class="search">Search...</span>
+    <span class="ib">⇩</span><span class="ib">▤</span>
+    <span class="ib">⚙</span>
+  </div>
+  <div class="body"><div class="maincol">
+    <div class="ctl">
+      <span class="dtab">Sat</span><span class="dtab">Sun</span><span class="dtab">Mon</span><span class="dtab">Tue</span><span class="dtab on">Wed 28 <span class="co">2</span></span><span class="dtab">Thu</span><span class="dtab">Today</span>
+      <span class="mut3">‹ 18:00 – 24:00 ›</span>
+      <span class="search" style="min-width:90px">Filter channels... <span class="co">3</span></span>
+      <span style="margin-left:auto;display:flex;align-items:center;gap:6px">
+        <span class="mut"><b style="color:var(--vio300)">Exit</b> · NRK1 · 20:25 · 95 min</span>
+        <span class="b pri" style="padding:2px 9px;font-size:11px"><span class="co" style="background:#fff;color:var(--vio500)">4</span> ▶ Play</span>
+        <span class="b" style="padding:2px 9px;font-size:11px">Test</span>
+      </span>
+    </div>
+    <div class="timeax2"><span>18:00</span><span>19:00</span><span>20:00</span><span>21:00</span><span>22:00</span><span>23:00</span></div>
+    <div class="row2">
+      <div class="ch2"><span class="logo">TV</span><span class="nm2">NRK1 HD</span><span class="dp">7D</span></div>
+      <div class="lane2">
+        <div class="bk" style="width:22%"><span class="t2">18:00</span><span class="n3">Dagsrevyen</span></div>
+        <div class="bk" style="width:12%"><span class="t2">19:45</span><span class="n3">Norge i dag</span></div>
+        <div class="bk on" style="width:28%"><span class="t2">20:25</span><span class="n3">Exit</span></div>
+        <div class="bk" style="width:24%"><span class="t2">22:00</span><span class="n3">Kveldsnytt</span></div>
+        <div class="bk" style="width:12%"><span class="t2">23:15</span><span class="n3">Debatten</span></div>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="ch2"><span class="logo">TV</span><span class="nm2">NRK2 HD</span><span class="dp">7D</span></div>
+      <div class="lane2">
+        <div class="bk" style="width:14%"><span class="t2">18:30</span><span class="n3">Oddasat</span></div>
+        <div class="bk" style="width:24%"><span class="t2">19:00</span><span class="n3">Studio 2</span></div>
+        <div class="bk" style="width:28%"><span class="t2">20:00</span><span class="n3">Brennpunkt</span></div>
+        <div class="bk" style="width:32%"><span class="t2">21:30</span><span class="n3">Filmklubben</span></div>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="ch2"><span class="logo">TV</span><span class="nm2">TV 2 Direkte HD</span><span class="dp">7D</span></div>
+      <div class="lane2">
+        <div class="bk" style="width:32%"><span class="t2">18:30</span><span class="n3">Oppgrader!</span></div>
+        <div class="bk" style="width:12%"><span class="t2">21:00</span><span class="n3">Nyhetene</span></div>
+        <div class="bk" style="width:38%"><span class="t2">21:40</span><span class="n3">Farmen</span></div>
+        <div class="bk" style="width:14%"><span class="t2">23:30</span><span class="n3">Siste nytt</span></div>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="ch2"><span class="logo">TV</span><span class="nm2">TV3 Norge</span><span class="dp">3D</span></div>
+      <div class="lane2">
+        <div class="bk dead" style="width:28%"><span class="t2">18:00</span><span class="n3">Luksusfellen <span class="co">5</span></span></div>
+        <div class="bk" style="width:34%"><span class="t2">20:00</span><span class="n3">Paradise Hotel</span></div>
+        <div class="bk" style="width:34%"><span class="t2">22:15</span><span class="n3">Kongen befaler</span></div>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="ch2"><span class="logo">TV</span><span class="nm2">TV Norge</span><span class="dp">7D</span></div>
+      <div class="lane2">
+        <div class="bk" style="width:16%"><span class="t2">18:00</span><span class="n3">Big Bang Theory</span></div>
+        <div class="bk" style="width:26%"><span class="t2">19:00</span><span class="n3">4-stjerners middag</span></div>
+        <div class="bk" style="width:30%"><span class="t2">20:30</span><span class="n3">Alltid beredt</span></div>
+        <div class="bk" style="width:24%"><span class="t2">22:00</span><span class="n3">Praktisk info</span></div>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="ch2"><span class="logo">TV</span><span class="nm2">Discovery Norge</span><span class="dp">7D</span></div>
+      <div class="lane2">
+        <div class="bk" style="width:30%"><span class="t2">18:00</span><span class="n3">Gullrushet</span></div>
+        <div class="bk" style="width:36%"><span class="t2">20:00</span><span class="n3">Deadliest Catch</span></div>
+        <div class="bk" style="width:30%"><span class="t2">22:00</span><span class="n3">Naked and Afraid</span></div>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="ch2"><span class="logo">TV</span><span class="nm2">BBC One FHD</span><span class="dp">14D</span></div>
+      <div class="lane2">
+        <div class="bk" style="width:18%"><span class="t2">18:00</span><span class="n3">The One Show</span></div>
+        <div class="bk" style="width:16%"><span class="t2">19:00</span><span class="n3">EastEnders</span></div>
+        <div class="bk" style="width:42%"><span class="t2">20:00</span><span class="n3">Silent Witness</span></div>
+        <div class="bk" style="width:20%"><span class="t2">22:00</span><span class="n3">News at Ten</span></div>
+      </div>
+    </div>
+    <div class="row2" style="border-bottom:none">
+      <div class="ch2"><span class="logo">TV</span><span class="nm2">TV 2 Nyheter</span><span class="dp">2D</span></div>
+      <div class="lane2">
+        <div class="bk" style="width:48%"><span class="t2">18:00</span><span class="n3">Nyhetskanalen</span></div>
+        <div class="bk" style="width:48%"><span class="t2">21:00</span><span class="n3">Nyhetskanalen</span></div>
+      </div>
+    </div>
+  </div></div>
+  <div class="stats">
+    <span class="pill pn">☰ 1,264 total</span>
+    <span class="pill pg">✓ 1,102</span>
+    <span class="pill pr">✕ 118</span>
+    <span class="pill py">🔒 44</span>
+    <span class="pill pv">⏪ 418 catch-up</span>
+    <span class="pill pb">Score 7.4/10</span>
+  </div>
+</div></div>
+<ul class="legend">
+  <li><span class="co">1</span><span><b>Segmented Table / Guide switch</b>, front and center in the toolbar and always visible once a playlist with catch-up loads: active segment fills violet, so the current mode is unmistakable. Esc also returns to Table. Second entry: right-click a channel → "Browse Catch-up…" switches to Guide scrolled to that channel (menu shown in D1).</span></li>
+  <li><span class="co">2</span><span><b>Date strip</b> spans the archive window (up to the deepest channel); ‹ › pages the 6-hour time window, wheel scrolls it. Rows virtualize like the channel table, only catch-up channels are listed.</span></li>
+  <li><span class="co">3</span><span><b>Channel filter</b> narrows rows; the toolbar Group select applies here too.</span></li>
+  <li><span class="co">4</span><span>Click a block to select it; its title and <b>Play / Test actions sit in the strip</b>, no footer. Double-click plays directly in the sidebar player and closes the view.</span></li>
+  <li><span class="co">5</span><span>Gray blocks are <b>beyond that channel's depth</b> (TV3 only keeps 3 days), unplayable but still listed so gaps are visible.</span></li>
+</ul>
+<ul>
+  <li>30 px rows, one-line programme blocks: a 1080p window shows ~25 channels at once.</li>
+  <li>Needs the phase 2 EPG store plus lane layout and time-axis math; the view itself is modest once the data exists.</li>
+</ul>
+
+<!-- ================= VARIANT D ================= -->
+<h2><span class="tag">D</span>Verification: measure the archive, playlist-wide</h2>
+<p>The verification layer, phase 4 (spot probes ship earlier, in phase 2). Three ways to trigger a probe, shown in the first screenshot; the second shows the app after verification.</p>
+
+<h3>D1 · Triggering verification</h3>
+<div class="frame"><div class="app">
+  <div class="tbar">
+    <span class="b pri" style="z-index:7">▶ Scan ▾<span class="co" style="position:absolute;top:-7px;right:-7px">1</span>
+      <span class="dd" style="font-weight:400">
+        <span class="mi"><span>Scan All</span></span>
+        <span class="mi hov"><span>Scan + Verify Catch-up</span><span class="k">⏪ 418</span></span>
+        <span class="mi"><span>Rescan Failed</span></span>
+      </span>
+    </span>
+    <span class="b">Open ▾</span><span class="b">Save</span>
+    <span class="plname">nordic-full.m3u</span>
+    <span class="selc">All Groups</span><span class="selc">All Status</span>
+    <span class="search">Search...</span>
+    <span class="ib">⇩</span><span class="ib">▤</span><span class="ib">⚙</span>
+  </div>
+  <div class="body" style="min-height:300px">
+    <div class="maincol">
+      <div class="th cols8">
+        <span>#</span><span>STATUS</span><span>CHANNEL NAME</span><span>GROUP</span><span class="ctr">RES</span><span class="ctr">FPS</span><span class="rgt">BITRATE</span><span class="ctr">CATCH-UP</span>
+      </div>
+      <div class="tr cols8">
+        <span class="mut3 num">1</span><span><span class="dot dg"></span></span>
+        <span class="nm"><span class="logo">TV</span><span>NRK1 HD</span></span>
+        <span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">8.2 Mbps</span>
+        <span class="ctr"><span class="chip cu">7 D</span></span>
+      </div>
+      <div class="tr sel cols8">
+        <span class="mut3 num">2</span><span><span class="dot dg"></span></span>
+        <span class="nm"><span class="logo">TV</span><span>TV 2 Direkte HD</span></span>
+        <span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">6.9 Mbps</span>
+        <span class="ctr"><span class="chip cu">7 D</span></span>
+      </div>
+      <div class="tr sel cols8">
+        <span class="mut3 num">3</span><span><span class="dot dg"></span></span>
+        <span class="nm"><span class="logo">TV</span><span>TV3 Norge</span></span>
+        <span class="mut">Norge</span><span class="mut num ctr">720p</span><span class="mut num ctr">25</span><span class="mut num rgt">4.1 Mbps</span>
+        <span class="ctr"><span class="chip cu">3 D</span></span>
+      </div>
+      <div class="tr sel cols8">
+        <span class="mut3 num">4</span><span><span class="dot dy"></span></span>
+        <span class="nm"><span class="logo">TV</span><span>BBC One FHD</span></span>
+        <span class="mut">UK</span><span class="mut num ctr">1080p</span><span class="mut num ctr">25</span><span class="mut num rgt">5.4 Mbps</span>
+        <span class="ctr"><span class="chip cu">14 D</span></span>
+      </div>
+      <div class="tr cols8">
+        <span class="mut3 num">5</span><span><span class="dot dg"></span></span>
+        <span class="nm"><span class="logo">TV</span><span>Eurosport 1 Norge</span></span>
+        <span class="mut">Sport</span><span class="mut num ctr">1080p</span><span class="mut num ctr">50</span><span class="mut num rgt">7.8 Mbps</span>
+        <span class="mut3 ctr">—</span>
+      </div>
+      <div class="tr cols8">
+        <span class="mut3 num">6</span><span><span class="dot dg"></span></span>
+        <span class="nm"><span class="logo">TV</span><span>Discovery Channel Norge</span></span>
+        <span class="mut">Norge</span><span class="mut num ctr">1080p</span><span class="mut num ctr">25</span><span class="mut num rgt">5.8 Mbps</span>
+        <span class="ctr"><span class="chip cu">7 D</span></span>
+      </div>
+      <div class="menu" style="left:280px;top:96px">
+        <div class="mi"><span>Rescan Selected (3)</span></div>
+        <div class="msep"></div>
+        <div class="mi hov"><span>Test Catch-up (3) <span class="co">2</span></span><span class="k">⏪</span></div>
+        <div class="mi"><span>Preview</span></div>
+        <div class="mi"><span>Open in External Player</span></div>
+        <div class="msep"></div>
+        <div class="mi"><span>Copy URL</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="stats">
+    <span class="pill pn">☰ 1,264 total</span>
+    <span class="pill pg">✓ 1,102</span>
+    <span class="pill pr">✕ 118</span>
+    <span class="pill py">🔒 44</span>
+    <span class="pill pv">⏪ 418 catch-up</span>
+    <span class="pill pb">Score 7.4/10</span>
+    <span class="rightst"><span>3 selected · <span class="vio">3 with catch-up</span></span></span>
+  </div>
+</div></div>
+<ul class="legend">
+  <li><span class="co">1</span><span><b>Scan becomes a split button.</b> "Scan + Verify Catch-up" runs the normal scan, then probes the 418 advertising channels. Opt-in per run, never part of the plain Scan.</span></li>
+  <li><span class="co">2</span><span><b>Right-click a selection</b> → "Test Catch-up (n)": probes only selected rows that advertise catch-up. (Third trigger: the per-channel Test button in the sidebar Archive card.)</span></li>
+</ul>
+
+<h3>D2 · After verification</h3>
+<div class="frame"><div class="app">
+  <div class="tbar">
+    <span class="b pri">▶ Scan ▾</span><span class="b">Open ▾</span><span class="b">Save</span>
+    <span class="plname">nordic-full.m3u</span>
+    <span class="selc">All Groups</span><span class="selc">All Status</span>
+    <span class="search">Search...</span>
+    <span class="ib">⇩</span><span class="ib ring">▤<span class="co" style="position:absolute;top:-7px;right:-7px">2</span></span><span class="ib">⚙</span>
+  </div>
+  <div class="body">
+    <div class="maincol">
+      <div class="th cols6" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px">
+        <span>#</span><span>STATUS</span><span>CHANNEL NAME</span><span>GROUP</span><span class="ctr">RES</span><span class="ctr">CATCH-UP <span class="co">1</span></span>
+      </div>
+      <div class="tr" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px;gap:6px">
+        <span class="mut3 num">1</span><span><span class="dot dg"></span></span>
+        <span class="nm"><span class="logo">TV</span><span>NRK1 HD</span></span>
+        <span class="mut">Norge</span><span class="mut num ctr">1080p</span>
+        <span class="ctr"><span class="chip cu v">✓ 7 D</span></span>
+      </div>
+      <div class="tr" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px;gap:6px">
+        <span class="mut3 num">2</span><span><span class="dot dg"></span></span>
+        <span class="nm"><span class="logo">TV</span><span>TV 2 Direkte HD</span></span>
+        <span class="mut">Norge</span><span class="mut num ctr">1080p</span>
+        <span class="ctr"><span class="chip cu v">✓ 7 D</span></span>
+      </div>
+      <div class="tr" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px;gap:6px">
+        <span class="mut3 num">3</span><span><span class="dot dg"></span></span>
+        <span class="nm"><span class="logo">TV</span><span>TV3 Norge</span></span>
+        <span class="mut">Norge</span><span class="mut num ctr">720p</span>
+        <span class="ctr"><span class="chip cu w">⚠ 1 / 3 D</span></span>
+      </div>
+      <div class="tr" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px;gap:6px">
+        <span class="mut3 num">4</span><span><span class="dot dy"></span></span>
+        <span class="nm"><span class="logo">TV</span><span>BBC One FHD</span></span>
+        <span class="mut">UK</span><span class="mut num ctr">1080p</span>
+        <span class="ctr"><span class="chip cu w">⚠ 9 / 14 D</span></span>
+      </div>
+      <div class="tr" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px;gap:6px">
+        <span class="mut3 num">5</span><span><span class="dot dg"></span></span>
+        <span class="nm"><span class="logo">TV</span><span>Eurosport 1 Norge</span></span>
+        <span class="mut">Sport</span><span class="mut num ctr">1080p</span>
+        <span class="mut3 ctr">—</span>
+      </div>
+      <div class="tr" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px;gap:6px">
+        <span class="mut3 num">6</span><span><span class="dot dr"></span></span>
+        <span class="nm"><span class="logo">TV</span><span>Sky Sports Main Event</span></span>
+        <span class="mut">Sport</span><span class="mut3 ctr">—</span>
+        <span class="ctr"><span class="chip cu x">✕ 7 D</span></span>
+      </div>
+      <div class="tr" style="grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 104px;gap:6px">
+        <span class="mut3 num">7</span><span><span class="dot dg"></span></span>
+        <span class="nm"><span class="logo">TV</span><span>Discovery Channel Norge</span></span>
+        <span class="mut">Norge</span><span class="mut num ctr">1080p</span>
+        <span class="ctr"><span class="chip cu v">✓ 7 D</span></span>
+      </div>
+    </div>
+    <div class="rep">
+      <h4 style="margin-top:0">Health Score</h4>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:2px">
+        <div class="ring2"><span>7.6</span></div>
+        <div style="flex:1;display:grid;gap:3px;min-width:0">
+          <div class="srow"><span>Ping</span><b>6.9</b></div>
+          <div class="srow"><span>Content</span><b>7.8</b></div>
+          <div class="srow"><span>Quality</span><b>7.2</b></div>
+          <div class="srow" style="box-shadow:inset 0 0 0 1px rgba(139,92,246,.35)"><span class="vio">Catch-up</span><b class="vio">8.1 <span class="co">3</span></b></div>
+        </div>
+      </div>
+      <h4>Catch-up <span class="co">4</span></h4>
+      <div class="tiles">
+        <div class="tile"><b class="vio">418</b><span>advertised</span></div>
+        <div class="tile"><b class="good">361</b><span>verified</span></div>
+        <div class="tile"><b class="warn">39</b><span>shallower</span></div>
+        <div class="tile"><b class="bad">18</b><span>broken</span></div>
+      </div>
+      <h4>Real depth · 400 playable</h4>
+      <div class="hbar"><span class="lb">1-2 d</span><div class="tr2"><div class="fl" style="width:18%"></div></div><span class="n2">54</span></div>
+      <div class="hbar"><span class="lb">3-6 d</span><div class="tr2"><div class="fl" style="width:34%"></div></div><span class="n2">102</span></div>
+      <div class="hbar"><span class="lb">7 d</span><div class="tr2"><div class="fl" style="width:71%"></div></div><span class="n2">213</span></div>
+      <div class="hbar"><span class="lb">14 d+</span><div class="tr2"><div class="fl" style="width:14%"></div></div><span class="n2">31</span></div>
+      <h4>Performance</h4>
+      <div class="kv"><span>Median archive start</span><b>640 ms</b></div>
+      <div class="kv"><span>Median live start</span><b>310 ms</b></div>
+      <div class="kv"><span>Slowest archive</span><b class="warn">3.9 s</b></div>
+      <h4>Content Counts</h4>
+      <div class="tiles">
+        <div class="tile"><b>1,264</b><span>channels</span></div>
+        <div class="tile"><b>42</b><span>groups</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="stats">
+    <span class="pill pn">☰ 1,264 total</span>
+    <span class="pill pg">✓ 1,102</span>
+    <span class="pill pr">✕ 118</span>
+    <span class="pill py">🔒 44</span>
+    <span class="pill pv">⏪ 361/418 catch-up <span class="co" style="position:absolute;top:-7px;right:-7px">5</span></span>
+    <span class="pill pb">Score 7.6/10</span>
+  </div>
+</div></div>
+<ul class="legend">
+  <li><span class="co">1</span><span>Chips graduate: violet = advertised only, <b class="good">green ✓</b> = depth confirmed, <b class="warn">amber ⚠ real/advertised</b> = provider lies about depth, <b class="bad">red ✕</b> = archive URLs fail. Sortable, so lying providers cluster.</span></li>
+  <li><span class="co">2</span><span>The existing <b>Report panel</b> (toolbar ▤ toggle, unchanged entry) keeps its current sections: Health Score ring with Ping / Content / Quality rows, Content Counts, charts below.</span></li>
+  <li><span class="co">3</span><span><b>Catch-up becomes a fourth score component</b> (weights rebalanced, e.g. Ping 20 / Content 35 / Quality 30 / Catch-up 15). Before verification it scores advertised coverage only; after, it blends coverage, reliability (verified vs broken), and real depth. Playlists with zero catch-up show N/A and the weights renormalize, so scores stay comparable.</span></li>
+  <li><span class="co">4</span><span>New <b>Catch-up section</b>: verified/shallower/broken tiles, real-depth histogram, archive vs live startup latency.</span></li>
+  <li><span class="co">5</span><span>Pill now reads <b>verified/advertised</b>.</span></li>
+</ul>
+<ul>
+  <li>Probe = archive URL at −1 h and at advertised depth, ffprobe both; on mismatch bisect a couple more points to estimate real depth. Roughly 2-4 extra requests per channel.</li>
+  <li>Playlist-wide probing respects the concurrency-1 default; on 418 channels that adds real scan time against providers with connection limits, hence opt-in.</li>
+  <li>Effort: medium; reuses the existing checker engine and latency plumbing.</li>
+</ul>
+
+<!-- ================= COMPARISON ================= -->
+<h2>Build order</h2>
+<table class="doc">
+<tr><th>Phase</th><th>Ships</th><th>Notes</th></tr>
+<tr><td><b>1 Detection</b></td><td>Rust catch-up fields + Xtream archive fields, table column, pill, Status filter, selection counts</td><td>Attrs already parsed, just unread. Releasable on its own.</td></tr>
+<tr><td><b>2 Playback</b></td><td>XMLTV EPG store, archive URL builder, player seek work, sidebar Archive card (programme list, picker fallback), spot probes</td><td>Longest-lead phase; card ships once, in final form.</td></tr>
+<tr><td><b>3 Guide</b></td><td>Table/Guide switch, dense EPG grid, right-click entry</td><td>Built as a shared component; doubles as the Player flavor's guide.</td></tr>
+<tr><td><b>4 Verification</b></td><td>Opt-in scan phase, graduated chips, report section, fourth score component</td><td>Checker-only; nothing in the Player flavor depends on it.</td></tr>
+<tr><td><b>5 Fake vs real</b></td><td>Verify split button (quick/full, scope), progress row, fake reasons on chips, verdict filters, why-fake breakdown, exports</td><td>Section ★ Batch verification. Reuses the phase-4 engine; adds quick mode and failure classes.</td></tr>
+</table>
+<p>Tracked in the checklist comment on issue #229. The IPTV Player flavor is a separate track (issue #231) with its own design document; phases 2-3 build its shared core (archive URL builder, XMLTV store, seek player, Guide grid) as checker-independent modules.</p>
+</main>
+</body>
+</html>

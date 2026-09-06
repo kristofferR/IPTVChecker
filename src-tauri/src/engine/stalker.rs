@@ -693,6 +693,9 @@ pub(crate) fn build_stalker_preview(
                 tvg_name,
                 tvg_logo,
                 tvg_chno,
+                catchup: None,
+                catchup_days: None,
+                catchup_source: None,
                 url: stream_url,
                 content_type,
                 extinf_line,
@@ -725,6 +728,8 @@ pub(crate) fn build_stalker_preview(
         movie_count,
         series_count,
         groups: groups.into_iter().collect(),
+        epg_sources: Vec::new(),
+        epg_sources_by_playlist: std::collections::BTreeMap::new(),
         channels,
     })
 }

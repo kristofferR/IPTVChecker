@@ -223,16 +223,44 @@ fn sanitize_saved_playlist_entry(
     })
 }
 
+/// Normalize saved entries, **keeping** any that fail normalization.
+///
+/// This list is written straight back to disk, so dropping an entry here
+/// deletes a playlist the user saved. A validation rule that tightens over
+/// time (an added scheme restriction, a stricter URL parse) would otherwise
+/// silently erase existing entries on the next write, with no way back.
+/// Entries that cannot be normalized are preserved verbatim and logged; only
+/// an entry with no id at all is unusable, and duplicate ids still collapse.
 fn sanitize_saved_playlists(entries: Vec<SavedPlaylistEntry>) -> Vec<SavedPlaylistEntry> {
     let mut sanitized = Vec::new();
-    let mut seen_ids = HashSet::new();
+    let mut seen_ids = HashMap::new();
 
     for entry in entries {
-        let Ok(entry) = sanitize_saved_playlist_entry(entry) else {
-            continue;
+        let (entry, normalized) = match sanitize_saved_playlist_entry(entry.clone()) {
+            Ok(entry) => (entry, true),
+            Err(error) => {
+                if entry.id.trim().is_empty() {
+                    log::warn!("Dropping saved playlist without an id: {error}");
+                    continue;
+                }
+                log::warn!(
+                    "Keeping saved playlist '{}' despite failing normalization: {error}",
+                    entry.id.trim()
+                );
+                (entry, false)
+            }
         };
-        if seen_ids.insert(entry.id.clone()) {
-            sanitized.push(entry);
+        let id = entry.id.trim().to_string();
+        match seen_ids.get(&id).copied() {
+            None => {
+                seen_ids.insert(id, (sanitized.len(), normalized));
+                sanitized.push(entry);
+            }
+            Some((index, previous_normalized)) if normalized && !previous_normalized => {
+                sanitized[index] = entry;
+                seen_ids.insert(id, (index, true));
+            }
+            Some(_) => {}
         }
     }
 
@@ -703,8 +731,83 @@ pub async fn open_saved_playlist(
 mod tests {
     use super::{
         default_display_name, path_source_identity, sanitize_saved_playlist_entry,
-        SavedPlaylistEntry, SavedPlaylistSource,
+        sanitize_saved_playlists, SavedPlaylistEntry, SavedPlaylistSource,
     };
+
+    /// A tightened validation rule must never delete playlists the user saved:
+    /// this list is persisted verbatim, so a dropped entry is gone for good.
+    #[test]
+    fn sanitize_keeps_entries_that_fail_normalization() {
+        let entries = vec![
+            SavedPlaylistEntry {
+                id: "saved-1".to_string(),
+                display_name: "Plain HTTP provider".to_string(),
+                source: SavedPlaylistSource::Xtream {
+                    servers: vec!["http://provider.example.com:8080".to_string()],
+                    preferred_server: None,
+                    username: "alice".to_string(),
+                    password: Some("secret".to_string()),
+                },
+            },
+            SavedPlaylistEntry {
+                id: "saved-2".to_string(),
+                display_name: "No password".to_string(),
+                source: SavedPlaylistSource::Xtream {
+                    servers: vec!["https://provider.example.com".to_string()],
+                    preferred_server: None,
+                    username: "bob".to_string(),
+                    password: None,
+                },
+            },
+        ];
+
+        let sanitized = sanitize_saved_playlists(entries);
+        let ids: Vec<&str> = sanitized.iter().map(|entry| entry.id.as_str()).collect();
+        assert!(ids.contains(&"saved-1"), "http Xtream entry must survive");
+        assert!(ids.contains(&"saved-2"), "password-less entry must survive");
+    }
+
+    #[test]
+    fn sanitize_drops_only_entries_without_an_id() {
+        let entries = vec![SavedPlaylistEntry {
+            id: "   ".to_string(),
+            display_name: "Unusable".to_string(),
+            source: SavedPlaylistSource::Url {
+                url: "https://example.com/list.m3u".to_string(),
+            },
+        }];
+
+        assert!(sanitize_saved_playlists(entries).is_empty());
+    }
+
+    #[test]
+    fn sanitize_prefers_normalized_duplicate_entries() {
+        let entries = vec![
+            SavedPlaylistEntry {
+                id: "saved-1".to_string(),
+                display_name: "Invalid URL".to_string(),
+                source: SavedPlaylistSource::Url {
+                    url: "ftp://example.com/list.m3u".to_string(),
+                },
+            },
+            SavedPlaylistEntry {
+                id: " saved-1 ".to_string(),
+                display_name: "Valid URL".to_string(),
+                source: SavedPlaylistSource::Url {
+                    url: "https://example.com/list.m3u".to_string(),
+                },
+            },
+        ];
+
+        let sanitized = sanitize_saved_playlists(entries);
+
+        assert_eq!(sanitized.len(), 1);
+        assert_eq!(sanitized[0].display_name, "Valid URL");
+        assert!(matches!(
+            sanitized[0].source,
+            SavedPlaylistSource::Url { .. }
+        ));
+    }
 
     #[test]
     fn path_source_identity_keeps_prefix_and_value() {

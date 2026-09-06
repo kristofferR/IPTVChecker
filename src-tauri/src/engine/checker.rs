@@ -1179,6 +1179,7 @@ pub async fn check_channel_status_with_debug(
         let client = client.clone();
         let headers = headers.clone();
         let url = url.to_string();
+        let redacted_url = crate::engine::stream_proxy::redact_url(&url);
         let cancel = cancel_token.clone();
         async move {
             let mut retries_used = 0u32;
@@ -1197,7 +1198,7 @@ pub async fn check_channel_status_with_debug(
                     "Attempt {}/{} for {} (timeout: {}s, max_retries: {}, backoff: {:?})",
                     attempt + 1,
                     attempts,
-                    url,
+                    redacted_url,
                     current_timeout,
                     retries,
                     retry_backoff
@@ -1321,7 +1322,7 @@ pub async fn check_channel_status_with_debug(
                         if let Some(reason) = reason {
                             last_error_reason = Some(reason);
                         }
-                        log::debug!("Retrying channel: {}", url);
+                        log::debug!("Retrying channel: {}", redacted_url);
                         if attempt < retries {
                             retries_used = retries_used.saturating_add(1);
                             let delay = retry_delay_seconds(retry_backoff, attempt);

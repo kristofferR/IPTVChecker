@@ -35,6 +35,7 @@ export const COLUMN_DEFINITIONS: ColumnDefinition[] = [
     minWidth: 72,
     align: "center",
   },
+  { key: "catchup", label: "Catch-up", defaultWidth: 92, minWidth: 72, align: "center" },
 ];
 
 export const COLUMN_DEFINITION_MAP: Record<ColumnKey, ColumnDefinition> = COLUMN_DEFINITIONS.reduce(

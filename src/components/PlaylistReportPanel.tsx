@@ -1,12 +1,27 @@
+import { save } from "@tauri-apps/plugin-dialog";
 import { BarChart3, X } from "lucide-react";
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
+import { hasArchive } from "../lib/archive";
+import { realCatchupResults, stripFakeCatchupResults } from "../lib/archiveExport";
+import {
+  type ArchiveFailure,
+  archiveFailure,
+  archiveVerdict,
+  measuredDepthDays,
+} from "../lib/archiveVerification";
+import { cancelArchiveVerification, verifyAllArchives } from "../lib/archiveVerifyRun";
+import { computeCatchupScore, withCatchupScore } from "../lib/catchupScore";
 import { summarizeEpgCoverage } from "../lib/epgCoverage";
 import { summarizeLanguageDistribution } from "../lib/languageDistribution";
+import { logger } from "../lib/logger";
+import { isSingleConnectionPlaylist } from "../lib/playback";
 import {
   hasScanStarted,
   shouldShowContentCounts,
   shouldShowLanguageDistribution,
 } from "../lib/playlistReportVisibility";
+import { isScanActive } from "../lib/scanState";
+import { exportM3u } from "../lib/tauri";
 import type { ChannelResult, PlaylistScore } from "../lib/types";
 import { useAppStore } from "../store";
 
@@ -36,6 +51,23 @@ function clampScore10(value: number): number {
 
 function round1(value: number): number {
   return Math.round(value * 10) / 10;
+}
+
+function formatVerifiedAt(epochS: number): string {
+  const date = new Date(epochS * 1000);
+  const today = new Date();
+  const sameDay =
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate();
+  const time = date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  return sameDay
+    ? `today ${time}`
+    : `${date.toLocaleDateString([], { day: "numeric", month: "short" })} ${time}`;
 }
 
 function median(values: number[]): number | null {
@@ -158,6 +190,15 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
   const playlist = useAppStore((s) => s.playlist);
   const results = useAppStore((s) => s.flatResults);
   const progress = useAppStore((s) => s.progress);
+  const epgLoadSummary = useAppStore((s) => s.epgLoadSummary);
+  const archiveProbes = useAppStore((s) => s.archiveProbes);
+  const archiveVerifyRun = useAppStore((s) => s.archiveVerifyRun);
+  const archiveGuideTestRunning = useAppStore((s) => s.archiveGuideTestRunning);
+  const playIntentActive = useAppStore((s) => s.playIntentActive);
+  const castActive = useAppStore((s) => s.castActive);
+  const archiveProbeRunning = Object.values(archiveProbes).some((entry) => entry.running);
+  const playbackBlocksVerification =
+    (playIntentActive || castActive) && isSingleConnectionPlaylist(playlist);
   const summary = useAppStore((s) => s.summary);
   const scanState = useAppStore((s) => s.scanState);
   // Every hook below must run unconditionally: the "no playlist" early return
@@ -190,6 +231,102 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
     () => summarizeEpgCoverage((channels ?? []).map((channel) => ({ tvg_id: channel.tvg_id }))),
     [channels],
   );
+
+  const catchupScore = useMemo(
+    () => computeCatchupScore(results, archiveProbes),
+    [results, archiveProbes],
+  );
+
+  const catchupStats = useMemo(() => {
+    const channels = results.filter(hasArchive);
+    if (channels.length === 0) return null;
+    let verified = 0;
+    let shallower = 0;
+    let fake = 0;
+    let verifiedAt: number | null = null;
+    const failures: Record<ArchiveFailure["kind"], number> = {
+      empty: 0,
+      live: 0,
+      http: 0,
+      timeout: 0,
+      unreachable: 0,
+    };
+    const depths: number[] = [];
+    const latencies: number[] = [];
+    for (const channel of channels) {
+      const entry = archiveProbes[channel.index];
+      const verdict = archiveVerdict(channel, entry);
+      if (verdict !== "advertised" && entry?.checkedAt != null) {
+        verifiedAt = Math.max(verifiedAt ?? 0, entry.checkedAt);
+      }
+      if (verdict === "verified") {
+        verified += 1;
+        depths.push(Math.min(channel.catchup_days ?? measuredDepthDays(entry) ?? 1, 14));
+      } else if (verdict === "shallower") {
+        shallower += 1;
+        const measured = measuredDepthDays(entry);
+        if (measured != null) depths.push(Math.min(measured, 14));
+      } else if (verdict === "fake") {
+        fake += 1;
+        const failure = archiveFailure(entry);
+        if (failure) failures[failure.kind] += 1;
+      }
+      for (const outcome of entry?.outcomes ?? []) {
+        if (outcome.ok && outcome.latencyMs != null) latencies.push(outcome.latencyMs);
+      }
+    }
+    const buckets: Array<{ label: string; count: number }> = [
+      { label: "<1 d", count: depths.filter((d) => d < 1).length },
+      { label: "1-2 d", count: depths.filter((d) => d >= 1 && d < 3).length },
+      { label: "3-6 d", count: depths.filter((d) => d >= 3 && d < 7).length },
+      { label: "7 d", count: depths.filter((d) => d >= 7 && d < 8).length },
+      { label: "8+ d", count: depths.filter((d) => d >= 8).length },
+    ];
+    const fakeReasons: Array<{ label: string; count: number }> = [
+      { label: "empty", count: failures.empty },
+      { label: "serves live", count: failures.live },
+      { label: "http error", count: failures.http },
+      { label: "timeout", count: failures.timeout },
+      { label: "unreachable", count: failures.unreachable },
+    ].filter((reason) => reason.count > 0);
+    const medianLatency = median(latencies);
+    return {
+      advertised: channels.length,
+      verified,
+      shallower,
+      fake,
+      tested: verified + shallower + fake,
+      verifiedAt,
+      fakeReasons,
+      buckets,
+      medianLatency,
+    };
+  }, [results, archiveProbes]);
+
+  const [catchupExportBusy, setCatchupExportBusy] = useState(false);
+  const exportCatchupPlaylist = async (variant: "real" | "stripped") => {
+    if (!playlist || catchupExportBusy) return;
+    const exported =
+      variant === "real"
+        ? realCatchupResults(results, archiveProbes)
+        : stripFakeCatchupResults(results, archiveProbes);
+    if (exported.length === 0) return;
+    const stem = playlist.file_name.replace(/\.[^.]+$/, "") || "playlist";
+    const path = await save({
+      defaultPath: `${stem}_${variant === "real" ? "real-catchup" : "no-fake-catchup"}.m3u8`,
+      filters: [{ name: "M3U Playlist", extensions: ["m3u8", "m3u"] }],
+    });
+    if (!path) return;
+    setCatchupExportBusy(true);
+    try {
+      await exportM3u(exported, path);
+      logger.info(`[Export] Wrote ${exported.length} channels (${variant} catch-up) to ${path}`);
+    } catch (error) {
+      logger.warn(`[Export] Catch-up export failed: ${String(error)}`);
+    } finally {
+      setCatchupExportBusy(false);
+    }
+  };
 
   const protocolSummary = useMemo(() => {
     let http = 0;
@@ -240,7 +377,8 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
   const showLanguageDistribution = shouldShowLanguageDistribution(
     playlist.channels.map((channel) => ({ language: channel.language })),
   );
-  const displayScore = summary?.playlist_score ?? computedScore;
+  const baseScore = summary?.playlist_score ?? computedScore;
+  const displayScore = baseScore ? withCatchupScore(baseScore, catchupScore) : null;
   const ringScore = displayScore?.overall ?? 0;
   const ringPercent = clamp01(ringScore / 10);
   const ringRadius = 38;
@@ -363,6 +501,12 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                     {(displayScore?.quality ?? 0).toFixed(1)}
                   </span>
                 </div>
+                <div className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1 ring-1 ring-violet-500/25">
+                  <span className="text-violet-400">Catch-up</span>
+                  <span className={catchupScore != null ? "text-violet-300" : "text-text-tertiary"}>
+                    {catchupScore != null ? catchupScore.toFixed(1) : "N/A"}
+                  </span>
+                </div>
               </div>
             </div>
             <p className="mt-2 text-[11px] text-text-tertiary">
@@ -480,9 +624,186 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                 {epgSummary.channelsWithEpg} / {epgSummary.totalChannels} channels
               </p>
               <p className="text-text-secondary">Unique EPG IDs: {epgSummary.uniqueEpgSources}</p>
+              {epgLoadSummary && (
+                <p className="text-text-secondary">
+                  Programme data: {epgLoadSummary.channels_matched} channels ·{" "}
+                  {epgLoadSummary.programme_count.toLocaleString()} programmes
+                </p>
+              )}
             </div>
           </div>
         </section>
+
+        {catchupStats && (
+          <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary">
+                Catch-up
+                {catchupStats.verifiedAt != null && (
+                  <span className="normal-case tracking-normal text-text-tertiary/80">
+                    {" "}
+                    · verified {formatVerifiedAt(catchupStats.verifiedAt)}
+                  </span>
+                )}
+              </p>
+              {archiveVerifyRun ? (
+                <button
+                  type="button"
+                  onClick={cancelArchiveVerification}
+                  className="rounded-md border border-border-app bg-btn px-2 py-0.5 text-[11px] text-text-primary hover:bg-btn-hover transition-colors"
+                >
+                  {archiveVerifyRun.done}/{archiveVerifyRun.total} · Cancel
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void verifyAllArchives()}
+                  disabled={
+                    playbackBlocksVerification ||
+                    isScanActive(scanState) ||
+                    archiveGuideTestRunning ||
+                    archiveProbeRunning
+                  }
+                  title={
+                    playbackBlocksVerification
+                      ? "Stop playback before verifying catch-up"
+                      : isScanActive(scanState)
+                        ? "Wait for the scan to finish"
+                        : archiveGuideTestRunning || archiveProbeRunning
+                          ? "Another catch-up verification is running"
+                          : undefined
+                  }
+                  className="rounded-md border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/20 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                >
+                  Verify all ({catchupStats.advertised})
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <div className="rounded-md bg-input/60 px-2 py-1.5">
+                <span className="block text-[15px] font-semibold text-green-400 tabular-nums">
+                  {catchupStats.verified}
+                </span>
+                <span className="text-text-tertiary uppercase text-[9px] tracking-[0.04em]">
+                  real
+                </span>
+              </div>
+              <div className="rounded-md bg-input/60 px-2 py-1.5">
+                <span className="block text-[15px] font-semibold text-red-400 tabular-nums">
+                  {catchupStats.fake}
+                </span>
+                <span className="text-text-tertiary uppercase text-[9px] tracking-[0.04em]">
+                  fake
+                </span>
+              </div>
+              <div className="rounded-md bg-input/60 px-2 py-1.5">
+                <span className="block text-[15px] font-semibold text-amber-400 tabular-nums">
+                  {catchupStats.shallower}
+                </span>
+                <span className="text-text-tertiary uppercase text-[9px] tracking-[0.04em]">
+                  shallower
+                </span>
+              </div>
+              <div className="rounded-md bg-input/60 px-2 py-1.5">
+                <span className="block text-[15px] font-semibold text-violet-300 tabular-nums">
+                  {catchupStats.advertised}
+                </span>
+                <span className="text-text-tertiary uppercase text-[9px] tracking-[0.04em]">
+                  advertised
+                </span>
+              </div>
+            </div>
+            {catchupStats.fakeReasons.length > 0 && (
+              <>
+                <p className="mt-3 mb-1 text-[11px] uppercase tracking-[0.08em] text-text-tertiary">
+                  Why fake
+                </p>
+                {catchupStats.fakeReasons.map((reason) => (
+                  <div key={reason.label} className="mb-1 flex items-center gap-2 text-[10px]">
+                    <span className="w-14 shrink-0 text-right text-text-secondary">
+                      {reason.label}
+                    </span>
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-btn/40">
+                      <div
+                        className="h-full rounded-full bg-red-500"
+                        style={{ width: `${(reason.count / catchupStats.fake) * 100}%` }}
+                      />
+                    </div>
+                    <span className="w-7 shrink-0 text-text-tertiary tabular-nums">
+                      {reason.count}
+                    </span>
+                  </div>
+                ))}
+              </>
+            )}
+            {catchupStats.tested > 0 && (
+              <>
+                <p className="mt-3 mb-1 text-[11px] uppercase tracking-[0.08em] text-text-tertiary">
+                  Verified depth
+                </p>
+                {catchupStats.buckets.map((bucket) => {
+                  const maxCount = Math.max(1, ...catchupStats.buckets.map((b) => b.count));
+                  return (
+                    <div key={bucket.label} className="mb-1 flex items-center gap-2 text-[10px]">
+                      <span className="w-8 shrink-0 text-right text-text-secondary tabular-nums">
+                        {bucket.label}
+                      </span>
+                      <div className="h-2 flex-1 overflow-hidden rounded-full bg-btn/40">
+                        <div
+                          className="h-full rounded-full bg-violet-500"
+                          style={{ width: `${(bucket.count / maxCount) * 100}%` }}
+                        />
+                      </div>
+                      <span className="w-7 shrink-0 text-text-tertiary tabular-nums">
+                        {bucket.count}
+                      </span>
+                    </div>
+                  );
+                })}
+                <div className="mt-2 space-y-1 text-[12px]">
+                  <div className="flex items-center justify-between">
+                    <span className="text-text-tertiary">Median archive start</span>
+                    <span className="text-text-primary tabular-nums">
+                      {catchupStats.medianLatency != null
+                        ? `${Math.round(catchupStats.medianLatency)} ms`
+                        : "N/A"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-text-tertiary">Average live start</span>
+                    <span className="text-text-primary tabular-nums">
+                      {latencyStats.average != null
+                        ? `${Math.round(latencyStats.average)} ms`
+                        : "N/A"}
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-3 space-y-1.5">
+                  <button
+                    type="button"
+                    disabled={
+                      catchupExportBusy || catchupStats.verified + catchupStats.shallower === 0
+                    }
+                    onClick={() => void exportCatchupPlaylist("real")}
+                    title="Only channels whose archive answered, with the measured depth written back"
+                    className="w-full rounded-md border border-border-app bg-btn px-2 py-1.5 text-[11.5px] font-medium text-text-primary hover:bg-btn-hover transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    Export real catch-up · M3U ({catchupStats.verified + catchupStats.shallower})
+                  </button>
+                  <button
+                    type="button"
+                    disabled={catchupExportBusy || catchupStats.fake === 0}
+                    onClick={() => void exportCatchupPlaylist("stripped")}
+                    title="The full playlist with catch-up attributes removed from fake channels"
+                    className="w-full rounded-md border border-border-app bg-btn px-2 py-1.5 text-[11.5px] font-medium text-text-primary hover:bg-btn-hover transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    Export playlist, fake flags stripped
+                  </button>
+                </div>
+              </>
+            )}
+          </section>
+        )}
 
         <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
           <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">
