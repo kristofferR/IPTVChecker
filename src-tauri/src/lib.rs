@@ -1058,6 +1058,7 @@ pub fn run() {
             commands::export::export_renamed,
             commands::export::export_m3u,
             commands::export::export_scan_log_json,
+            commands::export::export_playback_diagnostics,
             commands::settings::get_settings,
             commands::settings::get_scan_presets,
             commands::settings::save_scan_preset,

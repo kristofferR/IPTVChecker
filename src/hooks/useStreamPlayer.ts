@@ -1,3 +1,4 @@
+import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { describeArchiveFailure, resolveArchivePlayback } from "../lib/archive";
 import { normalizeCodecName, resolveResolutionLabel } from "../lib/format";
@@ -26,11 +27,19 @@ import {
   supportsNativeHlsPlayback,
   tryConvertToXtreamHls,
 } from "../lib/playback";
+import { observePlayback, type PlaybackObserver } from "../lib/playbackObserver";
+import {
+  type PlaybackEndReason,
+  type PlaybackEventKind,
+  PlaybackRecorder,
+  playbackTelemetry,
+} from "../lib/playbackTelemetry";
 import { toProxyUrl } from "../lib/proxyUrl";
 import { createRuntimeMonitor, type MpegtsPlayer } from "../lib/runtimeMonitor";
 import { getStreamingProxyPort } from "../lib/tauri";
 import type { ChannelResult } from "../lib/types";
 import { canUseBlobWorkers } from "../lib/workerSupport";
+import { useAppStore } from "../store";
 
 // Re-exported for components (e.g. StreamPlayer) that read the recovery cap
 // alongside the hook. The implementation lives in lib/playback.
@@ -175,6 +184,37 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const playbackStartedAtRef = useRef<number | null>(null);
   const startupLatencyMsRef = useRef<number | null>(null);
   const playbackSessionIdRef = useRef(0);
+  const telemetryRef = useRef<PlaybackRecorder | null>(null);
+  const telemetryObserverRef = useRef<PlaybackObserver | null>(null);
+  const telemetryAttemptRef = useRef(0);
+  const finishTelemetry = useCallback((reason: PlaybackEndReason) => {
+    telemetryObserverRef.current?.close();
+    telemetryObserverRef.current = null;
+    playbackTelemetry.finish(reason);
+    telemetryRef.current = null;
+  }, []);
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen<{
+      session_id: string;
+      attempt: number;
+      counters: Partial<Record<PlaybackEventKind, number>>;
+    }>("playback://transport", ({ payload }) => {
+      const recorder = telemetryRef.current;
+      if (recorder?.id === payload.session_id && telemetryAttemptRef.current === payload.attempt)
+        recorder.transport(payload.attempt, payload.counters);
+    })
+      .then((cleanup) => {
+        if (disposed) cleanup();
+        else unlisten = cleanup;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
   const startPlaybackAttemptRef = useRef<StartPlaybackAttempt | null>(null);
 
   useEffect(() => {
@@ -375,6 +415,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   }, [videoElement, collectMetadata, cleanupMetadataListeners]);
 
   const cleanup = useCallback(() => {
+    telemetryObserverRef.current?.closeRoute();
     const abortController = playbackAbortRef.current;
     playbackAbortRef.current = null;
     if (abortController && !abortController.signal.aborted) {
@@ -399,6 +440,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
   const stop = useCallback(
     (options?: { preserveArchiveSession?: boolean }) => {
+      finishTelemetry("stopped");
       playbackSessionIdRef.current += 1;
       isPausedRef.current = false;
       clearRecoveryTimer();
@@ -417,7 +459,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         setArchiveSession(null);
       }
     },
-    [cleanup, clearRecoveryTimer, resetRecoveryUi],
+    [cleanup, clearRecoveryTimer, resetRecoveryUi, finishTelemetry],
   );
 
   const applyVolume = useCallback(() => {
@@ -443,6 +485,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
   const finalizePlaybackFailure = useCallback(
     (result: ChannelResult, reason: string, notifyBackend: boolean) => {
+      telemetryRef.current?.event("player_failure", reason);
+      finishTelemetry("failed");
       cleanup();
       clearRecoveryTimer();
       resetRecoveryUi();
@@ -459,7 +503,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       // let the caller distinguish it from a live channel failure.
       onPlaybackFailedRef.current?.(result, notifyBackend && !archiveSessionRef.current);
     },
-    [cleanup, clearRecoveryTimer, resetRecoveryUi],
+    [cleanup, clearRecoveryTimer, resetRecoveryUi, finishTelemetry],
   );
 
   const attemptRecoveryOrFail = useCallback(
@@ -480,6 +524,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
       if (decision.kind === "finish") {
         logger.info("[Player] Playback finished for", result.name);
+        finishTelemetry("finished");
         onPlaybackFinishedRef.current?.(result);
         stop();
         return;
@@ -498,6 +543,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         reason,
       );
 
+      telemetryRef.current?.event("reconnect", issue);
       let recoveryResult = result;
       const archiveSession = archiveSessionRef.current;
       const elapsedS = Math.floor(videoElement.currentTime);
@@ -560,6 +606,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       cleanup,
       clearRecoveryTimer,
       finalizePlaybackFailure,
+      finishTelemetry,
       setArchiveSession,
       showRecoveryUi,
       stop,
@@ -580,6 +627,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         playerStateRef,
         playbackSessionIdRef,
         hasStartedPlayingRef,
+        onTelemetry: (kind, detail, seconds) => telemetryRef.current?.event(kind, detail, seconds),
         onRuntimeIssue: (issue, reason) => attemptRecoveryOrFail(result, sessionId, issue, reason),
       });
     },
@@ -655,6 +703,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         videoElement.addEventListener("canplay", onCanPlay, { once: true });
         videoElement.addEventListener("error", onError, { once: true });
         signal.addEventListener("abort", onAbort, { once: true });
+        telemetryAttemptRef.current++;
+        telemetryObserverRef.current?.route("native");
         videoElement.src = url;
         applyVolume();
         videoElement.load();
@@ -680,6 +730,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             maxBufferLength: 30,
             maxMaxBufferLength: 60,
           });
+          telemetryAttemptRef.current++;
+          telemetryObserverRef.current?.route("hls.js");
+          telemetryObserverRef.current?.hls(hls, Hls.Events);
           hlsInstanceRef.current = hls;
 
           const finish = (value: boolean) => {
@@ -763,10 +816,20 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         return await new Promise<boolean>((resolve) => {
           let settled = false;
           let timer: ReturnType<typeof setTimeout> | null = null;
+          telemetryObserverRef.current?.route("mpegts.js");
           const player = mpegts.createPlayer(
             {
               type: "mpegts",
-              url,
+              url: (() => {
+                const target = new URL(url);
+                const recorder = telemetryRef.current;
+                if (recorder && target.hostname === "127.0.0.1" && target.pathname === "/stream") {
+                  recorder.enableTransport();
+                  target.searchParams.set("session", recorder.id);
+                  target.searchParams.set("attempt", String(++telemetryAttemptRef.current));
+                }
+                return target.toString();
+              })(),
               isLive,
             },
             {
@@ -781,6 +844,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
               autoCleanupMinBackwardDuration: 60,
             },
           ) as unknown as MpegtsPlayer;
+          telemetryObserverRef.current?.mpegts(player);
           mpegtsPlayerRef.current = player;
 
           const finish = (value: boolean) => {
@@ -831,7 +895,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             videoElement.addEventListener("error", onError, { once: true });
             signal.addEventListener("abort", onAbort, { once: true });
             player.on?.("error", onPlayerError);
-            player.attachMediaElement(videoElement);
+            if (telemetryObserverRef.current)
+              telemetryObserverRef.current.attachMpegts(() =>
+                player.attachMediaElement(videoElement),
+              );
+            else player.attachMediaElement(videoElement);
             player.load();
             applyVolume();
           } catch (error) {
@@ -1102,13 +1170,37 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
 
   useEffect(() => {
     return () => {
+      finishTelemetry("unmounted");
       clearRecoveryTimer();
       cleanup();
     };
-  }, [cleanup, clearRecoveryTimer]);
+  }, [cleanup, clearRecoveryTimer, finishTelemetry]);
 
   const beginPlayback = useCallback(
     (result: ChannelResult) => {
+      finishTelemetry("switched");
+      const state = useAppStore.getState();
+      const recorder = new PlaybackRecorder({
+        id: crypto.randomUUID(),
+        channelIndex: result.index,
+        channelName: result.name,
+        mode: archiveSessionRef.current
+          ? "archive"
+          : result.content_type === "live"
+            ? "live"
+            : "vod",
+        streamType: classifyStream(result.url),
+        platform: state.platform,
+        appVersion: state.appVersion,
+      });
+      telemetryRef.current = recorder;
+      telemetryAttemptRef.current = 0;
+      playbackTelemetry.start(recorder);
+      telemetryObserverRef.current = observePlayback(
+        videoElement,
+        recorder,
+        () => isPausedRef.current,
+      );
       playbackSessionIdRef.current += 1;
       isPausedRef.current = false;
       const sessionId = playbackSessionIdRef.current;
@@ -1121,7 +1213,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       resetRecoveryUi();
       void startPlaybackAttempt(result, sessionId, "manual", 0);
     },
-    [clearRecoveryTimer, resetRecoveryUi, startPlaybackAttempt],
+    [clearRecoveryTimer, resetRecoveryUi, startPlaybackAttempt, finishTelemetry, videoElement],
   );
 
   const play = useCallback(

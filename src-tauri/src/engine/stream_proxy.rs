@@ -3,7 +3,7 @@ use base64::Engine;
 use reqwest::header::{HeaderValue, CONTENT_TYPE, LOCATION, RANGE, USER_AGENT};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use url::{Host, Url};
 
 use crate::engine::ffmpeg::{
@@ -593,7 +593,79 @@ struct StreamForwardResult {
     bytes_forwarded: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+struct PlaybackTransportId {
+    session_id: String,
+    attempt: u32,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct PlaybackTransportEvent {
+    #[serde(flatten)]
+    id: PlaybackTransportId,
+    counters: std::collections::BTreeMap<&'static str, u64>,
+}
+
+#[derive(Clone)]
+struct PlaybackTransport {
+    app: tauri::AppHandle,
+    pending: Arc<std::sync::Mutex<PlaybackTransportEvent>>,
+}
+impl PlaybackTransport {
+    fn new(app: tauri::AppHandle, id: PlaybackTransportId) -> Self {
+        let pending = Arc::new(std::sync::Mutex::new(PlaybackTransportEvent {
+            id,
+            counters: Default::default(),
+        }));
+        let weak = Arc::downgrade(&pending);
+        let emitter = app.clone();
+        tokio::spawn(async move {
+            let mut previous = std::collections::BTreeMap::new();
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                let Some(pending) = weak.upgrade() else {
+                    break;
+                };
+                if let Ok(pending) = pending.lock() {
+                    if pending.counters != previous {
+                        let _ = emitter.emit("playback://transport", &*pending);
+                        previous = pending.counters.clone();
+                    }
+                };
+            }
+        });
+        Self { app, pending }
+    }
+    fn record(&self, kind: &'static str) {
+        if let Ok(mut pending) = self.pending.lock() {
+            *pending.counters.entry(kind).or_default() += 1;
+        }
+    }
+    fn flush(&self) {
+        if let Ok(pending) = self.pending.lock() {
+            let _ = self.app.emit("playback://transport", &*pending);
+        }
+    }
+    fn outcome(&self, outcome: StreamForwardOutcome) {
+        match outcome {
+            StreamForwardOutcome::Completed => self.record("upstream_eof"),
+            StreamForwardOutcome::UpstreamReadTimeout => self.record("upstream_timeout"),
+            StreamForwardOutcome::UpstreamReadError(_) => self.record("upstream_error"),
+            StreamForwardOutcome::DownstreamClosed => {}
+        }
+        self.flush();
+    }
+    fn request_failure(&self, error: &SafeFetchError) {
+        self.record(match error {
+            SafeFetchError::Request(error) if error.is_timeout() => "upstream_timeout",
+            _ => "upstream_error",
+        });
+        self.flush();
+    }
+}
+
 struct TransportStreamPacer {
+    telemetry: Option<PlaybackTransport>,
     scan_tail: Vec<u8>,
     pcr_pid: Option<u16>,
     last_pcr: Option<u64>,
@@ -611,6 +683,7 @@ impl TransportStreamPacer {
 
     fn with_max_lead(max_lead: std::time::Duration) -> Self {
         Self {
+            telemetry: None,
             scan_tail: Vec::with_capacity(MPEG_TS_PACKET_SIZE * 4),
             pcr_pid: None,
             last_pcr: None,
@@ -694,6 +767,9 @@ impl TransportStreamPacer {
             self.media_elapsed_ticks = duration_to_pcr_ticks(self.max_lead);
             self.wall_anchor = Some(std::time::Instant::now());
             self.reanchor_count = self.reanchor_count.saturating_add(1);
+            if let Some(telemetry) = &self.telemetry {
+                telemetry.record("pacing_warning");
+            }
             log::warn!(
                 "[StreamProxy] Re-anchored transport clock after an implausible pacing delay"
             );
@@ -792,6 +868,7 @@ async fn forward_playback_remux_as_chunked_stream<W>(
     writer: &mut W,
     mut child: tokio::process::Child,
     upstream_url: &str,
+    telemetry: Option<PlaybackTransport>,
 ) -> StreamForwardResult
 where
     W: tokio::io::AsyncWrite + Unpin,
@@ -809,9 +886,13 @@ where
     if let Some(stderr) = child.stderr.take() {
         let redacted = redact_url(upstream_url);
         let original = upstream_url.to_string();
+        let telemetry = telemetry.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                if let Some(telemetry) = &telemetry {
+                    telemetry.record("remux_warning");
+                }
                 let sanitized = sanitize_ffmpeg_stderr_line(&line);
                 log::debug!(
                     "[StreamProxy/remux] {}",
@@ -856,6 +937,7 @@ where
 
     let mut bytes_forwarded = 0u64;
     let mut pacer = TransportStreamPacer::with_max_lead(REMUX_PACER_MAX_LEAD);
+    pacer.telemetry = telemetry.clone();
     while let Some((chunk, _budget_permit)) = chunk_rx.recv().await {
         let delay = pacer.delay_for_payload(&chunk);
         if !pacer.announced && pacer.wall_anchor.is_some() {
@@ -893,6 +975,9 @@ where
         }
     };
     if status.is_some_and(|status| !status.success()) {
+        if let Some(telemetry) = &telemetry {
+            telemetry.record("remux_warning");
+        }
         log::warn!(
             "[StreamProxy/remux] ffmpeg stopped while streaming {}",
             redact_url(upstream_url)
@@ -1170,6 +1255,9 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                         return;
                     }
                 };
+                let telemetry = request
+                    .telemetry
+                    .map(|id| PlaybackTransport::new(app_handle.clone(), id));
                 let url = request.url;
                 let reconnect = request.reconnect;
 
@@ -1218,6 +1306,10 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                                 redact_url(&url),
                                 error
                             );
+                            if let Some(telemetry) = &telemetry {
+                                telemetry.record("remux_warning");
+                                telemetry.flush();
+                            }
                             let body = "Playback remux unavailable";
                             let response = format!(
                                 "HTTP/1.1 502 Bad Gateway\r\nContent-Length: {}\r\n\r\n{}",
@@ -1248,8 +1340,16 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                         "[StreamProxy/remux] Normalizing live MPEG-TS timestamps for {}",
                         redact_url(&url)
                     );
-                    let forward =
-                        forward_playback_remux_as_chunked_stream(&mut socket, child, &url).await;
+                    let forward = forward_playback_remux_as_chunked_stream(
+                        &mut socket,
+                        child,
+                        &url,
+                        telemetry.clone(),
+                    )
+                    .await;
+                    if let Some(telemetry) = &telemetry {
+                        telemetry.outcome(forward.outcome);
+                    }
                     if forward.outcome != StreamForwardOutcome::DownstreamClosed {
                         let _ = finish_chunked_stream(&mut socket).await;
                     }
@@ -1291,6 +1391,9 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                                 }
                             }
                         };
+                        if let Some(telemetry) = &telemetry {
+                            telemetry.request_failure(&err);
+                        }
                         let response = format!(
                             "{status_line}\r\nContent-Length: {}\r\n\r\n{}",
                             body.len(),
@@ -1302,6 +1405,12 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                 };
 
                 let status = response.status();
+                if !status.is_success() {
+                    if let Some(telemetry) = &telemetry {
+                        telemetry.record("upstream_error");
+                        telemetry.flush();
+                    }
+                }
                 let content_type = response
                     .headers()
                     .get(CONTENT_TYPE)
@@ -1331,13 +1440,20 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                 // Only successful live bodies are safe to concatenate after an
                 // upstream reconnect.
                 if !reconnect || !status.is_success() {
-                    let _ = forward_response_as_chunked_stream(&mut socket, response, None).await;
+                    let forward =
+                        forward_response_as_chunked_stream(&mut socket, response, None).await;
+                    if let Some(telemetry) = &telemetry {
+                        if status.is_success() {
+                            telemetry.outcome(forward.outcome);
+                        }
+                    }
                     let _ = finish_chunked_stream(&mut socket).await;
                     return;
                 }
 
                 let mut response = response;
                 let mut pacer = TransportStreamPacer::new();
+                pacer.telemetry = telemetry.clone();
                 let mut reconnects = 0u32;
                 let mut consecutive_empty_attempts = 0u32;
 
@@ -1345,6 +1461,9 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     let forward =
                         forward_response_as_chunked_stream(&mut socket, response, Some(&mut pacer))
                             .await;
+                    if let Some(telemetry) = &telemetry {
+                        telemetry.outcome(forward.outcome);
+                    }
                     if forward.outcome == StreamForwardOutcome::DownstreamClosed {
                         log::debug!(
                             "[StreamProxy] Downstream disconnected while streaming {}",
@@ -1390,16 +1509,28 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                             return;
                         }
 
+                        if let Some(telemetry) = &telemetry {
+                            telemetry.record("proxy_reconnect");
+                            telemetry.flush();
+                        }
                         match fetch_with_hop_validation(&url, |target| {
                             client.get(target).header(USER_AGENT, user_agent.clone())
                         })
                         .await
                         {
                             Ok(next_response) if next_response.status().is_success() => {
+                                if let Some(telemetry) = &telemetry {
+                                    telemetry.record("proxy_connected");
+                                    telemetry.flush();
+                                }
                                 response = next_response;
                                 break;
                             }
                             Ok(next_response) => {
+                                if let Some(telemetry) = &telemetry {
+                                    telemetry.record("upstream_error");
+                                    telemetry.flush();
+                                }
                                 consecutive_empty_attempts =
                                     consecutive_empty_attempts.saturating_add(1);
                                 log::warn!(
@@ -1409,6 +1540,9 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                                 );
                             }
                             Err(err) => {
+                                if let Some(telemetry) = &telemetry {
+                                    telemetry.request_failure(&err);
+                                }
                                 consecutive_empty_attempts =
                                     consecutive_empty_attempts.saturating_add(1);
                                 let kind = match &err {
@@ -1437,6 +1571,7 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
 
 #[derive(Debug, PartialEq, Eq)]
 struct StreamRequest {
+    telemetry: Option<PlaybackTransportId>,
     url: String,
     reconnect: bool,
     remux: bool,
@@ -1450,8 +1585,20 @@ fn parse_stream_request(request: &str) -> Option<StreamRequest> {
     let mut upstream_url = None;
     let mut reconnect = false;
     let mut remux = false;
+    let mut session_id = None;
+    let mut attempt = None;
     for (key, value) in url.query_pairs() {
         match key.as_ref() {
+            "session"
+                if value.len() <= 64
+                    && !value.is_empty()
+                    && value
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-') =>
+            {
+                session_id = Some(value.into_owned())
+            }
+            "attempt" => attempt = value.parse::<u32>().ok(),
             "url" => upstream_url = Some(value.into_owned()),
             "reconnect" => reconnect = value == "1" || value.eq_ignore_ascii_case("true"),
             "remux" => remux = value == "1" || value.eq_ignore_ascii_case("true"),
@@ -1459,6 +1606,12 @@ fn parse_stream_request(request: &str) -> Option<StreamRequest> {
         }
     }
     upstream_url.map(|url| StreamRequest {
+        telemetry: session_id
+            .zip(attempt)
+            .map(|(session_id, attempt)| PlaybackTransportId {
+                session_id,
+                attempt,
+            }),
         url,
         reconnect,
         remux,
@@ -1788,6 +1941,7 @@ segment.ts
         assert_eq!(
             parse_stream_request(request),
             Some(StreamRequest {
+                telemetry: None,
                 url: "https://example.com/strøm?token=abc+123".to_string(),
                 reconnect: false,
                 remux: false,
@@ -1796,11 +1950,27 @@ segment.ts
     }
 
     #[test]
+    fn playback_transport_correlation_accepts_only_bounded_safe_ids() {
+        let valid = parse_stream_request("GET /stream?url=https%3A%2F%2Fexample.com%2Flive.ts&session=session-1&attempt=2 HTTP/1.1").unwrap();
+        assert_eq!(valid.telemetry.unwrap().attempt, 2);
+        for suffix in [
+            "session=https%3A%2F%2Fuser%3Asecret%40host&attempt=2",
+            "session=session-1&attempt=invalid",
+            "session=session-1",
+        ] {
+            let request =
+                format!("GET /stream?url=https%3A%2F%2Fexample.com%2Flive.ts&{suffix} HTTP/1.1");
+            assert!(parse_stream_request(&request).unwrap().telemetry.is_none());
+        }
+    }
+
+    #[test]
     fn parse_stream_request_enables_opt_in_reconnect() {
         let request = "GET /stream?url=https%3A%2F%2Fexample.com%2Flive.ts&reconnect=1 HTTP/1.1\r\nHost: localhost\r\n\r\n";
         assert_eq!(
             parse_stream_request(request),
             Some(StreamRequest {
+                telemetry: None,
                 url: "https://example.com/live.ts".to_string(),
                 reconnect: true,
                 remux: false,
@@ -1814,6 +1984,7 @@ segment.ts
         assert_eq!(
             parse_stream_request(request),
             Some(StreamRequest {
+                telemetry: None,
                 url: "https://example.com/live.ts".to_string(),
                 reconnect: true,
                 remux: true,

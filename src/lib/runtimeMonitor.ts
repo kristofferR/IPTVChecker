@@ -20,6 +20,7 @@ import {
   recordPlaybackRecoveryAttempt,
   shouldSuspendPlaybackWatchdog,
 } from "./playback";
+import type { PlaybackEventKind } from "./playbackTelemetry";
 import type { ChannelResult } from "./types";
 
 const PLAYBACK_STALL_GRACE_MS = 15_000;
@@ -69,6 +70,8 @@ export interface RuntimeMonitorParams {
   playerStateRef: MutableRef<PlayerState>;
   playbackSessionIdRef: MutableRef<number>;
   hasStartedPlayingRef: MutableRef<boolean>;
+  /** Reports each observed recovery action during monitoring. */
+  onTelemetry?: (kind: PlaybackEventKind, detail?: string, seconds?: number) => void;
   /** Invoked at most once when the monitor decides recovery is needed. */
   onRuntimeIssue: (issue: PlaybackRecoveryIssue, reason: string) => void;
 }
@@ -85,6 +88,7 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
     playbackSessionIdRef,
     hasStartedPlayingRef,
     onRuntimeIssue,
+    onTelemetry,
   } = params;
   const isLive = result.content_type === "live";
 
@@ -154,6 +158,7 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
     monitor.lastProgressAt = monitor.lastResyncAt;
     monitor.stallStartedAt = null;
     logger.warn(`[Player] Skipping ${(target - from).toFixed(2)}s buffered timestamp gap`);
+    onTelemetry?.("resync", "Buffered timestamp gap", target - from);
     videoElement.currentTime = target;
     void videoElement.play().catch(() => {});
     return true;
@@ -199,6 +204,7 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
     monitor.lastCurrentTime = target;
     monitor.lastProgressAt = now;
     monitor.stallStartedAt = null;
+    onTelemetry?.("latency_trim", "Accumulated live latency", target - from);
     logger.warn(`[Player] Trimming ${(target - from).toFixed(1)}s accumulated live latency`);
     videoElement.currentTime = target;
     void videoElement.play().catch(() => {});
@@ -314,12 +320,14 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
         }
         if (recoveryAction === "restart_network") {
           logger.warn("[Player] Restarting hls.js network loading after", detail);
+          onTelemetry?.("library_recovery", "Restarting HLS network loading");
           hls.startLoad(-1);
           markPotentialStall();
           return;
         }
         if (recoveryAction === "recover_media") {
           logger.warn("[Player] Recovering hls.js media pipeline after", detail);
+          onTelemetry?.("library_recovery", "Recovering HLS media pipeline");
           hls.recoverMediaError();
           markPotentialStall();
           return;

@@ -23,6 +23,7 @@ import { getThumbnailDisplayState } from "../lib/thumbnailState";
 import type { ChannelResult } from "../lib/types";
 import { ArchiveCard } from "./ArchiveCard";
 import { CastMenu, type CastStartHandler } from "./CastMenu";
+import { PlaybackDiagnostics } from "./PlaybackDiagnostics";
 import { StatusBadge } from "./StatusBadge";
 import { StreamPlayer } from "./StreamPlayer";
 
@@ -530,8 +531,11 @@ export function ThumbnailPanel({
         )}
       </div>
 
+      <PlaybackDiagnostics channelIndex={result.index} />
+
       {onPlayArchive && (
         <ArchiveCard
+          key={result.index}
           result={result}
           archiveSession={activeArchiveSession}
           isCasting={isCastSessionActive(chromecast.session)}
