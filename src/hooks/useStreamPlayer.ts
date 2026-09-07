@@ -635,7 +635,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   );
 
   const tryNativePlayback = useCallback(
-    (url: string, signal: AbortSignal, timeoutMs?: number): Promise<boolean> => {
+    (url: string, signal: AbortSignal, timeoutMs?: number, audioOnly = false): Promise<boolean> => {
       return new Promise((resolve) => {
         if (signal.aborted) {
           resolve(false);
@@ -658,7 +658,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         const onCanPlay = () => {
           // Native HLS can advance audio while dropping every video frame.
           // Start playback before accepting it so the MSE fallback still runs.
-          if (!videoElement.videoWidth || !videoElement.getVideoPlaybackQuality) {
+          if (audioOnly) {
             finish(true);
             return;
           }
@@ -666,8 +666,10 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           void videoElement.play().catch(() => finish(true));
           frameTimer = setInterval(() => {
             if (
-              document.visibilityState === "hidden" ||
-              hasPresentedVideoFrame(videoElement.getVideoPlaybackQuality())
+              videoElement.videoWidth > 0 &&
+              (document.visibilityState === "hidden" ||
+                !videoElement.getVideoPlaybackQuality ||
+                hasPresentedVideoFrame(videoElement.getVideoPlaybackQuality()))
             ) {
               finish(true);
             } else if (performance.now() - startedAt >= 2_000) {
@@ -1010,6 +1012,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             xtreamHlsUrl,
             abortController.signal,
             PLAYBACK_ROUTE_TIMEOUT_MS,
+            result.audio_only,
           );
           if (!isCurrentPlayback()) return false;
           if (nativeOk && (await handleSuccessfulStart())) {
@@ -1040,6 +1043,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           url,
           abortController.signal,
           PLAYBACK_ROUTE_TIMEOUT_MS,
+          result.audio_only,
         );
         if (!isCurrentPlayback()) {
           return;
@@ -1157,6 +1161,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           url,
           abortController.signal,
           PLAYBACK_ROUTE_TIMEOUT_MS,
+          result.audio_only,
         );
         if (!isCurrentPlayback()) {
           return;
