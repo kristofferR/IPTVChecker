@@ -155,6 +155,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [volume, setVolumeState] = useState(readStoredVolume);
   const [muted, setMuted] = useState(readStoredMuted);
+  const audioSettingsRef = useRef({ volume, muted });
+  audioSettingsRef.current = { volume, muted };
+  const nativeVideoPrerollRef = useRef(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isRecovering, setIsRecovering] = useState(false);
   const [recoveryAttempt, setRecoveryAttempt] = useState<number | null>(null);
@@ -463,13 +466,13 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   );
 
   const applyVolume = useCallback(() => {
-    videoElement.volume = volume;
-    videoElement.muted = muted;
-  }, [videoElement, volume, muted]);
+    videoElement.volume = audioSettingsRef.current.volume;
+    videoElement.muted = nativeVideoPrerollRef.current || audioSettingsRef.current.muted;
+  }, [videoElement]);
 
   useEffect(() => {
     applyVolume();
-  }, [applyVolume]);
+  }, [applyVolume, volume, muted]);
 
   useEffect(() => {
     try {
@@ -635,7 +638,12 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   );
 
   const tryNativePlayback = useCallback(
-    (url: string, signal: AbortSignal, timeoutMs?: number, audioOnly = false): Promise<boolean> => {
+    (
+      url: string,
+      signal: AbortSignal,
+      timeoutMs = PLAYBACK_ROUTE_TIMEOUT_MS,
+      audioOnly = false,
+    ): Promise<boolean> => {
       return new Promise((resolve) => {
         if (signal.aborted) {
           resolve(false);
@@ -645,14 +653,18 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         let settled = false;
         let timer: ReturnType<typeof setTimeout> | null = null;
         let frameTimer: ReturnType<typeof setInterval> | null = null;
+        let frameRequest: number | null = null;
         const finish = (value: boolean) => {
           if (settled) return;
           settled = true;
           if (timer) clearTimeout(timer);
           if (frameTimer) clearInterval(frameTimer);
+          if (frameRequest !== null) videoElement.cancelVideoFrameCallback(frameRequest);
           videoElement.removeEventListener("canplay", onCanPlay);
           videoElement.removeEventListener("error", onError);
           signal.removeEventListener("abort", onAbort);
+          nativeVideoPrerollRef.current = false;
+          applyVolume();
           resolve(value);
         };
         const onCanPlay = () => {
@@ -663,17 +675,23 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             return;
           }
           const startedAt = performance.now();
-          void videoElement.play().catch(() => finish(true));
+          if (videoElement.requestVideoFrameCallback) {
+            frameRequest = videoElement.requestVideoFrameCallback(() => finish(true));
+          }
+          void videoElement.play().catch(() => {});
           frameTimer = setInterval(() => {
             if (
               videoElement.videoWidth > 0 &&
               (document.visibilityState === "hidden" ||
-                !videoElement.getVideoPlaybackQuality ||
-                hasPresentedVideoFrame(videoElement.getVideoPlaybackQuality()))
+                (!videoElement.requestVideoFrameCallback &&
+                  (!videoElement.getVideoPlaybackQuality ||
+                    hasPresentedVideoFrame(videoElement.getVideoPlaybackQuality()))))
             ) {
               finish(true);
-            } else if (performance.now() - startedAt >= 2_000) {
-              lastErrorRef.current = "Native playback did not produce a video frame";
+            } else if (videoElement.videoWidth === 0 && performance.now() - startedAt >= 2_000) {
+              // Missing video can fall back quickly. A recognized video track
+              // may still be buffering, so allow the full route startup budget.
+              lastErrorRef.current = "Native playback did not expose a video track";
               finish(false);
               videoElement.pause();
               videoElement.removeAttribute("src");
@@ -707,6 +725,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         signal.addEventListener("abort", onAbort, { once: true });
         telemetryAttemptRef.current++;
         telemetryObserverRef.current?.route("native");
+        // WebKit can drop every interlaced frame when its audio clock starts
+        // first. Preroll video silently, then restore the user's audio settings.
+        nativeVideoPrerollRef.current = !audioOnly;
         videoElement.src = url;
         applyVolume();
         videoElement.load();
