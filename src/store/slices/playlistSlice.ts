@@ -14,7 +14,10 @@ export const createPlaylistSlice: StateCreator<AppStore, [], [], PlaylistSlice> 
   lastAppliedSourceFilter: "",
 
   setPlaylist: (playlist) => {
-    if (get().playlist !== playlist) playbackTelemetry.clear();
+    const previous = get().playlist;
+    const previousIdentity = previous?.source_identity ?? previous?.file_path;
+    const nextIdentity = playlist?.source_identity ?? playlist?.file_path;
+    if (previousIdentity !== nextIdentity) playbackTelemetry.clear();
     set({ playlist });
   },
   setCachedSourcePreview: (cachedSourcePreview) => set({ cachedSourcePreview }),

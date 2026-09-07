@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { describeArchiveFailure, resolveArchivePlayback } from "../lib/archive";
 import { normalizeCodecName, resolveResolutionLabel } from "../lib/format";
 import { logger } from "../lib/logger";
@@ -156,7 +156,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
   const [volume, setVolumeState] = useState(readStoredVolume);
   const [muted, setMuted] = useState(readStoredMuted);
   const audioSettingsRef = useRef({ volume, muted });
-  audioSettingsRef.current = { volume, muted };
+  useLayoutEffect(() => {
+    audioSettingsRef.current = { volume, muted };
+  }, [volume, muted]);
   const nativeVideoPrerollRef = useRef(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isRecovering, setIsRecovering] = useState(false);
