@@ -17,7 +17,7 @@
         "@tauri-apps/plugin-store": "^2.4.4",
         "hls.js": "^1.7.0",
         "lucide-react": "^1.31.0",
-        "mpegts.js": "^1.8.1",
+        "mpegts.js": "^1.8.2",
         "react": "^19.2.8",
         "react-dom": "^19.2.8",
         "tauri-plugin-liquid-glass-api": "^0.1.6",
@@ -333,7 +333,7 @@
 
     "magic-string": ["magic-string@0.30.21", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.5" } }, "sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ=="],
 
-    "mpegts.js": ["mpegts.js@1.8.1", "", { "dependencies": { "es6-promise": "^4.2.8", "events": "^3.3.0" } }, "sha512-mQ2daxqBaS+QmBYTmJMDUGwAOw08534b08KSyqUGkjkhuBODNod15j8pnRfVEIQVWulKNe201/6UqILe4m4YRQ=="],
+    "mpegts.js": ["mpegts.js@1.8.2", "", { "dependencies": { "es6-promise": "^4.2.8", "events": "^3.3.0" } }, "sha512-cZYMa5muASH55wrS6JK5IGkUqnCA96c0f+WdnW91jIK9s/N6NzjmTQDJNYg9A5u/G2Q5nj2b3w1Zwzze/9guxA=="],
 
     "ms": ["ms@2.1.3", "", {}, "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="],
 

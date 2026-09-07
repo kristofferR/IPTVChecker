@@ -31,7 +31,7 @@
     "@tauri-apps/plugin-store": "^2.4.4",
     "hls.js": "^1.7.0",
     "lucide-react": "^1.31.0",
-    "mpegts.js": "^1.8.1",
+    "mpegts.js": "^1.8.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "tauri-plugin-liquid-glass-api": "^0.1.6",
