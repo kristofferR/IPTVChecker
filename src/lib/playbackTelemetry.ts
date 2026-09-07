@@ -431,6 +431,13 @@ export class PlaybackTelemetryStore {
   };
   getSummaries = () => this.summaries;
   get = (index: number) => this.latest.get(index) ?? null;
+  transport(
+    sessionId: string,
+    attempt: number,
+    counters: Partial<Record<PlaybackEventKind, number>>,
+  ) {
+    if (this.current?.id === sessionId) this.current.transport(attempt, counters);
+  }
   start(recorder: PlaybackRecorder) {
     this.finish("switched");
     this.current = recorder;

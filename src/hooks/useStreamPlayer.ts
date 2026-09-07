@@ -206,9 +206,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       attempt: number;
       counters: Partial<Record<PlaybackEventKind, number>>;
     }>("playback://transport", ({ payload }) => {
-      const recorder = telemetryRef.current;
-      if (recorder?.id === payload.session_id && telemetryAttemptRef.current === payload.attempt)
-        recorder.transport(payload.attempt, payload.counters);
+      playbackTelemetry.transport(payload.session_id, payload.attempt, payload.counters);
     })
       .then((cleanup) => {
         if (disposed) cleanup();

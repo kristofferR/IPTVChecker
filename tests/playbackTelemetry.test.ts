@@ -172,6 +172,31 @@ describe("playback observations", () => {
 });
 
 describe("retention and exports", () => {
+  test("accepts delayed transport counters after route fallback, but isolates sessions", () => {
+    const store = new PlaybackTelemetryStore();
+    const { recorder } = session();
+    store.start(recorder);
+    recorder.route("mpegts.js");
+    store.transport(recorder.id, 1, { upstream_timeout: 1 });
+    recorder.route("mpegts.js");
+    // The next route has started, but the previous route's final flush is delayed.
+    store.transport(recorder.id, 1, { upstream_timeout: 2 });
+    store.publish();
+    expect(store.get(1)?.summary.counters.upstream_timeout).toBe(2);
+    store.transport(recorder.id, 2, { upstream_timeout: 1 });
+    store.transport(recorder.id, 1, { upstream_timeout: 20 });
+    store.publish();
+    expect(store.get(1)?.summary.counters.upstream_timeout).toBe(3);
+
+    const next = session(2).recorder;
+    store.start(next);
+    store.transport(recorder.id, 3, { upstream_timeout: 50 });
+    store.publish();
+    expect(store.get(2)?.summary.counters.upstream_timeout).toBeUndefined();
+    store.transport(next.id, 1, { upstream_timeout: 1 });
+    store.publish();
+    expect(store.get(2)?.summary.counters.upstream_timeout).toBe(1);
+  });
   test("keeps bounded details and summaries, and clears reused channel identities with the playlist", () => {
     const store = new PlaybackTelemetryStore();
     for (let i = 0; i < PLAYBACK_SUMMARY_LIMIT + 5; i++) {
