@@ -24,6 +24,7 @@ import { isScanActive } from "../lib/scanState";
 import { exportM3u } from "../lib/tauri";
 import type { ChannelResult, PlaylistScore } from "../lib/types";
 import { useAppStore } from "../store";
+import { PlaybackReportSummary } from "./PlaybackDiagnostics";
 
 interface PlaylistReportPanelProps {
   placement?: "left" | "right";
@@ -451,6 +452,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
       </div>
 
       <div className="p-4 space-y-5">
+        <PlaybackReportSummary />
         {showHealthScore && (
           <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
             <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">

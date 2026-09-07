@@ -1,5 +1,6 @@
-import { CircleCheck, CircleX, LoaderCircle, Play } from "lucide-react";
+import { ChevronRight, CircleCheck, CircleX, LoaderCircle, Play } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useDisclosure } from "../hooks/useDisclosure";
 import type { ArchivePlayOptions, ArchiveSession } from "../hooks/useStreamPlayer";
 import { archivePickerDefault, archiveTitle, hasArchive, MAX_CATCHUP_DAYS } from "../lib/archive";
 import { probeChannelArchive } from "../lib/archiveProbe";
@@ -222,11 +223,13 @@ export function ArchiveCard({
   isCasting,
   onPlayArchive,
 }: ArchiveCardProps) {
+  const [expanded, setExpanded] = useDisclosure("archive-expanded");
+  const [hasOpened, setHasOpened] = useState(expanded);
   const [programmes, setProgrammes] = useState<EpgProgramme[] | null>(null);
   const depthDays = Math.min(MAX_CATCHUP_DAYS, Math.max(1, result.catchup_days ?? 7));
 
   useEffect(() => {
-    if (!hasArchive(result)) {
+    if (!hasOpened || !hasArchive(result)) {
       return;
     }
     let stale = false;
@@ -255,7 +258,7 @@ export function ArchiveCard({
     return () => {
       stale = true;
     };
-  }, [depthDays, result]);
+  }, [depthDays, result, hasOpened]);
 
   const dayGroups = useMemo(() => {
     if (!programmes || programmes.length === 0) return [];
@@ -292,65 +295,74 @@ export function ArchiveCard({
       : null;
 
   return (
-    <div className="p-2 rounded bg-violet-500/10 border border-violet-500/20">
-      <p
-        className="text-[12px] font-medium text-violet-300"
-        title={archiveTitle(result) ?? undefined}
-      >
-        Archive
-        <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-violet-300/80">
-          {result.catchup ?? "default"}
-          {result.catchup_days != null ? ` · ${result.catchup_days} d` : ""}
+    <details
+      open={expanded}
+      onToggle={(event) => {
+        const next = event.currentTarget.open;
+        setExpanded(next);
+        if (next) setHasOpened(true);
+      }}
+      className="group/archive rounded bg-violet-500/10 border border-violet-500/20"
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 p-2 text-[12px] font-medium text-violet-300 [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-blue-500">
+        <span className="min-w-0" title={archiveTitle(result) ?? undefined}>
+          Archive
+          <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-violet-300/80">
+            {result.catchup ?? "default"}
+            {result.catchup_days != null ? ` · ${result.catchup_days} d` : ""}
+          </span>
         </span>
-      </p>
+        <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 group-open/archive:rotate-90" />
+      </summary>
+      <div className="px-2 pb-2">
+        {programmes === null ? (
+          <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-text-tertiary">
+            <LoaderCircle className="h-3 w-3 animate-spin" />
+            Loading guide...
+          </div>
+        ) : dayGroups.length > 0 ? (
+          <div className="mt-1">
+            {dayGroups.map((group) => (
+              <div key={group.label}>
+                <p className="mt-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-text-tertiary">
+                  {group.label}
+                </p>
+                {group.entries.map((programme) => {
+                  const playing = playingStart === programme.start;
+                  return (
+                    <button
+                      key={`${programme.start}-${programme.stop}-${programme.title}`}
+                      type="button"
+                      onClick={() =>
+                        onPlayArchive(result, {
+                          startEpochS: programme.start,
+                          endEpochS: programme.stop,
+                          title: programme.title,
+                        })
+                      }
+                      className={`flex w-full items-center gap-2 rounded px-1.5 py-0.5 text-left text-[11px] transition-colors ${
+                        playing
+                          ? "bg-violet-500/20 text-violet-200"
+                          : "text-text-secondary hover:bg-panel-subtle hover:text-text-primary"
+                      }`}
+                    >
+                      <span className="shrink-0 tabular-nums text-text-tertiary">
+                        {timeLabel(programme.start)}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">{programme.title}</span>
+                      <Play className="h-2.5 w-2.5 shrink-0 opacity-60" />
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <ArchivePicker result={result} onPlayArchive={onPlayArchive} />
+        )}
 
-      {programmes === null ? (
-        <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-text-tertiary">
-          <LoaderCircle className="h-3 w-3 animate-spin" />
-          Loading guide...
-        </div>
-      ) : dayGroups.length > 0 ? (
-        <div className="mt-1">
-          {dayGroups.map((group) => (
-            <div key={group.label}>
-              <p className="mt-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-text-tertiary">
-                {group.label}
-              </p>
-              {group.entries.map((programme) => {
-                const playing = playingStart === programme.start;
-                return (
-                  <button
-                    key={`${programme.start}-${programme.stop}-${programme.title}`}
-                    type="button"
-                    onClick={() =>
-                      onPlayArchive(result, {
-                        startEpochS: programme.start,
-                        endEpochS: programme.stop,
-                        title: programme.title,
-                      })
-                    }
-                    className={`flex w-full items-center gap-2 rounded px-1.5 py-0.5 text-left text-[11px] transition-colors ${
-                      playing
-                        ? "bg-violet-500/20 text-violet-200"
-                        : "text-text-secondary hover:bg-panel-subtle hover:text-text-primary"
-                    }`}
-                  >
-                    <span className="shrink-0 tabular-nums text-text-tertiary">
-                      {timeLabel(programme.start)}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate">{programme.title}</span>
-                    <Play className="h-2.5 w-2.5 shrink-0 opacity-60" />
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <ArchivePicker result={result} onPlayArchive={onPlayArchive} />
-      )}
-
-      <ArchiveProbe result={result} isCasting={isCasting} />
-    </div>
+        <ArchiveProbe result={result} isCasting={isCasting} />
+      </div>
+    </details>
   );
 }

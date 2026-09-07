@@ -753,3 +753,69 @@ mod tests {
         );
     }
 }
+
+/// Diagnostics carry no playable URLs. Sanitize again at the disk boundary,
+/// including nested engine messages, independently of frontend sanitization.
+fn sanitize_playback_json(value: &mut serde_json::Value) {
+    use std::sync::LazyLock;
+    static URL: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r#"(?i)https?(?:://|%3a%2f%2f)[^\s<>"']*"#).unwrap());
+    static PATH: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"(?i)/(?:live|movie|series|timeshift)/[^\s?#]+").unwrap()
+    });
+    static QUERY: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"([?&][^=\s&]+=)[^\s&#]*").unwrap());
+    match value {
+        serde_json::Value::String(text) => {
+            *text = QUERY
+                .replace_all(
+                    &PATH.replace_all(&URL.replace_all(text, "[URL redacted]"), "/[path redacted]"),
+                    "$1[redacted]",
+                )
+                .into_owned();
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(sanitize_playback_json),
+        serde_json::Value::Object(fields) => fields.values_mut().for_each(sanitize_playback_json),
+        _ => {}
+    }
+}
+
+#[tauri::command]
+pub async fn export_playback_diagnostics(
+    path: String,
+    mut payload: serde_json::Value,
+) -> Result<(), AppError> {
+    run_blocking_export("Playback diagnostics export", move || {
+        if payload.get("version").and_then(|v| v.as_u64()) != Some(1) {
+            return Err(AppError::Parse(
+                "Unsupported playback diagnostics version".into(),
+            ));
+        }
+        sanitize_playback_json(&mut payload);
+        let bytes = serde_json::to_vec_pretty(&payload)
+            .map_err(|error| AppError::Parse(error.to_string()))?;
+        if bytes.len() > 4 * 1024 * 1024 {
+            return Err(AppError::Other(
+                "Playback diagnostics exceed the export size limit".into(),
+            ));
+        }
+        std::fs::write(path, bytes).map_err(|error| {
+            AppError::Other(format!("Playback diagnostics export failed: {error}"))
+        })
+    })
+    .await
+}
+
+#[cfg(test)]
+mod playback_export_tests {
+    #[test]
+    fn nested_diagnostics_strip_userinfo_query_path_and_encoded_proxy_credentials() {
+        let mut payload = serde_json::json!({"version": 1, "sessions": [{"detail": "error https://user:secret@host/live/alice/password/1.ts?token=hidden", "events": ["https%3A%2F%2Fhost%2Flive%2Fu%2Fsecret%2F1", "/timeshift/alice/secret/60/start/1.ts", "failed?token=secret&password=secret"]}]});
+        super::sanitize_playback_json(&mut payload);
+        let output = payload.to_string();
+        for secret in ["secret", "alice", "hidden", "user:"] {
+            assert!(!output.contains(secret));
+        }
+        assert_eq!(payload["version"], 1);
+    }
+}

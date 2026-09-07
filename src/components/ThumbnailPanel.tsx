@@ -23,6 +23,7 @@ import { getThumbnailDisplayState } from "../lib/thumbnailState";
 import type { ChannelResult } from "../lib/types";
 import { ArchiveCard } from "./ArchiveCard";
 import { CastMenu, type CastStartHandler } from "./CastMenu";
+import { PlaybackDiagnostics } from "./PlaybackDiagnostics";
 import { StatusBadge } from "./StatusBadge";
 import { StreamPlayer } from "./StreamPlayer";
 
@@ -291,310 +292,320 @@ export function ThumbnailPanel({
     "w-[400px] max-w-[88vw] aspect-video rounded-xl border border-white/15 bg-black/60 shadow-[0_35px_90px_rgba(0,0,0,0.55),0_5px_18px_rgba(0,0,0,0.28)]";
 
   return (
-    <div className="native-scroll flex flex-col gap-3 p-4 overflow-y-auto select-none">
-      <div className="flex items-center gap-2">
-        <StatusBadge status={result.status} />
-        <h3 className="text-[14px] font-semibold truncate">{result.name}</h3>
-      </div>
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden p-4 select-none">
+      <div className="flex shrink-0 flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <StatusBadge status={result.status} />
+          <h3 className="text-[14px] font-semibold truncate">{result.name}</h3>
+        </div>
 
-      {/* Hidden sidebar container keeps the ref alive for FLIP handoff from lightbox */}
-      {isPlaying && lightboxOpen && <div ref={sidebarPlayerRef} className="hidden" />}
+        {/* Hidden sidebar container keeps the ref alive for FLIP handoff from lightbox */}
+        {isPlaying && lightboxOpen && <div ref={sidebarPlayerRef} className="hidden" />}
 
-      {isPlaying &&
-      !lightboxOpen &&
-      videoElement &&
-      onTogglePause &&
-      onStopPlayer &&
-      onSetVolume &&
-      onToggleMute ? (
-        <StreamPlayer
-          containerRef={sidebarPlayerRef}
-          playerState={playerState}
-          errorMessage={playerErrorMessage ?? null}
-          isPaused={isPaused ?? false}
-          isRecovering={isRecovering ?? false}
-          recoveryAttempt={recoveryAttempt ?? null}
-          recoveryMessage={recoveryMessage ?? null}
-          volume={volume ?? 0.75}
-          muted={muted ?? false}
-          onTogglePause={onTogglePause}
-          onStop={onStopPlayer}
-          onSetVolume={onSetVolume}
-          onToggleMute={onToggleMute}
-          onCastStart={onCastStart}
-          onOpenExternal={() => externalPlaybackResult && onOpenExternal?.(externalPlaybackResult)}
-          onRetry={() => onRetryPlay?.(result)}
-          onFullscreen={() => onLightboxChange(true)}
-          onPip={onPip}
-          castRequest={castRequest}
-          compact
-          chromecast={chromecast}
-          archiveSession={activeArchiveSession}
-          videoElement={videoElement}
-          onSeekArchive={onSeekArchive}
-          onGoLive={onGoLive}
-        />
-      ) : screenshotUrl ? (
-        <button
-          type="button"
-          onClick={openLightbox}
-          className={`${mediaFrameClass} bg-black cursor-zoom-in group`}
-        >
-          <img
-            src={screenshotUrl}
-            alt={result.name}
-            className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.015]"
-          />
-          <div className="absolute inset-x-0 bottom-0 px-2 py-1 text-[11px] text-white/90 bg-black/45 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-            Click to enlarge
-          </div>
-        </button>
-      ) : thumbnailState.showLoadingPlaceholder ? (
-        <div className={`${mediaFrameClass} bg-panel-subtle isolate`}>
-          <div className="absolute inset-0 rounded-[inherit] animate-pulse bg-gradient-to-br from-panel to-panel-subtle" />
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-secondary">
-            <LoaderCircle className="h-5 w-5 animate-spin" />
-            <span className="text-[11px] font-medium">
-              {thumbnailState.waitingForScanResult
-                ? "Waiting for scan result..."
-                : "Loading thumbnail..."}
-            </span>
-          </div>
-        </div>
-      ) : thumbnailState.showStoredScreenshotLoadError ? (
-        <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 text-center">
-          <ImageOff className="h-9 w-9 text-red-300/90" strokeWidth={1.75} />
-          <p className="text-[12px] font-medium text-red-200">Thumbnail unavailable</p>
-          <p className="text-[11px] text-red-200/80">
-            Saved screenshot could not be read from disk.
-          </p>
-        </div>
-      ) : thumbnailState.showCaptureError ? (
-        <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 text-center">
-          <ImageOff className="h-9 w-9 text-red-300/90" strokeWidth={1.75} />
-          <p className="text-[12px] font-medium text-red-200">Thumbnail unavailable</p>
-          <p className="text-[11px] text-red-200/80">
-            Capture failed: {thumbnailState.screenshotErrorReason}
-          </p>
-        </div>
-      ) : thumbnailState.showDrmPlaceholder ? (
-        <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 text-center">
-          <CircleHelp className="h-8 w-8 text-cyan-300/90" strokeWidth={1.75} />
-          <p className="text-[12px] font-medium text-cyan-200">DRM-protected stream</p>
-          <p className="text-[11px] text-cyan-200/80">
-            {result.drm_system
-              ? `Detected system: ${result.drm_system}`
-              : "Detected encrypted playback requirements."}
-          </p>
-        </div>
-      ) : thumbnailState.showNoThumbnailCaptured ? (
-        <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
-          <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
-          <p className="text-[12px] font-medium text-text-secondary">No thumbnail captured</p>
-          <p className="text-[11px] text-text-tertiary">
-            This channel scanned successfully, but no frame was saved.
-          </p>
-        </div>
-      ) : thumbnailState.showUnscannedPlaceholder ? (
-        <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
-          <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
-          <p className="text-[12px] font-medium text-text-secondary">Unscanned</p>
-          <p className="text-[11px] text-text-tertiary">Start a scan to capture this thumbnail.</p>
-        </div>
-      ) : thumbnailState.showScreenshotsDisabled ? (
-        <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
-          <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
-          <p className="text-[12px] font-medium text-text-secondary">Screenshots disabled</p>
-          <p className="text-[11px] text-text-tertiary">
-            Enable screenshots in Settings to capture thumbnails.
-          </p>
-        </div>
-      ) : null}
-
-      {(onPlayChannel || onScanChannel) && (
-        <div className="flex items-center justify-center gap-2">
-          {onPlayChannel &&
-            (isPlaying ? (
-              <button
-                type="button"
-                onClick={onStopPlayer}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-red-600 hover:bg-red-500 text-white shadow-sm transition-colors"
-                title="Stop playback"
-              >
-                <Square className="w-3.5 h-3.5" />
-                Stop
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => onPlayChannel(result)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition-colors"
-                title="Preview in app"
-              >
-                <Play className="w-3.5 h-3.5" />
-                Play
-              </button>
-            ))}
-          {onOpenExternal && (
-            <button
-              type="button"
-              onClick={() => externalPlaybackResult && onOpenExternal(externalPlaybackResult)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-btn hover:bg-btn-hover text-text-primary border border-border-app shadow-sm transition-colors"
-              title="Open in external player"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-            </button>
-          )}
-          {onScanChannel && (
-            <button
-              type="button"
-              disabled={scanActive}
-              onClick={() => onScanChannel([result.index])}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-btn hover:bg-btn-hover text-text-primary border border-border-app shadow-sm transition-colors disabled:opacity-40 disabled:pointer-events-none"
-              title={
-                scanActive
-                  ? "Scan in progress"
-                  : result.status === "pending" || result.status === "checking"
-                    ? "Scan channel"
-                    : "Rescan channel"
-              }
-            >
-              <RotateCw className="w-3.5 h-3.5" />
-              {result.status === "pending" || result.status === "checking" ? "Scan" : "Rescan"}
-            </button>
-          )}
-        </div>
-      )}
-
-      {(() => {
-        // Keep the row visible while a session is active so the user can
-        // still hit Stop after we've torn down the local player. The
-        // lightbox-open carve-out matters for casts started from the
-        // lightbox: starting a cast unmounts the lightbox StreamPlayer
-        // (onStopPlayer fires), and without this fallback the user would
-        // have to manually close the lightbox to find a way to stop or
-        // retarget the cast.
-        const hasCastSession = isCastSessionActive(chromecast.session);
-        if (!isPlaying && !hasCastSession) return null;
-        if (lightboxOpen && !hasCastSession) return null;
-        return (
-          <CastMenu
-            chromecast={chromecast}
-            castRequest={castRequest}
-            mode="inline"
-            onCastStart={
-              onCastStart ??
-              (() => {
-                onStopPlayer?.();
-                return undefined;
-              })
+        {isPlaying &&
+        !lightboxOpen &&
+        videoElement &&
+        onTogglePause &&
+        onStopPlayer &&
+        onSetVolume &&
+        onToggleMute ? (
+          <StreamPlayer
+            containerRef={sidebarPlayerRef}
+            playerState={playerState}
+            errorMessage={playerErrorMessage ?? null}
+            isPaused={isPaused ?? false}
+            isRecovering={isRecovering ?? false}
+            recoveryAttempt={recoveryAttempt ?? null}
+            recoveryMessage={recoveryMessage ?? null}
+            volume={volume ?? 0.75}
+            muted={muted ?? false}
+            onTogglePause={onTogglePause}
+            onStop={onStopPlayer}
+            onSetVolume={onSetVolume}
+            onToggleMute={onToggleMute}
+            onCastStart={onCastStart}
+            onOpenExternal={() =>
+              externalPlaybackResult && onOpenExternal?.(externalPlaybackResult)
             }
+            onRetry={() => onRetryPlay?.(result)}
+            onFullscreen={() => onLightboxChange(true)}
+            onPip={onPip}
+            castRequest={castRequest}
+            compact
+            chromecast={chromecast}
+            archiveSession={activeArchiveSession}
+            videoElement={videoElement}
+            onSeekArchive={onSeekArchive}
+            onGoLive={onGoLive}
           />
-        );
-      })()}
+        ) : screenshotUrl ? (
+          <button
+            type="button"
+            onClick={openLightbox}
+            className={`${mediaFrameClass} bg-black cursor-zoom-in group`}
+          >
+            <img
+              src={screenshotUrl}
+              alt={result.name}
+              className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.015]"
+            />
+            <div className="absolute inset-x-0 bottom-0 px-2 py-1 text-[11px] text-white/90 bg-black/45 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+              Click to enlarge
+            </div>
+          </button>
+        ) : thumbnailState.showLoadingPlaceholder ? (
+          <div className={`${mediaFrameClass} bg-panel-subtle isolate`}>
+            <div className="absolute inset-0 rounded-[inherit] animate-pulse bg-gradient-to-br from-panel to-panel-subtle" />
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-text-secondary">
+              <LoaderCircle className="h-5 w-5 animate-spin" />
+              <span className="text-[11px] font-medium">
+                {thumbnailState.waitingForScanResult
+                  ? "Waiting for scan result..."
+                  : "Loading thumbnail..."}
+              </span>
+            </div>
+          </div>
+        ) : thumbnailState.showStoredScreenshotLoadError ? (
+          <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 text-center">
+            <ImageOff className="h-9 w-9 text-red-300/90" strokeWidth={1.75} />
+            <p className="text-[12px] font-medium text-red-200">Thumbnail unavailable</p>
+            <p className="text-[11px] text-red-200/80">
+              Saved screenshot could not be read from disk.
+            </p>
+          </div>
+        ) : thumbnailState.showCaptureError ? (
+          <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 text-center">
+            <ImageOff className="h-9 w-9 text-red-300/90" strokeWidth={1.75} />
+            <p className="text-[12px] font-medium text-red-200">Thumbnail unavailable</p>
+            <p className="text-[11px] text-red-200/80">
+              Capture failed: {thumbnailState.screenshotErrorReason}
+            </p>
+          </div>
+        ) : thumbnailState.showDrmPlaceholder ? (
+          <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 text-center">
+            <CircleHelp className="h-8 w-8 text-cyan-300/90" strokeWidth={1.75} />
+            <p className="text-[12px] font-medium text-cyan-200">DRM-protected stream</p>
+            <p className="text-[11px] text-cyan-200/80">
+              {result.drm_system
+                ? `Detected system: ${result.drm_system}`
+                : "Detected encrypted playback requirements."}
+            </p>
+          </div>
+        ) : thumbnailState.showNoThumbnailCaptured ? (
+          <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
+            <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
+            <p className="text-[12px] font-medium text-text-secondary">No thumbnail captured</p>
+            <p className="text-[11px] text-text-tertiary">
+              This channel scanned successfully, but no frame was saved.
+            </p>
+          </div>
+        ) : thumbnailState.showUnscannedPlaceholder ? (
+          <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
+            <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
+            <p className="text-[12px] font-medium text-text-secondary">Unscanned</p>
+            <p className="text-[11px] text-text-tertiary">
+              Start a scan to capture this thumbnail.
+            </p>
+          </div>
+        ) : thumbnailState.showScreenshotsDisabled ? (
+          <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
+            <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
+            <p className="text-[12px] font-medium text-text-secondary">Screenshots disabled</p>
+            <p className="text-[11px] text-text-tertiary">
+              Enable screenshots in Settings to capture thumbnails.
+            </p>
+          </div>
+        ) : null}
 
-      <div className="grid grid-cols-2 gap-2 text-[11px]">
-        <div>
-          <span className="text-text-tertiary">Status</span>
-          <p className="font-medium text-[12px]">{statusLabel(result.status)}</p>
-        </div>
-        <div>
-          <span className="text-text-tertiary">Group</span>
-          <p className="font-medium text-[12px]">{result.group}</p>
-        </div>
-        {(result.status === "alive" || result.resolution || result.codec) && (
-          <>
-            <div>
-              <span className="text-text-tertiary">Video</span>
-              <p className="font-medium text-[12px]">{formatVideoInfo(result)}</p>
-            </div>
-            <div>
-              <span className="text-text-tertiary">Audio</span>
-              <p className="font-medium text-[12px]">{formatAudioInfo(result)}</p>
-            </div>
-            {result.resolution && (
-              <div>
-                <span className="text-text-tertiary">Resolution</span>
-                <p className="font-medium text-[12px]">
-                  {result.width}x{result.height}
-                </p>
-              </div>
+        {(onPlayChannel || onScanChannel) && (
+          <div className="flex items-center justify-center gap-2">
+            {onPlayChannel &&
+              (isPlaying ? (
+                <button
+                  type="button"
+                  onClick={onStopPlayer}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-red-600 hover:bg-red-500 text-white shadow-sm transition-colors"
+                  title="Stop playback"
+                >
+                  <Square className="w-3.5 h-3.5" />
+                  Stop
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onPlayChannel(result)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition-colors"
+                  title="Preview in app"
+                >
+                  <Play className="w-3.5 h-3.5" />
+                  Play
+                </button>
+              ))}
+            {onOpenExternal && (
+              <button
+                type="button"
+                onClick={() => externalPlaybackResult && onOpenExternal(externalPlaybackResult)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-btn hover:bg-btn-hover text-text-primary border border-border-app shadow-sm transition-colors"
+                title="Open in external player"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </button>
             )}
-            {result.fps && (
-              <div>
-                <span className="text-text-tertiary">Frame Rate</span>
-                <p className="font-medium text-[12px]">{result.fps} fps</p>
-              </div>
+            {onScanChannel && (
+              <button
+                type="button"
+                disabled={scanActive}
+                onClick={() => onScanChannel([result.index])}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-btn hover:bg-btn-hover text-text-primary border border-border-app shadow-sm transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                title={
+                  scanActive
+                    ? "Scan in progress"
+                    : result.status === "pending" || result.status === "checking"
+                      ? "Scan channel"
+                      : "Rescan channel"
+                }
+              >
+                <RotateCw className="w-3.5 h-3.5" />
+                {result.status === "pending" || result.status === "checking" ? "Scan" : "Rescan"}
+              </button>
             )}
-          </>
+          </div>
+        )}
+
+        {(() => {
+          // Keep the row visible while a session is active so the user can
+          // still hit Stop after we've torn down the local player. The
+          // lightbox-open carve-out matters for casts started from the
+          // lightbox: starting a cast unmounts the lightbox StreamPlayer
+          // (onStopPlayer fires), and without this fallback the user would
+          // have to manually close the lightbox to find a way to stop or
+          // retarget the cast.
+          const hasCastSession = isCastSessionActive(chromecast.session);
+          if (!isPlaying && !hasCastSession) return null;
+          if (lightboxOpen && !hasCastSession) return null;
+          return (
+            <CastMenu
+              chromecast={chromecast}
+              castRequest={castRequest}
+              mode="inline"
+              onCastStart={
+                onCastStart ??
+                (() => {
+                  onStopPlayer?.();
+                  return undefined;
+                })
+              }
+            />
+          );
+        })()}
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0">
+        <div className="grid grid-cols-2 gap-2 text-[11px]">
+          <div>
+            <span className="text-text-tertiary">Status</span>
+            <p className="font-medium text-[12px]">{statusLabel(result.status)}</p>
+          </div>
+          <div>
+            <span className="text-text-tertiary">Group</span>
+            <p className="font-medium text-[12px]">{result.group}</p>
+          </div>
+          {(result.status === "alive" || result.resolution || result.codec) && (
+            <>
+              <div>
+                <span className="text-text-tertiary">Video</span>
+                <p className="font-medium text-[12px]">{formatVideoInfo(result)}</p>
+              </div>
+              <div>
+                <span className="text-text-tertiary">Audio</span>
+                <p className="font-medium text-[12px]">{formatAudioInfo(result)}</p>
+              </div>
+              {result.resolution && (
+                <div>
+                  <span className="text-text-tertiary">Resolution</span>
+                  <p className="font-medium text-[12px]">
+                    {result.width}x{result.height}
+                  </p>
+                </div>
+              )}
+              {result.fps && (
+                <div>
+                  <span className="text-text-tertiary">Frame Rate</span>
+                  <p className="font-medium text-[12px]">{result.fps} fps</p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <PlaybackDiagnostics channelIndex={result.index} />
+
+        {onPlayArchive && (
+          <ArchiveCard
+            key={result.index}
+            result={result}
+            archiveSession={activeArchiveSession}
+            isCasting={isCastSessionActive(chromecast.session)}
+            onPlayArchive={onPlayArchive}
+          />
+        )}
+
+        {result.status === "drm" && (
+          <div className="p-2 rounded bg-cyan-500/10 border border-cyan-500/20">
+            <p className="text-[12px] font-medium text-cyan-300">DRM Detection</p>
+            <p className="text-[11px] text-cyan-200/90 mt-1">
+              System: {result.drm_system ?? "Encrypted stream"}
+            </p>
+          </div>
+        )}
+
+        {result.label_mismatches.length > 0 && (
+          <div className="p-2 rounded bg-orange-500/10 border border-orange-500/20">
+            <p className="text-[12px] font-medium text-orange-400">Label Mismatch</p>
+            {result.label_mismatches.map((m, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: plain-text list; mismatch strings can repeat, so index is the only stable key.
+              <p key={i} className="text-[11px] text-orange-300">
+                {m}
+              </p>
+            ))}
+          </div>
+        )}
+
+        {result.low_framerate && (
+          <div className="p-2 rounded bg-orange-500/10 border border-orange-500/20">
+            <p className="text-[11px] text-orange-400">Low framerate: {result.fps} fps</p>
+          </div>
+        )}
+
+        {(retryCount > 0 || lastErrorReason) && (
+          <div className="p-2 rounded bg-panel-subtle border border-border-subtle">
+            <p className="text-[12px] font-medium text-text-primary">Diagnostics</p>
+            {retryCount > 0 && (
+              <p className="text-[11px] text-text-secondary mt-1">Retries used: {retryCount}</p>
+            )}
+            {lastErrorReason && (
+              <p className="text-[11px] text-text-secondary mt-1 break-words">
+                Last error: {lastErrorReason}
+              </p>
+            )}
+          </div>
+        )}
+
+        {showResolvedUrl && (
+          <div className="p-2 rounded bg-panel-subtle border border-border-subtle">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[12px] font-medium text-text-primary">Resolved URL</p>
+              <button
+                type="button"
+                onClick={handleCopyResolvedUrl}
+                className="macos-btn px-2 py-1 text-[11px] bg-btn hover:bg-btn-hover rounded-md"
+              >
+                {resolvedUrlCopied ? "Copied" : "Copy"}
+              </button>
+            </div>
+            <p className="text-[11px] text-text-secondary mt-1 break-all">{resolvedUrl}</p>
+          </div>
         )}
       </div>
-
-      {onPlayArchive && (
-        <ArchiveCard
-          result={result}
-          archiveSession={activeArchiveSession}
-          isCasting={isCastSessionActive(chromecast.session)}
-          onPlayArchive={onPlayArchive}
-        />
-      )}
-
-      {result.status === "drm" && (
-        <div className="p-2 rounded bg-cyan-500/10 border border-cyan-500/20">
-          <p className="text-[12px] font-medium text-cyan-300">DRM Detection</p>
-          <p className="text-[11px] text-cyan-200/90 mt-1">
-            System: {result.drm_system ?? "Encrypted stream"}
-          </p>
-        </div>
-      )}
-
-      {result.label_mismatches.length > 0 && (
-        <div className="p-2 rounded bg-orange-500/10 border border-orange-500/20">
-          <p className="text-[12px] font-medium text-orange-400">Label Mismatch</p>
-          {result.label_mismatches.map((m, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: plain-text list; mismatch strings can repeat, so index is the only stable key.
-            <p key={i} className="text-[11px] text-orange-300">
-              {m}
-            </p>
-          ))}
-        </div>
-      )}
-
-      {result.low_framerate && (
-        <div className="p-2 rounded bg-orange-500/10 border border-orange-500/20">
-          <p className="text-[11px] text-orange-400">Low framerate: {result.fps} fps</p>
-        </div>
-      )}
-
-      {(retryCount > 0 || lastErrorReason) && (
-        <div className="p-2 rounded bg-panel-subtle border border-border-subtle">
-          <p className="text-[12px] font-medium text-text-primary">Diagnostics</p>
-          {retryCount > 0 && (
-            <p className="text-[11px] text-text-secondary mt-1">Retries used: {retryCount}</p>
-          )}
-          {lastErrorReason && (
-            <p className="text-[11px] text-text-secondary mt-1 break-words">
-              Last error: {lastErrorReason}
-            </p>
-          )}
-        </div>
-      )}
-
-      {showResolvedUrl && (
-        <div className="p-2 rounded bg-panel-subtle border border-border-subtle">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-[12px] font-medium text-text-primary">Resolved URL</p>
-            <button
-              type="button"
-              onClick={handleCopyResolvedUrl}
-              className="macos-btn px-2 py-1 text-[11px] bg-btn hover:bg-btn-hover rounded-md"
-            >
-              {resolvedUrlCopied ? "Copied" : "Copy"}
-            </button>
-          </div>
-          <p className="text-[11px] text-text-secondary mt-1 break-all">{resolvedUrl}</p>
-        </div>
-      )}
 
       {lightboxRendered &&
         createPortal(
