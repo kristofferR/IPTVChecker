@@ -1000,6 +1000,24 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       const tryXtreamHlsRoute = async (): Promise<boolean> => {
         if (!xtreamHlsUrl) return false;
 
+        // Converted playlist URLs need the same native-first routing as
+        // explicit HLS URLs. WebKit can decode interlaced TS through native
+        // HLS even when the MSE-based engines reject those video samples.
+        if (supportsNativeHlsPlayback(videoElement)) {
+          logger.info("[Player] Trying native Xtream HLS for", result.name);
+          lastErrorRef.current = null;
+          const nativeOk = await tryNativePlayback(
+            xtreamHlsUrl,
+            abortController.signal,
+            PLAYBACK_ROUTE_TIMEOUT_MS,
+          );
+          if (!isCurrentPlayback()) return false;
+          if (nativeOk && (await handleSuccessfulStart())) {
+            logger.info("[Player] Playing via native Xtream HLS:", result.name);
+            return true;
+          }
+        }
+
         logger.info(
           startMode === "recovery"
             ? "[Player] Trying Xtream HLS recovery route for"
