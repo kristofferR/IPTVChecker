@@ -94,6 +94,7 @@ function ExportDiagnostics({ record }: { record?: PlaybackRecord }) {
 export function PlaybackDiagnostics({ channelIndex }: { channelIndex: number }) {
   const getRecord = useCallback(() => playbackTelemetry.get(channelIndex), [channelIndex]);
   const record = useSyncExternalStore(playbackTelemetry.subscribe, getRecord);
+  const [expanded, setExpanded] = useDisclosure("playback-expanded", true);
   const [activityOpen, setActivityOpen] = useDisclosure("playback-activity-expanded");
   if (!record) return null;
   const { summary: s } = record;
@@ -199,21 +200,24 @@ export function PlaybackDiagnostics({ channelIndex }: { channelIndex: number }) 
     ["Environment", `${s.platform} · ${s.appVersion}`],
   ];
   return (
-    <section
+    <details
       aria-label="Playback diagnostics"
-      className="overflow-hidden rounded border border-border-app bg-panel-muted"
+      open={expanded}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+      className="group/diagnostics overflow-hidden rounded border border-border-app bg-panel-muted"
     >
-      <div className="flex flex-wrap items-center justify-between gap-1 px-2 pt-2">
-        <h4 className="text-[12px] font-medium">
+      <summary className="flex cursor-pointer list-none items-center gap-2 p-2 [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-blue-500">
+        <span className="text-[12px] font-medium">
           {s.ended ? "Last playback" : "Playback"}
           {s.mode === "archive" ? " · Archive" : ""}
-        </h4>
+        </span>
         <span
-          className={`text-[9px] tabular-nums ${s.ended === "failed" ? "text-red-400" : s.phase === "reconnecting" && !s.ended ? "text-amber-500" : "text-text-secondary"}`}
+          className={`ml-auto text-[9px] tabular-nums ${s.ended === "failed" ? "text-red-400" : s.phase === "reconnecting" && !s.ended ? "text-amber-500" : "text-text-secondary"}`}
         >
           {state} · {clock(s.durationMs)}
         </span>
-      </div>
+        <ChevronRight className="h-3 w-3 shrink-0 group-open/diagnostics:rotate-90" />
+      </summary>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2 p-2">
         <Metric
           label="First frame"
@@ -325,7 +329,7 @@ export function PlaybackDiagnostics({ channelIndex }: { channelIndex: number }) 
           <ExportDiagnostics record={record} />
         </div>
       </details>
-    </section>
+    </details>
   );
 }
 
