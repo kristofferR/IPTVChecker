@@ -1,6 +1,11 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { describeArchiveFailure, resolveArchivePlayback } from "../lib/archive";
+import {
+  archiveChannelKey,
+  prefersArchiveRemux,
+  rememberArchiveRemux,
+} from "../lib/archivePlaybackPreference";
 import { normalizeCodecName, resolveResolutionLabel } from "../lib/format";
 import { logger } from "../lib/logger";
 import {
@@ -131,6 +136,9 @@ function createVideoElement(): HTMLVideoElement {
 // Bound each route independently so one broken route cannot block fallbacks,
 // while allowing slow IPTV providers enough time to produce the first frame.
 const PLAYBACK_ROUTE_TIMEOUT_MS = 15_000;
+// Replay has a local compatibility route available: don't spend the full live
+// startup budget waiting for a provider manifest WebKit cannot play.
+const ARCHIVE_NATIVE_TIMEOUT_MS = 3_000;
 const MPEGTS_PLAYBACK_ROUTE_TIMEOUT_MS = 25_000;
 const LOADING_TIMEOUT_MS = 90_000;
 const PLAYBACK_RECOVERY_DELAY_MS = 900;
@@ -1104,12 +1112,34 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       };
 
       if (preferNativeHls) {
+        const archive = archiveSessionRef.current;
+        const channelKey = archive
+          ? await archiveChannelKey(archive.baseResult.url).catch(() => null)
+          : null;
+        if (!isCurrentPlayback()) return;
+        const remuxFirst = channelKey !== null && prefersArchiveRemux(channelKey);
+        const tryArchiveRemux = async (): Promise<boolean> => {
+          logger.info("[Player] Trying native HLS archive remux for", result.name);
+          const remuxOk = await tryRemuxedArchive(url, abortController.signal, result.audio_only);
+          if (!isCurrentPlayback()) return false;
+          if (remuxOk && (await handleSuccessfulStart())) {
+            if (channelKey !== null) rememberArchiveRemux(channelKey, true);
+            logger.info("[Player] Playing via native HLS archive remux:", result.name);
+            return true;
+          }
+          if (isCurrentPlayback() && channelKey !== null) rememberArchiveRemux(channelKey, false);
+          return false;
+        };
+        if (remuxFirst) {
+          if (await tryArchiveRemux()) return;
+          if (!isCurrentPlayback()) return;
+        }
         logger.info("[Player] Trying native HLS for", result.name);
         lastErrorRef.current = null;
         const nativeOk = await tryNativePlayback(
           url,
           abortController.signal,
-          PLAYBACK_ROUTE_TIMEOUT_MS,
+          archive ? ARCHIVE_NATIVE_TIMEOUT_MS : PLAYBACK_ROUTE_TIMEOUT_MS,
           result.audio_only,
         );
         if (!isCurrentPlayback()) {
@@ -1125,14 +1155,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           "-",
           lastErrorRef.current ?? "no media error reported",
         );
-        if (archiveSessionRef.current) {
-          logger.info("[Player] Trying native HLS archive remux for", result.name);
-          const remuxOk = await tryRemuxedArchive(url, abortController.signal, result.audio_only);
+        if (archive && !remuxFirst) {
+          if (await tryArchiveRemux()) return;
           if (!isCurrentPlayback()) return;
-          if (remuxOk && (await handleSuccessfulStart())) {
-            logger.info("[Player] Playing via native HLS archive remux:", result.name);
-            return;
-          }
         }
       }
 

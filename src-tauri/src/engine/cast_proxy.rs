@@ -367,6 +367,27 @@ fn dash_window_size(is_finite: bool) -> &'static str {
     }
 }
 
+async fn supports_initial_read_burst(ffmpeg_bin: &str) -> bool {
+    // The resolved binary is fixed for the app lifetime. Older system ffmpeg
+    // installations can still remux without this optional startup optimization.
+    static SUPPORTED: tokio::sync::OnceCell<bool> = tokio::sync::OnceCell::const_new();
+    *SUPPORTED
+        .get_or_init(|| async {
+            let mut cmd = tokio::process::Command::new(ffmpeg_bin);
+            configure_background_process(&mut cmd);
+            cmd.kill_on_drop(true)
+                .args(["-hide_banner", "-h", "full"])
+                .stdin(std::process::Stdio::null());
+            match tokio::time::timeout(Duration::from_millis(500), cmd.output()).await {
+                Ok(Ok(output)) if output.status.success() => {
+                    String::from_utf8_lossy(&output.stdout).contains("-readrate_initial_burst")
+                }
+                _ => false,
+            }
+        })
+        .await
+}
+
 /// Spawn ffmpeg to remux the upstream MPEG-TS into a sliding-window HLS
 /// playlist on disk. Waits for the playlist file to appear (so the Cast
 /// device's first GET doesn't 404) before returning.
@@ -457,6 +478,11 @@ async fn start_remux(
     // before the sliding HLS/DASH window removes it.
     if is_finite {
         cmd.arg("-re");
+        if local_playback && supports_initial_read_burst(&ffmpeg_bin).await {
+            // Fill WebKit's initial buffer immediately, then resume normal
+            // pacing to keep disk/network use bounded during long recordings.
+            cmd.arg("-readrate_initial_burst").arg("12");
+        }
     }
     if is_hevc {
         cmd.arg("-f").arg("mpegts");
@@ -536,7 +562,11 @@ async fn start_remux(
         let segment_pattern = tmpdir.join("seg_%05d.ts");
         let (playlist_size, hls_flags) = hls_muxer_options(is_finite);
         cmd.arg("-f").arg("hls");
-        cmd.arg("-hls_time").arg("4");
+        // WebKit buffers several segments before presenting video. Shorter
+        // local segments reduce startup without downloading the whole archive
+        // ahead of playback, including on older ffmpeg without burst support.
+        cmd.arg("-hls_time")
+            .arg(if local_playback { "1" } else { "4" });
         cmd.arg("-hls_list_size").arg(playlist_size);
         cmd.arg("-hls_flags").arg(hls_flags);
         cmd.arg("-hls_segment_filename").arg(&segment_pattern);
