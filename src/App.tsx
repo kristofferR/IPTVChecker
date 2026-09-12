@@ -74,6 +74,7 @@ import { errorToString } from "./lib/errors";
 import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/haptics";
 import { logger } from "./lib/logger";
 import { recordUiPerf, startLongTaskObserver, uiPerfEnabled } from "./lib/perf";
+import { supportsPictureInPicture, togglePictureInPicture } from "./lib/pictureInPicture";
 import { detectPlatform } from "./lib/platform";
 import { isSingleConnectionPlaylist } from "./lib/playback";
 import { shouldAutoRevealReportPanel } from "./lib/playlistReportVisibility";
@@ -322,7 +323,7 @@ function SelectedChannelSidebar({
         onToggleMute={streamPlayer.toggleMute}
         onOpenExternal={onOpenExternal}
         onRetryPlay={streamPlayer.retry}
-        onPip={document.pictureInPictureEnabled ? onPip : undefined}
+        onPip={supportsPictureInPicture(streamPlayer.videoElement) ? onPip : undefined}
       />
     </div>
   );
@@ -1397,11 +1398,10 @@ export default function App() {
   const handlePip = useCallback(() => {
     const video = playbackVideoElement;
     if (!video) return;
-    if (document.pictureInPictureElement) {
-      document.exitPictureInPicture().catch(() => {});
-    } else if (document.pictureInPictureEnabled) {
-      video.requestPictureInPicture().catch(() => {});
-    }
+    void togglePictureInPicture(video).catch((error) => {
+      logger.warn("[Player] Picture-in-picture failed:", errorToString(error));
+      getStore().setPlaybackError(`Picture-in-picture: ${errorToString(error)}`);
+    });
   }, [playbackVideoElement]);
 
   const handleProceedPlayback = useCallback(() => {
