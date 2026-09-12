@@ -690,13 +690,12 @@ pub fn run() {
             .build()?;
 
         let toggle_sidebar_item =
-            MenuItemBuilder::with_id("menu.view.toggle_sidebar", "Toggle Sidebar")
+            MenuItemBuilder::with_id("menu.view.toggle_sidebar", "Show Sidebar")
                 .accelerator(accel("Shift+L"))
                 .build(app)?;
-        let toggle_report_item =
-            MenuItemBuilder::with_id("menu.view.toggle_report", "Toggle Report")
-                .accelerator(accel("Shift+R"))
-                .build(app)?;
+        let toggle_report_item = MenuItemBuilder::with_id("menu.view.toggle_report", "Show Report")
+            .accelerator(accel("Shift+R"))
+            .build(app)?;
         let toggle_prescan_item =
             MenuItemBuilder::with_id("menu.view.toggle_prescan_filter", "Show Source Filter")
                 .accelerator(accel("Shift+F"))
@@ -715,7 +714,7 @@ pub fn run() {
             .accelerator(if is_macos { "Alt+Cmd+L" } else { "Ctrl+Alt+L" })
             .build(app)?;
 
-        let view_menu = SubmenuBuilder::new(app, "View")
+        let view_menu = SubmenuBuilder::with_id(app, "menu.view", "View")
             .item(&toggle_sidebar_item)
             .item(&toggle_report_item)
             .item(&toggle_prescan_item)
@@ -881,15 +880,28 @@ pub fn run() {
                 }
             }
 
-            let theme_preference = {
+            let (theme_preference, show_prescan_filter, show_header_button_text) = {
                 let state = app.state::<Arc<AppState>>();
-                let theme = state.settings.blocking_lock().theme;
-                theme
+                let settings = state.settings.blocking_lock();
+                (
+                    settings.theme,
+                    settings.show_prescan_filter,
+                    settings.show_header_button_text,
+                )
             };
             if let Err(error) =
                 commands::settings::apply_theme_preference(app.handle(), theme_preference)
             {
                 log::warn!("Failed to apply startup theme preference: {}", error);
+            }
+            if let Err(error) = commands::settings::sync_view_menu_labels(
+                app.handle().clone(),
+                false,
+                false,
+                show_prescan_filter,
+                show_header_button_text,
+            ) {
+                log::warn!("Failed to sync startup View menu: {error}");
             }
 
             commands::recent::refresh_recent_menu(app.handle());
@@ -1037,6 +1049,8 @@ pub fn run() {
             commands::playlist::open_playlist_stalker,
             commands::player::open_channel_in_player,
             commands::player::get_streaming_proxy_port,
+            commands::playback::start_local_playback,
+            commands::playback::stop_local_playback,
             commands::chromecast::discover_chromecasts,
             commands::chromecast::cast_to_device,
             commands::chromecast::stop_cast,
@@ -1060,6 +1074,7 @@ pub fn run() {
             commands::export::export_scan_log_json,
             commands::export::export_playback_diagnostics,
             commands::settings::get_settings,
+            commands::settings::sync_view_menu,
             commands::settings::get_scan_presets,
             commands::settings::save_scan_preset,
             commands::settings::rename_scan_preset,
@@ -1109,6 +1124,12 @@ pub fn run() {
         .on_window_event(|_window, _event| {
             if matches!(_event, tauri::WindowEvent::Destroyed) {
                 clear_menu_window_state(_window.label());
+                _window
+                    .state::<Arc<AppState>>()
+                    .local_playback
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .remove(_window.label());
             }
 
             #[cfg(target_os = "macos")]

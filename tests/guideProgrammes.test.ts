@@ -1,11 +1,71 @@
 import { describe, expect, it } from "bun:test";
-import { guideProgrammesInWindow, indexGuideProgrammes } from "../src/lib/guideProgrammes";
+import { resolveArchivePlayback } from "../src/lib/archive";
+import {
+  guideProgrammesInWindow,
+  indexGuideProgrammes,
+  programmePlaybackAvailability,
+} from "../src/lib/guideProgrammes";
 import type { EpgProgramme } from "../src/lib/types";
 
 const programme = (start: number, stop: number): EpgProgramme => ({
   start,
   stop,
   title: `${start}-${stop}`,
+});
+
+describe("programme playback choices", () => {
+  const channel = {
+    url: "https://example.com/live.m3u8",
+    catchup: "default",
+    catchup_days: 3,
+    catchup_source: null,
+  };
+  const now = 1_800_000_000;
+
+  it("offers restart and live for an airing catch-up programme, using its EPG start", () => {
+    const current = programme(now - 1800, now + 1800);
+    expect(programmePlaybackAvailability(channel, current, now)).toEqual({
+      live: true,
+      archive: true,
+    });
+    const replay = resolveArchivePlayback(
+      channel,
+      { startEpochS: current.start, endEpochS: current.stop },
+      now,
+    );
+    expect(replay?.startEpochS).toBe(current.start);
+    expect(replay?.windowEndEpochS).toBe(now);
+    expect(replay?.url).toBe(`https://example.com/live.m3u8?utc=${current.start}&lutc=${now}`);
+  });
+
+  it("offers only live without catch-up and adds restart when metadata arrives", () => {
+    const current = programme(now - 1800, now + 1800);
+    expect(
+      programmePlaybackAvailability(
+        { ...channel, catchup: null, catchup_days: null },
+        current,
+        now,
+      ),
+    ).toEqual({ live: true, archive: false });
+    expect(programmePlaybackAvailability(channel, current, now).archive).toBe(true);
+  });
+
+  it("limits replay to retained programmes and keeps live available for long programmes", () => {
+    expect(programmePlaybackAvailability(channel, programme(now - 3600, now), now)).toEqual({
+      live: false,
+      archive: true,
+    });
+    expect(programmePlaybackAvailability(channel, programme(now + 1, now + 3600), now)).toEqual({
+      live: false,
+      archive: false,
+    });
+    expect(
+      programmePlaybackAvailability(channel, programme(now - 4 * 86400, now - 3600), now),
+    ).toEqual({ live: false, archive: false });
+    expect(
+      programmePlaybackAvailability(channel, programme(now - 4 * 86400, now + 3600), now),
+    ).toEqual({ live: true, archive: false });
+  });
 });
 
 describe("guide programme windows", () => {

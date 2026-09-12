@@ -41,11 +41,6 @@ import { type ArchivePlayOptions, useStreamPlayer } from "./hooks/useStreamPlaye
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 import { resolveArchivePlayback } from "./lib/archive";
 import { cancelArchiveProbes } from "./lib/archiveProbe";
-import {
-  archiveProbeStorageKey,
-  loadArchiveProbes,
-  saveArchiveProbes,
-} from "./lib/archiveProbeStorage";
 import { registerArchiveTimezoneResolver } from "./lib/archiveTimezone";
 import { isArchiveVerificationBlockingPlayback, verifyAllArchives } from "./lib/archiveVerifyRun";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
@@ -79,6 +74,7 @@ import { errorToString } from "./lib/errors";
 import { HapticFeedbackPattern, PerformanceTime, triggerHaptic } from "./lib/haptics";
 import { logger } from "./lib/logger";
 import { recordUiPerf, startLongTaskObserver, uiPerfEnabled } from "./lib/perf";
+import { supportsPictureInPicture, togglePictureInPicture } from "./lib/pictureInPicture";
 import { detectPlatform } from "./lib/platform";
 import { isSingleConnectionPlaylist } from "./lib/playback";
 import { shouldAutoRevealReportPanel } from "./lib/playlistReportVisibility";
@@ -327,7 +323,7 @@ function SelectedChannelSidebar({
         onToggleMute={streamPlayer.toggleMute}
         onOpenExternal={onOpenExternal}
         onRetryPlay={streamPlayer.retry}
-        onPip={document.pictureInPictureEnabled ? onPip : undefined}
+        onPip={supportsPictureInPicture(streamPlayer.videoElement) ? onPip : undefined}
       />
     </div>
   );
@@ -724,31 +720,17 @@ export default function App() {
     };
   }, [platform]);
 
-  // Catch-up verdicts persist per playlist: restore on open, save as they change.
+  // Remove verdicts saved by older builds. Probe results are session-only.
   useEffect(() => {
-    if (!playlist) return;
-    const key = archiveProbeStorageKey(playlist);
-    const state = getStore();
-    if (Object.keys(state.archiveProbes).length === 0) {
-      const restored = loadArchiveProbes(key, state.flatResults);
-      if (restored) state.restoreArchiveProbes(restored);
+    try {
+      for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+        const key = localStorage.key(index);
+        if (key?.startsWith("catchup-verdicts:")) localStorage.removeItem(key);
+      }
+    } catch {
+      // Storage can be unavailable; old entries are never read again.
     }
-    let timer: number | null = null;
-    const unsubscribe = useAppStore.subscribe((next, previous) => {
-      if (next.archiveProbes === previous.archiveProbes || next.playlist !== playlist) return;
-      if (timer != null) window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        timer = null;
-        const latest = getStore();
-        if (latest.playlist !== playlist) return;
-        saveArchiveProbes(key, latest.archiveProbes, latest.flatResults);
-      }, 1000);
-    });
-    return () => {
-      unsubscribe();
-      if (timer != null) window.clearTimeout(timer);
-    };
-  }, [playlist]);
+  }, []);
 
   useEffect(() => {
     const title = playlist ? `${playlist.file_name} | IPTV Checker` : "IPTV Checker";
@@ -1416,11 +1398,10 @@ export default function App() {
   const handlePip = useCallback(() => {
     const video = playbackVideoElement;
     if (!video) return;
-    if (document.pictureInPictureElement) {
-      document.exitPictureInPicture().catch(() => {});
-    } else if (document.pictureInPictureEnabled) {
-      video.requestPictureInPicture().catch(() => {});
-    }
+    void togglePictureInPicture(video).catch((error) => {
+      logger.warn("[Player] Picture-in-picture failed:", errorToString(error));
+      getStore().setPlaybackError(`Picture-in-picture: ${errorToString(error)}`);
+    });
   }, [playbackVideoElement]);
 
   const handleProceedPlayback = useCallback(() => {

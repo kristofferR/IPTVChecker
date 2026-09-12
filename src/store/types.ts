@@ -114,7 +114,7 @@ export interface FilterSlice {
 // ---------------------------------------------------------------------------
 
 export interface ArchiveSlice {
-  /** Spot-probe results for catch-up channels, keyed by channel index. */
+  /** Session-only spot-probe results for catch-up channels, keyed by channel index. */
   archiveProbes: Record<number, ArchiveProbeEntry>;
   /** Changes whenever per-playlist archive state is reset. */
   archiveProbeGeneration: number;
@@ -137,8 +137,6 @@ export interface ArchiveSlice {
   upsertArchiveDownload: (download: ArchiveDownload) => void;
   patchArchiveDownload: (id: string, patch: Partial<ArchiveDownload>) => void;
   removeArchiveDownload: (id: string) => void;
-  /** Replace probe entries wholesale (restoring persisted verdicts). */
-  restoreArchiveProbes: (probes: Record<number, ArchiveProbeEntry>) => void;
   /** Reset all per-playlist archive state (probes and EPG summary). */
   clearArchiveProbes: () => void;
 }

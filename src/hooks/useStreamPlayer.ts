@@ -1,6 +1,11 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { describeArchiveFailure, resolveArchivePlayback } from "../lib/archive";
+import {
+  archiveChannelKey,
+  prefersArchiveRemux,
+  rememberArchiveRemux,
+} from "../lib/archivePlaybackPreference";
 import { normalizeCodecName, resolveResolutionLabel } from "../lib/format";
 import { logger } from "../lib/logger";
 import {
@@ -28,6 +33,7 @@ import {
   tryConvertToXtreamHls,
 } from "../lib/playback";
 import { observePlayback, type PlaybackObserver } from "../lib/playbackObserver";
+import { confirmPlaybackStarted } from "../lib/playbackStartup";
 import {
   type PlaybackEndReason,
   type PlaybackEventKind,
@@ -36,7 +42,7 @@ import {
 } from "../lib/playbackTelemetry";
 import { toProxyUrl } from "../lib/proxyUrl";
 import { createRuntimeMonitor, type MpegtsPlayer } from "../lib/runtimeMonitor";
-import { getStreamingProxyPort } from "../lib/tauri";
+import { getStreamingProxyPort, startLocalPlayback, stopLocalPlayback } from "../lib/tauri";
 import type { ChannelResult } from "../lib/types";
 import { canUseBlobWorkers } from "../lib/workerSupport";
 import { useAppStore } from "../store";
@@ -130,6 +136,9 @@ function createVideoElement(): HTMLVideoElement {
 // Bound each route independently so one broken route cannot block fallbacks,
 // while allowing slow IPTV providers enough time to produce the first frame.
 const PLAYBACK_ROUTE_TIMEOUT_MS = 15_000;
+// Replay has a local compatibility route available: don't spend the full live
+// startup budget waiting for a provider manifest WebKit cannot play.
+const ARCHIVE_NATIVE_TIMEOUT_MS = 3_000;
 const MPEGTS_PLAYBACK_ROUTE_TIMEOUT_MS = 25_000;
 const LOADING_TIMEOUT_MS = 90_000;
 const PLAYBACK_RECOVERY_DELAY_MS = 900;
@@ -736,6 +745,35 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
     [videoElement, applyVolume],
   );
 
+  const tryRemuxedArchive = useCallback(
+    async (url: string, signal: AbortSignal, audioOnly: boolean): Promise<boolean> => {
+      const requestId = crypto.randomUUID();
+      const stopProxy = () => {
+        void stopLocalPlayback(requestId).catch(() => {});
+      };
+      signal.addEventListener("abort", stopProxy, { once: true });
+      let playing = false;
+      try {
+        if (signal.aborted) return false;
+        const localUrl = await startLocalPlayback(url, requestId);
+        if (signal.aborted) return false;
+        playing = await tryNativePlayback(localUrl, signal, PLAYBACK_ROUTE_TIMEOUT_MS, audioOnly);
+        return playing;
+      } catch (error) {
+        lastErrorRef.current = error instanceof Error ? error.message : "Archive remux failed";
+        return false;
+      } finally {
+        if (!playing) {
+          signal.removeEventListener("abort", stopProxy);
+          // Also handles a cancellation that arrived before the start command
+          // registered its backend session.
+          stopProxy();
+        }
+      }
+    },
+    [tryNativePlayback],
+  );
+
   const tryHlsPlayback = useCallback(
     async (
       url: string,
@@ -757,11 +795,18 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           telemetryObserverRef.current?.route("hls.js");
           telemetryObserverRef.current?.hls(hls, Hls.Events);
           hlsInstanceRef.current = hls;
+          let cancelStartup: (() => void) | undefined;
+          let detectedAudioOnly = currentChannelRef.current?.audio_only ?? false;
+          hls.on(Hls.Events.BUFFER_CODECS, (_event, tracks) => {
+            if (tracks.video || tracks.audiovideo) detectedAudioOnly = false;
+            else if (tracks.audio?.id === "main") detectedAudioOnly = true;
+          });
 
           const finish = (value: boolean) => {
             if (settled) return;
             settled = true;
             if (timer) clearTimeout(timer);
+            cancelStartup?.();
             videoElement.removeEventListener("canplay", onCanPlay);
             videoElement.removeEventListener("error", onVideoError);
             signal.removeEventListener("abort", onAbort);
@@ -769,10 +814,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             resolve(value);
           };
           const destroyPlayer = () => {
-            hls.destroy();
+            telemetryObserverRef.current?.closeRoute();
             if (hlsInstanceRef.current === hls) {
               hlsInstanceRef.current = null;
             }
+            hls.destroy();
           };
           const fail = (reason?: string) => {
             if (settled) return;
@@ -782,7 +828,14 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             finish(false);
             destroyPlayer();
           };
-          const onCanPlay = () => finish(true);
+          const onCanPlay = () => {
+            cancelStartup = confirmPlaybackStarted(
+              videoElement,
+              () => detectedAudioOnly,
+              () => finish(true),
+              fail,
+            );
+          };
           const onVideoError = () => {
             fail(readMediaErrorMessage(videoElement.error) ?? "HLS media error");
           };
@@ -869,11 +922,13 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           ) as unknown as MpegtsPlayer;
           telemetryObserverRef.current?.mpegts(player);
           mpegtsPlayerRef.current = player;
+          let cancelStartup: (() => void) | undefined;
 
           const finish = (value: boolean) => {
             if (settled) return;
             settled = true;
             if (timer) clearTimeout(timer);
+            cancelStartup?.();
             videoElement.removeEventListener("canplay", onCanPlay);
             videoElement.removeEventListener("error", onError);
             signal.removeEventListener("abort", onAbort);
@@ -881,10 +936,13 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             resolve(value);
           };
           const destroyPlayer = () => {
-            player.destroy();
+            // mpegts.js cannot remove listeners after destroy() nulls its
+            // engine. Detach diagnostics before disposing a failed route.
+            telemetryObserverRef.current?.closeRoute();
             if (mpegtsPlayerRef.current === player) {
               mpegtsPlayerRef.current = null;
             }
+            player.destroy();
           };
           const fail = (reason?: string) => {
             if (settled) return;
@@ -895,7 +953,19 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             destroyPlayer();
           };
           const onCanPlay = () => {
-            finish(true);
+            cancelStartup = confirmPlaybackStarted(
+              videoElement,
+              () => {
+                const info = player.mediaInfo;
+                return info?.hasVideo === false && info.hasAudio === true
+                  ? true
+                  : info?.hasVideo === true
+                    ? false
+                    : (currentChannelRef.current?.audio_only ?? false);
+              },
+              () => finish(true),
+              fail,
+            );
           };
           const onError = () => {
             fail(readMediaErrorMessage(videoElement.error) ?? "MPEG-TS media error");
@@ -1058,12 +1128,34 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       };
 
       if (preferNativeHls) {
+        const archive = archiveSessionRef.current;
+        const channelKey = archive
+          ? await archiveChannelKey(archive.baseResult.url).catch(() => null)
+          : null;
+        if (!isCurrentPlayback()) return;
+        const remuxFirst = channelKey !== null && prefersArchiveRemux(channelKey);
+        const tryArchiveRemux = async (): Promise<boolean> => {
+          logger.info("[Player] Trying native HLS archive remux for", result.name);
+          const remuxOk = await tryRemuxedArchive(url, abortController.signal, result.audio_only);
+          if (!isCurrentPlayback()) return false;
+          if (remuxOk && (await handleSuccessfulStart())) {
+            if (channelKey !== null) rememberArchiveRemux(channelKey, true);
+            logger.info("[Player] Playing via native HLS archive remux:", result.name);
+            return true;
+          }
+          if (isCurrentPlayback() && channelKey !== null) rememberArchiveRemux(channelKey, false);
+          return false;
+        };
+        if (remuxFirst) {
+          if (await tryArchiveRemux()) return;
+          if (!isCurrentPlayback()) return;
+        }
         logger.info("[Player] Trying native HLS for", result.name);
         lastErrorRef.current = null;
         const nativeOk = await tryNativePlayback(
           url,
           abortController.signal,
-          PLAYBACK_ROUTE_TIMEOUT_MS,
+          archive ? ARCHIVE_NATIVE_TIMEOUT_MS : PLAYBACK_ROUTE_TIMEOUT_MS,
           result.audio_only,
         );
         if (!isCurrentPlayback()) {
@@ -1079,6 +1171,10 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           "-",
           lastErrorRef.current ?? "no media error reported",
         );
+        if (archive && !remuxFirst) {
+          if (await tryArchiveRemux()) return;
+          if (!isCurrentPlayback()) return;
+        }
       }
 
       // A playlist URL that answers with raw media (timeshift `.m3u8` redirecting
@@ -1207,6 +1303,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       tryHlsPlayback,
       tryMpegtsPlayback,
       tryNativePlayback,
+      tryRemuxedArchive,
       videoElement,
     ],
   );

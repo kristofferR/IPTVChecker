@@ -383,6 +383,39 @@ body {
   white-space: nowrap;
 }
 
+/* Filters have their own row so commands and long group names cannot squeeze them out. */
+.toolbar-filters {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1.2fr) minmax(10rem, 0.8fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem 0.75rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+@media (width < 1050px) {
+  .toolbar-actions .toolbar-btn {
+    flex-direction: row;
+    min-height: 2.25rem;
+    gap: 0.35rem;
+    padding: 0.4rem 0.6rem;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .toolbar-actions .toolbar-btn > svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+  }
+
+  .toolbar-actions .toolbar-scan-options {
+    top: 50%;
+    bottom: auto;
+    transform: translateY(-50%);
+  }
+}
+
 .guide-row:hover .guide-channel-button {
   background: var(--panel-bg-subtle);
 }

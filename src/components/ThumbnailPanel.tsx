@@ -12,7 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import type { UseChromecastResult } from "../hooks/useChromecast";
 import type { ArchivePlayOptions, ArchiveSession } from "../hooks/useStreamPlayer";
 import { buildCastRequest, isCastSessionActive } from "../lib/cast";
@@ -682,8 +682,10 @@ export function ThumbnailPanel({
                     onPip={
                       onPip
                         ? () => {
+                            // Finish moving the video before starting native PiP,
+                            // while this click still supplies user activation.
+                            flushSync(() => closeLightbox());
                             onPip();
-                            closeLightbox();
                           }
                         : undefined
                     }

@@ -78,12 +78,25 @@ pub struct CastState {
     pub proxy: Option<CastProxyHandle>,
 }
 
+pub struct LocalPlaybackState {
+    pub request_id: String,
+    pub cancel: CancellationToken,
+    pub proxy: Option<CastProxyHandle>,
+}
+
+impl Drop for LocalPlaybackState {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+    }
+}
+
 pub struct AppState {
     pub settings: Mutex<AppSettings>,
     pub proxy_client: Mutex<Option<(reqwest::Client, bool)>>,
     pub streaming_proxy_port: std::sync::atomic::AtomicU16,
     pub streaming_proxy_start_lock: Mutex<()>,
     pub cast_state: Mutex<CastState>,
+    pub local_playback: std::sync::Mutex<HashMap<String, LocalPlaybackState>>,
     /// Held for the entire start/stop cast lifecycle so concurrent
     /// `cast_to_device` / `stop_cast` calls cannot interleave and corrupt
     /// the stored session.
@@ -124,6 +137,7 @@ impl AppState {
             streaming_proxy_port: std::sync::atomic::AtomicU16::new(0),
             streaming_proxy_start_lock: Mutex::new(()),
             cast_state: Mutex::new(CastState::default()),
+            local_playback: std::sync::Mutex::new(HashMap::new()),
             cast_lifecycle_lock: Mutex::new(()),
             window_scan_states: Mutex::new(HashMap::new()),
             quick_check_tokens: Mutex::new(HashMap::new()),

@@ -1,6 +1,8 @@
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useRef } from "react";
+import { logger } from "../lib/logger";
+import { syncViewMenu } from "../lib/tauri";
 import type { AppSettings, PlaylistLoadProgress, RecentPlaylistEntry } from "../lib/types";
 import { useAppStore } from "../store";
 
@@ -39,6 +41,51 @@ export interface MenuEventHandlers {
 export function useMenuEventBridge(handlers: MenuEventHandlers): void {
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
+
+  const settingsHydrated = useAppStore((state) => state.settingsHydrated);
+  const sidebarVisible = useAppStore(
+    (state) => !state.sidebarHidden && state.selectedChannel !== null,
+  );
+  const reportVisible = useAppStore((state) => state.showReportPanel);
+  const sourceFilterVisible = handlers.settings.show_prescan_filter;
+  const headerButtonTextVisible = handlers.settings.show_header_button_text;
+
+  useEffect(() => {
+    if (!settingsHydrated) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    const sync = () => {
+      if (cancelled) return;
+      void syncViewMenu({
+        sidebarVisible,
+        reportVisible,
+        sourceFilterVisible,
+        headerButtonTextVisible,
+      }).catch((error) => logger.warn("Failed to sync View menu labels:", error));
+    };
+    void getCurrentWindow()
+      .onFocusChanged(({ payload: focused }) => {
+        if (focused) sync();
+      })
+      .then((off) => {
+        if (cancelled) off();
+        else {
+          unlisten = off;
+          sync();
+        }
+      })
+      .catch((error) => logger.warn("Failed to watch View menu focus:", error));
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [
+    settingsHydrated,
+    sidebarVisible,
+    reportVisible,
+    sourceFilterVisible,
+    headerButtonTextVisible,
+  ]);
 
   useEffect(() => {
     let cancelled = false;

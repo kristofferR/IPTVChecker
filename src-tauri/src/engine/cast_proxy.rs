@@ -97,6 +97,7 @@ impl Drop for CastProxyHandle {
 
 struct RemuxState {
     tmpdir: PathBuf,
+    local_playback: bool,
     // Note: the ffmpeg child is owned (and killed) by the remux worker task,
     // not stored here — cleanup only removes the temp directory.
 }
@@ -164,14 +165,62 @@ pub async fn start(
     stream_kind: CastStreamKind,
     is_finite: bool,
 ) -> Result<CastProxyHandle, AppError> {
-    let token = generate_token();
-    let lan_ip = detect_lan_ip()
-        .ok_or_else(|| AppError::Other("Could not determine LAN IP for cast proxy".to_string()))?;
+    start_proxy(
+        app,
+        upstream_url,
+        stream_kind,
+        is_finite,
+        false,
+        CancellationToken::new(),
+    )
+    .await
+}
 
-    let listener = TcpListener::bind("0.0.0.0:0").await.map_err(AppError::Io)?;
+/// Repackage an archive as short HLS segments for native WebKit playback.
+/// This listener is local to the app and does not use the casting session.
+pub async fn start_local_playback(
+    app: AppHandle,
+    upstream_url: String,
+    cancel: CancellationToken,
+) -> Result<CastProxyHandle, AppError> {
+    start_proxy(
+        app,
+        upstream_url,
+        CastStreamKind::MpegTs,
+        true,
+        true,
+        cancel,
+    )
+    .await
+}
+
+async fn start_proxy(
+    app: AppHandle,
+    upstream_url: String,
+    stream_kind: CastStreamKind,
+    is_finite: bool,
+    local_playback: bool,
+    cancel: CancellationToken,
+) -> Result<CastProxyHandle, AppError> {
+    let token = generate_token();
+    let lan_ip = if local_playback {
+        IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)
+    } else {
+        detect_lan_ip().ok_or_else(|| {
+            AppError::Other("Could not determine LAN IP for cast proxy".to_string())
+        })?
+    };
+
+    let bind_address = if local_playback {
+        "127.0.0.1:0"
+    } else {
+        "0.0.0.0:0"
+    };
+    let listener = TcpListener::bind(bind_address)
+        .await
+        .map_err(AppError::Io)?;
     let port = listener.local_addr().map_err(AppError::Io)?.port();
 
-    let cancel = CancellationToken::new();
     let remux_state: Arc<Mutex<Option<RemuxState>>> = Arc::new(Mutex::new(None));
     // Final URL of the manifest after redirects, populated on the first
     // successful manifest fetch in `serve_upstream`. Used as the same-origin
@@ -207,6 +256,7 @@ pub async fn start(
             remux_state.clone(),
             client.clone(),
             is_finite,
+            local_playback,
         )
         .await?;
         (
@@ -221,7 +271,7 @@ pub async fn start(
     };
 
     log::info!(
-        "[CastProxy] Listening on 0.0.0.0:{port} (advertising {lan_ip}:{port}) for {} (mode={:?})",
+        "[CastProxy] Listening on {bind_address} (advertising {lan_ip}:{port}) for {} (mode={:?})",
         redact_url(&upstream_url),
         stream_kind
     );
@@ -318,6 +368,27 @@ fn dash_window_size(is_finite: bool) -> &'static str {
     }
 }
 
+async fn supports_initial_read_burst(ffmpeg_bin: &str) -> bool {
+    // The resolved binary is fixed for the app lifetime. Older system ffmpeg
+    // installations can still remux without this optional startup optimization.
+    static SUPPORTED: tokio::sync::OnceCell<bool> = tokio::sync::OnceCell::const_new();
+    *SUPPORTED
+        .get_or_init(|| async {
+            let mut cmd = tokio::process::Command::new(ffmpeg_bin);
+            configure_background_process(&mut cmd);
+            cmd.kill_on_drop(true)
+                .args(["-hide_banner", "-h", "full"])
+                .stdin(std::process::Stdio::null());
+            match tokio::time::timeout(Duration::from_millis(500), cmd.output()).await {
+                Ok(Ok(output)) if output.status.success() => {
+                    String::from_utf8_lossy(&output.stdout).contains("-readrate_initial_burst")
+                }
+                _ => false,
+            }
+        })
+        .await
+}
+
 /// Spawn ffmpeg to remux the upstream MPEG-TS into a sliding-window HLS
 /// playlist on disk. Waits for the playlist file to appear (so the Cast
 /// device's first GET doesn't 404) before returning.
@@ -329,6 +400,7 @@ async fn start_remux(
     remux_state: Arc<Mutex<Option<RemuxState>>>,
     client: Arc<reqwest::Client>,
     is_finite: bool,
+    local_playback: bool,
 ) -> Result<RemuxStartInfo, AppError> {
     let tmpdir = std::env::temp_dir().join(format!("iptv-cast-{token}"));
     std::fs::create_dir_all(&tmpdir).map_err(AppError::Io)?;
@@ -354,13 +426,19 @@ async fn start_remux(
     // a transcode-to-AAC is needed. Probe is best-effort: a failure (timeout,
     // missing ffprobe) falls through to HLS+TS with stream copy, correct for
     // the well-tested H.264+AAC case.
-    let (video_codec, audio_codec) = probe_codecs(
-        &ffprobe_bin,
-        &upstream_url,
-        &user_agent,
-        accept_invalid_certs,
-    )
-    .await;
+    // Native playback needs HLS rather than Cast's HEVC/DASH route. Copy the
+    // original tracks without opening an additional provider connection.
+    let (video_codec, audio_codec) = if local_playback {
+        (None, None)
+    } else {
+        probe_codecs(
+            &ffprobe_bin,
+            &upstream_url,
+            &user_agent,
+            accept_invalid_certs,
+        )
+        .await
+    };
     let is_hevc = video_codec
         .as_deref()
         .map(|c| matches!(c, "hevc" | "h265"))
@@ -401,6 +479,11 @@ async fn start_remux(
     // before the sliding HLS/DASH window removes it.
     if is_finite {
         cmd.arg("-re");
+        if local_playback && supports_initial_read_burst(&ffmpeg_bin).await {
+            // Fill WebKit's initial buffer immediately, then resume normal
+            // pacing to keep disk/network use bounded during long recordings.
+            cmd.arg("-readrate_initial_burst").arg("12");
+        }
     }
     if is_hevc {
         cmd.arg("-f").arg("mpegts");
@@ -480,10 +563,17 @@ async fn start_remux(
         let segment_pattern = tmpdir.join("seg_%05d.ts");
         let (playlist_size, hls_flags) = hls_muxer_options(is_finite);
         cmd.arg("-f").arg("hls");
-        cmd.arg("-hls_time").arg("4");
+        // WebKit buffers several segments before presenting video. Shorter
+        // local segments reduce startup without downloading the whole archive
+        // ahead of playback, including on older ffmpeg without burst support.
+        cmd.arg("-hls_time")
+            .arg(if local_playback { "1" } else { "4" });
         cmd.arg("-hls_list_size").arg(playlist_size);
         cmd.arg("-hls_flags").arg(hls_flags);
         cmd.arg("-hls_segment_filename").arg(&segment_pattern);
+    }
+    if local_playback {
+        cmd.arg("-avoid_negative_ts").arg("make_zero");
     }
     cmd.arg(&manifest_path);
 
@@ -535,6 +625,7 @@ async fn start_remux(
             use tokio::io::{AsyncBufReadExt, BufReader};
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                let line = crate::engine::ffmpeg::sanitize_ffmpeg_stderr_line(&line);
                 log::debug!("[CastProxy/ffmpeg] {line}");
                 let mut t = tail.lock().await;
                 if t.len() >= 32 {
@@ -615,6 +706,7 @@ async fn start_remux(
         let mut guard = remux_state.lock().await;
         *guard = Some(RemuxState {
             tmpdir: tmpdir.clone(),
+            local_playback,
         });
     }
 
@@ -993,14 +1085,21 @@ async fn handle_connection(
     if let Some(rest) = suffix.strip_prefix("hls/") {
         let tmpdir_opt = {
             let guard = remux_state.lock().await;
-            guard.as_ref().map(|s| s.tmpdir.clone())
+            guard.as_ref().map(|s| (s.tmpdir.clone(), s.local_playback))
         };
-        let Some(tmpdir) = tmpdir_opt else {
+        let Some((tmpdir, local_playback)) = tmpdir_opt else {
             let _ = write_simple(&mut socket, 503, "text/plain", b"Remux not ready").await;
             return Ok(());
         };
-        return serve_remux_file(&mut socket, &tmpdir, rest, &method, range_header.as_deref())
-            .await;
+        return serve_remux_file(
+            &mut socket,
+            &tmpdir,
+            rest,
+            &method,
+            range_header.as_deref(),
+            local_playback,
+        )
+        .await;
     }
 
     // Pass-through mode: entrypoint or rewritten manifest segment.
@@ -1082,6 +1181,7 @@ async fn serve_remux_file(
     relative: &str,
     method: &str,
     range_header: Option<&str>,
+    local_playback: bool,
 ) -> std::io::Result<()> {
     // Cross-platform path-traversal guard. The string-level checks reject
     // backslashes (Windows separator), drive letters (`C:foo`), and UNC
@@ -1094,7 +1194,7 @@ async fn serve_remux_file(
         return Ok(());
     }
     let file_path = tmpdir.join(relative);
-    let bytes = match tokio::fs::read(&file_path).await {
+    let mut bytes = match tokio::fs::read(&file_path).await {
         Ok(data) => data,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             let _ = write_simple(socket, 404, "text/plain", b"Not found").await;
@@ -1106,6 +1206,18 @@ async fn serve_remux_file(
             return Ok(());
         }
     };
+    if local_playback && relative.ends_with(".m3u8") {
+        // This growing playlist is a recording starting at the requested
+        // replay/seek position. Explicitly start there: WebKit's default live
+        // edge selection both skips content and delays the first video frame.
+        if let Some(body) = bytes.strip_prefix(b"#EXTM3U\n") {
+            bytes = [
+                b"#EXTM3U\n#EXT-X-START:TIME-OFFSET=0,PRECISE=YES\n".as_slice(),
+                body,
+            ]
+            .concat();
+        }
+    }
     let content_type = if relative.ends_with(".m3u8") {
         "application/vnd.apple.mpegurl"
     } else if relative.ends_with(".mpd") {
@@ -1590,6 +1702,53 @@ fn decode_segment(encoded: &str) -> Option<String> {
 mod tests {
     use super::*;
     use tokio::io::AsyncReadExt;
+
+    #[tokio::test]
+    async fn local_archive_manifest_starts_at_requested_position_and_preserves_http_ranges() {
+        let tmpdir = std::env::temp_dir().join(format!("iptv-start-test-{}", generate_token()));
+        tokio::fs::create_dir(&tmpdir).await.unwrap();
+        let manifest = "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\nseg0.ts\n";
+        tokio::fs::write(tmpdir.join("playlist.m3u8"), manifest)
+            .await
+            .unwrap();
+        let expected = manifest.replace(
+            "#EXTM3U\n",
+            "#EXTM3U\n#EXT-X-START:TIME-OFFSET=0,PRECISE=YES\n",
+        );
+        for (local, range, body) in [
+            (false, None, manifest),
+            (true, None, expected.as_str()),
+            (true, Some("bytes=8-19"), &expected[8..20]),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let directory = tmpdir.clone();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                serve_remux_file(
+                    &mut socket,
+                    &directory,
+                    "playlist.m3u8",
+                    "GET",
+                    range,
+                    local,
+                )
+                .await
+                .unwrap();
+            });
+            let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+            let mut response = String::new();
+            client.read_to_string(&mut response).await.unwrap();
+            server.await.unwrap();
+            let (headers, actual) = response.split_once("\r\n\r\n").unwrap();
+            assert_eq!(actual, body);
+            assert!(headers.contains(&format!("Content-Length: {}\r\n", body.len())));
+            if range.is_some() {
+                assert!(headers.contains(&format!("Content-Range: bytes 8-19/{}", expected.len())));
+            }
+        }
+        tokio::fs::remove_dir_all(tmpdir).await.unwrap();
+    }
 
     #[test]
     fn token_is_url_safe_and_long() {

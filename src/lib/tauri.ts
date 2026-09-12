@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+
 import { toCommandChannelResult } from "./channelResults";
 import type {
   AppSettings,
@@ -27,6 +28,14 @@ import type {
   XtreamOpenRequest,
   XtreamServerTestReport,
 } from "./types";
+
+export function startLocalPlayback(url: string, requestId: string): Promise<string> {
+  return invoke("start_local_playback", { url, requestId });
+}
+
+export function stopLocalPlayback(requestId: string): Promise<void> {
+  return invoke("stop_local_playback", { requestId });
+}
 
 function toCommandChannelResults(results: ChannelResult[]) {
   return results.map(toCommandChannelResult);
@@ -184,6 +193,15 @@ export async function exportScanLogJson(path: string): Promise<void> {
 
 export async function getSettings(): Promise<AppSettings> {
   return invoke("get_settings");
+}
+
+export async function syncViewMenu(visibility: {
+  sidebarVisible: boolean;
+  reportVisible: boolean;
+  sourceFilterVisible: boolean;
+  headerButtonTextVisible: boolean;
+}): Promise<void> {
+  return invoke("sync_view_menu", visibility);
 }
 
 /** Linux: whether new windows should keep their native title bar. */
