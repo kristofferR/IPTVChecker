@@ -393,10 +393,6 @@ body {
   border-top: 1px solid var(--border-subtle);
 }
 
-.toolbar-filters-empty {
-  grid-template-columns: minmax(0, 1.2fr) minmax(10rem, 0.8fr) minmax(0, 1fr);
-}
-
 @media (width < 1050px) {
   .toolbar-actions .toolbar-btn {
     flex-direction: row;

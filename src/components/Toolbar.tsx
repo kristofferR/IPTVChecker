@@ -373,7 +373,6 @@ export const Toolbar = memo(function Toolbar({
         : null;
   const canSavePlaylist =
     hasPlaylist && currentSourceDescriptor !== null && currentSourceDescriptor.kind !== "stalker";
-  const filtersDisabled = !hasPlaylist;
   const statusLabel = (value: string, label: string) =>
     hasPlaylist ? `${label} (${statusOptionCounts[value] ?? 0})` : label;
 
@@ -907,12 +906,9 @@ export const Toolbar = memo(function Toolbar({
           </button>
         </div>
       </div>
-      <div
-        data-no-window-drag
-        className={`toolbar-filters ${hasPlaylist ? "" : "toolbar-filters-empty"} ${filtersDisabled ? "opacity-50" : ""}`}
-      >
-        {/* Table / Guide mode switch */}
-        {hasPlaylist && (
+      {hasPlaylist && (
+        <div data-no-window-drag className="toolbar-filters">
+          {/* Table / Guide mode switch */}
           <div
             data-no-window-drag
             className="toolbar-view-switch flex shrink-0 items-center gap-0.5 rounded-lg border border-border-app bg-input p-0.5"
@@ -942,81 +938,78 @@ export const Toolbar = memo(function Toolbar({
               Guide
             </button>
           </div>
-        )}
 
-        <select
-          aria-label="Channel group"
-          value={groupFilter}
-          title={selectedGroupTitle}
-          disabled={filtersDisabled}
-          onChange={(e) => handleGroupChange(e.target.value)}
-          className="toolbar-select native-field h-7 w-full min-w-0 pl-2.5 pr-7 bg-input border border-border-app rounded-md text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
-        >
-          <option value="all">{GROUP_FILTER_LABEL}</option>
-          {groups.map((g) => (
-            <option key={g} value={g}>
-              {g}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="Channel status"
-          value={statusFilter}
-          disabled={filtersDisabled}
-          onChange={(e) => handleStatusChange(e.target.value)}
-          className="toolbar-select native-field h-7 w-full min-w-0 pl-2.5 pr-7 bg-input border border-border-app rounded-md text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
-        >
-          <option value="all">{statusLabel("all", "All Status")}</option>
-          <option value="alive">{statusLabel("alive", "Alive")}</option>
-          <option value="drm">{statusLabel("drm", "DRM")}</option>
-          <option value="dead">{statusLabel("dead", "Dead")}</option>
-          <option value="geoblocked">{statusLabel("geoblocked", "Geoblocked")}</option>
-          {(statusOptionCounts.placeholder ?? 0) > 0 && (
-            <option value="placeholder">{statusLabel("placeholder", "Placeholder")}</option>
-          )}
-          {((statusOptionCounts.catchup ?? 0) > 0 ||
-            statusFilter === "catchup" ||
-            catchupVerdictsAvailable ||
-            statusFilter in CATCHUP_VERDICT_FILTERS) && (
-            <option value="catchup">{statusLabel("catchup", "Catch-up")}</option>
-          )}
-          {(catchupVerdictsAvailable || statusFilter in CATCHUP_VERDICT_FILTERS) && (
-            <>
-              <option value="catchup_real">
-                {statusLabel("catchup_real", "\u00a0\u00a0\u00a0\u00a0Real")}
+          <select
+            aria-label="Channel group"
+            value={groupFilter}
+            title={selectedGroupTitle}
+            onChange={(e) => handleGroupChange(e.target.value)}
+            className="toolbar-select native-field h-7 w-full min-w-0 pl-2.5 pr-7 bg-input border border-border-app rounded-md text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
+          >
+            <option value="all">{GROUP_FILTER_LABEL}</option>
+            {groups.map((g) => (
+              <option key={g} value={g}>
+                {g}
               </option>
-              <option value="catchup_shallower">
-                {statusLabel("catchup_shallower", "\u00a0\u00a0\u00a0\u00a0Shallower")}
-              </option>
-              <option value="catchup_fake">
-                {statusLabel("catchup_fake", "\u00a0\u00a0\u00a0\u00a0Fake")}
-              </option>
-              <option value="catchup_untested">
-                {statusLabel("catchup_untested", "\u00a0\u00a0\u00a0\u00a0Untested")}
-              </option>
-            </>
-          )}
-          <option value="mislabeled">{statusLabel("mislabeled", "Mislabeled")}</option>
-          <option value="audio_only">{statusLabel("audio_only", "Audio Only")}</option>
-          <option value="duplicates">{statusLabel("duplicates", "Duplicates")}</option>
-          <option value="pending">{statusLabel("pending", "Pending")}</option>
-        </select>
-        <div className="relative min-w-0">
-          <Search className="search-icon absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary" />
-          <input
-            ref={searchInputRef}
-            type="search"
-            aria-label="Search channels"
-            autoCorrect="off"
-            spellCheck={false}
-            placeholder="Search..."
-            value={search}
-            disabled={filtersDisabled}
-            onChange={(e) => handleSearchChange(e.target.value)}
-            className="native-field h-7 w-full min-w-0 pl-7 pr-2 text-[12px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:cursor-not-allowed"
-          />
+            ))}
+          </select>
+          <select
+            aria-label="Channel status"
+            value={statusFilter}
+            onChange={(e) => handleStatusChange(e.target.value)}
+            className="toolbar-select native-field h-7 w-full min-w-0 pl-2.5 pr-7 bg-input border border-border-app rounded-md text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
+          >
+            <option value="all">{statusLabel("all", "All Status")}</option>
+            <option value="alive">{statusLabel("alive", "Alive")}</option>
+            <option value="drm">{statusLabel("drm", "DRM")}</option>
+            <option value="dead">{statusLabel("dead", "Dead")}</option>
+            <option value="geoblocked">{statusLabel("geoblocked", "Geoblocked")}</option>
+            {(statusOptionCounts.placeholder ?? 0) > 0 && (
+              <option value="placeholder">{statusLabel("placeholder", "Placeholder")}</option>
+            )}
+            {((statusOptionCounts.catchup ?? 0) > 0 ||
+              statusFilter === "catchup" ||
+              catchupVerdictsAvailable ||
+              statusFilter in CATCHUP_VERDICT_FILTERS) && (
+              <option value="catchup">{statusLabel("catchup", "Catch-up")}</option>
+            )}
+            {(catchupVerdictsAvailable || statusFilter in CATCHUP_VERDICT_FILTERS) && (
+              <>
+                <option value="catchup_real">
+                  {statusLabel("catchup_real", "\u00a0\u00a0\u00a0\u00a0Real")}
+                </option>
+                <option value="catchup_shallower">
+                  {statusLabel("catchup_shallower", "\u00a0\u00a0\u00a0\u00a0Shallower")}
+                </option>
+                <option value="catchup_fake">
+                  {statusLabel("catchup_fake", "\u00a0\u00a0\u00a0\u00a0Fake")}
+                </option>
+                <option value="catchup_untested">
+                  {statusLabel("catchup_untested", "\u00a0\u00a0\u00a0\u00a0Untested")}
+                </option>
+              </>
+            )}
+            <option value="mislabeled">{statusLabel("mislabeled", "Mislabeled")}</option>
+            <option value="audio_only">{statusLabel("audio_only", "Audio Only")}</option>
+            <option value="duplicates">{statusLabel("duplicates", "Duplicates")}</option>
+            <option value="pending">{statusLabel("pending", "Pending")}</option>
+          </select>
+          <div className="relative min-w-0">
+            <Search className="search-icon absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary" />
+            <input
+              ref={searchInputRef}
+              type="search"
+              aria-label="Search channels"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="Search..."
+              value={search}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              className="native-field h-7 w-full min-w-0 pl-7 pr-2 text-[12px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:cursor-not-allowed"
+            />
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 });
