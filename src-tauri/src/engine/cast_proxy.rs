@@ -97,6 +97,7 @@ impl Drop for CastProxyHandle {
 
 struct RemuxState {
     tmpdir: PathBuf,
+    local_playback: bool,
     // Note: the ffmpeg child is owned (and killed) by the remux worker task,
     // not stored here — cleanup only removes the temp directory.
 }
@@ -705,6 +706,7 @@ async fn start_remux(
         let mut guard = remux_state.lock().await;
         *guard = Some(RemuxState {
             tmpdir: tmpdir.clone(),
+            local_playback,
         });
     }
 
@@ -1083,14 +1085,21 @@ async fn handle_connection(
     if let Some(rest) = suffix.strip_prefix("hls/") {
         let tmpdir_opt = {
             let guard = remux_state.lock().await;
-            guard.as_ref().map(|s| s.tmpdir.clone())
+            guard.as_ref().map(|s| (s.tmpdir.clone(), s.local_playback))
         };
-        let Some(tmpdir) = tmpdir_opt else {
+        let Some((tmpdir, local_playback)) = tmpdir_opt else {
             let _ = write_simple(&mut socket, 503, "text/plain", b"Remux not ready").await;
             return Ok(());
         };
-        return serve_remux_file(&mut socket, &tmpdir, rest, &method, range_header.as_deref())
-            .await;
+        return serve_remux_file(
+            &mut socket,
+            &tmpdir,
+            rest,
+            &method,
+            range_header.as_deref(),
+            local_playback,
+        )
+        .await;
     }
 
     // Pass-through mode: entrypoint or rewritten manifest segment.
@@ -1172,6 +1181,7 @@ async fn serve_remux_file(
     relative: &str,
     method: &str,
     range_header: Option<&str>,
+    local_playback: bool,
 ) -> std::io::Result<()> {
     // Cross-platform path-traversal guard. The string-level checks reject
     // backslashes (Windows separator), drive letters (`C:foo`), and UNC
@@ -1184,7 +1194,7 @@ async fn serve_remux_file(
         return Ok(());
     }
     let file_path = tmpdir.join(relative);
-    let bytes = match tokio::fs::read(&file_path).await {
+    let mut bytes = match tokio::fs::read(&file_path).await {
         Ok(data) => data,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             let _ = write_simple(socket, 404, "text/plain", b"Not found").await;
@@ -1196,6 +1206,18 @@ async fn serve_remux_file(
             return Ok(());
         }
     };
+    if local_playback && relative.ends_with(".m3u8") {
+        // This growing playlist is a recording starting at the requested
+        // replay/seek position. Explicitly start there: WebKit's default live
+        // edge selection both skips content and delays the first video frame.
+        if let Some(body) = bytes.strip_prefix(b"#EXTM3U\n") {
+            bytes = [
+                b"#EXTM3U\n#EXT-X-START:TIME-OFFSET=0,PRECISE=YES\n".as_slice(),
+                body,
+            ]
+            .concat();
+        }
+    }
     let content_type = if relative.ends_with(".m3u8") {
         "application/vnd.apple.mpegurl"
     } else if relative.ends_with(".mpd") {
@@ -1680,6 +1702,53 @@ fn decode_segment(encoded: &str) -> Option<String> {
 mod tests {
     use super::*;
     use tokio::io::AsyncReadExt;
+
+    #[tokio::test]
+    async fn local_archive_manifest_starts_at_requested_position_and_preserves_http_ranges() {
+        let tmpdir = std::env::temp_dir().join(format!("iptv-start-test-{}", generate_token()));
+        tokio::fs::create_dir(&tmpdir).await.unwrap();
+        let manifest = "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\nseg0.ts\n";
+        tokio::fs::write(tmpdir.join("playlist.m3u8"), manifest)
+            .await
+            .unwrap();
+        let expected = manifest.replace(
+            "#EXTM3U\n",
+            "#EXTM3U\n#EXT-X-START:TIME-OFFSET=0,PRECISE=YES\n",
+        );
+        for (local, range, body) in [
+            (false, None, manifest),
+            (true, None, expected.as_str()),
+            (true, Some("bytes=8-19"), &expected[8..20]),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let directory = tmpdir.clone();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                serve_remux_file(
+                    &mut socket,
+                    &directory,
+                    "playlist.m3u8",
+                    "GET",
+                    range,
+                    local,
+                )
+                .await
+                .unwrap();
+            });
+            let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+            let mut response = String::new();
+            client.read_to_string(&mut response).await.unwrap();
+            server.await.unwrap();
+            let (headers, actual) = response.split_once("\r\n\r\n").unwrap();
+            assert_eq!(actual, body);
+            assert!(headers.contains(&format!("Content-Length: {}\r\n", body.len())));
+            if range.is_some() {
+                assert!(headers.contains(&format!("Content-Range: bytes 8-19/{}", expected.len())));
+            }
+        }
+        tokio::fs::remove_dir_all(tmpdir).await.unwrap();
+    }
 
     #[test]
     fn token_is_url_safe_and_long() {
