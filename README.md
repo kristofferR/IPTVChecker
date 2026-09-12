@@ -76,9 +76,9 @@ Export results as CSV, M3U (alive only, split by group, or renamed), or a full J
 
 ### Catch-up that actually works
 
-Channels that advertise catch-up (`catchup`/`catchup-days` in M3U, `tv_archive` on Xtream) get a chip in the table and a pill in the status bar. Verify tells you which ones are real: quick mode asks each archive for the last hour, full mode also measures how many days are really kept. Fakes come back with a reason (empty archive, serves the live stream, HTTP error, timeout), filter to them, and export either a playlist of only the working catch-up channels or your list with the fake flags stripped. Verdicts are remembered per playlist.
+Channels that advertise catch-up (`catchup`/`catchup-days` in M3U, `tv_archive` on Xtream) get a chip in the table and a pill in the status bar. Verify tells you which ones are real: quick mode asks each archive for the last hour, full mode also checks how far back the archive is available. Fakes come back with a reason (empty archive, serves the live stream, HTTP error, timeout), filter to them, and export either a playlist of only the working catch-up channels or your list with the fake flags stripped. Verdicts stay within the current playlist session and are cleared when the playlist is reopened or the app restarts.
 
-The Guide view shows the EPG for every channel as one scrollable timeline. Double-click a past programme on a catch-up channel to replay it, right-click to record it to disk with ffmpeg, or play the current programme live on any channel.
+The Guide view shows the EPG for every channel as one scrollable timeline. Replay a past programme on a catch-up channel, use **Play from beginning** for one still airing, or choose **Play live**. Right-click an available archive programme and choose **Download…** to save it to disk with ffmpeg.
 
 ### Lightweight and fast
 
