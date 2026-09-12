@@ -41,11 +41,6 @@ import { type ArchivePlayOptions, useStreamPlayer } from "./hooks/useStreamPlaye
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 import { resolveArchivePlayback } from "./lib/archive";
 import { cancelArchiveProbes } from "./lib/archiveProbe";
-import {
-  archiveProbeStorageKey,
-  loadArchiveProbes,
-  saveArchiveProbes,
-} from "./lib/archiveProbeStorage";
 import { registerArchiveTimezoneResolver } from "./lib/archiveTimezone";
 import { isArchiveVerificationBlockingPlayback, verifyAllArchives } from "./lib/archiveVerifyRun";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
@@ -724,31 +719,17 @@ export default function App() {
     };
   }, [platform]);
 
-  // Catch-up verdicts persist per playlist: restore on open, save as they change.
+  // Remove verdicts saved by older builds. Probe results are session-only.
   useEffect(() => {
-    if (!playlist) return;
-    const key = archiveProbeStorageKey(playlist);
-    const state = getStore();
-    if (Object.keys(state.archiveProbes).length === 0) {
-      const restored = loadArchiveProbes(key, state.flatResults);
-      if (restored) state.restoreArchiveProbes(restored);
+    try {
+      for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+        const key = localStorage.key(index);
+        if (key?.startsWith("catchup-verdicts:")) localStorage.removeItem(key);
+      }
+    } catch {
+      // Storage can be unavailable; old entries are never read again.
     }
-    let timer: number | null = null;
-    const unsubscribe = useAppStore.subscribe((next, previous) => {
-      if (next.archiveProbes === previous.archiveProbes || next.playlist !== playlist) return;
-      if (timer != null) window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        timer = null;
-        const latest = getStore();
-        if (latest.playlist !== playlist) return;
-        saveArchiveProbes(key, latest.archiveProbes, latest.flatResults);
-      }, 1000);
-    });
-    return () => {
-      unsubscribe();
-      if (timer != null) window.clearTimeout(timer);
-    };
-  }, [playlist]);
+  }, []);
 
   useEffect(() => {
     const title = playlist ? `${playlist.file_name} | IPTV Checker` : "IPTV Checker";
