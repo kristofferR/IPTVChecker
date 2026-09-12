@@ -26,7 +26,11 @@ export function confirmPlaybackStarted(
   };
   if (!isAudioOnly() && typeof video.requestVideoFrameCallback === "function") observeFrame();
   const timer = setInterval(() => {
-    if (closed || video.currentTime <= initialTime || video.paused) return;
+    if (closed) return;
+    if (!isAudioOnly() && frame === null && typeof video.requestVideoFrameCallback === "function") {
+      observeFrame();
+    }
+    if (video.currentTime <= initialTime || video.paused) return;
     const quality = video.getVideoPlaybackQuality?.();
     if (
       isAudioOnly() ||

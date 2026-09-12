@@ -28,6 +28,31 @@ function mediaFixture() {
 }
 
 describe("playback startup", () => {
+  it("observes the first video frame when track discovery corrects an audio-only result", async () => {
+    const fixture = mediaFixture();
+    let audioOnly = true;
+    let started = false;
+    const cancel = confirmPlaybackStarted(
+      fixture.video,
+      () => audioOnly,
+      () => {
+        started = true;
+      },
+      () => {},
+    );
+    try {
+      expect(fixture.hasFrameCallback()).toBe(false);
+      audioOnly = false;
+      await Bun.sleep(120);
+      expect(fixture.hasFrameCallback()).toBe(true);
+      expect(started).toBe(false);
+      fixture.presentFrame();
+      expect(started).toBe(true);
+    } finally {
+      cancel();
+    }
+  });
+
   it("accepts radio playback when track discovery completes after startup begins", async () => {
     const fixture = mediaFixture();
     Object.defineProperty(fixture.video, "videoWidth", { value: 0 });
