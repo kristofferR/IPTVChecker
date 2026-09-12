@@ -21,7 +21,11 @@ import {
 } from "../lib/archiveProbe";
 import { fetchGuideProgrammes } from "../lib/epgLoader";
 import { filterResultsShared } from "../lib/filters";
-import { guideProgrammesInWindow, indexGuideProgrammes } from "../lib/guideProgrammes";
+import {
+  guideProgrammesInWindow,
+  indexGuideProgrammes,
+  programmePlaybackAvailability,
+} from "../lib/guideProgrammes";
 import { isSingleConnectionPlaylist } from "../lib/playback";
 import { isScanActive } from "../lib/scanState";
 import { isInputLikeTarget } from "../lib/shortcuts";
@@ -54,16 +58,13 @@ interface GuideSelection {
  * without catch-up can only play the programme airing right now, live.
  */
 function isProgrammePlayable(selection: GuideSelection, nowEpochS: number): boolean {
-  const { result, programme } = selection;
-  if (!hasArchive(result)) {
-    return programme.start <= nowEpochS && programme.stop > nowEpochS;
-  }
-  const earliestPlayable =
-    result.catchup_days != null ? nowEpochS - result.catchup_days * 86_400 : null;
-  return (
-    programme.start <= nowEpochS &&
-    (earliestPlayable == null || programme.start >= earliestPlayable)
-  );
+  const available = programmePlaybackAvailability(selection.result, selection.programme, nowEpochS);
+  return available.live || available.archive;
+}
+
+function programmePlayLabel(selection: GuideSelection, nowEpochS: number): string {
+  const available = programmePlaybackAvailability(selection.result, selection.programme, nowEpochS);
+  return available.archive ? (available.live ? "Play from beginning" : "Play") : "Play live";
 }
 
 function selectionKey(selection: GuideSelection | null): string | null {
@@ -364,8 +365,33 @@ export function GuideView({
     [spanFrom],
   );
 
-  const [selection, setSelection] = useState<GuideSelection | null>(null);
-  const [menu, setMenu] = useState<ProgrammeMenuState | null>(null);
+  const [selectedProgramme, setSelection] = useState<GuideSelection | null>(null);
+  const [openMenu, setMenu] = useState<ProgrammeMenuState | null>(null);
+  // Catch-up metadata can arrive after selection, when the provider refreshes
+  // the playlist. Keep the programme but use the channel's current metadata.
+  const selection = useMemo(
+    () =>
+      selectedProgramme && {
+        ...selectedProgramme,
+        result:
+          flatResults.find((result) => result.index === selectedProgramme.result.index) ??
+          selectedProgramme.result,
+      },
+    [selectedProgramme, flatResults],
+  );
+  const menu = useMemo(
+    () =>
+      openMenu && {
+        ...openMenu,
+        selection: {
+          ...openMenu.selection,
+          result:
+            flatResults.find((result) => result.index === openMenu.selection.result.index) ??
+            openMenu.selection.result,
+        },
+      },
+    [openMenu, flatResults],
+  );
   const [testOutcome, setTestOutcome] = useState<ArchiveProbeOutcome | null>(null);
   const [testing, setTesting] = useState(false);
   const testRequestRef = useRef(0);
@@ -529,12 +555,27 @@ export function GuideView({
 
   const activate = (target: GuideSelection) => {
     if (testing) return;
-    if (!isProgrammePlayable(target, Math.floor(Date.now() / 1000))) return;
-    if (!hasArchive(target.result)) {
+    const available = programmePlaybackAvailability(
+      target.result,
+      target.programme,
+      Math.floor(Date.now() / 1000),
+    );
+    if (!available.live && !available.archive) return;
+    if (!available.archive) {
       onPlayLive(target.result);
       return;
     }
     onPlayArchive(target.result, playOptionsFor(target));
+  };
+
+  const playLive = (target: GuideSelection) => {
+    if (
+      testing ||
+      !programmePlaybackAvailability(target.result, target.programme, Math.floor(Date.now() / 1000))
+        .live
+    )
+      return;
+    onPlayLive(target.result);
   };
 
   const runTest = async (target: GuideSelection | null = selection) => {
@@ -612,9 +653,16 @@ export function GuideView({
     archiveGuideTestRunning ||
     archiveProbeRunning ||
     ((playIntentActive || castActive) && isSingleConnectionPlaylist(playlist));
-  const selectionPlayable = selection != null && isProgrammePlayable(selection, nowEpochS);
-  const menuPlayable = menu != null && isProgrammePlayable(menu.selection, nowEpochS);
+  const selectionAvailability =
+    selection && programmePlaybackAvailability(selection.result, selection.programme, nowEpochS);
+  const menuAvailability =
+    menu &&
+    programmePlaybackAvailability(menu.selection.result, menu.selection.programme, nowEpochS);
+  const selectionPlayable = selectionAvailability?.live || selectionAvailability?.archive;
+  const menuPlayable = menuAvailability?.live || menuAvailability?.archive;
   const menuArchive = menu != null && hasArchive(menu.selection.result);
+  const selectionHasBothRoutes = selectionAvailability?.live && selectionAvailability.archive;
+  const menuHasBothRoutes = menuAvailability?.live && menuAvailability.archive;
 
   const select = useCallback((next: GuideSelection) => {
     testRequestRef.current += 1;
@@ -728,8 +776,18 @@ export function GuideView({
               className="flex shrink-0 items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-500 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Play className="h-3 w-3" />
-              Play
+              {programmePlayLabel(selection, nowEpochS)}
             </button>
+            {selectionHasBothRoutes && (
+              <button
+                type="button"
+                disabled={testing}
+                onClick={() => playLive(selection)}
+                className="flex shrink-0 items-center gap-1 rounded-md border border-border-app bg-btn px-2.5 py-1 text-[11px] font-medium text-text-primary hover:bg-btn-hover transition-colors disabled:opacity-40"
+              >
+                <Play className="h-3 w-3" /> Play live
+              </button>
+            )}
             <button
               type="button"
               disabled={testBlocked}
@@ -843,7 +901,7 @@ export function GuideView({
           data-no-window-drag
           className="fixed z-50 w-56 rounded-lg border border-border-app bg-dropdown py-1 shadow-2xl"
           style={{
-            top: `${Math.min(menu.y, window.innerHeight - 180)}px`,
+            top: `${Math.max(0, Math.min(menu.y, window.innerHeight - (menuHasBothRoutes ? 240 : 200)))}px`,
             left: `${Math.min(menu.x, window.innerWidth - 232)}px`,
           }}
         >
@@ -860,12 +918,26 @@ export function GuideView({
             }}
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
           >
-            <Play className="h-3.5 w-3.5" /> {menuArchive ? "Play" : "Play live"}
+            <Play className="h-3.5 w-3.5" /> {programmePlayLabel(menu.selection, nowEpochS)}
           </button>
+          {menuHasBothRoutes && (
+            <button
+              type="button"
+              disabled={testing}
+              onClick={() => {
+                const target = menu.selection;
+                setMenu(null);
+                playLive(target);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
+            >
+              <Play className="h-3.5 w-3.5" /> Play live
+            </button>
+          )}
           {menuArchive && (
             <button
               type="button"
-              disabled={!menuPlayable}
+              disabled={!menuAvailability?.archive}
               onClick={() => {
                 const target = menu.selection;
                 setMenu(null);
@@ -887,7 +959,7 @@ export function GuideView({
           <div className="my-1 h-px bg-border-subtle" />
           <button
             type="button"
-            disabled={testBlocked || !menuPlayable || !menuArchive}
+            disabled={testBlocked || !menuAvailability?.archive}
             onClick={() => {
               const target = menu.selection;
               setMenu(null);

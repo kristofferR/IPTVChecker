@@ -1,4 +1,18 @@
-import type { EpgProgramme } from "./types";
+import { hasArchive } from "./archive";
+import type { ChannelResult, EpgProgramme } from "./types";
+
+export function programmePlaybackAvailability(
+  channel: Pick<ChannelResult, "catchup" | "catchup_days" | "catchup_source">,
+  programme: Pick<EpgProgramme, "start" | "stop">,
+  nowEpochS: number,
+) {
+  const started = programme.start <= nowEpochS;
+  const earliest = channel.catchup_days == null ? null : nowEpochS - channel.catchup_days * 86_400;
+  return {
+    live: started && programme.stop > nowEpochS,
+    archive: hasArchive(channel) && started && (earliest == null || programme.start >= earliest),
+  };
+}
 
 export interface GuideProgrammeIndex {
   programmes: readonly EpgProgramme[];
