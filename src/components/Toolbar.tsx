@@ -989,20 +989,27 @@ export const Toolbar = memo(function Toolbar({
               {(statusOptionCounts.placeholder ?? 0) > 0 && (
                 <option value="placeholder">{statusLabel("placeholder", "Placeholder")}</option>
               )}
-              {((statusOptionCounts.catchup ?? 0) > 0 || statusFilter === "catchup") && (
+              {((statusOptionCounts.catchup ?? 0) > 0 ||
+                statusFilter === "catchup" ||
+                catchupVerdictsAvailable ||
+                statusFilter in CATCHUP_VERDICT_FILTERS) && (
                 <option value="catchup">{statusLabel("catchup", "Catch-up")}</option>
               )}
               {(catchupVerdictsAvailable || statusFilter in CATCHUP_VERDICT_FILTERS) && (
-                <optgroup label="Catch-up verdict">
-                  <option value="catchup_real">{statusLabel("catchup_real", "Real")}</option>
+                <>
+                  <option value="catchup_real">
+                    {statusLabel("catchup_real", "\u00a0\u00a0\u00a0\u00a0Real")}
+                  </option>
                   <option value="catchup_shallower">
-                    {statusLabel("catchup_shallower", "Shallower")}
+                    {statusLabel("catchup_shallower", "\u00a0\u00a0\u00a0\u00a0Shallower")}
                   </option>
-                  <option value="catchup_fake">{statusLabel("catchup_fake", "Fake")}</option>
+                  <option value="catchup_fake">
+                    {statusLabel("catchup_fake", "\u00a0\u00a0\u00a0\u00a0Fake")}
+                  </option>
                   <option value="catchup_untested">
-                    {statusLabel("catchup_untested", "Untested")}
+                    {statusLabel("catchup_untested", "\u00a0\u00a0\u00a0\u00a0Untested")}
                   </option>
-                </optgroup>
+                </>
               )}
               <option value="mislabeled">{statusLabel("mislabeled", "Mislabeled")}</option>
               <option value="audio_only">{statusLabel("audio_only", "Audio Only")}</option>
