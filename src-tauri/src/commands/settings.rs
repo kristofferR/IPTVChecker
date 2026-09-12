@@ -561,6 +561,47 @@ pub async fn get_settings(app: tauri::AppHandle) -> Result<AppSettings, AppError
 }
 
 #[tauri::command]
+pub fn sync_view_menu(
+    app: tauri::AppHandle,
+    sidebar_visible: bool,
+    report_visible: bool,
+    source_filter_visible: bool,
+    header_button_text_visible: bool,
+) -> Result<(), String> {
+    let Some(view_menu) = app
+        .menu()
+        .and_then(|menu| menu.get("menu.view"))
+        .and_then(|item| item.as_submenu().cloned())
+    else {
+        return Ok(());
+    };
+    for (id, visible, subject) in [
+        ("menu.view.toggle_sidebar", sidebar_visible, "Sidebar"),
+        ("menu.view.toggle_report", report_visible, "Report"),
+        (
+            "menu.view.toggle_prescan_filter",
+            source_filter_visible,
+            "Source Filter",
+        ),
+        (
+            "menu.view.toggle_header_button_text",
+            header_button_text_visible,
+            "Header Button Text",
+        ),
+    ] {
+        if let Some(item) = view_menu
+            .get(id)
+            .and_then(|item| item.as_menuitem().cloned())
+        {
+            let action = if visible { "Hide" } else { "Show" };
+            item.set_text(format!("{action} {subject}"))
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn get_scan_presets(app: tauri::AppHandle) -> Result<ScanPresetCollection, AppError> {
     Ok(load_scan_presets(&app))
 }

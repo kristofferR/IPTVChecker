@@ -195,6 +195,15 @@ export async function getSettings(): Promise<AppSettings> {
   return invoke("get_settings");
 }
 
+export async function syncViewMenu(visibility: {
+  sidebarVisible: boolean;
+  reportVisible: boolean;
+  sourceFilterVisible: boolean;
+  headerButtonTextVisible: boolean;
+}): Promise<void> {
+  return invoke("sync_view_menu", visibility);
+}
+
 /** Linux: whether new windows should keep their native title bar. */
 export async function getTitleBarVisibility(): Promise<boolean> {
   return invoke("get_title_bar_visibility");
