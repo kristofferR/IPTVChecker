@@ -562,6 +562,26 @@ pub async fn get_settings(app: tauri::AppHandle) -> Result<AppSettings, AppError
 
 #[tauri::command]
 pub fn sync_view_menu(
+    window: tauri::Window,
+    app: tauri::AppHandle,
+    sidebar_visible: bool,
+    report_visible: bool,
+    source_filter_visible: bool,
+    header_button_text_visible: bool,
+) -> Result<(), String> {
+    if !window.is_focused().map_err(|error| error.to_string())? {
+        return Ok(());
+    }
+    sync_view_menu_labels(
+        app,
+        sidebar_visible,
+        report_visible,
+        source_filter_visible,
+        header_button_text_visible,
+    )
+}
+
+pub fn sync_view_menu_labels(
     app: tauri::AppHandle,
     sidebar_visible: bool,
     report_visible: bool,

@@ -2,12 +2,13 @@
  * precede WebKit's first decode error, particularly for interlaced MPEG-TS. */
 export function confirmPlaybackStarted(
   video: HTMLVideoElement,
-  audioOnly: boolean,
+  audioOnly: boolean | (() => boolean),
   onStarted: () => void,
   onFailure: (reason: string) => void,
 ): () => void {
   let closed = false;
   let frame: number | null = null;
+  const isAudioOnly = () => (typeof audioOnly === "function" ? audioOnly() : audioOnly);
   const initialTime = video.currentTime;
   const initialQuality = video.getVideoPlaybackQuality?.();
   const initialPresented = initialQuality
@@ -23,12 +24,12 @@ export function confirmPlaybackStarted(
       else observeFrame();
     });
   };
-  if (!audioOnly && typeof video.requestVideoFrameCallback === "function") observeFrame();
+  if (!isAudioOnly() && typeof video.requestVideoFrameCallback === "function") observeFrame();
   const timer = setInterval(() => {
     if (closed || video.currentTime <= initialTime || video.paused) return;
     const quality = video.getVideoPlaybackQuality?.();
     if (
-      audioOnly ||
+      isAudioOnly() ||
       (video.videoWidth > 0 &&
         (document.visibilityState === "hidden" ||
           (!video.requestVideoFrameCallback &&

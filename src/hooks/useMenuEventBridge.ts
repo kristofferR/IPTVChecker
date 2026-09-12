@@ -52,12 +52,33 @@ export function useMenuEventBridge(handlers: MenuEventHandlers): void {
 
   useEffect(() => {
     if (!settingsHydrated) return;
-    void syncViewMenu({
-      sidebarVisible,
-      reportVisible,
-      sourceFilterVisible,
-      headerButtonTextVisible,
-    }).catch((error) => logger.warn("Failed to sync View menu labels:", error));
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    const sync = () => {
+      if (cancelled) return;
+      void syncViewMenu({
+        sidebarVisible,
+        reportVisible,
+        sourceFilterVisible,
+        headerButtonTextVisible,
+      }).catch((error) => logger.warn("Failed to sync View menu labels:", error));
+    };
+    void getCurrentWindow()
+      .onFocusChanged(({ payload: focused }) => {
+        if (focused) sync();
+      })
+      .then((off) => {
+        if (cancelled) off();
+        else {
+          unlisten = off;
+          sync();
+        }
+      })
+      .catch((error) => logger.warn("Failed to watch View menu focus:", error));
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, [
     settingsHydrated,
     sidebarVisible,

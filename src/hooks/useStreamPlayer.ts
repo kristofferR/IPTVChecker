@@ -796,6 +796,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           telemetryObserverRef.current?.hls(hls, Hls.Events);
           hlsInstanceRef.current = hls;
           let cancelStartup: (() => void) | undefined;
+          let detectedAudioOnly = currentChannelRef.current?.audio_only ?? false;
+          hls.on(Hls.Events.BUFFER_CODECS, (_event, tracks) => {
+            if (tracks.video || tracks.audiovideo) detectedAudioOnly = false;
+            else if (tracks.audio?.id === "main") detectedAudioOnly = true;
+          });
 
           const finish = (value: boolean) => {
             if (settled) return;
@@ -826,7 +831,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           const onCanPlay = () => {
             cancelStartup = confirmPlaybackStarted(
               videoElement,
-              currentChannelRef.current?.audio_only ?? false,
+              () => detectedAudioOnly,
               () => finish(true),
               fail,
             );
@@ -950,7 +955,14 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           const onCanPlay = () => {
             cancelStartup = confirmPlaybackStarted(
               videoElement,
-              currentChannelRef.current?.audio_only ?? false,
+              () => {
+                const info = player.mediaInfo;
+                return info?.hasVideo === false && info.hasAudio === true
+                  ? true
+                  : info?.hasVideo === true
+                    ? false
+                    : (currentChannelRef.current?.audio_only ?? false);
+              },
               () => finish(true),
               fail,
             );

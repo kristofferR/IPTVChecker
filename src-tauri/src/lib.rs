@@ -894,7 +894,7 @@ pub fn run() {
             {
                 log::warn!("Failed to apply startup theme preference: {}", error);
             }
-            if let Err(error) = commands::settings::sync_view_menu(
+            if let Err(error) = commands::settings::sync_view_menu_labels(
                 app.handle().clone(),
                 false,
                 false,

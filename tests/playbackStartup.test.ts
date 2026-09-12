@@ -28,6 +28,50 @@ function mediaFixture() {
 }
 
 describe("playback startup", () => {
+  it("accepts radio playback when track discovery completes after startup begins", async () => {
+    const fixture = mediaFixture();
+    Object.defineProperty(fixture.video, "videoWidth", { value: 0 });
+    let audioOnly = false;
+    let started = false;
+    const cancel = confirmPlaybackStarted(
+      fixture.video,
+      () => audioOnly,
+      () => {
+        started = true;
+      },
+      () => {},
+    );
+    try {
+      audioOnly = true;
+      fixture.video.currentTime = 1;
+      await Bun.sleep(120);
+      expect(started).toBe(true);
+    } finally {
+      cancel();
+    }
+  });
+
+  it("does not mistake progressing audio for working video when a video track exists", async () => {
+    const fixture = mediaFixture();
+    Object.defineProperty(fixture.video, "videoWidth", { value: 0 });
+    let started = false;
+    const cancel = confirmPlaybackStarted(
+      fixture.video,
+      () => false,
+      () => {
+        started = true;
+      },
+      () => {},
+    );
+    try {
+      fixture.video.currentTime = 1;
+      await Bun.sleep(120);
+      expect(started).toBe(false);
+    } finally {
+      cancel();
+    }
+  });
+
   it("keeps a ready video in startup until it presents a frame", () => {
     const fixture = mediaFixture();
     let started = false;
