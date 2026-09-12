@@ -164,14 +164,62 @@ pub async fn start(
     stream_kind: CastStreamKind,
     is_finite: bool,
 ) -> Result<CastProxyHandle, AppError> {
-    let token = generate_token();
-    let lan_ip = detect_lan_ip()
-        .ok_or_else(|| AppError::Other("Could not determine LAN IP for cast proxy".to_string()))?;
+    start_proxy(
+        app,
+        upstream_url,
+        stream_kind,
+        is_finite,
+        false,
+        CancellationToken::new(),
+    )
+    .await
+}
 
-    let listener = TcpListener::bind("0.0.0.0:0").await.map_err(AppError::Io)?;
+/// Repackage an archive as short HLS segments for native WebKit playback.
+/// This listener is local to the app and does not use the casting session.
+pub async fn start_local_playback(
+    app: AppHandle,
+    upstream_url: String,
+    cancel: CancellationToken,
+) -> Result<CastProxyHandle, AppError> {
+    start_proxy(
+        app,
+        upstream_url,
+        CastStreamKind::MpegTs,
+        true,
+        true,
+        cancel,
+    )
+    .await
+}
+
+async fn start_proxy(
+    app: AppHandle,
+    upstream_url: String,
+    stream_kind: CastStreamKind,
+    is_finite: bool,
+    local_playback: bool,
+    cancel: CancellationToken,
+) -> Result<CastProxyHandle, AppError> {
+    let token = generate_token();
+    let lan_ip = if local_playback {
+        IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)
+    } else {
+        detect_lan_ip().ok_or_else(|| {
+            AppError::Other("Could not determine LAN IP for cast proxy".to_string())
+        })?
+    };
+
+    let bind_address = if local_playback {
+        "127.0.0.1:0"
+    } else {
+        "0.0.0.0:0"
+    };
+    let listener = TcpListener::bind(bind_address)
+        .await
+        .map_err(AppError::Io)?;
     let port = listener.local_addr().map_err(AppError::Io)?.port();
 
-    let cancel = CancellationToken::new();
     let remux_state: Arc<Mutex<Option<RemuxState>>> = Arc::new(Mutex::new(None));
     // Final URL of the manifest after redirects, populated on the first
     // successful manifest fetch in `serve_upstream`. Used as the same-origin
@@ -207,6 +255,7 @@ pub async fn start(
             remux_state.clone(),
             client.clone(),
             is_finite,
+            local_playback,
         )
         .await?;
         (
@@ -221,7 +270,7 @@ pub async fn start(
     };
 
     log::info!(
-        "[CastProxy] Listening on 0.0.0.0:{port} (advertising {lan_ip}:{port}) for {} (mode={:?})",
+        "[CastProxy] Listening on {bind_address} (advertising {lan_ip}:{port}) for {} (mode={:?})",
         redact_url(&upstream_url),
         stream_kind
     );
@@ -329,6 +378,7 @@ async fn start_remux(
     remux_state: Arc<Mutex<Option<RemuxState>>>,
     client: Arc<reqwest::Client>,
     is_finite: bool,
+    local_playback: bool,
 ) -> Result<RemuxStartInfo, AppError> {
     let tmpdir = std::env::temp_dir().join(format!("iptv-cast-{token}"));
     std::fs::create_dir_all(&tmpdir).map_err(AppError::Io)?;
@@ -354,13 +404,19 @@ async fn start_remux(
     // a transcode-to-AAC is needed. Probe is best-effort: a failure (timeout,
     // missing ffprobe) falls through to HLS+TS with stream copy, correct for
     // the well-tested H.264+AAC case.
-    let (video_codec, audio_codec) = probe_codecs(
-        &ffprobe_bin,
-        &upstream_url,
-        &user_agent,
-        accept_invalid_certs,
-    )
-    .await;
+    // Native playback needs HLS rather than Cast's HEVC/DASH route. Copy the
+    // original tracks without opening an additional provider connection.
+    let (video_codec, audio_codec) = if local_playback {
+        (None, None)
+    } else {
+        probe_codecs(
+            &ffprobe_bin,
+            &upstream_url,
+            &user_agent,
+            accept_invalid_certs,
+        )
+        .await
+    };
     let is_hevc = video_codec
         .as_deref()
         .map(|c| matches!(c, "hevc" | "h265"))
@@ -485,6 +541,9 @@ async fn start_remux(
         cmd.arg("-hls_flags").arg(hls_flags);
         cmd.arg("-hls_segment_filename").arg(&segment_pattern);
     }
+    if local_playback {
+        cmd.arg("-avoid_negative_ts").arg("make_zero");
+    }
     cmd.arg(&manifest_path);
 
     log::info!(
@@ -535,6 +594,7 @@ async fn start_remux(
             use tokio::io::{AsyncBufReadExt, BufReader};
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                let line = crate::engine::ffmpeg::sanitize_ffmpeg_stderr_line(&line);
                 log::debug!("[CastProxy/ffmpeg] {line}");
                 let mut t = tail.lock().await;
                 if t.len() >= 32 {

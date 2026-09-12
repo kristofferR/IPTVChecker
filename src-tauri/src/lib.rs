@@ -1037,6 +1037,8 @@ pub fn run() {
             commands::playlist::open_playlist_stalker,
             commands::player::open_channel_in_player,
             commands::player::get_streaming_proxy_port,
+            commands::playback::start_local_playback,
+            commands::playback::stop_local_playback,
             commands::chromecast::discover_chromecasts,
             commands::chromecast::cast_to_device,
             commands::chromecast::stop_cast,
@@ -1109,6 +1111,12 @@ pub fn run() {
         .on_window_event(|_window, _event| {
             if matches!(_event, tauri::WindowEvent::Destroyed) {
                 clear_menu_window_state(_window.label());
+                _window
+                    .state::<Arc<AppState>>()
+                    .local_playback
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .remove(_window.label());
             }
 
             #[cfg(target_os = "macos")]
