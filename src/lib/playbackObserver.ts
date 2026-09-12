@@ -140,8 +140,16 @@ export function observePlayback(
     routeActive = false;
     if (frameRequest !== null) video.cancelVideoFrameCallback(frameRequest);
     frameRequest = null;
-    for (const cleanup of routeCleanups) cleanup();
+    const pending = routeCleanups;
     routeCleanups = [];
+    for (const cleanup of pending) {
+      try {
+        cleanup();
+      } catch {
+        // Diagnostics must not block stopping playback or opening an external
+        // player if a library has already disposed its event emitter.
+      }
+    }
   };
   return {
     sample,

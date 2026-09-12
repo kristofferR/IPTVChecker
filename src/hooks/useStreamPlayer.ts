@@ -809,10 +809,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             resolve(value);
           };
           const destroyPlayer = () => {
-            hls.destroy();
+            telemetryObserverRef.current?.closeRoute();
             if (hlsInstanceRef.current === hls) {
               hlsInstanceRef.current = null;
             }
+            hls.destroy();
           };
           const fail = (reason?: string) => {
             if (settled) return;
@@ -930,10 +931,13 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             resolve(value);
           };
           const destroyPlayer = () => {
-            player.destroy();
+            // mpegts.js cannot remove listeners after destroy() nulls its
+            // engine. Detach diagnostics before disposing a failed route.
+            telemetryObserverRef.current?.closeRoute();
             if (mpegtsPlayerRef.current === player) {
               mpegtsPlayerRef.current = null;
             }
+            player.destroy();
           };
           const fail = (reason?: string) => {
             if (settled) return;
