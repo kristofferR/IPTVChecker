@@ -687,6 +687,7 @@ pub fn run() {
             .cut()
             .copy()
             .paste()
+            .select_all()
             .build()?;
 
         let toggle_sidebar_item =
