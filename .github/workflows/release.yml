@@ -5,35 +5,69 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to build
+        required: true
+        type: string
+      target:
+        description: Platform to build (publication still requires every platform)
+        type: choice
+        default: all
+        options:
+          - all
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - x86_64-pc-windows-msvc
+          - aarch64-pc-windows-msvc
 
 permissions:
   contents: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+
+concurrency:
+  group: release-${{ inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Select release targets
+        id: matrix
+        env:
+          REQUESTED_TARGET: ${{ inputs.target || 'all' }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Expected a stable release tag, such as v2.0.0" >&2; exit 1; }
+          matrix=$(jq -cn --arg target "$REQUESTED_TARGET" '
+            {include: [
+              {os: "macos-latest", target: "aarch64-apple-darwin"},
+              {os: "macos-latest", target: "x86_64-apple-darwin"},
+              {os: "ubuntu-22.04", target: "x86_64-unknown-linux-gnu"},
+              {os: "ubuntu-24.04-arm", target: "aarch64-unknown-linux-gnu"},
+              {os: "windows-latest", target: "x86_64-pc-windows-msvc"},
+              {os: "windows-latest", target: "aarch64-pc-windows-msvc"}
+            ] | map(select($target == "all" or .target == $target))}')
+          jq -e '.include | length > 0' <<< "$matrix" >/dev/null
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: prepare
     strategy:
       fail-fast: false
       # Run targets one at a time: tauri-action's updater step downloads the
       # release's latest.json, adds this target's entry, and re-uploads it.
       # Concurrent jobs would clobber each other's entries.
       max-parallel: 1
-      matrix:
-        include:
-          - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: macos-latest
-            target: x86_64-apple-darwin
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-          - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-          - os: windows-latest
-            target: aarch64-pc-windows-msvc
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
 
     runs-on: ${{ matrix.os }}
     env:
@@ -43,6 +77,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Install Linux dependencies
         if: startsWith(matrix.os, 'ubuntu')
@@ -64,6 +100,8 @@ jobs:
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri
+          # Windows post-build cache saving can stall after all assets are uploaded.
+          save-if: ${{ !startsWith(matrix.os, 'windows') }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -89,8 +127,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "IPTV Checker ${{ github.ref_name }}"
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: "IPTV Checker ${{ env.RELEASE_TAG }}"
           releaseDraft: true
           prerelease: false
           # Keep these aliases stable: kristofferR/homebrew-tap builds asset URLs from them.
@@ -124,15 +162,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${APPLE_ID}" ] || [ -z "${APPLE_PASSWORD}" ] || [ -z "${APPLE_TEAM_ID}" ]; then
-            # A tagged release promises a signed, notarized download — fail
-            # rather than publish an unstapled .dmg. Manual (workflow_dispatch)
-            # runs may still skip when the secrets aren't configured.
-            if [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
-              echo "Missing Apple notarization secrets for a tagged release." >&2
-              exit 1
-            fi
-            echo "No Apple credentials configured — skipping .dmg notarization."
-            exit 0
+            echo "Missing Apple notarization secrets for release ${RELEASE_TAG}." >&2
+            exit 1
           fi
 
           # -print -quit rather than piping to head: under `set -o pipefail` a
@@ -148,16 +179,16 @@ jobs:
           dest="IPTV.Checker_${version}_mac_${ASSET_ARCH}.dmg"
           cp "${src}" "${dest}"
           bun run tauri signer sign "${dest}"
-          gh release upload "${GITHUB_REF_NAME}" "${dest}" "${dest}.sig" --clobber
+          gh release upload "${RELEASE_TAG}" "${dest}" "${dest}.sig" --clobber
 
           bash scripts/patch-updater-manifest.sh \
-            "${GITHUB_REF_NAME}" "${UPDATER_PLATFORM}" "app" "${dest}" "$(cat "${dest}.sig")"
+            "${RELEASE_TAG}" "${UPDATER_PLATFORM}" "app" "${dest}" "$(cat "${dest}.sig")"
 
           # Drop the stock .app.tar.gz updater archive: latest.json now points
           # at the stapled .dmg, so the archive would only confuse the release
           # listing (and is not notarized).
           release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
-            | jq -r --arg tag "${GITHUB_REF_NAME}" '.[] | select(.tag_name == $tag) | .id' | head -n1)"
+            | jq -r --arg tag "${RELEASE_TAG}" '.[] | select(.tag_name == $tag) | .id' | head -n1)"
           assets="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" --paginate)"
           for stale in \
             "IPTV.Checker_${version}_${TAURI_MAC_ARCH}.app.tar.gz" \
@@ -188,7 +219,7 @@ jobs:
           version="$(jq -r '.version' src-tauri/tauri.conf.json)"
           release_asset="IPTV.Checker_${version}_lin_${ASSET_ARCH}.AppImage"
           cp "${appimage}" "${release_asset}"
-          gh release upload "${GITHUB_REF_NAME}" "${release_asset}" --clobber
+          gh release upload "${RELEASE_TAG}" "${release_asset}" --clobber
 
           # Hardening rewrites the AppImage after tauri-action signed it, so the
           # signature already in latest.json does not match the published bytes.
@@ -197,9 +228,9 @@ jobs:
           bun run tauri signer sign "${release_asset}"
           # Replace the stale detached signature asset too, so anyone verifying
           # the published AppImage by hand gets the matching one.
-          gh release upload "${GITHUB_REF_NAME}" "${release_asset}.sig" --clobber
+          gh release upload "${RELEASE_TAG}" "${release_asset}.sig" --clobber
           bash scripts/patch-updater-manifest.sh \
-            "${GITHUB_REF_NAME}" "${UPDATER_PLATFORM}" "appimage" \
+            "${RELEASE_TAG}" "${UPDATER_PLATFORM}" "appimage" \
             "${release_asset}" "$(cat "${release_asset}.sig")"
 
       - name: Create Windows portable zip
@@ -240,16 +271,51 @@ jobs:
         if: startsWith(matrix.target, 'x86_64-pc-windows') || startsWith(matrix.target, 'aarch64-pc-windows')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.ref_name }}" "${{ env.PORTABLE_ZIP }}" --clobber
+        run: gh release upload "${{ env.RELEASE_TAG }}" "${{ env.PORTABLE_ZIP }}" --clobber
 
   publish:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - name: Verify the complete release asset set
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          gh api "repos/$GH_REPO/releases" --paginate --slurp > "$RUNNER_TEMP/releases.json"
+          jq -e --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | length == 1' "$RUNNER_TEMP/releases.json" >/dev/null
+          gh release view "$RELEASE_TAG" --json assets > "$RUNNER_TEMP/release-assets.json"
+          for arch in arm x64; do
+            for suffix in \
+              "mac_$arch.dmg" "mac_$arch.dmg.sig" \
+              "lin_$arch.AppImage" "lin_$arch.AppImage.sig" \
+              "lin_$arch.deb" "lin_$arch.deb.sig" \
+              "lin_$arch.rpm" "lin_$arch.rpm.sig" \
+              "win_${arch}_setup.exe" "win_${arch}_setup.exe.sig" "win_${arch}_portable.zip"; do
+              name="IPTV.Checker_${version}_$suffix"
+              jq -e --arg name "$name" '.assets | any(.name == $name and .size > 0)' "$RUNNER_TEMP/release-assets.json" >/dev/null || { echo "Missing release asset: $name" >&2; exit 1; }
+            done
+          done
+          gh release download "$RELEASE_TAG" --pattern latest.json --dir "$RUNNER_TEMP/release-manifest"
+          manifest="$RUNNER_TEMP/release-manifest/latest.json"
+          jq -e --arg version "$version" '.version == $version' "$manifest" >/dev/null
+          for platform in darwin-aarch64 darwin-x86_64 linux-aarch64 linux-x86_64 windows-aarch64 windows-x86_64; do
+            case "$platform" in darwin-*) installer=app ;; linux-*) installer=appimage ;; windows-*) installer=nsis ;; esac
+            for key in "$platform" "$platform-$installer"; do
+              jq -e --arg key "$key" --slurpfile assets "$RUNNER_TEMP/release-assets.json" '
+                .platforms[$key] as $entry |
+                ($entry.signature | type == "string" and length > 0) and
+                ($assets[0].assets | any(.apiUrl == $entry.url or .url == $entry.url))
+              ' "$manifest" >/dev/null || { echo "Invalid updater entry: $key" >&2; exit 1; }
+            done
+          done
+
       - name: Publish release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "${{ github.ref_name }}" --draft=false --repo ${{ github.repository }}
+        run: gh release edit "${{ env.RELEASE_TAG }}" --draft=false --repo ${{ github.repository }}
 
       - name: Update Homebrew tap
         env:
@@ -261,7 +327,7 @@ jobs:
             exit 0
           fi
 
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           REPO="kristofferR/IPTVChecker"
           TAP_REPO="kristofferR/homebrew-tap"
 
@@ -272,7 +338,7 @@ jobs:
             "IPTV.Checker_${VERSION}_mac_x64.dmg" \
             "IPTV.Checker_${VERSION}_lin_arm.AppImage" \
             "IPTV.Checker_${VERSION}_lin_x64.AppImage"; do
-            GH_TOKEN="$RELEASE_TOKEN" gh release download "$GITHUB_REF_NAME" --repo "$REPO" --pattern "$asset" --dir /tmp/assets
+            GH_TOKEN="$RELEASE_TOKEN" gh release download "$RELEASE_TAG" --repo "$REPO" --pattern "$asset" --dir /tmp/assets
           done
 
           # Compute SHA256 hashes (fail if any asset is missing)
@@ -375,6 +441,7 @@ jobs:
         if: env.HAS_AUR_KEY == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
 
       - name: Generate PKGBUILD from template
@@ -382,10 +449,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           mkdir -p /tmp/aur
-          gh release download "${GITHUB_REF_NAME}" --pattern "IPTV.Checker_${VERSION}_lin_x64.deb" --dir /tmp/aur
-          gh release download "${GITHUB_REF_NAME}" --pattern "IPTV.Checker_${VERSION}_lin_arm.deb" --dir /tmp/aur
+          gh release download "${RELEASE_TAG}" --pattern "IPTV.Checker_${VERSION}_lin_x64.deb" --dir /tmp/aur
+          gh release download "${RELEASE_TAG}" --pattern "IPTV.Checker_${VERSION}_lin_arm.deb" --dir /tmp/aur
 
           SHA_X64=$(sha256sum "/tmp/aur/IPTV.Checker_${VERSION}_lin_x64.deb" | cut -d' ' -f1)
           SHA_ARM=$(sha256sum "/tmp/aur/IPTV.Checker_${VERSION}_lin_arm.deb" | cut -d' ' -f1)
@@ -410,7 +477,7 @@ jobs:
           commit_username: kristofferR
           commit_email: 481270+kristofferR@users.noreply.github.com
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: "Update to ${{ github.ref_name }}"
+          commit_message: "Update to ${{ env.RELEASE_TAG }}"
 
       - name: Skip notice
         if: env.HAS_AUR_KEY != 'true'
