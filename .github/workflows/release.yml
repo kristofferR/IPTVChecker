@@ -43,10 +43,13 @@ jobs:
       - name: Select release targets
         id: matrix
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           REQUESTED_TARGET: ${{ inputs.target || 'all' }}
         run: |
           set -euo pipefail
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Expected a stable release tag, such as v2.0.0" >&2; exit 1; }
+          gh api --silent "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG"
           matrix=$(jq -cn --arg target "$REQUESTED_TARGET" '
             {include: [
               {os: "macos-latest", target: "aarch64-apple-darwin"},
@@ -78,7 +81,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: refs/tags/${{ env.RELEASE_TAG }}
 
       - name: Install Linux dependencies
         if: startsWith(matrix.os, 'ubuntu')
@@ -441,7 +444,7 @@ jobs:
         if: env.HAS_AUR_KEY == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: refs/tags/${{ env.RELEASE_TAG }}
           persist-credentials: false
 
       - name: Generate PKGBUILD from template
