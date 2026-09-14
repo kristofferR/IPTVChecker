@@ -64,6 +64,7 @@ export function LogWindowContent() {
   const [levelFilter, setLevelFilter] = useState<Set<LogLevel>>(() => new Set(DEFAULT_ENABLED));
   const [searchText, setSearchText] = useState("");
   const [selectedEntries, setSelectedEntries] = useState<AppLogEntry[]>([]);
+  const selectionAnchorRef = useRef<number | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
@@ -156,15 +157,60 @@ export function LogWindowContent() {
         (active.matches("input, textarea") || active.isContentEditable)
       );
     };
-    const clearSelection = () => setSelectedEntries([]);
+    const clearSelection = () => {
+      setSelectedEntries([]);
+      selectionAnchorRef.current = null;
+    };
     const handlePointerDown = (event: PointerEvent) => {
-      if (event.button === 0) clearSelection();
+      if (event.button !== 0) return;
+      const container = scrollContainerRef.current;
+      const row =
+        event.target instanceof Element
+          ? event.target.closest<HTMLElement>("[data-log-entry-id]")
+          : null;
+      if (!row || !container?.contains(row)) {
+        clearSelection();
+        return;
+      }
+      const clickedId = Number(row.dataset.logEntryId);
+      if (!event.shiftKey) {
+        setSelectedEntries([]);
+        selectionAnchorRef.current = clickedId;
+        return;
+      }
+      const clickedIndex = filteredEntries.findIndex((entry) => entry.id === clickedId);
+      if (clickedIndex === -1) return;
+      const anchorIndex = filteredEntries.findIndex(
+        (entry) => entry.id === selectionAnchorRef.current,
+      );
+      if (anchorIndex === -1) selectionAnchorRef.current = clickedId;
+      const start = Math.min(anchorIndex === -1 ? clickedIndex : anchorIndex, clickedIndex);
+      const end = Math.max(anchorIndex === -1 ? clickedIndex : anchorIndex, clickedIndex);
+      event.preventDefault();
+      setSelectedEntries(filteredEntries.slice(start, end + 1));
+      container.focus({ preventScroll: true });
+
+      // Native selection enables Edit > Copy; selectedEntries supplies offscreen rows.
+      const rendered = Array.from(container.querySelectorAll<HTMLElement>("[data-index]")).filter(
+        (element) => Number(element.dataset.index) >= start && Number(element.dataset.index) <= end,
+      );
+      const first = rendered[0];
+      const last = rendered[rendered.length - 1];
+      if (first && last) {
+        const range = document.createRange();
+        range.setStartBefore(first);
+        range.setEndAfter(last);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+      }
     };
     const selectAllEntries = () => {
       const container = scrollContainerRef.current;
       if (!container) return;
       container.focus({ preventScroll: true });
       setSelectedEntries(filteredEntries);
+      selectionAnchorRef.current = filteredEntries[0]?.id ?? null;
       // Keep a native selection so Edit > Copy works; the copy handler includes
       // the selected entries that virtualization has kept out of the DOM.
       const range = document.createRange();
@@ -225,6 +271,7 @@ export function LogWindowContent() {
 
   useEffect(() => {
     setSelectedEntries([]);
+    selectionAnchorRef.current = null;
   }, [levelFilter, searchText]);
 
   const handleExport = async () => {
@@ -300,6 +347,7 @@ export function LogWindowContent() {
     bufferRef.current = [];
     setEntries([]);
     setSelectedEntries([]);
+    selectionAnchorRef.current = null;
     void emitTo("main", APP_LOG_CLEAR_EVENT).catch(() => {});
   }, [entries]);
 
@@ -413,6 +461,7 @@ export function LogWindowContent() {
                 key={entry.id}
                 ref={virtualizer.measureElement}
                 data-index={virtualRow.index}
+                data-log-entry-id={entry.id}
                 style={{
                   position: "absolute",
                   top: 0,
