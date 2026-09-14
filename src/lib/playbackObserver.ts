@@ -1,7 +1,13 @@
 import type Hls from "hls.js";
-import type { BufferCreatedData, ErrorData, Events } from "hls.js";
-import { bufferedSecondsAhead } from "./playback";
-import { type PlaybackEngine, type PlaybackRecorder, playbackTelemetry } from "./playbackTelemetry";
+import type { BufferCodecsData, BufferCreatedData, ErrorData, Events } from "hls.js";
+import { logger } from "./logger";
+import { bufferedSecondsAhead, playbackErrorDetail, readMediaErrorDetail } from "./playback";
+import {
+  type PlaybackEngine,
+  type PlaybackRecorder,
+  playbackTelemetry,
+  sanitizePlaybackText,
+} from "./playbackTelemetry";
 import type { MpegtsPlayer } from "./runtimeMonitor";
 
 /** Observe only this player's media and buffers, never patch SourceBuffer.prototype. */
@@ -11,6 +17,37 @@ export function observePlayback(
   isPaused: () => boolean,
 ) {
   let routeActive = false;
+  let routeNumber = 0;
+  let routeLabel = "";
+  let formatDetected = false;
+  const reportedDetails = new Set<string>();
+  const report = (
+    kind: "stream_format" | "media_error" | "engine_error" | "route_failure",
+    detail: string,
+  ) => {
+    if (!routeActive || recorder.ended) return;
+    if (kind === "stream_format") formatDetected = true;
+    const sanitized = sanitizePlaybackText(`${routeLabel}: ${detail}`);
+    const key = `${kind}:${sanitized}`;
+    if (reportedDetails.has(key)) return;
+    // Bound diagnostic deduplication even for long-running, changing streams.
+    if (reportedDetails.size >= 200) reportedDetails.clear();
+    reportedDetails.add(key);
+    recorder.event(kind, sanitized);
+    const log = kind === "stream_format" ? logger.info : logger.warn;
+    log(`[Player][${recorder.id}] ${kind}: ${sanitized}`);
+  };
+  const reportMime = (mime: string) => {
+    let support = "";
+    try {
+      const mse =
+        typeof MediaSource === "undefined" ? "unavailable" : MediaSource.isTypeSupported(mime);
+      support = `; MSE=${mse}; native=${video.canPlayType(mime) || "unsupported"}`;
+    } catch {
+      /* Capability probes must not interfere with playback. */
+    }
+    report("stream_format", `MIME=${mime}${support}`);
+  };
   let frameRequest: number | null = null;
   let routeCleanups: Array<() => void> = [];
   const cleanups: Array<() => void> = [];
@@ -72,7 +109,7 @@ export function observePlayback(
     if (routeActive) recorder.event("ready");
   });
   listen(video, "error", () => {
-    if (routeActive) recorder.event("media_error", `Media error ${video.error?.code ?? "unknown"}`);
+    report("media_error", readMediaErrorDetail(video.error));
   });
   const interval = setInterval(sample, 1000);
 
@@ -154,8 +191,15 @@ export function observePlayback(
   return {
     sample,
     closeRoute,
-    route(engine: PlaybackEngine) {
+    failure(reason: string) {
+      if (!formatDetected) report("stream_format", "Format not detected before route failed");
+      report("route_failure", reason);
+    },
+    route(engine: PlaybackEngine, detail?: string) {
       closeRoute();
+      reportedDetails.clear();
+      formatDetected = false;
+      routeLabel = `${engine} #${++routeNumber}${detail ? ` (${detail})` : ""}`;
       recorder.route(engine);
       routeActive = true;
       if (video.requestVideoFrameCallback)
@@ -165,28 +209,75 @@ export function observePlayback(
         });
     },
     hls(hls: Hls, events: typeof Events) {
+      const onCodecs = (_event: Events.BUFFER_CODECS, data: BufferCodecsData) => {
+        for (const name of ["video", "audio", "audiovideo"] as const) {
+          const track = data[name];
+          if (!track) continue;
+          report(
+            "stream_format",
+            `${name}: codec=${track.codec ?? "unknown"}; levelCodec=${track.levelCodec ?? "unknown"}; container=${track.container}`,
+          );
+          const codec = track.levelCodec || track.codec;
+          reportMime(codec ? `${track.container}; codecs="${codec}"` : track.container);
+        }
+      };
+      const onManifest = () => {
+        for (const level of hls.levels) {
+          report(
+            "stream_format",
+            `manifest: video=${level.videoCodec ?? "unknown"}; audio=${level.audioCodec ?? "unknown"}; resolution=${level.width}x${level.height}`,
+          );
+        }
+      };
       const onBuffers = (_event: Events.BUFFER_CREATED, data: BufferCreatedData) => {
         for (const track of Object.values(data.tracks)) observeBuffer(track.buffer);
       };
-      const onError = (_event: Events.ERROR, data: ErrorData) =>
-        recorder.event(
+      const onError = (_event: Events.ERROR, data: ErrorData) => {
+        if (data.mimeType) reportMime(data.mimeType);
+        report(
           "engine_error",
-          `${data.type}: ${data.details}${data.fatal ? " (fatal)" : ""}`,
+          [
+            data.type,
+            data.details,
+            data.fatal ? "fatal" : "nonfatal",
+            data.reason,
+            playbackErrorDetail(data.error),
+          ]
+            .filter(Boolean)
+            .join(": "),
         );
+      };
+      hls.on(events.MANIFEST_PARSED, onManifest);
+      hls.on(events.BUFFER_CODECS, onCodecs);
       hls.on(events.BUFFER_CREATED, onBuffers);
       hls.on(events.ERROR, onError);
       routeCleanups.push(() => {
+        hls.off(events.MANIFEST_PARSED, onManifest);
+        hls.off(events.BUFFER_CODECS, onCodecs);
         hls.off(events.BUFFER_CREATED, onBuffers);
         hls.off(events.ERROR, onError);
       });
     },
     mpegts(player: MpegtsPlayer) {
-      const onError = (type?: unknown, detail?: unknown) =>
-        recorder.event(
-          "engine_error",
-          [type, detail].filter((v) => typeof v === "string").join(": "),
+      const onMediaInfo = () => {
+        const info = player.mediaInfo;
+        if (!info) return;
+        report(
+          "stream_format",
+          `video=${info.videoCodec ?? "unknown"}; audio=${info.audioCodec ?? "unknown"}; resolution=${info.width ?? "unknown"}x${info.height ?? "unknown"}`,
         );
+        if (info.mimeType) reportMime(info.mimeType);
+      };
+      const onError = (type?: unknown, detail?: unknown, info?: unknown) => {
+        onMediaInfo();
+        report(
+          "engine_error",
+          [type, detail, info].map(playbackErrorDetail).filter(Boolean).join(": "),
+        );
+      };
+      player.on?.("media_info", onMediaInfo);
       player.on?.("error", onError);
+      routeCleanups.push(() => player.off?.("media_info", onMediaInfo));
       routeCleanups.push(() => player.off?.("error", onError));
     },
     attachMpegts(attach: () => void) {
@@ -199,9 +290,15 @@ export function observePlayback(
           const add = source.addSourceBuffer;
           const descriptor = Object.getOwnPropertyDescriptor(source, "addSourceBuffer");
           const wrappedAdd: MediaSource["addSourceBuffer"] = function (this: MediaSource, mime) {
-            const buffer = add.call(this, mime);
-            observeBuffer(buffer);
-            return buffer;
+            reportMime(mime);
+            try {
+              const buffer = add.call(this, mime);
+              observeBuffer(buffer);
+              return buffer;
+            } catch (error) {
+              report("engine_error", `addSourceBuffer: ${playbackErrorDetail(error)}`);
+              throw error;
+            }
           };
           try {
             Object.defineProperty(source, "addSourceBuffer", {

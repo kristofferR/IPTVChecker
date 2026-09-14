@@ -40,6 +40,7 @@ export interface MpegtsPlayer {
   on?(event: string, handler: (...args: unknown[]) => void): void;
   off?(event: string, handler: (...args: unknown[]) => void): void;
   mediaInfo?: {
+    mimeType?: string;
     videoCodec?: string;
     audioCodec?: string;
     width?: number;

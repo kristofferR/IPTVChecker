@@ -6,6 +6,8 @@ export const PLAYBACK_SUMMARY_LIMIT = 1000;
 
 export type PlaybackEventKind =
   | "route"
+  | "route_failure"
+  | "stream_format"
   | "ready"
   | "first_frame"
   | "waiting"
