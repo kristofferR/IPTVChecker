@@ -53,10 +53,10 @@ function engineFixture() {
     on(event: string, listener: (...args: unknown[]) => void) {
       listeners.set(event, listener);
     },
-    off(event: string) {
+    off(event: string, listener: (...args: unknown[]) => void) {
       removals++;
       if (destroyed) throw new Error("this._player_engine is null");
-      listeners.delete(event);
+      if (listeners.get(event) === listener) listeners.delete(event);
     },
     destroy() {
       destroyed = true;

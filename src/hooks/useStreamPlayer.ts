@@ -898,11 +898,14 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       timeoutMs = MPEGTS_PLAYBACK_ROUTE_TIMEOUT_MS,
     ): Promise<boolean> => {
       if (signal.aborted) return false;
+      let routeDetail = "unknown";
       try {
-        telemetryObserverRef.current?.route(
-          "mpegts.js",
-          new URL(url).searchParams.get("remux") === "1" ? "remux" : "direct",
-        );
+        routeDetail = new URL(url).searchParams.get("remux") === "1" ? "remux" : "direct";
+      } catch {
+        // The playback attempt below reports malformed URLs on its own route.
+      }
+      telemetryObserverRef.current?.route("mpegts.js", routeDetail);
+      try {
         const [mpegtsModule, enableWorker] = await Promise.all([
           import("mpegts.js"),
           canUseBlobWorkers(),
