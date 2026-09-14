@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::Manager;
+use tauri_plugin_dialog::DialogExt;
 
 const AUDIO_ONLY_EXPORT_TAG: &str = "#EXTVLCOPT:iptv-checker-audio-only=1";
 const EXPORT_FORMAT_VERSION: u32 = 1;
@@ -51,6 +52,28 @@ async fn run_blocking_export<T: Send + 'static>(
     tokio::task::spawn_blocking(work)
         .await
         .map_err(|error| AppError::Other(format!("{} task failed: {}", task_name, error)))?
+}
+
+#[tauri::command]
+pub async fn export_app_log(window: tauri::WebviewWindow, text: String) -> Result<(), AppError> {
+    run_blocking_export("Log export", move || {
+        let Some(path) = window
+            .dialog()
+            .file()
+            .set_parent(&window)
+            .set_title("Export Log")
+            .set_file_name("iptv-checker.log")
+            .add_filter("Log files", &["log", "txt"])
+            .blocking_save_file()
+        else {
+            return Ok(());
+        };
+        let path = path
+            .into_path()
+            .map_err(|error| AppError::Other(error.to_string()))?;
+        std::fs::write(path, text).map_err(AppError::Io)
+    })
+    .await
 }
 
 fn sanitize_csv_cell(value: &str) -> String {

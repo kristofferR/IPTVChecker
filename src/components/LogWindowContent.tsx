@@ -1,7 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { LogLevel } from "@tauri-apps/plugin-log";
-import { ArrowDown, Search, Trash2 } from "lucide-react";
+import { ArrowDown, Download, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   APP_LOG_CLEAR_EVENT,
@@ -11,7 +11,14 @@ import {
   type AppLogHistoryRequest,
   type AppLogHistoryResponse,
 } from "../lib/logBridge";
-import { type AppLogEntry, MAX_LOG_ENTRIES, mergeLogEntries } from "../lib/logEntries";
+import {
+  type AppLogEntry,
+  formatLogEntries,
+  formatLogTimestamp,
+  MAX_LOG_ENTRIES,
+  mergeLogEntries,
+} from "../lib/logEntries";
+import { exportAppLog } from "../lib/tauri";
 
 const LEVEL_META: Record<LogLevel, { label: string; color: string; activeColor: string }> = {
   [LogLevel.Trace]: {
@@ -52,25 +59,20 @@ function createHistoryRequestId(): string {
   return `${Date.now()}:${nextHistoryRequestId}`;
 }
 
-function formatTimestamp(timestampMs: number): string {
-  const date = new Date(timestampMs);
-  const h = String(date.getHours()).padStart(2, "0");
-  const m = String(date.getMinutes()).padStart(2, "0");
-  const s = String(date.getSeconds()).padStart(2, "0");
-  const ms = String(date.getMilliseconds()).padStart(3, "0");
-  return `${h}:${m}:${s}.${ms}`;
-}
-
 export function LogWindowContent() {
   const [entries, setEntries] = useState<AppLogEntry[]>([]);
   const [levelFilter, setLevelFilter] = useState<Set<LogLevel>>(() => new Set(DEFAULT_ENABLED));
   const [searchText, setSearchText] = useState("");
+  const [selectedEntries, setSelectedEntries] = useState<AppLogEntry[]>([]);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const bufferRef = useRef<AppLogEntry[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearedThroughIdRef = useRef(-1);
   const activeHistoryRequestIdRef = useRef<string | null>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLElement>(null);
   const autoScrollRef = useRef(true);
   const [autoScroll, setAutoScroll] = useState(true);
 
@@ -141,6 +143,104 @@ export function LogWindowContent() {
     });
   }, [entries, levelFilter, searchLower]);
 
+  const selectedIds = useMemo(
+    () => new Set(selectedEntries.map((entry) => entry.id)),
+    [selectedEntries],
+  );
+
+  useEffect(() => {
+    const isEditing = () => {
+      const active = document.activeElement;
+      return (
+        active instanceof HTMLElement &&
+        (active.matches("input, textarea") || active.isContentEditable)
+      );
+    };
+    const clearSelection = () => setSelectedEntries([]);
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button === 0) clearSelection();
+    };
+    const selectAllEntries = () => {
+      const container = scrollContainerRef.current;
+      if (!container) return;
+      container.focus({ preventScroll: true });
+      setSelectedEntries(filteredEntries);
+      // Keep a native selection so Edit > Copy works; the copy handler includes
+      // the selected entries that virtualization has kept out of the DOM.
+      const range = document.createRange();
+      range.selectNodeContents(container);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditing()) return;
+      if (event.key === "Escape") {
+        clearSelection();
+        window.getSelection()?.removeAllRanges();
+        return;
+      }
+      if (
+        !(event.metaKey || event.ctrlKey) ||
+        event.altKey ||
+        event.shiftKey ||
+        event.key.toLowerCase() !== "a"
+      )
+        return;
+      event.preventDefault();
+      selectAllEntries();
+    };
+    const handleSelectionChange = () => {
+      // Native Edit > Select All can bypass keydown on macOS. Recognize its
+      // document-wide selection and scope it to the complete log instead.
+      if (isEditing()) return;
+      const selection = window.getSelection();
+      const toolbar = toolbarRef.current;
+      const container = scrollContainerRef.current;
+      if (
+        toolbar &&
+        container &&
+        selection?.containsNode(toolbar, true) &&
+        selection.containsNode(container, true)
+      ) {
+        selectAllEntries();
+      }
+    };
+    const handleCopy = (event: ClipboardEvent) => {
+      if (isEditing() || selectedEntries.length === 0 || !event.clipboardData) return;
+      event.clipboardData.setData("text/plain", formatLogEntries(selectedEntries));
+      event.preventDefault();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("copy", handleCopy);
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("copy", handleCopy);
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("selectionchange", handleSelectionChange);
+    };
+  }, [filteredEntries, selectedEntries]);
+
+  useEffect(() => {
+    setSelectedEntries([]);
+  }, [levelFilter, searchText]);
+
+  const handleExport = async () => {
+    if (exporting || filteredEntries.length === 0) return;
+    const text = formatLogEntries(filteredEntries);
+    setExporting(true);
+    setExportError(null);
+    try {
+      await exportAppLog(`${text}\n`);
+    } catch (error) {
+      setExportError(`Could not export log: ${String(error)}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const getItemKey = useCallback(
     (index: number) => filteredEntries[index]?.id ?? index,
     [filteredEntries],
@@ -199,6 +299,7 @@ export function LogWindowContent() {
     activeHistoryRequestIdRef.current = null;
     bufferRef.current = [];
     setEntries([]);
+    setSelectedEntries([]);
     void emitTo("main", APP_LOG_CLEAR_EVENT).catch(() => {});
   }, [entries]);
 
@@ -209,6 +310,7 @@ export function LogWindowContent() {
     <div className="flex flex-col h-screen bg-overlay">
       {/* Toolbar */}
       <div
+        ref={toolbarRef}
         data-tauri-drag-region
         className="shrink-0 border-b border-border-app bg-panel-subtle"
         style={{
@@ -258,6 +360,17 @@ export function LogWindowContent() {
               : `${filteredCount} / ${totalCount}`}
           </span>
 
+          <button
+            type="button"
+            onClick={() => void handleExport()}
+            disabled={exporting || filteredCount === 0}
+            className="flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[12px] text-text-secondary hover:bg-btn-hover disabled:opacity-40 transition-colors cursor-default whitespace-nowrap"
+            title="Save matching log entries as a file"
+          >
+            <Download className="w-3.5 h-3.5" />
+            {exporting ? "Exporting…" : "Export Log…"}
+          </button>
+
           {/* Clear button */}
           <button
             type="button"
@@ -270,9 +383,18 @@ export function LogWindowContent() {
         </div>
       </div>
 
+      {exportError && (
+        <div role="alert" className="shrink-0 px-3 py-2 text-[12px] text-red-400">
+          {exportError}
+        </div>
+      )}
+
       {/* Log list */}
-      <div
+      <section
         ref={scrollContainerRef}
+        aria-label="Log entries"
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: Scrollable logs need keyboard focus for scrolling and copying.
+        tabIndex={0}
         onScroll={handleScroll}
         className="flex-1 overflow-auto font-mono text-[12px] leading-[22px]"
       >
@@ -298,10 +420,10 @@ export function LogWindowContent() {
                   width: "100%",
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
-                className="flex items-baseline gap-2 px-3 py-px hover:bg-btn-hover/50"
+                className={`flex items-baseline gap-2 px-3 py-px ${selectedIds.has(entry.id) ? "bg-blue-500/25" : "hover:bg-btn-hover/50"}`}
               >
                 <span className="text-text-tertiary shrink-0 select-all">
-                  {formatTimestamp(entry.timestampMs)}
+                  {formatLogTimestamp(entry.timestampMs)}
                 </span>
                 <span className={`${meta.color} font-semibold shrink-0 w-[5ch] text-right`}>
                   {meta.label}
@@ -311,7 +433,7 @@ export function LogWindowContent() {
             );
           })}
         </div>
-      </div>
+      </section>
 
       {/* Scroll-to-bottom FAB */}
       {!autoScroll && filteredEntries.length > 0 && (

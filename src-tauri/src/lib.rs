@@ -1073,6 +1073,7 @@ pub fn run() {
             commands::export::export_renamed,
             commands::export::export_m3u,
             commands::export::export_scan_log_json,
+            commands::export::export_app_log,
             commands::export::export_playback_diagnostics,
             commands::settings::get_settings,
             commands::settings::sync_view_menu,

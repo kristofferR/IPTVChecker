@@ -1,4 +1,4 @@
-import type { LogLevel } from "@tauri-apps/plugin-log";
+import { LogLevel } from "@tauri-apps/plugin-log";
 
 export interface AppLogEntry {
   id: number;
@@ -8,6 +8,24 @@ export interface AppLogEntry {
 }
 
 export const MAX_LOG_ENTRIES = 10_000;
+
+export function formatLogTimestamp(timestampMs: number): string {
+  const date = new Date(timestampMs);
+  const h = String(date.getHours()).padStart(2, "0");
+  const m = String(date.getMinutes()).padStart(2, "0");
+  const s = String(date.getSeconds()).padStart(2, "0");
+  const ms = String(date.getMilliseconds()).padStart(3, "0");
+  return `${h}:${m}:${s}.${ms}`;
+}
+
+export function formatLogEntries(entries: readonly AppLogEntry[]): string {
+  return entries
+    .map(
+      (entry) =>
+        `${formatLogTimestamp(entry.timestampMs)} ${LogLevel[entry.level].toUpperCase()} ${entry.message}`,
+    )
+    .join("\n");
+}
 
 export function mergeLogEntries(
   current: AppLogEntry[],

@@ -191,6 +191,10 @@ export async function exportScanLogJson(path: string): Promise<void> {
   return invoke("export_scan_log_json", { path });
 }
 
+export async function exportAppLog(text: string): Promise<void> {
+  return invoke("export_app_log", { text });
+}
+
 export async function getSettings(): Promise<AppSettings> {
   return invoke("get_settings");
 }
