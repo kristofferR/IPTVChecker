@@ -344,12 +344,21 @@ jobs:
           manifest="$RUNNER_TEMP/release-manifest/latest.json"
           jq -e --arg version "$version" '.version == $version' "$manifest" >/dev/null
           for platform in darwin-aarch64 darwin-x86_64 linux-aarch64 linux-x86_64 windows-aarch64 windows-x86_64; do
-            case "$platform" in darwin-*) installer=app ;; linux-*) installer=appimage ;; windows-*) installer=nsis ;; esac
+            case "$platform" in *-aarch64) arch=arm ;; *) arch=x64 ;; esac
+            case "$platform" in
+              darwin-*) installer=app; suffix="mac_$arch.dmg" ;;
+              linux-*) installer=appimage; suffix="lin_$arch.AppImage" ;;
+              windows-*) installer=nsis; suffix="win_${arch}_setup.exe" ;;
+            esac
+            asset="IPTV.Checker_${version}_$suffix"
+            gh release download "$RELEASE_TAG" --pattern "$asset.sig" --dir "$RUNNER_TEMP/release-signatures"
+            signature=$(cat "$RUNNER_TEMP/release-signatures/$asset.sig")
             for key in "$platform" "$platform-$installer"; do
-              jq -e --arg key "$key" --slurpfile assets "$RUNNER_TEMP/release-assets.json" '
+              jq -e --arg key "$key" --arg name "$asset" --arg signature "$signature" \
+                --slurpfile assets "$RUNNER_TEMP/release-assets.json" '
                 .platforms[$key] as $entry |
-                ($entry.signature | type == "string" and length > 0) and
-                ($assets[0].assets | any(.apiUrl == $entry.url or .url == $entry.url))
+                ($signature | length > 0) and $entry.signature == $signature and
+                ($assets[0].assets | any(.name == $name and (.apiUrl == $entry.url or .url == $entry.url)))
               ' "$manifest" >/dev/null || { echo "Invalid updater entry: $key" >&2; exit 1; }
             done
           done
