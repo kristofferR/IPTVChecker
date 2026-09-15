@@ -407,15 +407,13 @@ jobs:
               on_arm do
                 sha256 "${SHA_MAC_ARM}"
 
-                url "https://github.com/${REPO}/releases/download/v#{version}/IPTV.Checker_#{version}_mac_arm.dmg",
-                    verified: "github.com/${REPO}/"
+                url "https://github.com/${REPO}/releases/download/v#{version}/IPTV.Checker_#{version}_mac_arm.dmg"
               end
 
               on_intel do
                 sha256 "${SHA_MAC_X64}"
 
-                url "https://github.com/${REPO}/releases/download/v#{version}/IPTV.Checker_#{version}_mac_x64.dmg",
-                    verified: "github.com/${REPO}/"
+                url "https://github.com/${REPO}/releases/download/v#{version}/IPTV.Checker_#{version}_mac_x64.dmg"
               end
             end
 
@@ -423,15 +421,13 @@ jobs:
               on_arm do
                 sha256 "${SHA_LIN_ARM}"
 
-                url "https://github.com/${REPO}/releases/download/v#{version}/IPTV.Checker_#{version}_lin_arm.AppImage",
-                    verified: "github.com/${REPO}/"
+                url "https://github.com/${REPO}/releases/download/v#{version}/IPTV.Checker_#{version}_lin_arm.AppImage"
               end
 
               on_intel do
                 sha256 "${SHA_LIN_X64}"
 
-                url "https://github.com/${REPO}/releases/download/v#{version}/IPTV.Checker_#{version}_lin_x64.AppImage",
-                    verified: "github.com/${REPO}/"
+                url "https://github.com/${REPO}/releases/download/v#{version}/IPTV.Checker_#{version}_lin_x64.AppImage"
               end
 
               container type: :naked
@@ -445,12 +441,11 @@ jobs:
             # update itself between \`brew upgrade\` runs.
             auto_updates true
 
-            preflight do
-              old_app = Pathname.new("/Applications/IPTV Checker.app")
-              next unless old_app.symlink?
-
-              target = old_app.readlink.to_s
-              old_app.delete if target.include?("/opt/homebrew/opt/iptv-checker/") || target.include?("/usr/local/opt/iptv-checker/")
+            preflight_steps do
+              on_macos do
+                remove "/Applications/IPTV Checker.app", symlink_target_contains: "/opt/homebrew/opt/iptv-checker/"
+                remove "/Applications/IPTV Checker.app", symlink_target_contains: "/usr/local/opt/iptv-checker/"
+              end
             end
 
             on_macos do
