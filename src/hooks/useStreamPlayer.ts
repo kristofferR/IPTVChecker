@@ -666,6 +666,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         const finish = (value: boolean) => {
           if (settled) return;
           settled = true;
+          if (!value && !signal.aborted) {
+            telemetryObserverRef.current?.failure(lastErrorRef.current ?? "Native playback failed");
+          }
           if (timer) clearTimeout(timer);
           if (frameTimer) clearInterval(frameTimer);
           if (frameRequest !== null) videoElement.cancelVideoFrameCallback(frameRequest);
@@ -733,7 +736,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         videoElement.addEventListener("error", onError, { once: true });
         signal.addEventListener("abort", onAbort, { once: true });
         telemetryAttemptRef.current++;
-        telemetryObserverRef.current?.route("native");
+        telemetryObserverRef.current?.route("native", classifyStream(url));
         // WebKit can drop every interlaced frame when its audio clock starts
         // first. Preroll video silently, then restore the user's audio settings.
         nativeVideoPrerollRef.current = !audioOnly;
@@ -761,6 +764,10 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         return playing;
       } catch (error) {
         lastErrorRef.current = error instanceof Error ? error.message : "Archive remux failed";
+        if (!signal.aborted) {
+          telemetryObserverRef.current?.route("native", "archive remux startup");
+          telemetryObserverRef.current?.failure(lastErrorRef.current);
+        }
         return false;
       } finally {
         if (!playing) {
@@ -780,9 +787,16 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       signal: AbortSignal,
       timeoutMs = PLAYBACK_ROUTE_TIMEOUT_MS,
     ): Promise<boolean> => {
+      if (signal.aborted) return false;
+      telemetryObserverRef.current?.route("hls.js");
       try {
         const { default: Hls } = await import("hls.js");
-        if (signal.aborted || !Hls.isSupported()) return false;
+        if (signal.aborted) return false;
+        if (!Hls.isSupported()) {
+          lastErrorRef.current = "hls.js is not supported by this WebView";
+          telemetryObserverRef.current?.failure(lastErrorRef.current);
+          return false;
+        }
 
         return await new Promise<boolean>((resolve) => {
           let settled = false;
@@ -792,7 +806,6 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             maxMaxBufferLength: 60,
           });
           telemetryAttemptRef.current++;
-          telemetryObserverRef.current?.route("hls.js");
           telemetryObserverRef.current?.hls(hls, Hls.Events);
           hlsInstanceRef.current = hls;
           let cancelStartup: (() => void) | undefined;
@@ -825,6 +838,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             if (reason) {
               lastErrorRef.current = reason;
             }
+            if (!signal.aborted)
+              telemetryObserverRef.current?.failure(reason ?? "HLS playback failed");
             finish(false);
             destroyPlayer();
           };
@@ -868,6 +883,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       } catch (error) {
         lastErrorRef.current =
           error instanceof Error ? error.message : "Could not initialize HLS playback";
+        if (!signal.aborted) telemetryObserverRef.current?.failure(lastErrorRef.current);
         return false;
       }
     },
@@ -881,18 +897,30 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       isLive: boolean,
       timeoutMs = MPEGTS_PLAYBACK_ROUTE_TIMEOUT_MS,
     ): Promise<boolean> => {
+      if (signal.aborted) return false;
+      let routeDetail = "unknown";
+      try {
+        routeDetail = new URL(url).searchParams.get("remux") === "1" ? "remux" : "direct";
+      } catch {
+        // The playback attempt below reports malformed URLs on its own route.
+      }
+      telemetryObserverRef.current?.route("mpegts.js", routeDetail);
       try {
         const [mpegtsModule, enableWorker] = await Promise.all([
           import("mpegts.js"),
           canUseBlobWorkers(),
         ]);
         const mpegts = mpegtsModule.default;
-        if (signal.aborted || !mpegts.isSupported()) return false;
+        if (signal.aborted) return false;
+        if (!mpegts.isSupported()) {
+          lastErrorRef.current = "mpegts.js is not supported by this WebView";
+          telemetryObserverRef.current?.failure(lastErrorRef.current);
+          return false;
+        }
 
         return await new Promise<boolean>((resolve) => {
           let settled = false;
           let timer: ReturnType<typeof setTimeout> | null = null;
-          telemetryObserverRef.current?.route("mpegts.js");
           const player = mpegts.createPlayer(
             {
               type: "mpegts",
@@ -949,6 +977,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             if (reason) {
               lastErrorRef.current = reason;
             }
+            if (!signal.aborted)
+              telemetryObserverRef.current?.failure(reason ?? "MPEG-TS playback failed");
             finish(false);
             destroyPlayer();
           };
@@ -1002,6 +1032,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       } catch (error) {
         lastErrorRef.current =
           error instanceof Error ? error.message : "Could not initialize MPEG-TS playback";
+        if (!signal.aborted) telemetryObserverRef.current?.failure(lastErrorRef.current);
         return false;
       }
     },
@@ -1083,6 +1114,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           return;
         }
         logger.warn("[Player] Connection timed out for channel", result.name);
+        telemetryObserverRef.current?.failure("Connection timed out");
         failCurrentAttempt("Connection timed out");
       }, LOADING_TIMEOUT_MS);
 

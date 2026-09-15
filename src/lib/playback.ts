@@ -248,6 +248,31 @@ export function readMediaErrorMessage(mediaErr: MediaError | null): string | nul
   return codeMap[mediaErr.code] ?? mediaErr.message ?? "Unknown media error";
 }
 
+/** Diagnostic detail stays separate from the short, user-facing error label. */
+export function readMediaErrorDetail(mediaErr: MediaError | null): string {
+  if (!mediaErr) return "Unknown media error";
+  return [`Media error ${mediaErr.code}`, readMediaErrorMessage(mediaErr), mediaErr.message]
+    .filter(Boolean)
+    .join(": ");
+}
+
+/** Engine error objects can also contain URLs and response bodies. Pick only error fields. */
+export function playbackErrorDetail(value: unknown): string {
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (value instanceof Error) return `${value.name}: ${value.message}`;
+  if (!value || typeof value !== "object") return "";
+  return ["code", "msg", "message", "reason"]
+    .flatMap((key) => {
+      try {
+        const field = Reflect.get(value, key);
+        return typeof field === "string" || typeof field === "number" ? [`${key}=${field}`] : [];
+      } catch {
+        return [];
+      }
+    })
+    .join("; ");
+}
+
 export const MAX_PLAYBACK_RECOVERY_ATTEMPTS = 5;
 export const PLAYBACK_RECOVERY_WINDOW_MS = 2 * 60_000;
 export const MIN_PROGRESS_DELTA_SECS = 0.05;

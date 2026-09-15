@@ -12,6 +12,8 @@ import {
 
 const eventLabels: Record<PlaybackEventKind, string> = {
   route: "Playback route",
+  route_failure: "Playback route failed",
+  stream_format: "Stream format",
   ready: "Media ready",
   first_frame: "First frame presented",
   waiting: "Waiting for media",
