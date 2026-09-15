@@ -39,6 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      commit: ${{ steps.matrix.outputs.commit }}
     steps:
       - name: Select release targets
         id: matrix
@@ -46,10 +47,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           REQUESTED_TARGET: ${{ inputs.target || 'all' }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Expected a stable release tag, such as v2.0.0" >&2; exit 1; }
           gh api --silent "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG"
+          commit=$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq '.sha')
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          gh api "repos/$GH_REPO/releases" --paginate --slurp > "$RUNNER_TEMP/releases.json"
+          jq --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)]' "$RUNNER_TEMP/releases.json" > "$RUNNER_TEMP/matching-releases.json"
+          jq -e --arg event "$EVENT_NAME" '
+            all(.draft == true) and ($event != "workflow_dispatch" or length == 1)
+          ' "$RUNNER_TEMP/matching-releases.json" >/dev/null || { echo "Recovery requires a draft release; published assets must not be overwritten." >&2; exit 1; }
           matrix=$(jq -cn --arg target "$REQUESTED_TARGET" '
             {include: [
               {os: "macos-latest", target: "aarch64-apple-darwin"},
@@ -61,6 +70,16 @@ jobs:
             ] | map(select($target == "all" or .target == $target))}')
           jq -e '.include | length > 0' <<< "$matrix" >/dev/null
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          # Invalidate old success markers before any selected target replaces its assets.
+          if jq -e 'length > 0' "$RUNNER_TEMP/matching-releases.json" >/dev/null; then
+            gh release view "$RELEASE_TAG" --json assets > "$RUNNER_TEMP/release-assets.json"
+            while IFS= read -r target; do
+              marker="verified-$target.json"
+              if jq -e --arg name "$marker" '.assets | any(.name == $name)' "$RUNNER_TEMP/release-assets.json" >/dev/null; then
+                gh release delete-asset "$RELEASE_TAG" "$marker" --yes
+              fi
+            done < <(jq -r '.include[].target' <<< "$matrix")
+          fi
 
   build:
     needs: prepare
@@ -81,7 +100,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ env.RELEASE_TAG }}
+          ref: ${{ needs.prepare.outputs.commit }}
 
       - name: Install Linux dependencies
         if: startsWith(matrix.os, 'ubuntu')
@@ -276,17 +295,37 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${{ env.RELEASE_TAG }}" "${{ env.PORTABLE_ZIP }}" --clobber
 
+      - name: Record successful platform verification
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+          TARGET_TRIPLE: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          marker="$RUNNER_TEMP/verified-$TARGET_TRIPLE.json"
+          jq -n --arg commit "$RELEASE_COMMIT" --arg target "$TARGET_TRIPLE" \
+            '{commit: $commit, target: $target}' > "$marker"
+          gh release upload "$RELEASE_TAG" "$marker" --clobber
+
   publish:
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     steps:
       - name: Verify the complete release asset set
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#v}"
+          gh release download "$RELEASE_TAG" --pattern 'verified-*.json' --dir "$RUNNER_TEMP/verified"
+          for target in aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-pc-windows-msvc aarch64-pc-windows-msvc; do
+            jq -e --arg commit "$RELEASE_COMMIT" --arg target "$target" \
+              '.commit == $commit and .target == $target' "$RUNNER_TEMP/verified/verified-$target.json" >/dev/null || { echo "Platform has not passed verification: $target" >&2; exit 1; }
+          done
           gh api "repos/$GH_REPO/releases" --paginate --slurp > "$RUNNER_TEMP/releases.json"
           jq -e --arg tag "$RELEASE_TAG" '[.[][] | select(.tag_name == $tag)] | length == 1' "$RUNNER_TEMP/releases.json" >/dev/null
           gh release view "$RELEASE_TAG" --json assets > "$RUNNER_TEMP/release-assets.json"
