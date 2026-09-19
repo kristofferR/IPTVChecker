@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IPTV Player: design notes</title>
+<style>
+  :root{
+    --surface:#18181b; --panel:#27272a; --panel50:rgba(39,39,42,.5); --panel30:rgba(39,39,42,.3);
+    --border:#3f3f46; --border50:rgba(63,63,70,.5);
+    --t1:#f4f4f5; --t2:#a1a1aa; --t3:#71717a;
+    --blue:#3b82f6; --blue600:#2563eb;
+    --green:#4ade80; --red:#f87171; --amber:#fbbf24;
+    --vio:#a78bfa; --vio300:#c4b5fd; --vio500:#8b5cf6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#000;color:#fff;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px 16px 80px}
+  main{max-width:1120px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 4px}
+  h2{font-size:15px;margin:44px 0 6px;padding-top:18px;border-top:1px solid #27272a}
+  h2 .tag{display:inline-block;min-width:20px;text-align:center;background:var(--vio500);color:#fff;border-radius:5px;padding:1px 7px;font-size:12px;margin-right:8px;vertical-align:1px}
+  h3{font-size:13px;color:var(--t2);margin:18px 0 4px;font-weight:600}
+  p{color:#d4d4d8;margin:6px 0;max-width:80ch}
+  .sub{color:var(--t2);font-size:13px}
+  ul{color:#d4d4d8;margin:8px 0;padding-left:20px;max-width:82ch}
+  li{margin:3px 0}
+  code{background:#1c1c1f;border:1px solid #2c2c30;border-radius:4px;padding:1px 5px;font-size:12px;color:#e4e4e7}
+  table.doc{border-collapse:collapse;font-size:13px;margin:10px 0;width:100%}
+  table.doc th{color:var(--t2);font-weight:600;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+  table.doc th,table.doc td{border-bottom:1px solid #27272a;padding:6px 10px 6px 0;vertical-align:top;color:#d4d4d8}
+  .good{color:var(--green)} .warn{color:var(--amber)} .bad{color:var(--red)} .vio{color:var(--vio)}
+  .cap{color:var(--t3);font-size:12px;margin:6px 0 0}
+
+  /* callouts */
+  .co{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--vio500);color:#fff;font-size:9.5px;font-weight:700;vertical-align:middle;margin:0 2px;flex:none;line-height:1}
+  .legend{list-style:none;padding:0;margin:10px 0 0;font-size:13px;color:#d4d4d8;max-width:82ch}
+  .legend li{display:flex;gap:8px;margin:4px 0;align-items:baseline}
+  .legend .co{position:relative;top:2px}
+  .ring{box-shadow:0 0 0 1.5px var(--vio) !important;border-radius:6px}
+
+  /* ---------- app mock chrome ---------- */
+  .frame{overflow-x:auto;margin:14px 0;border-radius:12px}
+  .app{min-width:960px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--surface);font-size:12px;color:var(--t1)}
+  .tbar{display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--panel);border-bottom:1px solid var(--border)}
+  .b{display:inline-flex;align-items:center;gap:5px;background:var(--border);border-radius:6px;padding:4px 10px;font-size:12px;color:var(--t1);position:relative}
+  .b.pri{background:var(--blue600);color:#fff}
+  .ib{display:inline-flex;align-items:center;justify-content:center;width:26px;height:24px;border-radius:6px;color:var(--t2);font-size:13px;position:relative}
+  .selc{display:inline-flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--t2);position:relative}
+  .selc b{color:var(--t1);font-weight:500}
+  .selc:after{content:"▾";font-size:9px;color:var(--t3)}
+  .search{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--t3);min-width:100px}
+  .plname{color:var(--t3);font-size:11px;margin:0 auto;padding:0 10px;white-space:nowrap}
+  .body{display:flex;min-height:0;position:relative}
+  .maincol{flex:1;min-width:0;display:flex;flex-direction:column}
+  .th{display:grid;align-items:center;height:26px;padding:0 12px;font-size:10px;font-weight:600;color:var(--t2);background:var(--panel);border-bottom:1px solid var(--border);gap:6px}
+  .tr{display:grid;align-items:center;height:31px;padding:0 12px;border-bottom:1px solid var(--border50);font-size:12px;gap:6px}
+  .tr.sel{background:var(--panel50)}
+  .tr:last-child{border-bottom:none}
+  .cols8{grid-template-columns:30px 36px minmax(0,1fr) 110px 52px 40px 72px 90px}
+  .cols6{grid-template-columns:26px 32px minmax(0,1fr) 92px 48px 84px}
+  .cols4{grid-template-columns:26px 32px minmax(0,1fr) 104px}
+  .tr .nm{font-weight:500;display:flex;align-items:center;gap:6px;min-width:0}
+  .tr .nm span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .logo{width:15px;height:15px;border-radius:3px;background:var(--panel);border:1px solid var(--border50);flex:none;display:grid;place-items:center;font-size:8px;color:var(--t3)}
+  .mut{color:var(--t2)} .mut3{color:var(--t3)}
+  .num{font-variant-numeric:tabular-nums}
+  .ctr{text-align:center}.rgt{text-align:right}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+  .dg{background:#22c55e}.dr{background:#ef4444}.dy{background:#eab308}
+  .chip{display:inline-flex;align-items:center;gap:3px;border-radius:4px;padding:1px 6px;font-size:9.5px;font-weight:600;letter-spacing:.05em;white-space:nowrap}
+  .cu{background:rgba(139,92,246,.15);color:var(--vio300);box-shadow:inset 0 0 0 1px rgba(139,92,246,.3)}
+  .cu.v{background:rgba(74,222,128,.12);color:#86efac;box-shadow:inset 0 0 0 1px rgba(74,222,128,.28)}
+  .cu.w{background:rgba(251,191,36,.12);color:#fcd34d;box-shadow:inset 0 0 0 1px rgba(251,191,36,.3)}
+  .cu.x{background:rgba(248,113,113,.12);color:#fca5a5;box-shadow:inset 0 0 0 1px rgba(248,113,113,.3)}
+  .stats{display:flex;align-items:center;gap:6px;padding:5px 12px;border-top:1px solid var(--border);background:var(--panel50);font-size:11px;flex-wrap:wrap}
+  .pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 9px;font-variant-numeric:tabular-nums;position:relative}
+  .pn{color:var(--t2);background:rgba(63,63,70,.6)}
+  .pg{color:var(--green);background:rgba(74,222,128,.1)}
+  .pr{color:var(--red);background:rgba(248,113,113,.1)}
+  .py{color:var(--amber);background:rgba(251,191,36,.1)}
+  .pb{color:#60a5fa;background:rgba(96,165,250,.1)}
+  .pv{color:var(--vio);background:rgba(167,139,250,.1)}
+  .pv.on{color:var(--vio300);background:rgba(167,139,250,.25);box-shadow:0 0 0 1px rgba(167,139,250,.5)}
+  .rightst{margin-left:auto;display:flex;align-items:center;gap:10px;color:var(--t3)}
+
+  /* sidebar */
+  .side{width:272px;flex:none;border-right:1px solid var(--border);background:var(--panel30);padding:10px;overflow:hidden}
+  .vid{position:relative;aspect-ratio:16/9;border:1px solid var(--border);border-radius:8px;background:linear-gradient(135deg,#101014,#1b1b22 60%,#14141a);overflow:hidden;margin-bottom:8px}
+  .vid .play{position:absolute;inset:0;display:grid;place-items:center;color:rgba(255,255,255,.7);font-size:22px}
+  .badge{position:absolute;top:6px;left:6px;background:rgba(139,92,246,.9);color:#fff;font-size:9.5px;font-weight:600;border-radius:4px;padding:2px 6px;max-width:85%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ctrls{position:absolute;left:0;right:0;bottom:0;padding:5px 8px 6px;background:linear-gradient(to top,rgba(0,0,0,.75),transparent)}
+  .seek{position:relative;height:3px;background:rgba(255,255,255,.22);border-radius:2px;margin-bottom:5px}
+  .seek .fill{position:absolute;left:0;top:0;bottom:0;width:62%;background:var(--vio);border-radius:2px}
+  .seek .tick{position:absolute;top:-2px;width:1px;height:7px;background:rgba(255,255,255,.45)}
+  .seek .knob{position:absolute;left:62%;top:50%;width:9px;height:9px;border-radius:50%;background:#fff;transform:translate(-50%,-50%)}
+  .cbar{display:flex;align-items:center;gap:8px;color:#fff;font-size:10px}
+  .cbar .liveb{margin-left:auto;border:1px solid rgba(255,255,255,.4);border-radius:4px;padding:1px 6px;font-size:9px;color:#fff}
+  .cbar .vol{width:24px;height:3px;background:rgba(255,255,255,.25);border-radius:2px;position:relative;flex:none}
+  .cbar .vol i{position:absolute;left:0;top:0;bottom:0;width:65%;background:#fff;border-radius:2px}
+  .cbar .spk{font-size:9px}
+  .golive{position:absolute;top:6px;right:6px;border:1px solid rgba(255,255,255,.45);background:rgba(0,0,0,.45);border-radius:4px;padding:2px 6px;font-size:9px;color:#fff;font-weight:600}
+  .sname{font-size:13px;font-weight:600;margin:2px 0 6px;display:flex;align-items:center;gap:6px}
+  .meta{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:10.5px;margin-bottom:4px}
+  .meta div{background:rgba(39,39,42,.6);border-radius:5px;padding:4px 7px}
+  .meta b{display:block;font-weight:400;color:var(--t3);font-size:9px;text-transform:uppercase;letter-spacing:.05em}
+  .card{border:1px solid var(--border50);background:var(--panel50);border-radius:8px;padding:8px;margin-top:8px;position:relative}
+  .card h4{margin:0 0 6px;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);font-weight:600;display:flex;align-items:center;gap:5px}
+  .card h4 .chip{margin-left:auto;letter-spacing:0}
+  .kv{display:flex;justify-content:space-between;font-size:11px;padding:2px 0;color:var(--t2);gap:8px}
+  .kv b{color:var(--t1);font-weight:500;white-space:nowrap}
+  .abtn{display:flex;align-items:center;justify-content:center;gap:5px;width:100%;background:var(--blue600);color:#fff;border-radius:6px;padding:5px 0;font-size:11.5px;font-weight:500;margin-top:7px;position:relative}
+  .abtn.sec{background:var(--border);color:var(--t1)}
+  .field{display:flex;align-items:center;gap:6px;margin-top:7px}
+  .field .in{flex:1;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--t1);white-space:nowrap}
+
+  /* existing sidebar chrome */
+  .shead{display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:13px;font-weight:600;min-width:0}
+  .shead span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .acts{display:flex;justify-content:center;align-items:center;gap:6px;margin:2px 0 6px}
+  .ab{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;font-size:11px;font-weight:500;border-radius:6px}
+  .ab.stop{background:#dc2626;color:#fff}
+  .ab.gr{background:var(--border);color:var(--t1)}
+  .castrow{display:flex;justify-content:center;align-items:center;gap:5px;background:var(--panel50);border:1px solid var(--border50);border-radius:6px;padding:4px 0;font-size:10.5px;color:var(--t2);margin-bottom:6px}
+  .meta2{display:grid;grid-template-columns:1fr 1fr;gap:6px 8px;margin:4px 0 2px}
+  .meta2 .l{display:block;color:var(--t3);font-size:10px}
+  .meta2 p{margin:0;font-weight:500;font-size:11px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .card.cardv{background:rgba(139,92,246,.08);border-color:rgba(139,92,246,.22)}
+  .card.cardv h4{color:var(--vio300)}
+  .cardp{background:var(--panel50);border:1px solid var(--border50);border-radius:8px;padding:8px;margin-top:8px}
+  .cardp .ph{display:flex;justify-content:space-between;align-items:center;font-size:11px;font-weight:600}
+  .cardp p{margin:3px 0 0;font-size:10px;color:var(--t2);word-break:break-all}
+
+  /* programme list */
+  .day{font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--t3);margin:8px 0 2px;font-weight:600}
+  .prog{display:flex;align-items:center;gap:7px;padding:3px 6px;border-radius:6px;font-size:11px}
+  .prog.now{background:rgba(139,92,246,.13);box-shadow:inset 0 0 0 1px rgba(139,92,246,.3)}
+  .prog .t{color:var(--t3);font-variant-numeric:tabular-nums;flex:none;width:33px}
+  .prog .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .prog .ic{color:var(--t3);flex:none;font-size:10px}
+  .prog.dis{opacity:.38}
+
+  /* menus */
+  .menu{position:absolute;width:225px;background:var(--panel);border:1px solid var(--border);border-radius:9px;box-shadow:0 18px 40px rgba(0,0,0,.65);padding:4px;font-size:12px;z-index:5}
+  .mi{padding:5px 10px;border-radius:5px;color:var(--t1);display:flex;justify-content:space-between;gap:8px;align-items:center}
+  .mi.hov{background:var(--border)}
+  .mi .k{color:var(--t3);font-size:10px}
+  .msep{height:1px;background:var(--border50);margin:4px 6px}
+  .dd{position:absolute;top:calc(100% + 4px);left:0;width:235px;background:var(--panel);border:1px solid var(--border);border-radius:9px;box-shadow:0 18px 40px rgba(0,0,0,.65);padding:4px;font-size:12px;z-index:6;color:var(--t1)}
+
+  /* EPG overlay (variant C) */
+  .ovl{position:absolute;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;padding:16px;z-index:4}
+  .epg{width:100%;max-width:880px;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--surface);font-size:11px;box-shadow:0 24px 60px rgba(0,0,0,.7)}
+  .epghead{display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--panel);border-bottom:1px solid var(--border)}
+  .daytabs{display:flex;gap:4px;margin-left:12px}
+  .dtab{border-radius:6px;padding:3px 10px;color:var(--t2);font-size:11px}
+  .dtab.on{background:var(--border);color:var(--t1)}
+  .epgrow{display:flex;align-items:stretch;border-bottom:1px solid var(--border50)}
+  .epgch{width:140px;flex:none;padding:7px 10px;border-right:1px solid var(--border50);display:flex;flex-direction:column;justify-content:center;gap:2px}
+  .epgch .cn{font-weight:600;font-size:11px;display:flex;gap:6px;align-items:center;min-width:0}
+  .epgch .cn span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lane{flex:1;display:flex;gap:2px;padding:6px;min-width:0;overflow:hidden}
+  .blk{border-radius:5px;background:rgba(139,92,246,.14);box-shadow:inset 0 0 0 1px rgba(139,92,246,.25);padding:3px 8px;overflow:hidden;flex:none;display:flex;flex-direction:column;justify-content:center}
+  .blk .bt{font-size:9px;color:var(--t3);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .blk .bn{font-size:10.5px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .blk.on{background:rgba(139,92,246,.35);box-shadow:inset 0 0 0 1px rgba(167,139,250,.7)}
+  .blk.dead{background:rgba(63,63,70,.25);box-shadow:inset 0 0 0 1px var(--border50)}
+  .blk.dead .bn{color:var(--t3)}
+  .timeax{display:flex;padding:3px 6px 3px 146px;color:var(--t3);font-size:9px;background:var(--panel30);border-bottom:1px solid var(--border50)}
+  .timeax span{flex:1}
+  .epgfoot{display:flex;align-items:center;gap:10px;padding:7px 14px;background:var(--panel30);border-top:1px solid var(--border);color:var(--t2);font-size:11px}
+
+  /* view mode switcher */
+  .seg{display:inline-flex;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:2px;gap:2px;position:relative}
+  .seg .sg{display:inline-flex;align-items:center;gap:5px;padding:3px 13px;border-radius:6px;font-size:11.5px;color:var(--t2)}
+  .seg .sg.on{background:var(--vio500);color:#fff;font-weight:600}
+  .seg .sg.on.gr{background:var(--border);color:var(--t1)}
+
+  /* dense EPG view (variant C v2) */
+  .ctl{display:flex;align-items:center;gap:8px;padding:4px 10px;background:var(--panel30);border-bottom:1px solid var(--border50);font-size:11px}
+  .ctl .dtab{padding:2px 9px;font-size:10.5px}
+  .row2{display:flex;align-items:stretch;border-bottom:1px solid var(--border50);height:30px}
+  .ch2{width:132px;flex:none;display:flex;align-items:center;gap:5px;padding:0 8px;border-right:1px solid var(--border50);font-size:10.5px;font-weight:600;min-width:0}
+  .ch2 span.nm2{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ch2 .dp{margin-left:auto;font-size:8.5px;color:var(--vio);font-weight:700;flex:none}
+  .ch2 .dp.no{color:var(--t3)}
+  .lane2{flex:1;display:flex;gap:1px;padding:2px;min-width:0;overflow:hidden}
+  .bk{display:flex;align-items:center;gap:5px;border-radius:3px;background:rgba(139,92,246,.12);box-shadow:inset 0 0 0 1px rgba(139,92,246,.2);padding:0 6px;overflow:hidden;flex:none;font-size:10px;min-width:0}
+  .bk .t2{color:var(--t3);font-variant-numeric:tabular-nums;font-size:9px;flex:none}
+  .bk .n3{color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bk.on{background:rgba(139,92,246,.35);box-shadow:inset 0 0 0 1px rgba(167,139,250,.7)}
+  .bk.dead{background:rgba(63,63,70,.22);box-shadow:inset 0 0 0 1px var(--border50)}
+  .bk.dead .n3{color:var(--t3)}
+  .timeax2{display:flex;padding:2px 3px 2px 132px;color:var(--t3);font-size:9px;background:var(--panel30);border-bottom:1px solid var(--border50)}
+  .timeax2 span{flex:1}
+
+  /* player fork */
+  .pside{width:224px;flex:none;border-right:1px solid var(--border);background:var(--panel30);padding:8px 6px;display:flex;flex-direction:column;gap:2px}
+  .chl{display:flex;align-items:center;gap:7px;padding:3px 8px;border-radius:6px;font-size:11.5px;min-width:0}
+  .chl.on{background:rgba(139,92,246,.16);box-shadow:inset 0 0 0 1px rgba(139,92,246,.3)}
+  .chl .cw{min-width:0;flex:1}
+  .chl .cw i{display:block;font-style:normal;font-size:9.5px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chl .cw b{display:block;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chl .st{color:var(--amber);font-size:10px;flex:none}
+  .nn{display:flex;gap:8px;padding:8px 2px 2px;font-size:11px}
+  .nn .nb{flex:1;background:var(--panel50);border:1px solid var(--border50);border-radius:7px;padding:6px 9px;min-width:0}
+  .nn .nb b{display:block;font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .nn .nb span{color:var(--t3);font-size:10px}
+
+  /* report panel */
+  .rep{width:270px;flex:none;border-left:1px solid var(--border);background:var(--panel30);padding:10px;font-size:11px}
+  .rep h4{margin:10px 0 6px;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--t3)}
+  .rep h4:first-child{margin-top:0}
+  .tiles{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .tile{background:rgba(39,39,42,.6);border-radius:6px;padding:5px 8px}
+  .tile b{display:block;font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+  .tile span{color:var(--t3);font-size:9px;text-transform:uppercase;letter-spacing:.04em}
+  .hbar{display:flex;align-items:center;gap:7px;margin:3px 0;color:var(--t2);font-size:10px}
+  .hbar .lb{width:32px;flex:none;text-align:right;font-variant-numeric:tabular-nums}
+  .hbar .tr2{flex:1;height:7px;background:rgba(63,63,70,.4);border-radius:4px;overflow:hidden}
+  .hbar .fl{height:100%;background:var(--vio500);border-radius:4px}
+  .hbar .n2{width:26px;flex:none;font-variant-numeric:tabular-nums;color:var(--t3)}
+  .ring2{width:58px;height:58px;border-radius:50%;background:conic-gradient(#38bdf8 0 76%,rgba(148,163,184,.22) 0);display:grid;place-items:center;flex:none}
+  .ring2 span{width:42px;height:42px;border-radius:50%;background:var(--surface);display:grid;place-items:center;font-size:13px;font-weight:600}
+  .srow{display:flex;justify-content:space-between;align-items:center;background:rgba(39,39,42,.6);border-radius:6px;padding:2px 8px;font-size:10.5px;color:var(--t3)}
+  .srow b{color:var(--t1);font-weight:500;display:inline-flex;align-items:center;gap:4px}
+</style>
+</head>
+<body>
+<main>
+<h1>IPTV Player, design notes</h1>
+<p class="sub">A watching-first flavor of IPTV Checker (issue kristofferR/IPTVChecker#231). Soft fork: one repo, two build flavors sharing the Rust crate and frontend core. Status: early notes only; the mock below is the initial direction and much more design work is needed before implementation. Catch-up/EPG groundwork lives in the Checker design doc: https://plans.kristofferr.com/d/5nwq8d7wj9h8</p>
+
+<p>Same codebase rejiggered into a watching-first app: channel zapper list on the left, player as the primary surface, EPG-driven now/next and archive rail below it. All checker machinery (scan, statuses, verification, report, export) is gone from the UI. Everything violet built above (archive URL builder, XMLTV store, seek player, EPG grid) is the core of this app, which is why it should be built player-grade in Checker first.</p>
+
+<div class="frame"><div class="app">
+  <div class="tbar">
+    <span class="b pri">nordic-full.m3u ▾ <span class="co">4</span></span>
+    <span class="selc">All Groups</span>
+    <span class="seg" style="margin-left:10px"><span class="sg on gr">▶ Watch</span><span class="sg">⏪ Guide</span></span>
+    <span class="plname"></span>
+    <span class="search" style="margin-left:auto">Search channels...</span>
+    <span class="ib">⚙</span>
+  </div>
+  <div class="body">
+    <div class="pside">
+      <div class="day" style="margin-top:0">Favorites <span class="co">1</span></div>
+      <div class="chl on"><span class="logo">TV</span><span class="cw"><b>TV 2 Direkte HD</b><i>Nyhetene · 21:00</i></span><span class="st">★</span></div>
+      <div class="chl"><span class="logo">TV</span><span class="cw"><b>NRK1 HD</b><i>Exit · 20:25</i></span><span class="st">★</span></div>
+      <div class="chl"><span class="logo">TV</span><span class="cw"><b>V Sport 1 HD</b><i>Premier League · 20:30</i></span><span class="st">★</span></div>
+      <div class="day">Norge</div>
+      <div class="chl"><span class="logo">TV</span><span class="cw"><b>NRK2 HD</b><i>Brennpunkt · 20:00</i></span></div>
+      <div class="chl"><span class="logo">TV</span><span class="cw"><b>TV3 Norge</b><i>Paradise Hotel · 20:00</i></span></div>
+      <div class="chl"><span class="logo">TV</span><span class="cw"><b>TV Norge</b><i>Alltid beredt · 20:30</i></span></div>
+      <div class="chl"><span class="logo">TV</span><span class="cw"><b>Discovery Norge</b><i>Deadliest Catch · 20:00</i></span></div>
+      <div class="chl"><span class="logo">TV</span><span class="cw"><b>TV 2 Nyheter</b><i>Nyhetskanalen</i></span></div>
+    </div>
+    <div class="maincol" style="padding:10px">
+      <div class="vid" style="margin-bottom:0">
+        <span class="badge live">● LIVE <span class="co" style="background:#fff;color:var(--vio500)">2</span></span>
+        <div class="play">▶</div>
+        <div class="ctrls">
+          <div class="seek"><div class="fill" style="width:86%;background:#dc2626"></div><div class="knob" style="left:86%"></div></div>
+          <div class="cbar"><span>⏸</span><span>■</span><span class="num">Nyhetene · 21:00 – 21:40</span><span style="margin-left:auto;display:flex;gap:7px;align-items:center"><span class="spk">🔊</span><span class="vol"><i></i></span><span>⧉</span><span>⛶</span></span></div>
+        </div>
+      </div>
+      <div class="nn">
+        <div class="nb"><span>NOW · 21:00</span><b>Nyhetene</b><span>34 min left</span></div>
+        <div class="nb"><span>NEXT · 21:40</span><b>Farmen</b><span>85 min</span></div>
+        <div class="nb" style="flex:2"><span class="vio">⏪ ARCHIVE · 7 DAYS <span class="co">3</span></span>
+          <span style="display:flex;gap:2px;margin-top:4px">
+            <span class="bk" style="width:31%"><span class="t2">Wed 21:40</span><span class="n3">Farmen</span></span>
+            <span class="bk" style="width:31%"><span class="t2">Wed 21:00</span><span class="n3">Nyhetene</span></span>
+            <span class="bk" style="width:31%"><span class="t2">Wed 18:30</span><span class="n3">Oppgrader!</span></span>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="stats">
+    <span class="pill pn">1,264 channels</span>
+    <span class="pill pv">⏪ 418 catch-up</span>
+    <span class="rightst"><span>EPG updated 12 min ago</span></span>
+  </div>
+</div></div>
+<ul class="legend">
+  <li><span class="co">1</span><span><b>Zapper list replaces the table</b>: favorites pinned on top, now-playing programme under each name (EPG), arrow keys and number entry zap. Click = play, no selection concept.</span></li>
+  <li><span class="co">2</span><span><b>Player is the primary surface</b>, always on. Same engine as Checker's sidebar player with the seek/archive work from A/B. ⛶ fullscreen; the same Watch / Guide switch as in C flips to the full programme guide.</span></li>
+  <li><span class="co">3</span><span><b>Now / Next / Archive rail</b> under the player: click an archive block to replay it, the rail scrolls back through the channel's depth.</span></li>
+  <li><span class="co">4</span><span><b>Toolbar shrinks to player needs</b>: playlist switcher, group, search, guide, settings. Scan, Save, Export, Report, status filters, verification: not present in this flavor.</span></li>
+</ul>
+<ul>
+  <li><b>Soft fork, not a hard fork:</b> one repo, two build flavors. Shared Rust crate (parser, Xtream/Stalker, proxy, catch-up URLs, EPG store) and shared frontend libs/player components; two thin app shells with separate <code>tauri.conf</code>, product name, and icon. Checker fixes flow into the Player for free; a hard fork would rot.</li>
+  <li>Player-only additions: favorites, last-channel resume, keyboard zapping, autoplay on launch.</li>
+  <li>Prerequisites from this document: A's archive playback, B's EPG store, C's grid. D is Checker-only.</li>
+</ul>
+
+
+<h2>Open design work</h2>
+<ul>
+  <li>Playlist onboarding and switching without the checker's Open/Save machinery.</li>
+  <li>Zapping model: number entry, channel history, previous-channel toggle, remote-friendly keyboard map.</li>
+  <li>Guide interactions on the watch screen vs the full Guide view; mini-guide overlay while watching.</li>
+  <li>VOD/series content types (parser already tags <code>content_type</code>); whether they get a separate browse surface.</li>
+  <li>Settings surface: which checker settings survive (proxy, external player, ffmpeg) and what player-specific ones are added (autoplay, startup channel, buffer size).</li>
+  <li>Packaging: product name, icon, AUR/release pipeline alongside the checker artifacts.</li>
+</ul>
+</main>
+</body>
+</html>
