@@ -91,6 +91,12 @@ Liquid Glass vibrancy on macOS, platform menus, keyboard shortcuts, dark/light/s
 - `S` starts a scan when idle, or stops the current scan.
 - `Cmd/Ctrl + /` opens the full shortcuts dialog in the app.
 
+## ❤️ Support the project
+
+Enjoying IPTVChecker? Sponsoring its development is a lovely way to say thanks and help keep the project growing.
+
+[![Sponsor on GitHub](https://img.shields.io/badge/Sponsor_on_GitHub-%E2%99%A1-ec6cb9?style=for-the-badge)](https://github.com/sponsors/kristofferR)
+
 ## Install
 
 ### Homebrew
