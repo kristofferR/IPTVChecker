@@ -14,23 +14,28 @@ import {
   decidePlaybackRecovery,
   formatPlaybackRecoveryMessage,
   getArchiveFallbackRoutes,
+  getAudioTranscodeRoute,
   getMpegtsPlaybackRoutes,
   type HlsErrorPayload,
   hasPresentedVideoFrame,
   isHlsManifestRejection,
   isHlsMediaRejection,
+  isUnsupportedAudioCodec,
   MAX_PLAYBACK_RECOVERY_ATTEMPTS,
   type PlaybackRecoveryIssue,
   type PlaybackStartMode,
   type PlayerState,
+  playbackErrorDetail,
   readMediaErrorMessage,
   recordPlaybackRecoveryAttempt,
   resolveAudioChannelLayout,
   resolveHlsHdrFormat,
   type StreamMetadata,
   shouldResetPlaybackRecoveryAttempts,
+  shouldTranscodeAudioCodec,
   supportsNativeHlsPlayback,
   tryConvertToXtreamHls,
+  xtreamTimeshiftTsVariant,
 } from "../lib/playback";
 import { observePlayback, type PlaybackObserver } from "../lib/playbackObserver";
 import { confirmPlaybackStarted } from "../lib/playbackStartup";
@@ -786,6 +791,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       url: string,
       signal: AbortSignal,
       timeoutMs = PLAYBACK_ROUTE_TIMEOUT_MS,
+      onUnsupportedAudio?: () => void,
     ): Promise<boolean> => {
       if (signal.aborted) return false;
       telemetryObserverRef.current?.route("hls.js");
@@ -855,6 +861,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             fail(readMediaErrorMessage(videoElement.error) ?? "HLS media error");
           };
           const onHlsError = (_event: unknown, data: HlsErrorPayload) => {
+            if (isUnsupportedAudioCodec(playbackErrorDetail(data.error))) {
+              onUnsupportedAudio?.();
+              fail(`${data.type ?? "hls.js"}: ${data.details ?? "unsupported audio codec"}`);
+              return;
+            }
             if (data.fatal) {
               const detail = data.details ?? "fatal hls.js error";
               const type = data.type ?? "hls.js";
@@ -896,6 +907,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       signal: AbortSignal,
       isLive: boolean,
       timeoutMs = MPEGTS_PLAYBACK_ROUTE_TIMEOUT_MS,
+      onUnsupportedAudio?: () => void,
     ): Promise<boolean> => {
       if (signal.aborted) return false;
       let routeDetail = "unknown";
@@ -1001,11 +1013,22 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             fail(readMediaErrorMessage(videoElement.error) ?? "MPEG-TS media error");
           };
           const onPlayerError = (errorType?: unknown, errorDetail?: unknown, info?: unknown) => {
-            const segments = [errorType, errorDetail, info].filter(
+            if (isUnsupportedAudioCodec(playbackErrorDetail(info))) onUnsupportedAudio?.();
+            const segments = [errorType, errorDetail].filter(
               (value): value is string => typeof value === "string" && value.length > 0,
             );
             fail(segments.join(": ") || "mpegts.js error");
           };
+          player.on?.("media_info", () => {
+            const audioCodec = player.mediaInfo?.audioCodec;
+            if (
+              typeof MediaSource !== "undefined" &&
+              shouldTranscodeAudioCodec(audioCodec, MediaSource.isTypeSupported.bind(MediaSource))
+            ) {
+              onUnsupportedAudio?.();
+              fail(`Unsupported audio codec: ${audioCodec}`);
+            }
+          });
           const onAbort = () => {
             fail();
           };
@@ -1213,10 +1236,19 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       // to `.ts`) is rejected by the proxy up front; hls.js then reports a
       // manifest error, and the MPEG-TS routes below take over.
       let hlsManifestRejected = false;
+      let hlsMediaRejected = false;
+      let unsupportedHlsAudio = false;
       if (streamType === "hls") {
         logger.info("[Player] Trying hls.js via proxy for", result.name);
         lastErrorRef.current = null;
-        const hlsOk = await tryHlsPlayback(url, abortController.signal);
+        const hlsOk = await tryHlsPlayback(
+          url,
+          abortController.signal,
+          PLAYBACK_ROUTE_TIMEOUT_MS,
+          () => {
+            unsupportedHlsAudio = true;
+          },
+        );
         if (!isCurrentPlayback()) {
           return;
         }
@@ -1227,20 +1259,43 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           }
         }
         hlsManifestRejected = isHlsManifestRejection(lastErrorRef.current);
+        hlsMediaRejected = isHlsMediaRejection(lastErrorRef.current);
         if (hlsManifestRejected) {
           logger.info(
             "[Player] Playlist URL served raw media; trying MPEG-TS routes for",
             result.name,
           );
-        } else if (result.content_type !== "live" && isHlsMediaRejection(lastErrorRef.current)) {
-          // Catch-up media hls.js cannot play (HEVC in TS): raw timeshift
-          // stream via mpegts.js, then an ffmpeg remux of the playlist.
+        }
+        if (unsupportedHlsAudio) {
           let proxyPort = 0;
           try {
             proxyPort = await getStreamingProxyPort();
           } catch {
             logger.warn("[Player] Could not get streaming proxy port");
           }
+          const transcoded = getAudioTranscodeRoute(url, proxyPort, result.content_type === "live");
+          if (transcoded) {
+            logger.info("[Player] Trying AAC audio conversion for", result.name);
+            lastErrorRef.current = null;
+            const convertedOk = await tryMpegtsPlayback(
+              transcoded,
+              abortController.signal,
+              result.content_type === "live",
+            );
+            if (!isCurrentPlayback()) return;
+            if (convertedOk && (await handleSuccessfulStart())) return;
+          }
+        }
+        if (result.content_type !== "live" && (hlsManifestRejected || hlsMediaRejected)) {
+          // HLS VOD and catch-up media can still play through the raw
+          // transport-stream route or an ffmpeg remux.
+          let proxyPort = 0;
+          try {
+            proxyPort = await getStreamingProxyPort();
+          } catch {
+            logger.warn("[Player] Could not get streaming proxy port");
+          }
+          let unsupportedAudioSource: string | null = null;
           for (const route of getArchiveFallbackRoutes(url, proxyPort)) {
             logger.info(
               route.kind === "remux"
@@ -1249,12 +1304,31 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
               result.name,
             );
             lastErrorRef.current = null;
-            const mpegtsOk = await tryMpegtsPlayback(route.url, abortController.signal, false);
+            const mpegtsOk = await tryMpegtsPlayback(
+              route.url,
+              abortController.signal,
+              false,
+              MPEGTS_PLAYBACK_ROUTE_TIMEOUT_MS,
+              () => {
+                unsupportedAudioSource =
+                  route.kind === "direct" ? (xtreamTimeshiftTsVariant(url) ?? url) : url;
+              },
+            );
             if (!isCurrentPlayback()) {
               return;
             }
             if (mpegtsOk && (await handleSuccessfulStart())) {
               return;
+            }
+            if (unsupportedAudioSource) break;
+          }
+          if (unsupportedAudioSource) {
+            const transcoded = getAudioTranscodeRoute(unsupportedAudioSource, proxyPort, false);
+            if (
+              transcoded &&
+              (await tryMpegtsPlayback(transcoded, abortController.signal, false))
+            ) {
+              if (isCurrentPlayback() && (await handleSuccessfulStart())) return;
             }
           }
         }
@@ -1270,7 +1344,12 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         return;
       }
 
-      if (streamType === "mpegts" || streamType === "unknown" || hlsManifestRejected) {
+      if (
+        streamType === "mpegts" ||
+        streamType === "unknown" ||
+        hlsManifestRejected ||
+        (streamType === "hls" && result.content_type !== "live" && hlsMediaRejected)
+      ) {
         const isLive = result.content_type === "live";
         let proxyPort = 0;
         try {
@@ -1284,6 +1363,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           isLive,
           startMode === "recovery",
         );
+        let unsupportedAudio = false;
         for (const route of playbackRoutes) {
           logger.info(
             route.kind === "remux"
@@ -1294,17 +1374,40 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             result.name,
           );
           lastErrorRef.current = null;
-          const mpegtsOk = await tryMpegtsPlayback(route.url, abortController.signal, isLive);
+          const mpegtsOk = await tryMpegtsPlayback(
+            route.url,
+            abortController.signal,
+            isLive,
+            MPEGTS_PLAYBACK_ROUTE_TIMEOUT_MS,
+            () => {
+              unsupportedAudio = true;
+            },
+          );
           if (!isCurrentPlayback()) {
             return;
           }
           if (mpegtsOk && (await handleSuccessfulStart())) {
             return;
           }
+          if (unsupportedAudio) break;
+        }
+        if (unsupportedAudio) {
+          const transcoded = getAudioTranscodeRoute(url, proxyPort, isLive);
+          if (transcoded) {
+            logger.info("[Player] Trying AAC audio conversion for", result.name);
+            lastErrorRef.current = null;
+            const convertedOk = await tryMpegtsPlayback(transcoded, abortController.signal, isLive);
+            if (!isCurrentPlayback()) return;
+            if (convertedOk && (await handleSuccessfulStart())) return;
+          }
         }
       }
 
-      if (streamType !== "hls" || hlsManifestRejected) {
+      if (
+        streamType !== "hls" ||
+        hlsManifestRejected ||
+        (result.content_type !== "live" && hlsMediaRejected)
+      ) {
         lastErrorRef.current = null;
         const nativeOk = await tryNativePlayback(
           url,

@@ -129,6 +129,7 @@ export interface HlsErrorPayload {
   fatal?: boolean;
   type?: string;
   details?: string;
+  error?: unknown;
 }
 
 export type HlsFatalRecoveryAction = "restart_network" | "recover_media" | "reconnect";
@@ -187,10 +188,39 @@ function toStreamingProxyUrl(
   port: number,
   reconnect: boolean,
   remux: boolean,
+  transcodeAudio = false,
 ): string {
   const reconnectParam = reconnect ? "&reconnect=1" : "";
   const remuxParam = remux ? "&remux=1" : "";
-  return `http://127.0.0.1:${port}/stream?url=${encodeURIComponent(url)}${reconnectParam}${remuxParam}`;
+  const audioParam = transcodeAudio ? "&transcode_audio=1" : "";
+  return `http://127.0.0.1:${port}/stream?url=${encodeURIComponent(url)}${reconnectParam}${remuxParam}${audioParam}`;
+}
+
+/** Convert only after the WebView reports that it cannot use the source audio. */
+export function getAudioTranscodeRoute(
+  url: string,
+  proxyPort: number,
+  isLive: boolean,
+): string | null {
+  return proxyPort > 0 ? toStreamingProxyUrl(url, proxyPort, isLive, true, true) : null;
+}
+
+export function isUnsupportedAudioCodec(reason: string | null | undefined): boolean {
+  const detail = reason ?? "";
+  return (
+    /(?:unsupported|not supported)/i.test(detail) &&
+    /(?:\baudio\b|ac-?3|e-?ac-?3|ec-?3|dts|truehd|flac|vorbis|opus|mp2|pcm)/i.test(detail)
+  );
+}
+
+export function shouldTranscodeAudioCodec(
+  codec: string | null | undefined,
+  isTypeSupported: (mimeType: string) => boolean,
+): boolean {
+  const normalized = codec?.trim().toLowerCase();
+  if (!normalized || normalized === "unknown") return false;
+  if (/^(?:mp4a\.40\.[\da-f]+|aac|mp3)$/.test(normalized)) return false;
+  return !isTypeSupported(`audio/mp4; codecs="${normalized}"`);
 }
 
 export type MpegtsPlaybackRouteKind = "direct" | "remux";

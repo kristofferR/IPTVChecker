@@ -784,6 +784,8 @@ fn spawn_playback_remux(
     upstream_url: &str,
     user_agent: &str,
     accept_invalid_certs: bool,
+    reconnect_at_eof: bool,
+    transcode_audio: bool,
 ) -> std::io::Result<tokio::process::Child> {
     let ffmpeg = resolve_binary(app, "ffmpeg");
     let mut command = tokio::process::Command::new(&ffmpeg);
@@ -804,8 +806,6 @@ fn spawn_playback_remux(
         // the 2-5 second holes that repeatedly freeze WebView's MediaSource.
         .arg("-dts_delta_threshold")
         .arg("0.5")
-        .arg("-thread_queue_size")
-        .arg("4096")
         .arg("-user_agent")
         .arg(user_agent);
 
@@ -813,11 +813,11 @@ fn spawn_playback_remux(
         command.arg("-tls_verify").arg("0");
     }
 
+    command.arg("-reconnect").arg("1");
+    if reconnect_at_eof {
+        command.arg("-reconnect_at_eof").arg("1");
+    }
     command
-        .arg("-reconnect")
-        .arg("1")
-        .arg("-reconnect_at_eof")
-        .arg("1")
         .arg("-reconnect_streamed")
         .arg("1")
         .arg("-reconnect_delay_max")
@@ -830,16 +830,24 @@ fn spawn_playback_remux(
         .arg("0:a:0?")
         .arg("-sn")
         .arg("-dn")
-        .arg("-c")
+        .arg("-c:v")
         .arg("copy")
+        .arg("-c:a")
+        .arg(if transcode_audio { "aac" } else { "copy" })
         // Some providers reconnect in short finite bursts whose timestamps
         // have small holes. Even ffmpeg's discontinuity correction can leave
         // those holes at the MSE boundary. setts is a bitstream filter, so it
         // repairs the packet clock without the CPU/quality cost of transcoding.
         .arg("-bsf:v")
-        .arg(CONTIGUOUS_VIDEO_TIMESTAMPS)
-        .arg("-bsf:a")
-        .arg(CONTIGUOUS_AUDIO_TIMESTAMPS)
+        .arg(CONTIGUOUS_VIDEO_TIMESTAMPS);
+
+    if transcode_audio {
+        command.args(["-b:a", "192k", "-ac", "2", "-af", "aresample=async=1000"]);
+    } else {
+        command.args(["-bsf:a", CONTIGUOUS_AUDIO_TIMESTAMPS]);
+    }
+
+    command
         .arg("-avoid_negative_ts")
         .arg("make_zero")
         .arg("-max_interleave_delta")
@@ -1298,6 +1306,8 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                         &url,
                         user_agent_text,
                         accept_invalid_certs,
+                        reconnect,
+                        request.transcode_audio,
                     ) {
                         Ok(child) => child,
                         Err(error) => {
@@ -1337,7 +1347,8 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     }
 
                     log::info!(
-                        "[StreamProxy/remux] Normalizing live MPEG-TS timestamps for {}",
+                        "[StreamProxy/remux] Normalizing MPEG-TS timestamps (AAC audio: {}) for {}",
+                        request.transcode_audio,
                         redact_url(&url)
                     );
                     let forward = forward_playback_remux_as_chunked_stream(
@@ -1575,6 +1586,7 @@ struct StreamRequest {
     url: String,
     reconnect: bool,
     remux: bool,
+    transcode_audio: bool,
 }
 
 fn parse_stream_request(request: &str) -> Option<StreamRequest> {
@@ -1585,6 +1597,7 @@ fn parse_stream_request(request: &str) -> Option<StreamRequest> {
     let mut upstream_url = None;
     let mut reconnect = false;
     let mut remux = false;
+    let mut transcode_audio = false;
     let mut session_id = None;
     let mut attempt = None;
     for (key, value) in url.query_pairs() {
@@ -1602,6 +1615,9 @@ fn parse_stream_request(request: &str) -> Option<StreamRequest> {
             "url" => upstream_url = Some(value.into_owned()),
             "reconnect" => reconnect = value == "1" || value.eq_ignore_ascii_case("true"),
             "remux" => remux = value == "1" || value.eq_ignore_ascii_case("true"),
+            "transcode_audio" => {
+                transcode_audio = value == "1" || value.eq_ignore_ascii_case("true")
+            }
             _ => {}
         }
     }
@@ -1615,6 +1631,7 @@ fn parse_stream_request(request: &str) -> Option<StreamRequest> {
         url,
         reconnect,
         remux,
+        transcode_audio,
     })
 }
 
@@ -1945,6 +1962,7 @@ segment.ts
                 url: "https://example.com/strøm?token=abc+123".to_string(),
                 reconnect: false,
                 remux: false,
+                transcode_audio: false,
             })
         );
     }
@@ -1974,13 +1992,14 @@ segment.ts
                 url: "https://example.com/live.ts".to_string(),
                 reconnect: true,
                 remux: false,
+                transcode_audio: false,
             })
         );
     }
 
     #[test]
     fn parse_stream_request_enables_opt_in_remux() {
-        let request = "GET /stream?url=https%3A%2F%2Fexample.com%2Flive.ts&reconnect=1&remux=true HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let request = "GET /stream?url=https%3A%2F%2Fexample.com%2Flive.ts&reconnect=1&remux=true&transcode_audio=1 HTTP/1.1\r\nHost: localhost\r\n\r\n";
         assert_eq!(
             parse_stream_request(request),
             Some(StreamRequest {
@@ -1988,6 +2007,7 @@ segment.ts
                 url: "https://example.com/live.ts".to_string(),
                 reconnect: true,
                 remux: true,
+                transcode_audio: true,
             })
         );
     }
