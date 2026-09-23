@@ -129,6 +129,7 @@ export interface HlsErrorPayload {
   fatal?: boolean;
   type?: string;
   details?: string;
+  error?: unknown;
 }
 
 export type HlsFatalRecoveryAction = "restart_network" | "recover_media" | "reconnect";
@@ -205,9 +206,17 @@ export function getAudioTranscodeRoute(
 }
 
 export function isUnsupportedAudioCodec(reason: string | null | undefined): boolean {
-  return /(?:ac-?3|e-?ac-?3|audio\/mp4).*?(?:unsupported|not supported)|(?:unsupported|not supported).*?(?:ac-?3|e-?ac-?3|audio\/mp4)/i.test(
-    reason ?? "",
+  const detail = reason ?? "";
+  return (
+    /(?:unsupported|not supported)/i.test(detail) &&
+    /(?:\baudio\b|ac-?3|e-?ac-?3|ec-?3|dts|truehd|flac|vorbis|opus|mp2|pcm)/i.test(detail)
   );
+}
+
+export function shouldTranscodeAudioCodec(codec: string | null | undefined): boolean {
+  const normalized = codec?.trim().toLowerCase();
+  if (!normalized || normalized === "unknown") return false;
+  return !/^(?:mp4a\.40\.[\da-f]+|aac|mp3)$/.test(normalized);
 }
 
 export type MpegtsPlaybackRouteKind = "direct" | "remux";

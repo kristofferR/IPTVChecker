@@ -117,6 +117,42 @@ describe("playback startup", () => {
     }
   });
 
+  it("accepts decoded frames when WebKit does not deliver video frame callbacks", async () => {
+    const fixture = mediaFixture();
+    const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: { visibilityState: "visible" },
+    });
+    let totalVideoFrames = 0;
+    let droppedVideoFrames = 0;
+    fixture.video.getVideoPlaybackQuality = () =>
+      ({ totalVideoFrames, droppedVideoFrames }) as VideoPlaybackQuality;
+    let started = false;
+    const cancel = confirmPlaybackStarted(
+      fixture.video,
+      false,
+      () => {
+        started = true;
+      },
+      () => {},
+    );
+    try {
+      fixture.video.currentTime = 1;
+      totalVideoFrames = 12;
+      droppedVideoFrames = 12;
+      await Bun.sleep(120);
+      expect(started).toBe(false);
+      totalVideoFrames = 13;
+      await Bun.sleep(120);
+      expect(started).toBe(true);
+    } finally {
+      cancel();
+      if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
+      else Reflect.deleteProperty(globalThis, "document");
+    }
+  });
+
   it("does not accept a preview frame while paused, or callbacks after cancellation", () => {
     const fixture = mediaFixture();
     let starts = 0;

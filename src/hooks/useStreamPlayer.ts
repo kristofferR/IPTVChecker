@@ -32,6 +32,7 @@ import {
   resolveHlsHdrFormat,
   type StreamMetadata,
   shouldResetPlaybackRecoveryAttempts,
+  shouldTranscodeAudioCodec,
   supportsNativeHlsPlayback,
   tryConvertToXtreamHls,
   xtreamTimeshiftTsVariant,
@@ -790,6 +791,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       url: string,
       signal: AbortSignal,
       timeoutMs = PLAYBACK_ROUTE_TIMEOUT_MS,
+      onUnsupportedAudio?: () => void,
     ): Promise<boolean> => {
       if (signal.aborted) return false;
       telemetryObserverRef.current?.route("hls.js");
@@ -859,6 +861,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             fail(readMediaErrorMessage(videoElement.error) ?? "HLS media error");
           };
           const onHlsError = (_event: unknown, data: HlsErrorPayload) => {
+            if (isUnsupportedAudioCodec(playbackErrorDetail(data.error))) {
+              onUnsupportedAudio?.();
+              fail(`${data.type ?? "hls.js"}: ${data.details ?? "unsupported audio codec"}`);
+              return;
+            }
             if (data.fatal) {
               const detail = data.details ?? "fatal hls.js error";
               const type = data.type ?? "hls.js";
@@ -1013,8 +1020,10 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             fail(segments.join(": ") || "mpegts.js error");
           };
           player.on?.("media_info", () => {
-            if (isUnsupportedAudioCodec(`${player.mediaInfo?.audioCodec ?? ""} unsupported`)) {
+            const audioCodec = player.mediaInfo?.audioCodec;
+            if (shouldTranscodeAudioCodec(audioCodec)) {
               onUnsupportedAudio?.();
+              fail(`Unsupported audio codec: ${audioCodec}`);
             }
           });
           const onAbort = () => {
@@ -1225,10 +1234,18 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       // manifest error, and the MPEG-TS routes below take over.
       let hlsManifestRejected = false;
       let archiveFallbackTried = false;
+      let unsupportedHlsAudio = false;
       if (streamType === "hls") {
         logger.info("[Player] Trying hls.js via proxy for", result.name);
         lastErrorRef.current = null;
-        const hlsOk = await tryHlsPlayback(url, abortController.signal);
+        const hlsOk = await tryHlsPlayback(
+          url,
+          abortController.signal,
+          PLAYBACK_ROUTE_TIMEOUT_MS,
+          () => {
+            unsupportedHlsAudio = true;
+          },
+        );
         if (!isCurrentPlayback()) {
           return;
         }
@@ -1239,16 +1256,34 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           }
         }
         hlsManifestRejected = isHlsManifestRejection(lastErrorRef.current);
+        const hlsMediaRejected = isHlsMediaRejection(lastErrorRef.current);
         if (hlsManifestRejected) {
           logger.info(
             "[Player] Playlist URL served raw media; trying MPEG-TS routes for",
             result.name,
           );
         }
-        if (
-          archiveSessionRef.current &&
-          (hlsManifestRejected || isHlsMediaRejection(lastErrorRef.current))
-        ) {
+        if (unsupportedHlsAudio) {
+          let proxyPort = 0;
+          try {
+            proxyPort = await getStreamingProxyPort();
+          } catch {
+            logger.warn("[Player] Could not get streaming proxy port");
+          }
+          const transcoded = getAudioTranscodeRoute(url, proxyPort, result.content_type === "live");
+          if (transcoded) {
+            logger.info("[Player] Trying AAC audio conversion for", result.name);
+            lastErrorRef.current = null;
+            const convertedOk = await tryMpegtsPlayback(
+              transcoded,
+              abortController.signal,
+              result.content_type === "live",
+            );
+            if (!isCurrentPlayback()) return;
+            if (convertedOk && (await handleSuccessfulStart())) return;
+          }
+        }
+        if (archiveSessionRef.current && (hlsManifestRejected || hlsMediaRejected)) {
           // Catch-up media hls.js cannot play (HEVC in TS): raw timeshift
           // stream via mpegts.js, then an ffmpeg remux of the playlist.
           archiveFallbackTried = true;

@@ -36,9 +36,9 @@ export function confirmPlaybackStarted(
       isAudioOnly() ||
       (video.videoWidth > 0 &&
         (document.visibilityState === "hidden" ||
-          (!video.requestVideoFrameCallback &&
-            (!quality ||
-              quality.totalVideoFrames - quality.droppedVideoFrames > initialPresented))))
+          (quality
+            ? quality.totalVideoFrames - quality.droppedVideoFrames > initialPresented
+            : !video.requestVideoFrameCallback)))
     )
       started();
   }, 100);

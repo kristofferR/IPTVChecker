@@ -23,6 +23,7 @@ import {
   type StreamType,
   shouldResetPlaybackRecoveryAttempts,
   shouldSuspendPlaybackWatchdog,
+  shouldTranscodeAudioCodec,
   supportsNativeHlsPlayback,
   tryConvertToXtreamHls,
 } from "../src/lib/playback";
@@ -137,7 +138,18 @@ describe("useStreamPlayer helpers", () => {
       true,
     );
     expect(isUnsupportedAudioCodec("msg=The type audio/mp4;codecs=ac-3 is unsupported")).toBe(true);
+    expect(isUnsupportedAudioCodec("ec-3 unsupported")).toBe(true);
+    expect(isUnsupportedAudioCodec("Unsupported EC-3 in M2TS found")).toBe(true);
+    expect(isUnsupportedAudioCodec("Unsupported audio codec: DTS")).toBe(true);
+    expect(isUnsupportedAudioCodec("audio/mp4;codecs=opus is not supported")).toBe(true);
     expect(isUnsupportedAudioCodec("MediaError: FormatUnsupported: Non MPEG-TS/FLV")).toBe(false);
+    expect(isUnsupportedAudioCodec("Unsupported video codec: HEVC")).toBe(false);
+    for (const codec of ["ac-3", "ec-3", "dts", "opus", "flac", "mp2", "pcm_s16le"]) {
+      expect(shouldTranscodeAudioCodec(codec)).toBe(true);
+    }
+    for (const codec of ["mp4a.40.2", "mp4a.40.5", "aac", "mp3", "unknown", null]) {
+      expect(shouldTranscodeAudioCodec(codec)).toBe(false);
+    }
     const route = getAudioTranscodeRoute("https://example.com/live.ts", 3210, true);
     expect(route).toContain("remux=1&transcode_audio=1");
     expect(route).toContain("reconnect=1");
