@@ -805,8 +805,6 @@ fn spawn_playback_remux(
         // the 2-5 second holes that repeatedly freeze WebView's MediaSource.
         .arg("-dts_delta_threshold")
         .arg("0.5")
-        .arg("-thread_queue_size")
-        .arg("4096")
         .arg("-user_agent")
         .arg(user_agent);
 
