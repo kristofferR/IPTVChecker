@@ -1021,7 +1021,10 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           };
           player.on?.("media_info", () => {
             const audioCodec = player.mediaInfo?.audioCodec;
-            if (shouldTranscodeAudioCodec(audioCodec)) {
+            if (
+              typeof MediaSource !== "undefined" &&
+              shouldTranscodeAudioCodec(audioCodec, MediaSource.isTypeSupported.bind(MediaSource))
+            ) {
               onUnsupportedAudio?.();
               fail(`Unsupported audio codec: ${audioCodec}`);
             }
@@ -1233,7 +1236,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       // to `.ts`) is rejected by the proxy up front; hls.js then reports a
       // manifest error, and the MPEG-TS routes below take over.
       let hlsManifestRejected = false;
-      let archiveFallbackTried = false;
+      let hlsMediaRejected = false;
       let unsupportedHlsAudio = false;
       if (streamType === "hls") {
         logger.info("[Player] Trying hls.js via proxy for", result.name);
@@ -1256,7 +1259,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           }
         }
         hlsManifestRejected = isHlsManifestRejection(lastErrorRef.current);
-        const hlsMediaRejected = isHlsMediaRejection(lastErrorRef.current);
+        hlsMediaRejected = isHlsMediaRejection(lastErrorRef.current);
         if (hlsManifestRejected) {
           logger.info(
             "[Player] Playlist URL served raw media; trying MPEG-TS routes for",
@@ -1283,10 +1286,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             if (convertedOk && (await handleSuccessfulStart())) return;
           }
         }
-        if (archiveSessionRef.current && (hlsManifestRejected || hlsMediaRejected)) {
-          // Catch-up media hls.js cannot play (HEVC in TS): raw timeshift
-          // stream via mpegts.js, then an ffmpeg remux of the playlist.
-          archiveFallbackTried = true;
+        if (result.content_type !== "live" && (hlsManifestRejected || hlsMediaRejected)) {
+          // HLS VOD and catch-up media can still play through the raw
+          // transport-stream route or an ffmpeg remux.
           let proxyPort = 0;
           try {
             proxyPort = await getStreamingProxyPort();
@@ -1345,7 +1347,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       if (
         streamType === "mpegts" ||
         streamType === "unknown" ||
-        (hlsManifestRejected && !archiveFallbackTried)
+        hlsManifestRejected ||
+        (streamType === "hls" && result.content_type !== "live" && hlsMediaRejected)
       ) {
         const isLive = result.content_type === "live";
         let proxyPort = 0;
@@ -1400,7 +1403,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
       }
 
-      if (streamType !== "hls" || (hlsManifestRejected && !archiveFallbackTried)) {
+      if (
+        streamType !== "hls" ||
+        hlsManifestRejected ||
+        (result.content_type !== "live" && hlsMediaRejected)
+      ) {
         lastErrorRef.current = null;
         const nativeOk = await tryNativePlayback(
           url,

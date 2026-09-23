@@ -145,11 +145,12 @@ describe("useStreamPlayer helpers", () => {
     expect(isUnsupportedAudioCodec("MediaError: FormatUnsupported: Non MPEG-TS/FLV")).toBe(false);
     expect(isUnsupportedAudioCodec("Unsupported video codec: HEVC")).toBe(false);
     for (const codec of ["ac-3", "ec-3", "dts", "opus", "flac", "mp2", "pcm_s16le"]) {
-      expect(shouldTranscodeAudioCodec(codec)).toBe(true);
+      expect(shouldTranscodeAudioCodec(codec, () => false)).toBe(true);
     }
     for (const codec of ["mp4a.40.2", "mp4a.40.5", "aac", "mp3", "unknown", null]) {
-      expect(shouldTranscodeAudioCodec(codec)).toBe(false);
+      expect(shouldTranscodeAudioCodec(codec, () => false)).toBe(false);
     }
+    expect(shouldTranscodeAudioCodec("ec-3", () => true)).toBe(false);
     const route = getAudioTranscodeRoute("https://example.com/live.ts", 3210, true);
     expect(route).toContain("remux=1&transcode_audio=1");
     expect(route).toContain("reconnect=1");

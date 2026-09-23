@@ -213,10 +213,14 @@ export function isUnsupportedAudioCodec(reason: string | null | undefined): bool
   );
 }
 
-export function shouldTranscodeAudioCodec(codec: string | null | undefined): boolean {
+export function shouldTranscodeAudioCodec(
+  codec: string | null | undefined,
+  isTypeSupported: (mimeType: string) => boolean,
+): boolean {
   const normalized = codec?.trim().toLowerCase();
   if (!normalized || normalized === "unknown") return false;
-  return !/^(?:mp4a\.40\.[\da-f]+|aac|mp3)$/.test(normalized);
+  if (/^(?:mp4a\.40\.[\da-f]+|aac|mp3)$/.test(normalized)) return false;
+  return !isTypeSupported(`audio/mp4; codecs="${normalized}"`);
 }
 
 export type MpegtsPlaybackRouteKind = "direct" | "remux";
