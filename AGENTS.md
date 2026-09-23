@@ -1,5 +1,17 @@
 # IPTV Checker GUI
 
+## Private playlist data
+
+- Treat real channel names, playlist names, programme titles, provider names,
+  stream URLs, and credentials from Kris's playlists, logs, or app data as
+  private. Never publish them in repository files, commits, PR or issue text,
+  review replies, CI output, or other public artifacts.
+- Describe playback tests by codec, stream format, and observed behavior. Use
+  synthetic names in tests and examples. Share the exact channel with Kris only
+  in private conversation when needed for manual testing.
+- Before posting or pushing, check the proposed text and changed files for
+  private playlist data, including names copied from logs and screenshots.
+
 ## Contributor pull requests
 
 - PRs from contributors other than `kristofferR` must include `AI models used: None`
