@@ -1,5 +1,18 @@
 # IPTV Checker GUI
 
+## Contributor pull requests
+
+- PRs from contributors other than `kristofferR` must include `AI models used: None`
+  if no AI helped create or edit the contribution. Otherwise, list every
+  model used to create or edit code, tests, or PR text by its most specific
+  available name and version, for example `AI models used: GPT-6 Astra`.
+- Include each model's reasoning level or effort when the tool exposes it, for
+  example `Reasoning levels: GPT-6 Astra: high`. If unavailable, say
+  `Reasoning levels: Unavailable (not exposed by tool)`. Never guess.
+  Missing or unavailable reasoning levels do not block a PR.
+- Routine automated review bots need not be listed. Put this disclosure in
+  the PR description, never in commit authorship or co-author trailers.
+
 ## Project Overview
 Cross-platform GUI application for validating IPTV playlists. Built with Tauri v2 (Rust backend) + React 19 + TypeScript + Tailwind CSS v4.
 
@@ -8,8 +21,9 @@ Ports all functionality from the CLI tool at `/Users/kristoffer/Code/Scripts/IPT
 ## GitHub
 - **Repo:** `kristofferR/IPTVChecker`
 - **Git identity:** kristofferR (`git use-personal`)
-- **No AI attribution.** Commit messages and PR bodies never carry a
-  `Co-Authored-By: Claude` trailer or a "Generated with Claude Code" line.
+- **No AI authorship attribution.** Do not add AI co-author trailers to commits
+  or generated-by-AI lines to Kristoffer's PR descriptions. The contributor
+  disclosure requirement above applies to PRs from other authors.
 
 ## Stack
 - **Backend:** Tauri v2 (Rust) — handles HTTP stream checking, M3U parsing, ffmpeg integration, proxy support
