@@ -784,6 +784,7 @@ fn spawn_playback_remux(
     upstream_url: &str,
     user_agent: &str,
     accept_invalid_certs: bool,
+    reconnect_at_eof: bool,
     transcode_audio: bool,
 ) -> std::io::Result<tokio::process::Child> {
     let ffmpeg = resolve_binary(app, "ffmpeg");
@@ -812,11 +813,11 @@ fn spawn_playback_remux(
         command.arg("-tls_verify").arg("0");
     }
 
+    command.arg("-reconnect").arg("1");
+    if reconnect_at_eof {
+        command.arg("-reconnect_at_eof").arg("1");
+    }
     command
-        .arg("-reconnect")
-        .arg("1")
-        .arg("-reconnect_at_eof")
-        .arg("1")
         .arg("-reconnect_streamed")
         .arg("1")
         .arg("-reconnect_delay_max")
@@ -1305,6 +1306,7 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                         &url,
                         user_agent_text,
                         accept_invalid_certs,
+                        reconnect,
                         request.transcode_audio,
                     ) {
                         Ok(child) => child,
