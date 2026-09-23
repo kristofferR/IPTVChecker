@@ -187,10 +187,27 @@ function toStreamingProxyUrl(
   port: number,
   reconnect: boolean,
   remux: boolean,
+  transcodeAudio = false,
 ): string {
   const reconnectParam = reconnect ? "&reconnect=1" : "";
   const remuxParam = remux ? "&remux=1" : "";
-  return `http://127.0.0.1:${port}/stream?url=${encodeURIComponent(url)}${reconnectParam}${remuxParam}`;
+  const audioParam = transcodeAudio ? "&transcode_audio=1" : "";
+  return `http://127.0.0.1:${port}/stream?url=${encodeURIComponent(url)}${reconnectParam}${remuxParam}${audioParam}`;
+}
+
+/** Convert only after the WebView reports that it cannot use the source audio. */
+export function getAudioTranscodeRoute(
+  url: string,
+  proxyPort: number,
+  isLive: boolean,
+): string | null {
+  return proxyPort > 0 ? toStreamingProxyUrl(url, proxyPort, isLive, true, true) : null;
+}
+
+export function isUnsupportedAudioCodec(reason: string | null | undefined): boolean {
+  return /(?:ac-?3|e-?ac-?3|audio\/mp4).*?(?:unsupported|not supported)|(?:unsupported|not supported).*?(?:ac-?3|e-?ac-?3|audio\/mp4)/i.test(
+    reason ?? "",
+  );
 }
 
 export type MpegtsPlaybackRouteKind = "direct" | "remux";

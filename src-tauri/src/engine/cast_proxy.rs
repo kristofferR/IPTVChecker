@@ -426,8 +426,8 @@ async fn start_remux(
     // a transcode-to-AAC is needed. Probe is best-effort: a failure (timeout,
     // missing ffprobe) falls through to HLS+TS with stream copy, correct for
     // the well-tested H.264+AAC case.
-    // Native playback needs HLS rather than Cast's HEVC/DASH route. Copy the
-    // original tracks without opening an additional provider connection.
+    // Native playback needs HLS rather than Cast's HEVC/DASH route. Convert
+    // provider audio to AAC for WebView compatibility.
     let (video_codec, audio_codec) = if local_playback {
         (None, None)
     } else {
@@ -552,7 +552,7 @@ async fn start_remux(
         // Media Receiver MPL emits LoadFailed on EAC3/AC3-in-TS even though
         // the muxer accepts those codec_tags.
         cmd.arg("-c:v").arg("copy");
-        if audio_needs_transcode {
+        if local_playback || audio_needs_transcode {
             cmd.arg("-c:a").arg("aac");
             cmd.arg("-b:a").arg("192k");
             cmd.arg("-ac").arg("2");

@@ -499,7 +499,7 @@ export function ThumbnailPanel({
           );
         })()}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto [&>*]:shrink-0">
         <div className="grid grid-cols-2 gap-2 text-[11px]">
           <div>
             <span className="text-text-tertiary">Status</span>

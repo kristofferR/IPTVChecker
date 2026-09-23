@@ -7,11 +7,13 @@ import {
   findLiveBufferResyncTarget,
   findLiveLatencyCatchUpTarget,
   formatPlaybackRecoveryMessage,
+  getAudioTranscodeRoute,
   getHlsFatalRecoveryAction,
   getMpegtsPlaybackRoutes,
   getNextPlaybackRecoveryAttempt,
   hasPresentedVideoFrame,
   isSingleConnectionPlaylist,
+  isUnsupportedAudioCodec,
   PLAYBACK_RECOVERY_WINDOW_MS,
   prunePlaybackRecoveryHistory,
   recordPlaybackRecoveryAttempt,
@@ -128,6 +130,18 @@ describe("useStreamPlayer helpers", () => {
     expect(getMpegtsPlaybackRoutes("https://example.com/live.ts", 0, true, false)).toEqual([
       { kind: "direct", url: "https://example.com/live.ts" },
     ]);
+  });
+
+  it("offers AAC conversion only for unsupported source audio", () => {
+    expect(isUnsupportedAudioCodec("audio/mp4;codecs=ac-3; MSE=false; native=unsupported")).toBe(
+      true,
+    );
+    expect(isUnsupportedAudioCodec("msg=The type audio/mp4;codecs=ac-3 is unsupported")).toBe(true);
+    expect(isUnsupportedAudioCodec("MediaError: FormatUnsupported: Non MPEG-TS/FLV")).toBe(false);
+    const route = getAudioTranscodeRoute("https://example.com/live.ts", 3210, true);
+    expect(route).toContain("remux=1&transcode_audio=1");
+    expect(route).toContain("reconnect=1");
+    expect(getAudioTranscodeRoute("https://example.com/live.ts", 0, true)).toBeNull();
   });
 
   it("suspends playback watchdog recovery while the app is hidden", () => {

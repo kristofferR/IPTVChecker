@@ -321,7 +321,7 @@ export function ArchiveCard({
             Loading guide...
           </div>
         ) : dayGroups.length > 0 ? (
-          <div className="mt-1">
+          <section className="mt-1 max-h-80 overflow-y-auto pr-1" aria-label="Catch-up programmes">
             {dayGroups.map((group) => (
               <div key={group.label}>
                 <p className="mt-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-text-tertiary">
@@ -356,7 +356,7 @@ export function ArchiveCard({
                 })}
               </div>
             ))}
-          </div>
+          </section>
         ) : (
           <ArchivePicker result={result} onPlayArchive={onPlayArchive} />
         )}
