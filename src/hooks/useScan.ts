@@ -399,6 +399,11 @@ export function useScan() {
             getStore().applyScanRuntime({ networkPaused: false });
           }
         }),
+        listen<ScanEvent<string[]>>("scan://accounts-busy", (event) => {
+          if (isRunScopedEventForActiveRun(activeRunId.current, event.payload.run_id)) {
+            getStore().applyScanRuntime({ busyAccounts: event.payload.payload });
+          }
+        }),
       ]);
 
       if (cancelled) {
@@ -462,6 +467,7 @@ export function useScan() {
         telemetry: EMPTY_TELEMETRY,
         screenshotsPaused: false,
         networkPaused: false,
+        busyAccounts: [],
       });
       pendingResults.current = [];
       eventCount.current = 0;
@@ -586,6 +592,7 @@ export function useScan() {
         telemetry: EMPTY_TELEMETRY,
         screenshotsPaused: false,
         networkPaused: false,
+        busyAccounts: [],
       });
       pendingResults.current = [];
       eventCount.current = 0;

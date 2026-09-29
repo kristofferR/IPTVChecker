@@ -1077,6 +1077,7 @@ pub fn run() {
             commands::dispatcharr::dispatcharr_push_stream_stats,
             commands::dispatcharr::dispatcharr_get_channel_streams,
             commands::dispatcharr::dispatcharr_set_channel_streams,
+            commands::dispatcharr::dispatcharr_refresh_account,
             commands::player::open_channel_in_player,
             commands::player::get_streaming_proxy_port,
             commands::playback::start_local_playback,

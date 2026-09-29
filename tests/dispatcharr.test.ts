@@ -4,6 +4,7 @@ import {
   dispatcharrChannelRows,
   dispatcharrLinkedIndices,
   dispatcharrServerOfProxyPlaylist,
+  failureCause,
   fixPreferencesFrom,
   getDispatcharrView,
   normalizeDispatcharrServer,
@@ -113,6 +114,7 @@ describe("dispatcharr helpers", () => {
       streamCount: 3,
       channelUuid: null,
       account: 'Provider "A"',
+      accountId: null,
       streamName: null,
       channelStreams: null,
     });
@@ -350,5 +352,61 @@ describe("dispatcharr helpers", () => {
     expect(ids(proposeFixOrder(channel, bitrateFirst))).toEqual([3, 4, 2, 1]);
     // Defaults: resolution first, dead stream unlinked.
     expect(ids(proposeFixOrder(channel))).toEqual([4, 2, 3]);
+  });
+
+  it("treats a provider whose streams all failed the same way as down, not dead", () => {
+    const onAccount = (result: ChannelResult, accountId: number) => {
+      const line = result.extinf_line;
+      const title = line.lastIndexOf(",");
+      return {
+        ...result,
+        extinf_line: `${line.slice(0, title)} x-dispatcharr-account-id="${accountId}"${line.slice(title)}`,
+      };
+    };
+    const down = { status: "dead" as const };
+    const [first, second, third] = channelRows(10, "News One", [
+      { id: 1, ...down },
+      { id: 2, height: 720 },
+      { id: 3, ...down },
+    ]);
+    const others = channelRows(
+      20,
+      "Sports 2",
+      [1, 2, 3, 4].map((n) => ({ id: 10 + n, ...down })),
+      3,
+    );
+    const results = [
+      onAccount({ ...first, error_reason: "HTTP 502" }, 7),
+      onAccount(second, 8),
+      onAccount({ ...third, error_reason: "HTTP 404" }, 8),
+      ...others.map((row) => onAccount({ ...row, error_reason: "HTTP 502 Bad Gateway" }, 7)),
+    ];
+    const view = getDispatcharrView(results, {});
+    if (!view) throw new Error("missing view");
+    expect(view.downAccounts).toEqual([
+      { accountId: 7, account: 'Provider "A"', failed: 5, scanned: 5, error: "HTTP 502" },
+    ]);
+    const news = view.byChannelId.get(10);
+    if (!news) throw new Error("missing channel");
+    expect(news.primaryDead).toBe(false);
+    expect(news.primaryProviderDown).toBe(true);
+    // The down provider's stream stays (as untested); the real dead one goes.
+    expect(ids(proposeFixOrder(news))).toEqual([2, 1]);
+    // A channel only on the down provider is not "all dead" and is left alone.
+    const sports = view.byChannelId.get(20);
+    if (!sports) throw new Error("missing channel");
+    expect(sports.allDead).toBe(false);
+    expect(proposeFixOrder(sports).kind).toBe("none");
+  });
+
+  it("groups failures by the cause a whole provider fails with", () => {
+    const row = (error_reason: string) =>
+      makeResult(0, extinf(1, 1, 0, 1, "N"), "N", { error_reason });
+    expect(failureCause(row("HTTP 513"))).toBe("HTTP 513");
+    expect(failureCause(row("operation timed out"))).toBe("timeouts");
+    expect(failureCause(row("error sending request for url (http://x.invalid/)"))).toBe(
+      "connection errors",
+    );
+    expect(failureCause(row("Not a video stream"))).toBeNull();
   });
 });

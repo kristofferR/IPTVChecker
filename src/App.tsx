@@ -166,6 +166,7 @@ function ScanPauseBanners() {
   const scanState = useAppStore((s) => s.scanState);
   const screenshotsPaused = useAppStore((s) => s.screenshotsPaused);
   const networkPaused = useAppStore((s) => s.networkPaused);
+  const busyAccounts = useAppStore((s) => s.busyAccounts);
 
   return (
     <>
@@ -180,6 +181,15 @@ function ScanPauseBanners() {
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span className="flex-1">
             Scan paused — network connectivity lost. Waiting for recovery...
+          </span>
+        </div>
+      )}
+
+      {busyAccounts.length > 0 && isScanActive(scanState) && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-[13px]">
+          <span className="flex-1">
+            Waiting for {busyAccounts.join(", ")}: someone is watching through Dispatcharr, and the
+            provider allows no more connections.
           </span>
         </div>
       )}
@@ -1765,7 +1775,7 @@ export default function App() {
         )}
         <ScanPauseBanners />
 
-        <AppBanners onInstallUpdate={installUpdate} />
+        <AppBanners onInstallUpdate={installUpdate} onScanRows={handleScanSelected} />
 
         <div className="flex flex-col flex-1 min-h-0">
           <div className="flex flex-1 min-h-0 bg-content">

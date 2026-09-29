@@ -62,7 +62,12 @@ export function ChannelHealth({ channel }: { channel: DispatcharrChannelView }) 
       ? "text-yellow-400"
       : "text-text-secondary";
   const title = channel.streams
-    .map((entry, i) => `${i + 1}. ${dispatcharrStreamName(entry)}: ${entry.result.status}`)
+    .map(
+      (entry, i) =>
+        `${i + 1}. ${dispatcharrStreamName(entry)}: ${
+          entry.providerDown ? "provider down" : entry.result.status
+        }`,
+    )
     .join("\n");
   return (
     <span className="inline-flex min-w-0 items-center gap-2 px-2" title={title}>
@@ -74,7 +79,7 @@ export function ChannelHealth({ channel }: { channel: DispatcharrChannelView }) 
         {channel.streams.map((entry, i) => (
           <i
             key={entry.ref.streamId}
-            className={`rounded-[1px] ${BAR_COLOR[entry.result.status]} ${
+            className={`rounded-[1px] ${entry.providerDown ? "bg-amber-500" : BAR_COLOR[entry.result.status]} ${
               i === 0 ? "mr-[3px] w-[6px] shrink-0" : "min-w-px max-w-[4px] flex-1"
             }`}
           />
@@ -143,6 +148,8 @@ function ChannelRowStatus({
       if (channel.allDead) return <span className="text-[12px] text-red-400">All dead</span>;
       if (channel.primaryDead)
         return <span className="text-[12px] text-red-400">Primary dead</span>;
+      if (channel.primaryProviderDown)
+        return <span className="text-[12px] text-amber-400">Provider down</span>;
       return null;
   }
 }

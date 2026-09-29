@@ -132,6 +132,13 @@ export async function dispatcharrSetChannelStreams(
   return invoke("dispatcharr_set_channel_streams", { ...target, channelId, streamIds });
 }
 
+export async function dispatcharrRefreshAccount(
+  target: DispatcharrTarget,
+  accountId: number,
+): Promise<void> {
+  return invoke("dispatcharr_refresh_account", { ...target, accountId });
+}
+
 export async function startScan(config: ScanConfig): Promise<string> {
   return invoke("start_scan", { config });
 }

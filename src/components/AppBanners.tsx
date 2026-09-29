@@ -2,9 +2,18 @@ import { Download, ExternalLink, Info, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { dismissUpdateNotice } from "../hooks/useUpdateCheck";
 import { type ArchiveDownload, cancelArchiveDownload } from "../lib/archiveDownload";
-import { dispatcharrServerOfProxyPlaylist } from "../lib/dispatcharr";
+import {
+  type DownAccount,
+  dispatcharrServerOfProxyPlaylist,
+  dispatcharrTarget,
+  getDispatcharrView,
+} from "../lib/dispatcharr";
+import { errorToString } from "../lib/errors";
 import { formatBytes } from "../lib/format";
+import { isScanActive } from "../lib/scanState";
 import { validateSourceFilterPattern } from "../lib/sourceFilter";
+import { dispatcharrRefreshAccount } from "../lib/tauri";
+import type { ChannelResult } from "../lib/types";
 import {
   isManualInstall,
   updateActionLabel,
@@ -81,6 +90,109 @@ function DispatcharrConvertBanner() {
       </button>
     </div>
   );
+}
+
+/** Names a provider account whose scanned streams nearly all failed the same
+ *  way, and offers to refresh it in Dispatcharr and scan it again. */
+type RefreshState =
+  | { kind: "idle" }
+  | { kind: "sending" }
+  | { kind: "sent" }
+  | { kind: "failed"; error: string };
+
+function DispatcharrProviderDownBanner({
+  account,
+  onRescan,
+  onDismiss,
+}: {
+  account: DownAccount;
+  onRescan: (indices: number[]) => void;
+  onDismiss: () => void;
+}) {
+  const [refresh, setRefresh] = useState<RefreshState>({ kind: "idle" });
+  const count =
+    account.failed === account.scanned
+      ? `All ${account.scanned} streams`
+      : `${account.failed} of ${account.scanned} streams`;
+  const handleRefresh = async () => {
+    const target = dispatcharrTarget(getStore().playlist);
+    if (!target) return;
+    setRefresh({ kind: "sending" });
+    try {
+      await dispatcharrRefreshAccount(target, account.accountId);
+      setRefresh({ kind: "sent" });
+    } catch (error) {
+      setRefresh({ kind: "failed", error: errorToString(error) });
+    }
+  };
+  const handleRescan = () => {
+    const { flatResults, dispatcharrOrders } = getStore();
+    const view = getDispatcharrView(flatResults, dispatcharrOrders);
+    const indices =
+      view?.channels.flatMap((channel) =>
+        channel.streams
+          .filter((entry) => entry.ref.accountId === account.accountId)
+          .map((entry) => entry.result.index),
+      ) ?? [];
+    if (indices.length > 0) onRescan(indices);
+  };
+  const buttonClass =
+    "inline-flex shrink-0 items-center px-2.5 py-1 rounded-md border border-amber-400/30 hover:bg-amber-500/15 transition-colors disabled:opacity-50";
+  return (
+    <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-[13px]">
+      <span className="flex-1 min-w-0">
+        {count} from {account.account} failed with {account.error}. The provider may be down; Fix
+        order keeps its streams.
+        {refresh.kind === "sent" && " Dispatcharr is refreshing it."}
+        {refresh.kind === "failed" && ` Refresh failed: ${refresh.error}`}
+      </span>
+      <button
+        type="button"
+        disabled={refresh.kind === "sending" || refresh.kind === "sent"}
+        onClick={() => void handleRefresh()}
+        className={buttonClass}
+      >
+        Refresh in Dispatcharr
+      </button>
+      <button type="button" onClick={handleRescan} className={buttonClass}>
+        Rescan
+      </button>
+      <button
+        onClick={onDismiss}
+        className="p-1 hover:bg-amber-500/20 rounded transition-colors"
+        type="button"
+        aria-label={`Dismiss the notice about ${account.account}`}
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
+function DispatcharrProviderDownBanners({ onRescan }: { onRescan: (indices: number[]) => void }) {
+  const flatResults = useAppStore((s) => s.flatResults);
+  const orders = useAppStore((s) => s.dispatcharrOrders);
+  const scanning = useAppStore((s) => isScanActive(s.scanState));
+  const view = useMemo(() => getDispatcharrView(flatResults, orders), [flatResults, orders]);
+  // Dismissed for this set of results; a new scan brings a notice back.
+  const [dismissed, setDismissed] = useState<{ results: ChannelResult[] | null; ids: number[] }>({
+    results: null,
+    ids: [],
+  });
+  if (scanning || !view) return null;
+  const hidden = dismissed.results === flatResults ? dismissed.ids : [];
+  return view.downAccounts
+    .filter((account) => !hidden.includes(account.accountId))
+    .map((account) => (
+      <DispatcharrProviderDownBanner
+        key={account.accountId}
+        account={account}
+        onRescan={onRescan}
+        onDismiss={() =>
+          setDismissed({ results: flatResults, ids: [...hidden, account.accountId] })
+        }
+      />
+    ));
 }
 
 /** Shared banner auto-dismiss shape: whenever `value` becomes truthy, run
@@ -167,11 +279,13 @@ interface AppBannersProps {
   /** Installs the discovered update, or opens the distribution's update page
    *  for package-manager-owned installations. */
   onInstallUpdate: () => void | Promise<void>;
+  /** Scans the given rows (a provider account's streams). */
+  onScanRows: (indices: number[]) => void;
 }
 
 /** Error/info banners shown under the toolbar, with optional auto-dismiss
  *  timers. The update banner is always persistent. */
-export function AppBanners({ onInstallUpdate }: AppBannersProps) {
+export function AppBanners({ onInstallUpdate, onScanRows }: AppBannersProps) {
   const scanError = useAppStore((s) => s.scanError);
   const errorDismissed = useAppStore((s) => s.errorDismissed);
   const playbackError = useAppStore((s) => s.playbackError);
@@ -276,6 +390,7 @@ export function AppBanners({ onInstallUpdate }: AppBannersProps) {
       )}
 
       <DispatcharrConvertBanner />
+      <DispatcharrProviderDownBanners onRescan={onScanRows} />
 
       {menuInfo && (
         <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-500/10 border-b border-blue-500/20 text-blue-400 text-[13px]">

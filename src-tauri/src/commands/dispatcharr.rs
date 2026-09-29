@@ -252,6 +252,18 @@ pub async fn dispatcharr_set_channel_streams(
     Ok(stored)
 }
 
+/// Ask Dispatcharr to re-fetch a provider account's playlist.
+#[tauri::command]
+pub async fn dispatcharr_refresh_account(
+    app: tauri::AppHandle,
+    source_identity: String,
+    connection: String,
+    account_id: i64,
+) -> Result<(), AppError> {
+    let client = resolve_session(&app, &source_identity, &connection).await?;
+    client.refresh_m3u_account(account_id).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

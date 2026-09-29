@@ -17,6 +17,7 @@ export interface DispatcharrStreamRef {
   streamCount: number;
   channelUuid: string | null;
   account: string | null;
+  accountId: number | null;
   /** The provider stream's own name (rows are titled with the channel). */
   streamName: string | null;
   /** The channel's complete stream order at load, including streams that
@@ -53,7 +54,8 @@ function extinfAttribute(extinfLine: string, key: string): string | null {
 export function parseDispatcharrIds(extinfLine: string): DispatcharrStreamRef | null {
   if (!extinfLine.includes("x-dispatcharr-stream-id")) return null;
   const number = (key: string) => {
-    const value = Number(extinfAttribute(extinfLine, key));
+    const raw = extinfAttribute(extinfLine, key);
+    const value = raw === null || raw.trim() === "" ? Number.NaN : Number(raw);
     return Number.isInteger(value) ? value : null;
   };
   const channelId = number("x-dispatcharr-channel-id");
@@ -66,6 +68,7 @@ export function parseDispatcharrIds(extinfLine: string): DispatcharrStreamRef | 
     streamCount: number("x-dispatcharr-stream-count") ?? 1,
     channelUuid: extinfAttribute(extinfLine, "x-dispatcharr-channel-uuid") || null,
     account: extinfAttribute(extinfLine, "x-dispatcharr-account") || null,
+    accountId: number("x-dispatcharr-account-id"),
     streamName: extinfAttribute(extinfLine, "x-dispatcharr-stream-name") || null,
     channelStreams:
       extinfAttribute(extinfLine, "x-dispatcharr-channel-streams")
@@ -90,6 +93,19 @@ export function isDispatcharrPreview(preview: PlaylistPreview | null): boolean {
 export interface DispatcharrStreamEntry {
   ref: DispatcharrStreamRef;
   result: ChannelResult;
+  /** Failed while its whole provider account was down: says nothing about
+   *  the stream, so it counts as untested. */
+  providerDown: boolean;
+}
+
+/** A provider account whose scanned streams nearly all failed the same way. */
+export interface DownAccount {
+  accountId: number;
+  account: string;
+  failed: number;
+  scanned: number;
+  /** The shared failure, e.g. "HTTP 502". */
+  error: string;
 }
 
 export interface DispatcharrChannelView {
@@ -105,9 +121,12 @@ export interface DispatcharrChannelView {
   /** The primary stream's result: what viewers get. */
   primary: ChannelResult;
   alive: number;
+  /** Dead streams exclude those of down provider accounts. */
   primaryDead: boolean;
   hasDead: boolean;
   allDead: boolean;
+  /** The primary failed because its provider account is down. */
+  primaryProviderDown: boolean;
 }
 
 export interface DispatcharrView {
@@ -119,6 +138,7 @@ export interface DispatcharrView {
   /** Channel of every loaded stream row by result index, including rows
    *  unlinked this session, so a selection can follow its channel. */
   byStreamIndex: Map<number, DispatcharrChannelView>;
+  downAccounts: DownAccount[];
 }
 
 /** Stream orders written to Dispatcharr this session, keyed by channel id.
@@ -149,6 +169,63 @@ export function isUntestedStatus(status: ChannelResult["status"]): boolean {
   return status === "pending" || status === "checking";
 }
 
+/** Fewest scanned streams before an account can count as down. */
+const DOWN_ACCOUNT_MIN_STREAMS = 5;
+/** Share of scanned streams that failed, and share of failures with the
+ *  same cause, for an account to count as down. */
+const DOWN_ACCOUNT_FAILED_SHARE = 0.9;
+const DOWN_ACCOUNT_SAME_CAUSE_SHARE = 0.8;
+
+/** A failure's cause at the level a whole provider fails with. */
+export function failureCause(result: ChannelResult): string | null {
+  const reason = `${result.error_reason ?? ""} ${result.error_message ?? ""}`;
+  const http = /\bHTTP (\d{3})\b/.exec(reason);
+  if (http) return `HTTP ${http[1]}`;
+  if (/timed out|timeout/i.test(reason)) return "timeouts";
+  if (/error sending request|connect|refused|dns|resolve/i.test(reason)) {
+    return "connection errors";
+  }
+  return null;
+}
+
+/** Accounts whose scanned streams nearly all failed with one cause: the
+ *  provider is down, not each stream. */
+export function findDownAccounts(entries: DispatcharrStreamEntry[]): DownAccount[] {
+  const byAccount = new Map<number, DispatcharrStreamEntry[]>();
+  for (const entry of entries) {
+    if (entry.ref.accountId === null) continue;
+    const list = byAccount.get(entry.ref.accountId) ?? [];
+    list.push(entry);
+    byAccount.set(entry.ref.accountId, list);
+  }
+  const down: DownAccount[] = [];
+  for (const [accountId, list] of byAccount) {
+    const scanned = list.filter((entry) => !isUntestedStatus(entry.result.status));
+    const failed = scanned.filter((entry) => isDeadStatus(entry.result.status));
+    if (
+      scanned.length < DOWN_ACCOUNT_MIN_STREAMS ||
+      failed.length < scanned.length * DOWN_ACCOUNT_FAILED_SHARE
+    ) {
+      continue;
+    }
+    const causes = new Map<string, number>();
+    for (const entry of failed) {
+      const cause = failureCause(entry.result);
+      if (cause) causes.set(cause, (causes.get(cause) ?? 0) + 1);
+    }
+    const [error, count] = [...causes].sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
+    if (count < failed.length * DOWN_ACCOUNT_SAME_CAUSE_SHARE) continue;
+    down.push({
+      accountId,
+      account: list[0].ref.account ?? `Account ${accountId}`,
+      failed: failed.length,
+      scanned: scanned.length,
+      error,
+    });
+  }
+  return down;
+}
+
 function buildView(results: ChannelResult[], orders: DispatcharrOrders): DispatcharrView | null {
   const byChannel = new Map<
     number,
@@ -165,10 +242,22 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
       byChannel.set(ref.channelId, channel);
     }
     if (!channel.streams.some((entry) => entry.ref.streamId === ref.streamId)) {
-      channel.streams.push({ ref, result });
+      channel.streams.push({ ref, result, providerDown: false });
     }
   }
   if (byChannel.size === 0) return null;
+
+  const allEntries = [...byChannel.values()].flatMap((channel) => channel.streams);
+  const downAccounts = findDownAccounts(allEntries);
+  const downIds = new Set(downAccounts.map((account) => account.accountId));
+  for (const entry of allEntries) {
+    entry.providerDown =
+      isDeadStatus(entry.result.status) &&
+      entry.ref.accountId !== null &&
+      downIds.has(entry.ref.accountId);
+  }
+  const isDead = (entry: DispatcharrStreamEntry) =>
+    isDeadStatus(entry.result.status) && !entry.providerDown;
 
   const channels: DispatcharrChannelView[] = [];
   const byStreamIndex = new Map<number, DispatcharrChannelView>();
@@ -181,7 +270,7 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
     const byStream = new Map(channel.streams.map((entry) => [entry.ref.streamId, entry]));
     const streams = order.flatMap((streamId) => byStream.get(streamId) ?? []);
     if (streams.length === 0) continue;
-    const dead = streams.filter((entry) => isDeadStatus(entry.result.status)).length;
+    const dead = streams.filter(isDead).length;
     const view: DispatcharrChannelView = {
       channelId,
       name: channel.name,
@@ -190,9 +279,10 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
       order,
       primary: streams[0].result,
       alive: streams.filter((entry) => entry.result.status === "alive").length,
-      primaryDead: isDeadStatus(streams[0].result.status),
+      primaryDead: isDead(streams[0]),
       hasDead: dead > 0,
       allDead: dead === streams.length,
+      primaryProviderDown: streams[0].providerDown,
     };
     channels.push(view);
     for (const entry of channel.streams) byStreamIndex.set(entry.result.index, view);
@@ -203,6 +293,7 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
     byChannelId: new Map(channels.map((channel) => [channel.channelId, channel])),
     byPrimaryIndex: new Map(channels.map((channel) => [channel.primary.index, channel])),
     byStreamIndex,
+    downAccounts,
   };
 }
 
@@ -313,7 +404,7 @@ export function proposeFixOrder(
   for (const entry of channel.streams) {
     const { status } = entry.result;
     if (status === "alive") alive.push(entry);
-    else if (isUntestedStatus(status)) untested.push(entry);
+    else if (isUntestedStatus(status) || entry.providerDown) untested.push(entry);
     else if (isDeadStatus(status)) dead.push(entry);
     else other.push(entry);
   }

@@ -232,6 +232,50 @@ pub(crate) struct DispatcharrM3uAccount {
     pub name: String,
     /// Concurrent streams the provider allows; 0 means unlimited.
     pub max_streams: u32,
+    /// Connection profiles (for example extra logins). Dispatcharr streams
+    /// through the active ones, each with its own limit.
+    pub profiles: Vec<DispatcharrM3uProfile>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub(crate) struct DispatcharrM3uProfile {
+    pub id: i64,
+    pub max_streams: u32,
+    pub is_active: bool,
+}
+
+impl DispatcharrM3uAccount {
+    /// Concurrent streams across the account's active profiles, 0 when any
+    /// of them is unlimited. Falls back to the account's own limit when it
+    /// reports no active profiles.
+    pub(crate) fn connection_limit(&self) -> u32 {
+        let active = self
+            .profiles
+            .iter()
+            .filter(|profile| profile.is_active)
+            .collect::<Vec<_>>();
+        if active.is_empty() {
+            return self.max_streams;
+        }
+        if active.iter().any(|profile| profile.max_streams == 0) {
+            return 0;
+        }
+        active.iter().map(|profile| profile.max_streams).sum()
+    }
+}
+
+/// A channel Dispatcharr is streaming right now (`/proxy/ts/status`).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+struct ActiveChannel {
+    m3u_profile_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+struct ProxyStatus {
+    channels: Vec<ActiveChannel>,
 }
 
 /// DRF list endpoints answer either with a bare array or a paginated page.
@@ -513,6 +557,41 @@ impl DispatcharrClient {
         self.fetch_all("/api/m3u/accounts/").await
     }
 
+    /// Provider connections Dispatcharr's viewers hold, per M3U account.
+    pub(crate) async fn fetch_account_viewers(&self) -> Result<HashMap<i64, usize>, AppError> {
+        let accounts = self.fetch_m3u_accounts().await?;
+        let account_of = accounts
+            .iter()
+            .flat_map(|account| {
+                account
+                    .profiles
+                    .iter()
+                    .map(move |profile| (profile.id, account.id))
+            })
+            .collect::<HashMap<_, _>>();
+        let status: ProxyStatus = self.json(Method::GET, "/proxy/ts/status", None).await?;
+        let mut viewers = HashMap::new();
+        for account in status
+            .channels
+            .iter()
+            .filter_map(|channel| account_of.get(&channel.m3u_profile_id?))
+        {
+            *viewers.entry(*account).or_insert(0) += 1;
+        }
+        Ok(viewers)
+    }
+
+    /// Ask Dispatcharr to re-fetch an M3U account's playlist.
+    pub(crate) async fn refresh_m3u_account(&self, account_id: i64) -> Result<(), AppError> {
+        self.send(
+            Method::POST,
+            self.endpoint(&format!("/api/m3u/refresh/{}/", account_id))?,
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
     pub(crate) async fn fetch_streams_by_ids(
         &self,
         ids: &[i64],
@@ -745,6 +824,78 @@ pub(crate) fn account_connection_slots(
     Arc::clone(pool)
 }
 
+/// How long a read of Dispatcharr's live connections stays current.
+const VIEWERS_TTL: Duration = Duration::from_secs(5);
+
+/// Viewers on one Dispatcharr server, per M3U account. Shared by every scan
+/// and cached briefly, so waiting rows don't flood the API.
+pub(crate) struct AccountViewers {
+    client: Arc<DispatcharrClient>,
+    counts: tokio::sync::Mutex<Option<(Instant, HashMap<i64, usize>)>>,
+}
+
+impl AccountViewers {
+    /// Viewers holding `account_id`'s connections, re-read when `fresh` or
+    /// when the last read is old. A failed read counts as none, so an
+    /// unreachable status endpoint never stalls a scan.
+    pub(crate) async fn on_account(&self, account_id: i64, fresh: bool) -> usize {
+        let mut counts = self.counts.lock().await;
+        if fresh
+            || counts
+                .as_ref()
+                .is_none_or(|(at, _)| at.elapsed() >= VIEWERS_TTL)
+        {
+            let read = self
+                .client
+                .fetch_account_viewers()
+                .await
+                .inspect_err(|error| {
+                    log::warn!("[dispatcharr] live connection read failed: {}", error)
+                })
+                .unwrap_or_default();
+            *counts = Some((Instant::now(), read));
+        }
+        counts
+            .as_ref()
+            .and_then(|(_, read)| read.get(&account_id).copied())
+            .unwrap_or(0)
+    }
+}
+
+/// Viewer counts for the server a row came from, through any open session to
+/// that server. `None` when no session is open (nothing to ask).
+pub(crate) fn account_viewers(extinf_line: &str) -> Option<Arc<AccountViewers>> {
+    type Registry = HashMap<String, Arc<AccountViewers>>;
+    static VIEWERS: OnceLock<Mutex<Registry>> = OnceLock::new();
+    let server = parse_extinf_attributes(extinf_line)
+        .into_iter()
+        .find_map(|(key, value)| (key == ATTR_SERVER).then_some(value))?;
+    let prefix = format!("dispatcharr:{}|", server);
+    let client = sessions()
+        .lock()
+        .ok()?
+        .iter()
+        .find_map(|(key, client)| key.starts_with(&prefix).then(|| Arc::clone(client)))?;
+    let mut registry = VIEWERS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let entry = registry.entry(server).or_insert_with(|| {
+        Arc::new(AccountViewers {
+            client: Arc::clone(&client),
+            counts: tokio::sync::Mutex::new(None),
+        })
+    });
+    // A reopened source replaces its session (and possibly its key).
+    if !Arc::ptr_eq(&entry.client, &client) {
+        *entry = Arc::new(AccountViewers {
+            client,
+            counts: tokio::sync::Mutex::new(None),
+        });
+    }
+    Some(Arc::clone(entry))
+}
+
 pub(crate) fn register_session(source_identity: &str, client: Arc<DispatcharrClient>) {
     if let Ok(mut sessions) = sessions().lock() {
         sessions.insert(source_identity.to_string(), client);
@@ -789,6 +940,22 @@ pub(crate) fn dispatcharr_ids_from_extinf(extinf_line: &str) -> Option<Dispatcha
             .filter(|value| !value.is_empty())
             .cloned(),
     })
+}
+
+/// A row's provider account name, for messages.
+pub(crate) fn account_label(extinf_line: &str) -> String {
+    let attrs = parse_extinf_attributes(extinf_line)
+        .into_iter()
+        .collect::<HashMap<_, _>>();
+    attrs
+        .get(ATTR_ACCOUNT)
+        .cloned()
+        .or_else(|| {
+            attrs
+                .get(ATTR_ACCOUNT_ID)
+                .map(|id| format!("Account {}", id))
+        })
+        .unwrap_or_else(|| "Provider".to_string())
 }
 
 /// The provider account a row streams from and how many concurrent streams
@@ -897,8 +1064,9 @@ pub(crate) fn build_m3u(
                     attr(ATTR_SERVER, &base);
                     attr(ATTR_ACCOUNT, &account.name);
                     attr(ATTR_ACCOUNT_ID, &account.id.to_string());
-                    if account.max_streams > 0 {
-                        attr(ATTR_MAX_STREAMS, &account.max_streams.to_string());
+                    let limit = account.connection_limit();
+                    if limit > 0 {
+                        attr(ATTR_MAX_STREAMS, &limit.to_string());
                     }
                 }
                 // Account details did not load: assume the strictest limit
@@ -1188,6 +1356,58 @@ mod tests {
         assert_eq!(streams.iter().map(|s| s.id).collect::<Vec<_>>(), vec![1, 2]);
     }
 
+    #[test]
+    fn account_limit_adds_up_active_profiles() {
+        let profile = |id, max_streams, is_active| DispatcharrM3uProfile {
+            id,
+            max_streams,
+            is_active,
+        };
+        let account = |profiles| DispatcharrM3uAccount {
+            max_streams: 1,
+            profiles,
+            ..Default::default()
+        };
+        assert_eq!(account(vec![]).connection_limit(), 1);
+        assert_eq!(
+            account(vec![
+                profile(1, 1, true),
+                profile(2, 2, true),
+                profile(3, 5, false)
+            ])
+            .connection_limit(),
+            3
+        );
+        // One unlimited active profile makes the account unlimited.
+        assert_eq!(
+            account(vec![profile(1, 1, true), profile(2, 0, true)]).connection_limit(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn viewers_are_counted_per_account_through_profiles() {
+        let base = spawn_server(Arc::new(|req: &Request| match req.path.as_str() {
+            "/api/m3u/accounts/" => (
+                200,
+                r#"[{"id":7,"profiles":[{"id":70},{"id":71}]},{"id":8,"profiles":[{"id":80}]}]"#
+                    .into(),
+            ),
+            "/proxy/ts/status" => (
+                200,
+                r#"{"count":3,"channels":[{"m3u_profile_id":70},{"m3u_profile_id":71},{"channel_id":"x"}]}"#
+                    .into(),
+            ),
+            _ => (404, "{}".into()),
+        }))
+        .await;
+        let viewers = client(&base, DispatcharrAuth::ApiKey("k".into()))
+            .fetch_account_viewers()
+            .await
+            .unwrap();
+        assert_eq!(viewers, HashMap::from([(7, 2)]));
+    }
+
     #[tokio::test]
     async fn a_deleted_channel_reads_as_none() {
         let base = spawn_server(Arc::new(|req: &Request| match req.path.as_str() {
@@ -1376,6 +1596,7 @@ mod tests {
                 id: 7,
                 name: "Provider A".to_string(),
                 max_streams: 2,
+                ..Default::default()
             },
         )]);
         let base = Url::parse("http://dvr.example:9191/").unwrap();

@@ -74,6 +74,7 @@ export interface ScanRuntimeUpdate {
   telemetry?: ScanTelemetry;
   screenshotsPaused?: boolean;
   networkPaused?: boolean;
+  busyAccounts?: string[];
 }
 
 export interface ScanSlice {
@@ -90,6 +91,9 @@ export interface ScanSlice {
   telemetry: ScanTelemetry;
   screenshotsPaused: boolean;
   networkPaused: boolean;
+  /** Dispatcharr accounts whose rows wait because viewers hold every
+   *  connection. */
+  busyAccounts: string[];
 
   applyScanCollections: (update: ScanCollectionsUpdate) => void;
   applyScanRuntime: (update: ScanRuntimeUpdate) => void;

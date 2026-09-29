@@ -754,6 +754,42 @@ async fn acquire_account_then_scan(
     Ok((account_permit, scan_permit))
 }
 
+/// How often a row waiting on an account Dispatcharr's viewers fill checks
+/// again.
+const BUSY_ACCOUNT_RECHECK: Duration = Duration::from_secs(5);
+/// Probes of a row retried because a viewer held its account.
+const BUSY_ACCOUNT_RETRIES: usize = 3;
+
+/// Accounts whose rows wait for Dispatcharr's viewers to free a connection,
+/// reported as `scan://accounts-busy`.
+struct BusyAccounts {
+    app: AppHandle,
+    run_id: String,
+    names: std::sync::Mutex<std::collections::BTreeSet<String>>,
+}
+
+impl BusyAccounts {
+    fn set(&self, account: &str, busy: bool) {
+        let Ok(mut names) = self.names.lock() else {
+            return;
+        };
+        let changed = if busy {
+            names.insert(account.to_string())
+        } else {
+            names.remove(account)
+        };
+        if changed {
+            let _ = self.app.emit(
+                "scan://accounts-busy",
+                ScanEvent {
+                    run_id: self.run_id.clone(),
+                    payload: names.iter().cloned().collect::<Vec<_>>(),
+                },
+            );
+        }
+    }
+}
+
 /// Rows queued per provider account, relative to the account's own
 /// connection limit: enough to keep its probes busy, never enough to crowd
 /// out other accounts.
@@ -2438,6 +2474,11 @@ async fn execute_scan_run(
 
     let mut handles = Vec::new();
 
+    let busy_accounts = Arc::new(BusyAccounts {
+        app: app.clone(),
+        run_id: run_id.clone(),
+        names: std::sync::Mutex::new(Default::default()),
+    });
     let mut dispatch_queue = DispatchQueue::new(channels);
     while let Some((channel, account_queue_slot)) = dispatch_queue.next(&cancel_token).await {
         if cancel_token.is_cancelled() {
@@ -2540,6 +2581,12 @@ async fn execute_scan_run(
         let consecutive_net_failures = Arc::clone(&consecutive_net_failures);
         let adaptive_throttle = adaptive_throttle.clone();
 
+        // Dispatcharr's viewers use the same provider connections.
+        let viewers = account_limit
+            .and_then(|_| crate::engine::dispatcharr::account_viewers(&channel.extinf_line));
+        let account_label = crate::engine::dispatcharr::account_label(&channel.extinf_line);
+        let busy_accounts = Arc::clone(&busy_accounts);
+
         let scan_semaphore = Arc::clone(&semaphore);
         let handle = tokio::spawn(async move {
             let _dispatch_permit = permit;
@@ -2581,44 +2628,91 @@ async fn execute_scan_run(
             };
             let shared_result = result_cell
                 .get_or_init(|| async {
-                    let _probe_permits = match &account_semaphore {
-                        Some(account) => {
-                            // Rows queued for a busy account passed the
-                            // dispatch pause check long ago. Honour a pause
-                            // without holding the account's shared slot, so
-                            // a paused window never blocks another scan of
-                            // the same provider.
-                            let permits = loop {
-                                if !wait_if_paused(&state_for_perf, &pause_scope, &cancel).await {
-                                    return Err(AppError::Cancelled);
-                                }
-                                let permits =
-                                    acquire_account_then_scan(account, &scan_semaphore, &cancel)
-                                        .await?;
-                                if !is_scan_paused(&state_for_perf, &pause_scope).await {
+                    let mut busy_retries = 0;
+                    loop {
+                        let _probe_permits = match &account_semaphore {
+                            Some(account) => {
+                                // Rows queued for a busy account passed the
+                                // dispatch pause check long ago. Honour a
+                                // pause without holding the account's shared
+                                // slot, so a paused window never blocks
+                                // another scan of the same provider.
+                                let permits = loop {
+                                    if !wait_if_paused(&state_for_perf, &pause_scope, &cancel).await
+                                    {
+                                        return Err(AppError::Cancelled);
+                                    }
+                                    let permits = acquire_account_then_scan(
+                                        account,
+                                        &scan_semaphore,
+                                        &cancel,
+                                    )
+                                    .await?;
+                                    if is_scan_paused(&state_for_perf, &pause_scope).await {
+                                        continue;
+                                    }
+                                    // Viewers watching through Dispatcharr hold
+                                    // connections too. Wait, holding no slot,
+                                    // until the account has one free.
+                                    if let (Some(viewers), Some((account_id, limit))) =
+                                        (&viewers, account_limit)
+                                    {
+                                        let ours =
+                                            limit.saturating_sub(account.available_permits());
+                                        if ours + viewers.on_account(account_id, false).await
+                                            > limit
+                                        {
+                                            drop(permits);
+                                            busy_accounts.set(&account_label, true);
+                                            tokio::select! {
+                                                _ = tokio::time::sleep(BUSY_ACCOUNT_RECHECK) => {}
+                                                _ = cancel.cancelled() => {
+                                                    return Err(AppError::Cancelled);
+                                                }
+                                            }
+                                            continue;
+                                        }
+                                        busy_accounts.set(&account_label, false);
+                                    }
                                     break permits;
-                                }
-                            };
-                            vec![permits.0, permits.1]
-                        }
-                        // A duplicate only probes when the owning row stopped
-                        // before probing; it holds no scan slot yet.
-                        None if duplicate_url => vec![tokio::select! {
-                            permit = Arc::clone(&scan_semaphore).acquire_owned() => {
-                                permit.map_err(|_| AppError::Cancelled)?
+                                };
+                                vec![permits.0, permits.1]
                             }
-                            _ = cancel.cancelled() => return Err(AppError::Cancelled),
-                        }],
-                        None => Vec::new(),
-                    };
-                    compute_shared_url_result(
-                        &check_ctx,
-                        &channel.url,
-                        effective_skip_screenshots,
-                        screenshots_dir.as_ref(),
-                        &screenshot_file_name,
-                    )
-                    .await
+                            // A duplicate only probes when the owning row
+                            // stopped before probing; it holds no scan slot
+                            // yet.
+                            None if duplicate_url => vec![tokio::select! {
+                                permit = Arc::clone(&scan_semaphore).acquire_owned() => {
+                                    permit.map_err(|_| AppError::Cancelled)?
+                                }
+                                _ = cancel.cancelled() => return Err(AppError::Cancelled),
+                            }],
+                            None => Vec::new(),
+                        };
+                        let outcome = compute_shared_url_result(
+                            &check_ctx,
+                            &channel.url,
+                            effective_skip_screenshots,
+                            screenshots_dir.as_ref(),
+                            &screenshot_file_name,
+                        )
+                        .await;
+                        // A probe refused while a viewer holds the account
+                        // says nothing about the stream: probe again once a
+                        // connection is free.
+                        if let (Ok((shared, _)), Some(viewers), Some((account_id, _))) =
+                            (&outcome, &viewers, account_limit)
+                        {
+                            if shared.status == ChannelStatus::Dead
+                                && busy_retries < BUSY_ACCOUNT_RETRIES
+                                && viewers.on_account(account_id, true).await > 0
+                            {
+                                busy_retries += 1;
+                                continue;
+                            }
+                        }
+                        break outcome;
+                    }
                 })
                 .await;
 
