@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  dispatcharrChannelRows,
   dispatcharrLinkedIndices,
   dispatcharrServerOfProxyPlaylist,
   getDispatcharrView,
@@ -249,5 +250,19 @@ describe("dispatcharr helpers", () => {
     const results = channelRows(10, "News One", [{ id: 1, status: "dead" }, { id: 2 }]);
     expect(dispatcharrLinkedIndices(results, {})).toBeNull();
     expect(dispatcharrLinkedIndices(results, { 10: [2] })).toEqual([1]);
+  });
+
+  it("exports a channel's streams in the written order with matching titles", () => {
+    const results = channelRows(10, "News One", [{ id: 1 }, { id: 2 }, { id: 3 }]);
+    const channel = getDispatcharrView(results, { 10: [3, 1] })?.byChannelId.get(10);
+    if (!channel) throw new Error("missing channel");
+    const rows = dispatcharrChannelRows(channel);
+    expect(rows.map((row) => row.name)).toEqual(["News One [1/2] Feed 3", "News One [2/2] Feed 1"]);
+    expect(parseDispatcharrIds(rows[0].extinf_line)).toMatchObject({
+      streamId: 3,
+      streamOrder: 0,
+      streamCount: 2,
+    });
+    expect(rows[0].extinf_line.endsWith(",News One [1/2] Feed 3")).toBe(true);
   });
 });

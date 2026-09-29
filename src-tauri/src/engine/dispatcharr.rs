@@ -18,6 +18,7 @@ use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -74,9 +75,18 @@ impl DispatcharrAuth {
         }
     }
 
-    fn identity_label(&self) -> String {
+    /// Account part of the source identity. API keys contribute a short
+    /// fingerprint, so two keys on one server stay separate sources.
+    pub(crate) fn identity_label(&self) -> String {
         match self {
-            Self::ApiKey(_) => "api-key".to_string(),
+            Self::ApiKey(key) => {
+                let digest = Sha256::digest(key.as_bytes());
+                let hex = digest
+                    .iter()
+                    .map(|byte| format!("{:02x}", byte))
+                    .collect::<String>();
+                format!("api-key:{}", &hex[..12])
+            }
             Self::Login { username, .. } => username.clone(),
         }
     }
@@ -117,11 +127,12 @@ fn base_string(base: &Url) -> String {
 }
 
 pub(crate) fn build_dispatcharr_source_key(base: &Url, auth: &DispatcharrAuth) -> String {
-    format!(
-        "dispatcharr:{}|{}",
-        base_string(base),
-        auth.identity_label()
-    )
+    dispatcharr_source_key(base, &auth.identity_label())
+}
+
+/// Identity from an already computed account label.
+pub(crate) fn dispatcharr_source_key(base: &Url, account_label: &str) -> String {
+    format!("dispatcharr:{}|{}", base_string(base), account_label)
 }
 
 /// "host:port" (or bare host) display label.
@@ -486,9 +497,20 @@ impl DispatcharrClient {
                     Some(&json!({ "ids": chunk })),
                 )
                 .await?;
-            streams.extend(match page {
-                ListPage::Bare(items) | ListPage::Paginated { results: items, .. } => items,
-            });
+            match page {
+                ListPage::Bare(items)
+                | ListPage::Paginated {
+                    results: items,
+                    next: None,
+                } => streams.extend(items),
+                // A paged answer would silently drop streams; callers fall
+                // back to per-channel requests, which follow pagination.
+                ListPage::Paginated { next: Some(_), .. } => {
+                    return Err(AppError::Other(
+                        "Dispatcharr paginated the bulk stream lookup".to_string(),
+                    ))
+                }
+            }
         }
         Ok(streams)
     }
@@ -972,6 +994,15 @@ mod tests {
             );
         }
         assert!(normalize_dispatcharr_server("http://u:p@dvr.example").is_err());
+    }
+
+    #[test]
+    fn api_keys_on_one_server_are_separate_sources() {
+        let base = Url::parse("http://dvr.example/").unwrap();
+        let key = |k: &str| build_dispatcharr_source_key(&base, &DispatcharrAuth::ApiKey(k.into()));
+        assert_eq!(key("one"), key("one"));
+        assert_ne!(key("one"), key("two"));
+        assert!(!key("one").contains("one"));
     }
 
     #[test]

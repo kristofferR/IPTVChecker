@@ -42,6 +42,7 @@ import {
 import {
   DISPATCHARR_STATUS_FILTERS,
   type DispatcharrStatusFilter,
+  dispatcharrChannelRows,
   filterDispatcharrPrimaries,
   getDispatcharrView,
   matchesDispatcharrStatus,
@@ -198,12 +199,10 @@ export const Toolbar = memo(function Toolbar({
         () =>
           dispatcharrView && visibleDispatcharrPrimaries
             ? // "Filtered" covers every stream of the visible channels.
-              visibleDispatcharrPrimaries.flatMap(
-                (primary) =>
-                  dispatcharrView.byPrimaryIndex
-                    .get(primary.index)
-                    ?.streams.map((entry) => entry.result) ?? [],
-              )
+              visibleDispatcharrPrimaries.flatMap((primary) => {
+                const channel = dispatcharrView.byPrimaryIndex.get(primary.index);
+                return channel ? dispatcharrChannelRows(channel) : [];
+              })
             : filterResultsShared(
                 completedResults,
                 deferredSearch,
@@ -304,19 +303,27 @@ export const Toolbar = memo(function Toolbar({
     void verifyArchives(targets, verifyMode);
   };
 
+  // Dispatcharr exports follow the channels' current order and leave out
+  // streams unlinked this session.
+  const exportAllResults = useMemo(
+    () =>
+      dispatcharrView ? dispatcharrView.channels.flatMap(dispatcharrChannelRows) : completedResults,
+    [dispatcharrView, completedResults],
+  );
+
   const exportContextRef = useRef({
-    all: completedResults,
+    all: exportAllResults,
     filtered: filteredExportResults,
     selectedIndices,
   });
 
   useEffect(() => {
     exportContextRef.current = {
-      all: completedResults,
+      all: exportAllResults,
       filtered: filteredExportResults,
       selectedIndices,
     };
-  }, [completedResults, filteredExportResults, selectedIndices]);
+  }, [exportAllResults, filteredExportResults, selectedIndices]);
 
   useLayoutEffect(() => {
     if (!verifyMenuVisible) {
@@ -403,11 +410,11 @@ export const Toolbar = memo(function Toolbar({
 
   const exportScopeCounts = useMemo(
     () => ({
-      all: completedResults.length,
+      all: exportAllResults.length,
       filtered: filteredExportResults.length,
       selected: selectedIndices.length,
     }),
-    [completedResults.length, filteredExportResults.length, selectedIndices.length],
+    [exportAllResults.length, filteredExportResults.length, selectedIndices.length],
   );
 
   // --- Derived values ---
@@ -1101,6 +1108,9 @@ export const Toolbar = memo(function Toolbar({
             <DispatcharrFixAll
               view={dispatcharrView}
               visiblePrimaries={visibleDispatcharrPrimaries}
+              filtered={
+                deferredSearch.trim() !== "" || groupFilter !== "all" || statusFilter !== "all"
+              }
               disabled={inScanSession}
             />
           )}

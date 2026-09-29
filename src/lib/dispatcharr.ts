@@ -350,3 +350,27 @@ export function dispatcharrLinkedIndices(
   );
   return linked.length < results.length ? linked.sort((a, b) => a - b) : null;
 }
+
+function setAttribute(extinfLine: string, key: string, value: string): string {
+  return extinfLine.replace(new RegExp(`(\\s${key}=)"(?:\\\\.|[^"\\\\])*"`), `$1"${value}"`);
+}
+
+/** A channel's streams as playlist rows in its current Dispatcharr order,
+ *  with titles and order attributes rewritten to match (for export). */
+export function dispatcharrChannelRows(channel: DispatcharrChannelView): ChannelResult[] {
+  const count = channel.streams.length;
+  return channel.streams.map((entry, position) => {
+    const { result } = entry;
+    const name =
+      count > 1
+        ? `${channel.name} [${position + 1}/${count}] ${dispatcharrStreamName(entry)}`
+        : channel.name;
+    let extinfLine = setAttribute(result.extinf_line, "x-dispatcharr-stream-order", `${position}`);
+    extinfLine = setAttribute(extinfLine, "x-dispatcharr-stream-count", `${count}`);
+    extinfLine = setAttribute(extinfLine, "x-dispatcharr-channel-streams", channel.order.join(","));
+    if (extinfLine.endsWith(result.name)) {
+      extinfLine = extinfLine.slice(0, extinfLine.length - result.name.length) + name;
+    }
+    return { ...result, name, extinf_line: extinfLine };
+  });
+}

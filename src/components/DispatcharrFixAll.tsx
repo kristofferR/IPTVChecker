@@ -9,11 +9,18 @@ interface DispatcharrFixAllProps {
   view: DispatcharrView;
   /** Primaries of the channels the current filter shows: the fix scope. */
   visiblePrimaries: ChannelResult[];
+  /** A filter narrows the scope, so the button says "shown", not "all". */
+  filtered: boolean;
   disabled: boolean;
 }
 
 /** "Fix all" for the filtered channels, confirmed with counts before writing. */
-export function DispatcharrFixAll({ view, visiblePrimaries, disabled }: DispatcharrFixAllProps) {
+export function DispatcharrFixAll({
+  view,
+  visiblePrimaries,
+  filtered,
+  disabled,
+}: DispatcharrFixAllProps) {
   const [open, setOpen] = useState(false);
   const [applying, setApplying] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -68,7 +75,7 @@ export function DispatcharrFixAll({ view, visiblePrimaries, disabled }: Dispatch
           open ? "bg-btn-hover" : "bg-btn"
         }`}
       >
-        {applying ? "Fixing..." : `Fix all (${count})`}
+        {applying ? "Fixing..." : `${filtered ? "Fix shown" : "Fix all"} (${count})`}
       </button>
       {open && (
         <div className="macos-popover absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-border-app bg-dropdown p-3 text-[12px] text-text-secondary shadow-xl">

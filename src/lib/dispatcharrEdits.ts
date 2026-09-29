@@ -1,7 +1,13 @@
 import { useAppStore } from "../store";
-import { type DispatcharrView, proposeFixOrder, withHiddenStreams } from "./dispatcharr";
+import {
+  type DispatcharrView,
+  getDispatcharrView,
+  proposeFixOrder,
+  withHiddenStreams,
+} from "./dispatcharr";
 import { errorToString } from "./errors";
 import { dispatcharrGetChannelStreams, dispatcharrSetChannelStreams } from "./tauri";
+import type { ChannelResult } from "./types";
 
 /** A channel's stream order as loaded (`from`) and as intended (`to`). */
 export interface OrderChange {
@@ -16,6 +22,20 @@ export interface ApplyOutcome {
 }
 
 const WRITE_CONCURRENCY = 4;
+
+function currentPrimary(channelId: number): ChannelResult | undefined {
+  const { flatResults, dispatcharrOrders } = useAppStore.getState();
+  return getDispatcharrView(flatResults, dispatcharrOrders)?.byChannelId.get(channelId)?.primary;
+}
+
+/** A selected channel is its primary stream; keep the selection (sidebar,
+ *  Play) on the channel when a write changes which stream that is. */
+function followPrimary(before: ChannelResult | undefined, after: ChannelResult | undefined) {
+  const store = useAppStore.getState();
+  if (before && after && before !== after && store.selectedChannel?.index === before.index) {
+    store.setSelectedChannel(after);
+  }
+}
 
 const sameOrder = (a: number[], b: number[]) =>
   a.length === b.length && a.every((id, i) => id === b[i]);
@@ -81,8 +101,10 @@ async function writeOrders(requested: OrderChange[], undoing: boolean): Promise<
       try {
         await dispatcharrSetChannelStreams(sourceIdentity, change.channelId, change.to);
         if (!stillCurrent()) return;
+        const primaryBefore = currentPrimary(change.channelId);
         store.commitDispatcharrOrder(change.channelId, change.to, undoing ? null : change.from);
         store.setDispatcharrRowState(change.channelId, undoing ? null : { kind: "fixed" });
+        followPrimary(primaryBefore, currentPrimary(change.channelId));
         applied.push(change);
       } catch (error) {
         if (!stillCurrent()) return;

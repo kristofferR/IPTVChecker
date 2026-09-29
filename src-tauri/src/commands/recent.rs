@@ -94,14 +94,12 @@ fn parse_dispatcharr_recent_value(value: &str) -> Option<DispatcharrRecentValue>
     })
 }
 
-/// Source identity of a recent Dispatcharr value. Without a username it is
-/// an API-key source, remembered or not.
+/// Source identity of a recent Dispatcharr value.
 fn dispatcharr_recent_identity(source: &DispatcharrRecentValue) -> Option<String> {
-    let api_key = source.username.is_none().then_some("-");
     crate::commands::saved::source_identity_for_dispatcharr(
         &source.server,
         source.username.as_deref(),
-        source.api_key.as_deref().or(api_key),
+        source.api_key.as_deref(),
     )
     .ok()
 }
@@ -236,11 +234,10 @@ fn find_saved_playlist_for_recent(
                     api_key,
                     ..
                 } => {
-                    let api_key = api_key.as_deref().or(username.is_none().then_some("-"));
                     crate::commands::saved::source_identity_for_dispatcharr(
                         server,
                         username.as_deref(),
-                        api_key,
+                        api_key.as_deref(),
                     )
                     .ok()
                     .as_deref()

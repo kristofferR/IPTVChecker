@@ -159,12 +159,19 @@ pub(crate) fn source_identity_for_dispatcharr(
     api_key: Option<&str>,
 ) -> Result<String, AppError> {
     use crate::engine::dispatcharr::{
-        build_dispatcharr_source_key, normalize_dispatcharr_server, DispatcharrAuth,
+        dispatcharr_source_key, normalize_dispatcharr_server, DispatcharrAuth,
     };
     let base = normalize_dispatcharr_server(server)?;
-    // Identity ignores the secret itself; a placeholder satisfies validation.
-    let auth = DispatcharrAuth::from_parts(username, Some("-"), api_key)?;
-    Ok(build_dispatcharr_source_key(&base, &auth))
+    fn clean(value: Option<&str>) -> Option<&str> {
+        value.map(str::trim).filter(|value| !value.is_empty())
+    }
+    // A key that was not remembered is only known to be "some API key".
+    let label = match (clean(api_key), clean(username)) {
+        (Some(key), _) => DispatcharrAuth::ApiKey(key.to_string()).identity_label(),
+        (None, Some(username)) => username.to_string(),
+        (None, None) => "api-key".to_string(),
+    };
+    Ok(dispatcharr_source_key(&base, &label))
 }
 
 fn sanitize_saved_playlist_entry(

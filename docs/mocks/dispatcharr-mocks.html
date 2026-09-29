@@ -920,7 +920,7 @@
 <ul>
   <li>Undo keeps the channel's previous stream ID list and writes it back with the same PATCH. Streams removed by Fix are only unlinked, never hard-deleted, so Undo can relink them.</li>
   <li>Before each write, re-fetch the channel's streams; if they changed in Dispatcharr since load, skip it and show it as a failure (Changed in Dispatcharr, Reload).</li>
-  <li>Fix all counts come from the whole source (36 channels), not just visible rows.</li>
+  <li>Fix all covers the channels the current filter shows; with a filter active the button reads "Fix shown".</li>
 </ul>
 </main>
 <script>
