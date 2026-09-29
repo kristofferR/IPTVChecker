@@ -163,6 +163,8 @@ export interface OpenSourceDialogState {
   initialXtream: XtreamRecentSource | null;
   initialStalker: StalkerOpenRequest | null;
   initialDispatcharr: DispatcharrOpenRequest | null;
+  /** Saved playlist that a successful Dispatcharr open replaces. */
+  convertSaved?: { id: string; name: string } | null;
 }
 
 export interface MenuExportRequest {

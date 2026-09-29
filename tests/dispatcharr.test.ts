@@ -1,12 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import {
+  dispatcharrServerOfProxyPlaylist,
   getDispatcharrView,
   normalizeDispatcharrServer,
   parseDispatcharrIds,
   proposeFixOrder,
 } from "../src/lib/dispatcharr";
 import { planFix } from "../src/lib/dispatcharrEdits";
-import type { ChannelResult } from "../src/lib/types";
+import type { ChannelResult, PlaylistPreview } from "../src/lib/types";
 
 function extinf(channel: number, stream: number, order: number, count: number, name: string) {
   return `#EXTINF:-1 group-title="News" x-dispatcharr-channel-id="${channel}" x-dispatcharr-stream-id="${stream}" x-dispatcharr-stream-order="${order}" x-dispatcharr-stream-count="${count}" x-dispatcharr-account="Provider \\"A\\"",${name}`;
@@ -198,5 +199,26 @@ describe("dispatcharr helpers", () => {
       "https://example.com/dispatcharr",
     );
     expect(normalizeDispatcharrServer("ftp://example.com")).toBeNull();
+  });
+
+  it("recognizes a Dispatcharr M3U export by its proxy stream URLs", () => {
+    const preview = (urls: string[]) =>
+      ({
+        channels: urls.map((url, index) => ({
+          ...makeResult(index, "#EXTINF:-1,Channel", "Channel"),
+          url,
+        })),
+      }) as unknown as PlaylistPreview;
+    expect(
+      dispatcharrServerOfProxyPlaylist(
+        preview([
+          "http://dvr.example:9191/proxy/ts/stream/a",
+          "http://dvr.example:9191/proxy/ts/stream/b",
+        ]),
+      ),
+    ).toBe("http://dvr.example:9191");
+    expect(
+      dispatcharrServerOfProxyPlaylist(preview(["http://provider.example/live/1.ts"])),
+    ).toBeNull();
   });
 });

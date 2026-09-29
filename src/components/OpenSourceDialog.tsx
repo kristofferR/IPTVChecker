@@ -21,6 +21,8 @@ interface OpenSourceDialogProps {
   initialXtream?: XtreamRecentSource | null;
   initialStalker?: StalkerOpenRequest | null;
   initialDispatcharr?: DispatcharrOpenRequest | null;
+  /** Saved playlist this Dispatcharr source will replace, when converting. */
+  convertSaved?: { id: string; name: string } | null;
   onOpenUrl: (url: string) => Promise<string | true>;
   onOpenXtream: (source: XtreamOpenRequest, savePassword?: boolean) => Promise<string | true>;
   onOpenStalker: (source: StalkerOpenRequest) => Promise<string | true>;
@@ -325,6 +327,7 @@ export default function OpenSourceDialog({
   initialXtream,
   initialStalker,
   initialDispatcharr,
+  convertSaved,
   onOpenUrl,
   onOpenXtream,
   onOpenStalker,
@@ -830,17 +833,23 @@ export default function OpenSourceDialog({
                     </div>
                   </>
                 )}
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={dispatcharrRemember}
-                    onChange={(event) => setDispatcharrRemember(event.target.checked)}
-                    className="rounded border-border-app accent-blue-600"
-                  />
-                  <span className="text-[12px] text-text-secondary">
-                    Save credentials in recents
-                  </span>
-                </label>
+                {convertSaved ? (
+                  <p className="text-[12px] text-text-secondary">
+                    Replaces the saved playlist "{convertSaved.name}".
+                  </p>
+                ) : (
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={dispatcharrRemember}
+                      onChange={(event) => setDispatcharrRemember(event.target.checked)}
+                      className="rounded border-border-app accent-blue-600"
+                    />
+                    <span className="text-[12px] text-text-secondary">
+                      Save credentials in recents
+                    </span>
+                  </label>
+                )}
               </div>
             ) : (
               <div className="space-y-3">

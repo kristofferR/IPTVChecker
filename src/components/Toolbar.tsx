@@ -10,6 +10,7 @@ import {
   Library,
   Link2,
   Loader2,
+  Network,
   Pause,
   Play,
   Radar,
@@ -75,6 +76,7 @@ interface ToolbarProps {
   onOpenFolder: () => void;
   onOpenUrl: () => void;
   onOpenXtream: () => void;
+  onOpenDispatcharr: () => void;
   onSavePlaylist: () => void;
   onManageSavedPlaylists: () => void;
   onStartScan: (verifyCatchup?: boolean) => void;
@@ -108,6 +110,7 @@ export const Toolbar = memo(function Toolbar({
   onOpenFolder,
   onOpenUrl,
   onOpenXtream,
+  onOpenDispatcharr,
   onSavePlaylist,
   onManageSavedPlaylists,
   onStartScan,
@@ -499,7 +502,7 @@ export const Toolbar = memo(function Toolbar({
     useAppStore.getState().setShowHistory(true);
   };
 
-  const handleOpenAction = (action: "file" | "folder" | "url" | "xtream") => {
+  const handleOpenAction = (action: "file" | "folder" | "url" | "xtream" | "dispatcharr") => {
     setOpenMenuVisible(false);
     if (action === "file") {
       onOpen();
@@ -511,6 +514,10 @@ export const Toolbar = memo(function Toolbar({
     }
     if (action === "xtream") {
       onOpenXtream();
+      return;
+    }
+    if (action === "dispatcharr") {
+      onOpenDispatcharr();
       return;
     }
     onOpenUrl();
@@ -874,6 +881,15 @@ export const Toolbar = memo(function Toolbar({
                 >
                   <KeyRound className="h-4 w-4 shrink-0" />
                   <span>Open Xtream</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenAction("dispatcharr")}
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[13px] text-text-primary transition-colors hover:bg-btn-hover"
+                  role="menuitem"
+                >
+                  <Network className="h-4 w-4 shrink-0" />
+                  <span>Open Dispatcharr</span>
                 </button>
               </div>
             )}

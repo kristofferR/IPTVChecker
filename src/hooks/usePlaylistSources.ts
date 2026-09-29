@@ -869,6 +869,43 @@ export function usePlaylistSources({
     [loadAndCommitSource],
   );
 
+  /** Replace a saved playlist (typically a Dispatcharr M3U export) with a
+   *  native Dispatcharr source under the same id and name. The old entry is
+   *  restored if the new source does not open. */
+  const convertSavedPlaylistToDispatcharr = useCallback(
+    async (savedId: string, source: DispatcharrOpenRequest): Promise<string | true> => {
+      const previous = getStore().savedPlaylists.find((entry) => entry.id === savedId);
+      if (!previous) {
+        return "The saved playlist no longer exists.";
+      }
+      try {
+        const result = await upsertSavedPlaylist({
+          id: previous.id,
+          kind: "dispatcharr",
+          display_name: previous.display_name,
+          server: source.server,
+          username: source.username ?? null,
+          password: source.password ?? null,
+          api_key: source.api_key ?? null,
+        });
+        getStore().setSavedPlaylists(result.entries);
+      } catch (err) {
+        return errorToString(err);
+      }
+      const opened = await openSavedPlaylistById(savedId);
+      if (opened !== true) {
+        try {
+          const restored = await upsertSavedPlaylist(savedEntryToDraft(previous));
+          getStore().setSavedPlaylists(restored.entries);
+        } catch (err) {
+          logger.error("[Saved Playlists] Failed to restore after conversion:", err);
+        }
+      }
+      return opened;
+    },
+    [openSavedPlaylistById],
+  );
+
   const openPlaylistStalkerValue = useCallback(
     async (source: StalkerOpenRequest): Promise<string | true> => {
       const result = await loadAndCommitSource(
@@ -1141,6 +1178,7 @@ export function usePlaylistSources({
     openPlaylistXtreamValue,
     openPlaylistStalkerValue,
     openPlaylistDispatcharrValue,
+    convertSavedPlaylistToDispatcharr,
     openSavedPlaylistById,
     handleOpenSaved,
     handleOpenRecent,

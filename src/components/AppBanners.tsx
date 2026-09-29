@@ -1,7 +1,8 @@
 import { Download, ExternalLink, Info, X } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { dismissUpdateNotice } from "../hooks/useUpdateCheck";
 import { type ArchiveDownload, cancelArchiveDownload } from "../lib/archiveDownload";
+import { dispatcharrServerOfProxyPlaylist } from "../lib/dispatcharr";
 import { formatBytes } from "../lib/format";
 import { validateSourceFilterPattern } from "../lib/sourceFilter";
 import {
@@ -14,6 +15,70 @@ import { useAppStore } from "../store";
 
 // Non-reactive store access for writes inside callbacks/effects.
 const getStore = () => useAppStore.getState();
+
+const CONVERT_DISMISSED_KEY = "dispatcharr-convert-dismissed";
+
+function readConvertDismissed(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(CONVERT_DISMISSED_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((value) => typeof value === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Offers to turn a Dispatcharr M3U export into a native Dispatcharr source,
+ *  replacing the saved playlist when it came from one. Dismissal sticks per
+ *  source. */
+function DispatcharrConvertBanner() {
+  const playlist = useAppStore((s) => s.playlist);
+  const savedPlaylists = useAppStore((s) => s.savedPlaylists);
+  const server = useMemo(() => dispatcharrServerOfProxyPlaylist(playlist), [playlist]);
+  const [dismissed, setDismissed] = useState(readConvertDismissed);
+  const sourceKey = playlist?.source_identity ?? playlist?.file_path ?? "";
+  if (!server || dismissed.includes(sourceKey)) return null;
+
+  const saved = savedPlaylists.find((entry) => entry.id === playlist?.saved_playlist_id);
+  const convert = () =>
+    getStore().setOpenSourceDialogState({
+      mode: "dispatcharr",
+      initialUrl: "",
+      initialXtream: null,
+      initialStalker: null,
+      initialDispatcharr: { server },
+      convertSaved: saved ? { id: saved.id, name: saved.display_name } : null,
+    });
+  const dismiss = () => {
+    const next = [...dismissed, sourceKey];
+    localStorage.setItem(CONVERT_DISMISSED_KEY, JSON.stringify(next));
+    setDismissed(next);
+  };
+
+  return (
+    <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-500/10 border-b border-blue-500/20 text-blue-400 text-[13px]">
+      <Info className="w-4 h-4" />
+      <span className="flex-1">
+        This playlist comes from Dispatcharr. Convert it to a Dispatcharr source to check each
+        channel's provider streams and fix their order.
+      </span>
+      <button
+        type="button"
+        onClick={convert}
+        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-blue-400/30 hover:bg-blue-500/15 transition-colors"
+      >
+        Convert
+      </button>
+      <button
+        onClick={dismiss}
+        className="p-1 hover:bg-blue-500/20 rounded transition-colors"
+        type="button"
+        aria-label="Dismiss Dispatcharr suggestion"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
 
 /** Shared banner auto-dismiss shape: whenever `value` becomes truthy, run
  *  `onShow` (optional) and schedule `dismiss` after `timeoutMs`. */
@@ -206,6 +271,8 @@ export function AppBanners({ onInstallUpdate }: AppBannersProps) {
           </button>
         </div>
       )}
+
+      <DispatcharrConvertBanner />
 
       {menuInfo && (
         <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-500/10 border-b border-blue-500/20 text-blue-400 text-[13px]">

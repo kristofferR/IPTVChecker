@@ -678,6 +678,7 @@ export default function App() {
     openPlaylistXtreamValue,
     openPlaylistStalkerValue,
     openPlaylistDispatcharrValue,
+    convertSavedPlaylistToDispatcharr,
     handleOpenSaved,
     handleOpenRecent,
     handleManageSavedPlaylists,
@@ -816,6 +817,16 @@ export default function App() {
   const handleOpenXtream = useCallback(() => {
     openSourceDialog({
       mode: "xtream",
+      initialUrl: "",
+      initialXtream: null,
+      initialStalker: null,
+      initialDispatcharr: null,
+    });
+  }, [openSourceDialog]);
+
+  const handleOpenDispatcharr = useCallback(() => {
+    openSourceDialog({
+      mode: "dispatcharr",
       initialUrl: "",
       initialXtream: null,
       initialStalker: null,
@@ -1685,6 +1696,7 @@ export default function App() {
             onOpenFolder={handleOpenFolder}
             onOpenUrl={handleOpenUrl}
             onOpenXtream={handleOpenXtream}
+            onOpenDispatcharr={handleOpenDispatcharr}
             onSavePlaylist={handleSaveCurrentPlaylist}
             onManageSavedPlaylists={handleManageSavedPlaylists}
             onStartScan={handleStartScan}
@@ -1759,6 +1771,7 @@ export default function App() {
                   onOpenFolder={handleOpenFolder}
                   onOpenUrl={handleOpenUrl}
                   onOpenXtream={handleOpenXtream}
+                  onOpenDispatcharr={handleOpenDispatcharr}
                   onManageSavedPlaylists={handleManageSavedPlaylists}
                   onOpenSaved={handleOpenSaved}
                   onOpenRecent={handleOpenRecent}
@@ -1794,7 +1807,13 @@ export default function App() {
             onOpenUrl={openPlaylistUrlValue}
             onOpenXtream={openPlaylistXtreamValue}
             onOpenStalker={openPlaylistStalkerValue}
-            onOpenDispatcharr={openPlaylistDispatcharrValue}
+            convertSaved={openSourceDialogState.convertSaved ?? null}
+            onOpenDispatcharr={(source, rememberSecrets) => {
+              const convert = openSourceDialogState.convertSaved;
+              return convert
+                ? convertSavedPlaylistToDispatcharr(convert.id, source)
+                : openPlaylistDispatcharrValue(source, rememberSecrets);
+            }}
             onClose={() => getStore().setOpenSourceDialogState(null)}
           />
         </Suspense>

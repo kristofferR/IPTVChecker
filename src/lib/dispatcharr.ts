@@ -304,3 +304,15 @@ export function expandDispatcharrSelection(
     : new Set(indices);
   return Array.from(expanded).sort((a, b) => a - b);
 }
+
+const PROXY_STREAM_PATH = /\/proxy\/(?:ts|hls)\/stream\//i;
+
+/** The Dispatcharr server behind a plain M3U export (its channels point at
+ *  Dispatcharr's `/proxy/.../stream/` URLs), or null. */
+export function dispatcharrServerOfProxyPlaylist(preview: PlaylistPreview | null): string | null {
+  if (!preview || isDispatcharrPreview(preview)) return null;
+  const sample = preview.channels.slice(0, 20);
+  const proxied = sample.filter((channel) => PROXY_STREAM_PATH.test(channel.url));
+  if (proxied.length === 0 || proxied.length * 2 < sample.length) return null;
+  return normalizeDispatcharrServer(proxied[0].url);
+}
