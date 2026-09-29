@@ -193,10 +193,11 @@ impl DispatcharrChannel {
     }
 
     fn tvg_id(&self) -> Option<&str> {
-        self.effective_tvg_id
-            .as_deref()
-            .or(self.tvg_id.as_deref())
-            .filter(|value| !value.is_empty())
+        [&self.effective_tvg_id, &self.tvg_id]
+            .into_iter()
+            .flatten()
+            .map(String::as_str)
+            .find(|value| !value.is_empty())
     }
 
     fn logo_id(&self) -> Option<i64> {
@@ -724,9 +725,20 @@ pub(crate) fn account_connection_slots(
     if limit > *current {
         pool.add_permits(limit - *current);
     } else if limit < *current {
-        // Best effort: permits in use come back and are then kept in check
-        // by the smaller count taken now.
-        pool.forget_permits(*current - limit);
+        let excess = *current - limit;
+        let retired = pool.forget_permits(excess);
+        if retired < excess {
+            // Retire permits still in use as they come back. The semaphore is
+            // fair, so this queues ahead of later callers and the smaller
+            // limit holds from now on.
+            let pool = Arc::clone(pool);
+            let pending = u32::try_from(excess - retired).unwrap_or(u32::MAX);
+            tauri::async_runtime::spawn(async move {
+                if let Ok(permits) = pool.acquire_many_owned(pending).await {
+                    permits.forget();
+                }
+            });
+        }
     }
     *current = limit;
     Arc::clone(pool)
@@ -1458,6 +1470,22 @@ mod tests {
         assert_eq!(resized.available_permits(), 2);
         let other_server = account_connection_slots(&row("http://dvr-b.example"), 9901, 1);
         assert!(!Arc::ptr_eq(&first, &other_server));
+    }
+
+    #[tokio::test]
+    async fn shrinking_account_slots_retires_permits_in_use() {
+        let row = "#EXTINF:-1 x-dispatcharr-server=\"http://dvr-c.example\",N";
+        let pool = account_connection_slots(row, 9902, 3);
+        let held = Arc::clone(&pool).acquire_many_owned(3).await.unwrap();
+        account_connection_slots(row, 9902, 1);
+        drop(held);
+        for _ in 0..100 {
+            if pool.available_permits() == 1 {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("pool kept {} permits", pool.available_permits());
     }
 
     #[test]
