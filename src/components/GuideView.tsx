@@ -19,6 +19,7 @@ import {
   probeArchivePoint,
   verifyArchivePointResponse,
 } from "../lib/archiveProbe";
+import { filterDispatcharrPrimaries, getDispatcharrView } from "../lib/dispatcharr";
 import { fetchGuideProgrammes } from "../lib/epgLoader";
 import { filterResultsShared } from "../lib/filters";
 import {
@@ -290,6 +291,7 @@ export function GuideView({
   headerPortalRef?: RefObject<HTMLDivElement | null>;
 }) {
   const flatResults = useAppStore((s) => s.flatResults);
+  const dispatcharrOrders = useAppStore((s) => s.dispatcharrOrders);
   const playlist = useAppStore((s) => s.playlist);
   const search = useAppStore((s) => s.search);
   const groupFilter = useAppStore((s) => s.groupFilter);
@@ -320,27 +322,39 @@ export function GuideView({
   }, []);
 
   // Every live channel that matches the toolbar filters; catch-up is not required.
-  const channels = useMemo(
-    () =>
-      filterResultsShared(
-        flatResults,
-        search,
-        groupFilter,
-        statusFilter,
-        duplicateIndices,
-        separatePlaceholder,
-        archiveProbes,
-      ).filter((result) => result.content_type === "live"),
-    [
-      flatResults,
-      search,
-      groupFilter,
-      statusFilter,
-      duplicateIndices,
-      separatePlaceholder,
-      archiveProbes,
-    ],
-  );
+  // A Dispatcharr channel appears once, through its primary stream.
+  const channels = useMemo(() => {
+    const dispatcharrView = getDispatcharrView(flatResults, dispatcharrOrders);
+    const matching = dispatcharrView
+      ? filterDispatcharrPrimaries(
+          dispatcharrView,
+          search,
+          groupFilter,
+          statusFilter,
+          duplicateIndices,
+          separatePlaceholder,
+          archiveProbes,
+        )
+      : filterResultsShared(
+          flatResults,
+          search,
+          groupFilter,
+          statusFilter,
+          duplicateIndices,
+          separatePlaceholder,
+          archiveProbes,
+        );
+    return matching.filter((result) => result.content_type === "live");
+  }, [
+    dispatcharrOrders,
+    flatResults,
+    search,
+    groupFilter,
+    statusFilter,
+    duplicateIndices,
+    separatePlaceholder,
+    archiveProbes,
+  ]);
 
   const maxDepthDays = useMemo(() => {
     const deepest = channels.reduce(

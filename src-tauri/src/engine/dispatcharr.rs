@@ -564,18 +564,6 @@ impl DispatcharrClient {
             .await?;
         Ok(channel.streams)
     }
-
-    /// Hard-delete streams from Dispatcharr. M3U-sourced streams come back on
-    /// the account's next refresh.
-    pub(crate) async fn bulk_delete_streams(&self, stream_ids: &[i64]) -> Result<(), AppError> {
-        self.send(
-            Method::DELETE,
-            self.endpoint("/api/channels/streams/bulk-delete/")?,
-            Some(&json!({ "stream_ids": stream_ids })),
-        )
-        .await?;
-        Ok(())
-    }
 }
 
 async fn status_error(path: &str, status: StatusCode, response: reqwest::Response) -> AppError {
@@ -1083,7 +1071,6 @@ mod tests {
             .await
             .unwrap();
         assert!(stats_stuck(stored.as_ref(), &stats));
-        client.bulk_delete_streams(&[9]).await.unwrap();
 
         let bodies = bodies.lock().unwrap();
         assert_eq!(bodies[0].0, "PATCH");
@@ -1094,12 +1081,6 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Value>(&bodies[1].2).unwrap(),
             json!({"stream_stats":{"video_codec":"h264"},"stream_stats_updated_at":"2026-09-29T10:00:00Z"})
-        );
-        assert_eq!(bodies[2].0, "DELETE");
-        assert_eq!(bodies[2].1, "/api/channels/streams/bulk-delete/");
-        assert_eq!(
-            serde_json::from_str::<Value>(&bodies[2].2).unwrap(),
-            json!({"stream_ids":[9]})
         );
     }
 

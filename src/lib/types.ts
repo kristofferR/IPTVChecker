@@ -407,6 +407,7 @@ export interface AppSettings {
   show_header_button_text: boolean;
   external_player_path: string | null;
   persistent_xtream_connection_notice: boolean;
+  dispatcharr_write_stats: boolean;
   automatic_update_checks: boolean;
 }
 

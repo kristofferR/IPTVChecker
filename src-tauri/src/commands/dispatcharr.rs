@@ -1,7 +1,6 @@
 //! Dispatcharr write-back commands: push probe stats into each stream's
-//! `stream_stats`, rewrite a channel's ordered stream list, and hard-delete
-//! streams. All are explicit user actions from the sync dialog. Batches
-//! report per-item outcomes; one failure never aborts the rest.
+//! `stream_stats` and rewrite a channel's ordered stream list. Batches report
+//! per-item outcomes; one failure never aborts the rest.
 
 use crate::engine::dispatcharr::{
     dispatcharr_ids_from_extinf, get_session, merge_stream_stats, normalize_dispatcharr_server,
@@ -251,21 +250,6 @@ pub async fn dispatcharr_set_channel_streams(
         )));
     }
     Ok(stored)
-}
-
-#[tauri::command]
-pub async fn dispatcharr_delete_streams(
-    app: tauri::AppHandle,
-    source_identity: String,
-    stream_ids: Vec<i64>,
-) -> Result<(), AppError> {
-    if stream_ids.is_empty() {
-        return Ok(());
-    }
-    resolve_session(&app, &source_identity)
-        .await?
-        .bulk_delete_streams(&stream_ids)
-        .await
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { createArchiveSlice } from "./slices/archiveSlice";
+import { createDispatcharrSlice } from "./slices/dispatcharrSlice";
 import { createFilterSlice } from "./slices/filterSlice";
 import { createHistorySlice } from "./slices/historySlice";
 import { createPlayerSlice } from "./slices/playerSlice";
@@ -20,4 +21,5 @@ export const useAppStore = create<AppStore>()((...a) => ({
   ...createHistorySlice(...a),
   ...createSettingsSlice(...a),
   ...createArchiveSlice(...a),
+  ...createDispatcharrSlice(...a),
 }));

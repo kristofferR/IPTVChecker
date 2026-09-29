@@ -1,16 +1,23 @@
 import { describe, expect, it } from "bun:test";
 import {
-  groupResultsByDispatcharrChannel,
+  getDispatcharrView,
   normalizeDispatcharrServer,
   parseDispatcharrIds,
+  proposeFixOrder,
 } from "../src/lib/dispatcharr";
+import { planFix } from "../src/lib/dispatcharrEdits";
 import type { ChannelResult } from "../src/lib/types";
 
 function extinf(channel: number, stream: number, order: number, count: number, name: string) {
   return `#EXTINF:-1 group-title="News" x-dispatcharr-channel-id="${channel}" x-dispatcharr-stream-id="${stream}" x-dispatcharr-stream-order="${order}" x-dispatcharr-stream-count="${count}" x-dispatcharr-account="Provider \\"A\\"",${name}`;
 }
 
-function makeResult(index: number, extinfLine: string, name: string): ChannelResult {
+function makeResult(
+  index: number,
+  extinfLine: string,
+  name: string,
+  overrides: Partial<ChannelResult> = {},
+): ChannelResult {
   return {
     index,
     playlist: "fixture.m3u8",
@@ -48,8 +55,30 @@ function makeResult(index: number, extinfLine: string, name: string): ChannelRes
     retry_count: null,
     error_reason: null,
     drm_system: null,
+    ...overrides,
   };
 }
+
+/** One row per stream of channel `channel`, in the given failover order. */
+function channelRows(
+  channel: number,
+  name: string,
+  streams: Array<{ id: number; status?: ChannelResult["status"]; height?: number }>,
+  firstIndex = 0,
+): ChannelResult[] {
+  return streams.map((stream, order) => {
+    const title =
+      streams.length > 1 ? `${name} [${order + 1}/${streams.length}] Feed ${stream.id}` : name;
+    return makeResult(
+      firstIndex + order,
+      extinf(channel, stream.id, order, streams.length, title),
+      title,
+      { status: stream.status ?? "alive", height: stream.height ?? null },
+    );
+  });
+}
+
+const ids = (order: { kind: string; order?: number[] }) => order.order;
 
 describe("dispatcharr helpers", () => {
   it("parses embedded IDs and unescapes attribute values", () => {
@@ -64,18 +93,101 @@ describe("dispatcharr helpers", () => {
     expect(parseDispatcharrIds('#EXTINF:-1 tvg-id="a",Plain')).toBeNull();
   });
 
-  it("groups rows by channel in failover order and strips the stream suffix", () => {
-    const groups = groupResultsByDispatcharrChannel([
-      makeResult(0, extinf(10, 102, 1, 2, "News One [2/2] Feed B"), "News One [2/2] Feed B"),
-      makeResult(1, extinf(20, 201, 0, 1, "Sports 2"), "Sports 2"),
-      makeResult(2, extinf(10, 101, 0, 2, "News One [1/2] Feed A"), "News One [1/2] Feed A"),
+  it("builds one channel per Dispatcharr channel, in failover order", () => {
+    const results = [
+      ...channelRows(10, "News One", [{ id: 101, status: "dead" }, { id: 102 }]),
+      ...channelRows(20, "Sports 2", [{ id: 201 }], 2),
       makeResult(3, "#EXTINF:-1,Plain", "Plain"),
-    ]);
-    expect(groups.map((group) => [group.channelId, group.name])).toEqual([
+    ];
+    const view = getDispatcharrView(results, {});
+    expect(view?.channels.map((channel) => [channel.channelId, channel.name])).toEqual([
       [10, "News One"],
       [20, "Sports 2"],
     ]);
-    expect(groups[0].streams.map((entry) => entry.ref.streamId)).toEqual([101, 102]);
+    const news = view?.byChannelId.get(10);
+    expect(news?.primary.index).toBe(0);
+    expect([news?.primaryDead, news?.hasDead, news?.allDead, news?.alive]).toEqual([
+      true,
+      true,
+      false,
+      1,
+    ]);
+    expect(getDispatcharrView([makeResult(0, "#EXTINF:-1,Plain", "Plain")], {})).toBeNull();
+  });
+
+  it("applies written orders: removed streams disappear and the primary follows", () => {
+    const results = channelRows(10, "News One", [{ id: 101, status: "dead" }, { id: 102 }]);
+    const news = getDispatcharrView(results, { 10: [102] })?.byChannelId.get(10);
+    expect(news?.streams.map((entry) => entry.ref.streamId)).toEqual([102]);
+    expect(news?.primary.index).toBe(1);
+    expect(news?.primaryDead).toBe(false);
+  });
+
+  it("orders working streams by resolution, then untested, then others; drops dead", () => {
+    const results = channelRows(10, "News One", [
+      { id: 1, status: "dead" },
+      { id: 2, status: "alive", height: 720 },
+      { id: 3, status: "pending" },
+      { id: 4, status: "geoblocked" },
+      { id: 5, status: "alive", height: 1080 },
+      { id: 6, status: "alive", height: 720 },
+    ]);
+    const channel = getDispatcharrView(results, {})?.byChannelId.get(10);
+    if (!channel) throw new Error("missing channel");
+    expect(ids(proposeFixOrder(channel))).toEqual([5, 2, 6, 3, 4]);
+  });
+
+  it("leaves all-dead and already-ordered channels alone", () => {
+    const view = getDispatcharrView(
+      [
+        ...channelRows(10, "News One", [
+          { id: 1, status: "dead" },
+          { id: 2, status: "dead" },
+        ]),
+        ...channelRows(
+          20,
+          "Sports 2",
+          [
+            { id: 3, height: 1080 },
+            { id: 4, height: 720 },
+          ],
+          2,
+        ),
+      ],
+      {},
+    );
+    if (!view) throw new Error("missing view");
+    const [news, sports] = view.channels;
+    expect(proposeFixOrder(news).kind).toBe("all_dead");
+    expect(proposeFixOrder(sports).kind).toBe("none");
+  });
+
+  it("plans a bulk fix with separate reorder, removal, and skip counts", () => {
+    const view = getDispatcharrView(
+      [
+        // Only a dead stream to drop: removal without reordering.
+        ...channelRows(10, "News One", [{ id: 1 }, { id: 2, status: "dead" }]),
+        // A better stream behind the primary: reordered.
+        ...channelRows(
+          20,
+          "Sports 2",
+          [
+            { id: 3, height: 720 },
+            { id: 4, height: 1080 },
+          ],
+          2,
+        ),
+        ...channelRows(30, "Movies", [{ id: 5, status: "dead" }], 4),
+      ],
+      {},
+    );
+    if (!view) throw new Error("missing view");
+    const plan = planFix(view, [10, 20, 30]);
+    expect(plan.changes.map((change) => [change.channelId, change.to])).toEqual([
+      [10, [1]],
+      [20, [4, 3]],
+    ]);
+    expect([plan.reordered, plan.removed, plan.skippedAllDead]).toEqual([1, 1, 1]);
   });
 
   it("reduces pasted Dispatcharr links to the server, keeping a path prefix", () => {

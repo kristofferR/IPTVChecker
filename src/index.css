@@ -393,6 +393,10 @@ body {
   border-top: 1px solid var(--border-subtle);
 }
 
+.toolbar-filters.has-action {
+  grid-template-columns: auto minmax(0, 1.2fr) minmax(10rem, 0.8fr) minmax(0, 1fr) auto;
+}
+
 @media (width < 1050px) {
   /* Keep labels below icons: putting them alongside makes narrow toolbars wider. */
   .toolbar-actions .toolbar-btn {

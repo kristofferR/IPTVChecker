@@ -309,6 +309,8 @@ export function usePlaylistSources({
       state.setSelectedChannel(null);
       state.setSelectedChannelIndices([]);
       state.clearArchiveProbes();
+      // A (re)load reflects Dispatcharr's current orders, so session edits are moot.
+      state.resetDispatcharrEdits();
       state.setPendingPlaybackChannel(null);
 
       return true;

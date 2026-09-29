@@ -131,13 +131,6 @@ export async function dispatcharrSetChannelStreams(
   return invoke("dispatcharr_set_channel_streams", { sourceIdentity, channelId, streamIds });
 }
 
-export async function dispatcharrDeleteStreams(
-  sourceIdentity: string,
-  streamIds: number[],
-): Promise<void> {
-  return invoke("dispatcharr_delete_streams", { sourceIdentity, streamIds });
-}
-
 export async function startScan(config: ScanConfig): Promise<string> {
   return invoke("start_scan", { config });
 }

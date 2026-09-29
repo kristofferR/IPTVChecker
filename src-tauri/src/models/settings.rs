@@ -96,6 +96,10 @@ pub struct AppSettings {
     pub external_player_path: Option<String>,
     /// Keep the Xtream max-connections notice visible until it is dismissed.
     pub persistent_xtream_connection_notice: bool,
+    /// After a scan of a Dispatcharr source, merge probe results into each
+    /// stream's `stream_stats` in Dispatcharr. Off by default: it writes to
+    /// the user's server.
+    pub dispatcharr_write_stats: bool,
     /// Look for a signed update on launch and every six hours. Discovery only
     /// ever surfaces a notice; installing always needs explicit confirmation.
     pub automatic_update_checks: bool,
@@ -222,6 +226,7 @@ impl Default for AppSettings {
             show_header_button_text: !cfg!(target_os = "macos"),
             external_player_path: None,
             persistent_xtream_connection_notice: false,
+            dispatcharr_write_stats: false,
             automatic_update_checks: true,
         }
     }

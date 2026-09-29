@@ -16,6 +16,12 @@ import { createArchiveProbeSequenceGuard, probeChannelArchive } from "../lib/arc
 import { channelRowHeightPixels } from "../lib/channelLogoSize";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { getChannelTableLayout } from "../lib/channelTableLayout";
+import {
+  type DispatcharrChannelView,
+  filterDispatcharrPrimaries,
+  getDispatcharrView,
+} from "../lib/dispatcharr";
+import { applyOrderChanges, planFix, undoChannels } from "../lib/dispatcharrEdits";
 import type { SortDirection, SortField } from "../lib/filters";
 import { filterResultsShared, sortResults } from "../lib/filters";
 import { statusLabel } from "../lib/format";
@@ -38,7 +44,8 @@ import {
 } from "../lib/tableColumns";
 import type { ChannelResult } from "../lib/types";
 import { useAppStore } from "../store";
-import { ChannelRow } from "./ChannelRow";
+import { ChannelRow, type DispatcharrRowMeta, type StreamAction } from "./ChannelRow";
+import { DispatcharrToast } from "./DispatcharrToast";
 
 interface ChannelTableProps {
   onSelectChannel: (result: ChannelResult) => void;
@@ -57,6 +64,7 @@ interface ChannelTableProps {
 
 /** ms to coalesce rapid arrow-key presses into one cast redirect. */
 const CAST_REDIRECT_DEBOUNCE_MS = 300;
+const DISPATCHARR_STATUS_WIDTH = 124;
 
 type CopyAction = "name" | "url" | "m3u" | "metadata";
 
@@ -154,6 +162,15 @@ export function ChannelTable({
   const externalPlaybackActive = useAppStore((s) => s.externalPlaybackActive);
   const separatePlaceholder = useAppStore((s) => s.settings.separate_placeholder_status);
   const onSelectionChange = useAppStore((s) => s.setSelectedChannelIndices);
+  const dispatcharrOrders = useAppStore((s) => s.dispatcharrOrders);
+  const dispatcharrRowStates = useAppStore((s) => s.dispatcharrRowStates);
+  const dispatcharrView = useMemo(
+    () => getDispatcharrView(completedResults, dispatcharrOrders),
+    [completedResults, dispatcharrOrders],
+  );
+  const dispatcharrViewRef = useRef(dispatcharrView);
+  dispatcharrViewRef.current = dispatcharrView;
+  const [expandedChannels, setExpandedChannels] = useState<ReadonlySet<number>>(() => new Set());
   const rawSearch = useAppStore((s) => s.search);
   const search = useDeferredValue(rawSearch);
   const parentRef = useRef<HTMLDivElement>(null);
@@ -286,26 +303,37 @@ export function ChannelTable({
     return () => ro.disconnect();
   }, []);
 
+  // Dispatcharr channel rows show a per-stream health strip in the status
+  // column, which needs more room than a status dot.
+  const hasDispatcharrRows = dispatcharrView !== null;
+  const layoutWidths = useMemo(
+    () =>
+      hasDispatcharrRows
+        ? { ...columnWidths, status: Math.max(columnWidths.status, DISPATCHARR_STATUS_WIDTH) }
+        : columnWidths,
+    [columnWidths, hasDispatcharrRows],
+  );
+
   const effectiveNameWidth = useMemo(() => {
     if (!columnOrder.includes("name") || containerWidth === 0) {
-      return columnWidths.name;
+      return layoutWidths.name;
     }
     const sumOther = columns.reduce(
-      (sum, col) => sum + (col.key === "name" ? 0 : columnWidths[col.key]),
+      (sum, col) => sum + (col.key === "name" ? 0 : layoutWidths[col.key]),
       0,
     );
     const autoWidth = containerWidth - sumOther - 32; // px-4 padding on each side
-    return Math.max(columnWidths.name, autoWidth);
-  }, [columns, columnOrder, columnWidths, containerWidth]);
+    return Math.max(layoutWidths.name, autoWidth);
+  }, [columns, columnOrder, layoutWidths, containerWidth]);
 
   const gridTemplateColumns = useMemo(
     () =>
       columns
         .map(
-          (column) => `${column.key === "name" ? effectiveNameWidth : columnWidths[column.key]}px`,
+          (column) => `${column.key === "name" ? effectiveNameWidth : layoutWidths[column.key]}px`,
         )
         .join(" "),
-    [columns, columnWidths, effectiveNameWidth],
+    [columns, layoutWidths, effectiveNameWidth],
   );
 
   const ROW_PADDING_PX = 32; // px-4 on each side
@@ -313,10 +341,10 @@ export function ChannelTable({
     () =>
       columns.reduce(
         (sum, column) =>
-          sum + (column.key === "name" ? effectiveNameWidth : columnWidths[column.key]),
+          sum + (column.key === "name" ? effectiveNameWidth : layoutWidths[column.key]),
         0,
       ) + ROW_PADDING_PX,
-    [columns, columnWidths, effectiveNameWidth],
+    [columns, layoutWidths, effectiveNameWidth],
   );
 
   const unsortedResults = useMemo(
@@ -324,15 +352,25 @@ export function ChannelTable({
       measureUiPerf(
         "table.filter",
         () =>
-          filterResultsShared(
-            completedResults,
-            search,
-            groupFilter,
-            statusFilter,
-            duplicateIndices,
-            separatePlaceholder,
-            archiveProbes,
-          ),
+          dispatcharrView
+            ? filterDispatcharrPrimaries(
+                dispatcharrView,
+                search,
+                groupFilter,
+                statusFilter,
+                duplicateIndices,
+                separatePlaceholder,
+                archiveProbes,
+              )
+            : filterResultsShared(
+                completedResults,
+                search,
+                groupFilter,
+                statusFilter,
+                duplicateIndices,
+                separatePlaceholder,
+                archiveProbes,
+              ),
         {
           rows: completedResults.length,
           search: search.length,
@@ -342,6 +380,7 @@ export function ChannelTable({
       ),
     [
       completedResults,
+      dispatcharrView,
       search,
       groupFilter,
       statusFilter,
@@ -353,7 +392,7 @@ export function ChannelTable({
 
   // Probe updates leave ordinary filters unchanged. Keep their sorted array
   // stable too, so the virtualizer does not rebuild its measurements.
-  const filteredResults = useMemo(
+  const sortedResults = useMemo(
     () =>
       measureUiPerf("table.sort", () => sortResults(unsortedResults, sortField, sortDir), {
         rows: unsortedResults.length,
@@ -362,13 +401,45 @@ export function ChannelTable({
     [unsortedResults, sortField, sortDir],
   );
 
+  // Dispatcharr sources show one row per channel (its primary stream), with
+  // the streams of expanded channels listed beneath in failover order.
+  const { filteredResults, rowMeta } = useMemo(() => {
+    if (!dispatcharrView) {
+      return { filteredResults: sortedResults, rowMeta: null };
+    }
+    const rows: ChannelResult[] = [];
+    const meta: DispatcharrRowMeta[] = [];
+    for (const primary of sortedResults) {
+      const channel = dispatcharrView.byPrimaryIndex.get(primary.index);
+      if (!channel) continue;
+      const expanded = expandedChannels.has(channel.channelId);
+      rows.push(primary);
+      meta.push({ kind: "channel", channel, expanded });
+      if (expanded) {
+        channel.streams.forEach((entry, position) => {
+          rows.push(entry.result);
+          meta.push({ kind: "stream", channel, entry, position });
+        });
+      }
+    }
+    return { filteredResults: rows, rowMeta: meta };
+  }, [dispatcharrView, sortedResults, expandedChannels]);
+
   const estimatedRowHeight = channelRowHeightPixels(channelLogoSize);
   const getVirtualItemKey = useCallback(
-    (index: number) => filteredResults[index]?.index ?? index,
+    (index: number) => {
+      const meta = rowMeta?.[index];
+      if (meta) {
+        return meta.kind === "channel"
+          ? `c${meta.channel.channelId}`
+          : `s${meta.channel.channelId}:${meta.entry.ref.streamId}`;
+      }
+      return filteredResults[index]?.index ?? index;
+    },
     // TanStack Virtual memoizes its key map by callback identity. Filters and
     // sorting can reorder rows without changing the item count, so the
     // callback must change with the ordered results.
-    [filteredResults],
+    [filteredResults, rowMeta],
   );
 
   const virtualizer = useVirtualizer({
@@ -390,15 +461,69 @@ export function ChannelTable({
   }, [channelLogoSize, virtualizer]);
 
   filteredResultsRef.current = filteredResults;
+  const rowMetaRef = useRef(rowMeta);
+  rowMetaRef.current = rowMeta;
   selectedIndicesRef.current = selectedIndices;
   contextMenuOpenRef.current = contextMenuState !== null;
 
   const emitSelection = useCallback(
     (next: Set<number>) => {
-      const ordered = Array.from(next).sort((a, b) => a - b);
+      // A selected Dispatcharr channel stands for all of its streams, so
+      // "scan selected" checks every one of them.
+      const view = dispatcharrViewRef.current;
+      const expanded = view
+        ? new Set(
+            Array.from(next).flatMap((index) => {
+              const channel = view.byPrimaryIndex.get(index);
+              return channel ? channel.streams.map((entry) => entry.result.index) : [index];
+            }),
+          )
+        : next;
+      const ordered = Array.from(expanded).sort((a, b) => a - b);
       onSelectionChange?.(ordered);
     },
     [onSelectionChange],
+  );
+
+  const toggleChannelExpanded = useCallback((channelId: number) => {
+    setExpandedChannels((previous) => {
+      const next = new Set(previous);
+      if (!next.delete(channelId)) next.add(channelId);
+      return next;
+    });
+  }, []);
+
+  const handleFixChannel = useCallback((channel: DispatcharrChannelView) => {
+    const view = dispatcharrViewRef.current;
+    if (!view) return;
+    void applyOrderChanges(planFix(view, [channel.channelId]).changes);
+  }, []);
+
+  const handleUndoChannel = useCallback((channel: DispatcharrChannelView) => {
+    const view = dispatcharrViewRef.current;
+    if (view) void undoChannels(view, [channel.channelId]);
+  }, []);
+
+  const handleRetryChannel = useCallback((channel: DispatcharrChannelView) => {
+    const rowState = useAppStore.getState().dispatcharrRowStates[channel.channelId];
+    if (rowState?.kind === "failed") {
+      void applyOrderChanges([{ channelId: channel.channelId, ...rowState.retry }]);
+    }
+  }, []);
+
+  const handleStreamAction = useCallback(
+    (channel: DispatcharrChannelView, position: number, action: StreamAction) => {
+      const from = channel.streams.map((entry) => entry.ref.streamId);
+      const to = [...from];
+      const [streamId] = to.splice(position, 1);
+      if (action === "primary") to.unshift(streamId);
+      else if (action === "up") to.splice(Math.max(0, position - 1), 0, streamId);
+      else if (action === "down") to.splice(position + 1, 0, streamId);
+      // "remove" leaves it out; the backend refuses to empty a channel.
+      if (to.length === 0) return;
+      void applyOrderChanges([{ channelId: channel.channelId, from, to }]);
+    },
+    [],
   );
 
   // Compute the next selection outside the setState updater: updaters must be
@@ -770,12 +895,21 @@ export function ChannelTable({
       } else if (event.key === "ArrowUp") {
         event.preventDefault();
         moveFocusByRef.current(-1);
+      } else if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+        const row = focusedRowRef.current;
+        const meta = row === null ? undefined : rowMetaRef.current?.[row];
+        if (!meta) return;
+        const expanded = meta.kind === "stream" || meta.expanded;
+        if (expanded !== (event.key === "ArrowRight")) {
+          event.preventDefault();
+          toggleChannelExpanded(meta.channel.channelId);
+        }
       }
     };
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [toggleChannelExpanded]);
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -881,6 +1015,10 @@ export function ChannelTable({
     (
       event: React.MouseEvent<HTMLDivElement>,
     ): { rowIndex: number; result: ChannelResult } | null => {
+      // Inline row controls (Dispatcharr actions) handle their own clicks.
+      if (event.target instanceof Element && event.target.closest("button")) {
+        return null;
+      }
       const rowIndexRaw = event.currentTarget.dataset.rowIndex;
       const rowIndex = rowIndexRaw ? Number.parseInt(rowIndexRaw, 10) : Number.NaN;
       if (!Number.isFinite(rowIndex)) {
@@ -1277,6 +1415,27 @@ export function ChannelTable({
     hasPortaledHeader: Boolean(portalTarget),
   });
 
+  const scanRunning = isScanActive(scanState);
+  const dispatcharrActions = useMemo(
+    () => ({
+      // Orders are judged on scan results, so edits wait for the scan.
+      disabled: scanRunning,
+      onToggleExpand: toggleChannelExpanded,
+      onFix: handleFixChannel,
+      onUndo: handleUndoChannel,
+      onRetry: handleRetryChannel,
+      onStreamAction: handleStreamAction,
+    }),
+    [
+      scanRunning,
+      toggleChannelExpanded,
+      handleFixChannel,
+      handleUndoChannel,
+      handleRetryChannel,
+      handleStreamAction,
+    ],
+  );
+
   const renderVirtualRows = useCallback(
     (items: typeof virtualItems, mode: "main" | "reveal") =>
       items.map((virtualRow) => {
@@ -1284,6 +1443,7 @@ export function ChannelTable({
         if (!result) {
           return null;
         }
+        const meta = rowMeta?.[virtualRow.index];
 
         const rowTop =
           mode === "main"
@@ -1316,12 +1476,20 @@ export function ChannelTable({
               columns={columns}
               gridTemplateColumns={gridTemplateColumns}
               tableWidth={tableWidth}
+              dispatcharr={meta}
+              dispatcharrRowState={
+                meta?.kind === "channel" ? dispatcharrRowStates[meta.channel.channelId] : undefined
+              }
+              dispatcharrActions={meta && mode === "main" ? dispatcharrActions : undefined}
             />
           </div>
         );
       }),
     [
       channelLogoSize,
+      dispatcharrActions,
+      dispatcharrRowStates,
+      rowMeta,
       columns,
       duplicateIndices,
       filteredResults,
@@ -1425,6 +1593,7 @@ export function ChannelTable({
 
   return (
     <div className="flex flex-col flex-1 min-h-0 relative">
+      {dispatcharrView && <DispatcharrToast view={dispatcharrView} />}
       {/* Column header — portaled into toolbar on macOS, or inline fallback */}
       {portalTarget ? createPortal(headerElement, portalTarget) : headerElement}
 

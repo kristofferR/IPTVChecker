@@ -33,6 +33,7 @@ import { StatsPanel } from "./components/StatsPanel";
 import { ThumbnailPanel } from "./components/ThumbnailPanel";
 import { Toolbar } from "./components/Toolbar";
 import { type UseChromecastResult, useChromecast } from "./hooks/useChromecast";
+import { useDispatcharrStatsPush } from "./hooks/useDispatcharrStatsPush";
 import { useMenuEventBridge } from "./hooks/useMenuEventBridge";
 import { usePlaylistSources } from "./hooks/usePlaylistSources";
 import { useScan } from "./hooks/useScan";
@@ -541,6 +542,7 @@ export default function App() {
   const playIntentActive = useAppStore((s) => s.playIntentActive);
   const castActive = useAppStore((s) => s.castActive);
   const verifyCatchupScanStartedRef = useRef(false);
+  useDispatcharrStatsPush();
 
   // Opt-in "Scan + Verify Catch-up": run the verification pass once the scan
   // finishes; a cancelled or reset scan drops the request.

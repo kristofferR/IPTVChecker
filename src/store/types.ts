@@ -2,6 +2,7 @@ import type { ScanUiMetrics } from "../hooks/useScan.helpers";
 import type { ArchiveDownload } from "../lib/archiveDownload";
 import type { ArchiveProbeEntry } from "../lib/archiveProbe";
 import type { ArchiveVerifyRun } from "../lib/archiveVerifyRun";
+import type { DispatcharrOrders } from "../lib/dispatcharr";
 import type { Platform } from "../lib/platform";
 import type { ScanState } from "../lib/scanState";
 import type {
@@ -285,6 +286,38 @@ export interface SettingsSlice {
 }
 
 // ---------------------------------------------------------------------------
+// Dispatcharr edits
+// ---------------------------------------------------------------------------
+
+export type DispatcharrRowState =
+  | { kind: "writing" }
+  | { kind: "fixed" }
+  | { kind: "failed"; error: string; retry: { from: number[]; to: number[] } };
+
+export interface DispatcharrToast {
+  fixed: number;
+  removed: number;
+  failed: number;
+  /** Channels "Undo all" restores. */
+  channelIds: number[];
+}
+
+export interface DispatcharrSlice {
+  /** Stream orders written to Dispatcharr this session, keyed by channel id. */
+  dispatcharrOrders: DispatcharrOrders;
+  /** Order each edited channel had before its last write, for Undo. */
+  dispatcharrUndo: DispatcharrOrders;
+  dispatcharrRowStates: Record<number, DispatcharrRowState>;
+  dispatcharrToast: DispatcharrToast | null;
+
+  setDispatcharrRowState: (channelId: number, state: DispatcharrRowState | null) => void;
+  /** Record a written order; `undoOrder` null clears the channel's undo. */
+  commitDispatcharrOrder: (channelId: number, order: number[], undoOrder: number[] | null) => void;
+  setDispatcharrToast: (toast: DispatcharrToast | null) => void;
+  resetDispatcharrEdits: () => void;
+}
+
+// ---------------------------------------------------------------------------
 // Combined store
 // ---------------------------------------------------------------------------
 
@@ -296,4 +329,5 @@ export type AppStore = PlaylistSlice &
   PlayerSlice &
   HistorySlice &
   SettingsSlice &
-  ArchiveSlice;
+  ArchiveSlice &
+  DispatcharrSlice;

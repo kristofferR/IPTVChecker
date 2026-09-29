@@ -2,6 +2,7 @@ import { memo, type ReactNode, startTransition, useDeferredValue, useMemo } from
 import { hasArchive } from "../lib/archive";
 import { archiveVerdict } from "../lib/archiveVerification";
 import { computeCatchupScore, withCatchupScore } from "../lib/catchupScore";
+import { getDispatcharrView, isUntestedStatus } from "../lib/dispatcharr";
 import { filterResultsShared, isCatchupStatusFilter } from "../lib/filters";
 import type { Channel } from "../lib/types";
 import { useAppStore } from "../store";
@@ -109,6 +110,24 @@ export const StatsPanel = memo(function StatsPanel() {
   const groupFilter = useAppStore((s) => s.groupFilter);
   const separatePlaceholder = useAppStore((s) => s.settings.separate_placeholder_status);
   const stats = summary ?? progress;
+  const dispatcharrOrders = useAppStore((s) => s.dispatcharrOrders);
+  // Dispatcharr sources count channels rather than streams.
+  const channelStats = useMemo(() => {
+    const view = getDispatcharrView(results, dispatcharrOrders);
+    if (!view) return null;
+    const tally = { alive: 0, primaryDead: 0, hasDead: 0, allDead: 0, checked: 0, streams: 0 };
+    for (const channel of view.channels) {
+      if (channel.primary.status === "alive") tally.alive += 1;
+      if (channel.primaryDead) tally.primaryDead += 1;
+      if (channel.hasDead) tally.hasDead += 1;
+      if (channel.allDead) tally.allDead += 1;
+      tally.streams += channel.streams.length;
+      tally.checked += channel.streams.filter(
+        (entry) => !isUntestedStatus(entry.result.status),
+      ).length;
+    }
+    return { channels: view.channels.length, ...tally };
+  }, [results, dispatcharrOrders]);
   const effectiveLowFpsCount = summary?.low_framerate ?? lowFpsCount;
   const effectiveMislabeledCount = summary?.mislabeled ?? mislabeledCount;
   const displayScore = useMemo(() => {
@@ -209,12 +228,50 @@ export const StatsPanel = memo(function StatsPanel() {
     <div className="flex items-center gap-2 px-4 py-1.5 border-t border-border-app bg-panel-subtle glass-material select-none">
       <Pill
         icon={<SFListNumber className={iconSize} />}
-        label={`${totalChannels} total`}
+        label={channelStats ? `${channelStats.channels} channels` : `${totalChannels} total`}
         color="neutral"
         active={statusFilter === "all"}
         onClick={() => handleStatusChange("all")}
       />
-      {stats && (
+      {channelStats && stats && (
+        <>
+          <Pill
+            icon={<SFCheckmarkCircleFill className={iconSize} />}
+            label={String(channelStats.alive)}
+            color="green"
+            active={statusFilter === "alive"}
+            onClick={() => toggleFilter("alive")}
+          />
+          {channelStats.primaryDead > 0 && (
+            <Pill
+              icon={<SFXmarkCircleFill className={iconSize} />}
+              label={`${channelStats.primaryDead} primary dead`}
+              color="red"
+              active={statusFilter === "primary_dead"}
+              onClick={() => toggleFilter("primary_dead")}
+            />
+          )}
+          {channelStats.hasDead > 0 && (
+            <Pill
+              icon={<SFExclamationTriangleFill className={iconSize} />}
+              label={`${channelStats.hasDead} with dead streams`}
+              color="orange"
+              active={statusFilter === "has_dead"}
+              onClick={() => toggleFilter("has_dead")}
+            />
+          )}
+          {channelStats.allDead > 0 && (
+            <Pill
+              icon={<SFXmarkCircleFill className={iconSize} />}
+              label={`${channelStats.allDead} all dead`}
+              color="red"
+              active={statusFilter === "all_dead"}
+              onClick={() => toggleFilter("all_dead")}
+            />
+          )}
+        </>
+      )}
+      {!channelStats && stats && (
         <>
           <Pill
             icon={<SFCheckmarkCircleFill className={iconSize} />}
@@ -273,6 +330,11 @@ export const StatsPanel = memo(function StatsPanel() {
           color="blue"
           onClick={toggleReportPanel}
         />
+      )}
+      {channelStats && stats && (
+        <span className="text-[12px] text-text-tertiary tabular-nums">
+          {channelStats.checked} of {channelStats.streams} streams checked
+        </span>
       )}
       {showRightStatus && (
         <div className="ml-auto flex items-center gap-2">

@@ -1080,6 +1080,25 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
 
             <section className={blockClass}>
               <div className={rowClass}>
+                <div>
+                  <p className="text-[13px] font-medium">Write probe results to Dispatcharr</p>
+                  <p className="text-[11px] text-text-tertiary mt-0.5">
+                    After scanning a Dispatcharr source, store each stream's codec, resolution, and
+                    bitrate in Dispatcharr.
+                  </p>
+                </div>
+                <Switch
+                  checked={draft.dispatcharr_write_stats}
+                  onChange={(checked) =>
+                    updateSetting("dispatcharr_write_stats", checked, { immediate: true })
+                  }
+                  ariaLabel="Write probe results to Dispatcharr"
+                />
+              </div>
+            </section>
+
+            <section className={blockClass}>
+              <div className={rowClass}>
                 <div className="min-w-0">
                   <p className="text-[13px] font-medium">User agent</p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">

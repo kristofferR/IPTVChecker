@@ -38,6 +38,13 @@ import {
   storeArchiveVerifyMode,
   verifyArchives,
 } from "../lib/archiveVerifyRun";
+import {
+  DISPATCHARR_STATUS_FILTERS,
+  type DispatcharrStatusFilter,
+  filterDispatcharrPrimaries,
+  getDispatcharrView,
+  matchesDispatcharrStatus,
+} from "../lib/dispatcharr";
 import type { ExportScope } from "../lib/exportScope";
 import {
   CATCHUP_VERDICT_FILTERS,
@@ -49,6 +56,7 @@ import { measureUiPerf } from "../lib/perf";
 import { validateSourceFilterPattern } from "../lib/sourceFilter";
 import type { ChannelResult } from "../lib/types";
 import { useAppStore } from "../store";
+import { DispatcharrFixAll } from "./DispatcharrFixAll";
 import { ExportMenu } from "./ExportMenu";
 import {
   SFChevronDown,
@@ -150,29 +158,27 @@ export const Toolbar = memo(function Toolbar({
   const [verifyMode, setVerifyMode] = useState<ArchiveVerifyMode>(readArchiveVerifyMode);
   const [verifyScope, setVerifyScope] = useState<ExportScope>("all");
 
-  const filteredExportResults = useMemo(
+  const dispatcharrOrders = useAppStore((s) => s.dispatcharrOrders);
+  const dispatcharrView = useMemo(
+    () => getDispatcharrView(completedResults, dispatcharrOrders),
+    [completedResults, dispatcharrOrders],
+  );
+  // Dispatcharr sources filter channels (by their primary stream).
+  const visibleDispatcharrPrimaries = useMemo(
     () =>
-      measureUiPerf(
-        "toolbar.export-filter",
-        () =>
-          filterResultsShared(
-            completedResults,
+      dispatcharrView
+        ? filterDispatcharrPrimaries(
+            dispatcharrView,
             deferredSearch,
             groupFilter,
             statusFilter,
             duplicateIndices,
             separatePlaceholder,
             archiveProbes,
-          ),
-        {
-          rows: completedResults.length,
-          search: deferredSearch.length,
-          group: groupFilter,
-          status: statusFilter,
-        },
-      ),
+          )
+        : null,
     [
-      completedResults,
+      dispatcharrView,
       deferredSearch,
       groupFilter,
       statusFilter,
@@ -182,26 +188,84 @@ export const Toolbar = memo(function Toolbar({
     ],
   );
 
-  const statusOptionCounts = useMemo(
+  const filteredExportResults = useMemo(
     () =>
-      countStatusOptions(
-        completedResults,
-        deferredSearch,
-        groupFilter,
-        duplicateIndices,
-        sharedSearchTextCache,
-        separatePlaceholder,
-        archiveProbes,
+      measureUiPerf(
+        "toolbar.export-filter",
+        () =>
+          dispatcharrView && visibleDispatcharrPrimaries
+            ? // "Filtered" covers every stream of the visible channels.
+              visibleDispatcharrPrimaries.flatMap(
+                (primary) =>
+                  dispatcharrView.byPrimaryIndex
+                    .get(primary.index)
+                    ?.streams.map((entry) => entry.result) ?? [],
+              )
+            : filterResultsShared(
+                completedResults,
+                deferredSearch,
+                groupFilter,
+                statusFilter,
+                duplicateIndices,
+                separatePlaceholder,
+                archiveProbes,
+              ),
+        {
+          rows: completedResults.length,
+          search: deferredSearch.length,
+          group: groupFilter,
+          status: statusFilter,
+        },
       ),
     [
       completedResults,
+      dispatcharrView,
+      visibleDispatcharrPrimaries,
       deferredSearch,
       groupFilter,
+      statusFilter,
       duplicateIndices,
       separatePlaceholder,
       archiveProbes,
     ],
   );
+
+  const statusOptionCounts = useMemo(() => {
+    const counts = countStatusOptions(
+      dispatcharrView?.primaries ?? completedResults,
+      deferredSearch,
+      groupFilter,
+      duplicateIndices,
+      sharedSearchTextCache,
+      separatePlaceholder,
+      archiveProbes,
+    );
+    if (dispatcharrView) {
+      const channels = filterResultsShared(
+        dispatcharrView.primaries,
+        deferredSearch,
+        groupFilter,
+        "all",
+        duplicateIndices,
+        separatePlaceholder,
+        archiveProbes,
+      ).flatMap((primary) => dispatcharrView.byPrimaryIndex.get(primary.index) ?? []);
+      for (const filter of Object.keys(DISPATCHARR_STATUS_FILTERS) as DispatcharrStatusFilter[]) {
+        counts[filter] = channels.filter((channel) =>
+          matchesDispatcharrStatus(channel, filter),
+        ).length;
+      }
+    }
+    return counts;
+  }, [
+    completedResults,
+    dispatcharrView,
+    deferredSearch,
+    groupFilter,
+    duplicateIndices,
+    separatePlaceholder,
+    archiveProbes,
+  ]);
   const catchupChannelCount = useMemo(
     () => completedResults.filter(hasArchive).length,
     [completedResults],
@@ -907,7 +971,10 @@ export const Toolbar = memo(function Toolbar({
         </div>
       </div>
       {hasPlaylist && (
-        <div data-no-window-drag className="toolbar-filters">
+        <div
+          data-no-window-drag
+          className={`toolbar-filters ${dispatcharrView ? "has-action" : ""}`}
+        >
           {/* Table / Guide mode switch */}
           <div
             data-no-window-drag
@@ -964,6 +1031,12 @@ export const Toolbar = memo(function Toolbar({
             <option value="drm">{statusLabel("drm", "DRM")}</option>
             <option value="dead">{statusLabel("dead", "Dead")}</option>
             <option value="geoblocked">{statusLabel("geoblocked", "Geoblocked")}</option>
+            {dispatcharrView &&
+              Object.entries(DISPATCHARR_STATUS_FILTERS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {statusLabel(value, label)}
+                </option>
+              ))}
             {(statusOptionCounts.placeholder ?? 0) > 0 && (
               <option value="placeholder">{statusLabel("placeholder", "Placeholder")}</option>
             )}
@@ -1008,6 +1081,13 @@ export const Toolbar = memo(function Toolbar({
               className="native-field h-7 w-full min-w-0 pl-7 pr-2 text-[12px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:cursor-not-allowed"
             />
           </div>
+          {dispatcharrView && visibleDispatcharrPrimaries && (
+            <DispatcharrFixAll
+              view={dispatcharrView}
+              visiblePrimaries={visibleDispatcharrPrimaries}
+              disabled={inScanSession}
+            />
+          )}
         </div>
       )}
     </div>

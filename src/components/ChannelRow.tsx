@@ -14,7 +14,15 @@ import { detectChannelProtocol } from "../lib/streamProtocol";
 import type { ColumnDefinition } from "../lib/tableColumns";
 import type { ChannelLogoSize, ChannelResult } from "../lib/types";
 import { useAppStore } from "../store";
+import type { DispatcharrRowState } from "../store/types";
 import { ChannelLogo } from "./ChannelLogo";
+import {
+  ChannelHealth,
+  ChannelNameCell,
+  type DispatcharrRowActions,
+  type DispatcharrRowMeta,
+  StreamNameCell,
+} from "./DispatcharrCells";
 import { StatusBadge } from "./StatusBadge";
 
 function formatLatency(latencyMs: number): string {
@@ -47,7 +55,13 @@ interface ChannelRowProps {
   tableWidth: number;
   onRowDoubleClick?: (event: React.MouseEvent<HTMLDivElement>) => void;
   onRowContextMenu?: (event: React.MouseEvent<HTMLDivElement>) => void;
+  /** Set for Dispatcharr sources: a channel row or one of its streams. */
+  dispatcharr?: DispatcharrRowMeta;
+  dispatcharrRowState?: DispatcharrRowState;
+  dispatcharrActions?: DispatcharrRowActions;
 }
+
+export type { DispatcharrRowMeta, StreamAction } from "./DispatcharrCells";
 
 function ChannelRowImpl({
   rowIndex,
@@ -62,6 +76,9 @@ function ChannelRowImpl({
   tableWidth,
   onRowDoubleClick,
   onRowContextMenu,
+  dispatcharr,
+  dispatcharrRowState,
+  dispatcharrActions,
 }: ChannelRowProps) {
   const isAlive = result.status === "alive";
   const logoSizePx = useMemo(() => channelLogoPixels(channelLogoSize), [channelLogoSize]);
@@ -71,7 +88,48 @@ function ChannelRowImpl({
   const streamProtocol = useMemo(() => detectChannelProtocol(result), [result]);
   const probeEntry = useAppStore((s) => s.archiveProbes[result.index]);
 
+  const renderDispatcharrCell = (column: ColumnDefinition, meta: DispatcharrRowMeta) => {
+    const isChannel = meta.kind === "channel";
+    switch (column.key) {
+      case "index":
+        return isChannel ? (
+          <span className="text-text-tertiary tabular-nums">
+            {result.tvg_chno ?? result.index + 1}
+          </span>
+        ) : (
+          <span className="pl-3 text-text-tertiary tabular-nums">{meta.position + 1}</span>
+        );
+      case "status":
+        return isChannel ? <ChannelHealth channel={meta.channel} /> : undefined;
+      case "name":
+        return isChannel ? (
+          <ChannelNameCell
+            channel={meta.channel}
+            expanded={meta.expanded}
+            rowState={dispatcharrRowState}
+            actions={dispatcharrActions}
+            logo={<ChannelLogo result={result} size={logoSizePx} />}
+          />
+        ) : (
+          <StreamNameCell
+            channel={meta.channel}
+            entry={meta.entry}
+            position={meta.position}
+            actions={dispatcharrActions}
+          />
+        );
+      case "group":
+        return isChannel ? undefined : null;
+      default:
+        return undefined;
+    }
+  };
+
   const renderCell = (column: ColumnDefinition) => {
+    if (dispatcharr) {
+      const cell = renderDispatcharrCell(column, dispatcharr);
+      if (cell !== undefined) return cell;
+    }
     switch (column.key) {
       case "index":
         return <span className="text-text-tertiary tabular-nums">{result.index + 1}</span>;
@@ -220,7 +278,9 @@ function ChannelRowImpl({
   return (
     <div
       data-row-index={rowIndex}
-      className={`channel-row select-none grid items-center px-4 text-sm border-b hover:bg-panel-subtle ${
+      className={`channel-row group select-none grid items-center px-4 text-sm border-b hover:bg-panel-subtle ${
+        dispatcharr?.kind === "stream" ? "bg-black/15" : ""
+      } ${dispatcharrRowState?.kind === "fixed" && !selected ? "bg-green-500/5" : ""} ${
         selected ? "selected bg-panel-subtle border-transparent" : "border-border-subtle"
       } ${duplicate && !selected ? "bg-amber-500/8" : ""} ${
         duplicate ? "ring-1 ring-amber-500/20" : ""
@@ -269,7 +329,10 @@ function equalChannelRowProps(
     previous.tableWidth === next.tableWidth &&
     previous.onRowClick === next.onRowClick &&
     previous.onRowDoubleClick === next.onRowDoubleClick &&
-    previous.onRowContextMenu === next.onRowContextMenu
+    previous.onRowContextMenu === next.onRowContextMenu &&
+    previous.dispatcharr === next.dispatcharr &&
+    previous.dispatcharrRowState === next.dispatcharrRowState &&
+    previous.dispatcharrActions === next.dispatcharrActions
   );
 }
 
