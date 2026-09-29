@@ -490,25 +490,34 @@ impl DispatcharrClient {
     ) -> Result<Vec<DispatcharrStream>, AppError> {
         let mut streams = Vec::with_capacity(ids.len());
         for chunk in ids.chunks(STREAMS_BY_IDS_CHUNK) {
-            let page: ListPage<DispatcharrStream> = self
-                .json(
-                    Method::POST,
-                    "/api/channels/streams/by-ids/",
-                    Some(&json!({ "ids": chunk })),
-                )
-                .await?;
-            match page {
-                ListPage::Bare(items)
-                | ListPage::Paginated {
-                    results: items,
-                    next: None,
-                } => streams.extend(items),
-                // A paged answer would silently drop streams; callers fall
-                // back to per-channel requests, which follow pagination.
-                ListPage::Paginated { next: Some(_), .. } => {
-                    return Err(AppError::Other(
-                        "Dispatcharr paginated the bulk stream lookup".to_string(),
-                    ))
+            let body = json!({ "ids": chunk });
+            // Current servers answer with a bare list; follow pages in case
+            // a server paginates, repeating the request body for each page.
+            let mut url = Some(self.endpoint("/api/channels/streams/by-ids/")?);
+            let mut pages = 0;
+            while let Some(current) = url.take() {
+                pages += 1;
+                if pages > MAX_PAGES {
+                    return Err(AppError::Other(format!(
+                        "Dispatcharr stream lookup exceeded {} pages",
+                        MAX_PAGES
+                    )));
+                }
+                let bytes = self
+                    .send(Method::POST, current, Some(&body))
+                    .await?
+                    .bytes()
+                    .await?;
+                match serde_json::from_slice::<ListPage<DispatcharrStream>>(&bytes).map_err(
+                    |error| {
+                        AppError::Parse(format!("Unexpected Dispatcharr stream lookup: {}", error))
+                    },
+                )? {
+                    ListPage::Bare(items) => streams.extend(items),
+                    ListPage::Paginated { results, next } => {
+                        streams.extend(results);
+                        url = next.as_deref().and_then(|next| self.rewrite_next(next));
+                    }
                 }
             }
         }
@@ -1038,6 +1047,29 @@ mod tests {
             channels.iter().map(|c| c.id).collect::<Vec<_>>(),
             vec![1, 2]
         );
+    }
+
+    #[tokio::test]
+    async fn bulk_stream_lookup_follows_pages() {
+        let base = spawn_server(Arc::new(|req: &Request| {
+            assert_eq!(req.method, "POST");
+            assert!(req.body.contains("\"ids\":[1,2]"));
+            if req.path.ends_with("?page=2") {
+                (200, r#"{"next":null,"results":[{"id":2}]}"#.into())
+            } else {
+                (
+                    200,
+                    r#"{"next":"http://internal/api/channels/streams/by-ids/?page=2","results":[{"id":1}]}"#
+                        .into(),
+                )
+            }
+        }))
+        .await;
+        let streams = client(&base, DispatcharrAuth::ApiKey("k".into()))
+            .fetch_streams_by_ids(&[1, 2])
+            .await
+            .unwrap();
+        assert_eq!(streams.iter().map(|s| s.id).collect::<Vec<_>>(), vec![1, 2]);
     }
 
     #[tokio::test]

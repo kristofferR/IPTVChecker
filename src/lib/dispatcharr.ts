@@ -319,14 +319,18 @@ export function expandDispatcharrSelection(
 
 const PROXY_STREAM_PATH = /\/proxy\/(?:ts|hls)\/stream\//i;
 
-/** The Dispatcharr server behind a plain M3U export (its channels point at
- *  Dispatcharr's `/proxy/.../stream/` URLs), or null. */
+/** The Dispatcharr server behind a plain M3U export, or null. Every channel
+ *  must be a proxy URL of that one server: converting replaces the whole
+ *  source, so a mixed playlist would lose its other channels. */
 export function dispatcharrServerOfProxyPlaylist(preview: PlaylistPreview | null): string | null {
-  if (!preview || isDispatcharrPreview(preview)) return null;
-  const sample = preview.channels.slice(0, 20);
-  const proxied = sample.filter((channel) => PROXY_STREAM_PATH.test(channel.url));
-  if (proxied.length === 0 || proxied.length * 2 < sample.length) return null;
-  return normalizeDispatcharrServer(proxied[0].url);
+  if (!preview || preview.channels.length === 0 || isDispatcharrPreview(preview)) return null;
+  const server = normalizeDispatcharrServer(preview.channels[0].url);
+  if (!server) return null;
+  const allFromServer = preview.channels.every(
+    (channel) =>
+      PROXY_STREAM_PATH.test(channel.url) && normalizeDispatcharrServer(channel.url) === server,
+  );
+  return allFromServer ? server : null;
 }
 
 /** A full order for Dispatcharr from a new order of the visible streams:

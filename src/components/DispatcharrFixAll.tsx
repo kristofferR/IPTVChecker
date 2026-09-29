@@ -37,6 +37,11 @@ export function DispatcharrFixAll({
   );
   const count = plan.changes.length;
 
+  // A scan starting while the confirm is open would change the plan under it.
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
   useEffect(() => {
     if (!open) return;
     const handlePointerDown = (event: MouseEvent) => {
@@ -54,6 +59,7 @@ export function DispatcharrFixAll({
   }, [open]);
 
   const handleConfirm = async () => {
+    if (disabled) return;
     setApplying(true);
     try {
       await applyFixPlan(plan);
@@ -115,7 +121,7 @@ export function DispatcharrFixAll({
             </button>
             <button
               type="button"
-              disabled={applying}
+              disabled={applying || disabled}
               onClick={() => void handleConfirm()}
               className="rounded-md bg-blue-600 px-2.5 py-1 font-medium text-white hover:bg-blue-500 disabled:opacity-50"
             >

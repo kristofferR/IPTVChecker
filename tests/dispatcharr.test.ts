@@ -226,6 +226,20 @@ describe("dispatcharr helpers", () => {
     expect(
       dispatcharrServerOfProxyPlaylist(preview(["http://provider.example/live/1.ts"])),
     ).toBeNull();
+    // Mixed playlists would lose channels on conversion, so they get no offer.
+    expect(
+      dispatcharrServerOfProxyPlaylist(
+        preview([
+          "http://dvr.example:9191/proxy/ts/stream/a",
+          "http://other.example:9191/proxy/ts/stream/b",
+        ]),
+      ),
+    ).toBeNull();
+    expect(
+      dispatcharrServerOfProxyPlaylist(
+        preview(["http://dvr.example:9191/proxy/ts/stream/a", "http://provider.example/live/1.ts"]),
+      ),
+    ).toBeNull();
   });
 
   it("keeps streams without a row in the order it checks and writes", () => {

@@ -426,9 +426,11 @@ fn sanitize_recent_playlists_inner(
                 match find_saved_playlist_for_recent(app, &entry_kind, &value) {
                     Ok(entry) => entry,
                     Err(error) => {
+                        // Log the label: Xtream and Dispatcharr values can
+                        // hold remembered credentials.
                         log::warn!(
                             "Failed to backfill saved playlist id for recent entry '{}': {}",
-                            value,
+                            build_label(&entry_kind, &value),
                             error
                         );
                         None

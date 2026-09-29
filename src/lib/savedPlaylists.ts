@@ -116,13 +116,18 @@ export function findSavedPlaylistForCurrentSource(
   if (descriptor.kind === "dispatcharr") {
     const targetServer = normalizeDispatcharrServer(descriptor.server);
     if (!targetServer) return null;
-    const targetUser = descriptor.api_key?.trim() ? null : descriptor.username?.trim() || null;
+    // The account is the API key when there is one, otherwise the login.
+    const account = (source: { api_key?: string | null; username?: string | null }) => {
+      const key = source.api_key?.trim();
+      return key ? `key:${key}` : `user:${source.username?.trim() ?? ""}`;
+    };
+    const targetAccount = account(descriptor);
     return (
       savedPlaylists.find(
         (entry) =>
           entry.kind === "dispatcharr" &&
           normalizeDispatcharrServer(entry.server) === targetServer &&
-          (entry.api_key?.trim() ? null : entry.username?.trim() || null) === targetUser,
+          account(entry) === targetAccount,
       ) ?? null
     );
   }
