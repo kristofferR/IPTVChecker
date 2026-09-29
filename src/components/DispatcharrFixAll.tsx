@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFixPreferences } from "../hooks/useFixPreferences";
-import type { DispatcharrView } from "../lib/dispatcharr";
+import { type DispatcharrView, isUntestedStatus } from "../lib/dispatcharr";
 import { applyFixPlan, planFix } from "../lib/dispatcharrEdits";
 import type { ChannelResult } from "../lib/types";
 
@@ -39,6 +39,20 @@ export function DispatcharrFixAll({
     [view, visiblePrimaries, preferences],
   );
   const count = plan.changes.length;
+  // Why the button is unavailable. Disabled buttons do not reliably show a
+  // tooltip, so the wrapper carries it.
+  const unavailableReason = useMemo(() => {
+    if (disabled) return "Available when the scan finishes";
+    if (count > 0) return undefined;
+    const scanned = visiblePrimaries.some((primary) =>
+      view.byPrimaryIndex
+        .get(primary.index)
+        ?.streams.some((entry) => !isUntestedStatus(entry.result.status)),
+    );
+    return scanned
+      ? "Every shown channel is already in order"
+      : "Scan the channels first; Fix order uses the scan results";
+  }, [disabled, count, visiblePrimaries, view]);
 
   // A scan starting while the confirm is open would change the plan under it.
   useEffect(() => {
@@ -73,12 +87,11 @@ export function DispatcharrFixAll({
   };
 
   return (
-    <div ref={rootRef} className="relative shrink-0">
+    <div ref={rootRef} className="relative shrink-0" title={unavailableReason}>
       <button
         type="button"
         disabled={disabled || count === 0 || applying}
         aria-expanded={open}
-        title={disabled ? "Available when the scan finishes" : undefined}
         onClick={() => setOpen((value) => !value)}
         className={`h-7 rounded-md border border-border-app px-2.5 text-[12px] text-text-primary hover:bg-btn-hover disabled:cursor-not-allowed disabled:opacity-50 ${
           open ? "bg-btn-hover" : "bg-btn"
