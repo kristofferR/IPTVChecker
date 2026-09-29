@@ -15,8 +15,11 @@ export function DispatcharrToast() {
   const handleUndoAll = async () => {
     setUndoing(true);
     try {
-      await undoChannels(toast.channelIds);
-      setToast(null);
+      const { applied } = await undoChannels(toast.channelIds);
+      const restored = new Set(applied.map((change) => change.channelId));
+      const remaining = toast.channelIds.filter((id) => !restored.has(id));
+      // Failed channels show their error inline; keep them undoable here.
+      setToast(remaining.length === 0 ? null : { ...toast, channelIds: remaining });
     } finally {
       setUndoing(false);
     }

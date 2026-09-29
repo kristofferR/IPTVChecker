@@ -880,6 +880,12 @@ export function usePlaylistSources({
       if (!previous) {
         return "The saved playlist no longer exists.";
       }
+      // Confirm the Dispatcharr source works before replacing anything.
+      try {
+        await openPlaylistDispatcharr(source);
+      } catch (err) {
+        return formatPlaylistOpenError(err);
+      }
       try {
         const result = await upsertSavedPlaylist({
           id: previous.id,
@@ -894,6 +900,7 @@ export function usePlaylistSources({
       } catch (err) {
         return errorToString(err);
       }
+      // The entry is verified now; only a failed (not superseded) open restores.
       const opened = await openSavedPlaylistById(savedId);
       if (opened !== true) {
         try {

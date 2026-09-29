@@ -102,14 +102,14 @@ export function applyOrderChanges(changes: OrderChange[]): Promise<ApplyOutcome>
 /** Restore the order each channel had before its last edit. The drift check
  *  compares against the order that was written, which can hold streams the
  *  loaded playlist has no row for. */
-export async function undoChannels(channelIds: number[]): Promise<void> {
+export async function undoChannels(channelIds: number[]): Promise<ApplyOutcome> {
   const { dispatcharrUndo, dispatcharrOrders } = useAppStore.getState();
   const changes = channelIds.flatMap((channelId) => {
     const previous = dispatcharrUndo[channelId];
     const written = dispatcharrOrders[channelId];
     return previous && written ? [{ channelId, from: written, to: previous }] : [];
   });
-  await writeOrders(changes, true);
+  return writeOrders(changes, true);
 }
 
 export interface FixPlan {
