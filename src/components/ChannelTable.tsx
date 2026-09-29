@@ -30,7 +30,11 @@ import { statusLabel } from "../lib/format";
 import { measureUiPerf } from "../lib/perf";
 import { isSingleConnectionPlaylist } from "../lib/playback";
 import { isScanActive } from "../lib/scanState";
-import { isInputLikeTarget, isPrimaryModifierPressed } from "../lib/shortcuts";
+import {
+  isInputLikeTarget,
+  isPrimaryModifierPressed,
+  SELECT_ALL_ROWS_EVENT,
+} from "../lib/shortcuts";
 import { detectChannelProtocol } from "../lib/streamProtocol";
 import {
   COLUMN_DEFINITION_MAP,
@@ -770,6 +774,14 @@ export function ChannelTable({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [isMac]);
+
+  // Edit > Select All (the app's own menu item, which Cmd+A triggers on
+  // macOS before keydown) selects every visible row.
+  useEffect(() => {
+    const handler = () => selectAllVisibleRef.current();
+    window.addEventListener(SELECT_ALL_ROWS_EVENT, handler);
+    return () => window.removeEventListener(SELECT_ALL_ROWS_EVENT, handler);
+  }, []);
 
   const handleSort = useCallback(
     (field: SortField) => {

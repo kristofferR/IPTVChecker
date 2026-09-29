@@ -417,6 +417,25 @@ fn clear_menu_window_state(window_label: &str) {
     }
 }
 
+/// Main windows select every table row (or a text field's content, which
+/// the frontend handles). Other windows (log, settings) get the webview's
+/// ordinary select-all.
+fn select_all_in_focused_window(app: &tauri::AppHandle) {
+    let Some(window) = app.get_focused_window() else {
+        return;
+    };
+    let label = window.label().to_string();
+    let is_main = READY_MENU_WINDOWS
+        .lock()
+        .map(|ready| ready.contains(&label))
+        .unwrap_or(false);
+    if is_main {
+        let _ = emit_menu_event_to_window(app, &label, "menu://select-all", "focused window");
+    } else if let Some(webview) = app.get_webview_window(&label) {
+        let _ = webview.eval("document.execCommand('selectAll')");
+    }
+}
+
 fn emit_menu_event_to_focused_window(app: &tauri::AppHandle, event_name: &str) {
     if let Some(window) = app.get_focused_window() {
         let window_label = window.label().to_string();
@@ -680,6 +699,11 @@ pub fn run() {
             file_builder.build()?
         };
 
+        // The app's own Select All: the stock item selects the page's text on
+        // macOS before the table sees Cmd+A.
+        let select_all_item = MenuItemBuilder::with_id("menu.edit.select_all", "Select All")
+            .accelerator(accel("A"))
+            .build(app)?;
         let edit_menu = SubmenuBuilder::new(app, "Edit")
             .undo()
             .redo()
@@ -687,7 +711,7 @@ pub fn run() {
             .cut()
             .copy()
             .paste()
-            .select_all()
+            .item(&select_all_item)
             .build()?;
 
         let toggle_sidebar_item =
@@ -792,6 +816,10 @@ pub fn run() {
         log::debug!("menu event: id={}", event.id().as_ref());
         if event.id().as_ref() == "menu.file.new_window" {
             create_new_window(app);
+            return;
+        }
+        if event.id().as_ref() == "menu.edit.select_all" {
+            select_all_in_focused_window(app);
             return;
         }
 
