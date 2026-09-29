@@ -58,6 +58,7 @@ import { measureUiPerf } from "../lib/perf";
 import { validateSourceFilterPattern } from "../lib/sourceFilter";
 import type { ChannelResult } from "../lib/types";
 import { useAppStore } from "../store";
+import { DispatcharrFindButton } from "./DispatcharrFindPanel";
 import { DispatcharrFixAll } from "./DispatcharrFixAll";
 import { ExportMenu } from "./ExportMenu";
 import {
@@ -1105,15 +1106,20 @@ export const Toolbar = memo(function Toolbar({
               className="native-field h-7 w-full min-w-0 pl-7 pr-2 text-[12px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:cursor-not-allowed"
             />
           </div>
-          {dispatcharrView && visibleDispatcharrPrimaries && (
-            <DispatcharrFixAll
-              view={dispatcharrView}
-              visiblePrimaries={visibleDispatcharrPrimaries}
-              filtered={
-                deferredSearch.trim() !== "" || groupFilter !== "all" || statusFilter !== "all"
-              }
-              disabled={inScanSession}
-            />
+          {dispatcharrView && (
+            <div className="flex shrink-0 items-center gap-2">
+              <DispatcharrFindButton view={dispatcharrView} />
+              {visibleDispatcharrPrimaries && (
+                <DispatcharrFixAll
+                  view={dispatcharrView}
+                  visiblePrimaries={visibleDispatcharrPrimaries}
+                  filtered={
+                    deferredSearch.trim() !== "" || groupFilter !== "all" || statusFilter !== "all"
+                  }
+                  disabled={inScanSession}
+                />
+              )}
+            </div>
           )}
         </div>
       )}

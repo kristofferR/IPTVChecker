@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, ChevronRight, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronRight, TextSearch, X } from "lucide-react";
 import { useMemo } from "react";
 import { useFixPreferences } from "../hooks/useFixPreferences";
 import {
@@ -29,6 +29,7 @@ export interface DispatcharrRowActions {
   onUndo: (channel: DispatcharrChannelView) => void;
   onRetry: (channel: DispatcharrChannelView) => void;
   onStreamAction: (channel: DispatcharrChannelView, position: number, action: StreamAction) => void;
+  onFindStreams: (channel: DispatcharrChannelView) => void;
 }
 
 const BAR_COLOR: Record<ChannelStatus, string> = {
@@ -107,7 +108,7 @@ function ChannelRowStatus({
     case "fixed":
       return (
         <>
-          <span className="shrink-0 text-[12px] text-green-400">Fixed</span>
+          <span className="shrink-0 text-[12px] text-green-400">{rowState.label ?? "Fixed"}</span>
           {actions && (
             <button
               type="button"
@@ -145,11 +146,12 @@ function ChannelRowStatus({
         </>
       );
     default:
-      if (channel.allDead) return <span className="text-[12px] text-red-400">All dead</span>;
+      if (channel.allDead)
+        return <span className="whitespace-nowrap text-[12px] text-red-400">All dead</span>;
       if (channel.primaryDead)
-        return <span className="text-[12px] text-red-400">Primary dead</span>;
+        return <span className="whitespace-nowrap text-[12px] text-red-400">Primary dead</span>;
       if (channel.primaryProviderDown)
-        return <span className="text-[12px] text-amber-400">Provider down</span>;
+        return <span className="whitespace-nowrap text-[12px] text-amber-400">Provider down</span>;
       return null;
   }
 }
@@ -205,6 +207,36 @@ export function ChannelNameCell({
             Fix order
           </button>
         )}
+        {actions &&
+          !busy &&
+          // A channel with nothing working always offers it; others on hover,
+          // compact, next to Fix order.
+          (channel.noWorking ? (
+            <button
+              type="button"
+              className={`${buttonClass} inline-flex items-center gap-1`}
+              onClick={(event) => {
+                stop(event);
+                actions.onFindStreams(channel);
+              }}
+            >
+              <TextSearch className="h-3 w-3" />
+              Find streams
+            </button>
+          ) : (
+            <button
+              type="button"
+              aria-label="Find streams"
+              title="Find streams"
+              className={`${iconButtonClass} ${expanded ? "" : "sr-only group-hover:not-sr-only focus:not-sr-only"}`}
+              onClick={(event) => {
+                stop(event);
+                actions.onFindStreams(channel);
+              }}
+            >
+              <TextSearch className="h-3 w-3" />
+            </button>
+          ))}
       </span>
     </span>
   );

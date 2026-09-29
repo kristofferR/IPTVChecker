@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  addedStreamRow,
   apiKeyFingerprint,
   dispatcharrChannelRows,
   dispatcharrLinkedIndices,
@@ -10,6 +11,7 @@ import {
   normalizeDispatcharrServer,
   parseDispatcharrIds,
   proposeFixOrder,
+  unlinkedStreams,
 } from "../src/lib/dispatcharr";
 import { planFix } from "../src/lib/dispatcharrEdits";
 import type { ChannelResult, PlaylistPreview } from "../src/lib/types";
@@ -115,6 +117,7 @@ describe("dispatcharr helpers", () => {
       channelUuid: null,
       account: 'Provider "A"',
       accountId: null,
+      added: false,
       streamName: null,
       channelStreams: null,
     });
@@ -408,5 +411,28 @@ describe("dispatcharr helpers", () => {
       "connection errors",
     );
     expect(failureCause(row("Not a video stream"))).toBeNull();
+  });
+
+  it("adds linked streams as rows that full rescans leave alone", () => {
+    const results = channelRows(10, "News One", [{ id: 1 }, { id: 2 }]);
+    const view = getDispatcharrView(results, {});
+    const channel = view?.byChannelId.get(10);
+    if (!channel) throw new Error("missing channel");
+    const found = makeResult(0, extinf(10, 7, 0, 1, "News One", "Feed 7"), "Feed 7");
+    const added = addedStreamRow(found, channel, 5);
+    expect(added.index).toBe(5);
+    expect(parseDispatcharrIds(added.extinf_line)?.added).toBe(true);
+    const orders = { 10: [7, 1, 2] };
+    const withAdded = [...results, added];
+    expect(getDispatcharrView(withAdded, orders)?.byChannelId.get(10)?.primary.index).toBe(5);
+    // The added row has no source row to rescan; the loaded ones do.
+    expect(dispatcharrLinkedIndices(withAdded, orders)).toEqual([0, 1]);
+  });
+
+  it("offers streams unlinked this session back to their channel", () => {
+    const results = channelRows(10, "News One", [{ id: 1 }, { id: 2, status: "dead" }]);
+    const channel = getDispatcharrView(results, { 10: [1] })?.byChannelId.get(10);
+    if (!channel) throw new Error("missing channel");
+    expect(unlinkedStreams(results, channel).map((entry) => entry.ref.streamId)).toEqual([2]);
   });
 });

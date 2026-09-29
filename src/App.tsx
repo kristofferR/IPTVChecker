@@ -24,6 +24,7 @@ import { AppBanners } from "./components/AppBanners";
 import { ArchiveVerifyBar } from "./components/ArchiveVerifyBar";
 import type { CastStartHandler } from "./components/CastMenu";
 import { ChannelTable } from "./components/ChannelTable";
+import { DispatcharrFindPanel } from "./components/DispatcharrFindPanel";
 import { FilterBar } from "./components/FilterBar";
 import { GuideView } from "./components/GuideView";
 import { PlaylistReportPanel } from "./components/PlaylistReportPanel";
@@ -576,6 +577,7 @@ export default function App() {
   }, [verifyCatchupAfterScan, scanState, playIntentActive, castActive, playlist]);
   const sidebarWidth = useAppStore((s) => s.sidebarWidth);
   const showReportPanel = useAppStore((s) => s.showReportPanel);
+  const dispatcharrFind = useAppStore((s) => s.dispatcharrFind);
   const reportSidebarWidth = useAppStore((s) => s.reportSidebarWidth);
   const showKeyboardShortcuts = useAppStore((s) => s.showKeyboardShortcuts);
   const isDragOver = useAppStore((s) => s.isDragOver);
@@ -1830,13 +1832,18 @@ export default function App() {
               )}
             </div>
 
-            {playlist && showReportPanel && (
-              <PlaylistReportPanel
-                placement="right"
-                widthPx={reportSidebarWidth}
-                onResizeStart={handleReportSidebarDragStart}
-                onClose={handleCloseReport}
-              />
+            {playlist && dispatcharrFind ? (
+              <DispatcharrFindPanel />
+            ) : (
+              playlist &&
+              showReportPanel && (
+                <PlaylistReportPanel
+                  placement="right"
+                  widthPx={reportSidebarWidth}
+                  onResizeStart={handleReportSidebarDragStart}
+                  onClose={handleCloseReport}
+                />
+              )
             )}
           </div>
 

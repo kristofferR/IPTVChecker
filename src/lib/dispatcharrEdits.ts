@@ -1,6 +1,8 @@
 import { useAppStore } from "../store";
 import {
+  addedStreamRow,
   DEFAULT_FIX_PREFERENCES,
+  type DispatcharrChannelView,
   type DispatcharrView,
   dispatcharrTarget,
   type FixPreferences,
@@ -54,7 +56,11 @@ const sameOrder = (a: number[], b: number[]) =>
 /** Write stream orders to Dispatcharr. Each channel is re-read just before
  *  its write and refused if it no longer matches `from`, so edits made in Dispatcharr since
  *  load are never overwritten. A failed channel never stops the others. */
-async function writeOrders(requested: OrderChange[], undoing: boolean): Promise<ApplyOutcome> {
+async function writeOrders(
+  requested: OrderChange[],
+  undoing: boolean,
+  label?: string,
+): Promise<ApplyOutcome> {
   const store = useAppStore.getState();
   const target = dispatcharrTarget(store.playlist);
   // A channel already being written keeps its first write; a second one
@@ -115,7 +121,7 @@ async function writeOrders(requested: OrderChange[], undoing: boolean): Promise<
         if (!stillCurrent()) return;
         const primaryBefore = currentPrimary(change.channelId);
         store.commitDispatcharrOrder(change.channelId, change.to, undoing ? null : change.from);
-        store.setDispatcharrRowState(change.channelId, undoing ? null : { kind: "fixed" });
+        store.setDispatcharrRowState(change.channelId, undoing ? null : { kind: "fixed", label });
         followSelection(change, primaryBefore);
         applied.push(change);
       } catch (error) {
@@ -158,6 +164,58 @@ export function reverseChanges(changes: OrderChange[]): Promise<ApplyOutcome> {
     pending.map((change) => ({ channelId: change.channelId, from: change.to, to: change.from })),
     true,
   );
+}
+
+/** Link found provider streams to a channel, first or last in its order.
+ *  Streams without a loaded row get one, so the channel shows them now. */
+export async function linkStreams(
+  channel: DispatcharrChannelView,
+  picked: ChannelResult[],
+  position: "primary" | "end",
+): Promise<boolean> {
+  const ids = picked.flatMap((result) => {
+    const ref = parseDispatcharrIds(result.extinf_line);
+    return ref ? [ref.streamId] : [];
+  });
+  const rest = channel.order.filter((id) => !ids.includes(id));
+  const to = position === "primary" ? [...ids, ...rest] : [...rest, ...ids];
+  const { applied } = await writeOrders(
+    [{ channelId: channel.channelId, from: channel.order, to }],
+    false,
+    `Linked ${ids.length}`,
+  );
+  if (applied.length === 0) return false;
+
+  const store = useAppStore.getState();
+  const loaded = new Set(
+    store.flatResults.flatMap((result) => {
+      const ref = parseDispatcharrIds(result.extinf_line);
+      return ref?.channelId === channel.channelId ? [ref.streamId] : [];
+    }),
+  );
+  let next = store.flatResults.reduce((max, result) => Math.max(max, result.index), -1) + 1;
+  const added = picked
+    .filter((result) => {
+      const ref = parseDispatcharrIds(result.extinf_line);
+      return ref && !loaded.has(ref.streamId);
+    })
+    .map((result) => addedStreamRow(result, channel, next++));
+  if (added.length > 0) {
+    const flatResults = [...store.flatResults, ...added];
+    store.applyScanCollections({
+      flatResults,
+      resultPositions: new Map(flatResults.map((result, position) => [result.index, position])),
+      uiMetrics: {
+        presentCount: flatResults.length,
+        lowFpsCount:
+          store.uiMetrics.lowFpsCount + added.filter((result) => result.low_framerate).length,
+        mislabeledCount:
+          store.uiMetrics.mislabeledCount +
+          added.filter((result) => result.label_mismatches.length > 0).length,
+      },
+    });
+  }
+  return true;
 }
 
 export interface FixPlan {

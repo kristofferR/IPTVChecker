@@ -107,6 +107,19 @@ export function useScan() {
   /** Set immediately on cancel click; suppresses incoming results during drain. */
   const cancelling = useRef(false);
 
+  // Rows can also change outside a scan (streams linked from Find streams);
+  // follow the store so the next scan starts from them.
+  useEffect(
+    () =>
+      useAppStore.subscribe((state) => {
+        if (state.flatResults === flatResultsRef.current) return;
+        flatResultsRef.current = state.flatResults;
+        resultPositionsRef.current = state.resultPositions;
+        uiMetricsRef.current = state.uiMetrics;
+      }),
+    [],
+  );
+
   // Reset backend scan state on mount (handles app restart with stale flag)
   useEffect(() => {
     resetScan().catch(() => {});

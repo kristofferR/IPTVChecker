@@ -298,7 +298,7 @@ export interface SettingsSlice {
 
 export type DispatcharrRowState =
   | { kind: "writing" }
-  | { kind: "fixed" }
+  | { kind: "fixed"; label?: string }
   | { kind: "failed"; error: string; retry: { from: number[]; to: number[] } };
 
 export interface DispatcharrToast {
@@ -309,6 +309,13 @@ export interface DispatcharrToast {
   changes: OrderChange[];
 }
 
+/** The Find streams panel: the channel it searches for, and whether it steps
+ *  through every channel whose streams are all dead. */
+export interface DispatcharrFind {
+  channelId: number;
+  queue: boolean;
+}
+
 export interface DispatcharrSlice {
   /** Stream orders written to Dispatcharr this session, keyed by channel id. */
   dispatcharrOrders: DispatcharrOrders;
@@ -316,11 +323,13 @@ export interface DispatcharrSlice {
   dispatcharrUndo: DispatcharrOrders;
   dispatcharrRowStates: Record<number, DispatcharrRowState>;
   dispatcharrToast: DispatcharrToast | null;
+  dispatcharrFind: DispatcharrFind | null;
 
   setDispatcharrRowState: (channelId: number, state: DispatcharrRowState | null) => void;
   /** Record a written order; `undoOrder` null clears the channel's undo. */
   commitDispatcharrOrder: (channelId: number, order: number[], undoOrder: number[] | null) => void;
   setDispatcharrToast: (toast: DispatcharrToast | null) => void;
+  setDispatcharrFind: (find: DispatcharrFind | null) => void;
   resetDispatcharrEdits: () => void;
 }
 

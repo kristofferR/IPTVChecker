@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering}
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
+use futures::stream::{self, StreamExt};
 use tauri::{AppHandle, Emitter, Manager, Window};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
@@ -3232,6 +3233,150 @@ pub async fn quick_check_channel(
         state.unregister_quick_check(request_id).await;
     }
     Ok(result)
+}
+
+/// One probed candidate, sent as `dispatcharr://probe-result`.
+#[derive(Clone, serde::Serialize)]
+struct CandidateProbeEvent {
+    request_id: String,
+    result: ChannelResult,
+}
+
+/// Probes that run at once when candidates come from unlimited accounts.
+const CANDIDATE_PROBE_CONCURRENCY: usize = 4;
+
+/// Probe Dispatcharr provider streams that are not loaded rows (candidates to
+/// link), with the full scan checks and each account's connection limit.
+/// Results arrive one by one as `dispatcharr://probe-result`. An account whose
+/// connections Dispatcharr's viewers hold is reported untested ("Account
+/// busy") instead of waiting. Cancel with `cancel_quick_check(request_id)`.
+#[tauri::command]
+pub async fn dispatcharr_probe_streams(
+    app: AppHandle,
+    request_id: String,
+    channels: Vec<Channel>,
+) -> Result<(), AppError> {
+    let state = app.state::<Arc<AppState>>();
+    let settings = state.settings.lock().await.clone();
+    let cancel = CancellationToken::new();
+    state
+        .register_quick_check(request_id.clone(), cancel.clone())
+        .await;
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .danger_accept_invalid_certs(settings.accept_invalid_certs)
+        .redirect(reqwest::redirect::Policy::none())
+        .pool_max_idle_per_host(0)
+        .build()
+        .unwrap_or_default();
+    let (ffmpeg_ok, ffprobe_ok) = ffmpeg::check_availability(&app).await;
+    let proxy_list = match (settings.test_geoblock, settings.proxy_file.as_deref()) {
+        (true, Some(file)) => proxy::load_proxy_list(file).ok(),
+        _ => None,
+    };
+    let diagnostics_semaphore = Arc::new(Semaphore::new(2));
+
+    stream::iter(channels)
+        .for_each_concurrent(CANDIDATE_PROBE_CONCURRENCY, |channel| {
+            let (app, cancel, client, proxy_list, diagnostics_semaphore, request_id, settings) = (
+                &app,
+                &cancel,
+                &client,
+                &proxy_list,
+                &diagnostics_semaphore,
+                &request_id,
+                &settings,
+            );
+            async move {
+                let limit =
+                    crate::engine::dispatcharr::dispatcharr_connection_limit(&channel.extinf_line);
+                let viewers = limit.and_then(|_| {
+                    crate::engine::dispatcharr::account_viewers(&channel.extinf_line)
+                });
+                let busy = |channel: &Channel| {
+                    let mut result = build_channel_result(
+                        channel,
+                        &SharedUrlResult::dead(
+                            None,
+                            None,
+                            None,
+                            Some("Account busy".to_string()),
+                            ChannelDebugLog::default(),
+                        ),
+                    );
+                    result.status = ChannelStatus::Pending;
+                    result
+                };
+                let result = async {
+                    let _permit = match limit {
+                        Some((account_id, limit)) => {
+                            if let Some(viewers) = &viewers {
+                                if viewers.on_account(account_id, false).await >= limit {
+                                    return Ok(busy(&channel));
+                                }
+                            }
+                            let slots = crate::engine::dispatcharr::account_connection_slots(
+                                &channel.extinf_line,
+                                account_id,
+                                limit,
+                            );
+                            Some(tokio::select! {
+                                permit = slots.acquire_owned() => {
+                                    permit.map_err(|_| AppError::Cancelled)?
+                                }
+                                _ = cancel.cancelled() => return Err(AppError::Cancelled),
+                            })
+                        }
+                        None => None,
+                    };
+                    let ctx = SharedCheckContext {
+                        app,
+                        client,
+                        timeout: settings.timeout,
+                        retries: settings.retries,
+                        retry_backoff: settings.retry_backoff,
+                        extended_timeout: settings.extended_timeout,
+                        user_agent: &settings.user_agent,
+                        cancel,
+                        proxy_list,
+                        test_geoblock: settings.test_geoblock,
+                        ffmpeg_ok,
+                        ffprobe_ok,
+                        profile_bitrate_flag: settings.profile_bitrate,
+                        ffprobe_timeout_secs: settings.ffprobe_timeout_secs,
+                        ffmpeg_bitrate_timeout_secs: settings.ffmpeg_bitrate_timeout_secs,
+                        low_fps_threshold: settings.low_fps_threshold,
+                        screenshot_format: settings.screenshot_format,
+                        diagnostics_semaphore,
+                        single_connection_mode: limit.is_some(),
+                    };
+                    let (shared, _) =
+                        compute_shared_url_result(&ctx, &channel.url, true, None, "").await?;
+                    Ok::<_, AppError>(build_channel_result(&channel, &shared))
+                }
+                .await;
+                match result {
+                    Ok(result) => {
+                        let _ = app.emit(
+                            "dispatcharr://probe-result",
+                            CandidateProbeEvent {
+                                request_id: request_id.clone(),
+                                result,
+                            },
+                        );
+                    }
+                    Err(AppError::Cancelled) => {}
+                    Err(error) => log::warn!("[dispatcharr] candidate probe failed: {}", error),
+                }
+            }
+        })
+        .await;
+
+    state.unregister_quick_check(&request_id).await;
+    if cancel.is_cancelled() {
+        return Err(AppError::Cancelled);
+    }
+    Ok(())
 }
 
 #[tauri::command]

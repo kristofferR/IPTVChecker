@@ -18,6 +18,9 @@ export interface DispatcharrStreamRef {
   channelUuid: string | null;
   account: string | null;
   accountId: number | null;
+  /** Linked from Find streams this session; its channel's source has no row
+   *  for it until reloaded, so scans leave it alone. */
+  added: boolean;
   /** The provider stream's own name (rows are titled with the channel). */
   streamName: string | null;
   /** The channel's complete stream order at load, including streams that
@@ -51,6 +54,43 @@ function extinfAttribute(extinfLine: string, key: string): string | null {
   return match ? match[1].replace(/\\(.)/g, "$1") : null;
 }
 
+const ADDED_ATTR = "x-dispatcharr-added";
+
+/** A candidate's row as linked to `channel` this session: titled and grouped
+ *  like the channel's other rows, and marked as added. */
+export function addedStreamRow(
+  result: ChannelResult,
+  channel: DispatcharrChannelView,
+  index: number,
+): ChannelResult {
+  // Attributes end at the last quote; the title follows.
+  const cut = result.extinf_line.lastIndexOf('"') + 1;
+  return {
+    ...result,
+    index,
+    name: channel.name,
+    group: channel.group,
+    extinf_line: `${result.extinf_line.slice(0, cut)} ${ADDED_ATTR}="1"${result.extinf_line.slice(cut)}`,
+  };
+}
+
+/** Loaded streams of a channel that are no longer linked to it (unlinked
+ *  this session), with their results. */
+export function unlinkedStreams(
+  results: ChannelResult[],
+  channel: DispatcharrChannelView,
+): DispatcharrStreamEntry[] {
+  const seen = new Set(channel.order);
+  const entries: DispatcharrStreamEntry[] = [];
+  for (const result of results) {
+    const ref = cachedIds(result.extinf_line);
+    if (!ref || ref.channelId !== channel.channelId || seen.has(ref.streamId)) continue;
+    seen.add(ref.streamId);
+    entries.push({ ref, result, providerDown: false });
+  }
+  return entries;
+}
+
 export function parseDispatcharrIds(extinfLine: string): DispatcharrStreamRef | null {
   if (!extinfLine.includes("x-dispatcharr-stream-id")) return null;
   const number = (key: string) => {
@@ -69,6 +109,7 @@ export function parseDispatcharrIds(extinfLine: string): DispatcharrStreamRef | 
     channelUuid: extinfAttribute(extinfLine, "x-dispatcharr-channel-uuid") || null,
     account: extinfAttribute(extinfLine, "x-dispatcharr-account") || null,
     accountId: number("x-dispatcharr-account-id"),
+    added: extinfAttribute(extinfLine, ADDED_ATTR) === "1",
     streamName: extinfAttribute(extinfLine, "x-dispatcharr-stream-name") || null,
     channelStreams:
       extinfAttribute(extinfLine, "x-dispatcharr-channel-streams")
@@ -127,6 +168,8 @@ export interface DispatcharrChannelView {
   allDead: boolean;
   /** The primary failed because its provider account is down. */
   primaryProviderDown: boolean;
+  /** Scanned, and not one stream works (dead, or its provider is down). */
+  noWorking: boolean;
 }
 
 export interface DispatcharrView {
@@ -283,6 +326,9 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
       hasDead: dead > 0,
       allDead: dead === streams.length,
       primaryProviderDown: streams[0].providerDown,
+      noWorking:
+        streams.every((entry) => entry.result.status !== "alive") &&
+        streams.every((entry) => !isUntestedStatus(entry.result.status)),
     };
     channels.push(view);
     for (const entry of channel.streams) byStreamIndex.set(entry.result.index, view);
@@ -528,8 +574,9 @@ export function dispatcharrLinkedIndices(
   if (Object.keys(orders).length === 0) return null;
   const view = getDispatcharrView(results, orders);
   if (!view) return null;
+  // Streams linked from Find streams have no row in the source yet.
   const linked = view.channels.flatMap((channel) =>
-    channel.streams.map((entry) => entry.result.index),
+    channel.streams.filter((entry) => !entry.ref.added).map((entry) => entry.result.index),
   );
   return linked.length < results.length ? linked.sort((a, b) => a - b) : null;
 }

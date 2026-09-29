@@ -499,6 +499,10 @@ export function ChannelTable({
     void applyOrderChanges(planFix(view, [channel.channelId], fixPreferencesRef.current).changes);
   }, []);
 
+  const handleFindStreams = useCallback((channel: DispatcharrChannelView) => {
+    useAppStore.getState().setDispatcharrFind({ channelId: channel.channelId, queue: false });
+  }, []);
+
   const handleUndoChannel = useCallback((channel: DispatcharrChannelView) => {
     void undoChannels([channel.channelId]);
   }, []);
@@ -1446,6 +1450,7 @@ export function ChannelTable({
       onUndo: handleUndoChannel,
       onRetry: handleRetryChannel,
       onStreamAction: handleStreamAction,
+      onFindStreams: handleFindStreams,
     }),
     [
       scanRunning,
@@ -1454,6 +1459,7 @@ export function ChannelTable({
       handleUndoChannel,
       handleRetryChannel,
       handleStreamAction,
+      handleFindStreams,
     ],
   );
 

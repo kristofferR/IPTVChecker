@@ -1,20 +1,21 @@
 //! Dispatcharr write-back commands: push probe stats into each stream's
-//! `stream_stats` and rewrite a channel's ordered stream list. Batches report
-//! per-item outcomes; one failure never aborts the rest.
+//! `stream_stats`, rewrite a channel's ordered stream list, and find provider
+//! streams to link. Batches report per-item outcomes; one failure never
+//! aborts the rest.
 
 use crate::engine::dispatcharr::{
-    build_dispatcharr_source_key, dispatcharr_ids_from_extinf, get_session,
+    build_dispatcharr_source_key, build_m3u, dispatcharr_ids_from_extinf, get_session,
     normalize_dispatcharr_server, register_session, stats_stuck, stream_stats_from_result,
-    DispatcharrAuth, DispatcharrClient,
+    CandidateMatch, DispatcharrAuth, DispatcharrChannel, DispatcharrClient,
 };
 use crate::error::AppError;
-use crate::models::channel::{ChannelResult, ChannelStatus};
+use crate::models::channel::{Channel, ChannelResult, ChannelStatus};
 use crate::models::saved_playlist::SavedPlaylistSource;
 use crate::state::AppState;
 use futures::stream::{self, StreamExt};
 use serde::Serialize;
 use serde_json::{Map, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tauri::Manager;
 
@@ -250,6 +251,79 @@ pub async fn dispatcharr_set_channel_streams(
         )));
     }
     Ok(stored)
+}
+
+/// A provider stream offered for a channel, as the row it would load as.
+#[derive(Debug, Serialize)]
+pub struct DispatcharrCandidate {
+    pub(crate) channel: Channel,
+    pub(crate) stream_id: i64,
+    #[serde(flatten)]
+    pub(crate) matched: CandidateMatch,
+}
+
+/// Provider streams that could be linked to a channel, best match first.
+/// `query` replaces the channel name as the search text.
+#[tauri::command]
+pub async fn dispatcharr_find_streams(
+    app: tauri::AppHandle,
+    source_identity: String,
+    connection: String,
+    channel_id: i64,
+    query: Option<String>,
+) -> Result<Vec<DispatcharrCandidate>, AppError> {
+    let client = resolve_session(&app, &source_identity, &connection).await?;
+    let channel = client
+        .fetch_channel(channel_id)
+        .await?
+        .ok_or_else(|| AppError::Other("Channel no longer exists in Dispatcharr".to_string()))?;
+    let found = client
+        .find_candidate_streams(&channel, query.as_deref())
+        .await?;
+    let accounts = client
+        .fetch_m3u_accounts()
+        .await
+        .inspect_err(|error| log::warn!("[dispatcharr] M3U account fetch failed: {}", error))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|account| (account.id, account))
+        .collect::<HashMap<_, _>>();
+    // Build the rows the loader would, so probes respect account limits and
+    // linked streams read like loaded ones.
+    let listing = DispatcharrChannel {
+        streams: found.iter().map(|(stream, _)| stream.id).collect(),
+        ..channel
+    };
+    let matches = found
+        .iter()
+        .map(|(stream, matched)| (stream.id, *matched))
+        .collect::<HashMap<_, _>>();
+    let streams = found
+        .into_iter()
+        .map(|(stream, _)| (stream.id, stream))
+        .collect::<HashMap<_, _>>();
+    let m3u = build_m3u(
+        client.base(),
+        &[listing],
+        &streams,
+        &HashMap::new(),
+        &accounts,
+    );
+    let preview =
+        crate::engine::parser::parse_m3u(m3u.as_bytes(), "dispatcharr-candidates", &None, &None)?;
+    Ok(preview
+        .channels
+        .into_iter()
+        .filter_map(|channel| {
+            let stream_id = dispatcharr_ids_from_extinf(&channel.extinf_line)?.stream_id;
+            let matched = *matches.get(&stream_id)?;
+            Some(DispatcharrCandidate {
+                channel,
+                stream_id,
+                matched,
+            })
+        })
+        .collect())
 }
 
 /// Ask Dispatcharr to re-fetch a provider account's playlist.

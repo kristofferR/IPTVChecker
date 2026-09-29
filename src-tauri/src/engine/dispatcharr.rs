@@ -167,12 +167,14 @@ pub(crate) struct DispatcharrChannel {
     pub name: String,
     pub channel_number: Option<f64>,
     pub channel_group_id: Option<i64>,
+    pub tvg_id: Option<String>,
     pub logo_id: Option<i64>,
     /// Stream IDs in failover order.
     pub streams: Vec<i64>,
     pub effective_name: Option<String>,
     pub effective_channel_number: Option<f64>,
     pub effective_channel_group_id: Option<i64>,
+    pub effective_tvg_id: Option<String>,
     pub effective_logo_id: Option<i64>,
 }
 
@@ -204,6 +206,15 @@ impl DispatcharrChannel {
     fn logo_id(&self) -> Option<i64> {
         self.effective_logo_id.or(self.logo_id)
     }
+
+    /// The EPG ID the channel is matched to guide data with, if any.
+    fn epg_id(&self) -> Option<&str> {
+        [&self.effective_tvg_id, &self.tvg_id]
+            .into_iter()
+            .flatten()
+            .map(|value| value.trim())
+            .find(|value| !value.is_empty())
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -211,6 +222,7 @@ impl DispatcharrChannel {
 pub(crate) struct DispatcharrStream {
     pub id: i64,
     pub name: String,
+    pub tvg_id: Option<String>,
     pub url: Option<String>,
     pub m3u_account: Option<i64>,
     pub is_custom: bool,
@@ -557,6 +569,84 @@ impl DispatcharrClient {
         self.fetch_all("/api/m3u/accounts/").await
     }
 
+    pub(crate) fn base(&self) -> &Url {
+        &self.base
+    }
+
+    /// Provider streams that could replace a channel's streams: those with
+    /// the channel's EPG ID, then those whose names match, best first.
+    /// Streams already linked to the channel are left out.
+    pub(crate) async fn find_candidate_streams(
+        &self,
+        channel: &DispatcharrChannel,
+        query: Option<&str>,
+    ) -> Result<Vec<(DispatcharrStream, CandidateMatch)>, AppError> {
+        let wanted = query
+            .map(str::trim)
+            .filter(|query| !query.is_empty())
+            .map(normalize_stream_name)
+            .unwrap_or_else(|| normalize_stream_name(channel.display_name()));
+        let epg_id = channel.epg_id();
+        let mut searches = Vec::new();
+        if !wanted.is_empty() {
+            searches.push(("search", wanted.as_str()));
+        }
+        if let Some(epg_id) = epg_id {
+            searches.push(("tvg_id", epg_id));
+        }
+        let mut found = HashMap::<i64, DispatcharrStream>::new();
+        for (key, value) in searches {
+            let mut url = self.endpoint("/api/channels/streams/")?;
+            url.query_pairs_mut()
+                .append_pair("hide_stale", "true")
+                .append_pair("page_size", &CANDIDATE_SEARCH_LIMIT.to_string())
+                .append_pair(key, value);
+            let bytes = self.send(Method::GET, url, None).await?.bytes().await?;
+            let page =
+                serde_json::from_slice::<ListPage<DispatcharrStream>>(&bytes).map_err(|error| {
+                    AppError::Parse(format!("Unexpected Dispatcharr stream search: {}", error))
+                })?;
+            let streams = match page {
+                ListPage::Paginated { results, .. } => results,
+                ListPage::Bare(items) => items,
+            };
+            for stream in streams {
+                found.entry(stream.id).or_insert(stream);
+            }
+        }
+        let mut candidates = found
+            .into_values()
+            .filter(|stream| !channel.streams.contains(&stream.id))
+            .filter(|stream| {
+                stream
+                    .url
+                    .as_deref()
+                    .is_some_and(|url| !url.trim().is_empty())
+            })
+            .map(|stream| {
+                let matched = CandidateMatch {
+                    epg: epg_id.is_some_and(|epg_id| {
+                        stream
+                            .tvg_id
+                            .as_deref()
+                            .is_some_and(|tvg_id| tvg_id.trim().eq_ignore_ascii_case(epg_id))
+                    }),
+                    similarity: name_similarity(&wanted, &normalize_stream_name(&stream.name)),
+                };
+                (stream, matched)
+            })
+            .filter(|(_, matched)| matched.epg || matched.similarity >= CANDIDATE_MIN_SIMILARITY)
+            .collect::<Vec<_>>();
+        candidates.sort_by(|(a, am), (b, bm)| {
+            bm.epg
+                .cmp(&am.epg)
+                .then(bm.similarity.cmp(&am.similarity))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        candidates.truncate(CANDIDATE_LIMIT);
+        Ok(candidates)
+    }
+
     /// Provider connections Dispatcharr's viewers hold, per M3U account.
     pub(crate) async fn fetch_account_viewers(&self) -> Result<HashMap<i64, usize>, AppError> {
         let accounts = self.fetch_m3u_accounts().await?;
@@ -822,6 +912,87 @@ pub(crate) fn account_connection_slots(
     }
     *current = limit;
     Arc::clone(pool)
+}
+
+// ── Replacement candidates ───────────────────────────────────────────────────
+
+/// Provider streams fetched per search.
+const CANDIDATE_SEARCH_LIMIT: usize = 200;
+/// Candidates offered for one channel.
+const CANDIDATE_LIMIT: usize = 40;
+/// Name similarity (percent) a candidate needs without an EPG match.
+const CANDIDATE_MIN_SIMILARITY: u8 = 60;
+
+/// Why a provider stream is offered for a channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub(crate) struct CandidateMatch {
+    /// Carries the channel's EPG ID.
+    pub epg: bool,
+    /// Name similarity with the channel, 0 to 100.
+    pub similarity: u8,
+}
+
+/// Tags that say how a stream is delivered, not what it is.
+const NAME_NOISE: &[&str] = &[
+    "hd", "fhd", "uhd", "sd", "4k", "8k", "hevc", "h264", "h265", "hdr", "raw", "backup", "vip",
+    "1080p", "1080i", "720p", "2160p", "576p", "480p", "50fps", "60fps",
+];
+
+/// A stream or channel name reduced to what identifies the channel: no
+/// provider prefix ("US|", "UK:", "EN -"), bracketed notes, or quality tags.
+pub(crate) fn normalize_stream_name(name: &str) -> String {
+    let mut rest = name.trim();
+    for separator in ["|", ":", " - "] {
+        if let Some((prefix, tail)) = rest.split_once(separator) {
+            if prefix.trim().chars().count() <= 5 && !tail.trim().is_empty() {
+                rest = tail;
+                break;
+            }
+        }
+    }
+    let mut cleaned = String::with_capacity(rest.len());
+    let mut depth = 0usize;
+    for c in rest.chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => cleaned.push(c),
+            _ => {}
+        }
+    }
+    cleaned
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric() && c != '+')
+        .filter(|token| !token.is_empty() && !NAME_NOISE.contains(token))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Dice similarity of two normalized names over character pairs, 0 to 100.
+pub(crate) fn name_similarity(a: &str, b: &str) -> u8 {
+    fn pairs(value: &str) -> Vec<(char, char)> {
+        let chars = value
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect::<Vec<_>>();
+        chars.windows(2).map(|pair| (pair[0], pair[1])).collect()
+    }
+    if a == b {
+        return if a.is_empty() { 0 } else { 100 };
+    }
+    let (left, mut right) = (pairs(a), pairs(b));
+    if left.is_empty() || right.is_empty() {
+        return 0;
+    }
+    let total = left.len() + right.len();
+    let mut shared = 0;
+    for pair in left {
+        if let Some(position) = right.iter().position(|other| *other == pair) {
+            right.swap_remove(position);
+            shared += 1;
+        }
+    }
+    ((200 * shared) / total).min(100) as u8
 }
 
 /// How long a read of Dispatcharr's live connections stays current.
@@ -1354,6 +1525,68 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(streams.iter().map(|s| s.id).collect::<Vec<_>>(), vec![1, 2]);
+    }
+
+    #[test]
+    fn names_reduce_to_the_channel_they_carry() {
+        assert_eq!(normalize_stream_name("US| KIDS ZONE HD"), "kids zone");
+        assert_eq!(
+            normalize_stream_name("EN - Kids Zone (backup)"),
+            "kids zone"
+        );
+        assert_eq!(
+            normalize_stream_name("UK: Kids Zone +1 [720p]"),
+            "kids zone +1"
+        );
+        // A long first word before a colon is part of the name.
+        assert_eq!(
+            normalize_stream_name("Channel: The Series"),
+            "channel the series"
+        );
+        assert_eq!(name_similarity("kids zone", "kids zone"), 100);
+        assert!(name_similarity("kids zone", "kids zone +1") > 80);
+        assert!(name_similarity("kids zone", "news one") < CANDIDATE_MIN_SIMILARITY);
+    }
+
+    #[tokio::test]
+    async fn candidates_skip_linked_streams_and_rank_epg_matches_first() {
+        let base = spawn_server(Arc::new(|req: &Request| {
+            assert!(req.path.starts_with("/api/channels/streams/?hide_stale=true"));
+            if req.path.contains("tvg_id=kidszone.us") {
+                (200, r#"{"next":null,"results":[{"id":4,"name":"KZ East","tvg_id":"KidsZone.us","url":"http://p/4"}]}"#.into())
+            } else {
+                assert!(req.path.contains("search=kids+zone"));
+                (
+                    200,
+                    r#"{"next":null,"results":[
+                        {"id":1,"name":"US| KIDS ZONE HD","url":"http://p/1"},
+                        {"id":2,"name":"Kids Zone","url":"http://p/2"},
+                        {"id":3,"name":"Kids Zone Plus","url":"http://p/3"},
+                        {"id":5,"name":"Zone Radio","url":"http://p/5"},
+                        {"id":6,"name":"Kids Zone","url":""}
+                    ]}"#
+                    .into(),
+                )
+            }
+        }))
+        .await;
+        let channel = DispatcharrChannel {
+            id: 9,
+            name: "Kids Zone".into(),
+            tvg_id: Some("kidszone.us".into()),
+            streams: vec![2],
+            ..Default::default()
+        };
+        let found = client(&base, DispatcharrAuth::ApiKey("k".into()))
+            .find_candidate_streams(&channel, None)
+            .await
+            .unwrap();
+        let ranked = found
+            .iter()
+            .map(|(stream, matched)| (stream.id, matched.epg))
+            .collect::<Vec<_>>();
+        // EPG match first; linked (2), URL-less (6) and unlike (5) left out.
+        assert_eq!(ranked, vec![(4, true), (1, false), (3, false)]);
     }
 
     #[test]

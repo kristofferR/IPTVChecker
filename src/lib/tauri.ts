@@ -6,6 +6,7 @@ import type {
   ArchiveDownloadRequest,
   CastMediaRequest,
   CastSession,
+  Channel,
   ChannelResult,
   ChromecastDevice,
   DispatcharrChannelStreams,
@@ -130,6 +131,33 @@ export async function dispatcharrSetChannelStreams(
   streamIds: number[],
 ): Promise<number[]> {
   return invoke("dispatcharr_set_channel_streams", { ...target, channelId, streamIds });
+}
+
+/** A provider stream offered for a channel, as the row it would load as. */
+export interface DispatcharrCandidate {
+  channel: Channel;
+  stream_id: number;
+  /** Carries the channel's EPG ID. */
+  epg: boolean;
+  /** Name similarity with the channel, 0 to 100. */
+  similarity: number;
+}
+
+export async function dispatcharrFindStreams(
+  target: DispatcharrTarget,
+  channelId: number,
+  query: string | null,
+): Promise<DispatcharrCandidate[]> {
+  return invoke("dispatcharr_find_streams", { ...target, channelId, query });
+}
+
+/** Probe candidates; results arrive as `dispatcharr://probe-result`. Cancel
+ *  with `cancelQuickCheck(requestId)`. */
+export async function dispatcharrProbeStreams(
+  requestId: string,
+  channels: Channel[],
+): Promise<void> {
+  return invoke("dispatcharr_probe_streams", { requestId, channels });
 }
 
 export async function dispatcharrRefreshAccount(
