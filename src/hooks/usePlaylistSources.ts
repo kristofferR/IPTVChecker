@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { applyXtreamArchiveUpdates, applyXtreamArchiveUpdatesToPreview } from "../lib/archive";
 import { cancelArchiveProbes } from "../lib/archiveProbe";
+import { apiKeyFingerprint } from "../lib/dispatcharr";
 import { errorToString, formatPlaylistOpenError, formatSourceReloadError } from "../lib/errors";
 import { logger } from "../lib/logger";
 import {
@@ -852,12 +853,18 @@ export function usePlaylistSources({
         const usesApiKey = Boolean(source.api_key?.trim());
         const entries = await addRecentPlaylist(
           "dispatcharr",
-          serializeDispatcharrRecent({
-            server: source.server,
-            username: usesApiKey ? null : source.username,
-            password: rememberSecrets && !usesApiKey ? source.password : null,
-            api_key: rememberSecrets ? source.api_key : null,
-          }),
+          serializeDispatcharrRecent(
+            {
+              server: source.server,
+              username: usesApiKey ? null : source.username,
+              password: rememberSecrets && !usesApiKey ? source.password : null,
+              api_key: rememberSecrets ? source.api_key : null,
+            },
+            // Keeps an unremembered key's account distinct in Recents.
+            usesApiKey && !rememberSecrets && source.api_key
+              ? await apiKeyFingerprint(source.api_key.trim())
+              : null,
+          ),
           null,
           null,
         );

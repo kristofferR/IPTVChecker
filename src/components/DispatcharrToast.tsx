@@ -18,6 +18,8 @@ export function DispatcharrToast() {
     setUndoing(true);
     try {
       const { failed } = await reverseChanges(toast.changes);
+      // A newer bulk fix may have replaced this toast while undo ran.
+      if (getStore().dispatcharrToast !== toast) return;
       if (failed === 0) {
         setToast(null);
       } else {

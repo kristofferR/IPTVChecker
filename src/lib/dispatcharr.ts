@@ -319,6 +319,23 @@ export function expandDispatcharrSelection(
 
 const PROXY_STREAM_PATH = /\/proxy\/(?:ts|hls)\/stream\//i;
 
+function isProxyStreamUrl(url: string): boolean {
+  try {
+    return PROXY_STREAM_PATH.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
+}
+
+/** Same short, non-reversible key fingerprint the backend puts in source
+ *  identities (first 12 hex digits of the key's SHA-256). */
+export async function apiKeyFingerprint(key: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key));
+  return Array.from(new Uint8Array(digest).slice(0, 6), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
 /** The Dispatcharr server behind a plain M3U export, or null. Every channel
  *  must be a proxy URL of that one server: converting replaces the whole
  *  source, so a mixed playlist would lose its other channels. */
@@ -328,7 +345,7 @@ export function dispatcharrServerOfProxyPlaylist(preview: PlaylistPreview | null
   if (!server) return null;
   const allFromServer = preview.channels.every(
     (channel) =>
-      PROXY_STREAM_PATH.test(channel.url) && normalizeDispatcharrServer(channel.url) === server,
+      isProxyStreamUrl(channel.url) && normalizeDispatcharrServer(channel.url) === server,
   );
   return allFromServer ? server : null;
 }

@@ -408,14 +408,15 @@ export const Toolbar = memo(function Toolbar({
     return context.all.filter((result) => selectedSet.has(result.index));
   }, []);
 
-  const exportScopeCounts = useMemo(
-    () => ({
+  const exportScopeCounts = useMemo(() => {
+    // Count what "selected" exports: selected rows still in the export set.
+    const selected = new Set(selectedIndices);
+    return {
       all: exportAllResults.length,
       filtered: filteredExportResults.length,
-      selected: selectedIndices.length,
-    }),
-    [exportAllResults.length, filteredExportResults.length, selectedIndices.length],
-  );
+      selected: exportAllResults.filter((result) => selected.has(result.index)).length,
+    };
+  }, [exportAllResults, filteredExportResults.length, selectedIndices]);
 
   // --- Derived values ---
   const useWindowDragRegion = platform !== "linux";

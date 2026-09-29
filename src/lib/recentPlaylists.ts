@@ -32,12 +32,16 @@ export function parseXtreamRecent(value: string): XtreamRecentSource | null {
 
 /** Only the fields present are stored, so leave secrets out unless the user
  *  asked to remember them. */
-export function serializeDispatcharrRecent(source: DispatcharrOpenRequest): string {
+export function serializeDispatcharrRecent(
+  source: DispatcharrOpenRequest,
+  keyFingerprint: string | null = null,
+): string {
   const obj: Record<string, string> = { server: source.server.trim() };
   for (const key of ["username", "password", "api_key"] as const) {
     const value = source[key]?.trim();
     if (value) obj[key] = value;
   }
+  if (keyFingerprint && !obj.api_key) obj.key_fingerprint = keyFingerprint;
   return JSON.stringify(obj);
 }
 

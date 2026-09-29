@@ -79,17 +79,22 @@ impl DispatcharrAuth {
     /// fingerprint, so two keys on one server stay separate sources.
     pub(crate) fn identity_label(&self) -> String {
         match self {
-            Self::ApiKey(key) => {
-                let digest = Sha256::digest(key.as_bytes());
-                let hex = digest
-                    .iter()
-                    .map(|byte| format!("{:02x}", byte))
-                    .collect::<String>();
-                format!("api-key:{}", &hex[..12])
-            }
+            Self::ApiKey(key) => format!("api-key:{}", api_key_fingerprint(key)),
             Self::Login { username, .. } => username.clone(),
         }
     }
+}
+
+/// Short, non-reversible fingerprint of an API key (first 12 hex digits of
+/// its SHA-256). The frontend computes the same value for recents that do not
+/// remember the key.
+pub(crate) fn api_key_fingerprint(key: &str) -> String {
+    let digest = Sha256::digest(key.as_bytes());
+    digest
+        .iter()
+        .take(6)
+        .map(|byte| format!("{:02x}", byte))
+        .collect()
 }
 
 /// Normalize a Dispatcharr base URL. Accepts pasted proxy/output/API URLs and

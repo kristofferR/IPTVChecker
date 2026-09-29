@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  apiKeyFingerprint,
   dispatcharrChannelRows,
   dispatcharrLinkedIndices,
   dispatcharrServerOfProxyPlaylist,
@@ -226,6 +227,12 @@ describe("dispatcharr helpers", () => {
     expect(
       dispatcharrServerOfProxyPlaylist(preview(["http://provider.example/live/1.ts"])),
     ).toBeNull();
+    // The proxy path must be the URL path, not text in the query.
+    expect(
+      dispatcharrServerOfProxyPlaylist(
+        preview(["http://dvr.example/player?next=/proxy/ts/stream/a"]),
+      ),
+    ).toBeNull();
     // Mixed playlists would lose channels on conversion, so they get no offer.
     expect(
       dispatcharrServerOfProxyPlaylist(
@@ -278,5 +285,9 @@ describe("dispatcharr helpers", () => {
       streamCount: 2,
     });
     expect(rows[0].extinf_line.endsWith(",News One [1/2] Feed 3")).toBe(true);
+  });
+
+  it("fingerprints API keys like the backend", async () => {
+    expect(await apiKeyFingerprint("key")).toBe("2c70e12b7a06");
   });
 });

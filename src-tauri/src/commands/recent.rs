@@ -76,6 +76,9 @@ struct DispatcharrRecentValue {
     password: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     api_key: Option<String>,
+    /// Identifies the API-key account when the key itself is not remembered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    key_fingerprint: Option<String>,
 }
 
 fn parse_dispatcharr_recent_value(value: &str) -> Option<DispatcharrRecentValue> {
@@ -91,11 +94,20 @@ fn parse_dispatcharr_recent_value(value: &str) -> Option<DispatcharrRecentValue>
         username: clean(parsed.username),
         password: clean(parsed.password),
         api_key: clean(parsed.api_key),
+        key_fingerprint: clean(parsed.key_fingerprint)
+            .filter(|value| value.len() == 12 && value.bytes().all(|b| b.is_ascii_hexdigit())),
     })
 }
 
 /// Source identity of a recent Dispatcharr value.
 fn dispatcharr_recent_identity(source: &DispatcharrRecentValue) -> Option<String> {
+    if let (None, Some(fingerprint)) = (&source.api_key, &source.key_fingerprint) {
+        let base = crate::engine::dispatcharr::normalize_dispatcharr_server(&source.server).ok()?;
+        return Some(crate::engine::dispatcharr::dispatcharr_source_key(
+            &base,
+            &format!("api-key:{}", fingerprint),
+        ));
+    }
     crate::commands::saved::source_identity_for_dispatcharr(
         &source.server,
         source.username.as_deref(),
@@ -716,6 +728,29 @@ mod tests {
             "{\"server\":\"https://demo.example.com\",\"username\":\"\"}"
         )
         .is_none());
+    }
+
+    #[test]
+    fn unremembered_api_keys_stay_separate_recents() {
+        let recent = |fingerprint: &str| RecentPlaylistEntry {
+            kind: RecentPlaylistKind::Dispatcharr,
+            value: format!(
+                r#"{{"server":"http://dvr.example:9191","key_fingerprint":"{}"}}"#,
+                fingerprint
+            ),
+            label: String::new(),
+            saved_playlist_id: None,
+        };
+        let sanitized = sanitize_recent_playlists_for_tests(vec![
+            recent("aaaaaaaaaaaa"),
+            recent("bbbbbbbbbbbb"),
+        ]);
+        assert_eq!(sanitized.len(), 2);
+        // Same value the frontend computes for an unremembered key.
+        assert_eq!(
+            crate::engine::dispatcharr::api_key_fingerprint("key"),
+            "2c70e12b7a06"
+        );
     }
 
     #[test]
