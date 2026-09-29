@@ -39,6 +39,9 @@ pub(crate) const ATTR_CHANNEL_UUID: &str = "x-dispatcharr-channel-uuid";
 pub(crate) const ATTR_ACCOUNT: &str = "x-dispatcharr-account";
 pub(crate) const ATTR_ACCOUNT_ID: &str = "x-dispatcharr-account-id";
 pub(crate) const ATTR_MAX_STREAMS: &str = "x-dispatcharr-max-streams";
+/// The channel's complete stream order, including streams without a row
+/// (no URL), so edits can be checked against Dispatcharr's full list.
+pub(crate) const ATTR_CHANNEL_STREAMS: &str = "x-dispatcharr-channel-streams";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DispatcharrAuth {
@@ -94,13 +97,14 @@ pub(crate) fn normalize_dispatcharr_server(server: &str) -> Result<Url, AppError
         ));
     }
     let path = parsed.path().to_string();
-    let lower = path.to_ascii_lowercase();
+    // Trailing slash so a path ending in a marker ("/dispatcharr/api") matches.
+    let lower = format!("{}/", path.to_ascii_lowercase());
     let prefix_end = ["/proxy/", "/output/", "/api/"]
         .iter()
         .filter_map(|marker| lower.find(marker))
         .min()
         .unwrap_or(path.len());
-    let prefix = path[..prefix_end].trim_end_matches('/');
+    let prefix = path[..prefix_end.min(path.len())].trim_end_matches('/');
     parsed.set_path(if prefix.is_empty() { "/" } else { prefix });
     parsed.set_query(None);
     parsed.set_fragment(None);
@@ -686,6 +690,12 @@ pub(crate) fn build_m3u(
     );
     for channel in ordered {
         let count = channel.streams.len();
+        let channel_streams = channel
+            .streams
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
         let group = channel
             .group_id()
             .and_then(|id| groups.get(&id))
@@ -740,16 +750,23 @@ pub(crate) fn build_m3u(
             if let Some(uuid) = channel.uuid.as_deref() {
                 attr(ATTR_CHANNEL_UUID, uuid);
             }
-            match account {
-                Some(account) => {
+            attr(ATTR_CHANNEL_STREAMS, &channel_streams);
+            match (account, stream.m3u_account) {
+                (Some(account), _) => {
                     attr(ATTR_ACCOUNT, &account.name);
                     attr(ATTR_ACCOUNT_ID, &account.id.to_string());
                     if account.max_streams > 0 {
                         attr(ATTR_MAX_STREAMS, &account.max_streams.to_string());
                     }
                 }
-                None if stream.is_custom => attr(ATTR_ACCOUNT, "Custom"),
-                None => {}
+                // Account details did not load: assume the strictest limit
+                // rather than scanning the provider without one.
+                (None, Some(account_id)) => {
+                    attr(ATTR_ACCOUNT_ID, &account_id.to_string());
+                    attr(ATTR_MAX_STREAMS, "1");
+                }
+                (None, None) if stream.is_custom => attr(ATTR_ACCOUNT, "Custom"),
+                (None, None) => {}
             }
             m3u.push(',');
             m3u.push_str(&flatten_extinf_title(&title));
@@ -941,6 +958,10 @@ mod tests {
             ),
             (
                 "https://example.com/dispatcharr/api/channels/",
+                "https://example.com/dispatcharr",
+            ),
+            (
+                "https://example.com/dispatcharr/api",
                 "https://example.com/dispatcharr",
             ),
         ];
@@ -1178,7 +1199,23 @@ mod tests {
             dispatcharr_connection_limit(&preview.channels[2].extinf_line),
             Some((7, 2))
         );
+        // Stream 102 has no M3U account, so no provider limit.
         assert_eq!(dispatcharr_connection_limit(&multi.extinf_line), None);
+        assert!(multi
+            .extinf_line
+            .contains("x-dispatcharr-channel-streams=\"102,101,999\""));
+    }
+
+    #[test]
+    fn unknown_accounts_get_the_strictest_limit() {
+        let (channels, streams) = fixture_channels();
+        let base = Url::parse("http://dvr.example:9191/").unwrap();
+        let m3u = build_m3u(&base, &channels, &streams, &HashMap::new(), &HashMap::new());
+        let feed_a = m3u
+            .lines()
+            .find(|line| line.contains("x-dispatcharr-stream-id=\"101\""))
+            .unwrap();
+        assert_eq!(dispatcharr_connection_limit(feed_a), Some((7, 1)));
     }
 
     #[test]

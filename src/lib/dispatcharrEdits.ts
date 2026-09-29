@@ -1,5 +1,5 @@
 import { useAppStore } from "../store";
-import { type DispatcharrView, proposeFixOrder } from "./dispatcharr";
+import { type DispatcharrView, proposeFixOrder, withHiddenStreams } from "./dispatcharr";
 import { errorToString } from "./errors";
 import { dispatcharrGetChannelStreams, dispatcharrSetChannelStreams } from "./tauri";
 
@@ -129,11 +129,15 @@ export function planFix(view: DispatcharrView, channelIds: Iterable<number>): Fi
     if (proposal.kind === "all_dead") {
       plan.skippedAllDead += 1;
     } else if (proposal.kind === "change") {
-      const from = channel.streams.map((entry) => entry.ref.streamId);
-      plan.changes.push({ channelId, from, to: proposal.order });
+      const visible = channel.streams.map((entry) => entry.ref.streamId);
+      plan.changes.push({
+        channelId,
+        from: channel.order,
+        to: withHiddenStreams(channel, proposal.order),
+      });
       plan.removed += proposal.removed;
       // Reordered when the streams that stay change their relative order.
-      const kept = from.filter((id) => proposal.order.includes(id));
+      const kept = visible.filter((id) => proposal.order.includes(id));
       if (!sameOrder(kept, proposal.order)) plan.reordered += 1;
     }
   }

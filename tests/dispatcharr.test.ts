@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  dispatcharrLinkedIndices,
   dispatcharrServerOfProxyPlaylist,
   getDispatcharrView,
   normalizeDispatcharrServer,
@@ -90,6 +91,7 @@ describe("dispatcharr helpers", () => {
       streamCount: 3,
       channelUuid: null,
       account: 'Provider "A"',
+      channelStreams: null,
     });
     expect(parseDispatcharrIds('#EXTINF:-1 tvg-id="a",Plain')).toBeNull();
   });
@@ -198,6 +200,9 @@ describe("dispatcharr helpers", () => {
     expect(normalizeDispatcharrServer("https://example.com/dispatcharr/output/m3u?x=1")).toBe(
       "https://example.com/dispatcharr",
     );
+    expect(normalizeDispatcharrServer("https://example.com/dispatcharr/api")).toBe(
+      "https://example.com/dispatcharr",
+    );
     expect(normalizeDispatcharrServer("ftp://example.com")).toBeNull();
   });
 
@@ -220,5 +225,29 @@ describe("dispatcharr helpers", () => {
     expect(
       dispatcharrServerOfProxyPlaylist(preview(["http://provider.example/live/1.ts"])),
     ).toBeNull();
+  });
+
+  it("keeps streams without a row in the order it checks and writes", () => {
+    // Stream 9 has no row (no URL) but is part of the channel in Dispatcharr.
+    const rows = channelRows(10, "News One", [{ id: 1, status: "dead" }, { id: 2 }]).map(
+      (result) => ({
+        ...result,
+        extinf_line: result.extinf_line.replace(
+          " x-dispatcharr-account",
+          ' x-dispatcharr-channel-streams="1,9,2" x-dispatcharr-account',
+        ),
+      }),
+    );
+    const view = getDispatcharrView(rows, {});
+    if (!view) throw new Error("missing view");
+    expect(view.channels[0].order).toEqual([1, 9, 2]);
+    const [change] = planFix(view, [10]).changes;
+    expect(change).toEqual({ channelId: 10, from: [1, 9, 2], to: [2, 9] });
+  });
+
+  it("limits full rescans to streams still linked after edits", () => {
+    const results = channelRows(10, "News One", [{ id: 1, status: "dead" }, { id: 2 }]);
+    expect(dispatcharrLinkedIndices(results, {})).toBeNull();
+    expect(dispatcharrLinkedIndices(results, { 10: [2] })).toEqual([1]);
   });
 });

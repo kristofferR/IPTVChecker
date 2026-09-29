@@ -21,6 +21,7 @@ import {
   expandDispatcharrSelection,
   filterDispatcharrPrimaries,
   getDispatcharrView,
+  withHiddenStreams,
 } from "../lib/dispatcharr";
 import { applyOrderChanges, planFix, undoChannels } from "../lib/dispatcharrEdits";
 import type { SortDirection, SortField } from "../lib/filters";
@@ -503,15 +504,15 @@ export function ChannelTable({
 
   const handleStreamAction = useCallback(
     (channel: DispatcharrChannelView, position: number, action: StreamAction) => {
-      const from = channel.streams.map((entry) => entry.ref.streamId);
-      const to = [...from];
-      const [streamId] = to.splice(position, 1);
-      if (action === "primary") to.unshift(streamId);
-      else if (action === "up") to.splice(Math.max(0, position - 1), 0, streamId);
-      else if (action === "down") to.splice(position + 1, 0, streamId);
+      const visible = channel.streams.map((entry) => entry.ref.streamId);
+      const [streamId] = visible.splice(position, 1);
+      if (action === "primary") visible.unshift(streamId);
+      else if (action === "up") visible.splice(Math.max(0, position - 1), 0, streamId);
+      else if (action === "down") visible.splice(position + 1, 0, streamId);
       // "remove" leaves it out; the backend refuses to empty a channel.
+      const to = withHiddenStreams(channel, visible);
       if (to.length === 0) return;
-      void applyOrderChanges([{ channelId: channel.channelId, from, to }]);
+      void applyOrderChanges([{ channelId: channel.channelId, from: channel.order, to }]);
     },
     [],
   );

@@ -45,6 +45,7 @@ import { cancelArchiveProbes } from "./lib/archiveProbe";
 import { registerArchiveTimezoneResolver } from "./lib/archiveTimezone";
 import { isArchiveVerificationBlockingPlayback, verifyAllArchives } from "./lib/archiveVerifyRun";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
+import { dispatcharrLinkedIndices } from "./lib/dispatcharr";
 import {
   checkFfmpegAvailable,
   clearScanHistory,
@@ -1038,7 +1039,15 @@ export default function App() {
       const currentChannelSearch = normalizeSourceFilter(refreshedState.channelSearch);
       const currentGroupFilter = refreshedState.groupFilter;
       const currentSettings = refreshedState.settings;
-      const effectiveSelection = applyResult.reapplied ? [] : selection;
+      const explicitSelection = applyResult.reapplied ? [] : selection;
+      // A full scan of a Dispatcharr source skips streams unlinked this session.
+      const effectiveSelection =
+        explicitSelection.length > 0
+          ? explicitSelection
+          : (dispatcharrLinkedIndices(
+              refreshedState.flatResults,
+              refreshedState.dispatcharrOrders,
+            ) ?? []);
 
       if (!currentPlaylist) return false;
 

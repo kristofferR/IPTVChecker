@@ -11,6 +11,9 @@ export interface DispatcharrStreamRef {
   streamCount: number;
   channelUuid: string | null;
   account: string | null;
+  /** The channel's complete stream order at load, including streams that
+   *  have no row (no URL). */
+  channelStreams: number[] | null;
 }
 
 /** Base URL of a Dispatcharr instance, accepting pasted proxy, output, or API
@@ -20,7 +23,8 @@ export function normalizeDispatcharrServer(value: string): string | null {
     const parsed = new URL(value.trim());
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
     if (!parsed.hostname || parsed.username || parsed.password) return null;
-    const lower = parsed.pathname.toLowerCase();
+    // Trailing slash so a path ending in a marker ("/dispatcharr/api") matches.
+    const lower = `${parsed.pathname.toLowerCase()}/`;
     const cut = ["/proxy/", "/output/", "/api/"]
       .map((marker) => lower.indexOf(marker))
       .filter((index) => index >= 0);
@@ -52,6 +56,11 @@ export function parseDispatcharrIds(extinfLine: string): DispatcharrStreamRef | 
     streamCount: number("x-dispatcharr-stream-count") ?? 1,
     channelUuid: extinfAttribute(extinfLine, "x-dispatcharr-channel-uuid") || null,
     account: extinfAttribute(extinfLine, "x-dispatcharr-account") || null,
+    channelStreams:
+      extinfAttribute(extinfLine, "x-dispatcharr-channel-streams")
+        ?.split(",")
+        .map(Number)
+        .filter(Number.isInteger) ?? null,
   };
 }
 
@@ -73,6 +82,9 @@ export interface DispatcharrChannelView {
   group: string;
   /** Streams in the channel's current failover order in Dispatcharr. */
   streams: DispatcharrStreamEntry[];
+  /** Dispatcharr's complete stream order, including streams with no row.
+   *  Writes compare against and preserve it. */
+  order: number[];
   /** The primary stream's result: what viewers get. */
   primary: ChannelResult;
   alive: number;
@@ -149,14 +161,13 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
 
   const channels: DispatcharrChannelView[] = [];
   for (const [channelId, channel] of byChannel) {
-    const order = orders[channelId];
-    let streams: DispatcharrStreamEntry[];
-    if (order) {
-      const byStream = new Map(channel.streams.map((entry) => [entry.ref.streamId, entry]));
-      streams = order.flatMap((streamId) => byStream.get(streamId) ?? []);
-    } else {
-      streams = [...channel.streams].sort((a, b) => a.ref.streamOrder - b.ref.streamOrder);
-    }
+    const loaded = [...channel.streams].sort((a, b) => a.ref.streamOrder - b.ref.streamOrder);
+    const order =
+      orders[channelId] ??
+      loaded[0]?.ref.channelStreams ??
+      loaded.map((entry) => entry.ref.streamId);
+    const byStream = new Map(channel.streams.map((entry) => [entry.ref.streamId, entry]));
+    const streams = order.flatMap((streamId) => byStream.get(streamId) ?? []);
     if (streams.length === 0) continue;
     const dead = streams.filter((entry) => isDeadStatus(entry.result.status)).length;
     channels.push({
@@ -164,6 +175,7 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
       name: channel.name,
       group: channel.group,
       streams,
+      order,
       primary: streams[0].result,
       alive: streams.filter((entry) => entry.result.status === "alive").length,
       primaryDead: isDeadStatus(streams[0].result.status),
@@ -315,4 +327,26 @@ export function dispatcharrServerOfProxyPlaylist(preview: PlaylistPreview | null
   const proxied = sample.filter((channel) => PROXY_STREAM_PATH.test(channel.url));
   if (proxied.length === 0 || proxied.length * 2 < sample.length) return null;
   return normalizeDispatcharrServer(proxied[0].url);
+}
+
+/** A full order for Dispatcharr from a new order of the visible streams:
+ *  streams without a row keep their place at the end. */
+export function withHiddenStreams(channel: DispatcharrChannelView, visible: number[]): number[] {
+  const shown = new Set(channel.streams.map((entry) => entry.ref.streamId));
+  return [...visible, ...channel.order.filter((id) => !shown.has(id))];
+}
+
+/** Rows a full scan should cover once streams were unlinked this session:
+ *  only streams still in their channels. Null when nothing was unlinked. */
+export function dispatcharrLinkedIndices(
+  results: ChannelResult[],
+  orders: DispatcharrOrders,
+): number[] | null {
+  if (Object.keys(orders).length === 0) return null;
+  const view = getDispatcharrView(results, orders);
+  if (!view) return null;
+  const linked = view.channels.flatMap((channel) =>
+    channel.streams.map((entry) => entry.result.index),
+  );
+  return linked.length < results.length ? linked.sort((a, b) => a - b) : null;
 }
