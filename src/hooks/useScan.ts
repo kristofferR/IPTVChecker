@@ -154,6 +154,13 @@ export function useScan() {
     rafId.current = null;
   }, [commitCollections]);
 
+  const flushPendingResults = useCallback(() => {
+    if (rafId.current !== null) {
+      cancelAnimationFrame(rafId.current);
+    }
+    flushResults();
+  }, [flushResults]);
+
   const queueResults = useCallback(
     (incoming: ChannelResult[]) => {
       if (incoming.length === 0) return;
@@ -306,6 +313,9 @@ export function useScan() {
             return;
           }
           logger.debug("[useScan] scan://complete received", event.payload);
+          // Results are batched per animation frame; land the last batch
+          // first so "complete" always means every result is in the store.
+          flushPendingResults();
           getStore().applyScanRuntime({
             summary: event.payload.payload,
             scanState: "complete",
@@ -320,6 +330,7 @@ export function useScan() {
             return;
           }
           logger.debug("[useScan] scan://cancelled received", event.payload);
+          flushPendingResults();
           cancelling.current = false;
           getStore().applyScanRuntime({
             summary: event.payload.payload,
@@ -412,7 +423,14 @@ export function useScan() {
         cancelAnimationFrame(rafId.current);
       }
     };
-  }, [queueResult, queueResults, applyScanError, recordCompletions, handleProgressUpdate]);
+  }, [
+    queueResult,
+    queueResults,
+    applyScanError,
+    recordCompletions,
+    handleProgressUpdate,
+    flushPendingResults,
+  ]);
 
   const start = useCallback(
     async (config: ScanConfig, totalChannels: number, selectedIndices: number[] = []) => {
