@@ -3,8 +3,8 @@
 //! per-item outcomes; one failure never aborts the rest.
 
 use crate::engine::dispatcharr::{
-    dispatcharr_ids_from_extinf, get_session, merge_stream_stats, normalize_dispatcharr_server,
-    register_session, stats_stuck, stream_stats_from_result, DispatcharrAuth, DispatcharrClient,
+    dispatcharr_ids_from_extinf, get_session, normalize_dispatcharr_server, register_session,
+    stats_stuck, stream_stats_from_result, DispatcharrAuth, DispatcharrClient,
 };
 use crate::error::AppError;
 use crate::models::channel::{ChannelResult, ChannelStatus};
@@ -13,7 +13,7 @@ use crate::state::AppState;
 use futures::stream::{self, StreamExt};
 use serde::Serialize;
 use serde_json::{Map, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tauri::Manager;
 
@@ -118,35 +118,14 @@ pub async fn dispatcharr_push_stream_stats(
         return Ok(report);
     }
 
-    // PATCH replaces the whole JSON, so merge onto the current stats.
-    let ids = updates.iter().map(|(id, _)| *id).collect::<Vec<_>>();
-    let existing = client
-        .fetch_streams_by_ids(&ids)
-        .await?
-        .into_iter()
-        .map(|stream| (stream.id, stream.stream_stats))
-        .collect::<HashMap<_, _>>();
     let updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-
-    let mut pending = Vec::new();
-    for (stream_id, stats) in updates {
-        match existing.get(&stream_id) {
-            Some(current) => {
-                pending.push((stream_id, merge_stream_stats(current.as_ref(), &stats)))
-            }
-            None => report.failed.push(DispatcharrItemFailure {
-                id: stream_id,
-                error: "Stream no longer exists in Dispatcharr".to_string(),
-            }),
-        }
-    }
-    let mut pending = pending.into_iter();
+    let mut pending = updates.into_iter();
 
     // Verify that a write sticks before sending the rest; a failed write
     // proves nothing, so keep probing until one succeeds.
     for (stream_id, stats) in pending.by_ref() {
         match client
-            .patch_stream_stats(stream_id, &stats, &updated_at)
+            .write_stream_stats(stream_id, &stats, &updated_at)
             .await
         {
             Ok(stored) if stats_stuck(stored.as_ref(), &stats) => {
@@ -171,7 +150,7 @@ pub async fn dispatcharr_push_stream_stats(
             (
                 stream_id,
                 client
-                    .patch_stream_stats(stream_id, &stats, updated_at)
+                    .write_stream_stats(stream_id, &stats, updated_at)
                     .await,
             )
         })

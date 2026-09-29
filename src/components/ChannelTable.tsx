@@ -540,13 +540,22 @@ export function ChannelTable({
       return visible.has(index);
     };
 
+    // A selected Dispatcharr channel whose primary changed stays selected
+    // through its current row.
+    const retarget = (index: number): number | null => {
+      if (isVisible(index)) return index;
+      const channel = dispatcharrViewRef.current?.byStreamIndex.get(index);
+      return channel && isVisible(channel.primary.index) ? channel.primary.index : null;
+    };
+
     updateSelection((prev) => {
       if (prev.size === 0) return prev;
-      const next = new Set(Array.from(prev).filter(isVisible));
-      return next.size === prev.size ? prev : next;
+      const next = new Set(Array.from(prev).flatMap((index) => retarget(index) ?? []));
+      const unchanged = next.size === prev.size && Array.from(next).every((i) => prev.has(i));
+      return unchanged ? prev : next;
     });
 
-    setSelectionAnchor((prev) => (prev !== null && isVisible(prev) ? prev : null));
+    setSelectionAnchor((prev) => (prev === null ? null : retarget(prev)));
 
     const previous = focusedRowRef.current;
     const next =

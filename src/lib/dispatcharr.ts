@@ -102,6 +102,8 @@ export interface DispatcharrView {
   primaries: ChannelResult[];
   byChannelId: Map<number, DispatcharrChannelView>;
   byPrimaryIndex: Map<number, DispatcharrChannelView>;
+  /** Channel of every linked stream row, by result index. */
+  byStreamIndex: Map<number, DispatcharrChannelView>;
 }
 
 /** Stream orders written to Dispatcharr this session, keyed by channel id.
@@ -180,6 +182,11 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
     primaries: channels.map((channel) => channel.primary),
     byChannelId: new Map(channels.map((channel) => [channel.channelId, channel])),
     byPrimaryIndex: new Map(channels.map((channel) => [channel.primary.index, channel])),
+    byStreamIndex: new Map(
+      channels.flatMap((channel) =>
+        channel.streams.map((entry) => [entry.result.index, channel] as const),
+      ),
+    ),
   };
 }
 

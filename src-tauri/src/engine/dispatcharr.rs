@@ -590,6 +590,27 @@ impl DispatcharrClient {
         Ok(stream.stream_stats)
     }
 
+    /// Merge `update` into a stream's current stats and store the result.
+    /// The PATCH replaces the whole object, so the stream is read right
+    /// before writing to keep fields Dispatcharr updated meanwhile.
+    pub(crate) async fn write_stream_stats(
+        &self,
+        stream_id: i64,
+        update: &Map<String, Value>,
+        updated_at: &str,
+    ) -> Result<Option<Value>, AppError> {
+        let current: DispatcharrStream = self
+            .json(
+                Method::GET,
+                &format!("/api/channels/streams/{}/", stream_id),
+                None,
+            )
+            .await?;
+        let merged = merge_stream_stats(current.stream_stats.as_ref(), update);
+        self.patch_stream_stats(stream_id, &merged, updated_at)
+            .await
+    }
+
     /// Set a channel's complete ordered stream list. Dispatcharr deletes the
     /// links missing from the list, so this covers remove, reorder, and
     /// promote. Returns the order Dispatcharr stored.
@@ -1164,6 +1185,39 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Value>(&bodies[1].2).unwrap(),
             json!({"stream_stats":{"video_codec":"h264"},"stream_stats_updated_at":"2026-09-29T10:00:00Z"})
+        );
+    }
+
+    #[tokio::test]
+    async fn stats_writes_merge_onto_a_fresh_read() {
+        let patched = Arc::new(Mutex::new(String::new()));
+        let seen = Arc::clone(&patched);
+        let base = spawn_server(Arc::new(move |req: &Request| {
+            if req.method == "GET" {
+                return (
+                    200,
+                    r#"{"id":3,"stream_stats":{"pixel_format":"yuv420p","video_codec":"mpeg2"}}"#
+                        .into(),
+                );
+            }
+            *seen.lock().unwrap() = req.body.clone();
+            let body: Value = serde_json::from_str(&req.body).unwrap();
+            (
+                200,
+                json!({"id":3,"stream_stats": body["stream_stats"]}).to_string(),
+            )
+        }))
+        .await;
+        let mut update = Map::new();
+        update.insert("video_codec".into(), json!("h264"));
+        client(&base, DispatcharrAuth::ApiKey("k".into()))
+            .write_stream_stats(3, &update, "2026-09-29T10:00:00Z")
+            .await
+            .unwrap();
+        let sent: Value = serde_json::from_str(&patched.lock().unwrap()).unwrap();
+        assert_eq!(
+            sent["stream_stats"],
+            json!({"pixel_format":"yuv420p","video_codec":"h264"})
         );
     }
 
