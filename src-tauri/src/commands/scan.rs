@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
@@ -754,33 +754,105 @@ async fn acquire_account_then_scan(
     Ok((account_permit, scan_permit))
 }
 
-/// Dispatch order that alternates between connection-limited provider
-/// accounts (keeping each account's rows in order), so a playlist grouped by
-/// provider cannot fill the bounded waiting pool with one busy account while
-/// the others sit idle. Playlists without account limits keep their order.
-fn interleave_by_account(channels: Vec<Channel>) -> Vec<Channel> {
-    let accounts = channels
-        .iter()
-        .map(|channel| {
-            crate::engine::dispatcharr::dispatcharr_connection_limit(&channel.extinf_line)
-                .map(|(account_id, _)| account_id)
-        })
-        .collect::<Vec<_>>();
-    if accounts.iter().all(Option::is_none) {
-        return channels;
+/// Rows queued per provider account, relative to the account's own
+/// connection limit: enough to keep its probes busy, never enough to crowd
+/// out other accounts.
+const ACCOUNT_QUEUE_FACTOR: usize = 2;
+
+struct AccountLane {
+    rows: VecDeque<Channel>,
+    queue_slots: Arc<Semaphore>,
+}
+
+/// Dispatch order for a scan. Rows of connection-limited provider accounts
+/// (Dispatcharr M3U accounts) sit in per-account lanes with a bounded queue
+/// each; the scheduler round-robins across lanes and only waits when every
+/// lane with rows left is full. One slow account therefore never blocks rows
+/// of other accounts. Playlists without account limits keep their order.
+struct DispatchQueue {
+    unlimited: VecDeque<Channel>,
+    lanes: Vec<AccountLane>,
+    cursor: usize,
+}
+
+impl DispatchQueue {
+    fn new(channels: Vec<Channel>) -> Self {
+        let mut unlimited = VecDeque::new();
+        let mut lanes = Vec::<AccountLane>::new();
+        let mut lane_of = HashMap::<i64, usize>::new();
+        for channel in channels {
+            match crate::engine::dispatcharr::dispatcharr_connection_limit(&channel.extinf_line) {
+                Some((account_id, limit)) => {
+                    let lane = *lane_of.entry(account_id).or_insert_with(|| {
+                        lanes.push(AccountLane {
+                            rows: VecDeque::new(),
+                            queue_slots: Arc::new(Semaphore::new(limit * ACCOUNT_QUEUE_FACTOR)),
+                        });
+                        lanes.len() - 1
+                    });
+                    lanes[lane].rows.push_back(channel);
+                }
+                None => unlimited.push_back(channel),
+            }
+        }
+        Self {
+            unlimited,
+            lanes,
+            cursor: 0,
+        }
     }
-    let mut seen = HashMap::<Option<i64>, usize>::new();
-    let mut ranked = channels
-        .into_iter()
-        .zip(accounts)
-        .map(|(channel, account)| {
-            let rank = seen.entry(account).or_insert(0);
-            *rank += 1;
-            (*rank, channel)
-        })
-        .collect::<Vec<_>>();
-    ranked.sort_by_key(|(rank, _)| *rank);
-    ranked.into_iter().map(|(_, channel)| channel).collect()
+
+    /// The next row to dispatch, with its account queue slot when it belongs
+    /// to a limited account. The slot must live as long as the row's task.
+    async fn next(
+        &mut self,
+        cancel: &CancellationToken,
+    ) -> Option<(Channel, Option<OwnedSemaphorePermit>)> {
+        // Lane 0 is the unlimited rows, then one lane per account.
+        let lane_count = self.lanes.len() + 1;
+        for step in 0..lane_count {
+            let lane = (self.cursor + step) % lane_count;
+            if lane == 0 {
+                if let Some(channel) = self.unlimited.pop_front() {
+                    self.cursor = (lane + 1) % lane_count;
+                    return Some((channel, None));
+                }
+                continue;
+            }
+            let account = &mut self.lanes[lane - 1];
+            if account.rows.is_empty() {
+                continue;
+            }
+            if let Ok(slot) = Arc::clone(&account.queue_slots).try_acquire_owned() {
+                let channel = account.rows.pop_front()?;
+                self.cursor = (lane + 1) % lane_count;
+                return Some((channel, Some(slot)));
+            }
+        }
+        // Every lane with rows left is full: wait for any of them.
+        let waiting = self
+            .lanes
+            .iter()
+            .enumerate()
+            .filter(|(_, account)| !account.rows.is_empty())
+            .map(|(index, account)| {
+                let slots = Arc::clone(&account.queue_slots);
+                Box::pin(async move { (index, slots.acquire_owned().await) })
+            })
+            .collect::<Vec<_>>();
+        if waiting.is_empty() {
+            return None;
+        }
+        // The lane index is into `lanes`; lane 0 of the cursor is unlimited rows.
+        let ((lane, slot), _, _) = tokio::select! {
+            ready = futures::future::select_all(waiting) => ready,
+            _ = cancel.cancelled() => return None,
+        };
+        let slot = slot.ok()?;
+        let channel = self.lanes[lane].rows.pop_front()?;
+        self.cursor = (lane + 2) % lane_count;
+        Some((channel, Some(slot)))
+    }
 }
 
 async fn wait_if_paused(state: &AppState, scan_scope: &str, cancel: &CancellationToken) -> bool {
@@ -2296,10 +2368,10 @@ async fn execute_scan_run(
         builder.build().unwrap_or_default()
     });
     let semaphore = Arc::new(Semaphore::new(config.concurrency as usize));
-    // Rows that may wait before probing (connection-limited provider
-    // accounts, and duplicates of a URL another row probes) are dispatched
-    // against this bounded pool and take a scan slot only when they probe.
-    // Waiting rows therefore never hold scan slots that probes need.
+    // Duplicates of a URL another row probes are dispatched against this
+    // bounded pool and take a scan slot only if they end up probing, so they
+    // never hold scan slots that probes need. Rows of limited provider
+    // accounts are bounded by their account's queue (see `DispatchQueue`).
     let waiting_rows = Arc::new(Semaphore::new((config.concurrency as usize).max(1) * 4));
     let diagnostics_limit = if single_provider {
         1
@@ -2358,7 +2430,8 @@ async fn execute_scan_run(
     // so a high scan concurrency never exceeds a provider's stream limit.
     let mut account_semaphores = HashMap::<i64, Arc<Semaphore>>::new();
 
-    for channel in interleave_by_account(channels) {
+    let mut dispatch_queue = DispatchQueue::new(channels);
+    while let Some((channel, account_queue_slot)) = dispatch_queue.next(&cancel_token).await {
         if cancel_token.is_cancelled() {
             break;
         }
@@ -2412,14 +2485,21 @@ async fn execute_scan_run(
                 ),
             }
         };
-        let dispatch_slots = if account_semaphore.is_some() || duplicate_url {
-            &waiting_rows
-        } else {
-            &semaphore
-        };
-        let permit = match Arc::clone(dispatch_slots).acquire_owned().await {
-            Ok(permit) => permit,
-            Err(_) => break,
+        // Account rows already hold their account's queue slot; duplicates
+        // wait in the shared waiting pool; everything else takes a scan slot.
+        let permit = match account_queue_slot {
+            Some(slot) => slot,
+            None => {
+                let dispatch_slots = if duplicate_url {
+                    &waiting_rows
+                } else {
+                    &semaphore
+                };
+                match Arc::clone(dispatch_slots).acquire_owned().await {
+                    Ok(permit) => permit,
+                    Err(_) => break,
+                }
+            }
         };
         let tx = tx.clone();
         let checkpoint_tx = checkpoint_tx.clone();
@@ -3055,10 +3135,8 @@ pub async fn cancel_quick_check(app: AppHandle, request_id: String) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn dispatch_alternates_between_provider_accounts() {
-        let row = |index: usize, account: Option<i64>| {
-            Channel {
+    fn dispatch_row(index: usize, account: Option<(i64, usize)>) -> Channel {
+        Channel {
             index,
             playlist: "p".into(),
             name: format!("row {}", index),
@@ -3074,32 +3152,57 @@ mod tests {
             url: format!("http://provider.example/{}.ts", index),
             content_type: crate::models::channel::ContentType::Live,
             extinf_line: match account {
-                Some(id) => format!(
-                    "#EXTINF:-1 x-dispatcharr-account-id=\"{}\" x-dispatcharr-max-streams=\"1\",row",
-                    id
+                Some((id, limit)) => format!(
+                    "#EXTINF:-1 x-dispatcharr-account-id=\"{}\" x-dispatcharr-max-streams=\"{}\",row",
+                    id, limit
                 ),
                 None => "#EXTINF:-1,row".into(),
             },
             metadata_lines: Vec::new(),
         }
-        };
-        let order = |rows: Vec<Channel>| {
-            interleave_by_account(rows)
-                .iter()
-                .map(|channel| channel.index)
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(
-            order(vec![
-                row(0, Some(1)),
-                row(1, Some(1)),
-                row(2, Some(1)),
-                row(3, Some(2)),
-                row(4, None)
-            ]),
-            vec![0, 3, 4, 1, 2]
-        );
-        assert_eq!(order(vec![row(0, None), row(1, None)]), vec![0, 1]);
+    }
+
+    #[tokio::test]
+    async fn a_full_account_queue_does_not_block_other_rows() {
+        let cancel = CancellationToken::new();
+        // Account 1 allows one stream (queue of two); account 2 allows five.
+        let mut queue = DispatchQueue::new(vec![
+            dispatch_row(0, Some((1, 1))),
+            dispatch_row(1, Some((1, 1))),
+            dispatch_row(2, Some((1, 1))),
+            dispatch_row(3, Some((2, 5))),
+            dispatch_row(4, Some((2, 5))),
+            dispatch_row(5, None),
+        ]);
+        let mut held = Vec::new();
+        let mut order = Vec::new();
+        for _ in 0..5 {
+            let (channel, slot) = queue.next(&cancel).await.unwrap();
+            order.push(channel.index);
+            held.push(slot);
+        }
+        // Row 2 waits for account 1's queue; everything else went out.
+        assert_eq!(order, vec![5, 0, 3, 1, 4]);
+        let blocked =
+            tokio::time::timeout(std::time::Duration::from_millis(50), queue.next(&cancel));
+        assert!(blocked.await.is_err());
+        held.remove(1); // row 0 finishes
+        assert_eq!(queue.next(&cancel).await.unwrap().0.index, 2);
+        assert!(queue.next(&cancel).await.is_none());
+    }
+
+    #[test]
+    fn plain_playlists_keep_their_order() {
+        let order = futures::executor::block_on(async {
+            let cancel = CancellationToken::new();
+            let mut queue = DispatchQueue::new(vec![dispatch_row(0, None), dispatch_row(1, None)]);
+            let mut order = Vec::new();
+            while let Some((channel, _)) = queue.next(&cancel).await {
+                order.push(channel.index);
+            }
+            order
+        });
+        assert_eq!(order, vec![0, 1]);
     }
 
     #[tokio::test]
