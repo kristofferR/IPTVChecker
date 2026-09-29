@@ -855,6 +855,12 @@ impl DispatchQueue {
     }
 }
 
+async fn is_scan_paused(state: &AppState, scan_scope: &str) -> bool {
+    state
+        .with_window_scan_state(scan_scope, |scan_state| scan_state.paused)
+        .await
+}
+
 async fn wait_if_paused(state: &AppState, scan_scope: &str, cancel: &CancellationToken) -> bool {
     loop {
         if cancel.is_cancelled() {
@@ -2465,7 +2471,11 @@ async fn execute_scan_run(
         let account_limit =
             crate::engine::dispatcharr::dispatcharr_connection_limit(&channel.extinf_line);
         let account_semaphore = account_limit.map(|(account_id, limit)| {
-            crate::engine::dispatcharr::account_connection_slots(account_id, &channel.url, limit)
+            crate::engine::dispatcharr::account_connection_slots(
+                &channel.extinf_line,
+                account_id,
+                limit,
+            )
         });
         // Rows sharing a URL wait on one probe. Settle which row owns it
         // before reserving capacity, so a waiting duplicate never holds the
@@ -2573,15 +2583,22 @@ async fn execute_scan_run(
                 .get_or_init(|| async {
                     let _probe_permits = match &account_semaphore {
                         Some(account) => {
-                            let permits =
-                                acquire_account_then_scan(account, &scan_semaphore, &cancel)
-                                    .await?;
                             // Rows queued for a busy account passed the
-                            // dispatch pause check long ago; honour a pause
-                            // requested since then before probing.
-                            if !wait_if_paused(&state_for_perf, &pause_scope, &cancel).await {
-                                return Err(AppError::Cancelled);
-                            }
+                            // dispatch pause check long ago. Honour a pause
+                            // without holding the account's shared slot, so
+                            // a paused window never blocks another scan of
+                            // the same provider.
+                            let permits = loop {
+                                if !wait_if_paused(&state_for_perf, &pause_scope, &cancel).await {
+                                    return Err(AppError::Cancelled);
+                                }
+                                let permits =
+                                    acquire_account_then_scan(account, &scan_semaphore, &cancel)
+                                        .await?;
+                                if !is_scan_paused(&state_for_perf, &pause_scope).await {
+                                    break permits;
+                                }
+                            };
                             vec![permits.0, permits.1]
                         }
                         // A duplicate only probes when the owning row stopped

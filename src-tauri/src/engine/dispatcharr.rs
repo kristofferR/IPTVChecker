@@ -43,6 +43,9 @@ pub(crate) const ATTR_ACCOUNT: &str = "x-dispatcharr-account";
 pub(crate) const ATTR_STREAM_NAME: &str = "x-dispatcharr-stream-name";
 pub(crate) const ATTR_ACCOUNT_ID: &str = "x-dispatcharr-account-id";
 pub(crate) const ATTR_MAX_STREAMS: &str = "x-dispatcharr-max-streams";
+/// The Dispatcharr server a row came from, so connection limits are shared
+/// per server and account across every scan in the app.
+pub(crate) const ATTR_SERVER: &str = "x-dispatcharr-server";
 /// The channel's complete stream order, including streams without a row
 /// (no URL), so edits can be checked against Dispatcharr's full list.
 pub(crate) const ATTR_CHANNEL_STREAMS: &str = "x-dispatcharr-channel-streams";
@@ -696,29 +699,37 @@ fn sessions() -> &'static Mutex<HashMap<String, Arc<DispatcharrClient>>> {
 
 /// Connection slots of one provider account, shared by every scan in the
 /// app (several windows can scan the same source at once), so together they
-/// never exceed the account's stream limit. Keyed by account, provider host,
-/// and limit: two Dispatcharr servers with the same account id stay apart,
-/// and a changed limit takes effect on the next scan.
+/// never exceed the account's stream limit. Keyed by Dispatcharr server and
+/// account; a changed limit resizes the existing pool rather than adding a
+/// second one.
 pub(crate) fn account_connection_slots(
+    extinf_line: &str,
     account_id: i64,
-    stream_url: &str,
     limit: usize,
 ) -> Arc<tokio::sync::Semaphore> {
-    type SlotKey = (i64, String, usize);
-    static SLOTS: OnceLock<Mutex<HashMap<SlotKey, Arc<tokio::sync::Semaphore>>>> = OnceLock::new();
-    let host = Url::parse(stream_url)
-        .ok()
-        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+    type Pools = HashMap<String, (Arc<tokio::sync::Semaphore>, usize)>;
+    static SLOTS: OnceLock<Mutex<Pools>> = OnceLock::new();
+    let server = parse_extinf_attributes(extinf_line)
+        .into_iter()
+        .find_map(|(key, value)| (key == ATTR_SERVER).then_some(value))
         .unwrap_or_default();
+    let key = format!("{}|{}", server, account_id);
     let mut slots = SLOTS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    Arc::clone(
-        slots
-            .entry((account_id, host, limit))
-            .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(limit))),
-    )
+    let (pool, current) = slots
+        .entry(key)
+        .or_insert_with(|| (Arc::new(tokio::sync::Semaphore::new(limit)), limit));
+    if limit > *current {
+        pool.add_permits(limit - *current);
+    } else if limit < *current {
+        // Best effort: permits in use come back and are then kept in check
+        // by the smaller count taken now.
+        pool.forget_permits(*current - limit);
+    }
+    *current = limit;
+    Arc::clone(pool)
 }
 
 pub(crate) fn register_session(source_identity: &str, client: Arc<DispatcharrClient>) {
@@ -872,6 +883,7 @@ pub(crate) fn build_m3u(
             attr(ATTR_CHANNEL_STREAMS, &channel_streams);
             match (account, stream.m3u_account) {
                 (Some(account), _) => {
+                    attr(ATTR_SERVER, &base);
                     attr(ATTR_ACCOUNT, &account.name);
                     attr(ATTR_ACCOUNT_ID, &account.id.to_string());
                     if account.max_streams > 0 {
@@ -881,6 +893,7 @@ pub(crate) fn build_m3u(
                 // Account details did not load: assume the strictest limit
                 // rather than scanning the provider without one.
                 (None, Some(account_id)) => {
+                    attr(ATTR_SERVER, &base);
                     attr(ATTR_ACCOUNT_ID, &account_id.to_string());
                     attr(ATTR_MAX_STREAMS, "1");
                 }
@@ -1431,12 +1444,19 @@ mod tests {
     }
 
     #[test]
-    fn account_slots_are_shared_across_scans() {
-        let url = "http://provider-slots.example/live/1.ts";
-        let first = account_connection_slots(9901, url, 1);
-        let second = account_connection_slots(9901, "http://provider-slots.example/live/2.ts", 1);
-        assert!(Arc::ptr_eq(&first, &second));
-        let other_server = account_connection_slots(9901, "http://elsewhere.example/1.ts", 1);
+    fn account_slots_are_shared_per_server_and_account() {
+        let row = |server: &str| {
+            format!(
+                "#EXTINF:-1 x-dispatcharr-server=\"{server}\" x-dispatcharr-account-id=\"9901\",N"
+            )
+        };
+        let first = account_connection_slots(&row("http://dvr-a.example"), 9901, 1);
+        // Same account on another stream host, or with a changed limit:
+        // still one pool, resized.
+        let resized = account_connection_slots(&row("http://dvr-a.example"), 9901, 2);
+        assert!(Arc::ptr_eq(&first, &resized));
+        assert_eq!(resized.available_permits(), 2);
+        let other_server = account_connection_slots(&row("http://dvr-b.example"), 9901, 1);
         assert!(!Arc::ptr_eq(&first, &other_server));
     }
 
