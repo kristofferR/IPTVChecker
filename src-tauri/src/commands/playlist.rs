@@ -323,14 +323,9 @@ fn dominant_host_from_counts(counts: &HashMap<String, usize>) -> Option<String> 
         .map(|(host, _)| host.clone())
 }
 
-/// Returns `true` when ≥90% of parseable channel URLs share the same hostname,
-/// or for Dispatcharr sources (see `open_playlist_dispatcharr_inner`).
+/// Returns `true` when ≥90% of parseable channel URLs share the same hostname.
 pub(crate) fn is_single_provider_check(channels: &[Channel]) -> bool {
     is_single_provider(channels)
-        || (!channels.is_empty()
-            && channels.iter().all(|channel| {
-                crate::engine::dispatcharr::is_dispatcharr_row(&channel.extinf_line)
-            }))
 }
 
 fn is_single_provider(channels: &[Channel]) -> bool {
@@ -1109,11 +1104,9 @@ pub(crate) async fn open_playlist_dispatcharr_inner(
         "{} (Dispatcharr)",
         dispatcharr::dispatcharr_host_label(&base)
     );
+    // No blanket single-provider flag: the scanner caps each provider account
+    // at its own stream limit, so different providers scan side by side.
     populate_server_metadata(Some(app), &mut preview).await;
-    // Provider accounts behind Dispatcharr commonly allow a single stream
-    // each, so treat the source as connection-limited even when its streams
-    // span several providers: auto concurrency then scans one at a time.
-    preview.single_provider = true;
     // Sessions are keyed by connection, not source identity: a saved source's
     // identity stays the same when its server or account is edited.
     dispatcharr::register_session(&source_key, client);

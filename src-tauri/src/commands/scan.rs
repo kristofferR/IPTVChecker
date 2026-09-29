@@ -2354,12 +2354,17 @@ async fn execute_scan_run(
     )
     .await?;
 
+    // Rows of connection-limited provider accounts (Dispatcharr) get the same
+    // one-connection treatment as a single-provider playlist, per row.
+    let has_account_limits = channels.iter().any(|channel| {
+        crate::engine::dispatcharr::dispatcharr_connection_limit(&channel.extinf_line).is_some()
+    });
     let client = Arc::new({
         let mut builder = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(5))
             .danger_accept_invalid_certs(config.accept_invalid_certs)
             .redirect(reqwest::redirect::Policy::none());
-        if single_provider {
+        if single_provider || has_account_limits {
             // Single-provider IPTV servers enforce connection limits.
             // Disable connection pooling so the checker's HTTP connection
             // is closed before the combined ffmpeg diagnostics connect.
@@ -2457,10 +2462,9 @@ async fn execute_scan_run(
         // Adaptive concurrency throttle — slow down dispatch when servers show pressure
         adaptive_throttle.before_dispatch(&app, &run_id).await;
 
-        let account_semaphore = crate::engine::dispatcharr::dispatcharr_connection_limit(
-            &channel.extinf_line,
-        )
-        .map(|(account_id, limit)| {
+        let account_limit =
+            crate::engine::dispatcharr::dispatcharr_connection_limit(&channel.extinf_line);
+        let account_semaphore = account_limit.map(|(account_id, limit)| {
             crate::engine::dispatcharr::account_connection_slots(account_id, &channel.url, limit)
         });
         // Rows sharing a URL wait on one probe. Settle which row owns it
@@ -2519,7 +2523,9 @@ async fn execute_scan_run(
         let run_id_for_perf = run_id.clone();
         let pause_scope = scan_scope.to_string();
         let diagnostics_semaphore = Arc::clone(&diagnostics_semaphore);
-        let single_connection_mode = single_provider;
+        // A limited provider account counts every connection, so its rows
+        // probe over one connection like a single-provider playlist.
+        let single_connection_mode = single_provider || account_limit.is_some();
         let disk_guard = disk_guard.clone();
         let consecutive_net_failures = Arc::clone(&consecutive_net_failures);
         let adaptive_throttle = adaptive_throttle.clone();
