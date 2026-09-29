@@ -1040,14 +1040,18 @@ export default function App() {
       const currentGroupFilter = refreshedState.groupFilter;
       const currentSettings = refreshedState.settings;
       const explicitSelection = applyResult.reapplied ? [] : selection;
-      // A full scan of a Dispatcharr source skips streams unlinked this session.
+      // Scans of a Dispatcharr source skip streams unlinked this session.
+      const linked = dispatcharrLinkedIndices(
+        refreshedState.flatResults,
+        refreshedState.dispatcharrOrders,
+      );
+      const linkedSet = linked ? new Set(linked) : null;
       const effectiveSelection =
         explicitSelection.length > 0
-          ? explicitSelection
-          : (dispatcharrLinkedIndices(
-              refreshedState.flatResults,
-              refreshedState.dispatcharrOrders,
-            ) ?? []);
+          ? linkedSet
+            ? explicitSelection.filter((index) => linkedSet.has(index))
+            : explicitSelection
+          : (linked ?? []);
 
       if (!currentPlaylist) return false;
 

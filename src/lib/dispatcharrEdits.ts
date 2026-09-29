@@ -134,6 +134,20 @@ export async function undoChannels(channelIds: number[]): Promise<ApplyOutcome> 
   return writeOrders(changes, true);
 }
 
+/** Reverse the given writes. A channel already back at its earlier order is
+ *  skipped; one edited since is refused by the drift check. */
+export function reverseChanges(changes: OrderChange[]): Promise<ApplyOutcome> {
+  const orders = useAppStore.getState().dispatcharrOrders;
+  const pending = changes.filter((change) => {
+    const current = orders[change.channelId];
+    return !(current && sameOrder(current, change.from));
+  });
+  return writeOrders(
+    pending.map((change) => ({ channelId: change.channelId, from: change.to, to: change.from })),
+    true,
+  );
+}
+
 export interface FixPlan {
   changes: OrderChange[];
   reordered: number;
@@ -169,15 +183,14 @@ export function planFix(view: DispatcharrView, channelIds: Iterable<number>): Fi
 /** Apply a bulk fix and summarize it in the toast. */
 export async function applyFixPlan(plan: FixPlan): Promise<void> {
   const { applied, failed } = await applyOrderChanges(plan.changes);
-  const appliedIds = new Set(applied.map((change) => change.channelId));
   const removed = applied.reduce(
     (sum, change) => sum + change.from.filter((id) => !change.to.includes(id)).length,
     0,
   );
   useAppStore.getState().setDispatcharrToast({
-    fixed: appliedIds.size,
+    fixed: applied.length,
     removed,
     failed,
-    channelIds: [...appliedIds],
+    changes: applied,
   });
 }

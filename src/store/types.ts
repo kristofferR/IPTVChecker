@@ -3,6 +3,7 @@ import type { ArchiveDownload } from "../lib/archiveDownload";
 import type { ArchiveProbeEntry } from "../lib/archiveProbe";
 import type { ArchiveVerifyRun } from "../lib/archiveVerifyRun";
 import type { DispatcharrOrders } from "../lib/dispatcharr";
+import type { OrderChange } from "../lib/dispatcharrEdits";
 import type { Platform } from "../lib/platform";
 import type { ScanState } from "../lib/scanState";
 import type {
@@ -300,8 +301,8 @@ export interface DispatcharrToast {
   fixed: number;
   removed: number;
   failed: number;
-  /** Channels "Undo all" restores. */
-  channelIds: number[];
+  /** The bulk fix's own writes; "Undo all" reverses exactly these. */
+  changes: OrderChange[];
 }
 
 export interface DispatcharrSlice {

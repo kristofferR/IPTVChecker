@@ -2400,6 +2400,7 @@ async fn execute_scan_run(
         let task_app = app.clone();
         let state_for_perf = state.clone();
         let run_id_for_perf = run_id.clone();
+        let pause_scope = scan_scope.to_string();
         let shared_url_results = Arc::clone(&shared_url_results);
         let diagnostics_semaphore = Arc::clone(&diagnostics_semaphore);
         let single_connection_mode = single_provider;
@@ -2458,9 +2459,18 @@ async fn execute_scan_run(
             let shared_result = result_cell
                 .get_or_init(|| async {
                     let _account_permits = match &account_semaphore {
-                        Some(account) => Some(
-                            acquire_account_then_scan(account, &scan_semaphore, &cancel).await?,
-                        ),
+                        Some(account) => {
+                            let permits =
+                                acquire_account_then_scan(account, &scan_semaphore, &cancel)
+                                    .await?;
+                            // Rows queued for a busy account passed the
+                            // dispatch pause check long ago; honour a pause
+                            // requested since then before probing.
+                            if !wait_if_paused(&state_for_perf, &pause_scope, &cancel).await {
+                                return Err(AppError::Cancelled);
+                            }
+                            Some(permits)
+                        }
                         None => None,
                     };
                     compute_shared_url_result(

@@ -1,7 +1,9 @@
 import { X } from "lucide-react";
 import { useState } from "react";
-import { undoChannels } from "../lib/dispatcharrEdits";
+import { reverseChanges } from "../lib/dispatcharrEdits";
 import { useAppStore } from "../store";
+
+const getStore = () => useAppStore.getState();
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
@@ -15,11 +17,18 @@ export function DispatcharrToast() {
   const handleUndoAll = async () => {
     setUndoing(true);
     try {
-      const { applied } = await undoChannels(toast.channelIds);
-      const restored = new Set(applied.map((change) => change.channelId));
-      const remaining = toast.channelIds.filter((id) => !restored.has(id));
-      // Failed channels show their error inline; keep them undoable here.
-      setToast(remaining.length === 0 ? null : { ...toast, channelIds: remaining });
+      const { failed } = await reverseChanges(toast.changes);
+      if (failed === 0) {
+        setToast(null);
+      } else {
+        // Failed channels show their error inline; keep them undoable here.
+        const orders = getStore().dispatcharrOrders;
+        const remaining = toast.changes.filter((change) => {
+          const current = orders[change.channelId];
+          return !current || current.join() !== change.from.join();
+        });
+        setToast(remaining.length === 0 ? null : { ...toast, changes: remaining });
+      }
     } finally {
       setUndoing(false);
     }
@@ -35,7 +44,7 @@ export function DispatcharrToast() {
         {toast.removed > 0 && ` · ${plural(toast.removed, "dead stream")} removed`}
       </span>
       {toast.failed > 0 && <span className="text-red-400">{toast.failed} failed</span>}
-      {toast.channelIds.length > 0 && (
+      {toast.changes.length > 0 && (
         <button
           type="button"
           disabled={undoing}
