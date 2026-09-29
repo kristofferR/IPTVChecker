@@ -1,5 +1,6 @@
 import { ArrowDown, ArrowUp, ChevronRight, X } from "lucide-react";
 import { useMemo } from "react";
+import { useFixPreferences } from "../hooks/useFixPreferences";
 import {
   type DispatcharrChannelView,
   type DispatcharrStreamEntry,
@@ -159,7 +160,11 @@ export function ChannelNameCell({
   actions: DispatcharrRowActions | undefined;
   logo: React.ReactNode;
 }) {
-  const canFix = useMemo(() => proposeFixOrder(channel).kind === "change", [channel]);
+  const preferences = useFixPreferences();
+  const canFix = useMemo(
+    () => proposeFixOrder(channel, preferences).kind === "change",
+    [channel, preferences],
+  );
   const busy = rowState?.kind === "writing";
   return (
     <span className="flex min-w-0 flex-1 items-center gap-1.5 px-2">

@@ -148,6 +148,9 @@ export interface XtreamOpenRequest {
   password: string;
 }
 
+/** Scan signals Fix order ranks working Dispatcharr streams by. */
+export type DispatcharrRankSignal = "resolution" | "frame_rate" | "bitrate" | "latency";
+
 /** API key wins when both are set. */
 export interface DispatcharrOpenRequest {
   server: string;
@@ -410,6 +413,8 @@ export interface AppSettings {
   external_player_path: string | null;
   persistent_xtream_connection_notice: boolean;
   dispatcharr_write_stats: boolean;
+  dispatcharr_rank_order: DispatcharrRankSignal[];
+  dispatcharr_dead_streams: "unlink" | "move_to_end";
   automatic_update_checks: boolean;
 }
 

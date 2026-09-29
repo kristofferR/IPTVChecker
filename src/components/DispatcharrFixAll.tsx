@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useFixPreferences } from "../hooks/useFixPreferences";
 import type { DispatcharrView } from "../lib/dispatcharr";
 import { applyFixPlan, planFix } from "../lib/dispatcharrEdits";
 import type { ChannelResult } from "../lib/types";
@@ -24,6 +25,7 @@ export function DispatcharrFixAll({
   const [open, setOpen] = useState(false);
   const [applying, setApplying] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const preferences = useFixPreferences();
   const plan = useMemo(
     () =>
       planFix(
@@ -32,8 +34,9 @@ export function DispatcharrFixAll({
           const channel = view.byPrimaryIndex.get(primary.index);
           return channel ? [channel.channelId] : [];
         }),
+        preferences,
       ),
-    [view, visiblePrimaries],
+    [view, visiblePrimaries, preferences],
   );
   const count = plan.changes.length;
 
@@ -95,10 +98,17 @@ export function DispatcharrFixAll({
                 {plural(plan.reordered, "channel")}
               </dd>
             </div>
-            <div className="flex justify-between">
-              <dt>Dead streams removed</dt>
-              <dd className="text-red-400 tabular-nums">{plan.removed}</dd>
-            </div>
+            {preferences.deadStreams === "move_to_end" ? (
+              <div className="flex justify-between">
+                <dt>Dead streams moved to end</dt>
+                <dd className="text-text-primary tabular-nums">{plan.movedDead}</dd>
+              </div>
+            ) : (
+              <div className="flex justify-between">
+                <dt>Dead streams removed</dt>
+                <dd className="text-red-400 tabular-nums">{plan.removed}</dd>
+              </div>
+            )}
             {plan.skippedAllDead > 0 && (
               <div className="flex justify-between">
                 <dt>Skipped, all streams dead</dt>

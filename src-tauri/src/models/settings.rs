@@ -29,6 +29,26 @@ pub enum TitleBarPreference {
     Hide,
 }
 
+/// Scan signals Dispatcharr's Fix order ranks working streams by.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DispatcharrRankSignal {
+    Resolution,
+    FrameRate,
+    Bitrate,
+    Latency,
+}
+
+/// What Fix order does with dead streams.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DispatcharrDeadStreams {
+    /// Remove them from the channel (they stay in Dispatcharr).
+    #[default]
+    Unlink,
+    MoveToEnd,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
@@ -97,9 +117,12 @@ pub struct AppSettings {
     /// Keep the Xtream max-connections notice visible until it is dismissed.
     pub persistent_xtream_connection_notice: bool,
     /// After a scan of a Dispatcharr source, merge probe results into each
-    /// stream's `stream_stats` in Dispatcharr. Off by default: it writes to
-    /// the user's server.
+    /// stream's `stream_stats` in Dispatcharr, so its stream list shows them.
     pub dispatcharr_write_stats: bool,
+    /// Fix order compares working streams on these signals in this order;
+    /// a tie on one falls through to the next.
+    pub dispatcharr_rank_order: Vec<DispatcharrRankSignal>,
+    pub dispatcharr_dead_streams: DispatcharrDeadStreams,
     /// Look for a signed update on launch and every six hours. Discovery only
     /// ever surfaces a notice; installing always needs explicit confirmation.
     pub automatic_update_checks: bool,
@@ -226,7 +249,14 @@ impl Default for AppSettings {
             show_header_button_text: !cfg!(target_os = "macos"),
             external_player_path: None,
             persistent_xtream_connection_notice: false,
-            dispatcharr_write_stats: false,
+            dispatcharr_write_stats: true,
+            dispatcharr_rank_order: vec![
+                DispatcharrRankSignal::Resolution,
+                DispatcharrRankSignal::FrameRate,
+                DispatcharrRankSignal::Bitrate,
+                DispatcharrRankSignal::Latency,
+            ],
+            dispatcharr_dead_streams: DispatcharrDeadStreams::Unlink,
             automatic_update_checks: true,
         }
     }

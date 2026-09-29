@@ -4,6 +4,7 @@ import {
   dispatcharrChannelRows,
   dispatcharrLinkedIndices,
   dispatcharrServerOfProxyPlaylist,
+  fixPreferencesFrom,
   getDispatcharrView,
   normalizeDispatcharrServer,
   parseDispatcharrIds,
@@ -80,6 +81,8 @@ function channelRows(
     status?: ChannelResult["status"];
     height?: number;
     fps?: number;
+    kbps?: number;
+    latency?: number;
   }>,
   firstIndex = 0,
 ): ChannelResult[] {
@@ -88,7 +91,13 @@ function channelRows(
       firstIndex + order,
       extinf(channel, stream.id, order, streams.length, name, `Feed ${stream.id}`),
       name,
-      { status: stream.status ?? "alive", height: stream.height ?? null, fps: stream.fps ?? null },
+      {
+        status: stream.status ?? "alive",
+        height: stream.height ?? null,
+        fps: stream.fps ?? null,
+        video_bitrate: stream.kbps == null ? null : `${stream.kbps} kbps`,
+        latency_ms: stream.latency ?? null,
+      },
     );
   });
 }
@@ -317,5 +326,26 @@ describe("dispatcharr helpers", () => {
     const channel = getDispatcharrView(results, {})?.byChannelId.get(10);
     if (!channel) throw new Error("missing channel");
     expect(ids(proposeFixOrder(channel))).toEqual([2, 1, 3]);
+  });
+
+  it("ranks by the preferred signals and can keep dead streams at the end", () => {
+    const results = channelRows(10, "News One", [
+      { id: 1, status: "dead" },
+      { id: 2, height: 1080, kbps: 3000, latency: 900 },
+      { id: 3, height: 720, kbps: 8000, latency: 100 },
+      { id: 4, height: 1080, kbps: 3200, latency: 100 },
+    ]);
+    const channel = getDispatcharrView(results, {})?.byChannelId.get(10);
+    if (!channel) throw new Error("missing channel");
+    // Bitrate first: 8000 beats both 1080p streams; 3000 and 3200 share a
+    // 500 kbps step, so latency (after resolution and frame rate) decides.
+    const bitrateFirst = fixPreferencesFrom({
+      dispatcharr_rank_order: ["bitrate", "latency"],
+      dispatcharr_dead_streams: "move_to_end",
+    });
+    expect(bitrateFirst.rankOrder).toEqual(["bitrate", "latency", "resolution", "frame_rate"]);
+    expect(ids(proposeFixOrder(channel, bitrateFirst))).toEqual([3, 4, 2, 1]);
+    // Defaults: resolution first, dead stream unlinked.
+    expect(ids(proposeFixOrder(channel))).toEqual([4, 2, 3]);
   });
 });

@@ -1,7 +1,9 @@
 import { useAppStore } from "../store";
 import {
+  DEFAULT_FIX_PREFERENCES,
   type DispatcharrView,
   dispatcharrTarget,
+  type FixPreferences,
   getDispatcharrView,
   parseDispatcharrIds,
   proposeFixOrder,
@@ -162,16 +164,28 @@ export interface FixPlan {
   changes: OrderChange[];
   reordered: number;
   removed: number;
+  /** Dead streams moved to the end instead (when preferred). */
+  movedDead: number;
   skippedAllDead: number;
 }
 
 /** Fix-order changes for the given channels (see `proposeFixOrder`). */
-export function planFix(view: DispatcharrView, channelIds: Iterable<number>): FixPlan {
-  const plan: FixPlan = { changes: [], reordered: 0, removed: 0, skippedAllDead: 0 };
+export function planFix(
+  view: DispatcharrView,
+  channelIds: Iterable<number>,
+  preferences: FixPreferences = DEFAULT_FIX_PREFERENCES,
+): FixPlan {
+  const plan: FixPlan = {
+    changes: [],
+    reordered: 0,
+    removed: 0,
+    movedDead: 0,
+    skippedAllDead: 0,
+  };
   for (const channelId of channelIds) {
     const channel = view.byChannelId.get(channelId);
     if (!channel) continue;
-    const proposal = proposeFixOrder(channel);
+    const proposal = proposeFixOrder(channel, preferences);
     if (proposal.kind === "all_dead") {
       plan.skippedAllDead += 1;
     } else if (proposal.kind === "change") {
@@ -182,6 +196,9 @@ export function planFix(view: DispatcharrView, channelIds: Iterable<number>): Fi
         to: withHiddenStreams(channel, proposal.order),
       });
       plan.removed += proposal.removed;
+      if (preferences.deadStreams === "move_to_end") {
+        plan.movedDead += channel.streams.filter((entry) => entry.result.status === "dead").length;
+      }
       // Reordered when the streams that stay change their relative order.
       const kept = visible.filter((id) => proposal.order.includes(id));
       if (!sameOrder(kept, proposal.order)) plan.reordered += 1;

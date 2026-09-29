@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { useFixPreferences } from "../hooks/useFixPreferences";
 import { resultAtIndex } from "../hooks/useScan.helpers";
 import { hasArchive } from "../lib/archive";
 import { createArchiveProbeSequenceGuard, probeChannelArchive } from "../lib/archiveProbe";
@@ -489,10 +490,13 @@ export function ChannelTable({
     });
   }, []);
 
+  const fixPreferences = useFixPreferences();
+  const fixPreferencesRef = useRef(fixPreferences);
+  fixPreferencesRef.current = fixPreferences;
   const handleFixChannel = useCallback((channel: DispatcharrChannelView) => {
     const view = dispatcharrViewRef.current;
     if (!view) return;
-    void applyOrderChanges(planFix(view, [channel.channelId]).changes);
+    void applyOrderChanges(planFix(view, [channel.channelId], fixPreferencesRef.current).changes);
   }, []);
 
   const handleUndoChannel = useCallback((channel: DispatcharrChannelView) => {

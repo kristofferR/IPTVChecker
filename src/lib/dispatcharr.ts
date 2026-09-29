@@ -1,5 +1,11 @@
 import { type ArchiveProbes, filterResultsShared } from "./filters";
-import type { ChannelResult, DispatcharrTarget, PlaylistPreview } from "./types";
+import type {
+  AppSettings,
+  ChannelResult,
+  DispatcharrRankSignal,
+  DispatcharrTarget,
+  PlaylistPreview,
+} from "./types";
 
 /** Dispatcharr IDs embedded as `x-dispatcharr-*` EXTINF attributes by the
  *  backend's M3U synthesis (mirror of `dispatcharr_ids_from_extinf`). */
@@ -247,26 +253,78 @@ export type FixProposal =
   | { kind: "all_dead" }
   | { kind: "change"; order: number[]; removed: number };
 
-/** Working streams first by resolution, then frame rate (remaining ties
- *  keep their order), then
- *  untested ones, then geoblocked, DRM, and placeholder. Dead streams leave
- *  the channel, except when every stream is dead: that channel is left alone. */
-export function proposeFixOrder(channel: DispatcharrChannelView): FixProposal {
+/** How Fix order ranks streams (Settings > Dispatcharr). */
+export interface FixPreferences {
+  /** Signals compared in order; a tie on one falls through to the next. */
+  rankOrder: DispatcharrRankSignal[];
+  deadStreams: "unlink" | "move_to_end";
+}
+
+const RANK_SIGNALS: DispatcharrRankSignal[] = ["resolution", "frame_rate", "bitrate", "latency"];
+
+export const DEFAULT_FIX_PREFERENCES: FixPreferences = {
+  rankOrder: RANK_SIGNALS,
+  deadStreams: "unlink",
+};
+
+/** Preferences from settings, with the rank order deduplicated and any
+ *  missing signal appended, so an old or edited settings file still ranks
+ *  on every signal. */
+export function fixPreferencesFrom(
+  settings: Pick<AppSettings, "dispatcharr_rank_order" | "dispatcharr_dead_streams">,
+): FixPreferences {
+  const chosen = (settings.dispatcharr_rank_order ?? []).filter((signal) =>
+    RANK_SIGNALS.includes(signal),
+  );
+  const rankOrder = [...new Set([...chosen, ...RANK_SIGNALS])];
+  return { rankOrder, deadStreams: settings.dispatcharr_dead_streams ?? "unlink" };
+}
+
+function bitrateKbps(result: ChannelResult): number {
+  const kbps = Number.parseFloat(result.video_bitrate ?? "");
+  return Number.isFinite(kbps) ? kbps : 0;
+}
+
+/** Higher is better for every signal. Bitrate and latency compare in steps
+ *  (500 kbps, 250 ms) so scan-to-scan noise does not reshuffle channels. */
+const SIGNAL_SCORE: Record<DispatcharrRankSignal, (result: ChannelResult) => number> = {
+  resolution: (result) => result.height ?? 0,
+  frame_rate: (result) => result.fps ?? 0,
+  bitrate: (result) => Math.floor(bitrateKbps(result) / 500),
+  latency: (result) =>
+    result.latency_ms == null ? -Number.MAX_SAFE_INTEGER : -Math.floor(result.latency_ms / 250),
+};
+
+/** Working streams first, ranked by the preferred signals (remaining ties
+ *  keep their order), then untested ones, then geoblocked, DRM, and
+ *  placeholder. Dead streams leave the channel or move to the end. A channel
+ *  whose streams are all dead is left alone. */
+export function proposeFixOrder(
+  channel: DispatcharrChannelView,
+  preferences: FixPreferences = DEFAULT_FIX_PREFERENCES,
+): FixProposal {
   if (channel.allDead) return { kind: "all_dead" };
   const alive: DispatcharrStreamEntry[] = [];
   const untested: DispatcharrStreamEntry[] = [];
   const other: DispatcharrStreamEntry[] = [];
+  const dead: DispatcharrStreamEntry[] = [];
   for (const entry of channel.streams) {
     const { status } = entry.result;
     if (status === "alive") alive.push(entry);
     else if (isUntestedStatus(status)) untested.push(entry);
-    else if (!isDeadStatus(status)) other.push(entry);
+    else if (isDeadStatus(status)) dead.push(entry);
+    else other.push(entry);
   }
-  alive.sort(
-    (a, b) =>
-      (b.result.height ?? 0) - (a.result.height ?? 0) || (b.result.fps ?? 0) - (a.result.fps ?? 0),
-  );
-  const order = [...alive, ...untested, ...other].map((entry) => entry.ref.streamId);
+  alive.sort((a, b) => {
+    for (const signal of preferences.rankOrder) {
+      const score = SIGNAL_SCORE[signal];
+      const difference = score(b.result) - score(a.result);
+      if (difference !== 0) return difference;
+    }
+    return 0;
+  });
+  const kept = preferences.deadStreams === "move_to_end" ? [...other, ...dead] : other;
+  const order = [...alive, ...untested, ...kept].map((entry) => entry.ref.streamId);
   const current = channel.streams.map((entry) => entry.ref.streamId);
   if (order.length === current.length && order.every((id, i) => id === current[i])) {
     return { kind: "none" };
