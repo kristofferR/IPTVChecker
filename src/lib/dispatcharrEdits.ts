@@ -23,9 +23,16 @@ const sameOrder = (a: number[], b: number[]) =>
 /** Write stream orders to Dispatcharr. Each channel is re-fetched first and
  *  refused if it no longer matches `from`, so edits made in Dispatcharr since
  *  load are never overwritten. A failed channel never stops the others. */
-async function writeOrders(changes: OrderChange[], undoing: boolean): Promise<ApplyOutcome> {
+async function writeOrders(requested: OrderChange[], undoing: boolean): Promise<ApplyOutcome> {
   const store = useAppStore.getState();
   const sourceIdentity = store.playlist?.source_identity;
+  // A channel already being written keeps its first write; a second one
+  // would start from the same stale order.
+  const changes = requested.filter(
+    (change) => store.dispatcharrRowStates[change.channelId]?.kind !== "writing",
+  );
+  // Results that land after the user opened another source are dropped.
+  const stillCurrent = () => useAppStore.getState().playlist?.source_identity === sourceIdentity;
   const fail = (change: OrderChange, error: string) =>
     store.setDispatcharrRowState(change.channelId, {
       kind: "failed",
@@ -50,9 +57,10 @@ async function writeOrders(changes: OrderChange[], undoing: boolean): Promise<Ap
     current = new Map(fresh.map((channel) => [channel.channel_id, channel.stream_ids]));
   } catch (error) {
     const message = errorToString(error);
-    for (const change of changes) fail(change, message);
+    if (stillCurrent()) for (const change of changes) fail(change, message);
     return { applied: [], failed: changes.length };
   }
+  if (!stillCurrent()) return { applied: [], failed: 0 };
 
   const applied: OrderChange[] = [];
   let failed = 0;
@@ -72,10 +80,12 @@ async function writeOrders(changes: OrderChange[], undoing: boolean): Promise<Ap
       }
       try {
         await dispatcharrSetChannelStreams(sourceIdentity, change.channelId, change.to);
+        if (!stillCurrent()) return;
         store.commitDispatcharrOrder(change.channelId, change.to, undoing ? null : change.from);
         store.setDispatcharrRowState(change.channelId, undoing ? null : { kind: "fixed" });
         applied.push(change);
       } catch (error) {
+        if (!stillCurrent()) return;
         fail(change, errorToString(error));
         failed += 1;
       }
@@ -89,15 +99,15 @@ export function applyOrderChanges(changes: OrderChange[]): Promise<ApplyOutcome>
   return writeOrders(changes, false);
 }
 
-/** Restore the order each channel had before its last edit. */
-export async function undoChannels(view: DispatcharrView, channelIds: number[]): Promise<void> {
-  const undo = useAppStore.getState().dispatcharrUndo;
+/** Restore the order each channel had before its last edit. The drift check
+ *  compares against the order that was written, which can hold streams the
+ *  loaded playlist has no row for. */
+export async function undoChannels(channelIds: number[]): Promise<void> {
+  const { dispatcharrUndo, dispatcharrOrders } = useAppStore.getState();
   const changes = channelIds.flatMap((channelId) => {
-    const channel = view.byChannelId.get(channelId);
-    const previous = undo[channelId];
-    return channel && previous
-      ? [{ channelId, from: channel.streams.map((entry) => entry.ref.streamId), to: previous }]
-      : [];
+    const previous = dispatcharrUndo[channelId];
+    const written = dispatcharrOrders[channelId];
+    return previous && written ? [{ channelId, from: written, to: previous }] : [];
   });
   await writeOrders(changes, true);
 }

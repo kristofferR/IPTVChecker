@@ -735,6 +735,30 @@ async fn cancel_scan_token(state: &AppState, scan_scope: &str) {
     pause_notify.notify_waiters();
 }
 
+/// Take a provider account's connection slot. While the account is busy the
+/// task hands its scan slot back, so other providers keep scanning, and takes
+/// a new scan slot once the account frees up.
+async fn acquire_account_slot(
+    account: &Arc<Semaphore>,
+    scan: &Arc<Semaphore>,
+    scan_permit: &mut Option<tokio::sync::OwnedSemaphorePermit>,
+    cancel: &CancellationToken,
+) -> Result<tokio::sync::OwnedSemaphorePermit, AppError> {
+    if let Ok(permit) = Arc::clone(account).try_acquire_owned() {
+        return Ok(permit);
+    }
+    scan_permit.take();
+    let account_permit = tokio::select! {
+        permit = Arc::clone(account).acquire_owned() => permit.map_err(|_| AppError::Cancelled)?,
+        _ = cancel.cancelled() => return Err(AppError::Cancelled),
+    };
+    *scan_permit = Some(tokio::select! {
+        permit = Arc::clone(scan).acquire_owned() => permit.map_err(|_| AppError::Cancelled)?,
+        _ = cancel.cancelled() => return Err(AppError::Cancelled),
+    });
+    Ok(account_permit)
+}
+
 async fn wait_if_paused(state: &AppState, scan_scope: &str, cancel: &CancellationToken) -> bool {
     loop {
         if cancel.is_cancelled() {
@@ -2380,8 +2404,9 @@ async fn execute_scan_run(
         let consecutive_net_failures = Arc::clone(&consecutive_net_failures);
         let adaptive_throttle = adaptive_throttle.clone();
 
+        let scan_semaphore = Arc::clone(&semaphore);
         let handle = tokio::spawn(async move {
-            let _permit = permit;
+            let mut scan_permit = Some(permit);
             if cancel.is_cancelled() {
                 return;
             }
@@ -2430,12 +2455,15 @@ async fn execute_scan_run(
             let shared_result = result_cell
                 .get_or_init(|| async {
                     let _account_permit = match &account_semaphore {
-                        Some(semaphore) => Some(tokio::select! {
-                            permit = Arc::clone(semaphore).acquire_owned() => {
-                                permit.map_err(|_| AppError::Cancelled)?
-                            }
-                            _ = cancel.cancelled() => return Err(AppError::Cancelled),
-                        }),
+                        Some(account) => Some(
+                            acquire_account_slot(
+                                account,
+                                &scan_semaphore,
+                                &mut scan_permit,
+                                &cancel,
+                            )
+                            .await?,
+                        ),
                         None => None,
                     };
                     compute_shared_url_result(
@@ -2977,6 +3005,35 @@ pub async fn cancel_quick_check(app: AppHandle, request_id: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn busy_account_hands_its_scan_slot_to_other_providers() {
+        let scan = Arc::new(Semaphore::new(1));
+        let account = Arc::new(Semaphore::new(1));
+        let busy = Arc::clone(&account).try_acquire_owned().unwrap();
+        let cancel = CancellationToken::new();
+
+        let waiter = {
+            let (scan, account, cancel) = (Arc::clone(&scan), Arc::clone(&account), cancel.clone());
+            tokio::spawn(async move {
+                let mut scan_permit = Some(Arc::clone(&scan).acquire_owned().await.unwrap());
+                let account_permit =
+                    acquire_account_slot(&account, &scan, &mut scan_permit, &cancel).await;
+                (account_permit.is_ok(), scan_permit.is_some())
+            })
+        };
+        // The waiter released its scan slot, so another provider can take it.
+        let other = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            Arc::clone(&scan).acquire_owned(),
+        )
+        .await
+        .expect("scan slot freed while the account is busy")
+        .unwrap();
+        drop(other);
+        drop(busy);
+        assert_eq!(waiter.await.unwrap(), (true, true));
+    }
     use tokio_util::sync::CancellationToken;
 
     fn make_result(

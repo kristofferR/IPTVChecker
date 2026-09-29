@@ -491,8 +491,7 @@ export function ChannelTable({
   }, []);
 
   const handleUndoChannel = useCallback((channel: DispatcharrChannelView) => {
-    const view = dispatcharrViewRef.current;
-    if (view) void undoChannels(view, [channel.channelId]);
+    void undoChannels([channel.channelId]);
   }, []);
 
   const handleRetryChannel = useCallback((channel: DispatcharrChannelView) => {
@@ -1589,7 +1588,7 @@ export function ChannelTable({
 
   return (
     <div className="flex flex-col flex-1 min-h-0 relative">
-      {dispatcharrView && <DispatcharrToast view={dispatcharrView} />}
+      {dispatcharrView && <DispatcharrToast />}
       {/* Column header — portaled into toolbar on macOS, or inline fallback */}
       {portalTarget ? createPortal(headerElement, portalTarget) : headerElement}
 

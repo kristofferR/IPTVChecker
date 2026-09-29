@@ -142,13 +142,17 @@ pub async fn dispatcharr_push_stream_stats(
     }
     let mut pending = pending.into_iter();
 
-    // Verify the first write sticks before sending the rest.
-    if let Some((stream_id, stats)) = pending.next() {
+    // Verify that a write sticks before sending the rest; a failed write
+    // proves nothing, so keep probing until one succeeds.
+    for (stream_id, stats) in pending.by_ref() {
         match client
             .patch_stream_stats(stream_id, &stats, &updated_at)
             .await
         {
-            Ok(stored) if stats_stuck(stored.as_ref(), &stats) => report.updated.push(stream_id),
+            Ok(stored) if stats_stuck(stored.as_ref(), &stats) => {
+                report.updated.push(stream_id);
+                break;
+            }
             Ok(_) => {
                 report.rejected = true;
                 return Ok(report);

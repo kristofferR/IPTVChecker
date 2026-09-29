@@ -1,13 +1,12 @@
 import { X } from "lucide-react";
 import { useState } from "react";
-import type { DispatcharrView } from "../lib/dispatcharr";
 import { undoChannels } from "../lib/dispatcharrEdits";
 import { useAppStore } from "../store";
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 /** Outcome of a bulk fix. Stays until dismissed so Undo all remains reachable. */
-export function DispatcharrToast({ view }: { view: DispatcharrView }) {
+export function DispatcharrToast() {
   const toast = useAppStore((s) => s.dispatcharrToast);
   const setToast = useAppStore((s) => s.setDispatcharrToast);
   const [undoing, setUndoing] = useState(false);
@@ -16,7 +15,7 @@ export function DispatcharrToast({ view }: { view: DispatcharrView }) {
   const handleUndoAll = async () => {
     setUndoing(true);
     try {
-      await undoChannels(view, toast.channelIds);
+      await undoChannels(toast.channelIds);
       setToast(null);
     } finally {
       setUndoing(false);

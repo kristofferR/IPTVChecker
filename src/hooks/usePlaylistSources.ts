@@ -309,8 +309,10 @@ export function usePlaylistSources({
       state.setSelectedChannel(null);
       state.setSelectedChannelIndices([]);
       state.clearArchiveProbes();
-      // A (re)load reflects Dispatcharr's current orders, so session edits are moot.
-      state.resetDispatcharrEdits();
+      // A fresh open reflects Dispatcharr's current orders, so session edits
+      // are moot. Re-applying a source filter can reuse the cached preview,
+      // whose orders predate the edits, so those keep them.
+      if (mode === "freshOpen") state.resetDispatcharrEdits();
       state.setPendingPlaybackChannel(null);
 
       return true;

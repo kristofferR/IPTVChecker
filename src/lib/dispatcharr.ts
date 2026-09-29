@@ -155,7 +155,7 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
       const byStream = new Map(channel.streams.map((entry) => [entry.ref.streamId, entry]));
       streams = order.flatMap((streamId) => byStream.get(streamId) ?? []);
     } else {
-      streams = channel.streams.sort((a, b) => a.ref.streamOrder - b.ref.streamOrder);
+      streams = [...channel.streams].sort((a, b) => a.ref.streamOrder - b.ref.streamOrder);
     }
     if (streams.length === 0) continue;
     const dead = streams.filter((entry) => isDeadStatus(entry.result.status)).length;
