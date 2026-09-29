@@ -1638,41 +1638,49 @@ fn parse_stream_request(request: &str) -> Option<StreamRequest> {
 
 #[cfg(test)]
 mod tests {
-    fn run_timestamp_filter(inject: &str, format: &str) -> std::process::Output {
+    fn run_timestamp_filter(inject: &str, format: &str) -> Option<std::process::Output> {
         let input_clock = "setts=pts=101+N+mod(N\\,3):dts=100+N:duration=1";
         let filter = format!(
             "{input_clock},{inject},{}",
             super::CONTIGUOUS_VIDEO_TIMESTAMPS
         );
-        let output = std::process::Command::new(
-            std::env::var_os("FFMPEG_TEST_BINARY").unwrap_or_else(|| "ffmpeg".into()),
-        )
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "warning",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=c=black:s=16x16:r=25",
-            "-frames:v",
-            "4",
-            "-c:v",
-            "mpeg2video",
-            "-bsf:v",
-            &filter,
-            "-f",
-            format,
-            "pipe:1",
-        ])
-        .output()
-        .expect("timestamp tests need ffmpeg in PATH or FFMPEG_TEST_BINARY");
+        let configured_binary = std::env::var_os("FFMPEG_TEST_BINARY");
+        let output =
+            std::process::Command::new(configured_binary.as_deref().unwrap_or("ffmpeg".as_ref()))
+                .args([
+                    "-hide_banner",
+                    "-loglevel",
+                    "warning",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=black:s=16x16:r=25",
+                    "-frames:v",
+                    "4",
+                    "-c:v",
+                    "mpeg2video",
+                    "-bsf:v",
+                    &filter,
+                    "-f",
+                    format,
+                    "pipe:1",
+                ])
+                .output();
+        let output = match output {
+            Err(error)
+                if configured_binary.is_none() && error.kind() == std::io::ErrorKind::NotFound =>
+            {
+                eprintln!("Skipping timestamp integration test: optional ffmpeg is not in PATH");
+                return None;
+            }
+            other => other.expect("failed to launch ffmpeg for timestamp test"),
+        };
         assert!(
             output.status.success(),
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        output
+        Some(output)
     }
 
     #[test]
@@ -1693,7 +1701,9 @@ mod tests {
                         }
                     }
                 };
-                let output = run_timestamp_filter(&inject, "framecrc");
+                let Some(output) = run_timestamp_filter(&inject, "framecrc") else {
+                    return;
+                };
                 let text = String::from_utf8(output.stdout).unwrap();
                 let packets: Vec<_> = text.lines().filter(|line| !line.starts_with('#')).collect();
                 assert_eq!(packets.len(), 4);
@@ -1709,7 +1719,8 @@ mod tests {
                     };
                     assert_eq!(pts, expected_pts, "{missing_fields}: {packet}");
                 }
-                let muxed = run_timestamp_filter(&inject, "mpegts");
+                let muxed = run_timestamp_filter(&inject, "mpegts")
+                    .expect("ffmpeg disappeared during timestamp test");
                 assert!(!muxed.stdout.is_empty());
                 assert!(
                     !String::from_utf8_lossy(&muxed.stderr).contains("Invalid DTS"),
