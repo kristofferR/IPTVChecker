@@ -425,11 +425,8 @@ fn select_all_in_focused_window(app: &tauri::AppHandle) {
         return;
     };
     let label = window.label().to_string();
-    let is_main = READY_MENU_WINDOWS
-        .lock()
-        .map(|ready| ready.contains(&label))
-        .unwrap_or(false);
-    if is_main {
+    // Queued until the window's listeners are ready, like other menu events.
+    if label.starts_with("main") {
         let _ = emit_menu_event_to_window(app, &label, "menu://select-all", "focused window");
     } else if let Some(webview) = app.get_webview_window(&label) {
         let _ = webview.eval("document.execCommand('selectAll')");

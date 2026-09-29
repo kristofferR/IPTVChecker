@@ -43,6 +43,10 @@ pub struct PlaylistPreview {
     /// targets exactly this connection, even for saved sources.
     #[serde(default)]
     pub dispatcharr_connection: Option<String>,
+    /// A Dispatcharr source with provider accounts that cap concurrent
+    /// streams. Playback then shares those slots with a running scan.
+    #[serde(default)]
+    pub dispatcharr_limited_accounts: bool,
     pub total_channels: usize,
     #[serde(default)]
     pub live_count: usize,

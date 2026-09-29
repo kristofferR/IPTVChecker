@@ -1110,6 +1110,10 @@ pub(crate) async fn open_playlist_dispatcharr_inner(
     // Sessions are keyed by connection, not source identity: a saved source's
     // identity stays the same when its server or account is edited.
     dispatcharr::register_session(&source_key, client);
+    preview.dispatcharr_limited_accounts = preview
+        .channels
+        .iter()
+        .any(|channel| dispatcharr::dispatcharr_connection_limit(&channel.extinf_line).is_some());
     preview.dispatcharr_connection = Some(source_key);
     preview.source_identity = Some(source_identity);
     Ok(preview)

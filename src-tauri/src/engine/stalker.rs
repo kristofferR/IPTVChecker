@@ -724,6 +724,7 @@ pub(crate) fn build_stalker_preview(
         xtream_max_connections: None,
         xtream_account_info: None,
         dispatcharr_connection: None,
+        dispatcharr_limited_accounts: false,
         total_channels: channels.len(),
         live_count,
         movie_count,

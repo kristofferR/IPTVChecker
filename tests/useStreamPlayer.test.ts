@@ -80,6 +80,13 @@ describe("useStreamPlayer helpers", () => {
     expect(isSingleConnectionPlaylist({ single_provider: true, xtream_max_connections: 2 })).toBe(
       false,
     );
+    expect(
+      isSingleConnectionPlaylist({
+        single_provider: false,
+        xtream_max_connections: null,
+        dispatcharr_limited_accounts: true,
+      }),
+    ).toBe(true);
   });
 
   it("classifies stream URLs with query strings and Xtream-style paths", () => {

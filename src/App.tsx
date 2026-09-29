@@ -1014,6 +1014,12 @@ export default function App() {
       ) {
         return false;
       }
+      // A scan snapshots the stream order; one still being written would
+      // change underneath it.
+      if (Object.values(state.dispatcharrRowStates).some((row) => row?.kind === "writing")) {
+        state.setScanInputError("Wait for the Dispatcharr changes to finish saving.");
+        return false;
+      }
       const currentChannelSearchError = validateSourceFilterPattern(state.channelSearch);
 
       if (currentChannelSearchError) {

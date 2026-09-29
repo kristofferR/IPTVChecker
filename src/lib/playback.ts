@@ -84,9 +84,13 @@ export function resolveHlsHdrFormat(
 }
 
 export function isSingleConnectionPlaylist(
-  playlist: Pick<PlaylistPreview, "single_provider" | "xtream_max_connections"> | null,
+  playlist: Pick<
+    PlaylistPreview,
+    "single_provider" | "xtream_max_connections" | "dispatcharr_limited_accounts"
+  > | null,
 ): boolean {
   if (!playlist) return false;
+  if (playlist.dispatcharr_limited_accounts) return true;
   if (playlist.xtream_max_connections != null) {
     return playlist.xtream_max_connections === 1;
   }

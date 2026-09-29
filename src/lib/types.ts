@@ -83,6 +83,9 @@ export interface PlaylistPreview {
   xtream_account_info: XtreamAccountInfo | null;
   /** Server and account a Dispatcharr source was loaded from. */
   dispatcharr_connection?: string | null;
+  /** Dispatcharr provider accounts cap concurrent streams, so playback
+   *  shares their slots with a running scan. */
+  dispatcharr_limited_accounts?: boolean;
   total_channels: number;
   live_count: number;
   movie_count: number;
