@@ -2,6 +2,7 @@ import { useAppStore } from "../store";
 import {
   type DispatcharrView,
   getDispatcharrView,
+  parseDispatcharrIds,
   proposeFixOrder,
   withHiddenStreams,
 } from "./dispatcharr";
@@ -28,12 +29,19 @@ function currentPrimary(channelId: number): ChannelResult | undefined {
   return getDispatcharrView(flatResults, dispatcharrOrders)?.byChannelId.get(channelId)?.primary;
 }
 
-/** A selected channel is its primary stream; keep the selection (sidebar,
- *  Play) on the channel when a write changes which stream that is. */
-function followPrimary(before: ChannelResult | undefined, after: ChannelResult | undefined) {
+/** Keep the selection (sidebar, Play) on the channel after a write: move
+ *  it to the new primary when the selected stream was the old primary or is
+ *  no longer linked. */
+function followSelection(change: OrderChange, primaryBefore: ChannelResult | undefined) {
   const store = useAppStore.getState();
-  if (before && after && before !== after && store.selectedChannel?.index === before.index) {
-    store.setSelectedChannel(after);
+  const selected = store.selectedChannel;
+  const ids = selected ? parseDispatcharrIds(selected.extinf_line) : null;
+  if (!selected || !ids || ids.channelId !== change.channelId) return;
+  const primaryAfter = currentPrimary(change.channelId);
+  if (!primaryAfter || primaryAfter.index === selected.index) return;
+  const wasPrimary = primaryBefore?.index === selected.index;
+  if (wasPrimary || !change.to.includes(ids.streamId)) {
+    store.setSelectedChannel(primaryAfter);
   }
 }
 
@@ -104,7 +112,7 @@ async function writeOrders(requested: OrderChange[], undoing: boolean): Promise<
         const primaryBefore = currentPrimary(change.channelId);
         store.commitDispatcharrOrder(change.channelId, change.to, undoing ? null : change.from);
         store.setDispatcharrRowState(change.channelId, undoing ? null : { kind: "fixed" });
-        followPrimary(primaryBefore, currentPrimary(change.channelId));
+        followSelection(change, primaryBefore);
         applied.push(change);
       } catch (error) {
         if (!stillCurrent()) return;

@@ -3,7 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { applyXtreamArchiveUpdates, applyXtreamArchiveUpdatesToPreview } from "../lib/archive";
 import { cancelArchiveProbes } from "../lib/archiveProbe";
-import { apiKeyFingerprint } from "../lib/dispatcharr";
+import { apiKeyFingerprint, normalizeDispatcharrServer } from "../lib/dispatcharr";
 import { errorToString, formatPlaylistOpenError, formatSourceReloadError } from "../lib/errors";
 import { logger } from "../lib/logger";
 import {
@@ -401,7 +401,8 @@ export function usePlaylistSources({
           case "stalker":
             return `stalker portal=${descriptor.portal}, mac=***`;
           case "dispatcharr":
-            return `dispatcharr server=${descriptor.server}`;
+            // Normalized origin only: a mistyped URL can carry credentials.
+            return `dispatcharr server=${normalizeDispatcharrServer(descriptor.server) ?? "(invalid)"}`;
         }
       })();
       const loadingAction =
