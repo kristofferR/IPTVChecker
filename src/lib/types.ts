@@ -81,6 +81,8 @@ export interface PlaylistPreview {
   single_provider: boolean;
   xtream_max_connections: number | null;
   xtream_account_info: XtreamAccountInfo | null;
+  /** Server and account a Dispatcharr source was loaded from. */
+  dispatcharr_connection?: string | null;
   total_channels: number;
   live_count: number;
   movie_count: number;
@@ -570,6 +572,12 @@ export interface UpdateCheckResult {
 // ---------------------------------------------------------------------------
 // Dispatcharr write-back
 // ---------------------------------------------------------------------------
+
+/** Where Dispatcharr writes go: the loaded source and its connection. */
+export interface DispatcharrTarget {
+  sourceIdentity: string;
+  connection: string;
+}
 
 export interface DispatcharrItemFailure {
   id: number;

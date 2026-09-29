@@ -1,5 +1,5 @@
 import { type ArchiveProbes, filterResultsShared } from "./filters";
-import type { ChannelResult, PlaylistPreview } from "./types";
+import type { ChannelResult, DispatcharrTarget, PlaylistPreview } from "./types";
 
 /** Dispatcharr IDs embedded as `x-dispatcharr-*` EXTINF attributes by the
  *  backend's M3U synthesis (mirror of `dispatcharr_ids_from_extinf`). */
@@ -65,6 +65,13 @@ export function parseDispatcharrIds(extinfLine: string): DispatcharrStreamRef | 
         .map(Number)
         .filter(Number.isInteger) ?? null,
   };
+}
+
+/** Where writes for the loaded Dispatcharr source go, or null. */
+export function dispatcharrTarget(preview: PlaylistPreview | null): DispatcharrTarget | null {
+  const sourceIdentity = preview?.source_identity;
+  const connection = preview?.dispatcharr_connection;
+  return sourceIdentity && connection ? { sourceIdentity, connection } : null;
 }
 
 /** Every row of a Dispatcharr source carries the IDs, so the first suffices. */

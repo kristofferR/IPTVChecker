@@ -39,6 +39,10 @@ pub struct PlaylistPreview {
     pub xtream_max_connections: Option<u32>,
     #[serde(default)]
     pub xtream_account_info: Option<XtreamAccountInfo>,
+    /// Server and account a Dispatcharr source was loaded from. Write-back
+    /// targets exactly this connection, even for saved sources.
+    #[serde(default)]
+    pub dispatcharr_connection: Option<String>,
     pub total_channels: usize,
     #[serde(default)]
     pub live_count: usize,

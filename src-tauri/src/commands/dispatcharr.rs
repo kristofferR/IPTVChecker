@@ -3,8 +3,9 @@
 //! per-item outcomes; one failure never aborts the rest.
 
 use crate::engine::dispatcharr::{
-    dispatcharr_ids_from_extinf, get_session, normalize_dispatcharr_server, register_session,
-    stats_stuck, stream_stats_from_result, DispatcharrAuth, DispatcharrClient,
+    build_dispatcharr_source_key, dispatcharr_ids_from_extinf, get_session,
+    normalize_dispatcharr_server, register_session, stats_stuck, stream_stats_from_result,
+    DispatcharrAuth, DispatcharrClient,
 };
 use crate::error::AppError;
 use crate::models::channel::{ChannelResult, ChannelStatus};
@@ -21,13 +22,15 @@ const STATS_PUSH_CONCURRENCY: usize = 4;
 
 type StatsUpdate = (i64, Map<String, Value>);
 
-/// The client registered when the source was opened. Saved sources can be
-/// rebuilt from their stored credentials after an app restart.
+/// The client for the connection the source was loaded from. After an app
+/// restart a saved source is rebuilt from its stored credentials, but only
+/// while the saved entry still points at that same connection.
 async fn resolve_session(
     app: &tauri::AppHandle,
     source_identity: &str,
+    connection: &str,
 ) -> Result<Arc<DispatcharrClient>, AppError> {
-    if let Some(client) = get_session(source_identity) {
+    if let Some(client) = get_session(connection) {
         return Ok(client);
     }
     if let Some(saved_id) = source_identity.strip_prefix("saved:") {
@@ -38,22 +41,26 @@ async fn resolve_session(
             api_key,
         }) = crate::commands::saved::saved_playlist_by_id(app, saved_id)?.map(|e| e.source)
         {
+            let base = normalize_dispatcharr_server(&server)?;
+            let auth = DispatcharrAuth::from_parts(
+                username.as_deref(),
+                password.as_deref(),
+                api_key.as_deref(),
+            )?;
+            if build_dispatcharr_source_key(&base, &auth) != connection {
+                return Err(AppError::State(
+                    "This saved Dispatcharr source now points elsewhere. Reload it to sync."
+                        .to_string(),
+                ));
+            }
             let accept_invalid_certs = app
                 .state::<Arc<AppState>>()
                 .settings
                 .lock()
                 .await
                 .accept_invalid_certs;
-            let client = Arc::new(DispatcharrClient::new(
-                normalize_dispatcharr_server(&server)?,
-                DispatcharrAuth::from_parts(
-                    username.as_deref(),
-                    password.as_deref(),
-                    api_key.as_deref(),
-                )?,
-                accept_invalid_certs,
-            )?);
-            register_session(source_identity, Arc::clone(&client));
+            let client = Arc::new(DispatcharrClient::new(base, auth, accept_invalid_certs)?);
+            register_session(connection, Arc::clone(&client));
             return Ok(client);
         }
     }
@@ -106,9 +113,10 @@ fn collect_stream_stats(results: &[ChannelResult]) -> (Vec<StatsUpdate>, usize) 
 pub async fn dispatcharr_push_stream_stats(
     app: tauri::AppHandle,
     source_identity: String,
+    connection: String,
     results: Vec<ChannelResult>,
 ) -> Result<DispatcharrStatsPushReport, AppError> {
-    let client = resolve_session(&app, &source_identity).await?;
+    let client = resolve_session(&app, &source_identity, &connection).await?;
     let (updates, skipped) = collect_stream_stats(&results);
     let mut report = DispatcharrStatsPushReport {
         skipped,
@@ -181,9 +189,10 @@ pub struct DispatcharrChannelStreams {
 pub async fn dispatcharr_get_channel_streams(
     app: tauri::AppHandle,
     source_identity: String,
+    connection: String,
     channel_ids: Vec<i64>,
 ) -> Result<Vec<DispatcharrChannelStreams>, AppError> {
-    let client = resolve_session(&app, &source_identity).await?;
+    let client = resolve_session(&app, &source_identity, &connection).await?;
     let wanted = channel_ids.into_iter().collect::<HashSet<_>>();
     Ok(client
         .fetch_channels()
@@ -219,12 +228,13 @@ fn validate_stream_list(stream_ids: &[i64], allow_empty: bool) -> Result<(), App
 pub async fn dispatcharr_set_channel_streams(
     app: tauri::AppHandle,
     source_identity: String,
+    connection: String,
     channel_id: i64,
     stream_ids: Vec<i64>,
     allow_empty: Option<bool>,
 ) -> Result<Vec<i64>, AppError> {
     validate_stream_list(&stream_ids, allow_empty.unwrap_or(false))?;
-    let client = resolve_session(&app, &source_identity).await?;
+    let client = resolve_session(&app, &source_identity, &connection).await?;
     let stored = client.set_channel_streams(channel_id, &stream_ids).await?;
     if stored != stream_ids {
         return Err(AppError::Other(format!(

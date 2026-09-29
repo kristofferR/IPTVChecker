@@ -1113,7 +1113,10 @@ pub(crate) async fn open_playlist_dispatcharr_inner(
     // each, so treat the source as connection-limited even when its streams
     // span several providers: auto concurrency then scans one at a time.
     preview.single_provider = true;
-    dispatcharr::register_session(&source_identity, client);
+    // Sessions are keyed by connection, not source identity: a saved source's
+    // identity stays the same when its server or account is edited.
+    dispatcharr::register_session(&source_key, client);
+    preview.dispatcharr_connection = Some(source_key);
     preview.source_identity = Some(source_identity);
     Ok(preview)
 }

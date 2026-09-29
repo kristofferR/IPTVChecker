@@ -1,6 +1,7 @@
 import { useAppStore } from "../store";
 import {
   type DispatcharrView,
+  dispatcharrTarget,
   getDispatcharrView,
   parseDispatcharrIds,
   proposeFixOrder,
@@ -53,21 +54,24 @@ const sameOrder = (a: number[], b: number[]) =>
  *  load are never overwritten. A failed channel never stops the others. */
 async function writeOrders(requested: OrderChange[], undoing: boolean): Promise<ApplyOutcome> {
   const store = useAppStore.getState();
-  const sourceIdentity = store.playlist?.source_identity;
+  const target = dispatcharrTarget(store.playlist);
   // A channel already being written keeps its first write; a second one
   // would start from the same stale order.
   const changes = requested.filter(
     (change) => store.dispatcharrRowStates[change.channelId]?.kind !== "writing",
   );
   // Results that land after the user opened another source are dropped.
-  const stillCurrent = () => useAppStore.getState().playlist?.source_identity === sourceIdentity;
+  const stillCurrent = () => {
+    const now = dispatcharrTarget(useAppStore.getState().playlist);
+    return now?.connection === target?.connection && now?.sourceIdentity === target?.sourceIdentity;
+  };
   const fail = (change: OrderChange, error: string) =>
     store.setDispatcharrRowState(change.channelId, {
       kind: "failed",
       error,
       retry: { from: change.from, to: change.to },
     });
-  if (!sourceIdentity || changes.length === 0) {
+  if (!target || changes.length === 0) {
     for (const change of changes) fail(change, "Not connected to Dispatcharr");
     return { applied: [], failed: changes.length };
   }
@@ -79,7 +83,7 @@ async function writeOrders(requested: OrderChange[], undoing: boolean): Promise<
   let current: Map<number, number[]>;
   try {
     const fresh = await dispatcharrGetChannelStreams(
-      sourceIdentity,
+      target,
       changes.map((change) => change.channelId),
     );
     current = new Map(fresh.map((channel) => [channel.channel_id, channel.stream_ids]));
@@ -107,7 +111,7 @@ async function writeOrders(requested: OrderChange[], undoing: boolean): Promise<
         continue;
       }
       try {
-        await dispatcharrSetChannelStreams(sourceIdentity, change.channelId, change.to);
+        await dispatcharrSetChannelStreams(target, change.channelId, change.to);
         if (!stillCurrent()) return;
         const primaryBefore = currentPrimary(change.channelId);
         store.commitDispatcharrOrder(change.channelId, change.to, undoing ? null : change.from);

@@ -45,7 +45,11 @@ import { cancelArchiveProbes } from "./lib/archiveProbe";
 import { registerArchiveTimezoneResolver } from "./lib/archiveTimezone";
 import { isArchiveVerificationBlockingPlayback, verifyAllArchives } from "./lib/archiveVerifyRun";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
-import { dispatcharrLinkedIndices } from "./lib/dispatcharr";
+import {
+  dispatcharrLinkedIndices,
+  expandDispatcharrSelection,
+  getDispatcharrView,
+} from "./lib/dispatcharr";
 import {
   checkFfmpegAvailable,
   clearScanHistory,
@@ -1326,7 +1330,13 @@ export default function App() {
   const handlePlayInApp = useCallback(
     (result: ChannelResult) => {
       getStore().setSelectedChannel(result);
-      getStore().setSelectedChannelIndices([result.index]);
+      // A Dispatcharr channel stands for all of its streams (Guide playback).
+      getStore().setSelectedChannelIndices(
+        expandDispatcharrSelection(
+          getDispatcharrView(getStore().flatResults, getStore().dispatcharrOrders),
+          [result.index],
+        ),
+      );
       getStore().setSidebarHidden(false);
       pendingArchivePlaybackRef.current = null;
       if (isScanActive(getStore().scanState) && isSingleConnectionPlaylist(getStore().playlist)) {
@@ -1407,7 +1417,12 @@ export default function App() {
   const handleGuidePlayArchive = useCallback(
     (result: ChannelResult, options: ArchivePlayOptions) => {
       getStore().setSelectedChannel(result);
-      getStore().setSelectedChannelIndices([result.index]);
+      getStore().setSelectedChannelIndices(
+        expandDispatcharrSelection(
+          getDispatcharrView(getStore().flatResults, getStore().dispatcharrOrders),
+          [result.index],
+        ),
+      );
       getStore().setSidebarHidden(false);
       const state = getStore();
       const singleConnection = isSingleConnectionPlaylist(state.playlist);

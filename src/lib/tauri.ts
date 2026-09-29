@@ -11,6 +11,7 @@ import type {
   DispatcharrChannelStreams,
   DispatcharrOpenRequest,
   DispatcharrStatsPushReport,
+  DispatcharrTarget,
   EpgLoadSummary,
   EpgProgramme,
   PlaylistPreview,
@@ -105,30 +106,30 @@ export async function openPlaylistDispatcharr(
 }
 
 export async function dispatcharrPushStreamStats(
-  sourceIdentity: string,
+  target: DispatcharrTarget,
   results: ChannelResult[],
 ): Promise<DispatcharrStatsPushReport> {
   return invoke("dispatcharr_push_stream_stats", {
-    sourceIdentity,
+    ...target,
     results: toCommandChannelResults(results),
   });
 }
 
 export async function dispatcharrGetChannelStreams(
-  sourceIdentity: string,
+  target: DispatcharrTarget,
   channelIds: number[],
 ): Promise<DispatcharrChannelStreams[]> {
-  return invoke("dispatcharr_get_channel_streams", { sourceIdentity, channelIds });
+  return invoke("dispatcharr_get_channel_streams", { ...target, channelIds });
 }
 
 /** `streamIds` must be the channel's complete intended list: Dispatcharr
  *  unlinks every stream left out. */
 export async function dispatcharrSetChannelStreams(
-  sourceIdentity: string,
+  target: DispatcharrTarget,
   channelId: number,
   streamIds: number[],
 ): Promise<number[]> {
-  return invoke("dispatcharr_set_channel_streams", { sourceIdentity, channelId, streamIds });
+  return invoke("dispatcharr_set_channel_streams", { ...target, channelId, streamIds });
 }
 
 export async function startScan(config: ScanConfig): Promise<string> {

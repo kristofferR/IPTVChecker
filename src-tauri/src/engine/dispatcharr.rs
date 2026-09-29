@@ -679,6 +679,10 @@ pub(crate) struct DispatcharrStreamRef {
     pub channel_uuid: Option<String>,
 }
 
+pub(crate) fn is_dispatcharr_row(extinf_line: &str) -> bool {
+    extinf_line.contains(ATTR_STREAM_ID)
+}
+
 pub(crate) fn dispatcharr_ids_from_extinf(extinf_line: &str) -> Option<DispatcharrStreamRef> {
     if !extinf_line.contains(ATTR_STREAM_ID) {
         return None;
@@ -1335,6 +1339,16 @@ mod tests {
             .find(|line| line.contains("x-dispatcharr-stream-id=\"101\""))
             .unwrap();
         assert_eq!(dispatcharr_connection_limit(feed_a), Some((7, 1)));
+    }
+
+    #[test]
+    fn dispatcharr_rows_are_live_whatever_the_url() {
+        let playlist = "#EXTM3U\n#EXTINF:-1 x-dispatcharr-channel-id=\"1\" x-dispatcharr-stream-id=\"2\",Movies 24/7\nhttp://provider.example/movie/1.mp4\n";
+        let preview =
+            crate::engine::parser::parse_m3u(playlist.as_bytes(), "fixture.m3u8", &None, &None)
+                .unwrap();
+        assert_eq!(preview.channels[0].content_type, ContentType::Live);
+        assert_eq!(preview.live_count, 1);
     }
 
     #[test]

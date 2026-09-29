@@ -560,6 +560,7 @@ pub fn filter_playlist_preview(
         single_provider: preview.single_provider,
         xtream_max_connections: preview.xtream_max_connections,
         xtream_account_info: preview.xtream_account_info.clone(),
+        dispatcharr_connection: preview.dispatcharr_connection.clone(),
         total_channels: channels.len(),
         live_count,
         movie_count,
@@ -648,7 +649,16 @@ fn parse_playlist_reader<R: BufRead>(
                 continue;
             }
 
-            let content_type = ContentType::detect_from_url(&line);
+            // Rows synthesized from Dispatcharr's channel list are live
+            // channels whatever their stream URL looks like.
+            let content_type = match &pending_extinf {
+                Some((extinf_line, _, _))
+                    if crate::engine::dispatcharr::is_dispatcharr_row(extinf_line) =>
+                {
+                    ContentType::Live
+                }
+                _ => ContentType::detect_from_url(&line),
+            };
             match content_type {
                 ContentType::Live => live_found += 1,
                 ContentType::Movie => movie_found += 1,
@@ -720,6 +730,7 @@ fn parse_playlist_reader<R: BufRead>(
         single_provider: false,
         xtream_max_connections: None,
         xtream_account_info: None,
+        dispatcharr_connection: None,
         total_channels: channels.len(),
         live_count,
         movie_count,
@@ -898,6 +909,7 @@ fn parse_playlist_directory(
         single_provider: false,
         xtream_max_connections: None,
         xtream_account_info: None,
+        dispatcharr_connection: None,
         total_channels: channels.len(),
         live_count,
         movie_count,

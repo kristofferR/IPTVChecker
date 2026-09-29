@@ -407,6 +407,7 @@ mod tests {
             single_provider: true,
             xtream_max_connections: None,
             xtream_account_info: None,
+            dispatcharr_connection: None,
             total_channels: 1,
             live_count: 1,
             movie_count: 0,

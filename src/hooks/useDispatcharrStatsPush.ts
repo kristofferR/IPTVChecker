@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { isDispatcharrPreview } from "../lib/dispatcharr";
+import { dispatcharrTarget, isDispatcharrPreview } from "../lib/dispatcharr";
 import { errorToString } from "../lib/errors";
 import { logger } from "../lib/logger";
 import { dispatcharrPushStreamStats } from "../lib/tauri";
@@ -23,18 +23,18 @@ export function useDispatcharrStatsPush() {
     const finished = scanState === "complete" && previousScanState.current !== "complete";
     previousScanState.current = scanState;
     const state = useAppStore.getState();
-    const sourceIdentity = state.playlist?.source_identity;
+    const target = dispatcharrTarget(state.playlist);
     if (
       !finished ||
       !state.settings.dispatcharr_write_stats ||
-      !sourceIdentity ||
+      !target ||
       !isDispatcharrPreview(state.playlist)
     ) {
       return;
     }
     const scanned = state.flatResults.filter((result) => !resultsBeforeScan.current.has(result));
     resultsBeforeScan.current = new Set();
-    void dispatcharrPushStreamStats(sourceIdentity, scanned)
+    void dispatcharrPushStreamStats(target, scanned)
       .then((report) => {
         const store = useAppStore.getState();
         if (report.rejected) {
