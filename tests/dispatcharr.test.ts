@@ -75,7 +75,12 @@ function makeResult(
 function channelRows(
   channel: number,
   name: string,
-  streams: Array<{ id: number; status?: ChannelResult["status"]; height?: number }>,
+  streams: Array<{
+    id: number;
+    status?: ChannelResult["status"];
+    height?: number;
+    fps?: number;
+  }>,
   firstIndex = 0,
 ): ChannelResult[] {
   return streams.map((stream, order) => {
@@ -83,7 +88,7 @@ function channelRows(
       firstIndex + order,
       extinf(channel, stream.id, order, streams.length, name, `Feed ${stream.id}`),
       name,
-      { status: stream.status ?? "alive", height: stream.height ?? null },
+      { status: stream.status ?? "alive", height: stream.height ?? null, fps: stream.fps ?? null },
     );
   });
 }
@@ -301,5 +306,16 @@ describe("dispatcharr helpers", () => {
 
   it("fingerprints API keys like the backend", async () => {
     expect(await apiKeyFingerprint("key")).toBe("2c70e12b7a06");
+  });
+
+  it("breaks resolution ties by frame rate", () => {
+    const results = channelRows(10, "News One", [
+      { id: 1, height: 1080, fps: 30 },
+      { id: 2, height: 1080, fps: 60 },
+      { id: 3, height: 720, fps: 60 },
+    ]);
+    const channel = getDispatcharrView(results, {})?.byChannelId.get(10);
+    if (!channel) throw new Error("missing channel");
+    expect(ids(proposeFixOrder(channel))).toEqual([2, 1, 3]);
   });
 });

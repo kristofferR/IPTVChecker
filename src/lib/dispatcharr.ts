@@ -247,7 +247,8 @@ export type FixProposal =
   | { kind: "all_dead" }
   | { kind: "change"; order: number[]; removed: number };
 
-/** Working streams first by resolution (ties keep their order), then
+/** Working streams first by resolution, then frame rate (remaining ties
+ *  keep their order), then
  *  untested ones, then geoblocked, DRM, and placeholder. Dead streams leave
  *  the channel, except when every stream is dead: that channel is left alone. */
 export function proposeFixOrder(channel: DispatcharrChannelView): FixProposal {
@@ -261,7 +262,10 @@ export function proposeFixOrder(channel: DispatcharrChannelView): FixProposal {
     else if (isUntestedStatus(status)) untested.push(entry);
     else if (!isDeadStatus(status)) other.push(entry);
   }
-  alive.sort((a, b) => (b.result.height ?? 0) - (a.result.height ?? 0));
+  alive.sort(
+    (a, b) =>
+      (b.result.height ?? 0) - (a.result.height ?? 0) || (b.result.fps ?? 0) - (a.result.fps ?? 0),
+  );
   const order = [...alive, ...untested, ...other].map((entry) => entry.ref.streamId);
   const current = channel.streams.map((entry) => entry.ref.streamId);
   if (order.length === current.length && order.every((id, i) => id === current[i])) {
