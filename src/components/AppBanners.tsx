@@ -103,10 +103,12 @@ type RefreshState =
 function DispatcharrProviderDownBanner({
   account,
   onRescan,
+  onReload,
   onDismiss,
 }: {
   account: DownAccount;
   onRescan: (indices: number[]) => void;
+  onReload: () => void;
   onDismiss: () => void;
 }) {
   const [refresh, setRefresh] = useState<RefreshState>({ kind: "idle" });
@@ -143,7 +145,8 @@ function DispatcharrProviderDownBanner({
       <span className="flex-1 min-w-0">
         {count} from {account.account} failed with {account.error}. The provider may be down; Fix
         order keeps its streams.
-        {refresh.kind === "sent" && " Dispatcharr is refreshing it."}
+        {refresh.kind === "sent" &&
+          " Dispatcharr is refreshing it; reload once it finishes to get the new stream URLs."}
         {refresh.kind === "failed" && ` Refresh failed: ${refresh.error}`}
       </span>
       <button
@@ -154,9 +157,15 @@ function DispatcharrProviderDownBanner({
       >
         Refresh in Dispatcharr
       </button>
-      <button type="button" onClick={handleRescan} className={buttonClass}>
-        Rescan
-      </button>
+      {refresh.kind === "sent" ? (
+        <button type="button" onClick={onReload} className={buttonClass}>
+          Reload
+        </button>
+      ) : (
+        <button type="button" onClick={handleRescan} className={buttonClass}>
+          Rescan
+        </button>
+      )}
       <button
         onClick={onDismiss}
         className="p-1 hover:bg-amber-500/20 rounded transition-colors"
@@ -169,7 +178,13 @@ function DispatcharrProviderDownBanner({
   );
 }
 
-function DispatcharrProviderDownBanners({ onRescan }: { onRescan: (indices: number[]) => void }) {
+function DispatcharrProviderDownBanners({
+  onRescan,
+  onReload,
+}: {
+  onRescan: (indices: number[]) => void;
+  onReload: () => void;
+}) {
   const flatResults = useAppStore((s) => s.flatResults);
   const orders = useAppStore((s) => s.dispatcharrOrders);
   const scanning = useAppStore((s) => isScanActive(s.scanState));
@@ -188,6 +203,7 @@ function DispatcharrProviderDownBanners({ onRescan }: { onRescan: (indices: numb
         key={account.accountId}
         account={account}
         onRescan={onRescan}
+        onReload={onReload}
         onDismiss={() =>
           setDismissed({ results: flatResults, ids: [...hidden, account.accountId] })
         }
@@ -281,11 +297,13 @@ interface AppBannersProps {
   onInstallUpdate: () => void | Promise<void>;
   /** Scans the given rows (a provider account's streams). */
   onScanRows: (indices: number[]) => void;
+  /** Loads the current source again, for stream URLs a refresh changed. */
+  onReloadSource: () => void;
 }
 
 /** Error/info banners shown under the toolbar, with optional auto-dismiss
  *  timers. The update banner is always persistent. */
-export function AppBanners({ onInstallUpdate, onScanRows }: AppBannersProps) {
+export function AppBanners({ onInstallUpdate, onScanRows, onReloadSource }: AppBannersProps) {
   const scanError = useAppStore((s) => s.scanError);
   const errorDismissed = useAppStore((s) => s.errorDismissed);
   const playbackError = useAppStore((s) => s.playbackError);
@@ -390,7 +408,7 @@ export function AppBanners({ onInstallUpdate, onScanRows }: AppBannersProps) {
       )}
 
       <DispatcharrConvertBanner />
-      <DispatcharrProviderDownBanners onRescan={onScanRows} />
+      <DispatcharrProviderDownBanners onRescan={onScanRows} onReload={onReloadSource} />
 
       {menuInfo && (
         <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-500/10 border-b border-blue-500/20 text-blue-400 text-[13px]">

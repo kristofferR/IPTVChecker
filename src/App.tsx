@@ -706,6 +706,7 @@ export default function App() {
     handlePreferSavedXtreamServer,
     ensureSourceFilterApplied,
     handleApplySourceFilter,
+    reloadCurrentSource,
     savedPlaylistsDialogOpen,
     setSavedPlaylistsDialogOpen,
     savedPlaylistEditorDraft,
@@ -1777,7 +1778,11 @@ export default function App() {
         )}
         <ScanPauseBanners />
 
-        <AppBanners onInstallUpdate={installUpdate} onScanRows={handleScanSelected} />
+        <AppBanners
+          onInstallUpdate={installUpdate}
+          onScanRows={handleScanSelected}
+          onReloadSource={reloadCurrentSource}
+        />
 
         <div className="flex flex-col flex-1 min-h-0">
           <div className="flex flex-1 min-h-0 bg-content">

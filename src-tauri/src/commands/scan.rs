@@ -2321,6 +2321,8 @@ async fn execute_scan_run(
 
     let preview = parse_playlist_with_cache(&app, &state, &config, &run_id).await?;
     let preview_single_provider = preview.single_provider;
+    // Viewer counts come through the session this source was loaded with.
+    let dispatcharr_connection = preview.dispatcharr_connection.clone();
     let mut channels = preview.channels.clone();
     filter_channels_by_selection(&mut channels, &config.selected_indices);
     filter_channels_by_content_type(&mut channels, config.hide_vod_content);
@@ -2583,8 +2585,11 @@ async fn execute_scan_run(
         let adaptive_throttle = adaptive_throttle.clone();
 
         // Dispatcharr's viewers use the same provider connections.
-        let viewers = account_limit
-            .and_then(|_| crate::engine::dispatcharr::account_viewers(&channel.extinf_line));
+        let viewers = account_limit.and_then(|_| {
+            dispatcharr_connection
+                .as_deref()
+                .and_then(crate::engine::dispatcharr::account_viewers)
+        });
         let account_label = crate::engine::dispatcharr::account_label(&channel.extinf_line);
         let busy_accounts = Arc::clone(&busy_accounts);
 
@@ -3254,6 +3259,7 @@ const CANDIDATE_PROBE_CONCURRENCY: usize = 4;
 pub async fn dispatcharr_probe_streams(
     app: AppHandle,
     request_id: String,
+    connection: String,
     channels: Vec<Channel>,
 ) -> Result<(), AppError> {
     let state = app.state::<Arc<AppState>>();
@@ -3287,12 +3293,12 @@ pub async fn dispatcharr_probe_streams(
                 &request_id,
                 &settings,
             );
+            let connection = &connection;
             async move {
                 let limit =
                     crate::engine::dispatcharr::dispatcharr_connection_limit(&channel.extinf_line);
-                let viewers = limit.and_then(|_| {
-                    crate::engine::dispatcharr::account_viewers(&channel.extinf_line)
-                });
+                let viewers =
+                    limit.and_then(|_| crate::engine::dispatcharr::account_viewers(connection));
                 let busy = |channel: &Channel| {
                     let mut result = build_channel_result(
                         channel,

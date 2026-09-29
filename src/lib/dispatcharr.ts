@@ -235,8 +235,11 @@ export function failureCause(result: ChannelResult): string | null {
  *  provider is down, not each stream. */
 export function findDownAccounts(entries: DispatcharrStreamEntry[]): DownAccount[] {
   const byAccount = new Map<number, DispatcharrStreamEntry[]>();
+  // A stream linked to several channels is still one provider stream.
+  const seen = new Set<number>();
   for (const entry of entries) {
-    if (entry.ref.accountId === null) continue;
+    if (entry.ref.accountId === null || seen.has(entry.ref.streamId)) continue;
+    seen.add(entry.ref.streamId);
     const list = byAccount.get(entry.ref.accountId) ?? [];
     list.push(entry);
     byAccount.set(entry.ref.accountId, list);

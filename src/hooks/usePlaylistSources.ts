@@ -1102,6 +1102,12 @@ export function usePlaylistSources({
     return { ok: result.ok, reapplied: result.ok };
   }, [loadAndCommitSource]);
 
+  /** Load the current source again from its origin, for new stream URLs. */
+  const reloadCurrentSource = useCallback(() => {
+    const descriptor = getStore().currentSourceDescriptor;
+    if (descriptor) void loadAndCommitSource(descriptor, "freshOpen");
+  }, [loadAndCommitSource]);
+
   const handleApplySourceFilter = useCallback(() => {
     const state = getStore();
     if (!state.currentSourceDescriptor) {
@@ -1207,6 +1213,7 @@ export function usePlaylistSources({
     handlePreferSavedXtreamServer,
     ensureSourceFilterApplied,
     handleApplySourceFilter,
+    reloadCurrentSource,
     savedPlaylistsDialogOpen,
     setSavedPlaylistsDialogOpen,
     savedPlaylistEditorDraft,

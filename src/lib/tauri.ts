@@ -155,9 +155,14 @@ export async function dispatcharrFindStreams(
  *  with `cancelQuickCheck(requestId)`. */
 export async function dispatcharrProbeStreams(
   requestId: string,
+  target: DispatcharrTarget,
   channels: Channel[],
 ): Promise<void> {
-  return invoke("dispatcharr_probe_streams", { requestId, channels });
+  return invoke("dispatcharr_probe_streams", {
+    requestId,
+    connection: target.connection,
+    channels,
+  });
 }
 
 export async function dispatcharrRefreshAccount(

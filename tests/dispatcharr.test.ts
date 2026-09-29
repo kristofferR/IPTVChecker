@@ -435,4 +435,21 @@ describe("dispatcharr helpers", () => {
     if (!channel) throw new Error("missing channel");
     expect(unlinkedStreams(results, channel).map((entry) => entry.ref.streamId)).toEqual([2]);
   });
+
+  it("counts a stream linked to several channels once when judging its provider", () => {
+    const results = [1, 2, 3, 4, 5].map((channel) => {
+      const row = makeResult(
+        channel,
+        extinf(channel, 7, 0, 1, `Channel ${channel}`),
+        `Channel ${channel}`,
+        { status: "dead", error_reason: "HTTP 502" },
+      );
+      const title = row.extinf_line.lastIndexOf(",");
+      return {
+        ...row,
+        extinf_line: `${row.extinf_line.slice(0, title)} x-dispatcharr-account-id="7"${row.extinf_line.slice(title)}`,
+      };
+    });
+    expect(getDispatcharrView(results, {})?.downAccounts).toEqual([]);
+  });
 });

@@ -254,13 +254,15 @@ export function DispatcharrFindPanel() {
   };
 
   const probe = async () => {
-    if (scanning || unprobed.length === 0) return;
+    const target = dispatcharrTarget(getStore().playlist);
+    if (scanning || unprobed.length === 0 || !target) return;
     const requestId = `find-${channel.channelId}-${Date.now()}`;
     requestRef.current = requestId;
     setProbing(true);
     try {
       await dispatcharrProbeStreams(
         requestId,
+        target,
         unprobed.map((entry) => entry.channel),
       );
     } catch {

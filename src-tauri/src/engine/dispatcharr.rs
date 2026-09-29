@@ -1033,31 +1033,23 @@ impl AccountViewers {
     }
 }
 
-/// Viewer counts for the server a row came from, through any open session to
-/// that server. `None` when no session is open (nothing to ask).
-pub(crate) fn account_viewers(extinf_line: &str) -> Option<Arc<AccountViewers>> {
+/// Viewer counts for a loaded Dispatcharr connection, read through that
+/// connection's own session. `None` when the session is gone.
+pub(crate) fn account_viewers(connection: &str) -> Option<Arc<AccountViewers>> {
     type Registry = HashMap<String, Arc<AccountViewers>>;
     static VIEWERS: OnceLock<Mutex<Registry>> = OnceLock::new();
-    let server = parse_extinf_attributes(extinf_line)
-        .into_iter()
-        .find_map(|(key, value)| (key == ATTR_SERVER).then_some(value))?;
-    let prefix = format!("dispatcharr:{}|", server);
-    let client = sessions()
-        .lock()
-        .ok()?
-        .iter()
-        .find_map(|(key, client)| key.starts_with(&prefix).then(|| Arc::clone(client)))?;
+    let client = get_session(connection)?;
     let mut registry = VIEWERS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let entry = registry.entry(server).or_insert_with(|| {
+    let entry = registry.entry(connection.to_string()).or_insert_with(|| {
         Arc::new(AccountViewers {
             client: Arc::clone(&client),
             counts: tokio::sync::Mutex::new(None),
         })
     });
-    // A reopened source replaces its session (and possibly its key).
+    // A reopened source replaces its session.
     if !Arc::ptr_eq(&entry.client, &client) {
         *entry = Arc::new(AccountViewers {
             client,
