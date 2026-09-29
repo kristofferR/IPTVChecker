@@ -21,6 +21,7 @@ import {
   resolveHlsHdrFormat,
   type StreamMetadata,
   type StreamType,
+  selectPlaybackFailure,
   shouldResetPlaybackRecoveryAttempts,
   shouldSuspendPlaybackWatchdog,
   shouldTranscodeAudioCodec,
@@ -37,6 +38,28 @@ function canPlayTypes(
 }
 
 describe("useStreamPlayer helpers", () => {
+  it("preserves the decode failure through unsupported-format and timeout fallbacks", () => {
+    let failure: string | null = null;
+    for (const next of [
+      "Format not supported",
+      "networkError: manifestLoadError",
+      "MediaError: MediaMSEError",
+      "Decode error",
+      "Native playback timed out",
+      "Format not supported",
+    ]) {
+      failure = selectPlaybackFailure(failure, next);
+    }
+    expect(failure).toBe("Decode error");
+  });
+
+  it("retains a specific failure when a fallback rejects the container or provides no error", () => {
+    expect(selectPlaybackFailure("Network error", "Format not supported")).toBe("Network error");
+    expect(selectPlaybackFailure("Network error", null)).toBe("Network error");
+    expect(selectPlaybackFailure(null, "Format not supported")).toBe("Format not supported");
+    expect(selectPlaybackFailure(null, null)).toBeNull();
+    expect(selectPlaybackFailure("Format not supported", "Network error")).toBe("Network error");
+  });
   it("does not accept native video when every decoded frame was dropped", () => {
     expect(hasPresentedVideoFrame({ totalVideoFrames: 0, droppedVideoFrames: 0 })).toBe(false);
     expect(hasPresentedVideoFrame({ totalVideoFrames: 1249, droppedVideoFrames: 1249 })).toBe(
