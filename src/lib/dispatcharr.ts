@@ -32,11 +32,13 @@ export function normalizeDispatcharrServer(value: string): string | null {
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
     if (!parsed.hostname || parsed.username || parsed.password) return null;
     // Trailing slash so a path ending in a marker ("/dispatcharr/api") matches.
+    // The last marker is Dispatcharr's own; earlier ones belong to a
+    // reverse-proxy prefix such as "/api/dispatcharr".
     const lower = `${parsed.pathname.toLowerCase()}/`;
-    const cut = ["/proxy/", "/output/", "/api/"]
-      .map((marker) => lower.indexOf(marker))
-      .filter((index) => index >= 0);
-    const prefix = parsed.pathname.slice(0, cut.length ? Math.min(...cut) : undefined);
+    const cut = Math.max(
+      ...["/proxy/", "/output/", "/api/"].map((marker) => lower.lastIndexOf(marker)),
+    );
+    const prefix = parsed.pathname.slice(0, cut >= 0 ? cut : undefined);
     return `${parsed.origin}${prefix.replace(/\/+$/, "")}`;
   } catch {
     return null;

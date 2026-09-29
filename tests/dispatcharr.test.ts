@@ -231,6 +231,9 @@ describe("dispatcharr helpers", () => {
     expect(normalizeDispatcharrServer("https://example.com/dispatcharr/api")).toBe(
       "https://example.com/dispatcharr",
     );
+    expect(
+      normalizeDispatcharrServer("https://example.com/api/dispatcharr/proxy/ts/stream/abc"),
+    ).toBe("https://example.com/api/dispatcharr");
     expect(normalizeDispatcharrServer("ftp://example.com")).toBeNull();
   });
 

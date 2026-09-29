@@ -119,11 +119,13 @@ pub(crate) fn normalize_dispatcharr_server(server: &str) -> Result<Url, AppError
     }
     let path = parsed.path().to_string();
     // Trailing slash so a path ending in a marker ("/dispatcharr/api") matches.
+    // The last marker is Dispatcharr's own; earlier ones belong to a
+    // reverse-proxy prefix such as "/api/dispatcharr".
     let lower = format!("{}/", path.to_ascii_lowercase());
     let prefix_end = ["/proxy/", "/output/", "/api/"]
         .iter()
-        .filter_map(|marker| lower.find(marker))
-        .min()
+        .filter_map(|marker| lower.rfind(marker))
+        .max()
         .unwrap_or(path.len());
     let prefix = path[..prefix_end.min(path.len())].trim_end_matches('/');
     parsed.set_path(if prefix.is_empty() { "/" } else { prefix });
@@ -1107,6 +1109,10 @@ mod tests {
             (
                 "https://example.com/dispatcharr/api",
                 "https://example.com/dispatcharr",
+            ),
+            (
+                "https://example.com/api/dispatcharr/proxy/ts/stream/abc",
+                "https://example.com/api/dispatcharr",
             ),
         ];
         for (input, expected) in cases {
