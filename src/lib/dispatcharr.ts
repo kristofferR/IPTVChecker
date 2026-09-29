@@ -11,6 +11,8 @@ export interface DispatcharrStreamRef {
   streamCount: number;
   channelUuid: string | null;
   account: string | null;
+  /** The provider stream's own name (rows are titled with the channel). */
+  streamName: string | null;
   /** The channel's complete stream order at load, including streams that
    *  have no row (no URL). */
   channelStreams: number[] | null;
@@ -56,6 +58,7 @@ export function parseDispatcharrIds(extinfLine: string): DispatcharrStreamRef | 
     streamCount: number("x-dispatcharr-stream-count") ?? 1,
     channelUuid: extinfAttribute(extinfLine, "x-dispatcharr-channel-uuid") || null,
     account: extinfAttribute(extinfLine, "x-dispatcharr-account") || null,
+    streamName: extinfAttribute(extinfLine, "x-dispatcharr-stream-name") || null,
     channelStreams:
       extinfAttribute(extinfLine, "x-dispatcharr-channel-streams")
         ?.split(",")
@@ -117,19 +120,8 @@ function cachedIds(extinfLine: string): DispatcharrStreamRef | null {
   return ref;
 }
 
-function channelNameOf(result: ChannelResult, ref: DispatcharrStreamRef): string {
-  if (ref.streamCount <= 1) return result.name;
-  const cut = result.name.indexOf(` [${ref.streamOrder + 1}/${ref.streamCount}]`);
-  return cut >= 0 ? result.name.slice(0, cut) : result.name;
-}
-
-/** Stream name without the "Channel [n/m] " prefix. */
 export function dispatcharrStreamName(entry: DispatcharrStreamEntry): string {
-  const { result, ref } = entry;
-  if (ref.streamCount <= 1) return result.name;
-  const marker = ` [${ref.streamOrder + 1}/${ref.streamCount}] `;
-  const cut = result.name.indexOf(marker);
-  return cut >= 0 ? result.name.slice(cut + marker.length) : result.name;
+  return entry.ref.streamName ?? entry.result.name;
 }
 
 export function isDeadStatus(status: ChannelResult["status"]): boolean {
@@ -150,7 +142,7 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
     if (!ref) continue;
     let channel = byChannel.get(ref.channelId);
     if (!channel) {
-      channel = { name: channelNameOf(result, ref), group: result.group, streams: [] };
+      channel = { name: result.name, group: result.group, streams: [] };
       byChannel.set(ref.channelId, channel);
     }
     if (!channel.streams.some((entry) => entry.ref.streamId === ref.streamId)) {

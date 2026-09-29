@@ -2267,11 +2267,11 @@ async fn execute_scan_run(
         builder.build().unwrap_or_default()
     });
     let semaphore = Arc::new(Semaphore::new(config.concurrency as usize));
-    // Rows of connection-limited provider accounts are dispatched against
-    // this bounded pool instead and take a scan slot only when their account
-    // is free (see `acquire_account_then_scan`). Duplicate-URL rows then wait
-    // on a shared result without holding the scan slot its probe needs.
-    let account_waiters = Arc::new(Semaphore::new((config.concurrency as usize).max(1) * 4));
+    // Rows that may wait before probing (connection-limited provider
+    // accounts, and duplicates of a URL another row probes) are dispatched
+    // against this bounded pool and take a scan slot only when they probe.
+    // Waiting rows therefore never hold scan slots that probes need.
+    let waiting_rows = Arc::new(Semaphore::new((config.concurrency as usize).max(1) * 4));
     let diagnostics_limit = if single_provider {
         1
     } else {
@@ -2368,8 +2368,23 @@ async fn execute_scan_run(
                     .or_insert_with(|| Arc::new(Semaphore::new(limit))),
             )
         });
-        let dispatch_slots = if account_semaphore.is_some() {
-            &account_waiters
+        // Rows sharing a URL wait on one probe. Settle which row owns it
+        // before reserving capacity, so a waiting duplicate never holds the
+        // scan slot that probe needs.
+        let (result_cell, duplicate_url) = {
+            let mut cache = shared_url_results.lock().await;
+            match cache.entry(canonicalize_stream_url(&channel.url)) {
+                std::collections::hash_map::Entry::Occupied(entry) => {
+                    (Arc::clone(entry.get()), true)
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => (
+                    Arc::clone(entry.insert(Arc::new(tokio::sync::OnceCell::new()))),
+                    false,
+                ),
+            }
+        };
+        let dispatch_slots = if account_semaphore.is_some() || duplicate_url {
+            &waiting_rows
         } else {
             &semaphore
         };
@@ -2401,7 +2416,6 @@ async fn execute_scan_run(
         let state_for_perf = state.clone();
         let run_id_for_perf = run_id.clone();
         let pause_scope = scan_scope.to_string();
-        let shared_url_results = Arc::clone(&shared_url_results);
         let diagnostics_semaphore = Arc::clone(&diagnostics_semaphore);
         let single_connection_mode = single_provider;
         let disk_guard = disk_guard.clone();
@@ -2414,15 +2428,6 @@ async fn execute_scan_run(
             if cancel.is_cancelled() {
                 return;
             }
-
-            let canonical_url = canonicalize_stream_url(&channel.url);
-            let result_cell = {
-                let mut cache = shared_url_results.lock().await;
-                cache
-                    .entry(canonical_url)
-                    .or_insert_with(|| Arc::new(tokio::sync::OnceCell::new()))
-                    .clone()
-            };
 
             let screenshot_file_name =
                 ffmpeg::build_screenshot_file_name(channel.index, &channel.name);
@@ -2458,7 +2463,7 @@ async fn execute_scan_run(
             };
             let shared_result = result_cell
                 .get_or_init(|| async {
-                    let _account_permits = match &account_semaphore {
+                    let _probe_permits = match &account_semaphore {
                         Some(account) => {
                             let permits =
                                 acquire_account_then_scan(account, &scan_semaphore, &cancel)
@@ -2469,9 +2474,17 @@ async fn execute_scan_run(
                             if !wait_if_paused(&state_for_perf, &pause_scope, &cancel).await {
                                 return Err(AppError::Cancelled);
                             }
-                            Some(permits)
+                            vec![permits.0, permits.1]
                         }
-                        None => None,
+                        // A duplicate only probes when the owning row stopped
+                        // before probing; it holds no scan slot yet.
+                        None if duplicate_url => vec![tokio::select! {
+                            permit = Arc::clone(&scan_semaphore).acquire_owned() => {
+                                permit.map_err(|_| AppError::Cancelled)?
+                            }
+                            _ = cancel.cancelled() => return Err(AppError::Cancelled),
+                        }],
+                        None => Vec::new(),
                     };
                     compute_shared_url_result(
                         &check_ctx,

@@ -12,8 +12,16 @@ import {
 import { planFix } from "../src/lib/dispatcharrEdits";
 import type { ChannelResult, PlaylistPreview } from "../src/lib/types";
 
-function extinf(channel: number, stream: number, order: number, count: number, name: string) {
-  return `#EXTINF:-1 group-title="News" x-dispatcharr-channel-id="${channel}" x-dispatcharr-stream-id="${stream}" x-dispatcharr-stream-order="${order}" x-dispatcharr-stream-count="${count}" x-dispatcharr-account="Provider \\"A\\"",${name}`;
+function extinf(
+  channel: number,
+  stream: number,
+  order: number,
+  count: number,
+  name: string,
+  streamName?: string,
+) {
+  const streamAttr = streamName ? ` x-dispatcharr-stream-name="${streamName}"` : "";
+  return `#EXTINF:-1 group-title="News" x-dispatcharr-channel-id="${channel}" x-dispatcharr-stream-id="${stream}" x-dispatcharr-stream-order="${order}" x-dispatcharr-stream-count="${count}"${streamAttr} x-dispatcharr-account="Provider \\"A\\"",${name}`;
 }
 
 function makeResult(
@@ -71,12 +79,10 @@ function channelRows(
   firstIndex = 0,
 ): ChannelResult[] {
   return streams.map((stream, order) => {
-    const title =
-      streams.length > 1 ? `${name} [${order + 1}/${streams.length}] Feed ${stream.id}` : name;
     return makeResult(
       firstIndex + order,
-      extinf(channel, stream.id, order, streams.length, title),
-      title,
+      extinf(channel, stream.id, order, streams.length, name, `Feed ${stream.id}`),
+      name,
       { status: stream.status ?? "alive", height: stream.height ?? null },
     );
   });
@@ -93,6 +99,7 @@ describe("dispatcharr helpers", () => {
       streamCount: 3,
       channelUuid: null,
       account: 'Provider "A"',
+      streamName: null,
       channelStreams: null,
     });
     expect(parseDispatcharrIds('#EXTINF:-1 tvg-id="a",Plain')).toBeNull();

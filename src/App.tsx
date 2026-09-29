@@ -1052,6 +1052,12 @@ export default function App() {
             ? explicitSelection.filter((index) => linkedSet.has(index))
             : explicitSelection
           : (linked ?? []);
+      if (explicitSelection.length > 0 && effectiveSelection.length === 0) {
+        // Everything selected was unlinked; an empty selection must not
+        // widen into a scan of the whole playlist.
+        getStore().setMenuInfo("The selected streams were removed from their channels.");
+        return false;
+      }
 
       if (!currentPlaylist) return false;
 

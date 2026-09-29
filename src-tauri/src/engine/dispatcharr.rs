@@ -38,6 +38,9 @@ pub(crate) const ATTR_STREAM_ORDER: &str = "x-dispatcharr-stream-order";
 pub(crate) const ATTR_STREAM_COUNT: &str = "x-dispatcharr-stream-count";
 pub(crate) const ATTR_CHANNEL_UUID: &str = "x-dispatcharr-channel-uuid";
 pub(crate) const ATTR_ACCOUNT: &str = "x-dispatcharr-account";
+/// The provider stream's own name. Row titles are the channel name, so the
+/// source filter and search match whole channels.
+pub(crate) const ATTR_STREAM_NAME: &str = "x-dispatcharr-stream-name";
 pub(crate) const ATTR_ACCOUNT_ID: &str = "x-dispatcharr-account-id";
 pub(crate) const ATTR_MAX_STREAMS: &str = "x-dispatcharr-max-streams";
 /// The channel's complete stream order, including streams without a row
@@ -750,17 +753,7 @@ pub(crate) fn build_m3u(
                 continue;
             };
             let account = stream.m3u_account.and_then(|id| accounts.get(&id));
-            let title = if count > 1 {
-                format!(
-                    "{} [{}/{}] {}",
-                    channel.display_name(),
-                    order + 1,
-                    count,
-                    stream.name
-                )
-            } else {
-                channel.display_name().to_string()
-            };
+            let title = channel.display_name();
 
             m3u.push_str("#EXTINF:-1");
             let mut attr = |key: &str, value: &str| {
@@ -783,6 +776,7 @@ pub(crate) fn build_m3u(
             attr(ATTR_STREAM_ID, &stream.id.to_string());
             attr(ATTR_STREAM_ORDER, &order.to_string());
             attr(ATTR_STREAM_COUNT, &count.to_string());
+            attr(ATTR_STREAM_NAME, &stream.name);
             if let Some(uuid) = channel.uuid.as_deref() {
                 attr(ATTR_CHANNEL_UUID, uuid);
             }
@@ -805,7 +799,7 @@ pub(crate) fn build_m3u(
                 (None, None) => {}
             }
             m3u.push(',');
-            m3u.push_str(&flatten_extinf_title(&title));
+            m3u.push_str(&flatten_extinf_title(title));
             m3u.push('\n');
             m3u.push_str(&url.replace(['\r', '\n'], ""));
             m3u.push('\n');
@@ -1253,7 +1247,10 @@ mod tests {
         assert_eq!(single.tvg_id.as_deref(), Some("news.one"));
 
         let multi = &preview.channels[1];
-        assert_eq!(multi.name, "Sports \"2\" [1/3] Feed B");
+        assert_eq!(multi.name, "Sports \"2\"");
+        assert!(multi
+            .extinf_line
+            .contains("x-dispatcharr-stream-name=\"Feed B\""));
         assert_eq!(multi.group, "Sports");
         assert_eq!(multi.tvg_chno.as_deref(), Some("2"));
         assert_eq!(

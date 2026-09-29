@@ -19,7 +19,11 @@ import {
   probeArchivePoint,
   verifyArchivePointResponse,
 } from "../lib/archiveProbe";
-import { filterDispatcharrPrimaries, getDispatcharrView } from "../lib/dispatcharr";
+import {
+  expandDispatcharrSelection,
+  filterDispatcharrPrimaries,
+  getDispatcharrView,
+} from "../lib/dispatcharr";
 import { fetchGuideProgrammes } from "../lib/epgLoader";
 import { filterResultsShared } from "../lib/filters";
 import {
@@ -209,8 +213,15 @@ const GuideRow = memo(function GuideRow({
           type="button"
           className="guide-channel-button flex h-full w-full items-center gap-1.5 px-2 text-left"
           onClick={() => {
-            useAppStore.getState().setSelectedChannel(result);
-            useAppStore.getState().setSelectedChannelIndices([result.index]);
+            const state = useAppStore.getState();
+            state.setSelectedChannel(result);
+            // A Dispatcharr channel row stands for all of its streams.
+            state.setSelectedChannelIndices(
+              expandDispatcharrSelection(
+                getDispatcharrView(state.flatResults, state.dispatcharrOrders),
+                [result.index],
+              ),
+            );
           }}
           onDoubleClick={() => onPlayLive(result)}
           onKeyDown={(event) => {
