@@ -109,7 +109,6 @@ describe("dispatcharr helpers", () => {
     const results = [
       ...channelRows(10, "News One", [{ id: 101, status: "dead" }, { id: 102 }]),
       ...channelRows(20, "Sports 2", [{ id: 201 }], 2),
-      makeResult(3, "#EXTINF:-1,Plain", "Plain"),
     ];
     const view = getDispatcharrView(results, {});
     expect(view?.channels.map((channel) => [channel.channelId, channel.name])).toEqual([
@@ -125,6 +124,10 @@ describe("dispatcharr helpers", () => {
       1,
     ]);
     expect(getDispatcharrView([makeResult(0, "#EXTINF:-1,Plain", "Plain")], {})).toBeNull();
+    // A mixed playlist keeps its plain table rather than hiding other rows.
+    expect(
+      getDispatcharrView([...results, makeResult(9, "#EXTINF:-1,Plain", "Plain")], {}),
+    ).toBeNull();
   });
 
   it("applies written orders: removed streams disappear and the primary follows", () => {

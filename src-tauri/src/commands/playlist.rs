@@ -327,9 +327,10 @@ fn dominant_host_from_counts(counts: &HashMap<String, usize>) -> Option<String> 
 /// or for Dispatcharr sources (see `open_playlist_dispatcharr_inner`).
 pub(crate) fn is_single_provider_check(channels: &[Channel]) -> bool {
     is_single_provider(channels)
-        || channels.first().is_some_and(|channel| {
-            crate::engine::dispatcharr::dispatcharr_ids_from_extinf(&channel.extinf_line).is_some()
-        })
+        || (!channels.is_empty()
+            && channels.iter().all(|channel| {
+                crate::engine::dispatcharr::is_dispatcharr_row(&channel.extinf_line)
+            }))
 }
 
 fn is_single_provider(channels: &[Channel]) -> bool {

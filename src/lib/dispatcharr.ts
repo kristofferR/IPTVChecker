@@ -74,10 +74,9 @@ export function dispatcharrTarget(preview: PlaylistPreview | null): DispatcharrT
   return sourceIdentity && connection ? { sourceIdentity, connection } : null;
 }
 
-/** Every row of a Dispatcharr source carries the IDs, so the first suffices. */
+/** A native Dispatcharr source: the backend records its connection. */
 export function isDispatcharrPreview(preview: PlaylistPreview | null): boolean {
-  const first = preview?.channels[0];
-  return first != null && parseDispatcharrIds(first.extinf_line) !== null;
+  return Boolean(preview?.dispatcharr_connection);
 }
 
 export interface DispatcharrStreamEntry {
@@ -149,7 +148,9 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
   >();
   for (const result of results) {
     const ref = cachedIds(result.extinf_line);
-    if (!ref) continue;
+    // Channel-first mode needs a pure Dispatcharr source; a mixed playlist
+    // (a folder, or an export merged with other rows) stays a plain table.
+    if (!ref) return null;
     let channel = byChannel.get(ref.channelId);
     if (!channel) {
       channel = { name: result.name, group: result.group, streams: [] };

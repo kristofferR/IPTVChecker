@@ -393,16 +393,24 @@ export function GuideView({
   const [selectedProgramme, setSelection] = useState<GuideSelection | null>(null);
   const [openMenu, setMenu] = useState<ProgrammeMenuState | null>(null);
   // Catch-up metadata can arrive after selection, when the provider refreshes
-  // the playlist. Keep the programme but use the channel's current metadata.
+  // the playlist. Keep the programme but use the channel's current metadata;
+  // a Dispatcharr channel resolves to its current primary, which an edit can
+  // change.
+  const currentResult = useCallback(
+    (selected: ChannelResult) =>
+      getDispatcharrView(flatResults, dispatcharrOrders)?.byStreamIndex.get(selected.index)
+        ?.primary ??
+      flatResults.find((result) => result.index === selected.index) ??
+      selected,
+    [flatResults, dispatcharrOrders],
+  );
   const selection = useMemo(
     () =>
       selectedProgramme && {
         ...selectedProgramme,
-        result:
-          flatResults.find((result) => result.index === selectedProgramme.result.index) ??
-          selectedProgramme.result,
+        result: currentResult(selectedProgramme.result),
       },
-    [selectedProgramme, flatResults],
+    [selectedProgramme, currentResult],
   );
   const menu = useMemo(
     () =>
@@ -410,12 +418,10 @@ export function GuideView({
         ...openMenu,
         selection: {
           ...openMenu.selection,
-          result:
-            flatResults.find((result) => result.index === openMenu.selection.result.index) ??
-            openMenu.selection.result,
+          result: currentResult(openMenu.selection.result),
         },
       },
-    [openMenu, flatResults],
+    [openMenu, currentResult],
   );
   const [testOutcome, setTestOutcome] = useState<ArchiveProbeOutcome | null>(null);
   const [testing, setTesting] = useState(false);
