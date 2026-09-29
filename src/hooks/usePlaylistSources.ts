@@ -5,7 +5,12 @@ import { applyXtreamArchiveUpdates, applyXtreamArchiveUpdatesToPreview } from ".
 import { cancelArchiveProbes } from "../lib/archiveProbe";
 import { errorToString, formatPlaylistOpenError, formatSourceReloadError } from "../lib/errors";
 import { logger } from "../lib/logger";
-import { parseXtreamRecent, serializeXtreamRecent } from "../lib/recentPlaylists";
+import {
+  parseDispatcharrRecent,
+  parseXtreamRecent,
+  serializeDispatcharrRecent,
+  serializeXtreamRecent,
+} from "../lib/recentPlaylists";
 import {
   buildSavedPlaylistDraftFromSource,
   findSavedPlaylistForCurrentSource,
@@ -27,6 +32,7 @@ import {
   getRecentPlaylists,
   getSavedPlaylists,
   openPlaylist,
+  openPlaylistDispatcharr,
   openPlaylistStalker,
   openPlaylistUrl,
   openPlaylistXtream,
@@ -36,6 +42,7 @@ import {
 import type {
   Channel,
   CurrentSourceDescriptor,
+  DispatcharrOpenRequest,
   PlaylistPreview,
   RecentPlaylistEntry,
   SavedPlaylistDraft,
@@ -123,6 +130,8 @@ function savedEntryToDraft(entry: SavedPlaylistEntry): SavedPlaylistDraft {
         username: entry.username,
         password: entry.password,
       };
+    case "dispatcharr":
+      return { ...entry };
   }
 }
 
@@ -335,6 +344,10 @@ export function usePlaylistSources({
             undefined,
             undefined,
           );
+        case "dispatcharr": {
+          const { kind: _kind, ...source } = descriptor;
+          return openPlaylistDispatcharr(source, undefined, undefined);
+        }
       }
     },
     [],
@@ -382,6 +395,8 @@ export function usePlaylistSources({
             return `xtream server=${descriptor.server}, username=***`;
           case "stalker":
             return `stalker portal=${descriptor.portal}, mac=***`;
+          case "dispatcharr":
+            return `dispatcharr server=${descriptor.server}`;
         }
       })();
       const loadingAction =
@@ -664,14 +679,19 @@ export function usePlaylistSources({
                   kind: "url" as const,
                   value: savedEntry.url,
                 }
-              : {
-                  kind: "xtream" as const,
-                  value: serializeXtreamRecent({
-                    server: savedEntry.preferred_server ?? savedEntry.servers[0] ?? "",
-                    username: savedEntry.username,
-                    password: savedEntry.password ?? undefined,
-                  }),
-                };
+              : savedEntry.kind === "xtream"
+                ? {
+                    kind: "xtream" as const,
+                    value: serializeXtreamRecent({
+                      server: savedEntry.preferred_server ?? savedEntry.servers[0] ?? "",
+                      username: savedEntry.username,
+                      password: savedEntry.password ?? undefined,
+                    }),
+                  }
+                : {
+                    kind: "dispatcharr" as const,
+                    value: serializeDispatcharrRecent(savedEntry),
+                  };
 
         const entries = await addRecentPlaylist(
           recentPayload.kind,
@@ -810,6 +830,36 @@ export function usePlaylistSources({
         getStore().setRecentPlaylists(entries);
       } catch (err) {
         logger.warn("[Recent Playlists] Failed to record Xtream playlist:", errorToString(err));
+      }
+
+      return true;
+    },
+    [loadAndCommitSource],
+  );
+
+  const openPlaylistDispatcharrValue = useCallback(
+    async (source: DispatcharrOpenRequest, rememberSecrets?: boolean): Promise<string | true> => {
+      const result = await loadAndCommitSource({ kind: "dispatcharr", ...source }, "freshOpen");
+      if (!result.ok) {
+        return result.superseded ? true : result.error;
+      }
+
+      try {
+        const usesApiKey = Boolean(source.api_key?.trim());
+        const entries = await addRecentPlaylist(
+          "dispatcharr",
+          serializeDispatcharrRecent({
+            server: source.server,
+            username: usesApiKey ? null : source.username,
+            password: rememberSecrets && !usesApiKey ? source.password : null,
+            api_key: rememberSecrets ? source.api_key : null,
+          }),
+          null,
+          null,
+        );
+        getStore().setRecentPlaylists(entries);
+      } catch (err) {
+        logger.warn("[Recent Playlists] Failed to record Dispatcharr source:", errorToString(err));
       }
 
       return true;
@@ -1042,12 +1092,34 @@ export function usePlaylistSources({
           initialUrl: "",
           initialXtream: source,
           initialStalker: null,
+          initialDispatcharr: null,
+        });
+        return;
+      }
+      if (entry.kind === "dispatcharr") {
+        const source = parseDispatcharrRecent(entry.value);
+        if (!source) {
+          getStore().setMenuInfo("This Dispatcharr recent entry is invalid.", "warn");
+          void refreshRecentPlaylists();
+          return;
+        }
+        if (source.api_key || (source.username && source.password)) {
+          void openPlaylistDispatcharrValue(source, true);
+          return;
+        }
+        getStore().setOpenSourceDialogState({
+          mode: "dispatcharr",
+          initialUrl: "",
+          initialXtream: null,
+          initialStalker: null,
+          initialDispatcharr: source,
         });
         return;
       }
       void openPlaylistPath(entry.value);
     },
     [
+      openPlaylistDispatcharrValue,
       openPlaylistPath,
       openPlaylistUrlValue,
       openPlaylistXtreamValue,
@@ -1066,6 +1138,7 @@ export function usePlaylistSources({
     openPlaylistUrlValue,
     openPlaylistXtreamValue,
     openPlaylistStalkerValue,
+    openPlaylistDispatcharrValue,
     openSavedPlaylistById,
     handleOpenSaved,
     handleOpenRecent,

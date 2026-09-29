@@ -1,0 +1,315 @@
+//! Dispatcharr write-back commands: push probe stats into each stream's
+//! `stream_stats`, rewrite a channel's ordered stream list, and hard-delete
+//! streams. All are explicit user actions from the sync dialog. Batches
+//! report per-item outcomes; one failure never aborts the rest.
+
+use crate::engine::dispatcharr::{
+    dispatcharr_ids_from_extinf, get_session, merge_stream_stats, normalize_dispatcharr_server,
+    register_session, stats_stuck, stream_stats_from_result, DispatcharrAuth, DispatcharrClient,
+};
+use crate::error::AppError;
+use crate::models::channel::{ChannelResult, ChannelStatus};
+use crate::models::saved_playlist::SavedPlaylistSource;
+use crate::state::AppState;
+use futures::stream::{self, StreamExt};
+use serde::Serialize;
+use serde_json::{Map, Value};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use tauri::Manager;
+
+const STATS_PUSH_CONCURRENCY: usize = 4;
+
+type StatsUpdate = (i64, Map<String, Value>);
+
+/// The client registered when the source was opened. Saved sources can be
+/// rebuilt from their stored credentials after an app restart.
+async fn resolve_session(
+    app: &tauri::AppHandle,
+    source_identity: &str,
+) -> Result<Arc<DispatcharrClient>, AppError> {
+    if let Some(client) = get_session(source_identity) {
+        return Ok(client);
+    }
+    if let Some(saved_id) = source_identity.strip_prefix("saved:") {
+        if let Some(SavedPlaylistSource::Dispatcharr {
+            server,
+            username,
+            password,
+            api_key,
+        }) = crate::commands::saved::saved_playlist_by_id(app, saved_id)?.map(|e| e.source)
+        {
+            let accept_invalid_certs = app
+                .state::<Arc<AppState>>()
+                .settings
+                .lock()
+                .await
+                .accept_invalid_certs;
+            let client = Arc::new(DispatcharrClient::new(
+                normalize_dispatcharr_server(&server)?,
+                DispatcharrAuth::from_parts(
+                    username.as_deref(),
+                    password.as_deref(),
+                    api_key.as_deref(),
+                )?,
+                accept_invalid_certs,
+            )?);
+            register_session(source_identity, Arc::clone(&client));
+            return Ok(client);
+        }
+    }
+    Err(AppError::State(
+        "Not connected to Dispatcharr. Reload the source to sync.".to_string(),
+    ))
+}
+
+#[derive(Debug, Serialize)]
+pub struct DispatcharrItemFailure {
+    pub id: i64,
+    pub error: String,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct DispatcharrStatsPushReport {
+    pub updated: Vec<i64>,
+    pub failed: Vec<DispatcharrItemFailure>,
+    /// Results that were not alive, had no Dispatcharr IDs, or no stats.
+    pub skipped: usize,
+    /// Dispatcharr accepted the first write but did not store the stats.
+    /// Later releases may make `stream_stats` read-only; nothing else is sent.
+    pub rejected: bool,
+}
+
+/// Alive results with Dispatcharr IDs and at least one stat, one per stream.
+fn collect_stream_stats(results: &[ChannelResult]) -> (Vec<StatsUpdate>, usize) {
+    let mut seen = HashSet::new();
+    let mut updates = Vec::new();
+    let mut skipped = 0;
+    for result in results {
+        let stream_id = (result.status == ChannelStatus::Alive)
+            .then(|| dispatcharr_ids_from_extinf(&result.extinf_line))
+            .flatten()
+            .map(|ids| ids.stream_id);
+        let stats = stream_stats_from_result(result);
+        match stream_id {
+            Some(stream_id) if !stats.is_empty() => {
+                if seen.insert(stream_id) {
+                    updates.push((stream_id, stats));
+                }
+            }
+            _ => skipped += 1,
+        }
+    }
+    (updates, skipped)
+}
+
+#[tauri::command]
+pub async fn dispatcharr_push_stream_stats(
+    app: tauri::AppHandle,
+    source_identity: String,
+    results: Vec<ChannelResult>,
+) -> Result<DispatcharrStatsPushReport, AppError> {
+    let client = resolve_session(&app, &source_identity).await?;
+    let (updates, skipped) = collect_stream_stats(&results);
+    let mut report = DispatcharrStatsPushReport {
+        skipped,
+        ..Default::default()
+    };
+    if updates.is_empty() {
+        return Ok(report);
+    }
+
+    // PATCH replaces the whole JSON, so merge onto the current stats.
+    let ids = updates.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+    let existing = client
+        .fetch_streams_by_ids(&ids)
+        .await?
+        .into_iter()
+        .map(|stream| (stream.id, stream.stream_stats))
+        .collect::<HashMap<_, _>>();
+    let updated_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+
+    let mut pending = Vec::new();
+    for (stream_id, stats) in updates {
+        match existing.get(&stream_id) {
+            Some(current) => {
+                pending.push((stream_id, merge_stream_stats(current.as_ref(), &stats)))
+            }
+            None => report.failed.push(DispatcharrItemFailure {
+                id: stream_id,
+                error: "Stream no longer exists in Dispatcharr".to_string(),
+            }),
+        }
+    }
+    let mut pending = pending.into_iter();
+
+    // Verify the first write sticks before sending the rest.
+    if let Some((stream_id, stats)) = pending.next() {
+        match client
+            .patch_stream_stats(stream_id, &stats, &updated_at)
+            .await
+        {
+            Ok(stored) if stats_stuck(stored.as_ref(), &stats) => report.updated.push(stream_id),
+            Ok(_) => {
+                report.rejected = true;
+                return Ok(report);
+            }
+            Err(error) => report.failed.push(DispatcharrItemFailure {
+                id: stream_id,
+                error: error.to_string(),
+            }),
+        }
+    }
+
+    let client = &client;
+    let updated_at = updated_at.as_str();
+    let outcomes = stream::iter(pending)
+        .map(|(stream_id, stats)| async move {
+            (
+                stream_id,
+                client
+                    .patch_stream_stats(stream_id, &stats, updated_at)
+                    .await,
+            )
+        })
+        .buffer_unordered(STATS_PUSH_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await;
+    for (stream_id, outcome) in outcomes {
+        match outcome {
+            Ok(_) => report.updated.push(stream_id),
+            Err(error) => report.failed.push(DispatcharrItemFailure {
+                id: stream_id,
+                error: error.to_string(),
+            }),
+        }
+    }
+    Ok(report)
+}
+
+#[derive(Debug, Serialize)]
+pub struct DispatcharrChannelStreams {
+    pub channel_id: i64,
+    pub stream_ids: Vec<i64>,
+}
+
+/// Current ordered stream IDs for the given channels, fetched fresh. Channels
+/// deleted in Dispatcharr are absent from the result.
+#[tauri::command]
+pub async fn dispatcharr_get_channel_streams(
+    app: tauri::AppHandle,
+    source_identity: String,
+    channel_ids: Vec<i64>,
+) -> Result<Vec<DispatcharrChannelStreams>, AppError> {
+    let client = resolve_session(&app, &source_identity).await?;
+    let wanted = channel_ids.into_iter().collect::<HashSet<_>>();
+    Ok(client
+        .fetch_channels()
+        .await?
+        .into_iter()
+        .filter(|channel| wanted.contains(&channel.id))
+        .map(|channel| DispatcharrChannelStreams {
+            channel_id: channel.id,
+            stream_ids: channel.streams,
+        })
+        .collect())
+}
+
+fn validate_stream_list(stream_ids: &[i64], allow_empty: bool) -> Result<(), AppError> {
+    if stream_ids.is_empty() && !allow_empty {
+        return Err(AppError::Validation(
+            "Refusing to remove every stream from a channel".to_string(),
+        ));
+    }
+    let mut seen = HashSet::new();
+    if let Some(duplicate) = stream_ids.iter().find(|id| !seen.insert(**id)) {
+        return Err(AppError::Validation(format!(
+            "Stream {} is listed twice",
+            duplicate
+        )));
+    }
+    Ok(())
+}
+
+/// Replace a channel's streams with `stream_ids`, in order. This must be the
+/// complete intended list: Dispatcharr unlinks every stream left out.
+#[tauri::command]
+pub async fn dispatcharr_set_channel_streams(
+    app: tauri::AppHandle,
+    source_identity: String,
+    channel_id: i64,
+    stream_ids: Vec<i64>,
+    allow_empty: Option<bool>,
+) -> Result<Vec<i64>, AppError> {
+    validate_stream_list(&stream_ids, allow_empty.unwrap_or(false))?;
+    let client = resolve_session(&app, &source_identity).await?;
+    let stored = client.set_channel_streams(channel_id, &stream_ids).await?;
+    if stored != stream_ids {
+        return Err(AppError::Other(format!(
+            "Dispatcharr stored a different stream order for channel {}",
+            channel_id
+        )));
+    }
+    Ok(stored)
+}
+
+#[tauri::command]
+pub async fn dispatcharr_delete_streams(
+    app: tauri::AppHandle,
+    source_identity: String,
+    stream_ids: Vec<i64>,
+) -> Result<(), AppError> {
+    if stream_ids.is_empty() {
+        return Ok(());
+    }
+    resolve_session(&app, &source_identity)
+        .await?
+        .bulk_delete_streams(&stream_ids)
+        .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn result(status: ChannelStatus, extinf: &str, codec: Option<&str>) -> ChannelResult {
+        let mut result: ChannelResult = serde_json::from_value(serde_json::json!({
+            "index": 0, "playlist": "p", "name": "n", "group": "g", "url": "http://x/1.ts",
+            "status": "alive", "codec": codec, "resolution": null, "width": null,
+            "height": null, "fps": null, "latency_ms": null, "video_bitrate": null,
+            "audio_bitrate": null, "audio_codec": null, "screenshot_path": null,
+            "label_mismatches": [], "low_framerate": false, "error_message": null,
+            "channel_id": "1", "extinf_line": extinf, "metadata_lines": [],
+            "stream_url": null
+        }))
+        .unwrap();
+        result.status = status;
+        result
+    }
+
+    #[test]
+    fn collects_alive_results_with_ids_once_per_stream() {
+        let ids = r#"#EXTINF:-1 x-dispatcharr-channel-id="1" x-dispatcharr-stream-id="9",N"#;
+        let (updates, skipped) = collect_stream_stats(&[
+            result(ChannelStatus::Alive, ids, Some("h264")),
+            // The same provider stream linked from a second channel.
+            result(ChannelStatus::Alive, ids, Some("h264")),
+            result(ChannelStatus::Dead, ids, Some("h264")),
+            result(ChannelStatus::Alive, ids, None),
+            result(ChannelStatus::Alive, "#EXTINF:-1,Plain", Some("h264")),
+        ]);
+        assert_eq!(
+            updates.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            vec![9]
+        );
+        assert_eq!(skipped, 3);
+    }
+
+    #[test]
+    fn stream_lists_must_be_non_empty_and_unique() {
+        assert!(validate_stream_list(&[], false).is_err());
+        assert!(validate_stream_list(&[], true).is_ok());
+        assert!(validate_stream_list(&[1, 2, 1], false).is_err());
+        assert!(validate_stream_list(&[2, 1], false).is_ok());
+    }
+}

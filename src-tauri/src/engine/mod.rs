@@ -3,6 +3,7 @@ pub mod checker;
 pub mod chromecast;
 pub mod connectivity;
 pub mod disk;
+pub mod dispatcharr;
 pub mod epg;
 pub mod ffmpeg;
 #[cfg(target_os = "macos")]

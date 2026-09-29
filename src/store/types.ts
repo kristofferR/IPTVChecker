@@ -8,6 +8,7 @@ import type {
   AppSettings,
   ChannelResult,
   CurrentSourceDescriptor,
+  DispatcharrOpenRequest,
   EpgLoadSummary,
   PlaylistLoadProgress,
   PlaylistPreview,
@@ -153,13 +154,14 @@ export interface SelectionSlice {
 // UI
 // ---------------------------------------------------------------------------
 
-export type OpenSourceMode = "url" | "xtream" | "stalker";
+export type OpenSourceMode = "url" | "xtream" | "stalker" | "dispatcharr";
 
 export interface OpenSourceDialogState {
   mode: OpenSourceMode;
   initialUrl: string;
   initialXtream: XtreamRecentSource | null;
   initialStalker: StalkerOpenRequest | null;
+  initialDispatcharr: DispatcharrOpenRequest | null;
 }
 
 export interface MenuExportRequest {

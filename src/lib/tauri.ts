@@ -8,6 +8,9 @@ import type {
   CastSession,
   ChannelResult,
   ChromecastDevice,
+  DispatcharrChannelStreams,
+  DispatcharrOpenRequest,
+  DispatcharrStatsPushReport,
   EpgLoadSummary,
   EpgProgramme,
   PlaylistPreview,
@@ -87,6 +90,52 @@ export async function openPlaylistStalker(
     groupFilter: groupFilter ?? null,
     channelSearch: channelSearch ?? null,
   });
+}
+
+export async function openPlaylistDispatcharr(
+  source: DispatcharrOpenRequest,
+  groupFilter?: string,
+  channelSearch?: string,
+): Promise<PlaylistPreview> {
+  return invoke("open_playlist_dispatcharr", {
+    source,
+    groupFilter: groupFilter ?? null,
+    channelSearch: channelSearch ?? null,
+  });
+}
+
+export async function dispatcharrPushStreamStats(
+  sourceIdentity: string,
+  results: ChannelResult[],
+): Promise<DispatcharrStatsPushReport> {
+  return invoke("dispatcharr_push_stream_stats", {
+    sourceIdentity,
+    results: toCommandChannelResults(results),
+  });
+}
+
+export async function dispatcharrGetChannelStreams(
+  sourceIdentity: string,
+  channelIds: number[],
+): Promise<DispatcharrChannelStreams[]> {
+  return invoke("dispatcharr_get_channel_streams", { sourceIdentity, channelIds });
+}
+
+/** `streamIds` must be the channel's complete intended list: Dispatcharr
+ *  unlinks every stream left out. */
+export async function dispatcharrSetChannelStreams(
+  sourceIdentity: string,
+  channelId: number,
+  streamIds: number[],
+): Promise<number[]> {
+  return invoke("dispatcharr_set_channel_streams", { sourceIdentity, channelId, streamIds });
+}
+
+export async function dispatcharrDeleteStreams(
+  sourceIdentity: string,
+  streamIds: number[],
+): Promise<void> {
+  return invoke("dispatcharr_delete_streams", { sourceIdentity, streamIds });
 }
 
 export async function startScan(config: ScanConfig): Promise<string> {

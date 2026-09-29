@@ -2301,6 +2301,9 @@ async fn execute_scan_run(
     let adaptive_throttle = AdaptiveThrottle::new();
 
     let mut handles = Vec::new();
+    // Per-provider connection caps (Dispatcharr M3U accounts report theirs),
+    // so a high scan concurrency never exceeds a provider's stream limit.
+    let mut account_semaphores = HashMap::<i64, Arc<Semaphore>>::new();
 
     for channel in channels {
         if cancel_token.is_cancelled() {
@@ -2337,6 +2340,16 @@ async fn execute_scan_run(
             Err(_) => break,
         };
 
+        let account_semaphore = crate::engine::dispatcharr::dispatcharr_connection_limit(
+            &channel.extinf_line,
+        )
+        .map(|(account_id, limit)| {
+            Arc::clone(
+                account_semaphores
+                    .entry(account_id)
+                    .or_insert_with(|| Arc::new(Semaphore::new(limit))),
+            )
+        });
         let tx = tx.clone();
         let checkpoint_tx = checkpoint_tx.clone();
         let cancel = cancel_token.clone();
@@ -2416,6 +2429,15 @@ async fn execute_scan_run(
             };
             let shared_result = result_cell
                 .get_or_init(|| async {
+                    let _account_permit = match &account_semaphore {
+                        Some(semaphore) => Some(tokio::select! {
+                            permit = Arc::clone(semaphore).acquire_owned() => {
+                                permit.map_err(|_| AppError::Cancelled)?
+                            }
+                            _ = cancel.cancelled() => return Err(AppError::Cancelled),
+                        }),
+                        None => None,
+                    };
                     compute_shared_url_result(
                         &check_ctx,
                         &channel.url,

@@ -250,6 +250,17 @@ pub struct XtreamOpenRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct DispatcharrOpenRequest {
+    pub server: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct StalkerOpenRequest {
     pub portal: String,
     pub mac: String,
@@ -312,9 +323,13 @@ fn dominant_host_from_counts(counts: &HashMap<String, usize>) -> Option<String> 
         .map(|(host, _)| host.clone())
 }
 
-/// Returns `true` when ≥90% of parseable channel URLs share the same hostname.
+/// Returns `true` when ≥90% of parseable channel URLs share the same hostname,
+/// or for Dispatcharr sources (see `open_playlist_dispatcharr_inner`).
 pub(crate) fn is_single_provider_check(channels: &[Channel]) -> bool {
     is_single_provider(channels)
+        || channels.first().is_some_and(|channel| {
+            crate::engine::dispatcharr::dispatcharr_ids_from_extinf(&channel.extinf_line).is_some()
+        })
 }
 
 fn is_single_provider(channels: &[Channel]) -> bool {
@@ -972,6 +987,134 @@ pub(crate) async fn open_playlist_xtream_inner(
         .and_then(|account| account.max_connections);
     preview.xtream_account_info = xtream_account_info;
     populate_server_metadata(Some(app), &mut preview).await;
+    Ok(preview)
+}
+
+#[tauri::command]
+pub async fn open_playlist_dispatcharr(
+    app: tauri::AppHandle,
+    source: DispatcharrOpenRequest,
+    group_filter: Option<String>,
+    channel_search: Option<String>,
+) -> Result<PlaylistPreview, AppError> {
+    let cache_group_filter = group_filter.clone();
+    let cache_channel_search = channel_search.clone();
+    let mut preview =
+        open_playlist_dispatcharr_inner(&app, &source, group_filter, channel_search, None).await?;
+    crate::commands::saved::apply_persisted_playlist_metadata(&app, &mut preview, None, None)?;
+    crate::commands::scan::seed_cached_playlist_preview(
+        &app,
+        &preview.file_path,
+        preview.source_identity.as_deref(),
+        Some(&preview.file_name),
+        cache_group_filter.as_deref(),
+        cache_channel_search.as_deref(),
+        &preview,
+    )
+    .await;
+    Ok(preview)
+}
+
+pub(crate) async fn open_playlist_dispatcharr_inner(
+    app: &tauri::AppHandle,
+    source: &DispatcharrOpenRequest,
+    group_filter: Option<String>,
+    channel_search: Option<String>,
+    source_identity_override: Option<String>,
+) -> Result<PlaylistPreview, AppError> {
+    use crate::engine::dispatcharr;
+
+    let base = dispatcharr::normalize_dispatcharr_server(&source.server)?;
+    let auth = dispatcharr::DispatcharrAuth::from_parts(
+        source.username.as_deref(),
+        source.password.as_deref(),
+        source.api_key.as_deref(),
+    )?;
+    let source_key = dispatcharr::build_dispatcharr_source_key(&base, &auth);
+    let source_identity = source_identity_override.unwrap_or_else(|| source_key.clone());
+    let client = Arc::new(dispatcharr::DispatcharrClient::new(
+        base.clone(),
+        auth,
+        accepts_invalid_certs(Some(app)).await,
+    )?);
+
+    emit_load_progress(
+        Some(app),
+        PlaylistLoadProgress::Connecting {
+            detail: "Fetching Dispatcharr channels",
+        },
+    );
+    let (channels, groups, accounts) = tokio::join!(
+        client.fetch_channels(),
+        client.fetch_groups(),
+        client.fetch_m3u_accounts(),
+    );
+    let channels = channels?;
+    if channels.is_empty() {
+        return Err(AppError::Other(
+            "Dispatcharr has no channels to check".to_string(),
+        ));
+    }
+    // Group and account names only label rows; a failure there is cosmetic.
+    let groups = groups
+        .inspect_err(|error| log::warn!("[dispatcharr] group fetch failed: {}", error))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|group| (group.id, group.name))
+        .collect::<HashMap<_, _>>();
+    let accounts = accounts
+        .inspect_err(|error| log::warn!("[dispatcharr] M3U account fetch failed: {}", error))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|account| (account.id, account))
+        .collect::<HashMap<_, _>>();
+
+    emit_load_progress(
+        Some(app),
+        PlaylistLoadProgress::Connecting {
+            detail: "Fetching Dispatcharr streams",
+        },
+    );
+    let streams = client.fetch_channel_streams(&channels).await?;
+    let m3u = dispatcharr::build_m3u(&base, &channels, &streams, &groups, &accounts);
+    log::info!(
+        "[dispatcharr] Built M3U: {} channels, {} streams",
+        channels.len(),
+        streams.len()
+    );
+
+    emit_load_progress(
+        Some(app),
+        PlaylistLoadProgress::Saving {
+            detail: "Caching Dispatcharr playlist",
+        },
+    );
+    let cache_path = remote_playlist_cache_path_from_data_dir(&app_data_dir(app)?, &source_key)?;
+    {
+        let cache_path = cache_path.clone();
+        tokio::task::spawn_blocking(move || write_bytes_to_cache(&cache_path, m3u.as_bytes()))
+            .await
+            .map_err(|err| AppError::Other(format!("Playlist cache write task failed: {err}")))??;
+    }
+
+    let mut preview = parse_playlist_off_thread(
+        Some(app),
+        cache_path.to_string_lossy().to_string(),
+        group_filter,
+        channel_search,
+    )
+    .await?;
+    preview.file_name = format!(
+        "{} (Dispatcharr)",
+        dispatcharr::dispatcharr_host_label(&base)
+    );
+    populate_server_metadata(Some(app), &mut preview).await;
+    // Provider accounts behind Dispatcharr commonly allow a single stream
+    // each, so treat the source as connection-limited even when its streams
+    // span several providers: auto concurrency then scans one at a time.
+    preview.single_provider = true;
+    dispatcharr::register_session(&source_identity, client);
+    preview.source_identity = Some(source_identity);
     Ok(preview)
 }
 

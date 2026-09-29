@@ -146,7 +146,15 @@ export interface XtreamOpenRequest {
   password: string;
 }
 
-export type SavedPlaylistKind = "file" | "url" | "xtream";
+/** API key wins when both are set. */
+export interface DispatcharrOpenRequest {
+  server: string;
+  username?: string | null;
+  password?: string | null;
+  api_key?: string | null;
+}
+
+export type SavedPlaylistKind = "file" | "url" | "xtream" | "dispatcharr";
 
 export type RenameSourceDescriptor =
   | {
@@ -161,6 +169,12 @@ export type RenameSourceDescriptor =
       kind: "xtream";
       server: string;
       username: string;
+    }
+  | {
+      kind: "dispatcharr";
+      server: string;
+      username?: string | null;
+      api_key?: string | null;
     };
 
 export type SavedPlaylistEntry =
@@ -184,6 +198,15 @@ export type SavedPlaylistEntry =
       preferred_server: string | null;
       username: string;
       password: string | null;
+    }
+  | {
+      id: string;
+      kind: "dispatcharr";
+      display_name: string;
+      server: string;
+      username: string | null;
+      password: string | null;
+      api_key: string | null;
     };
 
 export type SavedPlaylistDraft =
@@ -207,6 +230,15 @@ export type SavedPlaylistDraft =
       preferred_server?: string | null;
       username: string;
       password: string | null;
+    }
+  | {
+      id?: string | null;
+      kind: "dispatcharr";
+      display_name: string;
+      server: string;
+      username: string | null;
+      password: string | null;
+      api_key: string | null;
     };
 
 export interface SavedPlaylistUpsertResult {
@@ -243,7 +275,10 @@ export type CurrentSourceDescriptor =
     } & XtreamOpenRequest)
   | ({
       kind: "stalker";
-    } & StalkerOpenRequest);
+    } & StalkerOpenRequest)
+  | ({
+      kind: "dispatcharr";
+    } & DispatcharrOpenRequest);
 
 export interface XtreamRecentSource {
   server: string;
@@ -436,7 +471,7 @@ export interface ScreenshotCacheStats {
   disk_space: DiskSpaceInfo | null;
 }
 
-export type RecentPlaylistKind = "file" | "url" | "xtream";
+export type RecentPlaylistKind = "file" | "url" | "xtream" | "dispatcharr";
 
 export interface RecentPlaylistEntry {
   kind: RecentPlaylistKind;
@@ -529,4 +564,27 @@ export interface UpdateInstallMode {
 export interface UpdateCheckResult {
   version: string | null;
   notes: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Dispatcharr write-back
+// ---------------------------------------------------------------------------
+
+export interface DispatcharrItemFailure {
+  id: number;
+  error: string;
+}
+
+export interface DispatcharrStatsPushReport {
+  updated: number[];
+  failed: DispatcharrItemFailure[];
+  /** Results that were not alive, had no Dispatcharr IDs, or no stats. */
+  skipped: number;
+  /** Dispatcharr accepted the first write but did not store the stats. */
+  rejected: boolean;
+}
+
+export interface DispatcharrChannelStreams {
+  channel_id: number;
+  stream_ids: number[];
 }

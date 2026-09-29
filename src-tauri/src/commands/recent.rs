@@ -22,6 +22,7 @@ pub enum RecentPlaylistKind {
     File,
     Url,
     Xtream,
+    Dispatcharr,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +66,58 @@ fn xtream_dedup_key(value: &str) -> Option<(String, String)> {
     Some((parsed.server, parsed.username))
 }
 
+/// Secrets are only present when the user chose to remember them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DispatcharrRecentValue {
+    server: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    password: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    api_key: Option<String>,
+}
+
+fn parse_dispatcharr_recent_value(value: &str) -> Option<DispatcharrRecentValue> {
+    let parsed = serde_json::from_str::<DispatcharrRecentValue>(value).ok()?;
+    let clean = |value: Option<String>| {
+        value
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    let server = crate::engine::dispatcharr::normalize_dispatcharr_server(&parsed.server).ok()?;
+    Some(DispatcharrRecentValue {
+        server: server.to_string().trim_end_matches('/').to_string(),
+        username: clean(parsed.username),
+        password: clean(parsed.password),
+        api_key: clean(parsed.api_key),
+    })
+}
+
+/// Source identity of a recent Dispatcharr value. Without a username it is
+/// an API-key source, remembered or not.
+fn dispatcharr_recent_identity(source: &DispatcharrRecentValue) -> Option<String> {
+    let api_key = source.username.is_none().then_some("-");
+    crate::commands::saved::source_identity_for_dispatcharr(
+        &source.server,
+        source.username.as_deref(),
+        source.api_key.as_deref().or(api_key),
+    )
+    .ok()
+}
+
+/// Dedup key for credentialed sources: server + account, ignoring secrets.
+fn credential_dedup_key(kind: &RecentPlaylistKind, value: &str) -> Option<(String, String)> {
+    match kind {
+        RecentPlaylistKind::Xtream => xtream_dedup_key(value),
+        RecentPlaylistKind::Dispatcharr => {
+            let identity = dispatcharr_recent_identity(&parse_dispatcharr_recent_value(value)?)?;
+            Some((identity, String::new()))
+        }
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecentPlaylistEntry {
     pub kind: RecentPlaylistKind,
@@ -98,6 +151,14 @@ fn build_label(kind: &RecentPlaylistKind, value: &str) -> String {
                     "{} ({})",
                     crate::commands::playlist::xtream_host_label(&source.server),
                     source.username
+                )
+            })
+            .unwrap_or_else(|| "Invalid Source".to_string()),
+        RecentPlaylistKind::Dispatcharr => parse_dispatcharr_recent_value(value)
+            .map(|source| {
+                format!(
+                    "{} (Dispatcharr)",
+                    crate::commands::playlist::xtream_host_label(&source.server)
                 )
             })
             .unwrap_or_else(|| "Invalid Source".to_string()),
@@ -158,6 +219,32 @@ fn find_saved_playlist_for_recent(
                             .as_deref()
                             == Some(target.as_str())
                     })
+                }
+                _ => false,
+            }))
+        }
+        RecentPlaylistKind::Dispatcharr => {
+            let Some(target) =
+                parse_dispatcharr_recent_value(value).and_then(|s| dispatcharr_recent_identity(&s))
+            else {
+                return Ok(None);
+            };
+            Ok(entries.into_iter().find(|entry| match &entry.source {
+                SavedPlaylistSource::Dispatcharr {
+                    server,
+                    username,
+                    api_key,
+                    ..
+                } => {
+                    let api_key = api_key.as_deref().or(username.is_none().then_some("-"));
+                    crate::commands::saved::source_identity_for_dispatcharr(
+                        server,
+                        username.as_deref(),
+                        api_key,
+                    )
+                    .ok()
+                    .as_deref()
+                        == Some(target.as_str())
                 }
                 _ => false,
             }))
@@ -259,6 +346,21 @@ fn sanitize_recent_playlists_inner(
                 };
                 serialized
             }
+            RecentPlaylistKind::Dispatcharr => {
+                let Some(source) = parse_dispatcharr_recent_value(&entry_value) else {
+                    continue;
+                };
+                let Some(identity) = dispatcharr_recent_identity(&source) else {
+                    continue;
+                };
+                if !seen_xtream.insert((identity, String::new())) {
+                    continue;
+                }
+                let Ok(serialized) = serde_json::to_string(&source) else {
+                    continue;
+                };
+                serialized
+            }
         };
 
         let key = (entry_kind.clone(), value.clone());
@@ -287,6 +389,8 @@ fn sanitize_recent_playlists_inner(
                             .ok()
                         })
                     }
+                    RecentPlaylistKind::Dispatcharr => parse_dispatcharr_recent_value(&value)
+                        .and_then(|source| dispatcharr_recent_identity(&source)),
                 }
                 .as_deref(),
                 match entry_kind {
@@ -407,6 +511,7 @@ fn apply_recent_menu_update(app: &tauri::AppHandle, entries: &[RecentPlaylistEnt
             RecentPlaylistKind::File => "File",
             RecentPlaylistKind::Url => "URL",
             RecentPlaylistKind::Xtream => "Xtream",
+            RecentPlaylistKind::Dispatcharr => "Dispatcharr",
         };
         let Ok(item) = MenuItem::with_id(
             app,
@@ -511,21 +616,27 @@ pub async fn add_recent_playlist(
                 AppError::Other("Failed to serialize Xtream recent value".to_string())
             })?
         }
+        RecentPlaylistKind::Dispatcharr => {
+            let Some(source) = parse_dispatcharr_recent_value(raw_value) else {
+                return Err(AppError::Other(
+                    "Invalid Dispatcharr recent value".to_string(),
+                ));
+            };
+            serde_json::to_string(&source).map_err(|_| {
+                AppError::Other("Failed to serialize Dispatcharr recent value".to_string())
+            })?
+        }
     };
 
     let mut entries = load_recent_playlists(&app);
-    let xtream_key = if recent.kind == RecentPlaylistKind::Xtream {
-        xtream_dedup_key(&value)
-    } else {
-        None
-    };
+    let credential_key = credential_dedup_key(&recent.kind, &value);
     entries.retain(|entry| {
         if entry.kind != recent.kind {
             return true;
         }
-        if let Some((ref server, ref username)) = xtream_key {
-            if let Some((s, u)) = xtream_dedup_key(&entry.value) {
-                return &s != server || &u != username;
+        if let Some(ref key) = credential_key {
+            if let Some(existing) = credential_dedup_key(&entry.kind, &entry.value) {
+                return &existing != key;
             }
         }
         entry.value != value

@@ -675,6 +675,7 @@ export default function App() {
     openPlaylistUrlValue,
     openPlaylistXtreamValue,
     openPlaylistStalkerValue,
+    openPlaylistDispatcharrValue,
     handleOpenSaved,
     handleOpenRecent,
     handleManageSavedPlaylists,
@@ -806,6 +807,7 @@ export default function App() {
       initialUrl: "",
       initialXtream: null,
       initialStalker: null,
+      initialDispatcharr: null,
     });
   }, [openSourceDialog]);
 
@@ -815,6 +817,7 @@ export default function App() {
       initialUrl: "",
       initialXtream: null,
       initialStalker: null,
+      initialDispatcharr: null,
     });
   }, [openSourceDialog]);
 
@@ -1785,9 +1788,11 @@ export default function App() {
             initialUrl={openSourceDialogState.initialUrl}
             initialXtream={openSourceDialogState.initialXtream}
             initialStalker={openSourceDialogState.initialStalker}
+            initialDispatcharr={openSourceDialogState.initialDispatcharr}
             onOpenUrl={openPlaylistUrlValue}
             onOpenXtream={openPlaylistXtreamValue}
             onOpenStalker={openPlaylistStalkerValue}
+            onOpenDispatcharr={openPlaylistDispatcharrValue}
             onClose={() => getStore().setOpenSourceDialogState(null)}
           />
         </Suspense>
