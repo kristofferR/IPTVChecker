@@ -167,14 +167,12 @@ pub(crate) struct DispatcharrChannel {
     pub name: String,
     pub channel_number: Option<f64>,
     pub channel_group_id: Option<i64>,
-    pub tvg_id: Option<String>,
     pub logo_id: Option<i64>,
     /// Stream IDs in failover order.
     pub streams: Vec<i64>,
     pub effective_name: Option<String>,
     pub effective_channel_number: Option<f64>,
     pub effective_channel_group_id: Option<i64>,
-    pub effective_tvg_id: Option<String>,
     pub effective_logo_id: Option<i64>,
 }
 
@@ -194,12 +192,13 @@ impl DispatcharrChannel {
         self.effective_channel_group_id.or(self.channel_group_id)
     }
 
-    fn tvg_id(&self) -> Option<&str> {
-        [&self.effective_tvg_id, &self.tvg_id]
-            .into_iter()
-            .flatten()
-            .map(String::as_str)
-            .find(|value| !value.is_empty())
+    /// The channel's ID in Dispatcharr's `/output/epg`, which by default
+    /// (`tvg_id_source=channel_number`) keys channels by number, falling back
+    /// to the channel ID.
+    fn guide_id(&self) -> String {
+        self.number()
+            .map(format_channel_number)
+            .unwrap_or_else(|| self.id.to_string())
     }
 
     fn logo_id(&self) -> Option<i64> {
@@ -873,9 +872,7 @@ pub(crate) fn build_m3u(
             let mut attr = |key: &str, value: &str| {
                 m3u.push_str(&format!(" {}=\"{}\"", key, escape_extinf_value(value)));
             };
-            if let Some(tvg_id) = channel.tvg_id() {
-                attr("tvg-id", tvg_id);
-            }
+            attr("tvg-id", &channel.guide_id());
             if let Some(number) = channel.number() {
                 attr("tvg-chno", &format_channel_number(number));
             }
@@ -1351,7 +1348,6 @@ mod tests {
                 id: 10,
                 name: "News One".into(),
                 channel_number: Some(1.5),
-                tvg_id: Some("news.one".into()),
                 streams: vec![101],
                 ..Default::default()
             },
@@ -1412,7 +1408,8 @@ mod tests {
         let single = &preview.channels[0];
         assert_eq!(single.name, "News One");
         assert_eq!(single.tvg_chno.as_deref(), Some("1.5"));
-        assert_eq!(single.tvg_id.as_deref(), Some("news.one"));
+        // Matches the channel IDs in Dispatcharr's EPG output.
+        assert_eq!(single.tvg_id.as_deref(), Some("1.5"));
 
         let multi = &preview.channels[1];
         assert_eq!(multi.name, "Sports \"2\"");
@@ -1421,6 +1418,7 @@ mod tests {
             .contains("x-dispatcharr-stream-name=\"Feed B\""));
         assert_eq!(multi.group, "Sports");
         assert_eq!(multi.tvg_chno.as_deref(), Some("2"));
+        assert_eq!(multi.tvg_id.as_deref(), Some("2"));
         assert_eq!(
             multi.tvg_logo.as_deref(),
             Some("http://dvr.example:9191/api/channels/logos/4/cache/")
