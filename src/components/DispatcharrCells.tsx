@@ -182,7 +182,7 @@ export function ChannelNameCell({
         {actions && canFix && !busy && rowState?.kind !== "failed" && (
           <button
             type="button"
-            className={`${buttonClass} ${expanded ? "" : "hidden group-hover:inline-block"}`}
+            className={`${buttonClass} ${expanded ? "" : "sr-only group-hover:not-sr-only focus:not-sr-only"}`}
             disabled={actions.disabled}
             title={actions.disabled ? "Available when the scan finishes" : undefined}
             onClick={(event) => {
@@ -224,7 +224,7 @@ export function StreamNameCell({
         </span>
       )}
       {actions && (
-        <span className="ml-auto hidden shrink-0 items-center gap-1 pl-2 group-hover:flex">
+        <span className="ml-auto flex shrink-0 items-center gap-1 pl-2 sr-only group-hover:not-sr-only focus-within:not-sr-only">
           {position > 0 && (
             <button
               type="button"

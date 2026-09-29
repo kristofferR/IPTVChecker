@@ -18,6 +18,7 @@ import { getChannelErrorReason } from "../lib/channelResults";
 import { getChannelTableLayout } from "../lib/channelTableLayout";
 import {
   type DispatcharrChannelView,
+  expandDispatcharrSelection,
   filterDispatcharrPrimaries,
   getDispatcharrView,
 } from "../lib/dispatcharr";
@@ -470,17 +471,7 @@ export function ChannelTable({
     (next: Set<number>) => {
       // A selected Dispatcharr channel stands for all of its streams, so
       // "scan selected" checks every one of them.
-      const view = dispatcharrViewRef.current;
-      const expanded = view
-        ? new Set(
-            Array.from(next).flatMap((index) => {
-              const channel = view.byPrimaryIndex.get(index);
-              return channel ? channel.streams.map((entry) => entry.result.index) : [index];
-            }),
-          )
-        : next;
-      const ordered = Array.from(expanded).sort((a, b) => a - b);
-      onSelectionChange?.(ordered);
+      onSelectionChange?.(expandDispatcharrSelection(dispatcharrViewRef.current, next));
     },
     [onSelectionChange],
   );
@@ -1065,8 +1056,13 @@ export function ChannelTable({
     [getRowFromEvent, onOpenChannel],
   );
 
+  const scanSelection = useMemo(
+    () => expandDispatcharrSelection(dispatcharrView, selectedIndices),
+    [dispatcharrView, selectedIndices],
+  );
+
   const handleScanSelected = useCallback(() => {
-    const ordered = Array.from(selectedIndices).sort((a, b) => a - b);
+    const ordered = scanSelection;
     if (ordered.length === 0) {
       setContextMenuState(null);
       return;
@@ -1074,7 +1070,7 @@ export function ChannelTable({
 
     onScanSelected?.(ordered);
     setContextMenuState(null);
-  }, [selectedIndices, onScanSelected]);
+  }, [scanSelection, onScanSelected]);
 
   const getSelectedChannels = useCallback((): ChannelResult[] => {
     if (selectedIndices.size <= 1 && contextMenuState) {
@@ -1689,8 +1685,8 @@ export function ChannelTable({
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
             type="button"
           >
-            {selectedIndices.size > 0 &&
-            Array.from(selectedIndices).every((idx) => {
+            {scanSelection.length > 0 &&
+            scanSelection.every((idx) => {
               const r = resultAtIndex(
                 { flatResults: completedResults, positions: resultPositions },
                 idx,
@@ -1699,7 +1695,7 @@ export function ChannelTable({
             })
               ? "Rescan"
               : "Scan"}{" "}
-            Selected ({selectedIndices.size})
+            Selected ({scanSelection.length})
           </button>
           {(() => {
             const archiveCount = getSelectedChannels().filter(hasArchive).length;

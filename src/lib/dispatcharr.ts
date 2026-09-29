@@ -287,3 +287,20 @@ export function filterDispatcharrPrimaries(
     return channel != null && matchesDispatcharrStatus(channel, statusFilter);
   });
 }
+
+/** Selected row indices with each selected channel (its primary) standing
+ *  for all of its streams, sorted. */
+export function expandDispatcharrSelection(
+  view: DispatcharrView | null,
+  indices: Iterable<number>,
+): number[] {
+  const expanded = view
+    ? new Set(
+        Array.from(indices).flatMap((index) => {
+          const channel = view.byPrimaryIndex.get(index);
+          return channel ? channel.streams.map((entry) => entry.result.index) : [index];
+        }),
+      )
+    : new Set(indices);
+  return Array.from(expanded).sort((a, b) => a - b);
+}
