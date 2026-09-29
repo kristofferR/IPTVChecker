@@ -63,7 +63,13 @@ const REMUX_PACER_MAX_LEAD: std::time::Duration = std::time::Duration::from_secs
 /// durations while preserving known composition offsets (PTS-DTS) for B-frames.
 /// Never do arithmetic on AV_NOPTS_VALUE. When an offset is unknown, use the
 /// rebuilt decode clock; the TS muxer requires a PTS even on the first packet.
-const CONTIGUOUS_VIDEO_TIMESTAMPS: &str = "setts=dts=if(eq(N\\,0)\\,0\\,PREV_OUTDTS+if(gt(PREV_OUTDURATION\\,0)\\,PREV_OUTDURATION\\,if(gt(DURATION\\,0)\\,DURATION\\,1))):pts=if(eq(N\\,0)\\,0\\,PREV_OUTDTS+if(gt(PREV_OUTDURATION\\,0)\\,PREV_OUTDURATION\\,if(gt(DURATION\\,0)\\,DURATION\\,1)))+if(eq(PTS\\,NOPTS)+eq(DTS\\,NOPTS)\\,0\\,PTS-DTS)";
+const CONTIGUOUS_VIDEO_TIMESTAMPS: &str = concat!(
+    "setts=dts=if(eq(N\\,0)\\,0\\,PREV_OUTDTS+if(gt(PREV_OUTDURATION\\,0)\\,PREV_OUTDURATION\\,if(gt(DURATION\\,0)\\,DURATION\\,1))):pts=if(eq(N\\,0)\\,0\\,PREV_OUTDTS+if(gt(PREV_OUTDURATION\\,0)\\,PREV_OUTDURATION\\,if(gt(DURATION\\,0)\\,DURATION\\,1)))+if(eq(PTS\\,NOPTS)+eq(DTS\\,NOPTS)\\,0\\,PTS-DTS)",
+    // Infer missing durations from adjacent source DTS only within the same
+    // 0.5-second discontinuity bound used by the demuxer. Keep the last good
+    // duration across missing timestamps, backwards jumps, and stream end.
+    ":duration=if(gt(DURATION\\,0)\\,DURATION\\,if(eq(DTS\\,NOPTS)+eq(NEXT_DTS\\,NOPTS)\\,PREV_OUTDURATION\\,if(gt(NEXT_DTS-DTS\\,0)*lte((NEXT_DTS-DTS)*TB\\,0.5)\\,NEXT_DTS-DTS\\,PREV_OUTDURATION)))",
+);
 const CONTIGUOUS_AUDIO_TIMESTAMPS: &str = "setts=ts=if(eq(N\\,0)\\,0\\,PREV_OUTDTS+if(gt(PREV_OUTDURATION\\,0)\\,PREV_OUTDURATION\\,if(gt(DURATION\\,0)\\,DURATION\\,1)))";
 
 /// Base64url-encode an original stream URL for the proxy scheme.
@@ -1681,6 +1687,38 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         Some(output)
+    }
+
+    #[test]
+    fn video_clock_recovers_zero_durations_without_preserving_discontinuities() {
+        // MPEG-TS uses 90 kHz ticks: 3,600 ticks per frame at 25 fps.
+        for (jump, missing_dts) in [(0, false), (180_000, false), (-180_000, false), (0, true)] {
+            let clock = format!("90000+N*3600+if(gte(N\\,2)\\,{jump}\\,0)");
+            let input_dts = if missing_dts {
+                format!("if(eq(N\\,2)\\,NOPTS\\,{clock})")
+            } else {
+                clock.clone()
+            };
+            let inject = format!(
+                "setts=pts=PTS:dts=DTS:time_base=1/90000,setts=pts={clock}+1800:dts={input_dts}:duration=0"
+            );
+            let Some(output) = run_timestamp_filter(&inject, "framecrc") else {
+                return;
+            };
+            let text = String::from_utf8(output.stdout).unwrap();
+            let packets: Vec<_> = text.lines().filter(|line| !line.starts_with('#')).collect();
+            assert_eq!(packets.len(), 4);
+            for (n, packet) in packets.iter().enumerate() {
+                let fields: Vec<_> = packet.split(',').map(str::trim).collect();
+                let dts: i64 = fields[1].parse().unwrap();
+                let pts: i64 = fields[2].parse().unwrap();
+                let duration: i64 = fields[3].parse().unwrap();
+                assert_eq!(dts, n as i64 * 3600, "jump={jump}: {packet}");
+                let offset = if missing_dts && n == 2 { 0 } else { 1800 };
+                assert_eq!(pts - dts, offset, "jump={jump}: {packet}");
+                assert_eq!(duration, 3600, "jump={jump}: {packet}");
+            }
+        }
     }
 
     #[test]
