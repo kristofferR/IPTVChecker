@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import { useState } from "react";
 import { reverseChanges } from "../lib/dispatcharrEdits";
+import { isScanActive } from "../lib/scanState";
 import { useAppStore } from "../store";
 
 const getStore = () => useAppStore.getState();
@@ -11,10 +12,13 @@ const plural = (count: number, word: string) => `${count} ${word}${count === 1 ?
 export function DispatcharrToast() {
   const toast = useAppStore((s) => s.dispatcharrToast);
   const setToast = useAppStore((s) => s.setDispatcharrToast);
+  // Like every other edit, undo waits for the scan it would invalidate.
+  const scanning = useAppStore((s) => isScanActive(s.scanState));
   const [undoing, setUndoing] = useState(false);
   if (!toast) return null;
 
   const handleUndoAll = async () => {
+    if (isScanActive(getStore().scanState)) return;
     setUndoing(true);
     try {
       const { failed } = await reverseChanges(toast.changes);
@@ -49,7 +53,8 @@ export function DispatcharrToast() {
       {toast.changes.length > 0 && (
         <button
           type="button"
-          disabled={undoing}
+          disabled={undoing || scanning}
+          title={scanning ? "Available when the scan finishes" : undefined}
           onClick={() => void handleUndoAll()}
           className="text-blue-400 hover:text-blue-300 disabled:opacity-50"
         >

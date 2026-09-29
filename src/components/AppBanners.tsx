@@ -32,8 +32,11 @@ function readConvertDismissed(): string[] {
  *  source. */
 function DispatcharrConvertBanner() {
   const playlist = useAppStore((s) => s.playlist);
+  // Converting replaces the whole source, so judge the unfiltered one: a
+  // source filter or Hide VOD can hide the channels that make it mixed.
+  const fullSource = useAppStore((s) => s.cachedSourcePreview ?? s.playlist);
   const savedPlaylists = useAppStore((s) => s.savedPlaylists);
-  const server = useMemo(() => dispatcharrServerOfProxyPlaylist(playlist), [playlist]);
+  const server = useMemo(() => dispatcharrServerOfProxyPlaylist(fullSource), [fullSource]);
   const [dismissed, setDismissed] = useState(readConvertDismissed);
   const sourceKey = playlist?.source_identity ?? playlist?.file_path ?? "";
   if (!server || dismissed.includes(sourceKey)) return null;

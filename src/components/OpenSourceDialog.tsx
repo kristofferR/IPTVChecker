@@ -413,17 +413,24 @@ export default function OpenSourceDialog({
     onClose();
   }, [onClose]);
 
+  // A conversion in progress replaces a saved playlist once it verifies, so
+  // the dialog cannot be dismissed until it finishes or fails.
+  const conversionPending = submitting && Boolean(convertSaved);
+  const requestClose = useCallback(() => {
+    if (!conversionPending) handleClose();
+  }, [conversionPending, handleClose]);
+
   useEffect(() => {
     if (showServerTest) return;
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        handleClose();
+        requestClose();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleClose, showServerTest]);
+  }, [requestClose, showServerTest]);
 
   const parseXtreamM3ULink = (link: string) => {
     try {
@@ -602,7 +609,7 @@ export default function OpenSourceDialog({
   return (
     <>
       <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-        <div className="absolute inset-0 bg-black/45" onClick={handleClose} />
+        <div className="absolute inset-0 bg-black/45" onClick={requestClose} />
         <div className="relative w-full max-w-xl rounded-xl border border-border-app bg-overlay shadow-2xl">
           <div className="flex items-start justify-between border-b border-border-app px-5 pb-3 pt-4">
             <div>
@@ -613,7 +620,8 @@ export default function OpenSourceDialog({
             </div>
             <button
               type="button"
-              onClick={handleClose}
+              onClick={requestClose}
+              disabled={conversionPending}
               className="rounded-md p-1.5 hover:bg-btn-hover transition-colors"
               aria-label="Close source dialog"
             >
@@ -894,8 +902,9 @@ export default function OpenSourceDialog({
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
                 type="button"
-                onClick={handleClose}
-                className="rounded-md bg-btn px-3 py-2 text-[13px] text-text-primary hover:bg-btn-hover transition-colors"
+                onClick={requestClose}
+                disabled={conversionPending}
+                className="rounded-md bg-btn px-3 py-2 text-[13px] text-text-primary hover:bg-btn-hover transition-colors disabled:opacity-50"
               >
                 Cancel
               </button>

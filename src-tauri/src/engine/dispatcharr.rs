@@ -393,6 +393,19 @@ impl DispatcharrClient {
         url: Url,
         body: Option<&Value>,
     ) -> Result<reqwest::Response, AppError> {
+        self.send_checked(method, url, body, false)
+            .await?
+            .ok_or_else(|| AppError::Other("Dispatcharr returned HTTP 404".to_string()))
+    }
+
+    /// `send`, but a 404 is `Ok(None)` when `not_found_ok` is set.
+    async fn send_checked(
+        &self,
+        method: Method,
+        url: Url,
+        body: Option<&Value>,
+        not_found_ok: bool,
+    ) -> Result<Option<reqwest::Response>, AppError> {
         let mut force_login = false;
         loop {
             let mut request = self
@@ -417,7 +430,10 @@ impl DispatcharrClient {
                 continue;
             }
             if status.is_success() {
-                return Ok(response);
+                return Ok(Some(response));
+            }
+            if not_found_ok && status == StatusCode::NOT_FOUND {
+                return Ok(None);
             }
             if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
                 return Err(AppError::Other(match self.auth {
@@ -609,6 +625,27 @@ impl DispatcharrClient {
         let merged = merge_stream_stats(current.stream_stats.as_ref(), update);
         self.patch_stream_stats(stream_id, &merged, updated_at)
             .await
+    }
+
+    /// One channel read fresh, or `None` when Dispatcharr no longer has it.
+    pub(crate) async fn fetch_channel(
+        &self,
+        channel_id: i64,
+    ) -> Result<Option<DispatcharrChannel>, AppError> {
+        let path = format!("/api/channels/channels/{}/", channel_id);
+        let Some(response) = self
+            .send_checked(Method::GET, self.endpoint(&path)?, None, true)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let bytes = response.bytes().await?;
+        serde_json::from_slice(&bytes).map(Some).map_err(|error| {
+            AppError::Parse(format!(
+                "Unexpected Dispatcharr response from {}: {}",
+                path, error
+            ))
+        })
     }
 
     /// Set a channel's complete ordered stream list. Dispatcharr deletes the
@@ -1094,6 +1131,21 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(streams.iter().map(|s| s.id).collect::<Vec<_>>(), vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn a_deleted_channel_reads_as_none() {
+        let base = spawn_server(Arc::new(|req: &Request| match req.path.as_str() {
+            "/api/channels/channels/5/" => (200, r#"{"id":5,"streams":[2,1]}"#.into()),
+            _ => (404, r#"{"detail":"Not found."}"#.into()),
+        }))
+        .await;
+        let client = client(&base, DispatcharrAuth::ApiKey("k".into()));
+        assert_eq!(
+            client.fetch_channel(5).await.unwrap().unwrap().streams,
+            vec![2, 1]
+        );
+        assert!(client.fetch_channel(6).await.unwrap().is_none());
     }
 
     #[tokio::test]

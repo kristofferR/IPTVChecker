@@ -49,8 +49,8 @@ function followSelection(change: OrderChange, primaryBefore: ChannelResult | und
 const sameOrder = (a: number[], b: number[]) =>
   a.length === b.length && a.every((id, i) => id === b[i]);
 
-/** Write stream orders to Dispatcharr. Each channel is re-fetched first and
- *  refused if it no longer matches `from`, so edits made in Dispatcharr since
+/** Write stream orders to Dispatcharr. Each channel is re-read just before
+ *  its write and refused if it no longer matches `from`, so edits made in Dispatcharr since
  *  load are never overwritten. A failed channel never stops the others. */
 async function writeOrders(requested: OrderChange[], undoing: boolean): Promise<ApplyOutcome> {
   const store = useAppStore.getState();
@@ -80,26 +80,24 @@ async function writeOrders(requested: OrderChange[], undoing: boolean): Promise<
     store.setDispatcharrRowState(change.channelId, { kind: "writing" });
   }
 
-  let current: Map<number, number[]>;
-  try {
-    const fresh = await dispatcharrGetChannelStreams(
-      target,
-      changes.map((change) => change.channelId),
-    );
-    current = new Map(fresh.map((channel) => [channel.channel_id, channel.stream_ids]));
-  } catch (error) {
-    const message = errorToString(error);
-    if (stillCurrent()) for (const change of changes) fail(change, message);
-    return { applied: [], failed: changes.length };
-  }
-  if (!stillCurrent()) return { applied: [], failed: 0 };
-
   const applied: OrderChange[] = [];
   let failed = 0;
   const queue = [...changes];
   const worker = async () => {
     for (let change = queue.shift(); change; change = queue.shift()) {
-      const server = current.get(change.channelId);
+      // Read the channel right before writing it, so an edit made in
+      // Dispatcharr during a long bulk fix is never overwritten.
+      let server: number[] | undefined;
+      try {
+        const [fresh] = await dispatcharrGetChannelStreams(target, [change.channelId]);
+        server = fresh?.stream_ids;
+      } catch (error) {
+        if (!stillCurrent()) return;
+        fail(change, errorToString(error));
+        failed += 1;
+        continue;
+      }
+      if (!stillCurrent()) return;
       if (!server) {
         fail(change, "Channel no longer exists in Dispatcharr");
         failed += 1;

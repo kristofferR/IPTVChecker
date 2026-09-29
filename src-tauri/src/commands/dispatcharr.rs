@@ -183,8 +183,8 @@ pub struct DispatcharrChannelStreams {
     pub stream_ids: Vec<i64>,
 }
 
-/// Current ordered stream IDs for the given channels, fetched fresh. Channels
-/// deleted in Dispatcharr are absent from the result.
+/// Current ordered stream IDs for the given channels, each read fresh.
+/// Channels deleted in Dispatcharr are absent from the result.
 #[tauri::command]
 pub async fn dispatcharr_get_channel_streams(
     app: tauri::AppHandle,
@@ -193,17 +193,24 @@ pub async fn dispatcharr_get_channel_streams(
     channel_ids: Vec<i64>,
 ) -> Result<Vec<DispatcharrChannelStreams>, AppError> {
     let client = resolve_session(&app, &source_identity, &connection).await?;
-    let wanted = channel_ids.into_iter().collect::<HashSet<_>>();
-    Ok(client
-        .fetch_channels()
-        .await?
-        .into_iter()
-        .filter(|channel| wanted.contains(&channel.id))
-        .map(|channel| DispatcharrChannelStreams {
-            channel_id: channel.id,
-            stream_ids: channel.streams,
-        })
-        .collect())
+    // Read each channel on its own, so callers can check a channel right
+    // before writing it without fetching the whole lineup.
+    let client = &client;
+    let fetched = stream::iter(channel_ids)
+        .map(|channel_id| async move { client.fetch_channel(channel_id).await })
+        .buffer_unordered(STATS_PUSH_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await;
+    let mut channels = Vec::new();
+    for channel in fetched {
+        if let Some(channel) = channel? {
+            channels.push(DispatcharrChannelStreams {
+                channel_id: channel.id,
+                stream_ids: channel.streams,
+            });
+        }
+    }
+    Ok(channels)
 }
 
 fn validate_stream_list(stream_ids: &[i64], allow_empty: bool) -> Result<(), AppError> {
