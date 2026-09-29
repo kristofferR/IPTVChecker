@@ -133,6 +133,8 @@ describe("dispatcharr helpers", () => {
     expect(news?.streams.map((entry) => entry.ref.streamId)).toEqual([102]);
     expect(news?.primary.index).toBe(1);
     expect(news?.primaryDead).toBe(false);
+    // The unlinked row still maps to its channel, so a selection can follow it.
+    expect(getDispatcharrView(results, { 10: [102] })?.byStreamIndex.get(0)?.channelId).toBe(10);
   });
 
   it("orders working streams by resolution, then untested, then others; drops dead", () => {

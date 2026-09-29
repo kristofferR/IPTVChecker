@@ -754,6 +754,35 @@ async fn acquire_account_then_scan(
     Ok((account_permit, scan_permit))
 }
 
+/// Dispatch order that alternates between connection-limited provider
+/// accounts (keeping each account's rows in order), so a playlist grouped by
+/// provider cannot fill the bounded waiting pool with one busy account while
+/// the others sit idle. Playlists without account limits keep their order.
+fn interleave_by_account(channels: Vec<Channel>) -> Vec<Channel> {
+    let accounts = channels
+        .iter()
+        .map(|channel| {
+            crate::engine::dispatcharr::dispatcharr_connection_limit(&channel.extinf_line)
+                .map(|(account_id, _)| account_id)
+        })
+        .collect::<Vec<_>>();
+    if accounts.iter().all(Option::is_none) {
+        return channels;
+    }
+    let mut seen = HashMap::<Option<i64>, usize>::new();
+    let mut ranked = channels
+        .into_iter()
+        .zip(accounts)
+        .map(|(channel, account)| {
+            let rank = seen.entry(account).or_insert(0);
+            *rank += 1;
+            (*rank, channel)
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by_key(|(rank, _)| *rank);
+    ranked.into_iter().map(|(_, channel)| channel).collect()
+}
+
 async fn wait_if_paused(state: &AppState, scan_scope: &str, cancel: &CancellationToken) -> bool {
     loop {
         if cancel.is_cancelled() {
@@ -2329,7 +2358,7 @@ async fn execute_scan_run(
     // so a high scan concurrency never exceeds a provider's stream limit.
     let mut account_semaphores = HashMap::<i64, Arc<Semaphore>>::new();
 
-    for channel in channels {
+    for channel in interleave_by_account(channels) {
         if cancel_token.is_cancelled() {
             break;
         }
@@ -3025,6 +3054,53 @@ pub async fn cancel_quick_check(app: AppHandle, request_id: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dispatch_alternates_between_provider_accounts() {
+        let row = |index: usize, account: Option<i64>| {
+            Channel {
+            index,
+            playlist: "p".into(),
+            name: format!("row {}", index),
+            group: "g".into(),
+            language: None,
+            tvg_id: None,
+            tvg_name: None,
+            tvg_logo: None,
+            tvg_chno: None,
+            catchup: None,
+            catchup_days: None,
+            catchup_source: None,
+            url: format!("http://provider.example/{}.ts", index),
+            content_type: crate::models::channel::ContentType::Live,
+            extinf_line: match account {
+                Some(id) => format!(
+                    "#EXTINF:-1 x-dispatcharr-account-id=\"{}\" x-dispatcharr-max-streams=\"1\",row",
+                    id
+                ),
+                None => "#EXTINF:-1,row".into(),
+            },
+            metadata_lines: Vec::new(),
+        }
+        };
+        let order = |rows: Vec<Channel>| {
+            interleave_by_account(rows)
+                .iter()
+                .map(|channel| channel.index)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            order(vec![
+                row(0, Some(1)),
+                row(1, Some(1)),
+                row(2, Some(1)),
+                row(3, Some(2)),
+                row(4, None)
+            ]),
+            vec![0, 3, 4, 1, 2]
+        );
+        assert_eq!(order(vec![row(0, None), row(1, None)]), vec![0, 1]);
+    }
 
     #[tokio::test]
     async fn waiting_on_a_busy_account_holds_no_scan_slot() {

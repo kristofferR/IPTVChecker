@@ -102,7 +102,8 @@ export interface DispatcharrView {
   primaries: ChannelResult[];
   byChannelId: Map<number, DispatcharrChannelView>;
   byPrimaryIndex: Map<number, DispatcharrChannelView>;
-  /** Channel of every linked stream row, by result index. */
+  /** Channel of every loaded stream row by result index, including rows
+   *  unlinked this session, so a selection can follow its channel. */
   byStreamIndex: Map<number, DispatcharrChannelView>;
 }
 
@@ -154,6 +155,7 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
   if (byChannel.size === 0) return null;
 
   const channels: DispatcharrChannelView[] = [];
+  const byStreamIndex = new Map<number, DispatcharrChannelView>();
   for (const [channelId, channel] of byChannel) {
     const loaded = [...channel.streams].sort((a, b) => a.ref.streamOrder - b.ref.streamOrder);
     const order =
@@ -164,7 +166,7 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
     const streams = order.flatMap((streamId) => byStream.get(streamId) ?? []);
     if (streams.length === 0) continue;
     const dead = streams.filter((entry) => isDeadStatus(entry.result.status)).length;
-    channels.push({
+    const view: DispatcharrChannelView = {
       channelId,
       name: channel.name,
       group: channel.group,
@@ -175,18 +177,16 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
       primaryDead: isDeadStatus(streams[0].result.status),
       hasDead: dead > 0,
       allDead: dead === streams.length,
-    });
+    };
+    channels.push(view);
+    for (const entry of channel.streams) byStreamIndex.set(entry.result.index, view);
   }
   return {
     channels,
     primaries: channels.map((channel) => channel.primary),
     byChannelId: new Map(channels.map((channel) => [channel.channelId, channel])),
     byPrimaryIndex: new Map(channels.map((channel) => [channel.primary.index, channel])),
-    byStreamIndex: new Map(
-      channels.flatMap((channel) =>
-        channel.streams.map((entry) => [entry.result.index, channel] as const),
-      ),
-    ),
+    byStreamIndex,
   };
 }
 
