@@ -2426,9 +2426,6 @@ async fn execute_scan_run(
     let adaptive_throttle = AdaptiveThrottle::new();
 
     let mut handles = Vec::new();
-    // Per-provider connection caps (Dispatcharr M3U accounts report theirs),
-    // so a high scan concurrency never exceeds a provider's stream limit.
-    let mut account_semaphores = HashMap::<i64, Arc<Semaphore>>::new();
 
     let mut dispatch_queue = DispatchQueue::new(channels);
     while let Some((channel, account_queue_slot)) = dispatch_queue.next(&cancel_token).await {
@@ -2464,11 +2461,7 @@ async fn execute_scan_run(
             &channel.extinf_line,
         )
         .map(|(account_id, limit)| {
-            Arc::clone(
-                account_semaphores
-                    .entry(account_id)
-                    .or_insert_with(|| Arc::new(Semaphore::new(limit))),
-            )
+            crate::engine::dispatcharr::account_connection_slots(account_id, &channel.url, limit)
         });
         // Rows sharing a URL wait on one probe. Settle which row owns it
         // before reserving capacity, so a waiting duplicate never holds the

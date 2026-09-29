@@ -694,6 +694,33 @@ fn sessions() -> &'static Mutex<HashMap<String, Arc<DispatcharrClient>>> {
     SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Connection slots of one provider account, shared by every scan in the
+/// app (several windows can scan the same source at once), so together they
+/// never exceed the account's stream limit. Keyed by account, provider host,
+/// and limit: two Dispatcharr servers with the same account id stay apart,
+/// and a changed limit takes effect on the next scan.
+pub(crate) fn account_connection_slots(
+    account_id: i64,
+    stream_url: &str,
+    limit: usize,
+) -> Arc<tokio::sync::Semaphore> {
+    type SlotKey = (i64, String, usize);
+    static SLOTS: OnceLock<Mutex<HashMap<SlotKey, Arc<tokio::sync::Semaphore>>>> = OnceLock::new();
+    let host = Url::parse(stream_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+        .unwrap_or_default();
+    let mut slots = SLOTS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    Arc::clone(
+        slots
+            .entry((account_id, host, limit))
+            .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(limit))),
+    )
+}
+
 pub(crate) fn register_session(source_identity: &str, client: Arc<DispatcharrClient>) {
     if let Ok(mut sessions) = sessions().lock() {
         sessions.insert(source_identity.to_string(), client);
@@ -1401,6 +1428,16 @@ mod tests {
                 .unwrap();
         assert_eq!(preview.channels[0].content_type, ContentType::Live);
         assert_eq!(preview.live_count, 1);
+    }
+
+    #[test]
+    fn account_slots_are_shared_across_scans() {
+        let url = "http://provider-slots.example/live/1.ts";
+        let first = account_connection_slots(9901, url, 1);
+        let second = account_connection_slots(9901, "http://provider-slots.example/live/2.ts", 1);
+        assert!(Arc::ptr_eq(&first, &second));
+        let other_server = account_connection_slots(9901, "http://elsewhere.example/1.ts", 1);
+        assert!(!Arc::ptr_eq(&first, &other_server));
     }
 
     #[test]
