@@ -60,9 +60,10 @@ const STREAM_PROXY_READ_AHEAD_BYTES: usize = 64 * 1024 * 1024;
 const STREAM_PROXY_READ_AHEAD_CHUNKS: usize = 4_096;
 const REMUX_PACER_MAX_LEAD: std::time::Duration = std::time::Duration::from_secs(12);
 /// Rebuild a monotonic packet clock from each encoded stream's packet
-/// durations. This preserves video composition offsets (PTS-DTS), including
-/// B-frames, while removing every provider timestamp hole without decoding.
-const CONTIGUOUS_VIDEO_TIMESTAMPS: &str = "setts=dts=if(eq(N\\,0)\\,0\\,PREV_OUTDTS+if(gt(PREV_OUTDURATION\\,0)\\,PREV_OUTDURATION\\,if(gt(DURATION\\,0)\\,DURATION\\,1))):pts=if(eq(N\\,0)\\,PTS-STARTDTS\\,PREV_OUTDTS+if(gt(PREV_OUTDURATION\\,0)\\,PREV_OUTDURATION\\,if(gt(DURATION\\,0)\\,DURATION\\,1))+PTS-DTS)";
+/// durations while preserving known composition offsets (PTS-DTS) for B-frames.
+/// Never do arithmetic on AV_NOPTS_VALUE. When an offset is unknown, use the
+/// rebuilt decode clock; the TS muxer requires a PTS even on the first packet.
+const CONTIGUOUS_VIDEO_TIMESTAMPS: &str = "setts=dts=if(eq(N\\,0)\\,0\\,PREV_OUTDTS+if(gt(PREV_OUTDURATION\\,0)\\,PREV_OUTDURATION\\,if(gt(DURATION\\,0)\\,DURATION\\,1))):pts=if(eq(N\\,0)\\,0\\,PREV_OUTDTS+if(gt(PREV_OUTDURATION\\,0)\\,PREV_OUTDURATION\\,if(gt(DURATION\\,0)\\,DURATION\\,1)))+if(eq(PTS\\,NOPTS)+eq(DTS\\,NOPTS)\\,0\\,PTS-DTS)";
 const CONTIGUOUS_AUDIO_TIMESTAMPS: &str = "setts=ts=if(eq(N\\,0)\\,0\\,PREV_OUTDTS+if(gt(PREV_OUTDURATION\\,0)\\,PREV_OUTDURATION\\,if(gt(DURATION\\,0)\\,DURATION\\,1)))";
 
 /// Base64url-encode an original stream URL for the proxy scheme.
@@ -1637,6 +1638,88 @@ fn parse_stream_request(request: &str) -> Option<StreamRequest> {
 
 #[cfg(test)]
 mod tests {
+    fn run_timestamp_filter(inject: &str, format: &str) -> std::process::Output {
+        let input_clock = "setts=pts=101+N+mod(N\\,3):dts=100+N:duration=1";
+        let filter = format!(
+            "{input_clock},{inject},{}",
+            super::CONTIGUOUS_VIDEO_TIMESTAMPS
+        );
+        let output = std::process::Command::new(
+            std::env::var_os("FFMPEG_TEST_BINARY").unwrap_or_else(|| "ffmpeg".into()),
+        )
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "warning",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=16x16:r=25",
+            "-frames:v",
+            "4",
+            "-c:v",
+            "mpeg2video",
+            "-bsf:v",
+            &filter,
+            "-f",
+            format,
+            "pipe:1",
+        ])
+        .output()
+        .expect("timestamp tests need ffmpeg in PATH or FFMPEG_TEST_BINARY");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    }
+
+    #[test]
+    fn video_clock_preserves_known_offsets_and_repairs_missing_timestamps() {
+        // Include first-packet and mid-stream gaps, plus a complete clock with
+        // reordered presentation timestamps (the offsets B-frames depend on).
+        for missing_packet in [None, Some(0), Some(1)] {
+            for missing_fields in ["pts", "dts", "both"] {
+                let inject = match missing_packet {
+                    None => "null".to_string(),
+                    Some(n) => {
+                        let pts = format!("pts=if(eq(N\\,{n})\\,NOPTS\\,PTS)");
+                        let dts = format!("dts=if(eq(N\\,{n})\\,NOPTS\\,DTS)");
+                        match missing_fields {
+                            "pts" => format!("setts={pts}"),
+                            "dts" => format!("setts=pts=PTS:{dts}"),
+                            _ => format!("setts={pts}:{dts}"),
+                        }
+                    }
+                };
+                let output = run_timestamp_filter(&inject, "framecrc");
+                let text = String::from_utf8(output.stdout).unwrap();
+                let packets: Vec<_> = text.lines().filter(|line| !line.starts_with('#')).collect();
+                assert_eq!(packets.len(), 4);
+                for (n, packet) in packets.iter().enumerate() {
+                    let fields: Vec<_> = packet.split(',').map(str::trim).collect();
+                    let dts: i64 = fields[1].parse().unwrap();
+                    let pts: i64 = fields[2].parse().unwrap();
+                    assert_eq!(dts, n as i64, "{missing_fields}: {packet}");
+                    let expected_pts = if missing_packet == Some(n) {
+                        n as i64 // Unknown composition offset falls back to the decode clock.
+                    } else {
+                        (n + 1 + n % 3) as i64
+                    };
+                    assert_eq!(pts, expected_pts, "{missing_fields}: {packet}");
+                }
+                let muxed = run_timestamp_filter(&inject, "mpegts");
+                assert!(!muxed.stdout.is_empty());
+                assert!(
+                    !String::from_utf8_lossy(&muxed.stderr).contains("Invalid DTS"),
+                    "{}",
+                    String::from_utf8_lossy(&muxed.stderr)
+                );
+            }
+        }
+    }
+
     #[test]
     fn manifest_request_served_media_detects_ts_redirects_only() {
         use super::manifest_request_served_media;

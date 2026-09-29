@@ -278,6 +278,13 @@ export function readMediaErrorMessage(mediaErr: MediaError | null): string | nul
   return codeMap[mediaErr.code] ?? mediaErr.message ?? "Unknown media error";
 }
 
+/** A decoder failure is more useful than a later route rejecting the container. */
+export function selectPlaybackFailure(previous: string | null, next: string | null): string | null {
+  if (!next || previous === "Decode error") return previous;
+  if (previous && next === "Format not supported") return previous;
+  return next;
+}
+
 /** Diagnostic detail stays separate from the short, user-facing error label. */
 export function readMediaErrorDetail(mediaErr: MediaError | null): string {
   if (!mediaErr) return "Unknown media error";

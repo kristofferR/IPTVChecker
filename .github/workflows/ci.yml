@@ -77,6 +77,7 @@ jobs:
         run: |
           TARGET="$(rustc -vV | sed -n 's/^host: //p')"
           bash scripts/download-ffmpeg.sh "$TARGET"
+          echo "FFMPEG_TEST_BINARY=$PWD/src-tauri/binaries/ffmpeg-$TARGET" >> "$GITHUB_ENV"
 
       - name: Rust cache
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
