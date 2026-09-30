@@ -1021,10 +1021,18 @@ export default function App() {
    *  scan would take another. Says so and returns true in that case. */
   const playbackHoldsProvider = useCallback(() => {
     const state = getStore();
+    if (!state.playlist?.dispatcharr_limited_accounts) return false;
+    // The app cannot see an external player close; ask, as catch-up does.
     if (
-      !state.playlist?.dispatcharr_limited_accounts ||
-      !(state.playIntentActive || state.castActive || state.externalPlaybackActive)
+      state.externalPlaybackActive &&
+      !state.playIntentActive &&
+      !state.castActive &&
+      window.confirm("Close the external player before scanning. Continue?")
     ) {
+      state.setExternalPlaybackActive(false);
+      return false;
+    }
+    if (!(state.playIntentActive || state.castActive || state.externalPlaybackActive)) {
       return false;
     }
     state.setScanInputError(
