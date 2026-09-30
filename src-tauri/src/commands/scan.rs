@@ -736,6 +736,14 @@ async fn compute_shared_url_result(
             }
         }
     }
+    // Captures swallow cancellation into a missing artifact. A cancelled
+    // channel must stay unscanned so resume re-checks it.
+    if cancel.is_cancelled() {
+        if let Some(clip) = shared.sample_clip.take() {
+            let _ = std::fs::remove_file(&clip.path);
+        }
+        return Err(AppError::Cancelled);
+    }
     // Diagnostics can still demote a channel (Dispatcharr single pass); only
     // alive channels keep a sample clip.
     if shared.status != ChannelStatus::Alive {

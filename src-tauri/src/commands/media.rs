@@ -93,7 +93,6 @@ pub async fn capture_sample_clip(
     channel_name: String,
     url: String,
     stream_url: Option<String>,
-    replaces: Option<String>,
 ) -> Result<ffmpeg::SampleClip, AppError> {
     ensure_capture_url(&url)?;
     let stream_url = stream_url.filter(|value| ensure_capture_url(value).is_ok());
@@ -112,8 +111,8 @@ pub async fn capture_sample_clip(
             settings.low_space_threshold_gb,
         )
     };
+    let custom_dir_is_none = custom_dir.is_none();
     let cache_root = media_cache_root(&app);
-    let manual_dir = cache_root.join(MANUAL_CAPTURE_DIR);
     let output_dir = tokio::task::spawn_blocking(move || {
         prepare_manual_capture_dir(&cache_root, custom_dir.as_deref(), low_space_threshold_gb)
     })
@@ -121,46 +120,53 @@ pub async fn capture_sample_clip(
     .map_err(|error| AppError::Other(format!("Failed to prepare sample clip: {}", error)))??;
     register_media_root(&app, &output_dir);
 
+    let file_name = ffmpeg::build_screenshot_file_name(channel_index, &channel_name);
     let clip = ffmpeg::capture_sample_clip(
         &app,
         &ffmpeg_target_url(&url, stream_url.as_deref()),
         Some(&url),
         &output_dir.to_string_lossy(),
-        &ffmpeg::build_screenshot_file_name(channel_index, &channel_name),
+        &file_name,
         &user_agent,
         duration_secs,
         &CancellationToken::new(),
     )
     .await?;
 
-    if let Some(previous) = replaces {
-        remove_superseded_manual_clip(&app, &previous, &manual_dir, &clip.path).await;
+    // A recapture supersedes this channel's earlier manual clips. Only the
+    // app's own cache is pruned; a custom folder holds the user's files.
+    if custom_dir_is_none {
+        remove_other_manual_clips(&output_dir, &file_name, Path::new(&clip.path));
     }
     Ok(clip)
 }
 
-/// Delete the clip a recapture replaced, but only from the app's own manual
-/// capture cache: scan-run clips follow retention, and a custom folder holds
-/// the user's files.
-async fn remove_superseded_manual_clip(
-    app: &tauri::AppHandle,
-    previous: &str,
-    manual_dir: &Path,
-    new_path: &str,
-) {
-    let Ok((previous, _)) = validated_media_path(app, previous, &[ArtifactKind::SampleClip]).await
-    else {
+/// Delete `stem.{mp4,ts}` and `stem-N.{mp4,ts}` in `dir`, except `keep`.
+fn remove_other_manual_clips(dir: &Path, stem: &str, keep: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
-    let in_manual_dir = manual_dir
-        .canonicalize()
-        .is_ok_and(|dir| previous.parent() == Some(dir.as_path()));
-    let is_new = Path::new(new_path)
-        .canonicalize()
-        .is_ok_and(|path| path == previous);
-    if in_manual_dir && !is_new {
-        if let Err(error) = std::fs::remove_file(&previous) {
-            log::debug!("Failed to remove superseded sample clip: {}", error);
+    for path in entries.flatten().map(|entry| entry.path()) {
+        let is_clip = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| matches!(ext, "mp4" | "ts"));
+        let same_channel = path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                name == stem
+                    || name
+                        .strip_prefix(stem)
+                        .and_then(|rest| rest.strip_prefix('-'))
+                        .is_some_and(|suffix| {
+                            !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit())
+                        })
+            });
+        if is_clip && same_channel && path != keep {
+            if let Err(error) = std::fs::remove_file(&path) {
+                log::debug!("Failed to remove superseded sample clip: {}", error);
+            }
         }
     }
 }
@@ -356,7 +362,10 @@ pub async fn try_serve_preview_request(
 
 #[cfg(test)]
 mod tests {
-    use super::{artifact_byte_span, ensure_capture_url, parse_preview_request, PreviewRequest};
+    use super::{
+        artifact_byte_span, ensure_capture_url, parse_preview_request, remove_other_manual_clips,
+        PreviewRequest,
+    };
 
     #[test]
     fn capture_url_must_be_a_network_stream() {
@@ -364,6 +373,41 @@ mod tests {
         assert!(ensure_capture_url("rtmp://example.com/live/1").is_ok());
         assert!(ensure_capture_url("file:///etc/passwd").is_err());
         assert!(ensure_capture_url("concat:/tmp/a.ts|/tmp/b.ts").is_err());
+    }
+
+    #[test]
+    fn recapture_prunes_only_this_channels_other_clips() {
+        let dir = std::env::temp_dir().join(format!("iptv-manual-prune-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("fixture dir");
+        for name in [
+            "3-News.ts",
+            "3-News-2.mp4",
+            "3-News-2.webp",
+            "3-News-HD.mp4",
+            "30-News.mp4",
+            "3-News-3.mp4",
+        ] {
+            std::fs::write(dir.join(name), b"x").expect("fixture file");
+        }
+
+        remove_other_manual_clips(&dir, "3-News", &dir.join("3-News-3.mp4"));
+
+        let mut left: Vec<String> = std::fs::read_dir(&dir)
+            .expect("fixture dir")
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            [
+                "3-News-2.webp",
+                "3-News-3.mp4",
+                "3-News-HD.mp4",
+                "30-News.mp4"
+            ]
+        );
+        std::fs::remove_dir_all(&dir).expect("fixture cleanup");
     }
 
     #[test]
