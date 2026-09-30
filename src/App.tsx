@@ -1282,6 +1282,12 @@ export default function App() {
   const handleOpenExternal = useCallback(
     async (result: ChannelResult) => {
       if (blockPlaybackDuringArchiveVerification()) return;
+      if (isSingleConnectionPlaylist(getStore().playlist) && getStore().sampleCaptureActive) {
+        getStore().setPlaybackError(
+          "Wait for the sample capture to finish before playing externally.",
+        );
+        return;
+      }
       try {
         if (isSingleConnectionPlaylist(getStore().playlist)) {
           handleStopPlayer();

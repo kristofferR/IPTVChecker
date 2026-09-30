@@ -144,30 +144,33 @@ pub async fn capture_sample_clip(
 }
 
 /// Delete a channel's earlier clips (`stem.{mp4,ts}`, `stem-N.{mp4,ts}`) in
-/// `dir`, except `keep`. Probes the names new captures would take instead of
-/// listing the folder, so it stays cheap in large scan runs.
+/// `dir`, except `keep`. One directory listing per capture is negligible next
+/// to the seconds each clip takes to record.
 pub(crate) fn remove_other_channel_clips(dir: &Path, stem: &str, keep: &Path) {
-    for n in 1..=9_999usize {
-        let name = if n == 1 {
-            stem.to_string()
-        } else {
-            format!("{stem}-{n}")
-        };
-        let mut found = false;
-        for ext in ["mp4", "ts"] {
-            let path = dir.join(format!("{name}.{ext}"));
-            if !path.exists() {
-                continue;
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for path in entries.flatten().map(|entry| entry.path()) {
+        let is_clip = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| matches!(ext, "mp4" | "ts"));
+        let same_channel = path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                name == stem
+                    || name
+                        .strip_prefix(stem)
+                        .and_then(|rest| rest.strip_prefix('-'))
+                        .is_some_and(|suffix| {
+                            !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit())
+                        })
+            });
+        if is_clip && same_channel && path != keep {
+            if let Err(error) = std::fs::remove_file(&path) {
+                log::debug!("Failed to remove superseded sample clip: {}", error);
             }
-            found = true;
-            if path != keep {
-                if let Err(error) = std::fs::remove_file(&path) {
-                    log::debug!("Failed to remove superseded sample clip: {}", error);
-                }
-            }
-        }
-        if !found && n > 1 {
-            break;
         }
     }
 }
@@ -409,6 +412,13 @@ mod tests {
                 "30-News.mp4"
             ]
         );
+
+        // A later recapture takes the freed base name; the gap before the
+        // previous suffix must not stop the prune.
+        std::fs::write(dir.join("3-News.mp4"), b"x").expect("fixture file");
+        remove_other_channel_clips(&dir, "3-News", &dir.join("3-News.mp4"));
+        assert!(!dir.join("3-News-3.mp4").exists());
+        assert!(dir.join("3-News.mp4").exists());
         std::fs::remove_dir_all(&dir).expect("fixture cleanup");
     }
 
