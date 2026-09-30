@@ -192,9 +192,7 @@ struct SharedCheckContext<'a> {
     diagnostics_semaphore: &'a Arc<Semaphore>,
     single_connection_mode: bool,
     /// Media goes to the app cache, where a rescan's clip supersedes the
-    /// channel's previous one. Custom folders hold the user's files, and a
-    /// partial rescan leaves unselected duplicate-URL rows pointing at the
-    /// old clip, so only full-scope scans prune.
+    /// channel's previous one. Custom folders hold the user's files.
     prune_superseded_clips: bool,
     low_space_threshold_gb: f64,
 }
@@ -2268,6 +2266,20 @@ async fn execute_scan_run(
 
     let preview = parse_playlist_with_cache(&app, &state, &config, &run_id).await?;
     let preview_single_provider = preview.single_provider;
+    // A partial rescan must keep old clips of URLs shared with unselected
+    // rows: those rows still point at the file.
+    let mut url_counts: HashMap<String, usize> = HashMap::new();
+    for channel in &preview.channels {
+        *url_counts
+            .entry(canonicalize_stream_url(&channel.url))
+            .or_default() += 1;
+    }
+    let shared_urls: Arc<HashSet<String>> = Arc::new(
+        url_counts
+            .into_iter()
+            .filter_map(|(url, count)| (count > 1).then_some(url))
+            .collect(),
+    );
     let mut channels = preview.channels.clone();
     filter_channels_by_selection(&mut channels, &config.selected_indices);
     filter_channels_by_content_type(&mut channels, config.hide_vod_content);
@@ -2402,11 +2414,10 @@ async fn execute_scan_run(
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
     // Disk space tracking for screenshot pause
-    let prune_superseded_clips = !using_custom_screenshots_dir
-        && config
-            .selected_indices
-            .as_ref()
-            .is_none_or(|indices| indices.is_empty());
+    let full_scope_scan = config
+        .selected_indices
+        .as_ref()
+        .is_none_or(|indices| indices.is_empty());
     let disk_guard = ScreenshotDiskGuard::new(
         using_custom_screenshots_dir,
         low_space_threshold_gb,
@@ -2483,6 +2494,7 @@ async fn execute_scan_run(
         let run_id_for_perf = run_id.clone();
         let shared_url_results = Arc::clone(&shared_url_results);
         let diagnostics_semaphore = Arc::clone(&diagnostics_semaphore);
+        let shared_urls = Arc::clone(&shared_urls);
         let single_connection_mode = single_provider;
         let disk_guard = disk_guard.clone();
         let consecutive_net_failures = Arc::clone(&consecutive_net_failures);
@@ -2495,6 +2507,8 @@ async fn execute_scan_run(
             }
 
             let canonical_url = canonicalize_stream_url(&channel.url);
+            let prune_superseded_clips = !using_custom_screenshots_dir
+                && (full_scope_scan || !shared_urls.contains(&canonical_url));
             let result_cell = {
                 let mut cache = shared_url_results.lock().await;
                 cache

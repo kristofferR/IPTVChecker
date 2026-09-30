@@ -619,29 +619,39 @@ pub fn build_screenshot_file_name(channel_index: usize, channel_name: &str) -> S
     }
 }
 
-fn unique_screenshot_output_path(output_dir: &Path, stem: &str, ext: &str) -> PathBuf {
-    let base_stem = sanitize_screenshot_stem(stem);
-    let mut base = truncate_stem(&base_stem, MAX_SCREENSHOT_STEM_LEN);
-    base = trim_windows_unsafe_edges(&base);
+/// File name base for a media stem, before any collision suffix.
+fn output_base(stem: &str) -> String {
+    let base = trim_windows_unsafe_edges(&truncate_stem(
+        &sanitize_screenshot_stem(stem),
+        MAX_SCREENSHOT_STEM_LEN,
+    ));
     if base.is_empty() {
-        base = FALLBACK_SCREENSHOT_STEM.to_string();
+        FALLBACK_SCREENSHOT_STEM.to_string()
+    } else {
+        base
     }
+}
 
+/// `base-N`, with `base` shortened so the result stays within the length cap.
+fn suffixed_output_base(base: &str, n: usize) -> String {
+    let suffix = format!("-{n}");
+    let max_base_len = MAX_SCREENSHOT_STEM_LEN.saturating_sub(suffix.chars().count());
+    let mut truncated_base = trim_windows_unsafe_edges(&truncate_stem(base, max_base_len));
+    if truncated_base.is_empty() {
+        truncated_base = FALLBACK_SCREENSHOT_STEM.to_string();
+    }
+    format!("{truncated_base}{suffix}")
+}
+
+fn unique_screenshot_output_path(output_dir: &Path, stem: &str, ext: &str) -> PathBuf {
+    let base = output_base(stem);
     let initial = output_dir.join(format!("{base}.{ext}"));
     if !initial.exists() {
         return initial;
     }
 
     for n in 2..=9_999usize {
-        let suffix = format!("-{n}");
-        let max_base_len = MAX_SCREENSHOT_STEM_LEN.saturating_sub(suffix.chars().count());
-        let mut truncated_base = truncate_stem(&base, max_base_len);
-        truncated_base = trim_windows_unsafe_edges(&truncated_base);
-        if truncated_base.is_empty() {
-            truncated_base = FALLBACK_SCREENSHOT_STEM.to_string();
-        }
-
-        let candidate = output_dir.join(format!("{truncated_base}{suffix}.{ext}"));
+        let candidate = output_dir.join(format!("{}.{ext}", suffixed_output_base(&base, n)));
         if !candidate.exists() {
             return candidate;
         }
@@ -652,6 +662,20 @@ fn unique_screenshot_output_path(output_dir: &Path, stem: &str, ext: &str) -> Pa
         .map(|d| d.as_millis())
         .unwrap_or(0);
     output_dir.join(format!("{base}-{ts}.{ext}"))
+}
+
+/// Whether `file_stem` is a name [`unique_screenshot_output_path`] gives
+/// `stem`: the base itself or a `-N` collision variant, including the
+/// shortened base long names get.
+pub(crate) fn is_output_name_for_stem(file_stem: &str, stem: &str) -> bool {
+    let base = output_base(stem);
+    if file_stem == base {
+        return true;
+    }
+    file_stem
+        .rsplit_once('-')
+        .and_then(|(_, digits)| digits.parse::<usize>().ok())
+        .is_some_and(|n| (2..=9_999).contains(&n) && file_stem == suffixed_output_base(&base, n))
 }
 
 fn screenshot_header_is_valid(format: ScreenshotFormat, header: &[u8]) -> bool {
@@ -2427,14 +2451,14 @@ mod tests {
     use super::{
         append_screenshot_output_args, binary_candidate_names, build_screenshot_file_name,
         capture_screenshot_with_format_using_binary, check_label_mismatch, contains_word,
-        format_ffmpeg_exit_reason, normalize_superscript, parse_bytes_read, parse_ffmpeg_stderr,
-        parse_ffprobe_fps, parse_probe_snapshot, parse_stream_track_presence,
-        proxy_upstream_source_url, resolution_label, resolve_binary_from_dir,
-        sanitize_ffmpeg_stderr_line, sanitize_screenshot_stem, screenshot_header_is_valid,
-        should_retry_screenshot_as_png, should_route_tool_through_stream_proxy,
-        should_route_tool_through_stream_proxy_with_hint, stderr_excerpt,
-        unique_screenshot_output_path, validate_captured_screenshot, ScreenshotFormat,
-        MAX_SCREENSHOT_STEM_LEN, TARGET_TRIPLE,
+        format_ffmpeg_exit_reason, is_output_name_for_stem, normalize_superscript,
+        parse_bytes_read, parse_ffmpeg_stderr, parse_ffprobe_fps, parse_probe_snapshot,
+        parse_stream_track_presence, proxy_upstream_source_url, resolution_label,
+        resolve_binary_from_dir, sanitize_ffmpeg_stderr_line, sanitize_screenshot_stem,
+        screenshot_header_is_valid, should_retry_screenshot_as_png,
+        should_route_tool_through_stream_proxy, should_route_tool_through_stream_proxy_with_hint,
+        stderr_excerpt, unique_screenshot_output_path, validate_captured_screenshot,
+        ScreenshotFormat, MAX_SCREENSHOT_STEM_LEN, TARGET_TRIPLE,
     };
     #[cfg(unix)]
     use super::{
@@ -2730,6 +2754,24 @@ exit 0
     #[cfg(unix)]
     const MP4_REMUX_OK: &str =
         r#"{ printf '\000\000\000\030ftypisom'; head -c 9000 /dev/zero; } > "$arg""#;
+
+    #[cfg(unix)]
+    #[test]
+    fn output_names_match_their_stem_including_long_suffixed_names() {
+        let long = "a".repeat(MAX_SCREENSHOT_STEM_LEN + 10);
+        let dir = temp_dir("iptv-checker-output-names");
+        let first = unique_screenshot_output_path(&dir, &long, "mp4");
+        std::fs::write(&first, b"x").expect("fixture");
+        let second = unique_screenshot_output_path(&dir, &long, "mp4");
+        let stem_of = |path: &Path| path.file_stem().unwrap().to_string_lossy().to_string();
+
+        assert!(is_output_name_for_stem(&stem_of(&first), &long));
+        assert!(is_output_name_for_stem(&stem_of(&second), &long));
+        assert!(is_output_name_for_stem("3-News-2", "3-News"));
+        assert!(!is_output_name_for_stem("3-News-HD", "3-News"));
+        assert!(!is_output_name_for_stem("30-News", "3-News"));
+        std::fs::remove_dir_all(&dir).expect("fixture cleanup");
+    }
 
     #[cfg(unix)]
     #[tokio::test]

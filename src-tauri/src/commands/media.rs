@@ -158,15 +158,7 @@ pub(crate) fn remove_other_channel_clips(dir: &Path, stem: &str, keep: &Path) {
         let same_channel = path
             .file_stem()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| {
-                name == stem
-                    || name
-                        .strip_prefix(stem)
-                        .and_then(|rest| rest.strip_prefix('-'))
-                        .is_some_and(|suffix| {
-                            !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit())
-                        })
-            });
+            .is_some_and(|name| ffmpeg::is_output_name_for_stem(name, stem));
         if is_clip && same_channel && path != keep {
             if let Err(error) = std::fs::remove_file(&path) {
                 log::debug!("Failed to remove superseded sample clip: {}", error);
