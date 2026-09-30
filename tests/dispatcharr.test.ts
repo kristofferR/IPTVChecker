@@ -508,6 +508,8 @@ describe("dispatcharr helpers", () => {
     expect(empty?.streams).toEqual([]);
     expect(empty?.primary.index).toBe(1);
     expect(empty?.order).toEqual([]);
+    // Find streams never offers the placeholder as a candidate.
+    expect(empty && unlinkedStreams(results, empty)).toEqual([]);
     // Full scans cover the real stream only.
     expect(dispatcharrLinkedIndices(results, {})).toEqual([0]);
   });

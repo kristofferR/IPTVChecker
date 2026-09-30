@@ -329,13 +329,23 @@ pub(crate) fn is_single_provider_check(channels: &[Channel]) -> bool {
 }
 
 fn is_single_provider(channels: &[Channel]) -> bool {
-    let counts = channel_host_counts(channels);
+    !all_dispatcharr_rows(channels) && shares_one_host(&channel_host_counts(channels))
+}
+
+/// ≥90% of parseable URLs point at one host.
+fn shares_one_host(counts: &HashMap<String, usize>) -> bool {
     let total: usize = counts.values().sum();
-    if total == 0 {
-        return false;
-    }
     let max = counts.values().max().copied().unwrap_or(0);
-    max * 10 >= total * 9 // equivalent to max/total >= 0.9 without floating point
+    total > 0 && max * 10 >= total * 9 // max/total >= 0.9 without floating point
+}
+
+/// Dispatcharr rows are capped per provider account by the scanner, so a
+/// shared host is no reason to scan them one at a time.
+fn all_dispatcharr_rows(channels: &[Channel]) -> bool {
+    !channels.is_empty()
+        && channels
+            .iter()
+            .all(|channel| crate::engine::dispatcharr::is_dispatcharr_row(&channel.extinf_line))
 }
 
 fn is_routable_ip(ip: &IpAddr) -> bool {
@@ -463,16 +473,11 @@ async fn populate_server_metadata(app: Option<&AppHandle>, preview: &mut Playlis
         },
     );
     let counts = channel_host_counts(&preview.channels);
-
-    // single_provider
-    let total: usize = counts.values().sum();
-    if total > 0 {
-        let max = counts.values().max().copied().unwrap_or(0);
-        preview.single_provider = max * 10 >= total * 9;
-    }
+    let one_host = shares_one_host(&counts);
+    preview.single_provider = one_host && !all_dispatcharr_rows(&preview.channels);
 
     // server_location — only look up when ≥90% of channels share the same host
-    if preview.single_provider {
+    if one_host {
         if let Some(host) = dominant_host_from_counts(&counts) {
             if !host.eq_ignore_ascii_case("localhost") {
                 if let Ok(cache) = server_location_cache().lock() {
@@ -1104,8 +1109,6 @@ pub(crate) async fn open_playlist_dispatcharr_inner(
         "{} (Dispatcharr)",
         dispatcharr::dispatcharr_host_label(&base)
     );
-    // No blanket single-provider flag: the scanner caps each provider account
-    // at its own stream limit, so different providers scan side by side.
     populate_server_metadata(Some(app), &mut preview).await;
     // Sessions are keyed by connection, not source identity: a saved source's
     // identity stays the same when its server or account is edited.
@@ -1295,6 +1298,33 @@ mod tests {
     #[test]
     fn is_single_provider_false_for_empty_channels() {
         assert!(!is_single_provider(&[]));
+    }
+
+    #[test]
+    fn dispatcharr_rows_on_one_host_are_not_single_provider() {
+        let channels = (0..3)
+            .map(|index| Channel {
+                index,
+                playlist: "fixture.m3u8".to_string(),
+                name: format!("Channel {}", index),
+                group: "Group".to_string(),
+                language: None,
+                tvg_id: None,
+                tvg_name: None,
+                tvg_logo: None,
+                tvg_chno: None,
+                catchup: None,
+                catchup_days: None,
+                catchup_source: None,
+                url: format!("https://provider.example.com/live/{index}.ts"),
+                content_type: ContentType::Live,
+                extinf_line: format!(
+                    "#EXTINF:-1 x-dispatcharr-channel-id=\"{index}\" x-dispatcharr-stream-id=\"{index}\",Channel"
+                ),
+                metadata_lines: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        assert!(!is_single_provider(&channels));
     }
 
     #[test]

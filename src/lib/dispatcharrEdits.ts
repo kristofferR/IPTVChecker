@@ -122,6 +122,9 @@ async function writeOrders(
     }
   };
   await Promise.all(Array.from({ length: Math.min(WRITE_CONCURRENCY, changes.length) }, worker));
+  // Writes to a source that is no longer open have nothing left to show
+  // or undo here.
+  if (!stillCurrent()) return { applied: [], failed: 0 };
   return { applied, failed };
 }
 
@@ -300,6 +303,7 @@ export function planFix(
 /** Apply a bulk fix and summarize it in the toast. */
 export async function applyFixPlan(plan: FixPlan): Promise<void> {
   const { applied, failed } = await applyOrderChanges(plan.changes);
+  if (applied.length === 0 && failed === 0) return;
   const removed = applied.reduce(
     (sum, change) => sum + change.from.filter((id) => !change.to.includes(id)).length,
     0,

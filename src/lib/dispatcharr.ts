@@ -135,7 +135,9 @@ export function unlinkedStreams(
   const entries: DispatcharrStreamEntry[] = [];
   for (const result of results) {
     const ref = cachedIds(result.extinf_line);
-    if (!ref || ref.channelId !== channel.channelId || seen.has(ref.streamId)) continue;
+    if (!ref || ref.empty || ref.channelId !== channel.channelId || seen.has(ref.streamId)) {
+      continue;
+    }
     seen.add(ref.streamId);
     entries.push({ ref, result, providerDown: false });
   }
