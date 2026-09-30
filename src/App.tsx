@@ -1029,7 +1029,8 @@ export default function App() {
       if (
         refreshedState.archiveVerifyRun ||
         refreshedState.archiveGuideTestRunning ||
-        Object.values(refreshedState.archiveProbes).some((entry) => entry.running)
+        Object.values(refreshedState.archiveProbes).some((entry) => entry.running) ||
+        (refreshedState.sampleCaptureActive && isSingleConnectionPlaylist(refreshedState.playlist))
       ) {
         return false;
       }
@@ -1462,6 +1463,14 @@ export default function App() {
       (pendingPlaybackReason === "sample_capture" && !sampleCaptureActive);
     if (released) {
       const state = getStore();
+      // A playlist load started meanwhile: the queued channel belongs to the
+      // source being replaced, so drop it instead of playing it.
+      if (state.playlistLoading) {
+        pendingArchivePlaybackRef.current = null;
+        state.setPendingPlaybackChannel(null);
+        setPendingPlaybackReason(null);
+        return;
+      }
       if (isScanActive(state.scanState) && isSingleConnectionPlaylist(state.playlist)) {
         setPendingPlaybackReason("scan");
         return;

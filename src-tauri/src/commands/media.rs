@@ -1,6 +1,7 @@
 //! Manual sample clip capture and access to saved media artifacts
 //! (screenshots and sample clips) from the selected-channel sidebar.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -98,6 +99,11 @@ pub async fn capture_sample_clip(
 ) -> Result<ffmpeg::SampleClip, AppError> {
     ensure_capture_url(&url)?;
     let stream_url = stream_url.filter(|value| ensure_capture_url(value).is_ok());
+    let state = app.state::<Arc<AppState>>().inner().clone();
+    let _capture_guard = state
+        .sample_capture_lock
+        .try_lock()
+        .map_err(|_| AppError::Other("Another sample is being captured.".to_string()))?;
     let (ffmpeg_available, _) = ffmpeg::check_availability(&app).await;
     if !ffmpeg_available {
         return Err(AppError::FfmpegNotAvailable);
@@ -141,6 +147,24 @@ pub async fn capture_sample_clip(
         remove_other_channel_clips(&output_dir, &file_name, Path::new(&clip.path));
     }
     Ok(clip)
+}
+
+/// Delete clips in a scan folder that no result references.
+pub(crate) fn sweep_unreferenced_clips(dir: &Path, referenced: &HashSet<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for path in entries.flatten().map(|entry| entry.path()) {
+        let is_clip = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| matches!(ext, "mp4" | "ts"));
+        if is_clip && !referenced.contains(&path) {
+            if let Err(error) = std::fs::remove_file(&path) {
+                log::debug!("Failed to remove unreferenced sample clip: {}", error);
+            }
+        }
+    }
 }
 
 /// Delete a channel's earlier clips (`stem.{mp4,ts}`, `stem-N.{mp4,ts}`) in

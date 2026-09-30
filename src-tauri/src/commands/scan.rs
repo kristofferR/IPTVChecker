@@ -2683,6 +2683,27 @@ async fn execute_scan_run(
         }
     };
 
+    // A completed full-scope scan saw every channel of this cache folder, so
+    // clips none of its results reference (removed, renamed, now dead, or
+    // failed recapture) can never be reached again.
+    if !cancel_token.is_cancelled() && full_scope_scan && !using_custom_screenshots_dir {
+        if let Some(dir) = screenshots_dir.clone() {
+            let referenced: HashSet<std::path::PathBuf> = completed_scan
+                .results
+                .iter()
+                .filter_map(|result| result.sample_clip_path.as_deref())
+                .map(std::path::PathBuf::from)
+                .collect();
+            let _ = tokio::task::spawn_blocking(move || {
+                crate::commands::media::sweep_unreferenced_clips(
+                    std::path::Path::new(&dir),
+                    &referenced,
+                )
+            })
+            .await;
+        }
+    }
+
     if !cancel_token.is_cancelled() {
         if let Some(source_identity) = config.source_identity.as_deref() {
             let archive_flags = tokio::select! {
