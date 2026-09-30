@@ -186,3 +186,27 @@ describe("saved playlist helpers", () => {
     });
   });
 });
+
+describe("Dispatcharr saved sources", () => {
+  const entry = (id: string, api_key: string): SavedPlaylistEntry => ({
+    id,
+    kind: "dispatcharr",
+    display_name: id,
+    server: "http://dvr.example:9191",
+    username: null,
+    password: null,
+    api_key,
+  });
+
+  it("matches the saved source with the same API key", () => {
+    const descriptor: CurrentSourceDescriptor = {
+      kind: "dispatcharr",
+      server: "http://dvr.example:9191/",
+      api_key: "second",
+    };
+    expect(
+      findSavedPlaylistForCurrentSource([entry("a", "first"), entry("b", "second")], descriptor)
+        ?.id,
+    ).toBe("b");
+  });
+});

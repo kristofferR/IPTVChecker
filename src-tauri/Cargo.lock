@@ -2412,6 +2412,7 @@ version = "2.0.2"
 dependencies = [
  "base64 0.22.1",
  "cast-sender",
+ "chrono",
  "core-foundation 0.10.1",
  "csv",
  "fancy-regex",

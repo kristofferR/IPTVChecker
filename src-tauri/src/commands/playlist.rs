@@ -250,6 +250,17 @@ pub struct XtreamOpenRequest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct DispatcharrOpenRequest {
+    pub server: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct StalkerOpenRequest {
     pub portal: String,
     pub mac: String,
@@ -318,13 +329,23 @@ pub(crate) fn is_single_provider_check(channels: &[Channel]) -> bool {
 }
 
 fn is_single_provider(channels: &[Channel]) -> bool {
-    let counts = channel_host_counts(channels);
+    !all_dispatcharr_rows(channels) && shares_one_host(&channel_host_counts(channels))
+}
+
+/// ≥90% of parseable URLs point at one host.
+fn shares_one_host(counts: &HashMap<String, usize>) -> bool {
     let total: usize = counts.values().sum();
-    if total == 0 {
-        return false;
-    }
     let max = counts.values().max().copied().unwrap_or(0);
-    max * 10 >= total * 9 // equivalent to max/total >= 0.9 without floating point
+    total > 0 && max * 10 >= total * 9 // max/total >= 0.9 without floating point
+}
+
+/// Dispatcharr rows are capped per provider account by the scanner, so a
+/// shared host is no reason to scan them one at a time.
+fn all_dispatcharr_rows(channels: &[Channel]) -> bool {
+    !channels.is_empty()
+        && channels
+            .iter()
+            .all(|channel| crate::engine::dispatcharr::is_dispatcharr_row(&channel.extinf_line))
 }
 
 fn is_routable_ip(ip: &IpAddr) -> bool {
@@ -452,16 +473,11 @@ async fn populate_server_metadata(app: Option<&AppHandle>, preview: &mut Playlis
         },
     );
     let counts = channel_host_counts(&preview.channels);
-
-    // single_provider
-    let total: usize = counts.values().sum();
-    if total > 0 {
-        let max = counts.values().max().copied().unwrap_or(0);
-        preview.single_provider = max * 10 >= total * 9;
-    }
+    let one_host = shares_one_host(&counts);
+    preview.single_provider = one_host && !all_dispatcharr_rows(&preview.channels);
 
     // server_location — only look up when ≥90% of channels share the same host
-    if preview.single_provider {
+    if one_host {
         if let Some(host) = dominant_host_from_counts(&counts) {
             if !host.eq_ignore_ascii_case("localhost") {
                 if let Ok(cache) = server_location_cache().lock() {
@@ -975,6 +991,142 @@ pub(crate) async fn open_playlist_xtream_inner(
     Ok(preview)
 }
 
+#[tauri::command]
+pub async fn open_playlist_dispatcharr(
+    app: tauri::AppHandle,
+    source: DispatcharrOpenRequest,
+    group_filter: Option<String>,
+    channel_search: Option<String>,
+) -> Result<PlaylistPreview, AppError> {
+    let cache_group_filter = group_filter.clone();
+    let cache_channel_search = channel_search.clone();
+    let mut preview =
+        open_playlist_dispatcharr_inner(&app, &source, group_filter, channel_search, None).await?;
+    crate::commands::saved::apply_persisted_playlist_metadata(&app, &mut preview, None, None)?;
+    crate::commands::scan::seed_cached_playlist_preview(
+        &app,
+        &preview.file_path,
+        preview.source_identity.as_deref(),
+        Some(&preview.file_name),
+        cache_group_filter.as_deref(),
+        cache_channel_search.as_deref(),
+        &preview,
+    )
+    .await;
+    Ok(preview)
+}
+
+pub(crate) async fn open_playlist_dispatcharr_inner(
+    app: &tauri::AppHandle,
+    source: &DispatcharrOpenRequest,
+    group_filter: Option<String>,
+    channel_search: Option<String>,
+    source_identity_override: Option<String>,
+) -> Result<PlaylistPreview, AppError> {
+    use crate::engine::dispatcharr;
+
+    let base = dispatcharr::normalize_dispatcharr_server(&source.server)?;
+    let auth = dispatcharr::DispatcharrAuth::from_parts(
+        source.username.as_deref(),
+        source.password.as_deref(),
+        source.api_key.as_deref(),
+    )?;
+    let source_key = dispatcharr::build_dispatcharr_source_key(&base, &auth);
+    let source_identity = source_identity_override.unwrap_or_else(|| source_key.clone());
+    // Overlapping loads of one source (a double Reload) run in turn, so the
+    // newest one publishes the cache and session last.
+    let _loading = dispatcharr::keyed_lock(format!("load:{source_key}"))
+        .lock_owned()
+        .await;
+    let client = Arc::new(dispatcharr::DispatcharrClient::new(
+        base.clone(),
+        auth,
+        accepts_invalid_certs(Some(app)).await,
+    )?);
+
+    emit_load_progress(
+        Some(app),
+        PlaylistLoadProgress::Connecting {
+            detail: "Fetching Dispatcharr channels",
+        },
+    );
+    let (channels, groups, accounts) = tokio::join!(
+        client.fetch_channels(),
+        client.fetch_groups(),
+        client.fetch_m3u_accounts(),
+    );
+    let channels = channels?;
+    if channels.is_empty() {
+        return Err(AppError::Other(
+            "Dispatcharr has no channels to check".to_string(),
+        ));
+    }
+    // Group and account names only label rows; a failure there is cosmetic.
+    let groups = groups
+        .inspect_err(|error| log::warn!("[dispatcharr] group fetch failed: {}", error))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|group| (group.id, group.name))
+        .collect::<HashMap<_, _>>();
+    let accounts = accounts
+        .inspect_err(|error| log::warn!("[dispatcharr] M3U account fetch failed: {}", error))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|account| (account.id, account))
+        .collect::<HashMap<_, _>>();
+
+    emit_load_progress(
+        Some(app),
+        PlaylistLoadProgress::Connecting {
+            detail: "Fetching Dispatcharr streams",
+        },
+    );
+    let streams = client.fetch_channel_streams(&channels).await?;
+    let m3u = dispatcharr::build_m3u(&base, &channels, &streams, &groups, &accounts);
+    log::info!(
+        "[dispatcharr] Built M3U: {} channels, {} streams",
+        channels.len(),
+        streams.len()
+    );
+
+    emit_load_progress(
+        Some(app),
+        PlaylistLoadProgress::Saving {
+            detail: "Caching Dispatcharr playlist",
+        },
+    );
+    let cache_path = remote_playlist_cache_path_from_data_dir(&app_data_dir(app)?, &source_key)?;
+    {
+        let cache_path = cache_path.clone();
+        tokio::task::spawn_blocking(move || write_bytes_to_cache(&cache_path, m3u.as_bytes()))
+            .await
+            .map_err(|err| AppError::Other(format!("Playlist cache write task failed: {err}")))??;
+    }
+
+    let mut preview = parse_playlist_off_thread(
+        Some(app),
+        cache_path.to_string_lossy().to_string(),
+        group_filter,
+        channel_search,
+    )
+    .await?;
+    preview.file_name = format!(
+        "{} (Dispatcharr)",
+        dispatcharr::dispatcharr_host_label(&base)
+    );
+    populate_server_metadata(Some(app), &mut preview).await;
+    // Sessions are keyed by connection, not source identity: a saved source's
+    // identity stays the same when its server or account is edited.
+    dispatcharr::register_session(&source_key, client);
+    preview.dispatcharr_limited_accounts = preview
+        .channels
+        .iter()
+        .any(|channel| dispatcharr::dispatcharr_connection_limit(&channel.extinf_line).is_some());
+    preview.dispatcharr_connection = Some(source_key);
+    preview.source_identity = Some(source_identity);
+    Ok(preview)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1151,6 +1303,33 @@ mod tests {
     #[test]
     fn is_single_provider_false_for_empty_channels() {
         assert!(!is_single_provider(&[]));
+    }
+
+    #[test]
+    fn dispatcharr_rows_on_one_host_are_not_single_provider() {
+        let channels = (0..3)
+            .map(|index| Channel {
+                index,
+                playlist: "fixture.m3u8".to_string(),
+                name: format!("Channel {}", index),
+                group: "Group".to_string(),
+                language: None,
+                tvg_id: None,
+                tvg_name: None,
+                tvg_logo: None,
+                tvg_chno: None,
+                catchup: None,
+                catchup_days: None,
+                catchup_source: None,
+                url: format!("https://provider.example.com/live/{index}.ts"),
+                content_type: ContentType::Live,
+                extinf_line: format!(
+                    "#EXTINF:-1 x-dispatcharr-channel-id=\"{index}\" x-dispatcharr-stream-id=\"{index}\",Channel"
+                ),
+                metadata_lines: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        assert!(!is_single_provider(&channels));
     }
 
     #[test]

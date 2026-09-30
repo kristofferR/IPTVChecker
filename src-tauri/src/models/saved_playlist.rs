@@ -6,11 +6,12 @@ pub enum SavedPlaylistKind {
     File,
     Url,
     Xtream,
+    Dispatcharr,
 }
 
 /// Saved playlist sources, persisted in settings.json in the app data dir.
 ///
-/// Deliberate trade-off: Xtream credentials are stored in plaintext rather
+/// Deliberate trade-off: Xtream and Dispatcharr credentials are stored in plaintext rather
 /// than the OS keychain. IPTV portal credentials are low-sensitivity (shared
 /// provider logins already embedded in M3U URLs), and keychain prompts on
 /// every launch would hurt more than they protect. Revisit if the app ever
@@ -31,6 +32,16 @@ pub enum SavedPlaylistSource {
         #[serde(default)]
         password: Option<String>,
     },
+    /// Authenticates with `api_key` when set, otherwise username + password.
+    Dispatcharr {
+        server: String,
+        #[serde(default)]
+        username: Option<String>,
+        #[serde(default)]
+        password: Option<String>,
+        #[serde(default)]
+        api_key: Option<String>,
+    },
 }
 
 impl SavedPlaylistSource {
@@ -39,6 +50,7 @@ impl SavedPlaylistSource {
             Self::File { .. } => SavedPlaylistKind::File,
             Self::Url { .. } => SavedPlaylistKind::Url,
             Self::Xtream { .. } => SavedPlaylistKind::Xtream,
+            Self::Dispatcharr { .. } => SavedPlaylistKind::Dispatcharr,
         }
     }
 }

@@ -1,8 +1,10 @@
 import { listen } from "@tauri-apps/api/event";
-import { Cpu, KeyRound, Link2, Loader2, Server, X } from "lucide-react";
+import { Cpu, KeyRound, Link2, Loader2, Network, Server, X } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { normalizeDispatcharrServer } from "../lib/dispatcharr";
 import { testXtreamServers } from "../lib/tauri";
 import type {
+  DispatcharrOpenRequest,
   StalkerOpenRequest,
   XtreamOpenRequest,
   XtreamRecentSource,
@@ -10,16 +12,24 @@ import type {
 } from "../lib/types";
 import PasswordField from "./PasswordField";
 
-type OpenSourceMode = "url" | "xtream" | "stalker";
+type OpenSourceMode = "url" | "xtream" | "stalker" | "dispatcharr";
+type DispatcharrAuthMode = "apiKey" | "login";
 
 interface OpenSourceDialogProps {
   initialMode: OpenSourceMode;
   initialUrl?: string;
   initialXtream?: XtreamRecentSource | null;
   initialStalker?: StalkerOpenRequest | null;
+  initialDispatcharr?: DispatcharrOpenRequest | null;
+  /** Saved playlist this Dispatcharr source will replace, when converting. */
+  convertSaved?: { id: string; name: string } | null;
   onOpenUrl: (url: string) => Promise<string | true>;
   onOpenXtream: (source: XtreamOpenRequest, savePassword?: boolean) => Promise<string | true>;
   onOpenStalker: (source: StalkerOpenRequest) => Promise<string | true>;
+  onOpenDispatcharr: (
+    source: DispatcharrOpenRequest,
+    rememberSecrets?: boolean,
+  ) => Promise<string | true>;
   onClose: () => void;
 }
 
@@ -316,9 +326,12 @@ export default function OpenSourceDialog({
   initialUrl,
   initialXtream,
   initialStalker,
+  initialDispatcharr,
+  convertSaved,
   onOpenUrl,
   onOpenXtream,
   onOpenStalker,
+  onOpenDispatcharr,
   onClose,
 }: OpenSourceDialogProps) {
   const [mode, setMode] = useState<OpenSourceMode>(initialMode);
@@ -329,6 +342,21 @@ export default function OpenSourceDialog({
   const [xtreamSavePassword, setXtreamSavePassword] = useState(!!initialXtream?.password);
   const [stalkerPortal, setStalkerPortal] = useState(initialStalker?.portal ?? "");
   const [stalkerMac, setStalkerMac] = useState(initialStalker?.mac ?? "");
+  const [dispatcharrServer, setDispatcharrServer] = useState(initialDispatcharr?.server ?? "");
+  const [dispatcharrServerAutofilled, setDispatcharrServerAutofilled] = useState(false);
+  const [dispatcharrAuthMode, setDispatcharrAuthMode] = useState<DispatcharrAuthMode>(
+    initialDispatcharr?.username && !initialDispatcharr.api_key ? "login" : "apiKey",
+  );
+  const [dispatcharrApiKey, setDispatcharrApiKey] = useState(initialDispatcharr?.api_key ?? "");
+  const [dispatcharrUsername, setDispatcharrUsername] = useState(
+    initialDispatcharr?.username ?? "",
+  );
+  const [dispatcharrPassword, setDispatcharrPassword] = useState(
+    initialDispatcharr?.password ?? "",
+  );
+  const [dispatcharrRemember, setDispatcharrRemember] = useState(
+    Boolean(initialDispatcharr?.api_key || initialDispatcharr?.password),
+  );
   const [localError, setLocalError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showServerTest, setShowServerTest] = useState(false);
@@ -338,6 +366,10 @@ export default function OpenSourceDialog({
   const initialXtreamPassword = initialXtream?.password ?? "";
   const initialStalkerPortal = initialStalker?.portal ?? "";
   const initialStalkerMac = initialStalker?.mac ?? "";
+  const initialDispatcharrServer = initialDispatcharr?.server ?? "";
+  const initialDispatcharrUsername = initialDispatcharr?.username ?? "";
+  const initialDispatcharrPassword = initialDispatcharr?.password ?? "";
+  const initialDispatcharrApiKey = initialDispatcharr?.api_key ?? "";
 
   useEffect(() => {
     setMode(initialMode);
@@ -348,6 +380,15 @@ export default function OpenSourceDialog({
     setXtreamSavePassword(!!initialXtreamPassword);
     setStalkerPortal(initialStalkerPortal);
     setStalkerMac(initialStalkerMac);
+    setDispatcharrServer(initialDispatcharrServer);
+    setDispatcharrServerAutofilled(false);
+    setDispatcharrAuthMode(
+      initialDispatcharrUsername && !initialDispatcharrApiKey ? "login" : "apiKey",
+    );
+    setDispatcharrApiKey(initialDispatcharrApiKey);
+    setDispatcharrUsername(initialDispatcharrUsername);
+    setDispatcharrPassword(initialDispatcharrPassword);
+    setDispatcharrRemember(Boolean(initialDispatcharrApiKey || initialDispatcharrPassword));
     setLocalError(null);
     setSubmitting(false);
   }, [
@@ -358,25 +399,38 @@ export default function OpenSourceDialog({
     initialXtreamPassword,
     initialStalkerPortal,
     initialStalkerMac,
+    initialDispatcharrServer,
+    initialDispatcharrUsername,
+    initialDispatcharrPassword,
+    initialDispatcharrApiKey,
   ]);
 
   const handleClose = useCallback(() => {
     setXtreamPassword("");
+    setDispatcharrPassword("");
+    setDispatcharrApiKey("");
     setLocalError(null);
     onClose();
   }, [onClose]);
+
+  // A conversion in progress replaces a saved playlist once it verifies, so
+  // the dialog cannot be dismissed until it finishes or fails.
+  const conversionPending = submitting && Boolean(convertSaved);
+  const requestClose = useCallback(() => {
+    if (!conversionPending) handleClose();
+  }, [conversionPending, handleClose]);
 
   useEffect(() => {
     if (showServerTest) return;
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        handleClose();
+        requestClose();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleClose, showServerTest]);
+  }, [requestClose, showServerTest]);
 
   const parseXtreamM3ULink = (link: string) => {
     try {
@@ -396,6 +450,14 @@ export default function OpenSourceDialog({
 
     // fallback to setting the link as is
     setXtreamServer(link);
+  };
+
+  // A pasted Dispatcharr stream or M3U link reduces to the server it came from.
+  const handleDispatcharrServerChange = (value: string) => {
+    const pastedLink = /\/(proxy|output)\//i.test(value);
+    const normalized = pastedLink ? normalizeDispatcharrServer(value) : null;
+    setDispatcharrServer(normalized ?? value);
+    setDispatcharrServerAutofilled(normalized !== null);
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -447,6 +509,37 @@ export default function OpenSourceDialog({
         return;
       }
 
+      if (mode === "dispatcharr") {
+        const serverError = validateHttpUrl(dispatcharrServer, "Dispatcharr server");
+        if (serverError) {
+          setLocalError(serverError);
+          return;
+        }
+        const apiKey = dispatcharrApiKey.trim();
+        const username = dispatcharrUsername.trim();
+        const password = dispatcharrPassword.trim();
+        if (dispatcharrAuthMode === "apiKey" && !apiKey) {
+          setLocalError("Dispatcharr API key cannot be empty.");
+          return;
+        }
+        if (dispatcharrAuthMode === "login" && (!username || !password)) {
+          setLocalError("Enter the Dispatcharr username and password.");
+          return;
+        }
+        const dispatcharrResult = await onOpenDispatcharr(
+          dispatcharrAuthMode === "apiKey"
+            ? { server: dispatcharrServer.trim(), api_key: apiKey }
+            : { server: dispatcharrServer.trim(), username, password },
+          dispatcharrRemember,
+        );
+        if (dispatcharrResult === true) {
+          handleClose();
+        } else {
+          setLocalError(dispatcharrResult);
+        }
+        return;
+      }
+
       const serverError = validateHttpUrl(xtreamServer, "Xtream server");
       if (serverError) {
         setLocalError(serverError);
@@ -491,6 +584,10 @@ export default function OpenSourceDialog({
       setXtreamPassword("");
       setXtreamSavePassword(false);
     }
+    if (nextMode !== "dispatcharr") {
+      setDispatcharrPassword("");
+      setDispatcharrApiKey("");
+    }
   };
 
   const handleOpenServerTest = () => {
@@ -512,7 +609,7 @@ export default function OpenSourceDialog({
   return (
     <>
       <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-        <div className="absolute inset-0 bg-black/45" onClick={handleClose} />
+        <div className="absolute inset-0 bg-black/45" onClick={requestClose} />
         <div className="relative w-full max-w-xl rounded-xl border border-border-app bg-overlay shadow-2xl">
           <div className="flex items-start justify-between border-b border-border-app px-5 pb-3 pt-4">
             <div>
@@ -523,7 +620,8 @@ export default function OpenSourceDialog({
             </div>
             <button
               type="button"
-              onClick={handleClose}
+              onClick={requestClose}
+              disabled={conversionPending}
               className="rounded-md p-1.5 hover:bg-btn-hover transition-colors"
               aria-label="Close source dialog"
             >
@@ -552,6 +650,14 @@ export default function OpenSourceDialog({
               >
                 <Cpu className="w-4 h-4" />
                 Stalker
+              </button>
+              <button
+                type="button"
+                onClick={() => switchMode("dispatcharr")}
+                className={tabClass("dispatcharr")}
+              >
+                <Network className="w-4 h-4" />
+                Dispatcharr
               </button>
             </div>
 
@@ -643,6 +749,116 @@ export default function OpenSourceDialog({
                   </button>
                 </div>
               </div>
+            ) : mode === "dispatcharr" ? (
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <label
+                    htmlFor="open-source-dispatcharr-server"
+                    className="text-[12px] font-medium text-text-secondary"
+                  >
+                    Dispatcharr Server
+                  </label>
+                  <input
+                    id="open-source-dispatcharr-server"
+                    type="text"
+                    autoFocus
+                    value={dispatcharrServer}
+                    onChange={(event) => handleDispatcharrServerChange(event.target.value)}
+                    placeholder="http://dispatcharr.local:9191"
+                    className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[14px] text-text-primary placeholder:text-text-muted focus:border-blue-500 focus:outline-none"
+                  />
+                  {dispatcharrServerAutofilled && (
+                    <p className="text-[11px] text-text-tertiary">From pasted stream URL</p>
+                  )}
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[12px] font-medium text-text-secondary">Sign in with</span>
+                  <div className="inline-flex rounded-md bg-btn p-0.5" role="radiogroup">
+                    {(
+                      [
+                        ["apiKey", "API key"],
+                        ["login", "Username"],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        role="radio"
+                        aria-checked={dispatcharrAuthMode === value}
+                        onClick={() => {
+                          setDispatcharrAuthMode(value);
+                          setLocalError(null);
+                        }}
+                        className={`rounded px-2.5 py-1 text-[12px] transition-colors ${
+                          dispatcharrAuthMode === value
+                            ? "bg-blue-600 text-white"
+                            : "text-text-secondary hover:text-text-primary"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {dispatcharrAuthMode === "apiKey" ? (
+                  <PasswordField
+                    id="open-source-dispatcharr-api-key"
+                    aria-label="API key"
+                    value={dispatcharrApiKey}
+                    onChange={(event) => setDispatcharrApiKey(event.target.value)}
+                    className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[14px] text-text-primary placeholder:text-text-muted focus:border-blue-500 focus:outline-none"
+                  />
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <label
+                        htmlFor="open-source-dispatcharr-username"
+                        className="text-[12px] font-medium text-text-secondary"
+                      >
+                        Username
+                      </label>
+                      <input
+                        id="open-source-dispatcharr-username"
+                        type="text"
+                        value={dispatcharrUsername}
+                        onChange={(event) => setDispatcharrUsername(event.target.value)}
+                        className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[14px] text-text-primary placeholder:text-text-muted focus:border-blue-500 focus:outline-none"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label
+                        htmlFor="open-source-dispatcharr-password"
+                        className="text-[12px] font-medium text-text-secondary"
+                      >
+                        Password
+                      </label>
+                      <PasswordField
+                        id="open-source-dispatcharr-password"
+                        value={dispatcharrPassword}
+                        onChange={(event) => setDispatcharrPassword(event.target.value)}
+                        className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[14px] text-text-primary placeholder:text-text-muted focus:border-blue-500 focus:outline-none"
+                      />
+                    </div>
+                  </>
+                )}
+                {convertSaved ? (
+                  <p className="text-[12px] text-text-secondary">
+                    Replaces the saved playlist "{convertSaved.name}".
+                  </p>
+                ) : (
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={dispatcharrRemember}
+                      onChange={(event) => setDispatcharrRemember(event.target.checked)}
+                      className="rounded border-border-app accent-blue-600"
+                    />
+                    <span className="text-[12px] text-text-secondary">
+                      Save credentials in recents
+                    </span>
+                  </label>
+                )}
+              </div>
             ) : (
               <div className="space-y-3">
                 <div className="space-y-2">
@@ -686,8 +902,9 @@ export default function OpenSourceDialog({
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
                 type="button"
-                onClick={handleClose}
-                className="rounded-md bg-btn px-3 py-2 text-[13px] text-text-primary hover:bg-btn-hover transition-colors"
+                onClick={requestClose}
+                disabled={conversionPending}
+                className="rounded-md bg-btn px-3 py-2 text-[13px] text-text-primary hover:bg-btn-hover transition-colors disabled:opacity-50"
               >
                 Cancel
               </button>

@@ -1,3 +1,4 @@
+import { normalizeDispatcharrServer } from "./dispatcharr";
 import type {
   CurrentSourceDescriptor,
   RenameSourceDescriptor,
@@ -65,6 +66,8 @@ export function savedPlaylistSecondaryLabel(entry: SavedPlaylistEntry): string {
       const primary = entry.preferred_server ?? entry.servers[0] ?? "Xtream";
       return `Xtream - ${primary} (${entry.username})`;
     }
+    case "dispatcharr":
+      return `Dispatcharr - ${entry.server}`;
   }
 }
 
@@ -110,6 +113,24 @@ export function findSavedPlaylistForCurrentSource(
       ) ?? null
     );
   }
+  if (descriptor.kind === "dispatcharr") {
+    const targetServer = normalizeDispatcharrServer(descriptor.server);
+    if (!targetServer) return null;
+    // The account is the API key when there is one, otherwise the login.
+    const account = (source: { api_key?: string | null; username?: string | null }) => {
+      const key = source.api_key?.trim();
+      return key ? `key:${key}` : `user:${source.username?.trim() ?? ""}`;
+    };
+    const targetAccount = account(descriptor);
+    return (
+      savedPlaylists.find(
+        (entry) =>
+          entry.kind === "dispatcharr" &&
+          normalizeDispatcharrServer(entry.server) === targetServer &&
+          account(entry) === targetAccount,
+      ) ?? null
+    );
+  }
   return null;
 }
 
@@ -149,6 +170,16 @@ export function buildSavedPlaylistDraftFromSource(
         username: descriptor.username,
         password: descriptor.password,
       };
+    case "dispatcharr":
+      return {
+        id: existingId ?? undefined,
+        kind: "dispatcharr",
+        display_name: displayName,
+        server: descriptor.server,
+        username: descriptor.username ?? null,
+        password: descriptor.password ?? null,
+        api_key: descriptor.api_key ?? null,
+      };
   }
 }
 
@@ -178,6 +209,17 @@ export function savedEntryToSourceDescriptor(
         password: entry.password,
       };
     }
+    case "dispatcharr":
+      if (!entry.api_key && !(entry.username && entry.password)) {
+        return null;
+      }
+      return {
+        kind: "dispatcharr",
+        server: entry.server,
+        username: entry.username,
+        password: entry.password,
+        api_key: entry.api_key,
+      };
   }
 }
 
@@ -197,6 +239,13 @@ export function buildRenameDescriptor(
         kind: "xtream",
         server: descriptor.server,
         username: descriptor.username,
+      };
+    case "dispatcharr":
+      return {
+        kind: "dispatcharr",
+        server: descriptor.server,
+        username: descriptor.username ?? null,
+        api_key: descriptor.api_key ?? null,
       };
     case "saved":
     case "stalker":

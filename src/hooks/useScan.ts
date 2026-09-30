@@ -107,6 +107,19 @@ export function useScan() {
   /** Set immediately on cancel click; suppresses incoming results during drain. */
   const cancelling = useRef(false);
 
+  // Rows can also change outside a scan (streams linked from Find streams);
+  // follow the store so the next scan starts from them.
+  useEffect(
+    () =>
+      useAppStore.subscribe((state) => {
+        if (state.flatResults === flatResultsRef.current) return;
+        flatResultsRef.current = state.flatResults;
+        resultPositionsRef.current = state.resultPositions;
+        uiMetricsRef.current = state.uiMetrics;
+      }),
+    [],
+  );
+
   // Reset backend scan state on mount (handles app restart with stale flag)
   useEffect(() => {
     resetScan().catch(() => {});
@@ -153,6 +166,13 @@ export function useScan() {
     }
     rafId.current = null;
   }, [commitCollections]);
+
+  const flushPendingResults = useCallback(() => {
+    if (rafId.current !== null) {
+      cancelAnimationFrame(rafId.current);
+    }
+    flushResults();
+  }, [flushResults]);
 
   const queueResults = useCallback(
     (incoming: ChannelResult[]) => {
@@ -306,6 +326,9 @@ export function useScan() {
             return;
           }
           logger.debug("[useScan] scan://complete received", event.payload);
+          // Results are batched per animation frame; land the last batch
+          // first so "complete" always means every result is in the store.
+          flushPendingResults();
           getStore().applyScanRuntime({
             summary: event.payload.payload,
             scanState: "complete",
@@ -320,6 +343,7 @@ export function useScan() {
             return;
           }
           logger.debug("[useScan] scan://cancelled received", event.payload);
+          flushPendingResults();
           cancelling.current = false;
           getStore().applyScanRuntime({
             summary: event.payload.payload,
@@ -388,6 +412,11 @@ export function useScan() {
             getStore().applyScanRuntime({ networkPaused: false });
           }
         }),
+        listen<ScanEvent<string[]>>("scan://accounts-busy", (event) => {
+          if (isRunScopedEventForActiveRun(activeRunId.current, event.payload.run_id)) {
+            getStore().applyScanRuntime({ busyAccounts: event.payload.payload });
+          }
+        }),
       ]);
 
       if (cancelled) {
@@ -412,7 +441,14 @@ export function useScan() {
         cancelAnimationFrame(rafId.current);
       }
     };
-  }, [queueResult, queueResults, applyScanError, recordCompletions, handleProgressUpdate]);
+  }, [
+    queueResult,
+    queueResults,
+    applyScanError,
+    recordCompletions,
+    handleProgressUpdate,
+    flushPendingResults,
+  ]);
 
   const start = useCallback(
     async (config: ScanConfig, totalChannels: number, selectedIndices: number[] = []) => {
@@ -444,6 +480,7 @@ export function useScan() {
         telemetry: EMPTY_TELEMETRY,
         screenshotsPaused: false,
         networkPaused: false,
+        busyAccounts: [],
       });
       pendingResults.current = [];
       eventCount.current = 0;
@@ -568,6 +605,7 @@ export function useScan() {
         telemetry: EMPTY_TELEMETRY,
         screenshotsPaused: false,
         networkPaused: false,
+        busyAccounts: [],
       });
       pendingResults.current = [];
       eventCount.current = 0;

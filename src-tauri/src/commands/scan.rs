@@ -1,11 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
+use futures::stream::{self, StreamExt};
 use tauri::{AppHandle, Emitter, Manager, Window};
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 use crate::commands::history;
@@ -94,16 +95,35 @@ impl SharedUrlResult {
 }
 
 /// Per-URL memo of check results, so channels that share a stream URL are only
-/// fetched once. The `OnceCell` lets the second waiter block on the first
-/// worker's result instead of racing it.
-type SharedUrlResultCache = Arc<
-    tokio::sync::Mutex<
-        HashMap<
-            String,
-            Arc<tokio::sync::OnceCell<Result<(SharedUrlResult, WorkerTiming), AppError>>>,
-        >,
-    >,
->;
+/// fetched once.
+type SharedUrlResultCache = Arc<tokio::sync::Mutex<HashMap<String, Arc<SharedUrlProbe>>>>;
+
+/// One probe shared by the rows with the same URL. The row that registered it
+/// (the owner) probes first; the others wait until the owner is done, then
+/// take its result, or probe themselves if it stopped before probing. So a
+/// waiting row never needs the scan slot its owner holds.
+struct SharedUrlProbe {
+    cell: tokio::sync::OnceCell<Result<(SharedUrlResult, WorkerTiming), AppError>>,
+    owner_done: tokio::sync::watch::Sender<bool>,
+}
+
+impl SharedUrlProbe {
+    fn new() -> Self {
+        Self {
+            cell: tokio::sync::OnceCell::new(),
+            owner_done: tokio::sync::watch::channel(false).0,
+        }
+    }
+}
+
+/// Marks the owner done when dropped, however its task ends.
+struct SharedUrlOwner(Arc<SharedUrlProbe>);
+
+impl Drop for SharedUrlOwner {
+    fn drop(&mut self) {
+        self.0.owner_done.send_replace(true);
+    }
+}
 
 fn set_screenshot_capture_success(shared: &mut SharedUrlResult, path: String) {
     shared.screenshot_path = Some(path);
@@ -733,6 +753,171 @@ async fn cancel_scan_token(state: &AppState, scan_scope: &str) {
         cancel.cancel();
     }
     pause_notify.notify_waiters();
+}
+
+/// Permits for a probe against a connection-limited provider account: the
+/// account's slot first, then a scan slot. Waiting for a busy account holds
+/// no scan slot, so other providers keep scanning meanwhile.
+async fn acquire_account_then_scan(
+    account: &Arc<Semaphore>,
+    scan: &Arc<Semaphore>,
+    cancel: &CancellationToken,
+) -> Result<(OwnedSemaphorePermit, OwnedSemaphorePermit), AppError> {
+    let account_permit = tokio::select! {
+        permit = Arc::clone(account).acquire_owned() => permit.map_err(|_| AppError::Cancelled)?,
+        _ = cancel.cancelled() => return Err(AppError::Cancelled),
+    };
+    let scan_permit = tokio::select! {
+        permit = Arc::clone(scan).acquire_owned() => permit.map_err(|_| AppError::Cancelled)?,
+        _ = cancel.cancelled() => return Err(AppError::Cancelled),
+    };
+    Ok((account_permit, scan_permit))
+}
+
+/// How often a row waiting on an account Dispatcharr's viewers fill checks
+/// again.
+const BUSY_ACCOUNT_RECHECK: Duration = Duration::from_secs(5);
+/// Probes of a row retried because a viewer held its account.
+const BUSY_ACCOUNT_RETRIES: usize = 3;
+
+/// Accounts whose rows wait for Dispatcharr's viewers to free a connection,
+/// reported as `scan://accounts-busy`.
+struct BusyAccounts {
+    app: AppHandle,
+    run_id: String,
+    names: std::sync::Mutex<std::collections::BTreeSet<String>>,
+}
+
+impl BusyAccounts {
+    fn set(&self, account: &str, busy: bool) {
+        let Ok(mut names) = self.names.lock() else {
+            return;
+        };
+        let changed = if busy {
+            names.insert(account.to_string())
+        } else {
+            names.remove(account)
+        };
+        if changed {
+            let _ = self.app.emit(
+                "scan://accounts-busy",
+                ScanEvent {
+                    run_id: self.run_id.clone(),
+                    payload: names.iter().cloned().collect::<Vec<_>>(),
+                },
+            );
+        }
+    }
+}
+
+/// Rows queued per provider account, relative to the account's own
+/// connection limit: enough to keep its probes busy, never enough to crowd
+/// out other accounts.
+const ACCOUNT_QUEUE_FACTOR: usize = 2;
+
+struct AccountLane {
+    rows: VecDeque<Channel>,
+    queue_slots: Arc<Semaphore>,
+}
+
+/// Dispatch order for a scan. Rows of connection-limited provider accounts
+/// (Dispatcharr M3U accounts) sit in per-account lanes with a bounded queue
+/// each; the scheduler round-robins across lanes and only waits when every
+/// lane with rows left is full. One slow account therefore never blocks rows
+/// of other accounts. Playlists without account limits keep their order.
+struct DispatchQueue {
+    unlimited: VecDeque<Channel>,
+    lanes: Vec<AccountLane>,
+    cursor: usize,
+}
+
+impl DispatchQueue {
+    fn new(channels: Vec<Channel>) -> Self {
+        let mut unlimited = VecDeque::new();
+        let mut lanes = Vec::<AccountLane>::new();
+        // Account ids are only unique within one Dispatcharr server.
+        let mut lane_of = HashMap::<(String, i64), usize>::new();
+        for channel in channels {
+            match crate::engine::dispatcharr::dispatcharr_connection_limit(&channel.extinf_line) {
+                Some((account_id, limit)) => {
+                    let server =
+                        crate::engine::dispatcharr::dispatcharr_server(&channel.extinf_line);
+                    let lane = *lane_of.entry((server, account_id)).or_insert_with(|| {
+                        lanes.push(AccountLane {
+                            rows: VecDeque::new(),
+                            queue_slots: Arc::new(Semaphore::new(limit * ACCOUNT_QUEUE_FACTOR)),
+                        });
+                        lanes.len() - 1
+                    });
+                    lanes[lane].rows.push_back(channel);
+                }
+                None => unlimited.push_back(channel),
+            }
+        }
+        Self {
+            unlimited,
+            lanes,
+            cursor: 0,
+        }
+    }
+
+    /// The next row to dispatch, with its account queue slot when it belongs
+    /// to a limited account. The slot must live as long as the row's task.
+    async fn next(
+        &mut self,
+        cancel: &CancellationToken,
+    ) -> Option<(Channel, Option<OwnedSemaphorePermit>)> {
+        // Lane 0 is the unlimited rows, then one lane per account.
+        let lane_count = self.lanes.len() + 1;
+        for step in 0..lane_count {
+            let lane = (self.cursor + step) % lane_count;
+            if lane == 0 {
+                if let Some(channel) = self.unlimited.pop_front() {
+                    self.cursor = (lane + 1) % lane_count;
+                    return Some((channel, None));
+                }
+                continue;
+            }
+            let account = &mut self.lanes[lane - 1];
+            if account.rows.is_empty() {
+                continue;
+            }
+            if let Ok(slot) = Arc::clone(&account.queue_slots).try_acquire_owned() {
+                let channel = account.rows.pop_front()?;
+                self.cursor = (lane + 1) % lane_count;
+                return Some((channel, Some(slot)));
+            }
+        }
+        // Every lane with rows left is full: wait for any of them.
+        let waiting = self
+            .lanes
+            .iter()
+            .enumerate()
+            .filter(|(_, account)| !account.rows.is_empty())
+            .map(|(index, account)| {
+                let slots = Arc::clone(&account.queue_slots);
+                Box::pin(async move { (index, slots.acquire_owned().await) })
+            })
+            .collect::<Vec<_>>();
+        if waiting.is_empty() {
+            return None;
+        }
+        // The lane index is into `lanes`; lane 0 of the cursor is unlimited rows.
+        let ((lane, slot), _, _) = tokio::select! {
+            ready = futures::future::select_all(waiting) => ready,
+            _ = cancel.cancelled() => return None,
+        };
+        let slot = slot.ok()?;
+        let channel = self.lanes[lane].rows.pop_front()?;
+        self.cursor = (lane + 2) % lane_count;
+        Some((channel, Some(slot)))
+    }
+}
+
+async fn is_scan_paused(state: &AppState, scan_scope: &str) -> bool {
+    state
+        .with_window_scan_state(scan_scope, |scan_state| scan_state.paused)
+        .await
 }
 
 async fn wait_if_paused(state: &AppState, scan_scope: &str, cancel: &CancellationToken) -> bool {
@@ -2158,9 +2343,14 @@ async fn execute_scan_run(
 
     let preview = parse_playlist_with_cache(&app, &state, &config, &run_id).await?;
     let preview_single_provider = preview.single_provider;
+    // Viewer counts come through the session this source was loaded with.
+    let dispatcharr_connection = preview.dispatcharr_connection.clone();
     let mut channels = preview.channels.clone();
     filter_channels_by_selection(&mut channels, &config.selected_indices);
     filter_channels_by_content_type(&mut channels, config.hide_vod_content);
+    // A Dispatcharr channel's no-streams row has nothing to probe.
+    channels
+        .retain(|channel| !crate::engine::dispatcharr::is_empty_channel_row(&channel.extinf_line));
     let total = channels.len();
 
     if total == 0 {
@@ -2234,12 +2424,17 @@ async fn execute_scan_run(
     )
     .await?;
 
+    // Rows of connection-limited provider accounts (Dispatcharr) get the same
+    // one-connection treatment as a single-provider playlist, per row.
+    let has_account_limits = channels.iter().any(|channel| {
+        crate::engine::dispatcharr::dispatcharr_connection_limit(&channel.extinf_line).is_some()
+    });
     let client = Arc::new({
         let mut builder = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(5))
             .danger_accept_invalid_certs(config.accept_invalid_certs)
             .redirect(reqwest::redirect::Policy::none());
-        if single_provider {
+        if single_provider || has_account_limits {
             // Single-provider IPTV servers enforce connection limits.
             // Disable connection pooling so the checker's HTTP connection
             // is closed before the combined ffmpeg diagnostics connect.
@@ -2248,6 +2443,11 @@ async fn execute_scan_run(
         builder.build().unwrap_or_default()
     });
     let semaphore = Arc::new(Semaphore::new(config.concurrency as usize));
+    // Duplicates of a URL another row probes are dispatched against this
+    // bounded pool and take a scan slot only if they end up probing, so they
+    // never hold scan slots that probes need. Rows of limited provider
+    // accounts are bounded by their account's queue (see `DispatchQueue`).
+    let waiting_rows = Arc::new(Semaphore::new((config.concurrency as usize).max(1) * 4));
     let diagnostics_limit = if single_provider {
         1
     } else {
@@ -2302,7 +2502,13 @@ async fn execute_scan_run(
 
     let mut handles = Vec::new();
 
-    for channel in channels {
+    let busy_accounts = Arc::new(BusyAccounts {
+        app: app.clone(),
+        run_id: run_id.clone(),
+        names: std::sync::Mutex::new(Default::default()),
+    });
+    let mut dispatch_queue = DispatchQueue::new(channels);
+    while let Some((channel, account_queue_slot)) = dispatch_queue.next(&cancel_token).await {
         if cancel_token.is_cancelled() {
             break;
         }
@@ -2331,12 +2537,61 @@ async fn execute_scan_run(
         // Adaptive concurrency throttle — slow down dispatch when servers show pressure
         adaptive_throttle.before_dispatch(&app, &run_id).await;
 
-        let permit = semaphore.clone().acquire_owned().await;
-        let permit = match permit {
-            Ok(permit) => permit,
-            Err(_) => break,
+        let account_limit =
+            crate::engine::dispatcharr::dispatcharr_connection_limit(&channel.extinf_line);
+        let account_semaphore = account_limit.map(|(account_id, limit)| {
+            crate::engine::dispatcharr::account_connection_slots(
+                &channel.extinf_line,
+                account_id,
+                limit,
+            )
+        });
+        // Rows sharing a URL wait on one probe. Settle which row owns it
+        // before reserving capacity, so a waiting duplicate never holds the
+        // scan slot that probe needs.
+        let (result_cell, duplicate_url) = {
+            let mut cache = shared_url_results.lock().await;
+            // Rows share a probe only within one provider lane, so a row of an
+            // unlimited account never probes for one with a connection limit.
+            let lane = account_limit
+                .map(|(account_id, _)| {
+                    format!(
+                        "{}|{}",
+                        crate::engine::dispatcharr::dispatcharr_server(&channel.extinf_line),
+                        account_id
+                    )
+                })
+                .unwrap_or_default();
+            match cache.entry(format!(
+                "{}\n{}",
+                canonicalize_stream_url(&channel.url),
+                lane
+            )) {
+                std::collections::hash_map::Entry::Occupied(entry) => {
+                    (Arc::clone(entry.get()), true)
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => (
+                    Arc::clone(entry.insert(Arc::new(SharedUrlProbe::new()))),
+                    false,
+                ),
+            }
         };
-
+        // Account rows already hold their account's queue slot; duplicates
+        // wait in the shared waiting pool; everything else takes a scan slot.
+        let permit = match account_queue_slot {
+            Some(slot) => slot,
+            None => {
+                let dispatch_slots = if duplicate_url {
+                    &waiting_rows
+                } else {
+                    &semaphore
+                };
+                match Arc::clone(dispatch_slots).acquire_owned().await {
+                    Ok(permit) => permit,
+                    Err(_) => break,
+                }
+            }
+        };
         let tx = tx.clone();
         let checkpoint_tx = checkpoint_tx.clone();
         let cancel = cancel_token.clone();
@@ -2360,27 +2615,30 @@ async fn execute_scan_run(
         let task_app = app.clone();
         let state_for_perf = state.clone();
         let run_id_for_perf = run_id.clone();
-        let shared_url_results = Arc::clone(&shared_url_results);
+        let pause_scope = scan_scope.to_string();
         let diagnostics_semaphore = Arc::clone(&diagnostics_semaphore);
-        let single_connection_mode = single_provider;
+        // A limited provider account counts every connection, so its rows
+        // probe over one connection like a single-provider playlist.
+        let single_connection_mode = single_provider || account_limit.is_some();
         let disk_guard = disk_guard.clone();
         let consecutive_net_failures = Arc::clone(&consecutive_net_failures);
         let adaptive_throttle = adaptive_throttle.clone();
 
+        // Dispatcharr's viewers use the same provider connections.
+        let viewers = account_limit.and_then(|_| {
+            dispatcharr_connection
+                .as_deref()
+                .and_then(crate::engine::dispatcharr::account_viewers)
+        });
+        let account_label = crate::engine::dispatcharr::account_label(&channel.extinf_line);
+        let busy_accounts = Arc::clone(&busy_accounts);
+
+        let scan_semaphore = Arc::clone(&semaphore);
         let handle = tokio::spawn(async move {
-            let _permit = permit;
+            let _dispatch_permit = permit;
             if cancel.is_cancelled() {
                 return;
             }
-
-            let canonical_url = canonicalize_stream_url(&channel.url);
-            let result_cell = {
-                let mut cache = shared_url_results.lock().await;
-                cache
-                    .entry(canonical_url)
-                    .or_insert_with(|| Arc::new(tokio::sync::OnceCell::new()))
-                    .clone()
-            };
 
             let screenshot_file_name =
                 ffmpeg::build_screenshot_file_name(channel.index, &channel.name);
@@ -2414,18 +2672,118 @@ async fn execute_scan_run(
                 diagnostics_semaphore: &diagnostics_semaphore,
                 single_connection_mode,
             };
+            let owner = (!duplicate_url).then(|| SharedUrlOwner(Arc::clone(&result_cell)));
+            if duplicate_url {
+                let mut owner_done = result_cell.owner_done.subscribe();
+                tokio::select! {
+                    _ = owner_done.wait_for(|done| *done) => {}
+                    _ = cancel.cancelled() => return,
+                }
+            }
             let shared_result = result_cell
+                .cell
                 .get_or_init(|| async {
-                    compute_shared_url_result(
-                        &check_ctx,
-                        &channel.url,
-                        effective_skip_screenshots,
-                        screenshots_dir.as_ref(),
-                        &screenshot_file_name,
-                    )
-                    .await
+                    let mut busy_retries = 0;
+                    loop {
+                        let _probe_permits = match &account_semaphore {
+                            Some(account) => {
+                                // Rows queued for a busy account passed the
+                                // dispatch pause check long ago. Honour a
+                                // pause without holding the account's shared
+                                // slot, so a paused window never blocks
+                                // another scan of the same provider.
+                                let permits = loop {
+                                    if !wait_if_paused(&state_for_perf, &pause_scope, &cancel).await
+                                    {
+                                        return Err(AppError::Cancelled);
+                                    }
+                                    let permits = acquire_account_then_scan(
+                                        account,
+                                        &scan_semaphore,
+                                        &cancel,
+                                    )
+                                    .await?;
+                                    if is_scan_paused(&state_for_perf, &pause_scope).await {
+                                        continue;
+                                    }
+                                    // Viewers watching through Dispatcharr hold
+                                    // connections too. Wait, holding no slot,
+                                    // until the account has one free.
+                                    if let (Some(viewers), Some((account_id, limit))) =
+                                        (&viewers, account_limit)
+                                    {
+                                        let ours =
+                                            limit.saturating_sub(account.available_permits());
+                                        if ours + viewers.on_account(account_id, false).await
+                                            > limit
+                                        {
+                                            drop(permits);
+                                            busy_accounts.set(&account_label, true);
+                                            // Rows that backed off together come back
+                                            // at different times, so one takes a free
+                                            // connection instead of all retreating.
+                                            let stagger = Duration::from_millis(
+                                                (channel.index % 8) as u64 * 400,
+                                            );
+                                            tokio::select! {
+                                                _ = tokio::time::sleep(BUSY_ACCOUNT_RECHECK + stagger) => {}
+                                                _ = cancel.cancelled() => {
+                                                    return Err(AppError::Cancelled);
+                                                }
+                                            }
+                                            continue;
+                                        }
+                                        busy_accounts.set(&account_label, false);
+                                    }
+                                    break permits;
+                                };
+                                vec![permits.0, permits.1]
+                            }
+                            // A duplicate only probes when the owning row
+                            // stopped before probing; it holds no scan slot
+                            // yet.
+                            None if duplicate_url => vec![tokio::select! {
+                                permit = Arc::clone(&scan_semaphore).acquire_owned() => {
+                                    permit.map_err(|_| AppError::Cancelled)?
+                                }
+                                _ = cancel.cancelled() => return Err(AppError::Cancelled),
+                            }],
+                            None => Vec::new(),
+                        };
+                        let outcome = compute_shared_url_result(
+                            &check_ctx,
+                            &channel.url,
+                            effective_skip_screenshots,
+                            screenshots_dir.as_ref(),
+                            &screenshot_file_name,
+                        )
+                        .await;
+                        // A probe refused while a viewer holds the account
+                        // says nothing about the stream: probe again once a
+                        // connection is free.
+                        if let (
+                            Ok((shared, _)),
+                            Some(viewers),
+                            Some((account_id, limit)),
+                            Some(account),
+                        ) = (&outcome, &viewers, account_limit, &account_semaphore)
+                        {
+                            // Only when viewers filled the account: this probe's
+                            // own slot is still held, so it counts in `ours`.
+                            let ours = limit.saturating_sub(account.available_permits());
+                            if shared.status == ChannelStatus::Dead
+                                && busy_retries < BUSY_ACCOUNT_RETRIES
+                                && ours + viewers.on_account(account_id, true).await > limit
+                            {
+                                busy_retries += 1;
+                                continue;
+                            }
+                        }
+                        break outcome;
+                    }
                 })
                 .await;
+            drop(owner);
 
             let (mut shared, timing) = match shared_result {
                 Ok(value) => value.clone(),
@@ -2945,6 +3303,159 @@ pub async fn quick_check_channel(
     Ok(result)
 }
 
+/// One probed candidate, sent as `dispatcharr://probe-result`.
+#[derive(Clone, serde::Serialize)]
+struct CandidateProbeEvent {
+    request_id: String,
+    result: ChannelResult,
+}
+
+/// Probes that run at once when candidates come from unlimited accounts.
+const CANDIDATE_PROBE_CONCURRENCY: usize = 4;
+
+/// Probe Dispatcharr provider streams that are not loaded rows (candidates to
+/// link), with the full scan checks and each account's connection limit.
+/// Results arrive one by one as `dispatcharr://probe-result`. An account whose
+/// connections Dispatcharr's viewers hold is reported untested ("Account
+/// busy") instead of waiting. Cancel with `cancel_quick_check(request_id)`.
+#[tauri::command]
+pub async fn dispatcharr_probe_streams(
+    app: AppHandle,
+    request_id: String,
+    connection: String,
+    channels: Vec<Channel>,
+) -> Result<(), AppError> {
+    let state = app.state::<Arc<AppState>>();
+    let settings = state.settings.lock().await.clone();
+    let cancel = CancellationToken::new();
+    state
+        .register_quick_check(request_id.clone(), cancel.clone())
+        .await;
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .danger_accept_invalid_certs(settings.accept_invalid_certs)
+        .redirect(reqwest::redirect::Policy::none())
+        .pool_max_idle_per_host(0)
+        .build()
+        .unwrap_or_default();
+    let (ffmpeg_ok, ffprobe_ok) = ffmpeg::check_availability(&app).await;
+    let proxy_list = match (settings.test_geoblock, settings.proxy_file.as_deref()) {
+        (true, Some(file)) => proxy::load_proxy_list(file).ok(),
+        _ => None,
+    };
+    let diagnostics_semaphore = Arc::new(Semaphore::new(2));
+
+    stream::iter(channels)
+        .for_each_concurrent(CANDIDATE_PROBE_CONCURRENCY, |channel| {
+            let (app, cancel, client, proxy_list, diagnostics_semaphore, request_id, settings) = (
+                &app,
+                &cancel,
+                &client,
+                &proxy_list,
+                &diagnostics_semaphore,
+                &request_id,
+                &settings,
+            );
+            let connection = &connection;
+            async move {
+                let limit =
+                    crate::engine::dispatcharr::dispatcharr_connection_limit(&channel.extinf_line);
+                let viewers =
+                    limit.and_then(|_| crate::engine::dispatcharr::account_viewers(connection));
+                let busy = |channel: &Channel| {
+                    let mut result = build_channel_result(
+                        channel,
+                        &SharedUrlResult::dead(
+                            None,
+                            None,
+                            None,
+                            Some("Account busy".to_string()),
+                            ChannelDebugLog::default(),
+                        ),
+                    );
+                    result.status = ChannelStatus::Pending;
+                    result
+                };
+                let result = async {
+                    let _permit = match limit {
+                        Some((account_id, limit)) => {
+                            if let Some(viewers) = &viewers {
+                                if viewers.on_account(account_id, false).await >= limit {
+                                    return Ok(busy(&channel));
+                                }
+                            }
+                            let slots = crate::engine::dispatcharr::account_connection_slots(
+                                &channel.extinf_line,
+                                account_id,
+                                limit,
+                            );
+                            let permit = tokio::select! {
+                                permit = Arc::clone(&slots).acquire_owned() => {
+                                    permit.map_err(|_| AppError::Cancelled)?
+                                }
+                                _ = cancel.cancelled() => return Err(AppError::Cancelled),
+                            };
+                            // Probes and viewers together stay within the limit.
+                            if let Some(viewers) = &viewers {
+                                let ours = limit.saturating_sub(slots.available_permits());
+                                if ours + viewers.on_account(account_id, false).await > limit {
+                                    return Ok(busy(&channel));
+                                }
+                            }
+                            Some(permit)
+                        }
+                        None => None,
+                    };
+                    let ctx = SharedCheckContext {
+                        app,
+                        client,
+                        timeout: settings.timeout,
+                        retries: settings.retries,
+                        retry_backoff: settings.retry_backoff,
+                        extended_timeout: settings.extended_timeout,
+                        user_agent: &settings.user_agent,
+                        cancel,
+                        proxy_list,
+                        test_geoblock: settings.test_geoblock,
+                        ffmpeg_ok,
+                        ffprobe_ok,
+                        profile_bitrate_flag: settings.profile_bitrate,
+                        ffprobe_timeout_secs: settings.ffprobe_timeout_secs,
+                        ffmpeg_bitrate_timeout_secs: settings.ffmpeg_bitrate_timeout_secs,
+                        low_fps_threshold: settings.low_fps_threshold,
+                        screenshot_format: settings.screenshot_format,
+                        diagnostics_semaphore,
+                        single_connection_mode: limit.is_some(),
+                    };
+                    let (shared, _) =
+                        compute_shared_url_result(&ctx, &channel.url, true, None, "").await?;
+                    Ok::<_, AppError>(build_channel_result(&channel, &shared))
+                }
+                .await;
+                match result {
+                    Ok(result) => {
+                        let _ = app.emit(
+                            "dispatcharr://probe-result",
+                            CandidateProbeEvent {
+                                request_id: request_id.clone(),
+                                result,
+                            },
+                        );
+                    }
+                    Err(AppError::Cancelled) => {}
+                    Err(error) => log::warn!("[dispatcharr] candidate probe failed: {}", error),
+                }
+            }
+        })
+        .await;
+
+    state.unregister_quick_check(&request_id).await;
+    if cancel.is_cancelled() {
+        return Err(AppError::Cancelled);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn cancel_quick_check(app: AppHandle, request_id: String) {
     app.state::<Arc<AppState>>()
@@ -2955,6 +3466,102 @@ pub async fn cancel_quick_check(app: AppHandle, request_id: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn dispatch_row(index: usize, account: Option<(i64, usize)>) -> Channel {
+        Channel {
+            index,
+            playlist: "p".into(),
+            name: format!("row {}", index),
+            group: "g".into(),
+            language: None,
+            tvg_id: None,
+            tvg_name: None,
+            tvg_logo: None,
+            tvg_chno: None,
+            catchup: None,
+            catchup_days: None,
+            catchup_source: None,
+            url: format!("http://provider.example/{}.ts", index),
+            content_type: crate::models::channel::ContentType::Live,
+            extinf_line: match account {
+                Some((id, limit)) => format!(
+                    "#EXTINF:-1 x-dispatcharr-account-id=\"{}\" x-dispatcharr-max-streams=\"{}\",row",
+                    id, limit
+                ),
+                None => "#EXTINF:-1,row".into(),
+            },
+            metadata_lines: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_full_account_queue_does_not_block_other_rows() {
+        let cancel = CancellationToken::new();
+        // Account 1 allows one stream (queue of two); account 2 allows five.
+        let mut queue = DispatchQueue::new(vec![
+            dispatch_row(0, Some((1, 1))),
+            dispatch_row(1, Some((1, 1))),
+            dispatch_row(2, Some((1, 1))),
+            dispatch_row(3, Some((2, 5))),
+            dispatch_row(4, Some((2, 5))),
+            dispatch_row(5, None),
+        ]);
+        let mut held = Vec::new();
+        let mut order = Vec::new();
+        for _ in 0..5 {
+            let (channel, slot) = queue.next(&cancel).await.unwrap();
+            order.push(channel.index);
+            held.push(slot);
+        }
+        // Row 2 waits for account 1's queue; everything else went out.
+        assert_eq!(order, vec![5, 0, 3, 1, 4]);
+        let blocked =
+            tokio::time::timeout(std::time::Duration::from_millis(50), queue.next(&cancel));
+        assert!(blocked.await.is_err());
+        held.remove(1); // row 0 finishes
+        assert_eq!(queue.next(&cancel).await.unwrap().0.index, 2);
+        assert!(queue.next(&cancel).await.is_none());
+    }
+
+    #[test]
+    fn plain_playlists_keep_their_order() {
+        let order = futures::executor::block_on(async {
+            let cancel = CancellationToken::new();
+            let mut queue = DispatchQueue::new(vec![dispatch_row(0, None), dispatch_row(1, None)]);
+            let mut order = Vec::new();
+            while let Some((channel, _)) = queue.next(&cancel).await {
+                order.push(channel.index);
+            }
+            order
+        });
+        assert_eq!(order, vec![0, 1]);
+    }
+
+    #[tokio::test]
+    async fn waiting_on_a_busy_account_holds_no_scan_slot() {
+        let scan = Arc::new(Semaphore::new(1));
+        let account = Arc::new(Semaphore::new(1));
+        let busy = Arc::clone(&account).try_acquire_owned().unwrap();
+        let cancel = CancellationToken::new();
+
+        let waiter = {
+            let (scan, account, cancel) = (Arc::clone(&scan), Arc::clone(&account), cancel.clone());
+            tokio::spawn(async move {
+                acquire_account_then_scan(&account, &scan, &cancel)
+                    .await
+                    .is_ok()
+            })
+        };
+        tokio::task::yield_now().await;
+        // Another provider (or a duplicate-URL row) can use the scan slot
+        // while the waiter's account is busy.
+        let other = Arc::clone(&scan)
+            .try_acquire_owned()
+            .expect("scan slot free while the account is busy");
+        drop(other);
+        drop(busy);
+        assert!(waiter.await.unwrap());
+    }
     use tokio_util::sync::CancellationToken;
 
     fn make_result(

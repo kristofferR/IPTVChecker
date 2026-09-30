@@ -18,6 +18,7 @@ interface StartScreenProps {
   onOpenFolder: () => void;
   onOpenUrl: () => void;
   onOpenXtream: () => void;
+  onOpenDispatcharr: () => void;
   onManageSavedPlaylists: () => void;
   onOpenSaved: (id: string) => void;
   onOpenRecent: (entry: RecentPlaylistEntry) => void;
@@ -36,6 +37,7 @@ export function StartScreen({
   onOpenFolder,
   onOpenUrl,
   onOpenXtream,
+  onOpenDispatcharr,
   onManageSavedPlaylists,
   onOpenSaved,
   onOpenRecent,
@@ -155,6 +157,13 @@ export function StartScreen({
                   type="button"
                 >
                   Add Xtream
+                </button>
+                <button
+                  onClick={onOpenDispatcharr}
+                  className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
+                  type="button"
+                >
+                  Add Dispatcharr
                 </button>
               </div>
             </div>

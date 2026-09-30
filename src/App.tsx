@@ -24,6 +24,7 @@ import { AppBanners } from "./components/AppBanners";
 import { ArchiveVerifyBar } from "./components/ArchiveVerifyBar";
 import type { CastStartHandler } from "./components/CastMenu";
 import { ChannelTable } from "./components/ChannelTable";
+import { DispatcharrFindPanel } from "./components/DispatcharrFindPanel";
 import { FilterBar } from "./components/FilterBar";
 import { GuideView } from "./components/GuideView";
 import { PlaylistReportPanel } from "./components/PlaylistReportPanel";
@@ -33,6 +34,7 @@ import { StatsPanel } from "./components/StatsPanel";
 import { ThumbnailPanel } from "./components/ThumbnailPanel";
 import { Toolbar } from "./components/Toolbar";
 import { type UseChromecastResult, useChromecast } from "./hooks/useChromecast";
+import { useDispatcharrStatsPush } from "./hooks/useDispatcharrStatsPush";
 import { useMenuEventBridge } from "./hooks/useMenuEventBridge";
 import { usePlaylistSources } from "./hooks/usePlaylistSources";
 import { useScan } from "./hooks/useScan";
@@ -44,6 +46,12 @@ import { cancelArchiveProbes } from "./lib/archiveProbe";
 import { registerArchiveTimezoneResolver } from "./lib/archiveTimezone";
 import { isArchiveVerificationBlockingPlayback, verifyAllArchives } from "./lib/archiveVerifyRun";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
+import {
+  dispatcharrLinkedIndices,
+  expandDispatcharrSelection,
+  getDispatcharrView,
+  isDispatcharrPlaceholder,
+} from "./lib/dispatcharr";
 import {
   checkFfmpegAvailable,
   clearScanHistory,
@@ -160,6 +168,7 @@ function ScanPauseBanners() {
   const scanState = useAppStore((s) => s.scanState);
   const screenshotsPaused = useAppStore((s) => s.screenshotsPaused);
   const networkPaused = useAppStore((s) => s.networkPaused);
+  const busyAccounts = useAppStore((s) => s.busyAccounts);
 
   return (
     <>
@@ -174,6 +183,15 @@ function ScanPauseBanners() {
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <span className="flex-1">
             Scan paused — network connectivity lost. Waiting for recovery...
+          </span>
+        </div>
+      )}
+
+      {busyAccounts.length > 0 && isScanActive(scanState) && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-[13px]">
+          <span className="flex-1">
+            Waiting for {busyAccounts.join(", ")}: someone is watching through Dispatcharr, and the
+            provider allows no more connections.
           </span>
         </div>
       )}
@@ -541,6 +559,7 @@ export default function App() {
   const playIntentActive = useAppStore((s) => s.playIntentActive);
   const castActive = useAppStore((s) => s.castActive);
   const verifyCatchupScanStartedRef = useRef(false);
+  useDispatcharrStatsPush();
 
   // Opt-in "Scan + Verify Catch-up": run the verification pass once the scan
   // finishes; a cancelled or reset scan drops the request.
@@ -559,6 +578,7 @@ export default function App() {
   }, [verifyCatchupAfterScan, scanState, playIntentActive, castActive, playlist]);
   const sidebarWidth = useAppStore((s) => s.sidebarWidth);
   const showReportPanel = useAppStore((s) => s.showReportPanel);
+  const dispatcharrFind = useAppStore((s) => s.dispatcharrFind);
   const reportSidebarWidth = useAppStore((s) => s.reportSidebarWidth);
   const showKeyboardShortcuts = useAppStore((s) => s.showKeyboardShortcuts);
   const isDragOver = useAppStore((s) => s.isDragOver);
@@ -675,6 +695,8 @@ export default function App() {
     openPlaylistUrlValue,
     openPlaylistXtreamValue,
     openPlaylistStalkerValue,
+    openPlaylistDispatcharrValue,
+    convertSavedPlaylistToDispatcharr,
     handleOpenSaved,
     handleOpenRecent,
     handleManageSavedPlaylists,
@@ -685,6 +707,7 @@ export default function App() {
     handlePreferSavedXtreamServer,
     ensureSourceFilterApplied,
     handleApplySourceFilter,
+    reloadCurrentSource,
     savedPlaylistsDialogOpen,
     setSavedPlaylistsDialogOpen,
     savedPlaylistEditorDraft,
@@ -806,6 +829,7 @@ export default function App() {
       initialUrl: "",
       initialXtream: null,
       initialStalker: null,
+      initialDispatcharr: null,
     });
   }, [openSourceDialog]);
 
@@ -815,6 +839,17 @@ export default function App() {
       initialUrl: "",
       initialXtream: null,
       initialStalker: null,
+      initialDispatcharr: null,
+    });
+  }, [openSourceDialog]);
+
+  const handleOpenDispatcharr = useCallback(() => {
+    openSourceDialog({
+      mode: "dispatcharr",
+      initialUrl: "",
+      initialXtream: null,
+      initialStalker: null,
+      initialDispatcharr: null,
     });
   }, [openSourceDialog]);
 
@@ -983,6 +1018,30 @@ export default function App() {
     return () => window.removeEventListener("contextmenu", handler);
   }, []);
 
+  /** Playback holds a connection a limited Dispatcharr account allows; a
+   *  scan would take another. Says so and returns true in that case. */
+  const playbackHoldsProvider = useCallback(() => {
+    const state = getStore();
+    if (!state.playlist?.dispatcharr_limited_accounts) return false;
+    // The app cannot see an external player close; ask, as catch-up does.
+    if (
+      state.externalPlaybackActive &&
+      !state.playIntentActive &&
+      !state.castActive &&
+      window.confirm("Close the external player before scanning. Continue?")
+    ) {
+      state.setExternalPlaybackActive(false);
+      return false;
+    }
+    if (!(state.playIntentActive || state.castActive || state.externalPlaybackActive)) {
+      return false;
+    }
+    state.setScanInputError(
+      "Stop playback first: the provider allows only so many connections at once.",
+    );
+    return true;
+  }, []);
+
   const startScanWithSelection = useCallback(
     async (selection: number[], verifyCatchup = false) => {
       const state = getStore();
@@ -991,6 +1050,13 @@ export default function App() {
         state.archiveGuideTestRunning ||
         Object.values(state.archiveProbes).some((entry) => entry.running)
       ) {
+        return false;
+      }
+      if (playbackHoldsProvider()) return false;
+      // A scan snapshots the stream order; one still being written would
+      // change underneath it.
+      if (Object.values(state.dispatcharrRowStates).some((row) => row?.kind === "writing")) {
+        state.setScanInputError("Wait for the Dispatcharr changes to finish saving.");
         return false;
       }
       const currentChannelSearchError = validateSourceFilterPattern(state.channelSearch);
@@ -1022,7 +1088,31 @@ export default function App() {
       const currentChannelSearch = normalizeSourceFilter(refreshedState.channelSearch);
       const currentGroupFilter = refreshedState.groupFilter;
       const currentSettings = refreshedState.settings;
-      const effectiveSelection = applyResult.reapplied ? [] : selection;
+      const explicitSelection = applyResult.reapplied ? [] : selection;
+      // Scans of a Dispatcharr source skip streams unlinked this session.
+      const linked = dispatcharrLinkedIndices(
+        refreshedState.flatResults,
+        refreshedState.dispatcharrOrders,
+      );
+      const linkedSet = linked ? new Set(linked) : null;
+      const effectiveSelection =
+        explicitSelection.length > 0
+          ? linkedSet
+            ? explicitSelection.filter((index) => linkedSet.has(index))
+            : explicitSelection
+          : (linked ?? []);
+      if (linked && linked.length === 0 && explicitSelection.length === 0) {
+        // Only streams linked from Find streams are left; the source has no
+        // row to scan them from until it is reloaded.
+        getStore().setMenuInfo("Reload the source to scan streams linked from Find streams.");
+        return false;
+      }
+      if (explicitSelection.length > 0 && effectiveSelection.length === 0) {
+        // Everything selected was unlinked; an empty selection must not
+        // widen into a scan of the whole playlist.
+        getStore().setMenuInfo("The selected streams were removed from their channels.");
+        return false;
+      }
 
       if (!currentPlaylist) return false;
 
@@ -1057,6 +1147,8 @@ export default function App() {
         },
       };
 
+      // Playback may have started while the steps above awaited.
+      if (playbackHoldsProvider()) return false;
       verifyCatchupScanStartedRef.current = verifyCatchup;
       refreshedState.setVerifyCatchupAfterScan(verifyCatchup);
       await start(config, currentPlaylist.total_channels, effectiveSelection);
@@ -1264,7 +1356,16 @@ export default function App() {
 
   const handleOpenExternal = useCallback(
     async (result: ChannelResult) => {
+      if (isDispatcharrPlaceholder(result)) return;
       if (blockPlaybackDuringArchiveVerification()) return;
+      // An external player opens its own provider connection, which a
+      // running scan of a connection-limited source may already hold.
+      if (isScanActive(getStore().scanState) && isSingleConnectionPlaylist(getStore().playlist)) {
+        getStore().setPlaybackError(
+          "Stop the scan first: the provider allows only so many connections at once.",
+        );
+        return;
+      }
       try {
         if (isSingleConnectionPlaylist(getStore().playlist)) {
           handleStopPlayer();
@@ -1291,9 +1392,16 @@ export default function App() {
   const handlePlayInApp = useCallback(
     (result: ChannelResult) => {
       getStore().setSelectedChannel(result);
-      getStore().setSelectedChannelIndices([result.index]);
+      // A Dispatcharr channel stands for all of its streams (Guide playback).
+      getStore().setSelectedChannelIndices(
+        expandDispatcharrSelection(
+          getDispatcharrView(getStore().flatResults, getStore().dispatcharrOrders),
+          [result.index],
+        ),
+      );
       getStore().setSidebarHidden(false);
       pendingArchivePlaybackRef.current = null;
+      if (isDispatcharrPlaceholder(result)) return;
       if (isScanActive(getStore().scanState) && isSingleConnectionPlaylist(getStore().playlist)) {
         pendingArchivePlaybackRef.current = null;
         getStore().setPendingPlaybackChannel(result);
@@ -1372,7 +1480,12 @@ export default function App() {
   const handleGuidePlayArchive = useCallback(
     (result: ChannelResult, options: ArchivePlayOptions) => {
       getStore().setSelectedChannel(result);
-      getStore().setSelectedChannelIndices([result.index]);
+      getStore().setSelectedChannelIndices(
+        expandDispatcharrSelection(
+          getDispatcharrView(getStore().flatResults, getStore().dispatcharrOrders),
+          [result.index],
+        ),
+      );
       getStore().setSidebarHidden(false);
       const state = getStore();
       const singleConnection = isSingleConnectionPlaylist(state.playlist);
@@ -1680,6 +1793,7 @@ export default function App() {
             onOpenFolder={handleOpenFolder}
             onOpenUrl={handleOpenUrl}
             onOpenXtream={handleOpenXtream}
+            onOpenDispatcharr={handleOpenDispatcharr}
             onSavePlaylist={handleSaveCurrentPlaylist}
             onManageSavedPlaylists={handleManageSavedPlaylists}
             onStartScan={handleStartScan}
@@ -1708,7 +1822,11 @@ export default function App() {
         )}
         <ScanPauseBanners />
 
-        <AppBanners onInstallUpdate={installUpdate} />
+        <AppBanners
+          onInstallUpdate={installUpdate}
+          onScanRows={handleScanSelected}
+          onReloadSource={reloadCurrentSource}
+        />
 
         <div className="flex flex-col flex-1 min-h-0">
           <div className="flex flex-1 min-h-0 bg-content">
@@ -1754,6 +1872,7 @@ export default function App() {
                   onOpenFolder={handleOpenFolder}
                   onOpenUrl={handleOpenUrl}
                   onOpenXtream={handleOpenXtream}
+                  onOpenDispatcharr={handleOpenDispatcharr}
                   onManageSavedPlaylists={handleManageSavedPlaylists}
                   onOpenSaved={handleOpenSaved}
                   onOpenRecent={handleOpenRecent}
@@ -1762,13 +1881,18 @@ export default function App() {
               )}
             </div>
 
-            {playlist && showReportPanel && (
-              <PlaylistReportPanel
-                placement="right"
-                widthPx={reportSidebarWidth}
-                onResizeStart={handleReportSidebarDragStart}
-                onClose={handleCloseReport}
-              />
+            {playlist && dispatcharrFind ? (
+              <DispatcharrFindPanel />
+            ) : (
+              playlist &&
+              showReportPanel && (
+                <PlaylistReportPanel
+                  placement="right"
+                  widthPx={reportSidebarWidth}
+                  onResizeStart={handleReportSidebarDragStart}
+                  onClose={handleCloseReport}
+                />
+              )
             )}
           </div>
 
@@ -1785,9 +1909,17 @@ export default function App() {
             initialUrl={openSourceDialogState.initialUrl}
             initialXtream={openSourceDialogState.initialXtream}
             initialStalker={openSourceDialogState.initialStalker}
+            initialDispatcharr={openSourceDialogState.initialDispatcharr}
             onOpenUrl={openPlaylistUrlValue}
             onOpenXtream={openPlaylistXtreamValue}
             onOpenStalker={openPlaylistStalkerValue}
+            convertSaved={openSourceDialogState.convertSaved ?? null}
+            onOpenDispatcharr={(source, rememberSecrets) => {
+              const convert = openSourceDialogState.convertSaved;
+              return convert
+                ? convertSavedPlaylistToDispatcharr(convert.id, source)
+                : openPlaylistDispatcharrValue(source, rememberSecrets);
+            }}
             onClose={() => getStore().setOpenSourceDialogState(null)}
           />
         </Suspense>

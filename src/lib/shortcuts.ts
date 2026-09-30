@@ -23,6 +23,19 @@ function resolveFocusedElement(target: EventTarget | null): Element | null {
   return null;
 }
 
+/** Window event the channel table answers by selecting every visible row. */
+export const SELECT_ALL_ROWS_EVENT = "app:select-all-rows";
+
+/** Edit > Select All: text fields keep their native select-all, anything
+ *  else selects every visible table row. */
+export function handleSelectAllCommand(): void {
+  if (isInputLikeTarget(document.activeElement)) {
+    document.execCommand("selectAll");
+    return;
+  }
+  window.dispatchEvent(new Event(SELECT_ALL_ROWS_EVENT));
+}
+
 export function isInputLikeTarget(target: EventTarget | null): boolean {
   const element = resolveFocusedElement(target);
   if (!(element instanceof HTMLElement)) {

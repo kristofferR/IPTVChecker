@@ -38,6 +38,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   show_header_button_text: defaultShowHeaderButtonText,
   external_player_path: null,
   persistent_xtream_connection_notice: false,
+  dispatcharr_write_stats: true,
+  dispatcharr_rank_order: ["resolution", "frame_rate", "bitrate", "latency"],
+  dispatcharr_dead_streams: "unlink",
   automatic_update_checks: true,
 };
 

@@ -19,6 +19,11 @@ import {
   probeArchivePoint,
   verifyArchivePointResponse,
 } from "../lib/archiveProbe";
+import {
+  expandDispatcharrSelection,
+  filterDispatcharrPrimaries,
+  getDispatcharrView,
+} from "../lib/dispatcharr";
 import { fetchGuideProgrammes } from "../lib/epgLoader";
 import { filterResultsShared } from "../lib/filters";
 import {
@@ -208,8 +213,15 @@ const GuideRow = memo(function GuideRow({
           type="button"
           className="guide-channel-button flex h-full w-full items-center gap-1.5 px-2 text-left"
           onClick={() => {
-            useAppStore.getState().setSelectedChannel(result);
-            useAppStore.getState().setSelectedChannelIndices([result.index]);
+            const state = useAppStore.getState();
+            state.setSelectedChannel(result);
+            // A Dispatcharr channel row stands for all of its streams.
+            state.setSelectedChannelIndices(
+              expandDispatcharrSelection(
+                getDispatcharrView(state.flatResults, state.dispatcharrOrders),
+                [result.index],
+              ),
+            );
           }}
           onDoubleClick={() => onPlayLive(result)}
           onKeyDown={(event) => {
@@ -290,6 +302,7 @@ export function GuideView({
   headerPortalRef?: RefObject<HTMLDivElement | null>;
 }) {
   const flatResults = useAppStore((s) => s.flatResults);
+  const dispatcharrOrders = useAppStore((s) => s.dispatcharrOrders);
   const playlist = useAppStore((s) => s.playlist);
   const search = useAppStore((s) => s.search);
   const groupFilter = useAppStore((s) => s.groupFilter);
@@ -320,27 +333,39 @@ export function GuideView({
   }, []);
 
   // Every live channel that matches the toolbar filters; catch-up is not required.
-  const channels = useMemo(
-    () =>
-      filterResultsShared(
-        flatResults,
-        search,
-        groupFilter,
-        statusFilter,
-        duplicateIndices,
-        separatePlaceholder,
-        archiveProbes,
-      ).filter((result) => result.content_type === "live"),
-    [
-      flatResults,
-      search,
-      groupFilter,
-      statusFilter,
-      duplicateIndices,
-      separatePlaceholder,
-      archiveProbes,
-    ],
-  );
+  // A Dispatcharr channel appears once, through its primary stream.
+  const channels = useMemo(() => {
+    const dispatcharrView = getDispatcharrView(flatResults, dispatcharrOrders);
+    const matching = dispatcharrView
+      ? filterDispatcharrPrimaries(
+          dispatcharrView,
+          search,
+          groupFilter,
+          statusFilter,
+          duplicateIndices,
+          separatePlaceholder,
+          archiveProbes,
+        )
+      : filterResultsShared(
+          flatResults,
+          search,
+          groupFilter,
+          statusFilter,
+          duplicateIndices,
+          separatePlaceholder,
+          archiveProbes,
+        );
+    return matching.filter((result) => result.content_type === "live");
+  }, [
+    dispatcharrOrders,
+    flatResults,
+    search,
+    groupFilter,
+    statusFilter,
+    duplicateIndices,
+    separatePlaceholder,
+    archiveProbes,
+  ]);
 
   const maxDepthDays = useMemo(() => {
     const deepest = channels.reduce(
@@ -368,16 +393,24 @@ export function GuideView({
   const [selectedProgramme, setSelection] = useState<GuideSelection | null>(null);
   const [openMenu, setMenu] = useState<ProgrammeMenuState | null>(null);
   // Catch-up metadata can arrive after selection, when the provider refreshes
-  // the playlist. Keep the programme but use the channel's current metadata.
+  // the playlist. Keep the programme but use the channel's current metadata;
+  // a Dispatcharr channel resolves to its current primary, which an edit can
+  // change.
+  const currentResult = useCallback(
+    (selected: ChannelResult) =>
+      getDispatcharrView(flatResults, dispatcharrOrders)?.byStreamIndex.get(selected.index)
+        ?.primary ??
+      flatResults.find((result) => result.index === selected.index) ??
+      selected,
+    [flatResults, dispatcharrOrders],
+  );
   const selection = useMemo(
     () =>
       selectedProgramme && {
         ...selectedProgramme,
-        result:
-          flatResults.find((result) => result.index === selectedProgramme.result.index) ??
-          selectedProgramme.result,
+        result: currentResult(selectedProgramme.result),
       },
-    [selectedProgramme, flatResults],
+    [selectedProgramme, currentResult],
   );
   const menu = useMemo(
     () =>
@@ -385,12 +418,10 @@ export function GuideView({
         ...openMenu,
         selection: {
           ...openMenu.selection,
-          result:
-            flatResults.find((result) => result.index === openMenu.selection.result.index) ??
-            openMenu.selection.result,
+          result: currentResult(openMenu.selection.result),
         },
       },
-    [openMenu, flatResults],
+    [openMenu, currentResult],
   );
   const [testOutcome, setTestOutcome] = useState<ArchiveProbeOutcome | null>(null);
   const [testing, setTesting] = useState(false);
