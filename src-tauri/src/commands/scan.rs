@@ -1758,26 +1758,30 @@ impl AdaptiveThrottle {
 }
 
 /// Disk-space guard for media capture (screenshots and sample clips). Every
-/// ~20 channels it re-checks free space on the media volume, evicting old
-/// cached runs (app cache only) when space is low and pausing capture (emitting
-/// `scan://screenshots-paused` once) when space is critical. Cloned into each
-/// worker task.
+/// 20 channels (every channel when capturing clips) it re-checks free space
+/// on the media volume, evicting old cached runs (app cache only) when space
+/// is low and pausing capture (emitting `scan://screenshots-paused` once) when
+/// space is critical. Cloned into each worker task.
 #[derive(Clone)]
 struct ScreenshotDiskGuard {
     paused: Arc<AtomicBool>,
     paused_emitted: Arc<AtomicBool>,
     check_counter: Arc<AtomicUsize>,
+    /// Channels between free-space checks. Screenshots are small, but a
+    /// clip can take hundreds of MB, so clip scans check every channel.
+    check_interval: usize,
     eviction_in_progress: Arc<AtomicBool>,
     using_custom_dir: bool,
     low_space_threshold_gb: f64,
 }
 
 impl ScreenshotDiskGuard {
-    fn new(using_custom_dir: bool, low_space_threshold_gb: f64) -> Self {
+    fn new(using_custom_dir: bool, low_space_threshold_gb: f64, captures_clips: bool) -> Self {
         Self {
             paused: Arc::new(AtomicBool::new(false)),
             paused_emitted: Arc::new(AtomicBool::new(false)),
             check_counter: Arc::new(AtomicUsize::new(0)),
+            check_interval: if captures_clips { 1 } else { 20 },
             eviction_in_progress: Arc::new(AtomicBool::new(false)),
             using_custom_dir,
             low_space_threshold_gb,
@@ -1798,7 +1802,7 @@ impl ScreenshotDiskGuard {
     }
 
     /// Decide whether this channel should skip media capture, re-checking
-    /// disk space periodically (every ~20 channels).
+    /// disk space every `check_interval` channels.
     fn effective_skip(
         &self,
         app: &AppHandle,
@@ -1810,7 +1814,7 @@ impl ScreenshotDiskGuard {
             return true;
         }
         let count = self.check_counter.fetch_add(1, Ordering::Relaxed);
-        if !count.is_multiple_of(20) {
+        if !count.is_multiple_of(self.check_interval) {
             return false;
         }
         let Some(dir) = screenshots_dir else {
@@ -2386,7 +2390,11 @@ async fn execute_scan_run(
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
     // Disk space tracking for screenshot pause
-    let disk_guard = ScreenshotDiskGuard::new(using_custom_screenshots_dir, low_space_threshold_gb);
+    let disk_guard = ScreenshotDiskGuard::new(
+        using_custom_screenshots_dir,
+        low_space_threshold_gb,
+        config.auto_capture_sample_clips,
+    );
 
     // Network connectivity tracking — consecutive network-level failures trigger a check
     let consecutive_net_failures = Arc::new(AtomicU32::new(0));
