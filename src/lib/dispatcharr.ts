@@ -111,13 +111,15 @@ export function addedStreamRow(
       break;
     }
   }
+  const marked = `${result.extinf_line.slice(0, cut)} ${ADDED_ATTR}="1"${result.extinf_line.slice(cut)}`;
   return {
     ...result,
     index,
     playlist: channel.primary.playlist,
     name: channel.name,
     group: channel.group,
-    extinf_line: `${result.extinf_line.slice(0, cut)} ${ADDED_ATTR}="1"${result.extinf_line.slice(cut)}`,
+    // Found streams come without the channel's group; exports read it here.
+    extinf_line: setAttribute(marked, "group-title", escapeAttribute(channel.group)),
   };
 }
 
@@ -634,6 +636,11 @@ export function dispatcharrLinkedIndices(
     channel.streams.filter((entry) => !entry.ref.added).map((entry) => entry.result.index),
   );
   return linked.length < results.length ? linked.sort((a, b) => a - b) : null;
+}
+
+/** An EXTINF attribute value with quotes and backslashes escaped. */
+function escapeAttribute(value: string): string {
+  return value.replace(/[\\"]/g, "\\$&");
 }
 
 function setAttribute(extinfLine: string, key: string, value: string): string {

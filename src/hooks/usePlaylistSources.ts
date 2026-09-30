@@ -280,6 +280,11 @@ export function usePlaylistSources({
         return false;
       }
 
+      // A fresh open reflects Dispatcharr's current orders, so session edits
+      // are moot; clear them before the new rows appear so no edit pairs
+      // new channel ids with the old source's orders.
+      if (mode === "freshOpen") getStore().resetDispatcharrEdits();
+
       const initStartedAt = performance.now();
       logger.info(`[App] Preparing scan cache for ${preview.channels.length} visible channels`);
       const initialized = await initFromPlaylist(preview.channels, shouldApply);
@@ -313,10 +318,8 @@ export function usePlaylistSources({
       state.setSelectedChannel(null);
       state.setSelectedChannelIndices([]);
       state.clearArchiveProbes();
-      // A fresh open reflects Dispatcharr's current orders, so session edits
-      // are moot. Re-applying a source filter can reuse the cached preview,
-      // whose orders predate the edits, so those keep them.
-      if (mode === "freshOpen") state.resetDispatcharrEdits();
+      // Re-applying a source filter keeps session edits (reset above for a
+      // fresh open): its cached preview predates them.
       state.setPendingPlaybackChannel(null);
 
       return true;

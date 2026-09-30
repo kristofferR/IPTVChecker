@@ -43,7 +43,6 @@ import {
   DISPATCHARR_STATUS_FILTERS,
   type DispatcharrStatusFilter,
   dispatcharrChannelRows,
-  expandDispatcharrSelection,
   filterDispatcharrPrimaries,
   getDispatcharrView,
   isDispatcharrPreview,
@@ -316,14 +315,9 @@ export const Toolbar = memo(function Toolbar({
     [dispatcharrView, completedResults],
   );
 
-  // A selected (collapsed) Dispatcharr channel exports all of its streams.
-  const exportSelectedIndices = useMemo(
-    () =>
-      dispatcharrView
-        ? expandDispatcharrSelection(dispatcharrView, selectedIndices)
-        : selectedIndices,
-    [dispatcharrView, selectedIndices],
-  );
+  // The table already expands a selected channel to its streams (and keeps a
+  // lone primary-stream selection to that stream).
+  const exportSelectedIndices = selectedIndices;
   const exportContextRef = useRef({
     all: exportAllResults,
     filtered: filteredExportResults,

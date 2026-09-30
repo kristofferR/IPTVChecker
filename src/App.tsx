@@ -1138,10 +1138,10 @@ export default function App() {
         },
       };
 
-      verifyCatchupScanStartedRef.current = verifyCatchup;
-      refreshedState.setVerifyCatchupAfterScan(verifyCatchup);
       // Playback may have started while the steps above awaited.
       if (playbackHoldsProvider()) return false;
+      verifyCatchupScanStartedRef.current = verifyCatchup;
+      refreshedState.setVerifyCatchupAfterScan(verifyCatchup);
       await start(config, currentPlaylist.total_channels, effectiveSelection);
       return true;
     },

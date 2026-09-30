@@ -424,10 +424,16 @@ describe("dispatcharr helpers", () => {
     const view = getDispatcharrView(results, {});
     const channel = view?.byChannelId.get(10);
     if (!channel) throw new Error("missing channel");
-    const found = makeResult(0, extinf(10, 7, 0, 1, "News One", "Feed 7"), "Feed 7");
+    const found = makeResult(
+      0,
+      extinf(10, 7, 0, 1, "News One", "Feed 7").replace('group-title="News"', 'group-title=""'),
+      "Feed 7",
+    );
     const added = addedStreamRow(found, channel, 5);
     expect(added.index).toBe(5);
     expect(parseDispatcharrIds(added.extinf_line)?.added).toBe(true);
+    // It carries the channel's group, which found streams arrive without.
+    expect(added.extinf_line).toContain('group-title="News"');
     // The marker lands before the title, even when the title holds a quote.
     const quoted = addedStreamRow(
       makeResult(0, extinf(10, 8, 0, 1, 'News "One"', "Feed 8"), 'News "One"'),

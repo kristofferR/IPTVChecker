@@ -73,6 +73,10 @@ async function writeOrders(
     const now = dispatcharrTarget(useAppStore.getState().playlist);
     return now?.connection === target?.connection && now?.sourceIdentity === target?.sourceIdentity;
   };
+  // A source loading replaces the rows the channel ids came from.
+  if (store.playlistLoading) {
+    return { applied: [], failed: changes.length };
+  }
   const fail = (change: OrderChange, error: string) =>
     store.setDispatcharrRowState(change.channelId, {
       kind: "failed",

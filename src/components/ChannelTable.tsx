@@ -1567,10 +1567,12 @@ export function ChannelTable({
 
   const scanRunning = isScanActive(scanState);
   const connected = useAppStore((s) => isDispatcharrPreview(s.playlist));
+  const playlistLoading = useAppStore((s) => s.playlistLoading);
   const dispatcharrActions = useMemo(
     () => ({
-      // Orders are judged on scan results, so edits wait for the scan.
-      disabled: scanRunning,
+      // Orders are judged on scan results, so edits wait for the scan (and
+      // for a source that is loading).
+      disabled: scanRunning || playlistLoading,
       canWrite: connected,
       onToggleExpand: toggleChannelExpanded,
       onFix: handleFixChannel,
@@ -1581,6 +1583,7 @@ export function ChannelTable({
     }),
     [
       scanRunning,
+      playlistLoading,
       connected,
       toggleChannelExpanded,
       handleFixChannel,
