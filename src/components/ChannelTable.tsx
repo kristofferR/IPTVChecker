@@ -19,6 +19,7 @@ import { getChannelErrorReason } from "../lib/channelResults";
 import { getChannelTableLayout } from "../lib/channelTableLayout";
 import {
   type DispatcharrChannelView,
+  type DispatcharrView,
   expandDispatcharrSelection,
   filterDispatcharrPrimaries,
   getDispatcharrView,
@@ -142,6 +143,20 @@ function keepMenuInViewport(
     x: Math.min(Math.max(x, padding), maxX),
     y: Math.min(Math.max(y, padding), maxY),
   };
+}
+
+/** Result indices a table selection stands for: a channel row stands for all
+ *  of its streams; a primary stream row (negative key) for just its stream. */
+function selectionIndices(view: DispatcharrView | null, keys: Iterable<number>): number[] {
+  const rows: number[] = [];
+  const streams: number[] = [];
+  for (const key of keys) {
+    if (key < 0) streams.push(-key - 1);
+    else rows.push(key);
+  }
+  return Array.from(new Set([...expandDispatcharrSelection(view, rows), ...streams])).sort(
+    (a, b) => a - b,
+  );
 }
 
 export function ChannelTable({
@@ -475,11 +490,17 @@ export function ChannelTable({
   selectedIndicesRef.current = selectedIndices;
   contextMenuOpenRef.current = contextMenuState !== null;
 
+  /** Selection key of a table row: its result index, except a Dispatcharr
+   *  channel's primary stream row, which shares the channel row's result and
+   *  is keyed apart so selecting it picks just that stream. */
+  const rowKey = useCallback((rowIndex: number, result: ChannelResult): number => {
+    const meta = rowMetaRef.current?.[rowIndex];
+    return meta?.kind === "stream" && meta.position === 0 ? -(result.index + 1) : result.index;
+  }, []);
+
   const emitSelection = useCallback(
     (next: Set<number>) => {
-      // A selected Dispatcharr channel stands for all of its streams, so
-      // "scan selected" checks every one of them.
-      onSelectionChange?.(expandDispatcharrSelection(dispatcharrViewRef.current, next));
+      onSelectionChange?.(selectionIndices(dispatcharrViewRef.current, next));
     },
     [onSelectionChange],
   );
@@ -629,16 +650,23 @@ export function ChannelTable({
 
   useEffect(() => {
     let visible: Set<number> | undefined;
-    const isVisible = (index: number) => {
-      visible ??= new Set(filteredResults.map((r) => r.index));
-      return visible.has(index);
+    const isVisible = (key: number) => {
+      visible ??= new Set(filteredResults.map((r, row) => rowKey(row, r)));
+      return visible.has(key);
     };
 
     // A selected Dispatcharr channel whose primary changed stays selected
-    // through its current row.
-    const retarget = (index: number): number | null => {
-      if (isVisible(index)) return index;
-      const channel = dispatcharrViewRef.current?.byStreamIndex.get(index);
+    // through its current row; a selected primary stream row that moved
+    // down its channel stays selected as that stream.
+    const retarget = (key: number): number | null => {
+      if (isVisible(key)) return key;
+      if (key < 0) {
+        const index = -key - 1;
+        return isVisible(index) && !dispatcharrViewRef.current?.byPrimaryIndex.has(index)
+          ? index
+          : null;
+      }
+      const channel = dispatcharrViewRef.current?.byStreamIndex.get(key);
       return channel && isVisible(channel.primary.index) ? channel.primary.index : null;
     };
 
@@ -655,7 +683,7 @@ export function ChannelTable({
     const next =
       filteredResults.length === 0 ? null : Math.min(previous ?? 0, filteredResults.length - 1);
     if (next !== previous) updateFocusedRow(next);
-  }, [filteredResults, updateFocusedRow, updateSelection]);
+  }, [filteredResults, updateFocusedRow, updateSelection, rowKey]);
 
   useEffect(() => {
     if (!contextMenuState) {
@@ -766,14 +794,15 @@ export function ChannelTable({
 
   const selectSingle = useCallback(
     (result: ChannelResult, rowIndex: number) => {
-      const next = new Set<number>([result.index]);
+      const key = rowKey(rowIndex, result);
+      const next = new Set<number>([key]);
       setSelectedIndices(next);
       emitSelection(next);
-      setSelectionAnchor(result.index);
+      setSelectionAnchor(key);
       updateFocusedRow(rowIndex);
       onSelectChannel(result);
     },
-    [emitSelection, onSelectChannel, updateFocusedRow],
+    [emitSelection, onSelectChannel, updateFocusedRow, rowKey],
   );
 
   const selectRange = useCallback(
@@ -783,7 +812,9 @@ export function ChannelTable({
         return;
       }
 
-      const anchorRow = filteredResults.findIndex((result) => result.index === selectionAnchor);
+      const anchorRow = filteredResults.findIndex(
+        (result, row) => rowKey(row, result) === selectionAnchor,
+      );
       if (anchorRow < 0) {
         selectSingle(clickedResult, clickedRow);
         return;
@@ -793,7 +824,7 @@ export function ChannelTable({
       const end = Math.max(anchorRow, clickedRow);
       const next = new Set<number>();
       for (let i = start; i <= end; i += 1) {
-        next.add(filteredResults[i].index);
+        next.add(rowKey(i, filteredResults[i]));
       }
 
       setSelectedIndices(next);
@@ -808,18 +839,19 @@ export function ChannelTable({
       emitSelection,
       onSelectChannel,
       updateFocusedRow,
+      rowKey,
     ],
   );
 
   const selectAllVisible = useCallback(() => {
     if (filteredResults.length === 0) return;
-    const next = new Set(filteredResults.map((result) => result.index));
+    const next = new Set(filteredResults.map((result, row) => rowKey(row, result)));
     setSelectedIndices(next);
     emitSelection(next);
-    setSelectionAnchor(filteredResults[0].index);
+    setSelectionAnchor(rowKey(0, filteredResults[0]));
     updateFocusedRow(0);
     onSelectChannel(filteredResults[0]);
-  }, [filteredResults, emitSelection, onSelectChannel, updateFocusedRow]);
+  }, [filteredResults, emitSelection, onSelectChannel, updateFocusedRow, rowKey]);
 
   const clearSelection = useCallback(() => {
     const next = new Set<number>();
@@ -937,17 +969,20 @@ export function ChannelTable({
       // All side effects (selection emit, playback/cast redirect, scroll) run
       // outside the focused-row state update — updaters must stay pure, and
       // StrictMode double-invocation here used to double-start playback.
-      const selectedRow = filteredResults.findIndex((result) => selectedIndices.has(result.index));
+      const selectedRow = filteredResults.findIndex((result, row) =>
+        selectedIndices.has(rowKey(row, result)),
+      );
       const current = focusedRowRef.current ?? (selectedRow >= 0 ? selectedRow : 0);
       const next = Math.min(filteredResults.length - 1, Math.max(0, current + delta));
 
       const result = filteredResults[next];
       if (result) {
-        const selected = new Set<number>([result.index]);
+        const key = rowKey(next, result);
+        const selected = new Set<number>([key]);
         selectedIndicesRef.current = selected;
         setSelectedIndices(selected);
         emitSelection(selected);
-        setSelectionAnchor(result.index);
+        setSelectionAnchor(key);
         onSelectChannel(result);
         if ((isPlaying || isCasting) && !isScanActive(scanState)) {
           if (isCasting) {
@@ -1041,17 +1076,18 @@ export function ChannelTable({
         return;
       }
 
+      const key = rowKey(rowIndex, result);
       if (isPrimaryModifierPressed(event, isMac)) {
         updateSelection((prev) => {
           const next = new Set(prev);
-          if (next.has(result.index)) {
-            next.delete(result.index);
+          if (next.has(key)) {
+            next.delete(key);
           } else {
-            next.add(result.index);
+            next.add(key);
           }
           return next;
         });
-        setSelectionAnchor(result.index);
+        setSelectionAnchor(key);
         updateFocusedRow(rowIndex);
         onSelectChannel(result);
         return;
@@ -1059,7 +1095,7 @@ export function ChannelTable({
 
       // Clicking the same single-selected row toggles back to no selection.
       const currentSelection = selectedIndicesRef.current;
-      if (currentSelection.size === 1 && currentSelection.has(result.index)) {
+      if (currentSelection.size === 1 && currentSelection.has(key)) {
         clearSelection();
         updateFocusedRow(rowIndex);
         return;
@@ -1099,7 +1135,7 @@ export function ChannelTable({
       event.preventDefault();
       setColumnMenuState(null);
 
-      if (!selectedIndicesRef.current.has(result.index)) {
+      if (!selectedIndicesRef.current.has(rowKey(rowIndex, result))) {
         selectSingle(result, rowIndex);
       }
 
@@ -1169,7 +1205,7 @@ export function ChannelTable({
   );
 
   const scanSelection = useMemo(
-    () => expandDispatcharrSelection(dispatcharrView, selectedIndices),
+    () => selectionIndices(dispatcharrView, selectedIndices),
     [dispatcharrView, selectedIndices],
   );
 
@@ -1188,7 +1224,7 @@ export function ChannelTable({
     if (selectedIndices.size <= 1 && contextMenuState) {
       return [contextMenuState.channel];
     }
-    const indexSet = selectedIndices;
+    const indexSet = new Set(selectionIndices(null, selectedIndices));
     return completedResults.filter((r) => indexSet.has(r.index)).sort((a, b) => a.index - b.index);
   }, [selectedIndices, contextMenuState, completedResults]);
 
@@ -1584,7 +1620,7 @@ export function ChannelTable({
               onRowClick={mode === "main" ? handleRowClick : noopRowEvent}
               onRowDoubleClick={mode === "main" ? handleRowDoubleClick : noopRowEvent}
               onRowContextMenu={mode === "main" ? handleRowContextMenu : noopRowEvent}
-              selected={selectedIndices.has(result.index)}
+              selected={selectedIndices.has(rowKey(virtualRow.index, result))}
               duplicate={duplicateIndices.has(result.index)}
               focused={focusedRow === virtualRow.index}
               columns={columns}
