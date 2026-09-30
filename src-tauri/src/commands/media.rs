@@ -17,7 +17,7 @@ use crate::commands::settings::{
     ArtifactKind,
 };
 use crate::engine::proxy_common::parse_byte_range;
-use crate::engine::{cast_proxy, disk, ffmpeg, stream_proxy};
+use crate::engine::{cast_proxy, checker, disk, ffmpeg, stream_proxy};
 use crate::error::AppError;
 use crate::models::channel::SampleClipFormat;
 use crate::state::AppState;
@@ -31,6 +31,7 @@ static PREVIEW_TOKEN: LazyLock<String> = LazyLock::new(cast_proxy::generate_toke
 /// Cache subdirectory for clips captured outside a scan. Its scan metadata
 /// keeps it under the same retention and low-space eviction as scan runs.
 const MANUAL_CAPTURE_DIR: &str = "manual-samples";
+const DISPATCHARR_TEARDOWN_RETRIES: u32 = 3;
 const CAPTURE_URL_SCHEMES: &[&str] = &[
     "http", "https", "rtmp", "rtmps", "rtsp", "rtsps", "rtp", "udp",
 ];
@@ -136,17 +137,40 @@ pub async fn capture_sample_clip(
         source_key(&source),
         ffmpeg::build_screenshot_file_name(channel_index, &channel_name)
     );
-    let clip = ffmpeg::capture_sample_clip(
-        &app,
-        &ffmpeg_target_url(&url, stream_url.as_deref()),
-        Some(&url),
-        &output_dir.to_string_lossy(),
-        &file_name,
-        &user_agent,
-        duration_secs,
-        &CancellationToken::new(),
-    )
-    .await?;
+    let target_url = ffmpeg_target_url(&url, stream_url.as_deref());
+    let output_dir_str = output_dir.to_string_lossy();
+    // Dispatcharr answers 503 for about a second while tearing a channel down
+    // after its last client leaves, which is exactly the state right after
+    // the in-app player was stopped to free the connection.
+    let teardown_retries = if checker::is_dispatcharr_proxy_url(&url) {
+        DISPATCHARR_TEARDOWN_RETRIES
+    } else {
+        0
+    };
+    let mut attempt = 0;
+    let clip = loop {
+        let result = ffmpeg::capture_sample_clip(
+            &app,
+            &target_url,
+            Some(&url),
+            &output_dir_str,
+            &file_name,
+            &user_agent,
+            duration_secs,
+            &CancellationToken::new(),
+        )
+        .await;
+        match result {
+            Err(AppError::Other(reason))
+                if attempt < teardown_retries
+                    && reason.starts_with("server rejected ffmpeg connection") =>
+            {
+                attempt += 1;
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+            result => break result?,
+        }
+    };
 
     // A recapture supersedes this channel's earlier manual clips. Only the
     // app's own cache is pruned; a custom folder holds the user's files.

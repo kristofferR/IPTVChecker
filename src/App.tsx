@@ -1063,7 +1063,8 @@ export default function App() {
         state.archiveVerifyRun ||
         state.archiveGuideTestRunning ||
         Object.values(state.archiveProbes).some((entry) => entry.running) ||
-        (state.sampleCaptureActive && isSingleConnectionPlaylist(state.playlist))
+        // A scan resets the clip path a finishing capture would attach.
+        state.sampleCaptureActive
       ) {
         return false;
       }
@@ -1096,7 +1097,7 @@ export default function App() {
         refreshedState.archiveVerifyRun ||
         refreshedState.archiveGuideTestRunning ||
         Object.values(refreshedState.archiveProbes).some((entry) => entry.running) ||
-        (refreshedState.sampleCaptureActive && isSingleConnectionPlaylist(refreshedState.playlist))
+        refreshedState.sampleCaptureActive
       ) {
         return false;
       }
