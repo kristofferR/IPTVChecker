@@ -33,6 +33,7 @@ interface Candidate {
   account: string;
   name: string;
   tag: { kind: "epg" } | { kind: "name"; similarity: number } | { kind: "was" };
+  otherCountry: string | null;
   /** What to probe. */
   channel: Channel;
   /** Known result: probed here, or the loaded row's scan result. */
@@ -51,6 +52,7 @@ function candidateOf(found: DispatcharrCandidate): Omit<Candidate, "result"> {
     account: ref?.account ?? "Provider",
     name: ref?.streamName ?? found.channel.name,
     tag: found.epg ? { kind: "epg" } : { kind: "name", similarity: found.similarity },
+    otherCountry: found.other_country,
     channel: found.channel,
   };
 }
@@ -247,6 +249,7 @@ export function DispatcharrFindPanel() {
     account: entry.ref.account ?? "Provider",
     name: entry.ref.streamName ?? entry.result.name,
     tag: { kind: "was" },
+    otherCountry: null,
     channel: entry.result,
     result: entry.result.status === "pending" ? null : entry.result,
   }));
@@ -441,6 +444,14 @@ export function DispatcharrFindPanel() {
                   <span className="font-medium text-text-primary">{entry.account}</span>
                   <span className="truncate text-[11.5px] text-text-tertiary">{entry.name}</span>
                 </span>
+                {entry.otherCountry && (
+                  <span
+                    title="Tagged for another country than this channel; may be a different channel"
+                    className="shrink-0 rounded bg-amber-500/15 px-1.5 text-[10.5px] text-amber-300"
+                  >
+                    {entry.otherCountry}
+                  </span>
+                )}
                 <Tag tag={entry.tag} />
                 <span className="w-40 shrink-0 text-right text-[11.5px]">
                   <Outcome result={entry.result} probing={probing} />

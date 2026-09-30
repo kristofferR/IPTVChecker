@@ -297,14 +297,12 @@ pub async fn dispatcharr_find_streams(
         streams: found.iter().map(|(stream, _)| stream.id).collect(),
         ..channel
     };
-    let matches = found
-        .iter()
-        .map(|(stream, matched)| (stream.id, *matched))
-        .collect::<HashMap<_, _>>();
-    let streams = found
-        .into_iter()
-        .map(|(stream, _)| (stream.id, stream))
-        .collect::<HashMap<_, _>>();
+    let mut matches = HashMap::new();
+    let mut streams = HashMap::new();
+    for (stream, matched) in found {
+        matches.insert(stream.id, matched);
+        streams.insert(stream.id, stream);
+    }
     let m3u = build_m3u(
         client.base(),
         &[listing],
@@ -319,7 +317,7 @@ pub async fn dispatcharr_find_streams(
         .into_iter()
         .filter_map(|channel| {
             let stream_id = dispatcharr_ids_from_extinf(&channel.extinf_line)?.stream_id;
-            let matched = *matches.get(&stream_id)?;
+            let matched = matches.remove(&stream_id)?;
             Some(DispatcharrCandidate {
                 channel,
                 stream_id,

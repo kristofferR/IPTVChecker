@@ -614,6 +614,24 @@ impl DispatcharrClient {
                 found.entry(stream.id).or_insert(stream);
             }
         }
+        // Countries the channel is known under: its streams' name tags and its
+        // EPG ID's suffix. "GB" and "UK" name the same country.
+        let normalize_country = |country: String| {
+            if country == "GB" {
+                "UK".to_string()
+            } else {
+                country
+            }
+        };
+        let mut countries = self
+            .fetch_streams_by_ids(&channel.streams)
+            .await
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|stream| name_country(&stream.name))
+            .map(normalize_country)
+            .collect::<std::collections::HashSet<_>>();
+        countries.extend(epg_id.and_then(epg_country).map(normalize_country));
         let mut candidates = found
             .into_values()
             .filter(|stream| !channel.streams.contains(&stream.id))
@@ -632,15 +650,26 @@ impl DispatcharrClient {
                             .is_some_and(|tvg_id| tvg_id.trim().eq_ignore_ascii_case(epg_id))
                     }),
                     similarity: name_similarity(&wanted, &normalize_stream_name(&stream.name)),
+                    other_country: name_country(&stream.name)
+                        .map(normalize_country)
+                        .filter(|country| !countries.is_empty() && !countries.contains(country)),
                 };
                 (stream, matched)
             })
             .filter(|(_, matched)| matched.epg || matched.similarity >= CANDIDATE_MIN_SIMILARITY)
             .collect::<Vec<_>>();
+        let rank = |matched: &CandidateMatch| {
+            let penalty = if matched.other_country.is_some() {
+                OTHER_COUNTRY_PENALTY
+            } else {
+                0
+            };
+            matched.similarity.saturating_sub(penalty)
+        };
         candidates.sort_by(|(a, am), (b, bm)| {
             bm.epg
                 .cmp(&am.epg)
-                .then(bm.similarity.cmp(&am.similarity))
+                .then(rank(bm).cmp(&rank(am)))
                 .then_with(|| a.name.cmp(&b.name))
         });
         candidates.truncate(CANDIDATE_LIMIT);
@@ -920,12 +949,42 @@ const CANDIDATE_LIMIT: usize = 40;
 const CANDIDATE_MIN_SIMILARITY: u8 = 60;
 
 /// Why a provider stream is offered for a channel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct CandidateMatch {
     /// Carries the channel's EPG ID.
     pub epg: bool,
     /// Name similarity with the channel, 0 to 100.
     pub similarity: u8,
+    /// Country tag from the stream name ("CH" in "CH: Sky Sport"), when it
+    /// differs from every country the channel is known under. The same
+    /// name in another country is often a different channel.
+    pub other_country: Option<String>,
+}
+
+/// Similarity points a candidate tagged with another country gives up when
+/// ranked, so a same-country match of almost the same name comes first.
+const OTHER_COUNTRY_PENALTY: u8 = 15;
+
+/// Country tag of a provider stream name: its short letter prefix ("UK" in
+/// "UK: Name", "US" in "US| NAME").
+pub(crate) fn name_country(name: &str) -> Option<String> {
+    let name = name.trim();
+    ["|", ":", " - "].iter().find_map(|separator| {
+        let (prefix, rest) = name.split_once(separator)?;
+        let prefix = prefix.trim();
+        (!rest.trim().is_empty()
+            && (2..=3).contains(&prefix.chars().count())
+            && prefix.chars().all(|c| c.is_ascii_alphabetic()))
+        .then(|| prefix.to_ascii_uppercase())
+    })
+}
+
+/// Country of an EPG ID such as "SkySportF1.uk" or "Channel.uk@HD".
+fn epg_country(epg_id: &str) -> Option<String> {
+    let base = epg_id.split('@').next()?;
+    let (_, suffix) = base.rsplit_once('.')?;
+    ((2..=3).contains(&suffix.len()) && suffix.chars().all(|c| c.is_ascii_alphabetic()))
+        .then(|| suffix.to_ascii_uppercase())
 }
 
 /// Tags that say how a stream is delivered, not what it is.
@@ -1547,6 +1606,9 @@ mod tests {
     #[tokio::test]
     async fn candidates_skip_linked_streams_and_rank_epg_matches_first() {
         let base = spawn_server(Arc::new(|req: &Request| {
+            if req.path == "/api/channels/streams/by-ids/" {
+                return (200, r#"[{"id":2,"name":"US| Kids Zone"}]"#.into());
+            }
             assert!(req.path.starts_with("/api/channels/streams/?hide_stale=true"));
             if req.path.contains("tvg_id=kidszone.us") {
                 (200, r#"{"next":null,"results":[{"id":4,"name":"KZ East","tvg_id":"KidsZone.us","url":"http://p/4"}]}"#.into())
@@ -1555,6 +1617,7 @@ mod tests {
                 (
                     200,
                     r#"{"next":null,"results":[
+                        {"id":7,"name":"CH: Kids Zone","url":"http://p/7"},
                         {"id":1,"name":"US| KIDS ZONE HD","url":"http://p/1"},
                         {"id":2,"name":"Kids Zone","url":"http://p/2"},
                         {"id":3,"name":"Kids Zone Plus","url":"http://p/3"},
@@ -1579,10 +1642,19 @@ mod tests {
             .unwrap();
         let ranked = found
             .iter()
-            .map(|(stream, matched)| (stream.id, matched.epg))
+            .map(|(stream, matched)| (stream.id, matched.epg, matched.other_country.as_deref()))
             .collect::<Vec<_>>();
-        // EPG match first; linked (2), URL-less (6) and unlike (5) left out.
-        assert_eq!(ranked, vec![(4, true), (1, false), (3, false)]);
+        // EPG match first; the same name from another country (7) after this
+        // country's; linked (2), URL-less (6) and unlike (5) left out.
+        assert_eq!(
+            ranked,
+            vec![
+                (4, true, None),
+                (1, false, None),
+                (7, false, Some("CH")),
+                (3, false, None)
+            ]
+        );
     }
 
     #[test]

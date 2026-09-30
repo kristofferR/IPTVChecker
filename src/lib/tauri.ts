@@ -140,6 +140,9 @@ export interface DispatcharrCandidate {
   epg: boolean;
   /** Name similarity with the channel, 0 to 100. */
   similarity: number;
+  /** Country tag of the stream when it differs from the channel's; the same
+   *  name in another country is often a different channel. */
+  other_country: string | null;
 }
 
 export async function dispatcharrFindStreams(
