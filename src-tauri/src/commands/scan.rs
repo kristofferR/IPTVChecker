@@ -31,8 +31,9 @@ const CHECKPOINT_FLUSH_MAX_BATCH: usize = 128;
 const RESULT_BATCH_MAX_ITEMS: usize = 64;
 const MIN_SCREENSHOT_DIAGNOSTIC_TIMEOUT_SECS: f64 = 15.0;
 const XTREAM_ARCHIVE_SCAN_COMPLETION_TIMEOUT: Duration = Duration::from_secs(2);
-static DIAGNOSTIC_URL_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r#"(?i)\b(?:https?|rtsp|rtmp)://[^\s'"]+"#).unwrap());
+static DIAGNOSTIC_URL_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?i)\b(?:https?|rtsps?|rtmps?|rtp|udp|srt)://[^\s'"]+"#).unwrap()
+});
 
 #[derive(Debug, Clone)]
 struct SharedUrlResult {

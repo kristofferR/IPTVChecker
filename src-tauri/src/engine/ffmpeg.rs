@@ -54,8 +54,9 @@ static FORMAT_BR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"bitrate:\s*(\d+)\s*kb/s").unwrap());
 static BYTES_READ_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(\d+)\s+bytes\s+read").unwrap());
-static FFMPEG_URL_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r#"(?i)\b(?:https?|rtsp|rtmp)://[^\s'"]+"#).unwrap());
+static FFMPEG_URL_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?i)\b(?:https?|rtsps?|rtmps?|rtp|udp|srt)://[^\s'"]+"#).unwrap()
+});
 static AUDIO_LAYOUT_VALUE_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(\d+(?:\.\d+)?)").unwrap());
 
@@ -3204,6 +3205,12 @@ Exiting with exit code -1482175992
                 "[rtsp @ 0x123] Failed to open rtsp://alice:secret@example.com/live?token=value"
             ),
             "Failed to open rtsp://***@example.com/live?***"
+        );
+        assert_eq!(
+            sanitize_ffmpeg_stderr_line(
+                "[tls @ 0x123] Failed to open rtsps://alice:secret@example.com/live?token=value"
+            ),
+            "Failed to open rtsps://***@example.com/live?***"
         );
     }
 

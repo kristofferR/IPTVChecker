@@ -1542,9 +1542,14 @@ export default function App() {
       }
       const state = getStore();
       // Indices restart per playlist, so a capture that outlives its playlist
-      // must not land on an unrelated channel.
+      // must not land on an unrelated channel. Compare the source, not the
+      // object: enrichment replaces the playlist object for the same source.
+      const sourceKey = (playlist: typeof playlistAtStart) =>
+        playlist ? (playlist.source_identity ?? playlist.file_path) : null;
       const current = selectResultByIndex(state, result.index);
-      if (state.playlist !== playlistAtStart || current?.url !== result.url) return;
+      if (sourceKey(state.playlist) !== sourceKey(playlistAtStart) || current?.url !== result.url) {
+        return;
+      }
       const updated = withSampleClip(current, clip);
       updateResult(updated);
       if (state.selectedChannel?.index === result.index) {
