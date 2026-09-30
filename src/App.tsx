@@ -1542,10 +1542,12 @@ export default function App() {
         }
         if (playIntentActive) handleStopPlayer();
       }
+      const sourceKey = (playlist: typeof playlistAtStart) =>
+        playlist ? (playlist.source_identity ?? playlist.file_path) : null;
       getStore().setSampleCaptureActive(true);
       let clip: SampleClip;
       try {
-        clip = await captureSampleClip(result);
+        clip = await captureSampleClip(result, sourceKey(playlistAtStart) ?? "");
       } finally {
         getStore().setSampleCaptureActive(false);
       }
@@ -1553,8 +1555,6 @@ export default function App() {
       // Indices restart per playlist, so a capture that outlives its playlist
       // must not land on an unrelated channel. Compare the source, not the
       // object: enrichment replaces the playlist object for the same source.
-      const sourceKey = (playlist: typeof playlistAtStart) =>
-        playlist ? (playlist.source_identity ?? playlist.file_path) : null;
       const current = selectResultByIndex(state, result.index);
       if (sourceKey(state.playlist) !== sourceKey(playlistAtStart) || current?.url !== result.url) {
         return;

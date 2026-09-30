@@ -262,12 +262,14 @@ export async function readScreenshot(path: string): Promise<string> {
 
 export async function captureSampleClip(
   result: Pick<ChannelResult, "index" | "name" | "url" | "stream_url">,
+  source: string,
 ): Promise<SampleClip> {
   return invoke("capture_sample_clip", {
     channelIndex: result.index,
     channelName: result.name,
     url: result.url,
     streamUrl: result.stream_url,
+    source,
   });
 }
 

@@ -96,6 +96,7 @@ pub async fn capture_sample_clip(
     channel_name: String,
     url: String,
     stream_url: Option<String>,
+    source: String,
 ) -> Result<ffmpeg::SampleClip, AppError> {
     ensure_capture_url(&url)?;
     let stream_url = stream_url.filter(|value| ensure_capture_url(value).is_ok());
@@ -128,7 +129,13 @@ pub async fn capture_sample_clip(
     .map_err(|error| AppError::Other(format!("Failed to prepare sample clip: {}", error)))??;
     register_media_root(&app, &output_dir);
 
-    let file_name = ffmpeg::build_screenshot_file_name(channel_index, &channel_name);
+    // Channel indices and names repeat across playlists, so key manual clips
+    // by source too; otherwise one window's recapture prunes another's clip.
+    let file_name = format!(
+        "{}-{}",
+        source_key(&source),
+        ffmpeg::build_screenshot_file_name(channel_index, &channel_name)
+    );
     let clip = ffmpeg::capture_sample_clip(
         &app,
         &ffmpeg_target_url(&url, stream_url.as_deref()),
@@ -147,6 +154,14 @@ pub async fn capture_sample_clip(
         remove_other_channel_clips(&output_dir, &file_name, Path::new(&clip.path));
     }
     Ok(clip)
+}
+
+/// Short stable key for a playlist source, used in manual clip names.
+fn source_key(source: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    source.hash(&mut hasher);
+    format!("{:08x}", hasher.finish() as u32)
 }
 
 /// Delete clips in a scan folder that no result references.
