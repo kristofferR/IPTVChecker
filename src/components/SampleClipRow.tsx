@@ -219,7 +219,16 @@ export function SampleClipRow({ result, scanActive, durationSecs, onCapture }: S
           Preview unavailable in app. Use Open or Show in folder.
         </p>
       )}
-      {error && <p className="text-[11px] text-red-300 break-words">{error}</p>}
+      <p role="alert" className="text-[11px] text-red-300 break-words empty:hidden">
+        {error}
+      </p>
+      <span role="status" className="sr-only">
+        {capturing
+          ? `Recording ${durationSecs} second sample`
+          : previewFailed
+            ? "Sample preview unavailable"
+            : ""}
+      </span>
     </div>
   );
 }
