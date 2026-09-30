@@ -958,7 +958,7 @@ pub fn run() {
                 });
             }
 
-            // Background cleanup: evict old screenshot dirs per retention policy
+            // Background cleanup: evict old media dirs per retention policy
             {
                 let handle = app.handle().clone();
                 let state = app.state::<Arc<AppState>>().inner().clone();
@@ -1118,6 +1118,10 @@ pub fn run() {
             commands::settings::check_ffmpeg_available,
             commands::settings::set_default_m3u8_file_association,
             commands::settings::read_screenshot,
+            commands::media::capture_sample_clip,
+            commands::media::get_sample_clip_preview_url,
+            commands::media::open_media_artifact,
+            commands::media::reveal_media_artifact,
             commands::settings::get_screenshot_cache_stats,
             commands::settings::clear_screenshot_cache,
             commands::updater::check_for_updates,

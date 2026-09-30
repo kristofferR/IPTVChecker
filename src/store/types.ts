@@ -252,11 +252,14 @@ export interface PlayerSlice {
   castActive: boolean;
   externalPlaybackActive: boolean;
   pendingPlaybackChannel: ChannelResult | null;
+  /** A manual sample capture holds an upstream connection. */
+  sampleCaptureActive: boolean;
 
   setPlayIntentActive: (active: boolean) => void;
   setCastActive: (active: boolean) => void;
   setExternalPlaybackActive: (active: boolean) => void;
   setPendingPlaybackChannel: (channel: ChannelResult | null) => void;
+  setSampleCaptureActive: (active: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------

@@ -716,6 +716,8 @@ mod tests {
             audio_only: false,
             screenshot_path: None,
             screenshot_error_reason: None,
+            sample_clip_path: None,
+            sample_clip_format: None,
             label_mismatches: Vec::new(),
             low_framerate: false,
             error_message: None,
@@ -760,6 +762,8 @@ mod tests {
             proxy_file: None,
             test_geoblock: false,
             screenshots_dir: None,
+            auto_capture_sample_clips: false,
+            sample_clip_duration_secs: 5,
             client_capabilities: None,
         }
     }
@@ -795,6 +799,8 @@ mod tests {
             audio_only: false,
             screenshot_path: None,
             screenshot_error_reason: None,
+            sample_clip_path: None,
+            sample_clip_format: None,
             label_mismatches: Vec::new(),
             low_framerate: false,
             error_message: None,
@@ -867,6 +873,8 @@ mod tests {
             proxy_file: None,
             test_geoblock: false,
             screenshots_dir: None,
+            auto_capture_sample_clips: false,
+            sample_clip_duration_secs: 5,
             client_capabilities: None,
         }
     }

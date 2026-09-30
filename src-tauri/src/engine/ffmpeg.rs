@@ -9,6 +9,7 @@ use url::Url;
 
 use crate::engine::stream_proxy::redact_url;
 use crate::error::AppError;
+use crate::models::channel::SampleClipFormat;
 use crate::models::settings::ScreenshotFormat;
 
 const MAX_SCREENSHOT_STEM_LEN: usize = 120;
@@ -18,6 +19,18 @@ const MAX_FFPROBE_OUTPUT_CHARS: usize = 16_000;
 const PNG_SIGNATURE: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
 const FFPROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 const FFMPEG_BITRATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Time allowed for ffmpeg to connect and start reading before a sample
+/// clip's own duration begins to count against the capture timeout.
+const SAMPLE_CLIP_OPEN_GRACE: std::time::Duration = std::time::Duration::from_secs(20);
+const SAMPLE_CLIP_REMUX_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// A capture holding only PAT/PMT tables is a few hundred bytes; anything
+/// below this carries no meaningful media.
+const MIN_SAMPLE_CLIP_BYTES: u64 = 8 * 1024;
+const MPEGTS_SYNC_BYTE: u8 = 0x47;
+/// Input probe size for clip captures. ffmpeg's 5 MB default can leave HLS
+/// variant audio unprobed ("0 channels"), and default stream selection then
+/// silently drops it from the clip. Matches the scan's ffprobe snapshot.
+const SAMPLE_CLIP_PROBESIZE: &str = "15000000";
 pub(crate) const GRACEFUL_KILL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -41,8 +54,9 @@ static FORMAT_BR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"bitrate:\s*(\d+)\s*kb/s").unwrap());
 static BYTES_READ_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(\d+)\s+bytes\s+read").unwrap());
-static FFMPEG_URL_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r#"(?i)\b(?:https?|rtsp|rtmp)://[^\s'"]+"#).unwrap());
+static FFMPEG_URL_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?i)\b(?:https?|rtsps?|rtmps?|rtp|udp|srt)://[^\s'"]+"#).unwrap()
+});
 static AUDIO_LAYOUT_VALUE_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(\d+(?:\.\d+)?)").unwrap());
 
@@ -606,29 +620,39 @@ pub fn build_screenshot_file_name(channel_index: usize, channel_name: &str) -> S
     }
 }
 
-fn unique_screenshot_output_path(output_dir: &Path, stem: &str, ext: &str) -> PathBuf {
-    let base_stem = sanitize_screenshot_stem(stem);
-    let mut base = truncate_stem(&base_stem, MAX_SCREENSHOT_STEM_LEN);
-    base = trim_windows_unsafe_edges(&base);
+/// File name base for a media stem, before any collision suffix.
+fn output_base(stem: &str) -> String {
+    let base = trim_windows_unsafe_edges(&truncate_stem(
+        &sanitize_screenshot_stem(stem),
+        MAX_SCREENSHOT_STEM_LEN,
+    ));
     if base.is_empty() {
-        base = FALLBACK_SCREENSHOT_STEM.to_string();
+        FALLBACK_SCREENSHOT_STEM.to_string()
+    } else {
+        base
     }
+}
 
+/// `base-N`, with `base` shortened so the result stays within the length cap.
+fn suffixed_output_base(base: &str, n: usize) -> String {
+    let suffix = format!("-{n}");
+    let max_base_len = MAX_SCREENSHOT_STEM_LEN.saturating_sub(suffix.chars().count());
+    let mut truncated_base = trim_windows_unsafe_edges(&truncate_stem(base, max_base_len));
+    if truncated_base.is_empty() {
+        truncated_base = FALLBACK_SCREENSHOT_STEM.to_string();
+    }
+    format!("{truncated_base}{suffix}")
+}
+
+fn unique_screenshot_output_path(output_dir: &Path, stem: &str, ext: &str) -> PathBuf {
+    let base = output_base(stem);
     let initial = output_dir.join(format!("{base}.{ext}"));
     if !initial.exists() {
         return initial;
     }
 
     for n in 2..=9_999usize {
-        let suffix = format!("-{n}");
-        let max_base_len = MAX_SCREENSHOT_STEM_LEN.saturating_sub(suffix.chars().count());
-        let mut truncated_base = truncate_stem(&base, max_base_len);
-        truncated_base = trim_windows_unsafe_edges(&truncated_base);
-        if truncated_base.is_empty() {
-            truncated_base = FALLBACK_SCREENSHOT_STEM.to_string();
-        }
-
-        let candidate = output_dir.join(format!("{truncated_base}{suffix}.{ext}"));
+        let candidate = output_dir.join(format!("{}.{ext}", suffixed_output_base(&base, n)));
         if !candidate.exists() {
             return candidate;
         }
@@ -639,6 +663,20 @@ fn unique_screenshot_output_path(output_dir: &Path, stem: &str, ext: &str) -> Pa
         .map(|d| d.as_millis())
         .unwrap_or(0);
     output_dir.join(format!("{base}-{ts}.{ext}"))
+}
+
+/// Whether `file_stem` is a name [`unique_screenshot_output_path`] gives
+/// `stem`: the base itself or a `-N` collision variant, including the
+/// shortened base long names get.
+pub(crate) fn is_output_name_for_stem(file_stem: &str, stem: &str) -> bool {
+    let base = output_base(stem);
+    if file_stem == base {
+        return true;
+    }
+    file_stem
+        .rsplit_once('-')
+        .and_then(|(_, digits)| digits.parse::<usize>().ok())
+        .is_some_and(|n| (2..=9_999).contains(&n) && file_stem == suffixed_output_base(&base, n))
 }
 
 fn screenshot_header_is_valid(format: ScreenshotFormat, header: &[u8]) -> bool {
@@ -1469,6 +1507,228 @@ pub async fn capture_screenshot(
     }
 }
 
+/// A validated sample clip on disk.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SampleClip {
+    pub path: String,
+    pub format: SampleClipFormat,
+}
+
+/// Stream-copy the default video and audio tracks for `duration` seconds into
+/// MPEG-TS. TS accepts every codec IPTV carries, so capture never fails on
+/// container support; [`finalize_sample_clip`] remuxes to MP4 afterwards.
+fn append_sample_clip_output_args<'a>(
+    args: &mut Vec<&'a str>,
+    duration: &'a str,
+    output_path: &'a str,
+) {
+    args.extend_from_slice(&[
+        "-sn",
+        "-dn",
+        "-c",
+        "copy",
+        "-t",
+        duration,
+        "-f",
+        "mpegts",
+        output_path,
+    ]);
+}
+
+fn sample_clip_header_is_valid(format: SampleClipFormat, header: &[u8]) -> bool {
+    match format {
+        SampleClipFormat::Ts => header.first() == Some(&MPEGTS_SYNC_BYTE),
+        SampleClipFormat::Mp4 => header.len() >= 8 && &header[4..8] == b"ftyp",
+    }
+}
+
+fn validate_sample_clip(path: &Path, format: SampleClipFormat) -> Result<(), String> {
+    use std::io::Read;
+
+    let metadata = std::fs::metadata(path)
+        .map_err(|error| format!("failed to read clip metadata: {}", error))?;
+    if metadata.len() < MIN_SAMPLE_CLIP_BYTES {
+        return Err("clip contains no media".to_string());
+    }
+
+    let mut header = [0u8; 8];
+    std::fs::File::open(path)
+        .and_then(|mut file| file.read_exact(&mut header))
+        .map_err(|error| format!("failed to read clip header: {}", error))?;
+    if !sample_clip_header_is_valid(format, &header) {
+        return Err(format!("clip is not a valid .{} file", format.extension()));
+    }
+    Ok(())
+}
+
+/// Validate a raw `.ts` capture and try a local stream-copy remux to `.mp4`,
+/// which webviews can preview inline. Keeps the `.ts` when the remux fails.
+async fn finalize_sample_clip(
+    resolved_bin: String,
+    ts_path: &Path,
+    cancel: &CancellationToken,
+) -> Result<SampleClip, AppError> {
+    if let Err(error) = validate_sample_clip(ts_path, SampleClipFormat::Ts) {
+        let _ = std::fs::remove_file(ts_path);
+        return Err(AppError::Other(format!("invalid sample clip - {}", error)));
+    }
+
+    let parent = ts_path.parent().unwrap_or_else(|| Path::new("."));
+    let stem = ts_path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let mp4_path = unique_screenshot_output_path(parent, &stem, SampleClipFormat::Mp4.extension());
+    let ts_str = ts_path.to_string_lossy().to_string();
+    let mp4_str = mp4_path.to_string_lossy().to_string();
+    let args = [
+        "-y",
+        "-nostdin",
+        "-v",
+        "error",
+        "-i",
+        &ts_str,
+        "-map",
+        "0",
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
+        "-f",
+        "mp4",
+        &mp4_str,
+    ];
+
+    let remux = run_resolved_tool_command(
+        resolved_bin,
+        "ffmpeg",
+        &args,
+        cancel,
+        Some(SAMPLE_CLIP_REMUX_TIMEOUT),
+    )
+    .await;
+    let remux_error = match remux {
+        Err(AppError::Cancelled) => {
+            let _ = std::fs::remove_file(&mp4_path);
+            let _ = std::fs::remove_file(ts_path);
+            return Err(AppError::Cancelled);
+        }
+        Ok(output) if output.success => {
+            validate_sample_clip(&mp4_path, SampleClipFormat::Mp4).err()
+        }
+        Ok(output) => Some(format_ffmpeg_exit_reason(output.exit_code, &output.stderr)),
+        Err(error) => Some(error.to_string()),
+    };
+
+    match remux_error {
+        None => {
+            let _ = std::fs::remove_file(ts_path);
+            Ok(SampleClip {
+                path: mp4_str,
+                format: SampleClipFormat::Mp4,
+            })
+        }
+        Some(reason) => {
+            let _ = std::fs::remove_file(&mp4_path);
+            log::debug!("Sample clip MP4 remux failed, keeping MPEG-TS ({})", reason);
+            Ok(SampleClip {
+                path: ts_str,
+                format: SampleClipFormat::Ts,
+            })
+        }
+    }
+}
+
+async fn capture_sample_clip_using_binary(
+    resolved_bin: String,
+    url: &str,
+    output_dir: &str,
+    file_name: &str,
+    user_agent: &str,
+    duration_secs: u32,
+    cancel: &CancellationToken,
+) -> Result<SampleClip, AppError> {
+    let ts_path = unique_screenshot_output_path(
+        Path::new(output_dir),
+        file_name,
+        SampleClipFormat::Ts.extension(),
+    );
+    let ts_str = ts_path.to_string_lossy().to_string();
+    let duration = duration_secs.to_string();
+    let mut args = vec![
+        "-y",
+        "-nostdin",
+        "-user_agent",
+        user_agent,
+        "-probesize",
+        SAMPLE_CLIP_PROBESIZE,
+        "-i",
+        url,
+    ];
+    append_sample_clip_output_args(&mut args, &duration, &ts_str);
+
+    // A timed-out capture still leaves a playable partial clip, so failures
+    // only matter when nothing usable was written.
+    let capture_error = match run_resolved_tool_command(
+        resolved_bin.clone(),
+        "ffmpeg",
+        &args,
+        cancel,
+        Some(std::time::Duration::from_secs(u64::from(duration_secs)) + SAMPLE_CLIP_OPEN_GRACE),
+    )
+    .await
+    {
+        Err(AppError::Cancelled) => {
+            let _ = std::fs::remove_file(&ts_path);
+            return Err(AppError::Cancelled);
+        }
+        Err(AppError::FfmpegNotAvailable) => return Err(AppError::FfmpegNotAvailable),
+        Err(error) => Some(error.to_string()),
+        Ok(output) if !output.success => {
+            Some(format_ffmpeg_exit_reason(output.exit_code, &output.stderr))
+        }
+        Ok(_) => None,
+    };
+
+    match finalize_sample_clip(resolved_bin, &ts_path, cancel).await {
+        Err(AppError::Other(reason)) => {
+            let reason = capture_error.unwrap_or(reason);
+            log::warn!("Sample clip capture failed for {} - {}", file_name, reason);
+            Err(AppError::Other(reason))
+        }
+        other => other,
+    }
+}
+
+/// Record a `duration_secs` stream-copied sample clip from a stream. Prefers
+/// MP4 and falls back to the raw MPEG-TS capture when remuxing fails.
+pub async fn capture_sample_clip(
+    app: &AppHandle,
+    url: &str,
+    route_hint_url: Option<&str>,
+    output_dir: &str,
+    file_name: &str,
+    user_agent: &str,
+    duration_secs: u32,
+    cancel: &CancellationToken,
+) -> Result<SampleClip, AppError> {
+    if cancel.is_cancelled() {
+        return Err(AppError::Cancelled);
+    }
+    let resolved_bin = resolve_binary(app, "ffmpeg");
+    let input_url = prepare_stream_tool_url(app, url, route_hint_url).await;
+    capture_sample_clip_using_binary(
+        resolved_bin,
+        &input_url,
+        output_dir,
+        file_name,
+        user_agent,
+        duration_secs,
+        cancel,
+    )
+    .await
+}
+
 /// Spawn a task that drains a child's stderr (so the child can't block on a
 /// full pipe) while retaining only the final 1 MB — the Statistics/error
 /// lines we parse are written near process exit.
@@ -1626,6 +1886,7 @@ pub struct CombinedDiagnostics {
     pub format_bitrate_kbps: Option<u32>,
     pub screenshot_path: Option<String>,
     pub screenshot_error_reason: Option<String>,
+    pub sample_clip: Option<SampleClip>,
     pub profiled_bitrate_kbps: Option<u64>,
     pub diagnostics_output: String,
     pub input_error_reason: Option<String>,
@@ -1773,8 +2034,9 @@ fn parse_bytes_read(stderr: &str, sample_secs: u64) -> Option<u64> {
 
 /// Run all stream diagnostics in a single ffmpeg process.
 ///
-/// Depending on `profile_bitrate` and `want_screenshot`, builds one of four
-/// ffmpeg command modes that minimizes connections to the stream server.
+/// Depending on `profile_bitrate`, `want_screenshot` and `sample_clip_secs`,
+/// adds a screenshot, a sample clip, and/or a bitrate-profiling output to one
+/// ffmpeg command, so every artifact shares a single connection to the server.
 pub async fn run_combined_diagnostics(
     app: &AppHandle,
     url: &str,
@@ -1784,6 +2046,7 @@ pub async fn run_combined_diagnostics(
     file_name: &str,
     screenshot_format: ScreenshotFormat,
     want_screenshot: bool,
+    sample_clip_secs: Option<u32>,
     profile_bitrate: bool,
     timeout_secs: f64,
     cancel: &CancellationToken,
@@ -1792,16 +2055,44 @@ pub async fn run_combined_diagnostics(
         return Err(AppError::Cancelled);
     }
 
-    let timeout_duration = if timeout_secs.is_finite() {
+    let resolved_bin = resolve_binary(app, "ffmpeg");
+    let input_url = prepare_stream_tool_url(app, url, route_hint_url).await;
+    run_combined_diagnostics_using_binary(
+        resolved_bin,
+        &input_url,
+        user_agent,
+        output_dir,
+        file_name,
+        screenshot_format,
+        want_screenshot,
+        sample_clip_secs,
+        profile_bitrate,
+        timeout_secs,
+        cancel,
+    )
+    .await
+}
+
+async fn run_combined_diagnostics_using_binary(
+    resolved_bin: String,
+    input_url: &str,
+    user_agent: &str,
+    output_dir: &str,
+    file_name: &str,
+    screenshot_format: ScreenshotFormat,
+    want_screenshot: bool,
+    sample_clip_secs: Option<u32>,
+    profile_bitrate: bool,
+    timeout_secs: f64,
+    cancel: &CancellationToken,
+) -> Result<CombinedDiagnostics, AppError> {
+    let mut timeout_duration = if timeout_secs.is_finite() {
         std::time::Duration::from_secs_f64(timeout_secs.clamp(1.0, 600.0))
     } else if profile_bitrate {
         FFMPEG_BITRATE_TIMEOUT
     } else {
         FFPROBE_TIMEOUT
     };
-
-    let resolved_bin = resolve_binary(app, "ffmpeg");
-    let input_url = prepare_stream_tool_url(app, url, route_hint_url).await;
 
     // When profiling, stream for 3–10 seconds to gather bitrate data.
     let sample_secs = if profile_bitrate {
@@ -1810,6 +2101,21 @@ pub async fn run_combined_diagnostics(
         0
     };
     let sample_secs_str = sample_secs.to_string();
+    let clip_secs_str = sample_clip_secs.map(|secs| secs.to_string());
+    if let Some(secs) = sample_clip_secs {
+        timeout_duration = timeout_duration
+            .max(std::time::Duration::from_secs(u64::from(secs)) + SAMPLE_CLIP_OPEN_GRACE);
+    }
+    let sample_clip_path = sample_clip_secs.map(|_| {
+        unique_screenshot_output_path(
+            Path::new(output_dir),
+            file_name,
+            SampleClipFormat::Ts.extension(),
+        )
+    });
+    let sample_clip_str = sample_clip_path
+        .as_ref()
+        .map(|p| p.to_string_lossy().to_string());
 
     // Build screenshot output path
     let screenshot_path = if want_screenshot {
@@ -1826,18 +2132,27 @@ pub async fn run_combined_diagnostics(
         .map(|p| p.to_string_lossy().to_string());
 
     // Build ffmpeg args
-    let mut args: Vec<&str> = vec!["-v", "verbose", "-user_agent", user_agent, "-i", &input_url];
+    let mut args: Vec<&str> = vec!["-v", "verbose", "-user_agent", user_agent];
+    if sample_clip_secs.is_some() {
+        args.extend_from_slice(&["-probesize", SAMPLE_CLIP_PROBESIZE]);
+    }
+    args.extend_from_slice(&["-i", input_url]);
 
     // Output 1: screenshot (if wanted)
     if let Some(ref out) = screenshot_str {
         append_screenshot_output_args(&mut args, screenshot_format, out);
     }
 
-    // Output 2: null sink for bitrate profiling (or just metadata-only decode)
+    // Output 2: sample clip (if wanted)
+    if let (Some(out), Some(duration)) = (&sample_clip_str, &clip_secs_str) {
+        append_sample_clip_output_args(&mut args, duration, out);
+    }
+
+    // Output 3: null sink for bitrate profiling (or just metadata-only decode)
     if profile_bitrate {
         args.extend_from_slice(&["-t", &sample_secs_str, "-f", "null", "-"]);
-    } else if screenshot_str.is_none() {
-        // Mode D: no screenshot, no profiling — just decode 1 frame for metadata
+    } else if screenshot_str.is_none() && sample_clip_str.is_none() {
+        // No artifacts, no profiling — just decode 1 frame for metadata
         args.extend_from_slice(&["-frames:v", "1", "-f", "null", "-"]);
     }
 
@@ -1867,6 +2182,9 @@ pub async fn run_combined_diagnostics(
             let _ = child.kill().await;
             let _ = child.wait().await;
             stderr_reader.abort();
+            if let Some(path) = &sample_clip_path {
+                let _ = std::fs::remove_file(path);
+            }
             return Err(AppError::Cancelled);
         }
         _ = tokio::time::sleep(timeout_duration) => {
@@ -1902,7 +2220,9 @@ pub async fn run_combined_diagnostics(
 
     // Parse bitrate from Statistics lines (if profiling)
     let profiled_bitrate_kbps = if profile_bitrate {
-        let kbps = parse_bytes_read(&stderr, sample_secs);
+        // ffmpeg keeps reading input until the longest output finishes.
+        let read_secs = sample_secs.max(sample_clip_secs.map_or(0, u64::from));
+        let kbps = parse_bytes_read(&stderr, read_secs);
         if kbps.is_none() && !timed_out {
             if is_stream_open_failure_reason(&stderr_summary) {
                 log::debug!(
@@ -1976,6 +2296,18 @@ pub async fn run_combined_diagnostics(
         (None, None)
     };
 
+    let sample_clip = match sample_clip_path {
+        Some(path) => match finalize_sample_clip(resolved_bin.clone(), &path, cancel).await {
+            Ok(clip) => Some(clip),
+            Err(AppError::Cancelled) => return Err(AppError::Cancelled),
+            Err(error) => {
+                log::debug!("Combined diagnostics: no sample clip ({})", error);
+                None
+            }
+        },
+        None => None,
+    };
+
     // Truncate stderr for debug log
     let diagnostics_output = {
         let relevant: String = stderr
@@ -2005,6 +2337,7 @@ pub async fn run_combined_diagnostics(
         format_bitrate_kbps,
         screenshot_path: validated_screenshot,
         screenshot_error_reason,
+        sample_clip,
         profiled_bitrate_kbps,
         diagnostics_output,
         input_error_reason,
@@ -2119,14 +2452,18 @@ mod tests {
     use super::{
         append_screenshot_output_args, binary_candidate_names, build_screenshot_file_name,
         capture_screenshot_with_format_using_binary, check_label_mismatch, contains_word,
-        format_ffmpeg_exit_reason, normalize_superscript, parse_bytes_read, parse_ffmpeg_stderr,
-        parse_ffprobe_fps, parse_probe_snapshot, parse_stream_track_presence,
-        proxy_upstream_source_url, resolution_label, resolve_binary_from_dir,
-        sanitize_ffmpeg_stderr_line, sanitize_screenshot_stem, screenshot_header_is_valid,
-        should_retry_screenshot_as_png, should_route_tool_through_stream_proxy,
-        should_route_tool_through_stream_proxy_with_hint, stderr_excerpt,
-        unique_screenshot_output_path, validate_captured_screenshot, ScreenshotFormat,
-        MAX_SCREENSHOT_STEM_LEN, TARGET_TRIPLE,
+        format_ffmpeg_exit_reason, is_output_name_for_stem, normalize_superscript,
+        parse_bytes_read, parse_ffmpeg_stderr, parse_ffprobe_fps, parse_probe_snapshot,
+        parse_stream_track_presence, proxy_upstream_source_url, resolution_label,
+        resolve_binary_from_dir, sanitize_ffmpeg_stderr_line, sanitize_screenshot_stem,
+        screenshot_header_is_valid, should_retry_screenshot_as_png,
+        should_route_tool_through_stream_proxy, should_route_tool_through_stream_proxy_with_hint,
+        stderr_excerpt, unique_screenshot_output_path, validate_captured_screenshot,
+        ScreenshotFormat, MAX_SCREENSHOT_STEM_LEN, TARGET_TRIPLE,
+    };
+    #[cfg(unix)]
+    use super::{
+        capture_sample_clip_using_binary, run_combined_diagnostics_using_binary, SampleClipFormat,
     };
     use crate::error::AppError;
     use tokio_util::sync::CancellationToken;
@@ -2384,6 +2721,195 @@ mod tests {
         }
 
         std::fs::remove_dir_all(&test_dir).expect("temp dir should be removable");
+    }
+
+    /// Fake ffmpeg that writes fixture media to every output argument (not
+    /// `-i` inputs) and logs its arguments next to itself. `mp4_behavior`
+    /// is shell run for `.mp4` outputs.
+    #[cfg(unix)]
+    fn write_fake_media_ffmpeg(dir: &Path, mp4_behavior: &str) -> String {
+        write_executable_script(
+            dir,
+            "fake-ffmpeg.sh",
+            &format!(
+                r#"#!/bin/sh
+echo "$@" >> "$0.args"
+prev=""
+for arg in "$@"; do
+  if [ "$prev" != "-i" ]; then
+    case "$arg" in
+      *.ts) {{ printf 'G'; head -c 9000 /dev/zero; }} > "$arg" ;;
+      *.mp4) {mp4_behavior} ;;
+      *.webp) printf 'RIFF\000\000\000\000WEBP' > "$arg" ;;
+    esac
+  fi
+  prev="$arg"
+done
+printf '%s\n' '  Stream #0:0: Video: h264, yuv420p, 1920x1080, 25 fps' >&2
+exit 0
+"#
+            ),
+        )
+    }
+
+    #[cfg(unix)]
+    const MP4_REMUX_OK: &str =
+        r#"{ printf '\000\000\000\030ftypisom'; head -c 9000 /dev/zero; } > "$arg""#;
+
+    #[cfg(unix)]
+    #[test]
+    fn output_names_match_their_stem_including_long_suffixed_names() {
+        let long = "a".repeat(MAX_SCREENSHOT_STEM_LEN + 10);
+        let dir = temp_dir("iptv-checker-output-names");
+        let first = unique_screenshot_output_path(&dir, &long, "mp4");
+        std::fs::write(&first, b"x").expect("fixture");
+        let second = unique_screenshot_output_path(&dir, &long, "mp4");
+        let stem_of = |path: &Path| path.file_stem().unwrap().to_string_lossy().to_string();
+
+        assert!(is_output_name_for_stem(&stem_of(&first), &long));
+        assert!(is_output_name_for_stem(&stem_of(&second), &long));
+        assert!(is_output_name_for_stem("3-News-2", "3-News"));
+        assert!(!is_output_name_for_stem("3-News-HD", "3-News"));
+        assert!(!is_output_name_for_stem("30-News", "3-News"));
+        std::fs::remove_dir_all(&dir).expect("fixture cleanup");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sample_clip_capture_prefers_mp4_remux() {
+        let test_dir = temp_dir("iptv-checker-clip-mp4");
+        let binary = write_fake_media_ffmpeg(&test_dir, MP4_REMUX_OK);
+
+        let clip = capture_sample_clip_using_binary(
+            binary.clone(),
+            "https://example.com/live.m3u8",
+            &test_dir.to_string_lossy(),
+            "1-Channel",
+            "UnitTest",
+            7,
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("clip should be captured");
+
+        assert_eq!(clip.format, SampleClipFormat::Mp4);
+        assert!(clip.path.ends_with("1-Channel.mp4"));
+        assert!(
+            !test_dir.join("1-Channel.ts").exists(),
+            "raw capture is replaced"
+        );
+        let args = std::fs::read_to_string(format!("{binary}.args")).expect("args logged");
+        assert!(args.contains("-probesize 15000000 -i"));
+        assert!(args.contains("-sn -dn -c copy -t 7 -f mpegts"));
+        assert!(args.contains("-map 0 -c copy -movflags +faststart -f mp4"));
+
+        std::fs::remove_dir_all(&test_dir).expect("temp dir should be removable");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sample_clip_capture_keeps_ts_when_remux_fails() {
+        let test_dir = temp_dir("iptv-checker-clip-ts");
+        let binary = write_fake_media_ffmpeg(&test_dir, "exit 1");
+
+        let clip = capture_sample_clip_using_binary(
+            binary,
+            "https://example.com/live.ts",
+            &test_dir.to_string_lossy(),
+            "1-Channel",
+            "UnitTest",
+            5,
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("raw clip should be kept");
+
+        assert_eq!(clip.format, SampleClipFormat::Ts);
+        assert!(PathBuf::from(&clip.path).exists());
+        assert!(!test_dir.join("1-Channel.mp4").exists());
+
+        std::fs::remove_dir_all(&test_dir).expect("temp dir should be removable");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sample_clip_capture_reports_ffmpeg_failure_without_media() {
+        let test_dir = temp_dir("iptv-checker-clip-empty");
+        let binary = write_executable_script(
+            &test_dir,
+            "fake-ffmpeg.sh",
+            "#!/bin/sh\nfor arg in \"$@\"; do out=\"$arg\"; done\nprintf 'G' > \"$out\"\nprintf '%s\\n' 'simulated ffmpeg failure' >&2\nexit 1\n",
+        );
+
+        let error = capture_sample_clip_using_binary(
+            binary,
+            "https://example.com/live.ts",
+            &test_dir.to_string_lossy(),
+            "1-Channel",
+            "UnitTest",
+            5,
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("a capture without media should fail");
+
+        assert!(error.to_string().contains("ffmpeg exited with 1"));
+        assert!(
+            !test_dir.join("1-Channel.ts").exists(),
+            "empty capture is removed"
+        );
+
+        std::fs::remove_dir_all(&test_dir).expect("temp dir should be removable");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn combined_diagnostics_records_clip_only_when_requested() {
+        for clip_secs in [None, Some(5)] {
+            let test_dir = temp_dir("iptv-checker-combined-clip");
+            let binary = write_fake_media_ffmpeg(&test_dir, MP4_REMUX_OK);
+
+            let diag = run_combined_diagnostics_using_binary(
+                binary.clone(),
+                "https://example.com/live.ts",
+                "UnitTest",
+                &test_dir.to_string_lossy(),
+                "1-Channel",
+                ScreenshotFormat::Webp,
+                true,
+                clip_secs,
+                false,
+                15.0,
+                &CancellationToken::new(),
+            )
+            .await
+            .expect("diagnostics should run");
+
+            let args = std::fs::read_to_string(format!("{binary}.args")).expect("args logged");
+            assert_eq!(
+                args.lines().count(),
+                if clip_secs.is_some() { 2 } else { 1 },
+                "only the local remux may add an ffmpeg run"
+            );
+            assert!(diag.track_presence.has_video);
+            assert!(diag.screenshot_path.is_some());
+            match clip_secs {
+                None => {
+                    assert!(!args.contains("mpegts"));
+                    assert!(
+                        !args.contains("-probesize"),
+                        "default scans keep ffmpeg's probe"
+                    );
+                    assert_eq!(diag.sample_clip, None);
+                }
+                Some(_) => {
+                    let clip = diag.sample_clip.expect("clip should be recorded");
+                    assert_eq!(clip.format, SampleClipFormat::Mp4);
+                }
+            }
+
+            std::fs::remove_dir_all(&test_dir).expect("temp dir should be removable");
+        }
     }
 
     #[test]
@@ -2679,6 +3205,12 @@ Exiting with exit code -1482175992
                 "[rtsp @ 0x123] Failed to open rtsp://alice:secret@example.com/live?token=value"
             ),
             "Failed to open rtsp://***@example.com/live?***"
+        );
+        assert_eq!(
+            sanitize_ffmpeg_stderr_line(
+                "[tls @ 0x123] Failed to open rtsps://alice:secret@example.com/live?token=value"
+            ),
+            "Failed to open rtsps://***@example.com/live?***"
         );
     }
 

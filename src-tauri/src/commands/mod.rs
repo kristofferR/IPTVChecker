@@ -4,6 +4,7 @@ pub mod download;
 pub mod epg;
 pub mod export;
 pub mod history;
+pub mod media;
 pub mod playback;
 pub mod player;
 pub mod playlist;

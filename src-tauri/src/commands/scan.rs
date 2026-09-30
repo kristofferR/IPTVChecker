@@ -32,8 +32,9 @@ const CHECKPOINT_FLUSH_MAX_BATCH: usize = 128;
 const RESULT_BATCH_MAX_ITEMS: usize = 64;
 const MIN_SCREENSHOT_DIAGNOSTIC_TIMEOUT_SECS: f64 = 15.0;
 const XTREAM_ARCHIVE_SCAN_COMPLETION_TIMEOUT: Duration = Duration::from_secs(2);
-static DIAGNOSTIC_URL_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| regex::Regex::new(r#"(?i)\b(?:https?|rtsp|rtmp)://[^\s'"]+"#).unwrap());
+static DIAGNOSTIC_URL_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?i)\b(?:https?|rtsps?|rtmps?|rtp|udp|srt)://[^\s'"]+"#).unwrap()
+});
 
 #[derive(Debug, Clone)]
 struct SharedUrlResult {
@@ -53,6 +54,7 @@ struct SharedUrlResult {
     audio_only: bool,
     screenshot_path: Option<String>,
     screenshot_error_reason: Option<String>,
+    sample_clip: Option<ffmpeg::SampleClip>,
     low_framerate: bool,
     stream_url: Option<String>,
     retry_count: Option<u32>,
@@ -85,6 +87,7 @@ impl SharedUrlResult {
             audio_only: false,
             screenshot_path: None,
             screenshot_error_reason: None,
+            sample_clip: None,
             low_framerate: false,
             stream_url,
             retry_count,
@@ -175,6 +178,17 @@ fn apply_combined_screenshot_outcome(
 
 use crate::urlnorm::canonicalize_stream_url;
 
+/// Hand ffmpeg the manifest URL, not the resolved leaf segment: for HLS,
+/// verify() descends to a media segment that may have rolled off the live
+/// window (404) or lack init context (invalid data). The original channel
+/// URL is what the player uses and is what ffmpeg can reliably open.
+pub(crate) fn ffmpeg_target_url(channel_url: &str, stream_url: Option<&str>) -> String {
+    match stream_url {
+        Some(resolved) if checker::is_manifest_url(resolved) => resolved.to_string(),
+        _ => channel_url.to_string(),
+    }
+}
+
 /// Per-run configuration and shared handles for checking a single stream URL.
 /// Bundles timeouts, retry policy, feature flags, and shared limits so the
 /// per-channel call site only adds the URL and screenshot destination.
@@ -198,12 +212,20 @@ struct SharedCheckContext<'a> {
     screenshot_format: ScreenshotFormat,
     diagnostics_semaphore: &'a Arc<Semaphore>,
     single_connection_mode: bool,
+    /// Media goes to the app cache, where a rescan's clip supersedes the
+    /// channel's previous one. Custom folders hold the user's files.
+    prune_superseded_clips: bool,
+    low_space_threshold_gb: f64,
+    /// One clip written at a time per scan, so each free-space check sees
+    /// the space earlier clips already took rather than racing them.
+    clip_write_lock: &'a tokio::sync::Mutex<()>,
 }
 
 async fn compute_shared_url_result(
     ctx: &SharedCheckContext<'_>,
     channel_url: &str,
     skip_screenshots: bool,
+    sample_clip_secs: Option<u32>,
     screenshots_dir: Option<&String>,
     screenshot_file_name: &str,
 ) -> Result<(SharedUrlResult, WorkerTiming), AppError> {
@@ -227,6 +249,9 @@ async fn compute_shared_url_result(
         screenshot_format,
         diagnostics_semaphore,
         single_connection_mode,
+        prune_superseded_clips,
+        low_space_threshold_gb,
+        clip_write_lock,
     } = ctx;
     let dispatcharr_single_pass = ffmpeg_ok && checker::is_dispatcharr_proxy_url(channel_url);
     let check_started_at = Instant::now();
@@ -362,6 +387,7 @@ async fn compute_shared_url_result(
                 audio_only: false,
                 screenshot_path: None,
                 screenshot_error_reason: None,
+                sample_clip: None,
                 low_framerate: false,
                 stream_url,
                 retry_count: (retry_count > 0).then_some(retry_count),
@@ -372,14 +398,7 @@ async fn compute_shared_url_result(
         ));
     }
 
-    // Hand ffmpeg the manifest URL, not the resolved leaf segment: for HLS,
-    // verify() descends to a media segment that may have rolled off the live
-    // window (404) or lack init context (invalid data). The original channel
-    // URL is what the player uses and is what ffmpeg can reliably open.
-    let target_url = match stream_url.as_deref() {
-        Some(resolved) if checker::is_manifest_url(resolved) => resolved.to_string(),
-        _ => channel_url.to_string(),
-    };
+    let target_url = ffmpeg_target_url(channel_url, stream_url.as_deref());
     let redacted_target_url = stream_proxy::redact_url(&target_url);
     let mut shared = SharedUrlResult {
         status,
@@ -398,6 +417,7 @@ async fn compute_shared_url_result(
         audio_only: false,
         screenshot_path: None,
         screenshot_error_reason: None,
+        sample_clip: None,
         low_framerate: false,
         stream_url,
         retry_count: (retry_count > 0).then_some(retry_count),
@@ -415,6 +435,14 @@ async fn compute_shared_url_result(
         std::time::Duration::from_secs_f64(ffprobe_timeout_secs.clamp(1.0, 300.0));
 
     let want_screenshot = !skip_screenshots && ffmpeg_ok && screenshots_dir.is_some();
+    // Re-checked right before every clip write (after the liveness check,
+    // the diagnostics queue, screenshots, and retry backoff), so workers
+    // approved earlier cannot keep writing clips once space is critical.
+    let has_space_for_clip = |dir: &str| {
+        disk::classify_space(std::path::Path::new(dir), low_space_threshold_gb)
+            != disk::DiskSpaceTier::Critical
+    };
+    let sample_clip_secs = sample_clip_secs.filter(|_| ffmpeg_ok && screenshots_dir.is_some());
     let mut format_bitrate_kbps: Option<u32> = None;
 
     if (single_connection_mode || dispatcharr_single_pass) && ffmpeg_ok {
@@ -430,6 +458,10 @@ async fn compute_shared_url_result(
         let mut combined_retries_used = 0u32;
         let (combined_result, final_attempt_elapsed) = loop {
             let attempt_started_at = Instant::now();
+            let clip_guard = match sample_clip_secs {
+                Some(_) => Some(clip_write_lock.lock().await),
+                None => None,
+            };
             let result = ffmpeg::run_combined_diagnostics(
                 app,
                 &target_url,
@@ -439,11 +471,14 @@ async fn compute_shared_url_result(
                 screenshot_file_name,
                 screenshot_format,
                 want_screenshot,
+                sample_clip_secs
+                    .filter(|_| screenshots_dir.is_some_and(|dir| has_space_for_clip(dir))),
                 profile_bitrate_flag,
                 diag_timeout,
                 cancel,
             )
             .await;
+            drop(clip_guard);
             let attempt_elapsed = attempt_started_at.elapsed();
 
             let no_tracks_yet = matches!(
@@ -521,6 +556,7 @@ async fn compute_shared_url_result(
                     shared.video_bitrate = Some(format!("{kbps} kbps"));
                 }
                 format_bitrate_kbps = diag.format_bitrate_kbps;
+                shared.sample_clip = diag.sample_clip;
                 shared.channel_log.diagnostics_output = Some(
                     crate::models::scan_log::cap_diagnostics_output(diag.diagnostics_output),
                 );
@@ -556,6 +592,36 @@ async fn compute_shared_url_result(
                     diag.screenshot_error_reason,
                     png_fallback_result,
                 );
+
+                // A screenshot output that cannot start (no video track, a
+                // missing encoder) aborts the whole combined run, clip
+                // included. The stream opened, so record the clip on its own.
+                // Dispatcharr is skipped: a second connection right after the
+                // first hits its channel teardown.
+                if let (Some(secs), Some(dir)) = (sample_clip_secs, screenshots_dir) {
+                    if shared.sample_clip.is_none()
+                        && has_tracks
+                        && want_screenshot
+                        && !dispatcharr_single_pass
+                        && !cancel.is_cancelled()
+                    {
+                        let _clip_guard = clip_write_lock.lock().await;
+                        if has_space_for_clip(dir) {
+                            shared.sample_clip = ffmpeg::capture_sample_clip(
+                                app,
+                                &target_url,
+                                Some(channel_url),
+                                dir,
+                                screenshot_file_name,
+                                user_agent,
+                                secs,
+                                cancel,
+                            )
+                            .await
+                            .ok();
+                        }
+                    }
+                }
             }
             Err(AppError::Cancelled) => {
                 drop(diagnostics_permit);
@@ -616,7 +682,37 @@ async fn compute_shared_url_result(
             .map(Some)
         };
 
-        let (probe_result, screenshot_result) = tokio::join!(ffprobe_fut, screenshot_fut);
+        // The clip follows the screenshot rather than running beside it, so a
+        // channel never holds more than the two connections it used before.
+        let media_fut = async {
+            let screenshot_result = screenshot_fut.await;
+            let sample_clip = match (sample_clip_secs, screenshots_dir) {
+                (Some(secs), Some(dir)) if !cancel.is_cancelled() => {
+                    let _clip_guard = clip_write_lock.lock().await;
+                    if has_space_for_clip(dir) {
+                        ffmpeg::capture_sample_clip(
+                            app,
+                            &target_url,
+                            Some(channel_url),
+                            dir,
+                            screenshot_file_name,
+                            user_agent,
+                            secs,
+                            cancel,
+                        )
+                        .await
+                        .ok()
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            (screenshot_result, sample_clip)
+        };
+
+        let (probe_result, (screenshot_result, sample_clip)) = tokio::join!(ffprobe_fut, media_fut);
+        shared.sample_clip = sample_clip;
 
         if let Some(snapshot) = probe_result {
             shared.audio_only =
@@ -693,6 +789,30 @@ async fn compute_shared_url_result(
                 shared.video_bitrate = Some(format!("{video_kbps} kbps"));
             }
         }
+    }
+    // Captures swallow cancellation into a missing artifact. A cancelled
+    // channel must stay unscanned so resume re-checks it.
+    if cancel.is_cancelled() {
+        if let Some(clip) = shared.sample_clip.take() {
+            let _ = std::fs::remove_file(&clip.path);
+        }
+        return Err(AppError::Cancelled);
+    }
+    // Diagnostics can still demote a channel (Dispatcharr single pass); only
+    // alive channels keep a sample clip.
+    if shared.status != ChannelStatus::Alive {
+        if let Some(clip) = shared.sample_clip.take() {
+            let _ = std::fs::remove_file(&clip.path);
+        }
+    }
+    if let (Some(clip), Some(dir), true) =
+        (&shared.sample_clip, screenshots_dir, prune_superseded_clips)
+    {
+        crate::commands::media::remove_other_channel_clips(
+            std::path::Path::new(dir),
+            screenshot_file_name,
+            std::path::Path::new(&clip.path),
+        );
     }
     timing.diagnostics_ms = diagnostics_started_at.elapsed().as_secs_f64() * 1000.0;
 
@@ -1631,7 +1751,7 @@ fn load_proxy_list_if_configured(config: &ScanConfig) -> Result<Option<Vec<Strin
 /// Resolve and create the screenshots directory for this run (app temp cache
 /// by default, or a user-specified folder), write the eviction metadata, and
 /// evict old cached runs per the retention policy. Returns `None` when
-/// screenshots are disabled or ffmpeg is unavailable.
+/// neither screenshots nor sample clips are captured, or ffmpeg is unavailable.
 async fn prepare_screenshots_dir(
     app: &AppHandle,
     config: &ScanConfig,
@@ -1641,7 +1761,7 @@ async fn prepare_screenshots_dir(
     screenshot_retention_count: u32,
     ffmpeg_available: bool,
 ) -> Result<Option<String>, AppError> {
-    if config.skip_screenshots || !ffmpeg_available {
+    if (config.skip_screenshots && !config.auto_capture_sample_clips) || !ffmpeg_available {
         return Ok(None);
     }
 
@@ -1654,7 +1774,24 @@ async fn prepare_screenshots_dir(
                 .temp_dir()
                 .unwrap_or_else(|_| std::env::temp_dir());
             temp.join("iptv-checker-screenshots")
-                .join(format!("{}_{}", base_name, scope_suffix))
+                // The readable suffix drops punctuation, so filters like
+                // "News-HD" and "News HD" collide. Key the folder on the exact
+                // source and scope so scans, and post-scan sweeps, stay apart.
+                .join(format!(
+                    "{}_{}_{}",
+                    base_name,
+                    scope_suffix,
+                    crate::commands::media::source_key(&format!(
+                        "{}\n{}\n{}\n{}",
+                        config
+                            .source_identity
+                            .as_deref()
+                            .unwrap_or(&config.file_path),
+                        config.group_filter.as_deref().unwrap_or_default(),
+                        config.channel_search.as_deref().unwrap_or_default(),
+                        config.hide_vod_content
+                    ))
+                ))
                 .to_string_lossy()
                 .to_string()
         }
@@ -1704,6 +1841,7 @@ async fn prepare_screenshots_dir(
         }
     }
 
+    settings::register_media_root(app, std::path::Path::new(&dir));
     Ok(Some(dir))
 }
 
@@ -1851,26 +1989,31 @@ impl AdaptiveThrottle {
     }
 }
 
-/// Disk-space guard for screenshot capture. Every ~20 channels it re-checks
-/// free space on the screenshot volume, evicting old cached runs when space
-/// is low and pausing screenshots (emitting `scan://screenshots-paused` once)
-/// when space is critical. Cloned into each worker task.
+/// Disk-space guard for media capture (screenshots and sample clips). Every
+/// 20 channels (every channel when capturing clips) it re-checks free space
+/// on the media volume, evicting old cached runs (app cache only) when space
+/// is low and pausing capture (emitting `scan://screenshots-paused` once) when
+/// space is critical. Cloned into each worker task.
 #[derive(Clone)]
 struct ScreenshotDiskGuard {
     paused: Arc<AtomicBool>,
     paused_emitted: Arc<AtomicBool>,
     check_counter: Arc<AtomicUsize>,
+    /// Channels between free-space checks. Screenshots are small, but a
+    /// clip can take hundreds of MB, so clip scans check every channel.
+    check_interval: usize,
     eviction_in_progress: Arc<AtomicBool>,
     using_custom_dir: bool,
     low_space_threshold_gb: f64,
 }
 
 impl ScreenshotDiskGuard {
-    fn new(using_custom_dir: bool, low_space_threshold_gb: f64) -> Self {
+    fn new(using_custom_dir: bool, low_space_threshold_gb: f64, captures_clips: bool) -> Self {
         Self {
             paused: Arc::new(AtomicBool::new(false)),
             paused_emitted: Arc::new(AtomicBool::new(false)),
             check_counter: Arc::new(AtomicUsize::new(0)),
+            check_interval: if captures_clips { 1 } else { 20 },
             eviction_in_progress: Arc::new(AtomicBool::new(false)),
             using_custom_dir,
             low_space_threshold_gb,
@@ -1890,23 +2033,20 @@ impl ScreenshotDiskGuard {
         }
     }
 
-    /// Decide whether this channel should skip its screenshot, re-checking
-    /// disk space periodically (every ~20 channels).
+    /// Decide whether this channel should skip media capture, re-checking
+    /// disk space every `check_interval` channels.
     fn effective_skip(
         &self,
         app: &AppHandle,
         run_id: &str,
-        skip_screenshots: bool,
+        skip_media: bool,
         screenshots_dir: Option<&String>,
     ) -> bool {
-        if skip_screenshots || self.paused.load(Ordering::Relaxed) {
+        if skip_media || self.paused.load(Ordering::Relaxed) {
             return true;
         }
-        if self.using_custom_dir {
-            return false;
-        }
         let count = self.check_counter.fetch_add(1, Ordering::Relaxed);
-        if !count.is_multiple_of(20) {
+        if !count.is_multiple_of(self.check_interval) {
             return false;
         }
         let Some(dir) = screenshots_dir else {
@@ -1918,6 +2058,9 @@ impl ScreenshotDiskGuard {
                 self.pause_and_emit(app, run_id);
                 true
             }
+            // A custom folder is the user's, so never evict from it; it still
+            // pauses on critical space above.
+            disk::DiskSpaceTier::Low if self.using_custom_dir => false,
             disk::DiskSpaceTier::Low => {
                 // Try eviction if not already running
                 if self.eviction_in_progress.swap(true, Ordering::Relaxed) {
@@ -2163,6 +2306,8 @@ fn build_channel_result(channel: &Channel, shared: &SharedUrlResult) -> ChannelR
         audio_only: shared.audio_only,
         screenshot_path: shared.screenshot_path.clone(),
         screenshot_error_reason: shared.screenshot_error_reason.clone(),
+        sample_clip_path: shared.sample_clip.as_ref().map(|clip| clip.path.clone()),
+        sample_clip_format: shared.sample_clip.as_ref().map(|clip| clip.format),
         label_mismatches: Vec::new(),
         low_framerate: shared.low_framerate,
         error_message: None,
@@ -2343,6 +2488,20 @@ async fn execute_scan_run(
 
     let preview = parse_playlist_with_cache(&app, &state, &config, &run_id).await?;
     let preview_single_provider = preview.single_provider;
+    // A partial rescan must keep old clips of URLs shared with unselected
+    // rows: those rows still point at the file.
+    let mut url_counts: HashMap<String, usize> = HashMap::new();
+    for channel in &preview.channels {
+        *url_counts
+            .entry(canonicalize_stream_url(&channel.url))
+            .or_default() += 1;
+    }
+    let shared_urls: Arc<HashSet<String>> = Arc::new(
+        url_counts
+            .into_iter()
+            .filter_map(|(url, count)| (count > 1).then_some(url))
+            .collect(),
+    );
     // Viewer counts come through the session this source was loaded with.
     let dispatcharr_connection = preview.dispatcharr_connection.clone();
     let mut channels = preview.channels.clone();
@@ -2492,7 +2651,16 @@ async fn execute_scan_run(
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
     // Disk space tracking for screenshot pause
-    let disk_guard = ScreenshotDiskGuard::new(using_custom_screenshots_dir, low_space_threshold_gb);
+    let clip_write_lock = Arc::new(tokio::sync::Mutex::new(()));
+    let full_scope_scan = config
+        .selected_indices
+        .as_ref()
+        .is_none_or(|indices| indices.is_empty());
+    let disk_guard = ScreenshotDiskGuard::new(
+        using_custom_screenshots_dir,
+        low_space_threshold_gb,
+        config.auto_capture_sample_clips,
+    );
 
     // Network connectivity tracking — consecutive network-level failures trigger a check
     let consecutive_net_failures = Arc::new(AtomicU32::new(0));
@@ -2546,6 +2714,8 @@ async fn execute_scan_run(
                 limit,
             )
         });
+        let prune_superseded_clips = !using_custom_screenshots_dir
+            && (full_scope_scan || !shared_urls.contains(&canonicalize_stream_url(&channel.url)));
         // Rows sharing a URL wait on one probe. Settle which row owns it
         // before reserving capacity, so a waiting duplicate never holds the
         // scan slot that probe needs.
@@ -2604,6 +2774,8 @@ async fn execute_scan_run(
         let proxy_list = Arc::clone(&proxy_list);
         let test_geoblock = config.test_geoblock;
         let skip_screenshots = config.skip_screenshots;
+        let auto_capture_sample_clips = config.auto_capture_sample_clips;
+        let sample_clip_duration_secs = config.sample_clip_duration_secs;
         let profile_bitrate_flag = config.profile_bitrate;
         let ffprobe_timeout_secs = config.ffprobe_timeout_secs;
         let ffmpeg_bitrate_timeout_secs = config.ffmpeg_bitrate_timeout_secs;
@@ -2617,6 +2789,7 @@ async fn execute_scan_run(
         let run_id_for_perf = run_id.clone();
         let pause_scope = scan_scope.to_string();
         let diagnostics_semaphore = Arc::clone(&diagnostics_semaphore);
+        let clip_write_lock = Arc::clone(&clip_write_lock);
         // A limited provider account counts every connection, so its rows
         // probe over one connection like a single-provider playlist.
         let single_connection_mode = single_provider || account_limit.is_some();
@@ -2644,12 +2817,15 @@ async fn execute_scan_run(
                 ffmpeg::build_screenshot_file_name(channel.index, &channel.name);
 
             // Check disk space periodically (every ~20 channels)
-            let effective_skip_screenshots = disk_guard.effective_skip(
+            let media_paused = disk_guard.effective_skip(
                 &task_app,
                 &run_id_for_perf,
-                skip_screenshots,
+                skip_screenshots && !auto_capture_sample_clips,
                 screenshots_dir.as_ref(),
             );
+            let effective_skip_screenshots = skip_screenshots || media_paused;
+            let sample_clip_secs =
+                (auto_capture_sample_clips && !media_paused).then_some(sample_clip_duration_secs);
 
             let check_ctx = SharedCheckContext {
                 app: &task_app,
@@ -2671,6 +2847,9 @@ async fn execute_scan_run(
                 screenshot_format,
                 diagnostics_semaphore: &diagnostics_semaphore,
                 single_connection_mode,
+                prune_superseded_clips,
+                low_space_threshold_gb,
+                clip_write_lock: &clip_write_lock,
             };
             let owner = (!duplicate_url).then(|| SharedUrlOwner(Arc::clone(&result_cell)));
             if duplicate_url {
@@ -2754,6 +2933,7 @@ async fn execute_scan_run(
                             &check_ctx,
                             &channel.url,
                             effective_skip_screenshots,
+                            sample_clip_secs,
                             screenshots_dir.as_ref(),
                             &screenshot_file_name,
                         )
@@ -2898,6 +3078,27 @@ async fn execute_scan_run(
             )));
         }
     };
+
+    // A completed full-scope scan saw every channel of this cache folder, so
+    // clips none of its results reference (removed, renamed, now dead, or
+    // failed recapture) can never be reached again.
+    if !cancel_token.is_cancelled() && full_scope_scan && !using_custom_screenshots_dir {
+        if let Some(dir) = screenshots_dir.clone() {
+            let referenced: HashSet<std::path::PathBuf> = completed_scan
+                .results
+                .iter()
+                .filter_map(|result| result.sample_clip_path.as_deref())
+                .map(std::path::PathBuf::from)
+                .collect();
+            let _ = tokio::task::spawn_blocking(move || {
+                crate::commands::media::sweep_unreferenced_clips(
+                    std::path::Path::new(&dir),
+                    &referenced,
+                )
+            })
+            .await;
+        }
+    }
 
     if !cancel_token.is_cancelled() {
         if let Some(source_identity) = config.source_identity.as_deref() {
@@ -3406,6 +3607,7 @@ pub async fn dispatcharr_probe_streams(
                         }
                         None => None,
                     };
+                    let clip_write_lock = tokio::sync::Mutex::new(());
                     let ctx = SharedCheckContext {
                         app,
                         client,
@@ -3426,9 +3628,13 @@ pub async fn dispatcharr_probe_streams(
                         screenshot_format: settings.screenshot_format,
                         diagnostics_semaphore,
                         single_connection_mode: limit.is_some(),
+                        // Metadata only: no screenshot or clip is written.
+                        prune_superseded_clips: false,
+                        low_space_threshold_gb: settings.low_space_threshold_gb,
+                        clip_write_lock: &clip_write_lock,
                     };
                     let (shared, _) =
-                        compute_shared_url_result(&ctx, &channel.url, true, None, "").await?;
+                        compute_shared_url_result(&ctx, &channel.url, true, None, None, "").await?;
                     Ok::<_, AppError>(build_channel_result(&channel, &shared))
                 }
                 .await;
@@ -3600,6 +3806,8 @@ mod tests {
             audio_only: false,
             screenshot_path: None,
             screenshot_error_reason: None,
+            sample_clip_path: None,
+            sample_clip_format: None,
             label_mismatches: if mismatched {
                 vec!["Label mismatch".to_string()]
             } else {
@@ -3656,6 +3864,7 @@ mod tests {
             audio_only: false,
             screenshot_path: None,
             screenshot_error_reason: None,
+            sample_clip: None,
             low_framerate: false,
             stream_url: Some("https://example.com/live.m3u8".to_string()),
             retry_count: None,

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 use crate::models::channel::ChannelResult;
+use crate::models::settings::{validate_sample_clip_duration, MIN_SAMPLE_CLIP_DURATION_SECS};
 
 pub const MIN_TIMEOUT_SECS: f64 = 0.5;
 pub const MAX_TIMEOUT_SECS: f64 = 300.0;
@@ -52,7 +53,15 @@ pub struct ScanConfig {
     pub proxy_file: Option<String>,
     pub test_geoblock: bool,
     pub screenshots_dir: Option<String>,
+    #[serde(default)]
+    pub auto_capture_sample_clips: bool,
+    #[serde(default = "default_sample_clip_duration_secs")]
+    pub sample_clip_duration_secs: u32,
     pub client_capabilities: Option<ScanClientCapabilities>,
+}
+
+fn default_sample_clip_duration_secs() -> u32 {
+    MIN_SAMPLE_CLIP_DURATION_SECS
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -119,7 +128,7 @@ impl ScanConfig {
             )));
         }
 
-        Ok(())
+        validate_sample_clip_duration(self.sample_clip_duration_secs)
     }
 }
 
@@ -205,6 +214,8 @@ mod tests {
             proxy_file: None,
             test_geoblock: false,
             screenshots_dir: None,
+            auto_capture_sample_clips: false,
+            sample_clip_duration_secs: 5,
             client_capabilities: None,
         }
     }
@@ -272,6 +283,18 @@ mod tests {
 
         config.ffprobe_timeout_secs = MAX_FFPROBE_TIMEOUT_SECS + 1.0;
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn older_clients_scan_without_sample_clips() {
+        let mut value = serde_json::to_value(valid_config()).expect("config serializes");
+        let object = value.as_object_mut().expect("config is an object");
+        object.remove("auto_capture_sample_clips");
+        object.remove("sample_clip_duration_secs");
+
+        let config: ScanConfig = serde_json::from_value(value).expect("config deserializes");
+        assert!(!config.auto_capture_sample_clips);
+        assert!(config.validate().is_ok());
     }
 
     #[test]

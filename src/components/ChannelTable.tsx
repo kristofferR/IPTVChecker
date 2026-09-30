@@ -185,6 +185,7 @@ export function ChannelTable({
   const isPlaying = useAppStore((s) => s.playIntentActive);
   const singleConnection = useAppStore((s) => isSingleConnectionPlaylist(s.playlist));
   const externalPlaybackActive = useAppStore((s) => s.externalPlaybackActive);
+  const sampleCaptureActive = useAppStore((s) => s.sampleCaptureActive);
   const separatePlaceholder = useAppStore((s) => s.settings.separate_placeholder_status);
   const onSelectionChange = useAppStore((s) => s.setSelectedChannelIndices);
   const dispatcharrOrders = useAppStore((s) => s.dispatcharrOrders);
@@ -1252,7 +1253,7 @@ export function ChannelTable({
       initialState.archiveGuideTestRunning ||
       Object.values(initialState.archiveProbes).some((probe) => probe.running) ||
       (isSingleConnectionPlaylist(initialState.playlist) &&
-        (initialState.playIntentActive || isCastingRef.current))
+        (initialState.playIntentActive || isCastingRef.current || initialState.sampleCaptureActive))
     ) {
       setContextMenuState(null);
       return;
@@ -1887,7 +1888,7 @@ export function ChannelTable({
                     isScanActive(scanState) ||
                     archiveGuideTestRunning ||
                     archiveProbeRunning ||
-                    (singleConnection && (isPlaying || isCasting))
+                    (singleConnection && (isPlaying || isCasting || sampleCaptureActive))
                   }
                   title={
                     externalPlaybackActive && singleConnection

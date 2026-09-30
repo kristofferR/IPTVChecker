@@ -85,7 +85,10 @@ export async function verifyArchives(
     initialState.archiveGuideTestRunning ||
     Object.values(initialState.archiveProbes).some((entry) => entry.running) ||
     (isArchiveDownloadRunning(initialState.archiveDownloads) && singleConnection) ||
-    ((initialState.playIntentActive || initialState.castActive) && singleConnection)
+    ((initialState.playIntentActive ||
+      initialState.castActive ||
+      initialState.sampleCaptureActive) &&
+      singleConnection)
   ) {
     return;
   }

@@ -1,5 +1,6 @@
 import type { StateCreator } from "zustand";
 import { inferPlatformFromNavigator } from "../../lib/platform";
+import { MIN_SAMPLE_CLIP_DURATION_SECS } from "../../lib/sampleClip";
 import { getScanPresets, getSettings, updateSettings } from "../../lib/tauri";
 import type { AppSettings, ScanPresetConfig } from "../../lib/types";
 import type { AppStore, SettingsSlice } from "../types";
@@ -32,6 +33,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   report_auto_reveal: true,
   channel_logo_size: "small",
   screenshot_format: "webp",
+  auto_capture_sample_clips: false,
+  sample_clip_duration_secs: MIN_SAMPLE_CLIP_DURATION_SECS,
   screenshot_retention_count: 1,
   low_space_threshold_gb: 5.0,
   separate_placeholder_status: true,
@@ -63,6 +66,8 @@ function applyPresetConfig(base: AppSettings, config: ScanPresetConfig): AppSett
     screenshots_dir: config.screenshots_dir,
     low_fps_threshold: config.low_fps_threshold,
     screenshot_format: config.screenshot_format,
+    auto_capture_sample_clips: config.auto_capture_sample_clips,
+    sample_clip_duration_secs: config.sample_clip_duration_secs,
   };
 }
 
@@ -83,7 +88,9 @@ function sameScanConfig(value: AppSettings, config: ScanPresetConfig): boolean {
     value.test_geoblock === config.test_geoblock &&
     value.screenshots_dir === config.screenshots_dir &&
     value.low_fps_threshold === config.low_fps_threshold &&
-    value.screenshot_format === config.screenshot_format
+    value.screenshot_format === config.screenshot_format &&
+    value.auto_capture_sample_clips === config.auto_capture_sample_clips &&
+    value.sample_clip_duration_secs === config.sample_clip_duration_secs
   );
 }
 

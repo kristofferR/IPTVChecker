@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 use tauri::Manager;
+use tauri_plugin_opener::OpenerExt;
 
 use crate::error::AppError;
 use crate::state::AppState;
@@ -325,6 +326,26 @@ pub async fn open_channel_in_player(
             let _ = std::fs::remove_file(temp_path);
             Err(error)
         }
+    }
+}
+
+/// Open a local media file with the configured external player, or the
+/// operating system's file association when none is set. Clip names derive
+/// from playlist channel names, so the default path must never pass through
+/// a shell (`cmd /C start` would reparse `&` in them); the opener plugin
+/// uses ShellExecute on Windows.
+pub(crate) async fn open_local_media(app: &tauri::AppHandle, path: &Path) -> Result<(), AppError> {
+    let external_player_path = {
+        let state = app.state::<Arc<AppState>>();
+        let settings = state.settings.lock().await;
+        settings.external_player_path.clone()
+    };
+    match external_player_path.as_deref() {
+        Some(player_path) => open_with_custom_player(Path::new(player_path), path),
+        None => app
+            .opener()
+            .open_path(path.to_string_lossy(), None::<&str>)
+            .map_err(|error| AppError::Other(format!("Failed to open media file: {}", error))),
     }
 }
 

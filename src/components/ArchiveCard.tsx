@@ -46,11 +46,14 @@ function ArchiveProbe({ result, isCasting }: Pick<ArchiveCardProps, "result" | "
   const playIntentActive = useAppStore((state) => state.playIntentActive);
   const castActive = useAppStore((state) => state.castActive);
   const externalPlaybackActive = useAppStore((state) => state.externalPlaybackActive);
+  const captureHoldsConnection = useAppStore(
+    (state) => state.sampleCaptureActive && isSingleConnectionPlaylist(state.playlist),
+  );
   const anotherProbeRunning = useAppStore((state) =>
     Object.values(state.archiveProbes).some((probe) => probe.running),
   );
   const running = entry?.running ?? false;
-  const playbackBlocksProbe = playIntentActive || castActive || isCasting;
+  const playbackBlocksProbe = playIntentActive || castActive || isCasting || captureHoldsConnection;
   const disabled =
     archiveGuideTestRunning ||
     anotherProbeRunning ||
@@ -67,7 +70,8 @@ function ArchiveProbe({ result, isCasting }: Pick<ArchiveCardProps, "result" | "
       Object.values(state.archiveProbes).some((probe) => probe.running) ||
       state.playIntentActive ||
       state.castActive ||
-      isCasting
+      isCasting ||
+      (state.sampleCaptureActive && isSingleConnectionPlaylist(state.playlist))
     ) {
       return;
     }

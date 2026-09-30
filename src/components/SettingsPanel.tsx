@@ -13,6 +13,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { fixPreferencesFrom } from "../lib/dispatcharr";
 import { formatBytes } from "../lib/format";
 import {
+  clampSampleClipDuration,
+  MAX_SAMPLE_CLIP_DURATION_SECS,
+  MIN_SAMPLE_CLIP_DURATION_SECS,
+} from "../lib/sampleClip";
+import {
   clearScreenshotCache,
   deleteScanPreset,
   getScanPresets,
@@ -76,6 +81,8 @@ function buildScanPresetConfig(settings: AppSettings): ScanPresetConfig {
     screenshots_dir: settings.screenshots_dir,
     low_fps_threshold: settings.low_fps_threshold,
     screenshot_format: settings.screenshot_format,
+    auto_capture_sample_clips: settings.auto_capture_sample_clips,
+    sample_clip_duration_secs: settings.sample_clip_duration_secs,
   };
 }
 
@@ -98,6 +105,8 @@ function applyScanPresetConfig(base: AppSettings, config: ScanPresetConfig): App
     screenshots_dir: config.screenshots_dir,
     low_fps_threshold: config.low_fps_threshold,
     screenshot_format: config.screenshot_format,
+    auto_capture_sample_clips: config.auto_capture_sample_clips,
+    sample_clip_duration_secs: config.sample_clip_duration_secs,
   };
 }
 
@@ -515,7 +524,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
   }> = [
     { id: "general", label: "General", Icon: SlidersHorizontal },
     { id: "scanning", label: "Scanning", Icon: Gauge },
-    { id: "media", label: "Screenshots", Icon: Layers },
+    { id: "media", label: "Media", Icon: Layers },
     { id: "network", label: "Network", Icon: Network },
     { id: "dispatcharr", label: "Dispatcharr", Icon: ListOrdered },
     { id: "advanced", label: "Advanced", Icon: Wrench },
@@ -1160,8 +1169,49 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
               </div>
 
               <div className={rowClass}>
+                <div>
+                  <p className="text-[13px] font-medium">Auto-capture sample clips</p>
+                  <p className="text-[11px] text-text-tertiary mt-0.5">
+                    Record a clip from every alive channel during scans. Adds scan time and disk
+                    usage.
+                  </p>
+                </div>
+                <Switch
+                  checked={draft.auto_capture_sample_clips}
+                  onChange={(checked) =>
+                    updateSetting("auto_capture_sample_clips", checked, { immediate: true })
+                  }
+                  ariaLabel="Auto-capture sample clips"
+                />
+              </div>
+
+              <div className={rowClass}>
+                <div>
+                  <p className="text-[13px] font-medium">Sample clip duration</p>
+                  <p className="text-[11px] text-text-tertiary mt-0.5">
+                    Seconds recorded per clip, {MIN_SAMPLE_CLIP_DURATION_SECS} to{" "}
+                    {MAX_SAMPLE_CLIP_DURATION_SECS}. Clips are saved without re-encoding.
+                  </p>
+                </div>
+                <input
+                  type="number"
+                  value={draft.sample_clip_duration_secs}
+                  onChange={(event) =>
+                    updateSetting(
+                      "sample_clip_duration_secs",
+                      clampSampleClipDuration(Number.parseInt(event.target.value, 10)),
+                    )
+                  }
+                  min={MIN_SAMPLE_CLIP_DURATION_SECS}
+                  max={MAX_SAMPLE_CLIP_DURATION_SECS}
+                  aria-label="Sample clip duration in seconds"
+                  className={`${inputClass} w-24`}
+                />
+              </div>
+
+              <div className={rowClass}>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-medium">Save screenshots to</p>
+                  <p className="text-[13px] font-medium">Save media to</p>
                   <p
                     className="text-[11px] text-text-tertiary mt-0.5 truncate"
                     title={draft.screenshots_dir ?? "Not saved (preview only)"}
@@ -1193,7 +1243,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
             <section className={blockClass}>
               <div className={rowClass}>
                 <div className="min-w-0">
-                  <p className="text-[13px] font-medium">Temp Screenshot Cache</p>
+                  <p className="text-[13px] font-medium">Temp Media Cache</p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
                     {cacheStats
                       ? `${formatBytes(cacheStats.total_bytes)} (${cacheStats.file_count} files)`
@@ -1227,7 +1277,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
               <div className="grid grid-cols-2 gap-3 p-4 border-t border-border-subtle">
                 <div>
                   <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Screenshot Retention
+                    Media Retention
                   </label>
                   <input
                     type="number"

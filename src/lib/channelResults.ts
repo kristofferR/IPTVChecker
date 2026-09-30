@@ -18,6 +18,8 @@ function pendingScanFields() {
     audio_only: false,
     screenshot_path: null,
     screenshot_error_reason: null,
+    sample_clip_path: null,
+    sample_clip_format: null,
     label_mismatches: [],
     low_framerate: false,
     error_message: null,

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -127,6 +127,12 @@ pub struct AppState {
     /// Wakes the periodic check loop when the preference is switched back on,
     /// instead of waiting out the current interval.
     pub update_check_wake: Notify,
+    /// Folders this session wrote screenshots or clips to. They stay readable
+    /// after "Save media to" changes, so existing results keep working.
+    pub media_roots: std::sync::Mutex<HashSet<std::path::PathBuf>>,
+    /// Held for a manual sample capture. Process-wide because every window
+    /// shares the provider's connection limit and the output folder.
+    pub sample_capture_lock: Mutex<()>,
 }
 
 impl AppState {
@@ -138,6 +144,8 @@ impl AppState {
             streaming_proxy_start_lock: Mutex::new(()),
             cast_state: Mutex::new(CastState::default()),
             local_playback: std::sync::Mutex::new(HashMap::new()),
+            media_roots: std::sync::Mutex::new(HashSet::new()),
+            sample_capture_lock: Mutex::new(()),
             cast_lifecycle_lock: Mutex::new(()),
             window_scan_states: Mutex::new(HashMap::new()),
             quick_check_tokens: Mutex::new(HashMap::new()),
