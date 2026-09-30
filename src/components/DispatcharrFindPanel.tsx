@@ -341,6 +341,7 @@ export function DispatcharrFindPanel() {
           </span>
         )}
         {unscanned > 0 && <span className="text-text-tertiary">{unscanned} not scanned</span>}
+        {channel.empty && <span className="text-amber-400">No streams</span>}
       </div>
       <ol className="mx-3 rounded-md border border-border-app">
         {channel.streams.map((entry, position) => (

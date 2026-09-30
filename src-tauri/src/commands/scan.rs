@@ -2371,6 +2371,9 @@ async fn execute_scan_run(
         base_name,
         scope_suffix,
     } = load_resume_state(&app, &state, &config, &run_id, &mut channels).await;
+    // A Dispatcharr channel's no-streams row has nothing to probe.
+    channels
+        .retain(|channel| !crate::engine::dispatcharr::is_empty_channel_row(&channel.extinf_line));
 
     // Compute single_provider from the filtered (and resume-pruned) channel set.
     let single_provider = if preview_single_provider {

@@ -21,6 +21,8 @@ export interface DispatcharrStreamRef {
   /** Linked from Find streams this session; its channel's source has no row
    *  for it until reloaded, so scans leave it alone. */
   added: boolean;
+  /** The placeholder row of a channel with no playable stream. */
+  empty: boolean;
   /** The provider stream's own name (rows are titled with the channel). */
   streamName: string | null;
   /** The channel's complete stream order at load, including streams that
@@ -159,6 +161,7 @@ export function parseDispatcharrIds(extinfLine: string): DispatcharrStreamRef | 
     account: extinfAttribute(extinfLine, "x-dispatcharr-account") || null,
     accountId: number("x-dispatcharr-account-id"),
     added: extinfAttribute(extinfLine, ADDED_ATTR) === "1",
+    empty: extinfAttribute(extinfLine, "x-dispatcharr-empty") === "1",
     streamName: extinfAttribute(extinfLine, "x-dispatcharr-stream-name") || null,
     channelStreams:
       extinfAttribute(extinfLine, "x-dispatcharr-channel-streams")
@@ -217,8 +220,11 @@ export interface DispatcharrChannelView {
   allDead: boolean;
   /** The primary failed because its provider account is down. */
   primaryProviderDown: boolean;
-  /** Scanned, and not one stream works (dead, or its provider is down). */
+  /** Scanned, and not one stream works (dead, or its provider is down), or
+   *  the channel has no streams at all. */
   noWorking: boolean;
+  /** No playable stream: shown through its placeholder row. */
+  empty: boolean;
 }
 
 export interface DispatcharrView {
@@ -324,7 +330,12 @@ export function findDownAccounts(entries: DispatcharrStreamEntry[]): DownAccount
 function buildView(results: ChannelResult[], orders: DispatcharrOrders): DispatcharrView | null {
   const byChannel = new Map<
     number,
-    { name: string; group: string; streams: DispatcharrStreamEntry[] }
+    {
+      name: string;
+      group: string;
+      streams: DispatcharrStreamEntry[];
+      placeholder?: DispatcharrStreamEntry;
+    }
   >();
   const playlist = results[0]?.playlist;
   for (const result of results) {
@@ -341,7 +352,8 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
       channel = { name, group: result.group, streams: [] };
       byChannel.set(ref.channelId, channel);
     }
-    if (!channel.streams.some((entry) => entry.ref.streamId === ref.streamId)) {
+    if (ref.empty) channel.placeholder = { ref, result, providerDown: false };
+    else if (!channel.streams.some((entry) => entry.ref.streamId === ref.streamId)) {
       channel.streams.push({ ref, result, providerDown: false });
     }
   }
@@ -366,10 +378,34 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
     const order =
       orders[channelId] ??
       loaded[0]?.ref.channelStreams ??
+      channel.placeholder?.ref.channelStreams ??
       loaded.map((entry) => entry.ref.streamId);
     const byStream = new Map(channel.streams.map((entry) => [entry.ref.streamId, entry]));
     const streams = order.flatMap((streamId) => byStream.get(streamId) ?? []);
-    if (streams.length === 0) continue;
+    if (streams.length === 0) {
+      // No playable stream: the channel shows through its placeholder so
+      // Find streams can give it some.
+      if (!channel.placeholder) continue;
+      const view: DispatcharrChannelView = {
+        channelId,
+        name: channel.name,
+        group: channel.group,
+        streams: [],
+        order,
+        primary: channel.placeholder.result,
+        alive: 0,
+        primaryDead: false,
+        hasDead: false,
+        allDead: false,
+        primaryProviderDown: false,
+        noWorking: true,
+        empty: true,
+      };
+      channels.push(view);
+      byStreamIndex.set(channel.placeholder.result.index, view);
+      for (const entry of channel.streams) byStreamIndex.set(entry.result.index, view);
+      continue;
+    }
     const dead = streams.filter(isDead).length;
     const view: DispatcharrChannelView = {
       channelId,
@@ -386,9 +422,11 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
       noWorking:
         streams.every((entry) => entry.result.status !== "alive") &&
         streams.every((entry) => !isUntestedStatus(entry.result.status)),
+      empty: false,
     };
     channels.push(view);
     for (const entry of channel.streams) byStreamIndex.set(entry.result.index, view);
+    if (channel.placeholder) byStreamIndex.set(channel.placeholder.result.index, view);
   }
   return {
     channels,
@@ -628,7 +666,6 @@ export function dispatcharrLinkedIndices(
   results: ChannelResult[],
   orders: DispatcharrOrders,
 ): number[] | null {
-  if (Object.keys(orders).length === 0) return null;
   const view = getDispatcharrView(results, orders);
   if (!view) return null;
   // Streams linked from Find streams have no row in the source yet.

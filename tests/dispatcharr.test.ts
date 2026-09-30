@@ -118,6 +118,7 @@ describe("dispatcharr helpers", () => {
       account: 'Provider "A"',
       accountId: null,
       added: false,
+      empty: false,
       streamName: null,
       channelStreams: null,
     });
@@ -487,5 +488,26 @@ describe("dispatcharr helpers", () => {
       name: `News One [${position + 1}/2] Feed ${position + 1}`,
     }));
     expect(getDispatcharrView(results, {})?.byChannelId.get(10)?.name).toBe("News One");
+  });
+
+  it("shows a channel with no streams through its placeholder, never scanning it", () => {
+    const streams = channelRows(10, "News One", [{ id: 1 }]);
+    const line = extinf(30, 0, 0, 0, "Empty One");
+    const title = line.lastIndexOf(",");
+    const placeholder = makeResult(
+      1,
+      `${line.slice(0, title)} x-dispatcharr-empty="1"${line.slice(title)}`,
+      "Empty One",
+      { status: "pending" },
+    );
+    const results = [...streams, placeholder];
+    const view = getDispatcharrView(results, {});
+    const empty = view?.byChannelId.get(30);
+    expect(empty?.empty).toBe(true);
+    expect(empty?.noWorking).toBe(true);
+    expect(empty?.streams).toEqual([]);
+    expect(empty?.primary.index).toBe(1);
+    // Full scans cover the real stream only.
+    expect(dispatcharrLinkedIndices(results, {})).toEqual([0]);
   });
 });

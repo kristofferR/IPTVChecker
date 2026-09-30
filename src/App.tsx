@@ -1356,6 +1356,14 @@ export default function App() {
   const handleOpenExternal = useCallback(
     async (result: ChannelResult) => {
       if (blockPlaybackDuringArchiveVerification()) return;
+      // An external player opens its own provider connection, which a
+      // running scan of a connection-limited source may already hold.
+      if (isScanActive(getStore().scanState) && isSingleConnectionPlaylist(getStore().playlist)) {
+        getStore().setPlaybackError(
+          "Stop the scan first: the provider allows only so many connections at once.",
+        );
+        return;
+      }
       try {
         if (isSingleConnectionPlaylist(getStore().playlist)) {
           handleStopPlayer();

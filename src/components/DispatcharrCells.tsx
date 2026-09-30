@@ -148,6 +148,8 @@ function ChannelRowStatus({
         </>
       );
     default:
+      if (channel.empty)
+        return <span className="whitespace-nowrap text-[12px] text-amber-400">No streams</span>;
       if (channel.allDead)
         return <span className="whitespace-nowrap text-[12px] text-red-400">All dead</span>;
       if (channel.primaryDead)

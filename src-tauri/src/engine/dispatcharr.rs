@@ -49,6 +49,14 @@ pub(crate) const ATTR_SERVER: &str = "x-dispatcharr-server";
 /// The channel's complete stream order, including streams without a row
 /// (no URL), so edits can be checked against Dispatcharr's full list.
 pub(crate) const ATTR_CHANNEL_STREAMS: &str = "x-dispatcharr-channel-streams";
+/// Marks the one row of a channel that has no playable stream, so the
+/// channel still shows (and can be given streams). Never probed.
+pub(crate) const ATTR_EMPTY: &str = "x-dispatcharr-empty";
+
+/// A channel's no-streams placeholder row (see `ATTR_EMPTY`).
+pub(crate) fn is_empty_channel_row(extinf_line: &str) -> bool {
+    extinf_line.contains(ATTR_EMPTY)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DispatcharrAuth {
@@ -1290,6 +1298,7 @@ pub(crate) fn build_m3u(
             .and_then(|id| groups.get(&id))
             .map(String::as_str)
             .unwrap_or("");
+        let mut rows = 0;
         for (order, stream_id) in channel.streams.iter().enumerate() {
             let Some(stream) = streams.get(stream_id) else {
                 continue;
@@ -1354,6 +1363,44 @@ pub(crate) fn build_m3u(
             m3u.push('\n');
             m3u.push_str(&url.replace(['\r', '\n'], ""));
             m3u.push('\n');
+            rows += 1;
+        }
+        // A channel with no playable stream still gets one row, so it shows
+        // and Find streams can give it some. Its URL is the channel's own
+        // Dispatcharr proxy link; scans never probe it.
+        if rows == 0 {
+            m3u.push_str("#EXTINF:-1");
+            let mut attr = |key: &str, value: &str| {
+                m3u.push_str(&format!(" {}=\"{}\"", key, escape_extinf_value(value)));
+            };
+            attr("tvg-id", &channel.guide_id());
+            if let Some(number) = channel.number() {
+                attr("tvg-chno", &format_channel_number(number));
+            }
+            if let Some(logo_id) = channel.logo_id() {
+                attr(
+                    "tvg-logo",
+                    &format!("{}/api/channels/logos/{}/cache/", base, logo_id),
+                );
+            }
+            attr("group-title", group);
+            attr(ATTR_CHANNEL_ID, &channel.id.to_string());
+            attr(ATTR_STREAM_ID, "0");
+            attr(ATTR_STREAM_ORDER, "0");
+            attr(ATTR_STREAM_COUNT, "0");
+            if let Some(uuid) = channel.uuid.as_deref() {
+                attr(ATTR_CHANNEL_UUID, uuid);
+            }
+            attr(ATTR_CHANNEL_STREAMS, &channel_streams);
+            attr(ATTR_EMPTY, "1");
+            m3u.push(',');
+            m3u.push_str(&flatten_extinf_title(channel.display_name()));
+            m3u.push('\n');
+            let key = channel
+                .uuid
+                .clone()
+                .unwrap_or_else(|| format!("channel-{}", channel.id));
+            m3u.push_str(&format!("{}/proxy/ts/stream/{}\n", base, key));
         }
     }
     m3u
@@ -1632,6 +1679,39 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(streams.iter().map(|s| s.id).collect::<Vec<_>>(), vec![1, 2]);
+    }
+
+    #[test]
+    fn a_channel_without_playable_streams_keeps_one_placeholder_row() {
+        let channels = [DispatcharrChannel {
+            id: 30,
+            uuid: Some("uuid-30".into()),
+            name: "Empty One".into(),
+            channel_number: Some(3.0),
+            streams: vec![],
+            ..Default::default()
+        }];
+        let base = Url::parse("http://dvr.example:9191/").unwrap();
+        let m3u = build_m3u(
+            &base,
+            &channels,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        let preview =
+            crate::engine::parser::parse_m3u(m3u.as_bytes(), "fixture.m3u8", &None, &None).unwrap();
+        assert_eq!(preview.channels.len(), 1);
+        let row = &preview.channels[0];
+        assert_eq!(row.name, "Empty One");
+        assert!(is_empty_channel_row(&row.extinf_line));
+        assert_eq!(
+            dispatcharr_ids_from_extinf(&row.extinf_line)
+                .unwrap()
+                .channel_id,
+            30
+        );
+        assert_eq!(row.url, "http://dvr.example:9191/proxy/ts/stream/uuid-30");
     }
 
     #[test]
