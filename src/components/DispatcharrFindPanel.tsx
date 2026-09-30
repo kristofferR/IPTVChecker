@@ -11,6 +11,7 @@ import {
 } from "../lib/dispatcharr";
 import { linkStreams } from "../lib/dispatcharrEdits";
 import { errorToString } from "../lib/errors";
+import { isSingleConnectionPlaylist } from "../lib/playback";
 import { isScanActive } from "../lib/scanState";
 import {
   cancelQuickCheck,
@@ -107,6 +108,12 @@ export function DispatcharrFindPanel() {
   const flatResults = useAppStore((s) => s.flatResults);
   const orders = useAppStore((s) => s.dispatcharrOrders);
   const scanning = useAppStore((s) => isScanActive(s.scanState));
+  // Playback uses a provider connection the probes cannot see.
+  const playing = useAppStore(
+    (s) =>
+      isSingleConnectionPlaylist(s.playlist) &&
+      (s.playIntentActive || s.castActive || s.externalPlaybackActive),
+  );
   const view = useMemo(() => getDispatcharrView(flatResults, orders), [flatResults, orders]);
   const channel = find ? view?.byChannelId.get(find.channelId) : undefined;
   const stuck = useMemo(() => view?.channels.filter((entry) => entry.noWorking) ?? [], [view]);
@@ -160,6 +167,11 @@ export function DispatcharrFindPanel() {
   }, [channelId]);
 
   useEffect(() => stopProbe, []);
+
+  // Playback starting mid-probe takes the connection back.
+  useEffect(() => {
+    if (playing) stopProbe();
+  }, [playing]);
 
   useEffect(() => {
     const unlisten = listen<{ request_id: string; result: ChannelResult }>(
@@ -270,7 +282,7 @@ export function DispatcharrFindPanel() {
 
   const probe = async () => {
     const target = dispatcharrTarget(getStore().playlist);
-    if (scanning || unprobed.length === 0 || !target) return;
+    if (scanning || playing || unprobed.length === 0 || !target) return;
     const requestId = `find-${channel.channelId}-${Date.now()}`;
     requestRef.current = requestId;
     setProbing(true);
@@ -445,8 +457,14 @@ export function DispatcharrFindPanel() {
             </span>
             <button
               type="button"
-              disabled={scanning || probing || unprobed.length === 0}
-              title={scanning ? "Available when the scan finishes" : undefined}
+              disabled={scanning || playing || probing || unprobed.length === 0}
+              title={
+                scanning
+                  ? "Available when the scan finishes"
+                  : playing
+                    ? "Stop playback first; it uses the provider's connection"
+                    : undefined
+              }
               onClick={() => void probe()}
               className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-2.5 py-1 font-medium text-white hover:bg-blue-500 disabled:opacity-40"
             >

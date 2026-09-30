@@ -422,6 +422,14 @@ describe("dispatcharr helpers", () => {
     const added = addedStreamRow(found, channel, 5);
     expect(added.index).toBe(5);
     expect(parseDispatcharrIds(added.extinf_line)?.added).toBe(true);
+    // The marker lands before the title, even when the title holds a quote.
+    const quoted = addedStreamRow(
+      makeResult(0, extinf(10, 8, 0, 1, 'News "One"', "Feed 8"), 'News "One"'),
+      channel,
+      6,
+    );
+    expect(quoted.extinf_line.endsWith(',News "One"')).toBe(true);
+    expect(parseDispatcharrIds(quoted.extinf_line)?.added).toBe(true);
     const orders = { 10: [7, 1, 2] };
     const withAdded = [...results, added];
     expect(getDispatcharrView(withAdded, orders)?.byChannelId.get(10)?.primary.index).toBe(5);

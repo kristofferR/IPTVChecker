@@ -63,8 +63,18 @@ export function addedStreamRow(
   channel: DispatcharrChannelView,
   index: number,
 ): ChannelResult {
-  // Attributes end at the last quote; the title follows.
-  const cut = result.extinf_line.lastIndexOf('"') + 1;
+  // The title starts after the first comma outside a quoted attribute.
+  let cut = result.extinf_line.length;
+  let quoted = false;
+  for (let i = 0; i < result.extinf_line.length; i++) {
+    const c = result.extinf_line[i];
+    if (c === "\\" && quoted) i++;
+    else if (c === '"') quoted = !quoted;
+    else if (c === "," && !quoted) {
+      cut = i;
+      break;
+    }
+  }
   return {
     ...result,
     index,

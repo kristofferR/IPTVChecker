@@ -215,14 +215,14 @@ export async function linkStreams(
       return ref?.channelId === channel.channelId ? [ref.streamId] : [];
     }),
   );
-  appendStreamRows(
-    picked
-      .filter((result) => {
-        const ref = parseDispatcharrIds(result.extinf_line);
-        return ref && !loaded.has(ref.streamId);
-      })
-      .map((result) => addedStreamRow(result, channel, 0)),
-  );
+  const rows = picked
+    .filter((result) => {
+      const ref = parseDispatcharrIds(result.extinf_line);
+      return ref && !loaded.has(ref.streamId);
+    })
+    .map((result) => addedStreamRow(result, channel, 0));
+  useAppStore.getState().addDispatcharrRows(rows);
+  appendStreamRows(rows);
   // The new primary had no row when the write moved the selection; follow it now.
   const store = useAppStore.getState();
   const selected = store.selectedChannel;

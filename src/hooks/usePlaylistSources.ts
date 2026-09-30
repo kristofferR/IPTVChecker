@@ -286,10 +286,7 @@ export function usePlaylistSources({
 
       // Streams linked from Find streams have no row in the cached source;
       // re-applying a filter keeps them with their channels.
-      const linkedRows =
-        mode === "reapplySourceFilter"
-          ? getStore().flatResults.filter((row) => parseDispatcharrIds(row.extinf_line)?.added)
-          : [];
+      const linkedRows = mode === "reapplySourceFilter" ? getStore().dispatcharrAddedRows : [];
 
       const initStartedAt = performance.now();
       logger.info(`[App] Preparing scan cache for ${preview.channels.length} visible channels`);

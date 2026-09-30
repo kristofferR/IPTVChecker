@@ -324,12 +324,17 @@ export interface DispatcharrSlice {
   dispatcharrRowStates: Record<number, DispatcharrRowState>;
   dispatcharrToast: DispatcharrToast | null;
   dispatcharrFind: DispatcharrFind | null;
+  /** Every stream row linked from Find streams since the source loaded. The
+   *  source has no row for them, so a reapplied filter restores them from
+   *  here. */
+  dispatcharrAddedRows: ChannelResult[];
 
   setDispatcharrRowState: (channelId: number, state: DispatcharrRowState | null) => void;
   /** Record a written order; `undoOrder` null clears the channel's undo. */
   commitDispatcharrOrder: (channelId: number, order: number[], undoOrder: number[] | null) => void;
   setDispatcharrToast: (toast: DispatcharrToast | null) => void;
   setDispatcharrFind: (find: DispatcharrFind | null) => void;
+  addDispatcharrRows: (rows: ChannelResult[]) => void;
   resetDispatcharrEdits: () => void;
 }
 
