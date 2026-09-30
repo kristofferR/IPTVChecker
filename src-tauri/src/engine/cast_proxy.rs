@@ -42,7 +42,7 @@ use url::Url;
 use crate::engine::ffmpeg::{
     configure_background_process, graceful_kill, resolve_binary, GRACEFUL_KILL_TIMEOUT,
 };
-use crate::engine::proxy_common::{read_capped, ReadCappedError};
+use crate::engine::proxy_common::{parse_byte_range, read_capped, ReadCappedError};
 use crate::engine::stream_proxy::redact_url;
 use crate::error::AppError;
 use crate::models::chromecast::CastStreamKind;
@@ -1592,31 +1592,6 @@ fn parse_request_header<'a>(request: &'a str, name: &str) -> Option<&'a str> {
         }
     }
     None
-}
-
-/// Parse an HTTP `Range` header of the form `bytes=START-END` (END optional)
-/// against a known content length. Returns `(start, end_inclusive)` clamped
-/// into bounds, or `None` if the header is malformed or unsatisfiable. We only
-/// support the single-range, byte-unit form — multi-range and suffix ranges
-/// (`bytes=-N`) are uncommon for media playback and would complicate the
-/// response framing.
-fn parse_byte_range(header: &str, total_len: u64) -> Option<(u64, u64)> {
-    if total_len == 0 {
-        return None;
-    }
-    let rest = header.strip_prefix("bytes=")?.trim();
-    let (start_s, end_s) = rest.split_once('-')?;
-    let start: u64 = start_s.trim().parse().ok()?;
-    let end_inclusive: u64 = if end_s.trim().is_empty() {
-        total_len - 1
-    } else {
-        end_s.trim().parse().ok()?
-    };
-    if start > end_inclusive || start >= total_len {
-        return None;
-    }
-    let end_clamped = end_inclusive.min(total_len - 1);
-    Some((start, end_clamped))
 }
 
 async fn write_simple(

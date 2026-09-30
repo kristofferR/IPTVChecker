@@ -9,6 +9,32 @@ pub enum ContentType {
     Series,
 }
 
+/// Container of a captured sample clip. Clips are stream-copied, so MP4 is
+/// only produced when the source packets remux cleanly; otherwise the raw
+/// MPEG-TS capture is kept.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SampleClipFormat {
+    Mp4,
+    Ts,
+}
+
+impl SampleClipFormat {
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Mp4 => "mp4",
+            Self::Ts => "ts",
+        }
+    }
+
+    pub fn mime_type(self) -> &'static str {
+        match self {
+            Self::Mp4 => "video/mp4",
+            Self::Ts => "video/mp2t",
+        }
+    }
+}
+
 impl std::fmt::Display for ContentType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -186,6 +212,10 @@ pub struct ChannelResult {
     pub screenshot_path: Option<String>,
     #[serde(default)]
     pub screenshot_error_reason: Option<String>,
+    #[serde(default)]
+    pub sample_clip_path: Option<String>,
+    #[serde(default)]
+    pub sample_clip_format: Option<SampleClipFormat>,
     pub label_mismatches: Vec<String>,
     pub low_framerate: bool,
     pub error_message: Option<String>,
@@ -236,6 +266,8 @@ mod tests {
             audio_only: false,
             screenshot_path: None,
             screenshot_error_reason: None,
+            sample_clip_path: None,
+            sample_clip_format: None,
             label_mismatches: Vec::new(),
             low_framerate: false,
             error_message: None,

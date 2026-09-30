@@ -1261,6 +1261,16 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     };
                 let request_str = String::from_utf8_lossy(&request_bytes);
 
+                if crate::commands::media::try_serve_preview_request(
+                    &app_handle,
+                    &request_str,
+                    &mut socket,
+                )
+                .await
+                {
+                    return;
+                }
+
                 // Parse GET /stream?url=ENCODED_URL HTTP/1.1
                 let request = match parse_stream_request(&request_str) {
                     Some(request) => request,

@@ -130,6 +130,8 @@ fn make_result(
         audio_only: false,
         screenshot_path: None,
         screenshot_error_reason: None,
+        sample_clip_path: None,
+        sample_clip_format: None,
         label_mismatches: Vec::new(),
         low_framerate: false,
         error_message: None,

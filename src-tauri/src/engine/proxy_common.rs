@@ -9,6 +9,31 @@ use url::Url;
 /// able to buffer unbounded data.
 pub const MAX_JSON_API_BYTES: u64 = 64 * 1024 * 1024;
 
+/// Parse an HTTP `Range` header of the form `bytes=START-END` (END optional)
+/// against a known content length. Returns `(start, end_inclusive)` clamped
+/// into bounds, or `None` if the header is malformed or unsatisfiable. We only
+/// support the single-range, byte-unit form — multi-range and suffix ranges
+/// (`bytes=-N`) are uncommon for media playback and would complicate the
+/// response framing.
+pub fn parse_byte_range(header: &str, total_len: u64) -> Option<(u64, u64)> {
+    if total_len == 0 {
+        return None;
+    }
+    let rest = header.strip_prefix("bytes=")?.trim();
+    let (start_s, end_s) = rest.split_once('-')?;
+    let start: u64 = start_s.trim().parse().ok()?;
+    let end_inclusive: u64 = if end_s.trim().is_empty() {
+        total_len - 1
+    } else {
+        end_s.trim().parse().ok()?
+    };
+    if start > end_inclusive || start >= total_len {
+        return None;
+    }
+    let end_clamped = end_inclusive.min(total_len - 1);
+    Some((start, end_clamped))
+}
+
 /// Whether a response is an HLS manifest, by content type or .m3u8 path.
 pub fn is_m3u8_response(content_type: &str, url: &str) -> bool {
     let ct = content_type.to_lowercase();

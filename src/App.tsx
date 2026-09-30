@@ -45,6 +45,7 @@ import { registerArchiveTimezoneResolver } from "./lib/archiveTimezone";
 import { isArchiveVerificationBlockingPlayback, verifyAllArchives } from "./lib/archiveVerifyRun";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
 import {
+  captureSampleClip,
   checkFfmpegAvailable,
   clearScanHistory,
   getScanHistory,
@@ -78,6 +79,7 @@ import { supportsPictureInPicture, togglePictureInPicture } from "./lib/pictureI
 import { detectPlatform } from "./lib/platform";
 import { isSingleConnectionPlaylist } from "./lib/playback";
 import { shouldAutoRevealReportPanel } from "./lib/playlistReportVisibility";
+import { withSampleClip } from "./lib/sampleClip";
 import { isScanActive } from "./lib/scanState";
 import { isInputLikeTarget, isPrimaryModifierPressed } from "./lib/shortcuts";
 import { normalizeSourceFilter, validateSourceFilterPattern } from "./lib/sourceFilter";
@@ -165,7 +167,7 @@ function ScanPauseBanners() {
     <>
       {screenshotsPaused && isScanActive(scanState) && (
         <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-[13px]">
-          <span className="flex-1">Screenshot capture paused — low disk space</span>
+          <span className="flex-1">Screenshot and clip capture paused: low disk space</span>
         </div>
       )}
 
@@ -189,6 +191,7 @@ function SelectedChannelSidebar({
   onPlayChannel,
   onPlayArchive,
   onScanChannel,
+  onCaptureSample,
   onStopPlayer,
   onCastStart,
   onOpenExternal,
@@ -201,6 +204,7 @@ function SelectedChannelSidebar({
   onPlayChannel: (result: ChannelResult) => void;
   onPlayArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
   onScanChannel: (indices: number[]) => void;
+  onCaptureSample: (result: ChannelResult) => Promise<void>;
   onStopPlayer: () => void;
   onCastStart: CastStartHandler;
   onOpenExternal: (result: ChannelResult) => void;
@@ -211,6 +215,7 @@ function SelectedChannelSidebar({
   const scanState = useAppStore((s) => s.scanState);
   const lightboxOpen = useAppStore((s) => s.lightboxOpen);
   const screenshotsEnabled = useAppStore((s) => !s.settings.skip_screenshots);
+  const sampleClipDurationSecs = useAppStore((s) => s.settings.sample_clip_duration_secs);
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
   const [screenshotLoading, setScreenshotLoading] = useState(false);
   const [screenshotLoadError, setScreenshotLoadError] = useState(false);
@@ -301,6 +306,8 @@ function SelectedChannelSidebar({
         onLightboxChange={(value) => getStore().setLightboxOpen(value)}
         onPlayChannel={onPlayChannel}
         onScanChannel={onScanChannel}
+        onCaptureSample={onCaptureSample}
+        sampleClipDurationSecs={sampleClipDurationSecs}
         chromecast={chromecast}
         isPlaying={streamPlayer.playerState !== "idle"}
         playerState={streamPlayer.playerState}
@@ -1052,6 +1059,8 @@ export default function App() {
         proxy_file: currentSettings.proxy_file,
         test_geoblock: currentSettings.test_geoblock,
         screenshots_dir: currentSettings.screenshots_dir,
+        auto_capture_sample_clips: currentSettings.auto_capture_sample_clips,
+        sample_clip_duration_secs: currentSettings.sample_clip_duration_secs,
         client_capabilities: {
           event_batch_v1: true,
         },
@@ -1464,6 +1473,19 @@ export default function App() {
     updateResult,
   ]);
 
+  const handleCaptureSample = useCallback(
+    async (result: ChannelResult) => {
+      const clip = await captureSampleClip(result);
+      const state = getStore();
+      const updated = withSampleClip(selectResultByIndex(state, result.index) ?? result, clip);
+      updateResult(updated);
+      if (state.selectedChannel?.index === result.index) {
+        getStore().setSelectedChannel(updated);
+      }
+    },
+    [updateResult],
+  );
+
   const handleToggleSidebar = useCallback(() => {
     const state = getStore();
     const sidebarVisible = !state.sidebarHidden && !!state.selectedChannel;
@@ -1721,6 +1743,7 @@ export default function App() {
                 onPlayChannel={handlePlayInApp}
                 onPlayArchive={handleGuidePlayArchive}
                 onScanChannel={handleScanSelected}
+                onCaptureSample={handleCaptureSample}
                 onStopPlayer={handleStopPlayer}
                 onCastStart={handleCastStart}
                 onOpenExternal={handleOpenExternal}

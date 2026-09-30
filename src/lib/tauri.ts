@@ -14,6 +14,7 @@ import type {
   RecentPlaylistEntry,
   RecentPlaylistKind,
   RenamePlaylistSourceInput,
+  SampleClip,
   SavedPlaylistDraft,
   SavedPlaylistEntry,
   SavedPlaylistUpsertResult,
@@ -257,6 +258,29 @@ export async function setDefaultM3u8FileAssociation(): Promise<string> {
 
 export async function readScreenshot(path: string): Promise<string> {
   return invoke("read_screenshot", { path });
+}
+
+export async function captureSampleClip(
+  result: Pick<ChannelResult, "index" | "name" | "url" | "stream_url">,
+): Promise<SampleClip> {
+  return invoke("capture_sample_clip", {
+    channelIndex: result.index,
+    channelName: result.name,
+    url: result.url,
+    streamUrl: result.stream_url,
+  });
+}
+
+export async function getSampleClipPreviewUrl(path: string): Promise<string> {
+  return invoke("get_sample_clip_preview_url", { path });
+}
+
+export async function openMediaArtifact(path: string): Promise<void> {
+  return invoke("open_media_artifact", { path });
+}
+
+export async function revealMediaArtifact(path: string): Promise<void> {
+  return invoke("reveal_media_artifact", { path });
 }
 
 export async function getScreenshotCacheStats(): Promise<ScreenshotCacheStats> {

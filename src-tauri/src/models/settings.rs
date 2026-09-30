@@ -1,9 +1,22 @@
 use serde::{Deserialize, Serialize};
 
 use super::scan::RetryBackoff;
+use crate::error::AppError;
 
 pub const DEFAULT_FFPROBE_TIMEOUT_SECS: f64 = 8.0;
 pub const DEFAULT_FFMPEG_BITRATE_TIMEOUT_SECS: f64 = 30.0;
+pub const MIN_SAMPLE_CLIP_DURATION_SECS: u32 = 5;
+pub const MAX_SAMPLE_CLIP_DURATION_SECS: u32 = 10;
+
+pub fn validate_sample_clip_duration(secs: u32) -> Result<(), AppError> {
+    if (MIN_SAMPLE_CLIP_DURATION_SECS..=MAX_SAMPLE_CLIP_DURATION_SECS).contains(&secs) {
+        return Ok(());
+    }
+    Err(AppError::Validation(format!(
+        "Invalid sample clip duration: must be between {} and {} seconds",
+        MIN_SAMPLE_CLIP_DURATION_SECS, MAX_SAMPLE_CLIP_DURATION_SECS
+    )))
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -87,6 +100,9 @@ pub struct AppSettings {
     pub report_auto_reveal: bool,
     pub channel_logo_size: ChannelLogoSize,
     pub screenshot_format: ScreenshotFormat,
+    /// Record a short stream-copied clip from every alive channel during scans.
+    pub auto_capture_sample_clips: bool,
+    pub sample_clip_duration_secs: u32,
     pub screenshot_retention_count: u32,
     pub low_space_threshold_gb: f64,
     pub separate_placeholder_status: bool,
@@ -155,6 +171,8 @@ scan_preset_fields! {
     screenshots_dir: Option<String>,
     low_fps_threshold: f64,
     screenshot_format: ScreenshotFormat,
+    auto_capture_sample_clips: bool,
+    sample_clip_duration_secs: u32,
 }
 
 impl Default for ScanPresetConfig {
@@ -216,6 +234,8 @@ impl Default for AppSettings {
             report_auto_reveal: true,
             channel_logo_size: ChannelLogoSize::default(),
             screenshot_format: ScreenshotFormat::default(),
+            auto_capture_sample_clips: false,
+            sample_clip_duration_secs: MIN_SAMPLE_CLIP_DURATION_SECS,
             screenshot_retention_count: 1,
             low_space_threshold_gb: 5.0,
             separate_placeholder_status: true,
@@ -254,6 +274,22 @@ mod tests {
                 "preset field `{key}` has no matching AppSettings field"
             );
         }
+    }
+
+    #[test]
+    fn sample_clips_default_off_with_shortest_duration() {
+        let settings: AppSettings = serde_json::from_value(serde_json::json!({}))
+            .expect("settings should deserialize with defaults");
+        assert!(!settings.auto_capture_sample_clips);
+        assert_eq!(settings.sample_clip_duration_secs, 5);
+    }
+
+    #[test]
+    fn sample_clip_duration_accepts_only_five_to_ten_seconds() {
+        assert!(super::validate_sample_clip_duration(4).is_err());
+        assert!(super::validate_sample_clip_duration(5).is_ok());
+        assert!(super::validate_sample_clip_duration(10).is_ok());
+        assert!(super::validate_sample_clip_duration(11).is_err());
     }
 
     #[test]

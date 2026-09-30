@@ -24,6 +24,7 @@ import type { ChannelResult } from "../lib/types";
 import { ArchiveCard } from "./ArchiveCard";
 import { CastMenu, type CastStartHandler } from "./CastMenu";
 import { PlaybackDiagnostics } from "./PlaybackDiagnostics";
+import { SampleClipCard } from "./SampleClipCard";
 import { StatusBadge } from "./StatusBadge";
 import { StreamPlayer } from "./StreamPlayer";
 
@@ -38,6 +39,8 @@ interface ThumbnailPanelProps {
   onLightboxChange: (open: boolean) => void;
   onPlayChannel?: (result: ChannelResult) => void;
   onScanChannel?: (indices: number[]) => void;
+  onCaptureSample?: (result: ChannelResult) => Promise<void>;
+  sampleClipDurationSecs?: number;
   /**
    * Shared chromecast hook lifted up from App.tsx so the play handler there
    * can intercept channel selection and redirect the cast instead of starting
@@ -80,6 +83,8 @@ export function ThumbnailPanel({
   onLightboxChange,
   onPlayChannel,
   onScanChannel,
+  onCaptureSample,
+  sampleClipDurationSecs = 5,
   chromecast,
   isPlaying,
   playerState = "idle",
@@ -538,6 +543,16 @@ export function ThumbnailPanel({
         </div>
 
         <PlaybackDiagnostics channelIndex={result.index} />
+
+        {onCaptureSample && (
+          <SampleClipCard
+            key={`sample-clip-${result.index}`}
+            result={result}
+            scanActive={scanActive}
+            durationSecs={sampleClipDurationSecs}
+            onCapture={onCaptureSample}
+          />
+        )}
 
         {onPlayArchive && (
           <ArchiveCard

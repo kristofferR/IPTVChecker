@@ -60,6 +60,8 @@ export interface ChannelResult {
   audio_only: boolean;
   screenshot_path: string | null;
   screenshot_error_reason?: string | null;
+  sample_clip_path?: string | null;
+  sample_clip_format?: SampleClipFormat | null;
   label_mismatches: string[];
   low_framerate: boolean;
   error_message: string | null;
@@ -273,6 +275,8 @@ export interface ScanConfig {
   proxy_file: string | null;
   test_geoblock: boolean;
   screenshots_dir: string | null;
+  auto_capture_sample_clips: boolean;
+  sample_clip_duration_secs: number;
   client_capabilities?: ScanClientCapabilities | null;
 }
 
@@ -338,6 +342,12 @@ export type PlaylistLoadProgress =
   | { stage: "Processing"; detail: string };
 
 export type ScreenshotFormat = "webp" | "png";
+export type SampleClipFormat = "mp4" | "ts";
+
+export interface SampleClip {
+  path: string;
+  format: SampleClipFormat;
+}
 export type ChannelLogoSize = "small" | "medium" | "large" | "huge";
 
 export interface AppSettings {
@@ -366,6 +376,8 @@ export interface AppSettings {
   report_auto_reveal: boolean;
   channel_logo_size: ChannelLogoSize;
   screenshot_format: ScreenshotFormat;
+  auto_capture_sample_clips: boolean;
+  sample_clip_duration_secs: number;
   screenshot_retention_count: number;
   low_space_threshold_gb: number;
   separate_placeholder_status: boolean;
@@ -392,6 +404,8 @@ export interface ScanPresetConfig {
   screenshots_dir: string | null;
   low_fps_threshold: number;
   screenshot_format: ScreenshotFormat;
+  auto_capture_sample_clips: boolean;
+  sample_clip_duration_secs: number;
 }
 
 export interface ScanSettingsPreset {

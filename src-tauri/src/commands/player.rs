@@ -74,7 +74,7 @@ fn open_with_system_default(path: &Path) -> Result<(), AppError> {
         Ok(())
     } else {
         Err(AppError::Other(
-            "Failed to open playlist with system default player".to_string(),
+            "Failed to open with the system default player".to_string(),
         ))
     }
 }
@@ -325,6 +325,20 @@ pub async fn open_channel_in_player(
             let _ = std::fs::remove_file(temp_path);
             Err(error)
         }
+    }
+}
+
+/// Open a local media file with the configured external player, or the
+/// operating system's file association when none is set.
+pub(crate) async fn open_local_media(app: &tauri::AppHandle, path: &Path) -> Result<(), AppError> {
+    let external_player_path = {
+        let state = app.state::<Arc<AppState>>();
+        let settings = state.settings.lock().await;
+        settings.external_player_path.clone()
+    };
+    match external_player_path.as_deref() {
+        Some(player_path) => open_with_custom_player(Path::new(player_path), path),
+        None => open_with_system_default(path),
     }
 }
 

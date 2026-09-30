@@ -13,6 +13,8 @@ use crate::models::settings::{
 use crate::state::AppState;
 
 const MAX_SCREENSHOT_BYTES: u64 = 10 * 1024 * 1024;
+/// Ten seconds of stream-copied 4K stays well under this.
+const MAX_SAMPLE_CLIP_BYTES: u64 = 512 * 1024 * 1024;
 const MIN_SCAN_HISTORY_LIMIT: u32 = 1;
 const MAX_SCAN_HISTORY_LIMIT: u32 = 200;
 const MIN_LOW_FPS_THRESHOLD: f64 = 0.0;
@@ -57,7 +59,9 @@ pub struct ScreenshotCacheStats {
     pub disk_space: Option<disk::DiskSpaceInfo>,
 }
 
-fn screenshot_cache_root(app: &tauri::AppHandle) -> std::path::PathBuf {
+/// Root of the temp media cache shared by screenshots and sample clips. The
+/// directory keeps its original name so existing caches stay evictable.
+pub(crate) fn media_cache_root(app: &tauri::AppHandle) -> std::path::PathBuf {
     app.path()
         .temp_dir()
         .unwrap_or_else(|_| std::env::temp_dir())
@@ -71,40 +75,79 @@ fn canonicalize_root_if_exists(path: &Path) -> Option<std::path::PathBuf> {
     path.canonicalize().ok()
 }
 
-fn is_supported_screenshot_extension(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| ext.eq_ignore_ascii_case("png") || ext.eq_ignore_ascii_case("webp"))
-        .unwrap_or(false)
+/// Media files the webview may read back, open, or reveal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ArtifactKind {
+    Screenshot,
+    SampleClip,
 }
 
-fn validate_screenshot_path(
+impl ArtifactKind {
+    fn extensions(self) -> &'static [&'static str] {
+        match self {
+            Self::Screenshot => &["png", "webp"],
+            Self::SampleClip => &["mp4", "ts"],
+        }
+    }
+
+    fn max_bytes(self) -> u64 {
+        match self {
+            Self::Screenshot => MAX_SCREENSHOT_BYTES,
+            Self::SampleClip => MAX_SAMPLE_CLIP_BYTES,
+        }
+    }
+
+    fn matches_extension(self, path: &Path) -> bool {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| {
+                self.extensions()
+                    .iter()
+                    .any(|allowed| ext.eq_ignore_ascii_case(allowed))
+            })
+    }
+}
+
+/// Resolve `requested_path` and accept it only when it is a regular file of
+/// one of `kinds`, within that kind's size cap, inside an allowed root.
+pub(crate) fn validate_artifact_path(
     requested_path: &Path,
     allowed_roots: &[std::path::PathBuf],
-) -> Result<std::path::PathBuf, AppError> {
+    kinds: &[ArtifactKind],
+) -> Result<(std::path::PathBuf, ArtifactKind), AppError> {
     let canonical_path = requested_path
         .canonicalize()
-        .map_err(|e| AppError::Other(format!("Failed to resolve screenshot path: {}", e)))?;
+        .map_err(|e| AppError::Other(format!("Failed to resolve media path: {}", e)))?;
 
     let metadata = std::fs::metadata(&canonical_path)
-        .map_err(|e| AppError::Other(format!("Failed to inspect screenshot: {}", e)))?;
+        .map_err(|e| AppError::Other(format!("Failed to inspect media file: {}", e)))?;
 
     if !metadata.is_file() {
         return Err(AppError::Other(
-            "Access denied: screenshot path must point to a file".to_string(),
+            "Access denied: media path must point to a file".to_string(),
         ));
     }
 
-    if !is_supported_screenshot_extension(&canonical_path) {
-        return Err(AppError::Other(
-            "Access denied: only .png and .webp screenshot files are allowed".to_string(),
-        ));
-    }
-
-    if metadata.len() > MAX_SCREENSHOT_BYTES {
+    let Some(kind) = kinds
+        .iter()
+        .copied()
+        .find(|kind| kind.matches_extension(&canonical_path))
+    else {
+        let allowed = kinds
+            .iter()
+            .flat_map(|kind| kind.extensions())
+            .map(|ext| format!(".{ext}"))
+            .collect::<Vec<_>>()
+            .join(", ");
         return Err(AppError::Other(format!(
-            "Access denied: screenshot exceeds max size of {} bytes",
-            MAX_SCREENSHOT_BYTES
+            "Access denied: only {allowed} media files are allowed"
+        )));
+    };
+
+    if metadata.len() > kind.max_bytes() {
+        return Err(AppError::Other(format!(
+            "Access denied: media file exceeds max size of {} bytes",
+            kind.max_bytes()
         )));
     }
 
@@ -112,18 +155,18 @@ fn validate_screenshot_path(
         .iter()
         .any(|root| canonical_path.starts_with(root))
     {
-        return Ok(canonical_path);
+        return Ok((canonical_path, kind));
     }
 
     Err(AppError::Other(
-        "Access denied: screenshot path is outside allowed directories".to_string(),
+        "Access denied: media path is outside allowed directories".to_string(),
     ))
 }
 
-async fn allowed_screenshot_roots(app: &tauri::AppHandle) -> Vec<std::path::PathBuf> {
+pub(crate) async fn allowed_artifact_roots(app: &tauri::AppHandle) -> Vec<std::path::PathBuf> {
     let mut roots: HashSet<std::path::PathBuf> = HashSet::new();
 
-    if let Some(path) = canonicalize_root_if_exists(&screenshot_cache_root(app)) {
+    if let Some(path) = canonicalize_root_if_exists(&media_cache_root(app)) {
         roots.insert(path);
     }
 
@@ -787,6 +830,7 @@ pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Re
             MIN_RETENTION_COUNT, MAX_RETENTION_COUNT
         )));
     }
+    crate::models::settings::validate_sample_clip_duration(settings.sample_clip_duration_secs)?;
     if !settings.low_space_threshold_gb.is_finite()
         || settings.low_space_threshold_gb < MIN_LOW_SPACE_THRESHOLD_GB
         || settings.low_space_threshold_gb > MAX_LOW_SPACE_THRESHOLD_GB
@@ -877,8 +921,9 @@ pub async fn read_screenshot(app: tauri::AppHandle, path: String) -> Result<Stri
     use base64::Engine;
 
     let requested = Path::new(path.trim());
-    let allowed_roots = allowed_screenshot_roots(&app).await;
-    let validated_path = validate_screenshot_path(requested, &allowed_roots)?;
+    let allowed_roots = allowed_artifact_roots(&app).await;
+    let (validated_path, _) =
+        validate_artifact_path(requested, &allowed_roots, &[ArtifactKind::Screenshot])?;
 
     let validated_path_clone = validated_path.clone();
     let bytes = tokio::task::spawn_blocking(move || std::fs::read(&validated_path_clone))
@@ -907,7 +952,7 @@ pub async fn read_screenshot(app: tauri::AppHandle, path: String) -> Result<Stri
 pub async fn get_screenshot_cache_stats(
     app: tauri::AppHandle,
 ) -> Result<ScreenshotCacheStats, AppError> {
-    let cache_root = screenshot_cache_root(&app);
+    let cache_root = media_cache_root(&app);
     let cache_root_clone = cache_root.clone();
     let (total_bytes, file_count) =
         tokio::task::spawn_blocking(move || collect_dir_stats(&cache_root_clone))
@@ -930,7 +975,7 @@ pub async fn get_screenshot_cache_stats(
 pub async fn clear_screenshot_cache(
     app: tauri::AppHandle,
 ) -> Result<ScreenshotCacheStats, AppError> {
-    let cache_root = screenshot_cache_root(&app);
+    let cache_root = media_cache_root(&app);
     let cache_root_clone = cache_root.clone();
     tokio::task::spawn_blocking(move || {
         if cache_root_clone.exists() {
@@ -1121,7 +1166,7 @@ pub fn evict_for_disk_space(
 mod tests {
     use super::{
         collect_dir_stats, normalize_preset_name, preset_index_by_name, sort_scan_presets,
-        validate_external_player_path, validate_screenshot_path,
+        validate_artifact_path, validate_external_player_path, ArtifactKind,
     };
     use crate::models::settings::{ScanPresetConfig, ScanSettingsPreset};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1161,7 +1206,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_screenshot_path_rejects_traversal_outside_allowed_root() {
+    fn validate_artifact_path_rejects_traversal_outside_allowed_root() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time should be monotonic")
@@ -1176,15 +1221,15 @@ mod tests {
         let allowed = vec![safe_dir
             .canonicalize()
             .expect("safe dir should canonicalize")];
-        let error =
-            validate_screenshot_path(&traversal, &allowed).expect_err("path should be rejected");
+        let error = validate_artifact_path(&traversal, &allowed, &[ArtifactKind::Screenshot])
+            .expect_err("path should be rejected");
 
         assert!(error.to_string().contains("outside allowed directories"));
         std::fs::remove_dir_all(&root).expect("fixture root should be removable");
     }
 
     #[test]
-    fn validate_screenshot_path_rejects_symlink_escape_attempt() {
+    fn validate_artifact_path_rejects_symlink_escape_attempt() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time should be monotonic")
@@ -1206,7 +1251,7 @@ mod tests {
         let allowed = vec![safe_dir
             .canonicalize()
             .expect("safe dir should canonicalize")];
-        let error = validate_screenshot_path(&symlink_path, &allowed)
+        let error = validate_artifact_path(&symlink_path, &allowed, &[ArtifactKind::Screenshot])
             .expect_err("symlink escape should be rejected");
 
         assert!(error.to_string().contains("outside allowed directories"));
@@ -1214,7 +1259,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_screenshot_path_allows_png_within_allowed_root() {
+    fn validate_artifact_path_allows_png_within_allowed_root() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time should be monotonic")
@@ -1225,15 +1270,16 @@ mod tests {
         std::fs::write(&screenshot, vec![0u8; 64]).expect("fixture screenshot should be writable");
 
         let allowed = vec![root.canonicalize().expect("root should canonicalize")];
-        let validated = validate_screenshot_path(&screenshot, &allowed)
-            .expect("in-scope png should be accepted");
+        let (validated, _) =
+            validate_artifact_path(&screenshot, &allowed, &[ArtifactKind::Screenshot])
+                .expect("in-scope png should be accepted");
 
         assert!(validated.ends_with("frame.png"));
         std::fs::remove_dir_all(&root).expect("fixture root should be removable");
     }
 
     #[test]
-    fn validate_screenshot_path_allows_webp_within_allowed_root() {
+    fn validate_artifact_path_allows_webp_within_allowed_root() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time should be monotonic")
@@ -1244,10 +1290,39 @@ mod tests {
         std::fs::write(&screenshot, vec![0u8; 64]).expect("fixture screenshot should be writable");
 
         let allowed = vec![root.canonicalize().expect("root should canonicalize")];
-        let validated = validate_screenshot_path(&screenshot, &allowed)
-            .expect("in-scope webp should be accepted");
+        let (validated, _) =
+            validate_artifact_path(&screenshot, &allowed, &[ArtifactKind::Screenshot])
+                .expect("in-scope webp should be accepted");
 
         assert!(validated.ends_with("frame.webp"));
+        std::fs::remove_dir_all(&root).expect("fixture root should be removable");
+    }
+
+    #[test]
+    fn validate_artifact_path_accepts_clips_only_as_sample_clips() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be monotonic")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("iptv-artifact-clip-{unique}"));
+        std::fs::create_dir_all(&root).expect("root should be created");
+        let clip = root.join("sample.mp4");
+        let fallback = root.join("sample.ts");
+        std::fs::write(&clip, vec![0u8; 64]).expect("fixture clip should be writable");
+        std::fs::write(&fallback, vec![0u8; 64]).expect("fixture clip should be writable");
+
+        let allowed = vec![root.canonicalize().expect("root should canonicalize")];
+        let (_, kind) = validate_artifact_path(
+            &fallback,
+            &allowed,
+            &[ArtifactKind::Screenshot, ArtifactKind::SampleClip],
+        )
+        .expect("in-scope ts clip should be accepted");
+        assert_eq!(kind, ArtifactKind::SampleClip);
+
+        let error = validate_artifact_path(&clip, &allowed, &[ArtifactKind::Screenshot])
+            .expect_err("clips must not be readable as screenshots");
+        assert!(error.to_string().contains("only .png, .webp"));
         std::fs::remove_dir_all(&root).expect("fixture root should be removable");
     }
 

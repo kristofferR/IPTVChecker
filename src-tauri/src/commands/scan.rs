@@ -52,6 +52,7 @@ struct SharedUrlResult {
     audio_only: bool,
     screenshot_path: Option<String>,
     screenshot_error_reason: Option<String>,
+    sample_clip: Option<ffmpeg::SampleClip>,
     low_framerate: bool,
     stream_url: Option<String>,
     retry_count: Option<u32>,
@@ -84,6 +85,7 @@ impl SharedUrlResult {
             audio_only: false,
             screenshot_path: None,
             screenshot_error_reason: None,
+            sample_clip: None,
             low_framerate: false,
             stream_url,
             retry_count,
@@ -155,6 +157,17 @@ fn apply_combined_screenshot_outcome(
 
 use crate::urlnorm::canonicalize_stream_url;
 
+/// Hand ffmpeg the manifest URL, not the resolved leaf segment: for HLS,
+/// verify() descends to a media segment that may have rolled off the live
+/// window (404) or lack init context (invalid data). The original channel
+/// URL is what the player uses and is what ffmpeg can reliably open.
+pub(crate) fn ffmpeg_target_url(channel_url: &str, stream_url: Option<&str>) -> String {
+    match stream_url {
+        Some(resolved) if checker::is_manifest_url(resolved) => resolved.to_string(),
+        _ => channel_url.to_string(),
+    }
+}
+
 /// Per-run configuration and shared handles for checking a single stream URL.
 /// Bundles timeouts, retry policy, feature flags, and shared limits so the
 /// per-channel call site only adds the URL and screenshot destination.
@@ -184,6 +197,7 @@ async fn compute_shared_url_result(
     ctx: &SharedCheckContext<'_>,
     channel_url: &str,
     skip_screenshots: bool,
+    sample_clip_secs: Option<u32>,
     screenshots_dir: Option<&String>,
     screenshot_file_name: &str,
 ) -> Result<(SharedUrlResult, WorkerTiming), AppError> {
@@ -342,6 +356,7 @@ async fn compute_shared_url_result(
                 audio_only: false,
                 screenshot_path: None,
                 screenshot_error_reason: None,
+                sample_clip: None,
                 low_framerate: false,
                 stream_url,
                 retry_count: (retry_count > 0).then_some(retry_count),
@@ -352,14 +367,7 @@ async fn compute_shared_url_result(
         ));
     }
 
-    // Hand ffmpeg the manifest URL, not the resolved leaf segment: for HLS,
-    // verify() descends to a media segment that may have rolled off the live
-    // window (404) or lack init context (invalid data). The original channel
-    // URL is what the player uses and is what ffmpeg can reliably open.
-    let target_url = match stream_url.as_deref() {
-        Some(resolved) if checker::is_manifest_url(resolved) => resolved.to_string(),
-        _ => channel_url.to_string(),
-    };
+    let target_url = ffmpeg_target_url(channel_url, stream_url.as_deref());
     let redacted_target_url = stream_proxy::redact_url(&target_url);
     let mut shared = SharedUrlResult {
         status,
@@ -378,6 +386,7 @@ async fn compute_shared_url_result(
         audio_only: false,
         screenshot_path: None,
         screenshot_error_reason: None,
+        sample_clip: None,
         low_framerate: false,
         stream_url,
         retry_count: (retry_count > 0).then_some(retry_count),
@@ -395,6 +404,7 @@ async fn compute_shared_url_result(
         std::time::Duration::from_secs_f64(ffprobe_timeout_secs.clamp(1.0, 300.0));
 
     let want_screenshot = !skip_screenshots && ffmpeg_ok && screenshots_dir.is_some();
+    let sample_clip_secs = sample_clip_secs.filter(|_| ffmpeg_ok && screenshots_dir.is_some());
     let mut format_bitrate_kbps: Option<u32> = None;
 
     if (single_connection_mode || dispatcharr_single_pass) && ffmpeg_ok {
@@ -419,6 +429,7 @@ async fn compute_shared_url_result(
                 screenshot_file_name,
                 screenshot_format,
                 want_screenshot,
+                sample_clip_secs,
                 profile_bitrate_flag,
                 diag_timeout,
                 cancel,
@@ -501,6 +512,7 @@ async fn compute_shared_url_result(
                     shared.video_bitrate = Some(format!("{kbps} kbps"));
                 }
                 format_bitrate_kbps = diag.format_bitrate_kbps;
+                shared.sample_clip = diag.sample_clip;
                 shared.channel_log.diagnostics_output = Some(
                     crate::models::scan_log::cap_diagnostics_output(diag.diagnostics_output),
                 );
@@ -536,6 +548,30 @@ async fn compute_shared_url_result(
                     diag.screenshot_error_reason,
                     png_fallback_result,
                 );
+
+                // Without a video track the screenshot output aborts the whole
+                // combined run, clip included, so record the clip on its own.
+                if let (Some(secs), Some(dir)) = (sample_clip_secs, screenshots_dir) {
+                    if shared.sample_clip.is_none()
+                        && shared.audio_only
+                        && want_screenshot
+                        && !dispatcharr_single_pass
+                        && !cancel.is_cancelled()
+                    {
+                        shared.sample_clip = ffmpeg::capture_sample_clip(
+                            app,
+                            &target_url,
+                            Some(channel_url),
+                            dir,
+                            screenshot_file_name,
+                            user_agent,
+                            secs,
+                            cancel,
+                        )
+                        .await
+                        .ok();
+                    }
+                }
             }
             Err(AppError::Cancelled) => {
                 drop(diagnostics_permit);
@@ -596,7 +632,30 @@ async fn compute_shared_url_result(
             .map(Some)
         };
 
-        let (probe_result, screenshot_result) = tokio::join!(ffprobe_fut, screenshot_fut);
+        // The clip follows the screenshot rather than running beside it, so a
+        // channel never holds more than the two connections it used before.
+        let media_fut = async {
+            let screenshot_result = screenshot_fut.await;
+            let sample_clip = match (sample_clip_secs, screenshots_dir) {
+                (Some(secs), Some(dir)) if !cancel.is_cancelled() => ffmpeg::capture_sample_clip(
+                    app,
+                    &target_url,
+                    Some(channel_url),
+                    dir,
+                    screenshot_file_name,
+                    user_agent,
+                    secs,
+                    cancel,
+                )
+                .await
+                .ok(),
+                _ => None,
+            };
+            (screenshot_result, sample_clip)
+        };
+
+        let (probe_result, (screenshot_result, sample_clip)) = tokio::join!(ffprobe_fut, media_fut);
+        shared.sample_clip = sample_clip;
 
         if let Some(snapshot) = probe_result {
             shared.audio_only =
@@ -672,6 +731,13 @@ async fn compute_shared_url_result(
             if video_kbps > 0 {
                 shared.video_bitrate = Some(format!("{video_kbps} kbps"));
             }
+        }
+    }
+    // Diagnostics can still demote a channel (Dispatcharr single pass); only
+    // alive channels keep a sample clip.
+    if shared.status != ChannelStatus::Alive {
+        if let Some(clip) = shared.sample_clip.take() {
+            let _ = std::fs::remove_file(&clip.path);
         }
     }
     timing.diagnostics_ms = diagnostics_started_at.elapsed().as_secs_f64() * 1000.0;
@@ -1446,7 +1512,7 @@ fn load_proxy_list_if_configured(config: &ScanConfig) -> Result<Option<Vec<Strin
 /// Resolve and create the screenshots directory for this run (app temp cache
 /// by default, or a user-specified folder), write the eviction metadata, and
 /// evict old cached runs per the retention policy. Returns `None` when
-/// screenshots are disabled or ffmpeg is unavailable.
+/// neither screenshots nor sample clips are captured, or ffmpeg is unavailable.
 async fn prepare_screenshots_dir(
     app: &AppHandle,
     config: &ScanConfig,
@@ -1456,7 +1522,7 @@ async fn prepare_screenshots_dir(
     screenshot_retention_count: u32,
     ffmpeg_available: bool,
 ) -> Result<Option<String>, AppError> {
-    if config.skip_screenshots || !ffmpeg_available {
+    if (config.skip_screenshots && !config.auto_capture_sample_clips) || !ffmpeg_available {
         return Ok(None);
     }
 
@@ -1666,10 +1732,11 @@ impl AdaptiveThrottle {
     }
 }
 
-/// Disk-space guard for screenshot capture. Every ~20 channels it re-checks
-/// free space on the screenshot volume, evicting old cached runs when space
-/// is low and pausing screenshots (emitting `scan://screenshots-paused` once)
-/// when space is critical. Cloned into each worker task.
+/// Disk-space guard for media capture (screenshots and sample clips). Every
+/// ~20 channels it re-checks free space on the media volume, evicting old
+/// cached runs when space is low and pausing capture (emitting
+/// `scan://screenshots-paused` once) when space is critical. Cloned into each
+/// worker task.
 #[derive(Clone)]
 struct ScreenshotDiskGuard {
     paused: Arc<AtomicBool>,
@@ -1705,16 +1772,16 @@ impl ScreenshotDiskGuard {
         }
     }
 
-    /// Decide whether this channel should skip its screenshot, re-checking
+    /// Decide whether this channel should skip media capture, re-checking
     /// disk space periodically (every ~20 channels).
     fn effective_skip(
         &self,
         app: &AppHandle,
         run_id: &str,
-        skip_screenshots: bool,
+        skip_media: bool,
         screenshots_dir: Option<&String>,
     ) -> bool {
-        if skip_screenshots || self.paused.load(Ordering::Relaxed) {
+        if skip_media || self.paused.load(Ordering::Relaxed) {
             return true;
         }
         if self.using_custom_dir {
@@ -1978,6 +2045,8 @@ fn build_channel_result(channel: &Channel, shared: &SharedUrlResult) -> ChannelR
         audio_only: shared.audio_only,
         screenshot_path: shared.screenshot_path.clone(),
         screenshot_error_reason: shared.screenshot_error_reason.clone(),
+        sample_clip_path: shared.sample_clip.as_ref().map(|clip| clip.path.clone()),
+        sample_clip_format: shared.sample_clip.as_ref().map(|clip| clip.format),
         label_mismatches: Vec::new(),
         low_framerate: shared.low_framerate,
         error_message: None,
@@ -2349,6 +2418,8 @@ async fn execute_scan_run(
         let proxy_list = Arc::clone(&proxy_list);
         let test_geoblock = config.test_geoblock;
         let skip_screenshots = config.skip_screenshots;
+        let auto_capture_sample_clips = config.auto_capture_sample_clips;
+        let sample_clip_duration_secs = config.sample_clip_duration_secs;
         let profile_bitrate_flag = config.profile_bitrate;
         let ffprobe_timeout_secs = config.ffprobe_timeout_secs;
         let ffmpeg_bitrate_timeout_secs = config.ffmpeg_bitrate_timeout_secs;
@@ -2386,12 +2457,15 @@ async fn execute_scan_run(
                 ffmpeg::build_screenshot_file_name(channel.index, &channel.name);
 
             // Check disk space periodically (every ~20 channels)
-            let effective_skip_screenshots = disk_guard.effective_skip(
+            let media_paused = disk_guard.effective_skip(
                 &task_app,
                 &run_id_for_perf,
-                skip_screenshots,
+                skip_screenshots && !auto_capture_sample_clips,
                 screenshots_dir.as_ref(),
             );
+            let effective_skip_screenshots = skip_screenshots || media_paused;
+            let sample_clip_secs =
+                (auto_capture_sample_clips && !media_paused).then_some(sample_clip_duration_secs);
 
             let check_ctx = SharedCheckContext {
                 app: &task_app,
@@ -2420,6 +2494,7 @@ async fn execute_scan_run(
                         &check_ctx,
                         &channel.url,
                         effective_skip_screenshots,
+                        sample_clip_secs,
                         screenshots_dir.as_ref(),
                         &screenshot_file_name,
                     )
@@ -2993,6 +3068,8 @@ mod tests {
             audio_only: false,
             screenshot_path: None,
             screenshot_error_reason: None,
+            sample_clip_path: None,
+            sample_clip_format: None,
             label_mismatches: if mismatched {
                 vec!["Label mismatch".to_string()]
             } else {
@@ -3049,6 +3126,7 @@ mod tests {
             audio_only: false,
             screenshot_path: None,
             screenshot_error_reason: None,
+            sample_clip: None,
             low_framerate: false,
             stream_url: Some("https://example.com/live.m3u8".to_string()),
             retry_count: None,
