@@ -59,6 +59,8 @@ interface ChannelRowProps {
   dispatcharr?: DispatcharrRowMeta;
   dispatcharrRowState?: DispatcharrRowState;
   dispatcharrActions?: DispatcharrRowActions;
+  /** A stream row being dragged, or the drop point before/after it. */
+  dragState?: "dragging" | "before" | "after";
 }
 
 export type { DispatcharrRowMeta, StreamAction } from "./DispatcharrCells";
@@ -79,6 +81,7 @@ function ChannelRowImpl({
   dispatcharr,
   dispatcharrRowState,
   dispatcharrActions,
+  dragState,
 }: ChannelRowProps) {
   const isAlive = result.status === "alive";
   const logoSizePx = useMemo(() => channelLogoPixels(channelLogoSize), [channelLogoSize]);
@@ -284,8 +287,20 @@ function ChannelRowImpl({
         selected ? "selected bg-panel-subtle border-transparent" : "border-border-subtle"
       } ${duplicate && !selected ? "bg-amber-500/8" : ""} ${
         duplicate ? "ring-1 ring-amber-500/20" : ""
-      } ${focused ? "ring-1 ring-border-app" : ""}`}
+      } ${focused ? "ring-1 ring-border-app" : ""} ${dragState === "dragging" ? "opacity-40" : ""} ${
+        dispatcharr?.kind === "stream" &&
+        dispatcharrActions?.canWrite &&
+        !dispatcharrActions.disabled
+          ? "cursor-grab"
+          : ""
+      }`}
       style={{
+        boxShadow:
+          dragState === "before"
+            ? "inset 0 2px 0 rgb(59 130 246)"
+            : dragState === "after"
+              ? "inset 0 -2px 0 rgb(59 130 246)"
+              : undefined,
         gridTemplateColumns,
         width: `${tableWidth}px`,
         minWidth: `${tableWidth}px`,
@@ -332,7 +347,8 @@ function equalChannelRowProps(
     previous.onRowContextMenu === next.onRowContextMenu &&
     previous.dispatcharr === next.dispatcharr &&
     previous.dispatcharrRowState === next.dispatcharrRowState &&
-    previous.dispatcharrActions === next.dispatcharrActions
+    previous.dispatcharrActions === next.dispatcharrActions &&
+    previous.dragState === next.dragState
   );
 }
 

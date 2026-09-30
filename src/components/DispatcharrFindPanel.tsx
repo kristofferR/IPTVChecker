@@ -6,6 +6,7 @@ import {
   type DispatcharrView,
   dispatcharrTarget,
   getDispatcharrView,
+  isUntestedStatus,
   parseDispatcharrIds,
   unlinkedStreams,
 } from "../lib/dispatcharr";
@@ -270,6 +271,8 @@ export function DispatcharrFindPanel() {
     (entry) => picked.includes(entry.streamId) && pickable(entry),
   );
   const alive = channel.streams.filter((entry) => entry.result.status === "alive").length;
+  const unscanned = channel.streams.filter((entry) => isUntestedStatus(entry.result.status)).length;
+  const scanned = channel.streams.length - unscanned;
 
   const runSearch = () => {
     const target = dispatcharrTarget(getStore().playlist);
@@ -332,9 +335,12 @@ export function DispatcharrFindPanel() {
     <>
       <div className="flex items-center gap-2 px-3 pt-2.5 pb-1.5 text-[13px]">
         <span className="font-semibold text-text-primary">{channel.name}</span>
-        <span className={alive > 0 ? "text-text-secondary" : "text-red-400"}>
-          {alive}/{channel.streams.length} alive
-        </span>
+        {scanned > 0 && (
+          <span className={alive > 0 ? "text-text-secondary" : "text-red-400"}>
+            {alive}/{scanned} alive
+          </span>
+        )}
+        {unscanned > 0 && <span className="text-text-tertiary">{unscanned} not scanned</span>}
       </div>
       <ol className="mx-3 rounded-md border border-border-app">
         {channel.streams.map((entry, position) => (

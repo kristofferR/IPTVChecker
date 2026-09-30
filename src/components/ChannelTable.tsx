@@ -53,6 +53,7 @@ import {
 import type { ChannelResult } from "../lib/types";
 import { useAppStore } from "../store";
 import { ChannelRow, type DispatcharrRowMeta, type StreamAction } from "./ChannelRow";
+import type { DispatcharrRowActions } from "./DispatcharrCells";
 import { DispatcharrToast } from "./DispatcharrToast";
 
 interface ChannelTableProps {
@@ -529,6 +530,86 @@ export function ChannelTable({
     },
     [],
   );
+
+  // Drag a stream row within its channel to reorder. Pointer events, not HTML
+  // drag and drop, so it works while the window accepts file drops.
+  const [streamDrag, setStreamDrag] = useState<{
+    channelId: number;
+    from: number;
+    /** Insertion point among the channel's streams, 0..count. */
+    to: number | null;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
+  const dispatcharrActionsRef = useRef<DispatcharrRowActions | undefined>(undefined);
+  const handleStreamPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || (event.target as HTMLElement).closest("button")) return;
+    const rowElement = (event.target as HTMLElement).closest<HTMLElement>("[data-row-index]");
+    const meta = rowElement ? rowMetaRef.current?.[Number(rowElement.dataset.rowIndex)] : undefined;
+    const actions = dispatcharrActionsRef.current;
+    if (meta?.kind !== "stream" || !actions?.canWrite || actions.disabled) return;
+    if (useAppStore.getState().dispatcharrRowStates[meta.channel.channelId]?.kind === "writing") {
+      return;
+    }
+    const { channel, position } = meta;
+    const startY = event.clientY;
+    let dragging = false;
+    let target: number | null = null;
+
+    const targetAt = (clientX: number, clientY: number): number | null => {
+      const element = document
+        .elementFromPoint(clientX, clientY)
+        ?.closest<HTMLElement>("[data-row-index]");
+      const over = element ? rowMetaRef.current?.[Number(element.dataset.rowIndex)] : undefined;
+      if (!element || over?.kind !== "stream" || over.channel.channelId !== channel.channelId) {
+        return null;
+      }
+      const box = element.getBoundingClientRect();
+      return over.position + (clientY > box.top + box.height / 2 ? 1 : 0);
+    };
+    const handleMove = (move: PointerEvent) => {
+      if (!dragging && Math.abs(move.clientY - startY) < 4) return;
+      dragging = true;
+      // Near the table's edges, scroll to reach the rest of the channel.
+      const container = parentRef.current;
+      if (container) {
+        const box = container.getBoundingClientRect();
+        if (move.clientY < box.top + 32) container.scrollTop -= 12;
+        else if (move.clientY > box.bottom - 32) container.scrollTop += 12;
+      }
+      target = targetAt(move.clientX, move.clientY);
+      setStreamDrag({ channelId: channel.channelId, from: position, to: target });
+    };
+    const finish = (commit: boolean) => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("keydown", handleKey);
+      setStreamDrag(null);
+      if (!dragging) return;
+      // The click that ends a drag must not select the row under it.
+      suppressClickRef.current = true;
+      setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
+      if (!commit || target === null || target === position || target === position + 1) return;
+      const visible = channel.streams.map((entry) => entry.ref.streamId);
+      const [streamId] = visible.splice(position, 1);
+      visible.splice(target > position ? target - 1 : target, 0, streamId);
+      void applyOrderChanges([
+        {
+          channelId: channel.channelId,
+          from: channel.order,
+          to: withHiddenStreams(channel, visible),
+        },
+      ]);
+    };
+    const handleUp = () => finish(true);
+    const handleKey = (key: KeyboardEvent) => {
+      if (key.key === "Escape") finish(false);
+    };
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("keydown", handleKey);
+  }, []);
 
   // Compute the next selection outside the setState updater: updaters must be
   // pure (StrictMode double-invokes them, which would double-emit selection).
@@ -1056,6 +1137,7 @@ export function ChannelTable({
 
   const handleRowClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
+      if (suppressClickRef.current) return;
       const row = getRowFromEvent(event);
       if (!row) return;
       handleRowClickAt(event, row.result, row.rowIndex);
@@ -1466,6 +1548,7 @@ export function ChannelTable({
       handleFindStreams,
     ],
   );
+  dispatcharrActionsRef.current = dispatcharrActions;
 
   const renderVirtualRows = useCallback(
     (items: typeof virtualItems, mode: "main" | "reveal") =>
@@ -1512,6 +1595,18 @@ export function ChannelTable({
                 meta?.kind === "channel" ? dispatcharrRowStates[meta.channel.channelId] : undefined
               }
               dispatcharrActions={meta && mode === "main" ? dispatcharrActions : undefined}
+              dragState={
+                meta?.kind === "stream" && streamDrag?.channelId === meta.channel.channelId
+                  ? meta.position === streamDrag.from
+                    ? "dragging"
+                    : streamDrag.to === meta.position
+                      ? "before"
+                      : streamDrag.to === meta.position + 1 &&
+                          meta.position === meta.channel.streams.length - 1
+                        ? "after"
+                        : undefined
+                  : undefined
+              }
             />
           </div>
         );
@@ -1520,6 +1615,7 @@ export function ChannelTable({
       channelLogoSize,
       dispatcharrActions,
       dispatcharrRowStates,
+      streamDrag,
       rowMeta,
       columns,
       duplicateIndices,
@@ -1656,6 +1752,7 @@ export function ChannelTable({
         ref={parentRef}
         tabIndex={0}
         onKeyDown={handleKeyDown}
+        onPointerDown={handleStreamPointerDown}
         onContextMenu={(event) => event.preventDefault()}
         onScroll={handleTableScroll}
         className={`channel-table-body native-scroll absolute left-0 right-0 bottom-0 overflow-auto focus:outline-none ${
