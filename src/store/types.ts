@@ -328,6 +328,9 @@ export interface DispatcharrSlice {
    *  source has no row for them, so a reapplied filter restores them from
    *  here. */
   dispatcharrAddedRows: ChannelResult[];
+  /** Bumped on every fresh load, so a write that started before it is not
+   *  applied to the rows loaded after. */
+  dispatcharrEditEpoch: number;
 
   setDispatcharrRowState: (channelId: number, state: DispatcharrRowState | null) => void;
   /** Record a written order; `undoOrder` null clears the channel's undo. */

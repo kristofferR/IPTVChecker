@@ -110,6 +110,17 @@ fn collect_stream_stats(results: &[ChannelResult]) -> (Vec<StatsUpdate>, usize) 
     (updates, skipped)
 }
 
+/// Start time of the newest scan whose stats were written, per connection
+/// and stream.
+fn newest_stats_scans() -> std::sync::MutexGuard<'static, HashMap<(String, i64), u64>> {
+    static NEWEST: std::sync::OnceLock<std::sync::Mutex<HashMap<(String, i64), u64>>> =
+        std::sync::OnceLock::new();
+    NEWEST
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[tauri::command]
 pub async fn dispatcharr_push_stream_stats(
     app: tauri::AppHandle,
@@ -123,28 +134,24 @@ pub async fn dispatcharr_push_stream_stats(
     let client = resolve_session(&app, &source_identity, &connection).await?;
     let (updates, mut skipped) = collect_stream_stats(&results);
     // A scan that started earlier but finished later never overwrites a
-    // stream a newer scan already wrote.
+    // stream a newer scan already wrote. The push lock makes this check and
+    // the `record` after each write one step.
     let updates = {
-        static NEWEST: std::sync::OnceLock<std::sync::Mutex<HashMap<(String, i64), u64>>> =
-            std::sync::OnceLock::new();
-        let mut newest = NEWEST
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let newest = newest_stats_scans();
         let before = updates.len();
         let updates = updates
             .into_iter()
             .filter(|(stream_id, _)| {
-                let started = newest.entry((connection.clone(), *stream_id)).or_default();
-                let current = *started <= scan_started_at;
-                if current {
-                    *started = scan_started_at;
-                }
-                current
+                newest
+                    .get(&(connection.clone(), *stream_id))
+                    .is_none_or(|&started| started <= scan_started_at)
             })
             .collect::<Vec<_>>();
         skipped += before - updates.len();
         updates
+    };
+    let record = |stream_id: i64| {
+        newest_stats_scans().insert((connection.clone(), stream_id), scan_started_at);
     };
     let mut report = DispatcharrStatsPushReport {
         skipped,
@@ -165,6 +172,7 @@ pub async fn dispatcharr_push_stream_stats(
             .await
         {
             Ok(stored) if stats_stuck(stored.as_ref(), &stats) => {
+                record(stream_id);
                 report.updated.push(stream_id);
                 break;
             }
@@ -195,7 +203,10 @@ pub async fn dispatcharr_push_stream_stats(
         .await;
     for (stream_id, outcome) in outcomes {
         match outcome {
-            Ok(_) => report.updated.push(stream_id),
+            Ok(_) => {
+                record(stream_id);
+                report.updated.push(stream_id);
+            }
             Err(error) => report.failed.push(DispatcharrItemFailure {
                 id: stream_id,
                 error: error.to_string(),

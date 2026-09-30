@@ -68,10 +68,17 @@ async function writeOrders(
   const changes = requested.filter(
     (change) => store.dispatcharrRowStates[change.channelId]?.kind !== "writing",
   );
-  // Results that land after the user opened another source are dropped.
+  // Results that land after the user opened another source, or reloaded
+  // this one, are dropped.
+  const epoch = store.dispatcharrEditEpoch;
   const stillCurrent = () => {
-    const now = dispatcharrTarget(useAppStore.getState().playlist);
-    return now?.connection === target?.connection && now?.sourceIdentity === target?.sourceIdentity;
+    const now = useAppStore.getState();
+    const nowTarget = dispatcharrTarget(now.playlist);
+    return (
+      now.dispatcharrEditEpoch === epoch &&
+      nowTarget?.connection === target?.connection &&
+      nowTarget?.sourceIdentity === target?.sourceIdentity
+    );
   };
   // A source loading replaces the rows the channel ids came from.
   if (store.playlistLoading) {

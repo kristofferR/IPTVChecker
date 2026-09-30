@@ -8,6 +8,7 @@ export const createDispatcharrSlice: StateCreator<AppStore, [], [], DispatcharrS
   dispatcharrToast: null,
   dispatcharrFind: null,
   dispatcharrAddedRows: [],
+  dispatcharrEditEpoch: 0,
 
   setDispatcharrRowState: (channelId, rowState) =>
     set((state) => {
@@ -27,12 +28,13 @@ export const createDispatcharrSlice: StateCreator<AppStore, [], [], DispatcharrS
   addDispatcharrRows: (rows) =>
     set((state) => ({ dispatcharrAddedRows: [...state.dispatcharrAddedRows, ...rows] })),
   resetDispatcharrEdits: () =>
-    set({
+    set((state) => ({
       dispatcharrOrders: {},
       dispatcharrUndo: {},
       dispatcharrRowStates: {},
       dispatcharrToast: null,
       dispatcharrFind: null,
       dispatcharrAddedRows: [],
-    }),
+      dispatcharrEditEpoch: state.dispatcharrEditEpoch + 1,
+    })),
 });
