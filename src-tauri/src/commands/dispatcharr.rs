@@ -190,42 +190,6 @@ pub async fn dispatcharr_push_stream_stats(
     Ok(report)
 }
 
-#[derive(Debug, Serialize)]
-pub struct DispatcharrChannelStreams {
-    pub channel_id: i64,
-    pub stream_ids: Vec<i64>,
-}
-
-/// Current ordered stream IDs for the given channels, each read fresh.
-/// Channels deleted in Dispatcharr are absent from the result.
-#[tauri::command]
-pub async fn dispatcharr_get_channel_streams(
-    app: tauri::AppHandle,
-    source_identity: String,
-    connection: String,
-    channel_ids: Vec<i64>,
-) -> Result<Vec<DispatcharrChannelStreams>, AppError> {
-    let client = resolve_session(&app, &source_identity, &connection).await?;
-    // Read each channel on its own, so callers can check a channel right
-    // before writing it without fetching the whole lineup.
-    let client = &client;
-    let fetched = stream::iter(channel_ids)
-        .map(|channel_id| async move { client.fetch_channel(channel_id).await })
-        .buffer_unordered(STATS_PUSH_CONCURRENCY)
-        .collect::<Vec<_>>()
-        .await;
-    let mut channels = Vec::new();
-    for channel in fetched {
-        if let Some(channel) = channel? {
-            channels.push(DispatcharrChannelStreams {
-                channel_id: channel.id,
-                stream_ids: channel.streams,
-            });
-        }
-    }
-    Ok(channels)
-}
-
 fn validate_stream_list(stream_ids: &[i64], allow_empty: bool) -> Result<(), AppError> {
     if stream_ids.is_empty() && !allow_empty {
         return Err(AppError::Validation(
@@ -252,9 +216,36 @@ pub async fn dispatcharr_set_channel_streams(
     channel_id: i64,
     stream_ids: Vec<i64>,
     allow_empty: Option<bool>,
+    expected: Option<Vec<i64>>,
 ) -> Result<Vec<i64>, AppError> {
     validate_stream_list(&stream_ids, allow_empty.unwrap_or(false))?;
     let client = resolve_session(&app, &source_identity, &connection).await?;
+    // Check and write as one step per channel, across windows: an edit made
+    // meanwhile (here or in Dispatcharr) is refused, never overwritten.
+    let channel_lock = {
+        type Locks = HashMap<String, Arc<tokio::sync::Mutex<()>>>;
+        static LOCKS: std::sync::OnceLock<std::sync::Mutex<Locks>> = std::sync::OnceLock::new();
+        let mut locks = LOCKS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Arc::clone(
+            locks
+                .entry(format!("{}#{}", connection, channel_id))
+                .or_default(),
+        )
+    };
+    let _writing = channel_lock.lock().await;
+    if let Some(expected) = expected {
+        let current = client.fetch_channel(channel_id).await?.ok_or_else(|| {
+            AppError::Other("Channel no longer exists in Dispatcharr".to_string())
+        })?;
+        if current.streams != expected {
+            return Err(AppError::Other(
+                "Changed in Dispatcharr. Reload first.".to_string(),
+            ));
+        }
+    }
     let stored = client.set_channel_streams(channel_id, &stream_ids).await?;
     if stored != stream_ids {
         return Err(AppError::Other(format!(

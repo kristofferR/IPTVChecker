@@ -835,11 +835,14 @@ impl DispatchQueue {
     fn new(channels: Vec<Channel>) -> Self {
         let mut unlimited = VecDeque::new();
         let mut lanes = Vec::<AccountLane>::new();
-        let mut lane_of = HashMap::<i64, usize>::new();
+        // Account ids are only unique within one Dispatcharr server.
+        let mut lane_of = HashMap::<(String, i64), usize>::new();
         for channel in channels {
             match crate::engine::dispatcharr::dispatcharr_connection_limit(&channel.extinf_line) {
                 Some((account_id, limit)) => {
-                    let lane = *lane_of.entry(account_id).or_insert_with(|| {
+                    let server =
+                        crate::engine::dispatcharr::dispatcharr_server(&channel.extinf_line);
+                    let lane = *lane_of.entry((server, account_id)).or_insert_with(|| {
                         lanes.push(AccountLane {
                             rows: VecDeque::new(),
                             queue_slots: Arc::new(Semaphore::new(limit * ACCOUNT_QUEUE_FACTOR)),
@@ -2698,8 +2701,14 @@ async fn execute_scan_run(
                                         {
                                             drop(permits);
                                             busy_accounts.set(&account_label, true);
+                                            // Rows that backed off together come back
+                                            // at different times, so one takes a free
+                                            // connection instead of all retreating.
+                                            let stagger = Duration::from_millis(
+                                                (channel.index % 8) as u64 * 400,
+                                            );
                                             tokio::select! {
-                                                _ = tokio::time::sleep(BUSY_ACCOUNT_RECHECK) => {}
+                                                _ = tokio::time::sleep(BUSY_ACCOUNT_RECHECK + stagger) => {}
                                                 _ = cancel.cancelled() => {
                                                     return Err(AppError::Cancelled);
                                                 }

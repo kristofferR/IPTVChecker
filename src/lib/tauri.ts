@@ -9,7 +9,6 @@ import type {
   Channel,
   ChannelResult,
   ChromecastDevice,
-  DispatcharrChannelStreams,
   DispatcharrOpenRequest,
   DispatcharrStatsPushReport,
   DispatcharrTarget,
@@ -116,21 +115,21 @@ export async function dispatcharrPushStreamStats(
   });
 }
 
-export async function dispatcharrGetChannelStreams(
-  target: DispatcharrTarget,
-  channelIds: number[],
-): Promise<DispatcharrChannelStreams[]> {
-  return invoke("dispatcharr_get_channel_streams", { ...target, channelIds });
-}
-
 /** `streamIds` must be the channel's complete intended list: Dispatcharr
  *  unlinks every stream left out. */
 export async function dispatcharrSetChannelStreams(
   target: DispatcharrTarget,
   channelId: number,
   streamIds: number[],
+  /** The order the channel must still have; the write is refused otherwise. */
+  expected: number[],
 ): Promise<number[]> {
-  return invoke("dispatcharr_set_channel_streams", { ...target, channelId, streamIds });
+  return invoke("dispatcharr_set_channel_streams", {
+    ...target,
+    channelId,
+    streamIds,
+    expected,
+  });
 }
 
 /** A provider stream offered for a channel, as the row it would load as. */

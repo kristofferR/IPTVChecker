@@ -1075,7 +1075,6 @@ pub fn run() {
             commands::playlist::open_playlist_stalker,
             commands::playlist::open_playlist_dispatcharr,
             commands::dispatcharr::dispatcharr_push_stream_stats,
-            commands::dispatcharr::dispatcharr_get_channel_streams,
             commands::dispatcharr::dispatcharr_set_channel_streams,
             commands::dispatcharr::dispatcharr_refresh_account,
             commands::dispatcharr::dispatcharr_find_streams,

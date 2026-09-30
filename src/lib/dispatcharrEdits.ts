@@ -12,7 +12,7 @@ import {
   withHiddenStreams,
 } from "./dispatcharr";
 import { errorToString } from "./errors";
-import { dispatcharrGetChannelStreams, dispatcharrSetChannelStreams } from "./tauri";
+import { dispatcharrSetChannelStreams } from "./tauri";
 import type { ChannelResult } from "./types";
 
 /** A channel's stream order as loaded (`from`) and as intended (`to`). */
@@ -93,31 +93,10 @@ async function writeOrders(
   const queue = [...changes];
   const worker = async () => {
     for (let change = queue.shift(); change; change = queue.shift()) {
-      // Read the channel right before writing it, so an edit made in
-      // Dispatcharr during a long bulk fix is never overwritten.
-      let server: number[] | undefined;
       try {
-        const [fresh] = await dispatcharrGetChannelStreams(target, [change.channelId]);
-        server = fresh?.stream_ids;
-      } catch (error) {
-        if (!stillCurrent()) return;
-        fail(change, errorToString(error));
-        failed += 1;
-        continue;
-      }
-      if (!stillCurrent()) return;
-      if (!server) {
-        fail(change, "Channel no longer exists in Dispatcharr");
-        failed += 1;
-        continue;
-      }
-      if (!sameOrder(server, change.from)) {
-        fail(change, "Changed in Dispatcharr. Reload first.");
-        failed += 1;
-        continue;
-      }
-      try {
-        await dispatcharrSetChannelStreams(target, change.channelId, change.to);
+        // The backend re-reads the channel and refuses the write if it no
+        // longer has `from`, so edits made meanwhile are never overwritten.
+        await dispatcharrSetChannelStreams(target, change.channelId, change.to, change.from);
         if (!stillCurrent()) return;
         const primaryBefore = currentPrimary(change.channelId);
         store.commitDispatcharrOrder(change.channelId, change.to, undoing ? null : change.from);

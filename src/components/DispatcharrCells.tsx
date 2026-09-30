@@ -24,6 +24,8 @@ export type DispatcharrRowMeta =
 export interface DispatcharrRowActions {
   /** Edits wait while a scan runs, since orders are judged on its results. */
   disabled: boolean;
+  /** Connected to Dispatcharr (a reopened export is read-only). */
+  canWrite: boolean;
   onToggleExpand: (channelId: number) => void;
   onFix: (channel: DispatcharrChannelView) => void;
   onUndo: (channel: DispatcharrChannelView) => void;
@@ -193,7 +195,7 @@ export function ChannelNameCell({
       <span className="min-w-24 truncate font-medium">{channel.name}</span>
       <span className="ml-auto flex min-w-0 items-center gap-2 pl-2">
         <ChannelRowStatus channel={channel} rowState={rowState} actions={actions} />
-        {actions && canFix && !busy && rowState?.kind !== "failed" && (
+        {actions?.canWrite && canFix && !busy && rowState?.kind !== "failed" && (
           <button
             type="button"
             className={`${buttonClass} ${expanded ? "" : "sr-only group-hover:not-sr-only focus:not-sr-only"}`}
@@ -207,7 +209,7 @@ export function ChannelNameCell({
             Fix order
           </button>
         )}
-        {actions &&
+        {actions?.canWrite &&
           !busy &&
           // A channel with nothing working always offers it; others on hover,
           // compact, next to Fix order.
@@ -267,7 +269,7 @@ export function StreamNameCell({
           Primary
         </span>
       )}
-      {actions && (
+      {actions?.canWrite && (
         <span className="ml-auto flex shrink-0 items-center gap-1 pl-2 sr-only group-hover:not-sr-only focus-within:not-sr-only">
           {position > 0 && (
             <button

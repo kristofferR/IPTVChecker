@@ -258,7 +258,10 @@ export function DispatcharrFindPanel() {
   ].map((entry) => ({ ...entry, result: probed.get(entry.streamId) ?? entry.result }));
   const accounts = [...new Set(candidates.map((entry) => entry.account))].sort();
   const shown = candidates.filter((entry) => account === "all" || entry.account === account);
-  const unprobed = shown.filter((entry) => !entry.result);
+  // An account busy with viewers said nothing about the stream: try again.
+  const unprobed = shown.filter(
+    (entry) => !entry.result || entry.result.error_reason === "Account busy",
+  );
   const pickable = (entry: Candidate) => entry.result?.status === "alive";
   const pickedCandidates = candidates.filter(
     (entry) => picked.includes(entry.streamId) && pickable(entry),

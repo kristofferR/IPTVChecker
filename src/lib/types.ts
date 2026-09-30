@@ -600,8 +600,3 @@ export interface DispatcharrStatsPushReport {
   /** Dispatcharr accepted the first write but did not store the stats. */
   rejected: boolean;
 }
-
-export interface DispatcharrChannelStreams {
-  channel_id: number;
-  stream_ids: number[];
-}

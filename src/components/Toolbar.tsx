@@ -45,6 +45,7 @@ import {
   dispatcharrChannelRows,
   filterDispatcharrPrimaries,
   getDispatcharrView,
+  isDispatcharrPreview,
   matchesDispatcharrStatus,
 } from "../lib/dispatcharr";
 import type { ExportScope } from "../lib/exportScope";
@@ -144,6 +145,8 @@ export const Toolbar = memo(function Toolbar({
   const menuExportRequest = useAppStore((s) => s.menuExportRequest);
   const showReport = useAppStore((s) => s.playlist !== null && s.showReportPanel);
   const hasPlaylist = useAppStore((s) => s.playlist !== null);
+  // A reopened Dispatcharr export shows channels but cannot write to them.
+  const dispatcharrConnected = useAppStore((s) => isDispatcharrPreview(s.playlist));
   const currentSourceDescriptor = useAppStore((s) => s.currentSourceDescriptor);
   const playlistName = useAppStore((s) => s.playlist?.file_name ?? "");
   const playlistPath = useAppStore((s) => s.playlist?.file_path ?? "");
@@ -1106,7 +1109,7 @@ export const Toolbar = memo(function Toolbar({
               className="native-field h-7 w-full min-w-0 pl-7 pr-2 text-[12px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:cursor-not-allowed"
             />
           </div>
-          {dispatcharrView && (
+          {dispatcharrView && dispatcharrConnected && (
             <div className="flex shrink-0 items-center gap-2">
               <DispatcharrFindButton view={dispatcharrView} />
               {visibleDispatcharrPrimaries && (

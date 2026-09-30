@@ -22,6 +22,7 @@ import {
   expandDispatcharrSelection,
   filterDispatcharrPrimaries,
   getDispatcharrView,
+  isDispatcharrPreview,
   withHiddenStreams,
 } from "../lib/dispatcharr";
 import { applyOrderChanges, planFix, undoChannels } from "../lib/dispatcharrEdits";
@@ -1441,10 +1442,12 @@ export function ChannelTable({
   });
 
   const scanRunning = isScanActive(scanState);
+  const connected = useAppStore((s) => isDispatcharrPreview(s.playlist));
   const dispatcharrActions = useMemo(
     () => ({
       // Orders are judged on scan results, so edits wait for the scan.
       disabled: scanRunning,
+      canWrite: connected,
       onToggleExpand: toggleChannelExpanded,
       onFix: handleFixChannel,
       onUndo: handleUndoChannel,
@@ -1454,6 +1457,7 @@ export function ChannelTable({
     }),
     [
       scanRunning,
+      connected,
       toggleChannelExpanded,
       handleFixChannel,
       handleUndoChannel,

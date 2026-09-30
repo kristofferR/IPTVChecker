@@ -880,11 +880,7 @@ pub(crate) fn account_connection_slots(
 ) -> Arc<tokio::sync::Semaphore> {
     type Pools = HashMap<String, (Arc<tokio::sync::Semaphore>, usize)>;
     static SLOTS: OnceLock<Mutex<Pools>> = OnceLock::new();
-    let server = parse_extinf_attributes(extinf_line)
-        .into_iter()
-        .find_map(|(key, value)| (key == ATTR_SERVER).then_some(value))
-        .unwrap_or_default();
-    let key = format!("{}|{}", server, account_id);
+    let key = format!("{}|{}", dispatcharr_server(extinf_line), account_id);
     let mut slots = SLOTS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
@@ -1103,6 +1099,14 @@ pub(crate) fn dispatcharr_ids_from_extinf(extinf_line: &str) -> Option<Dispatcha
             .filter(|value| !value.is_empty())
             .cloned(),
     })
+}
+
+/// The Dispatcharr server a row came from (empty when it carries none).
+pub(crate) fn dispatcharr_server(extinf_line: &str) -> String {
+    parse_extinf_attributes(extinf_line)
+        .into_iter()
+        .find_map(|(key, value)| (key == ATTR_SERVER).then_some(value))
+        .unwrap_or_default()
 }
 
 /// A row's provider account name, for messages.
