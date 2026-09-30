@@ -116,12 +116,36 @@ pub async fn dispatcharr_push_stream_stats(
     source_identity: String,
     connection: String,
     results: Vec<ChannelResult>,
+    scan_started_at: u64,
 ) -> Result<DispatcharrStatsPushReport, AppError> {
-    // One push per connection at a time, across windows, so an older scan's
-    // writes never land after a newer one's.
+    // One push per connection at a time, across windows.
     let _pushing = keyed_lock(format!("push:{connection}")).lock_owned().await;
     let client = resolve_session(&app, &source_identity, &connection).await?;
-    let (updates, skipped) = collect_stream_stats(&results);
+    let (updates, mut skipped) = collect_stream_stats(&results);
+    // A scan that started earlier but finished later never overwrites a
+    // stream a newer scan already wrote.
+    let updates = {
+        static NEWEST: std::sync::OnceLock<std::sync::Mutex<HashMap<(String, i64), u64>>> =
+            std::sync::OnceLock::new();
+        let mut newest = NEWEST
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let before = updates.len();
+        let updates = updates
+            .into_iter()
+            .filter(|(stream_id, _)| {
+                let started = newest.entry((connection.clone(), *stream_id)).or_default();
+                let current = *started <= scan_started_at;
+                if current {
+                    *started = scan_started_at;
+                }
+                current
+            })
+            .collect::<Vec<_>>();
+        skipped += before - updates.len();
+        updates
+    };
     let mut report = DispatcharrStatsPushReport {
         skipped,
         ..Default::default()

@@ -6,8 +6,8 @@ import { dispatcharrPushStreamStats } from "../lib/tauri";
 import type { ChannelResult, DispatcharrTarget } from "../lib/types";
 import { useAppStore } from "../store";
 
-// Pushes run one after another, so an older scan's results never land after
-// a newer one's.
+// Pushes from this window run one after another; the backend also keeps an
+// earlier-started scan (in any window) from overwriting a newer one's stats.
 let pushQueue: Promise<void> = Promise.resolve();
 
 /** When enabled in settings, write probe results into Dispatcharr's stream
@@ -20,6 +20,7 @@ export function useDispatcharrStatsPush() {
     // Result objects from before the scan: only rows the scan replaced are
     // pushed, so a partial rescan does not re-date older results.
     let before: ReadonlySet<ChannelResult> = new Set();
+    let startedAt = Date.now();
     return useAppStore.subscribe((state) => {
       const { scanState } = state;
       if (scanState === previous) return;
@@ -27,6 +28,7 @@ export function useDispatcharrStatsPush() {
       previous = scanState;
       if (scanState === "scanning" && was !== "paused") {
         before = new Set(state.flatResults);
+        startedAt = Date.now();
         return;
       }
       if (scanState !== "complete") return;
@@ -40,14 +42,19 @@ export function useDispatcharrStatsPush() {
       }
       const scanned = state.flatResults.filter((result) => !before.has(result));
       before = new Set();
-      pushQueue = pushQueue.then(() => pushStats(target, scanned));
+      const scanStartedAt = startedAt;
+      pushQueue = pushQueue.then(() => pushStats(target, scanned, scanStartedAt));
     });
   }, []);
 }
 
-async function pushStats(target: DispatcharrTarget, scanned: ChannelResult[]): Promise<void> {
+async function pushStats(
+  target: DispatcharrTarget,
+  scanned: ChannelResult[],
+  scanStartedAt: number,
+): Promise<void> {
   try {
-    const report = await dispatcharrPushStreamStats(target, scanned);
+    const report = await dispatcharrPushStreamStats(target, scanned, scanStartedAt);
     const store = useAppStore.getState();
     if (report.rejected) {
       store.setMenuInfo(

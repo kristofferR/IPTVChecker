@@ -108,10 +108,12 @@ export async function openPlaylistDispatcharr(
 export async function dispatcharrPushStreamStats(
   target: DispatcharrTarget,
   results: ChannelResult[],
+  scanStartedAt: number,
 ): Promise<DispatcharrStatsPushReport> {
   return invoke("dispatcharr_push_stream_stats", {
     ...target,
     results: toCommandChannelResults(results),
+    scanStartedAt,
   });
 }
 
