@@ -623,10 +623,20 @@ impl DispatcharrClient {
                 country
             }
         };
-        let mut countries = self
-            .fetch_streams_by_ids(&channel.streams)
-            .await
-            .unwrap_or_default()
+        let linked = if channel.streams.is_empty() {
+            Vec::new()
+        } else {
+            self.fetch_streams_by_ids(&channel.streams)
+                .await
+                .inspect_err(|error| {
+                    log::warn!(
+                        "[dispatcharr] linked stream lookup for country ranking failed: {}",
+                        error
+                    )
+                })
+                .unwrap_or_default()
+        };
+        let mut countries = linked
             .iter()
             .filter_map(|stream| name_country(&stream.name))
             .map(normalize_country)
