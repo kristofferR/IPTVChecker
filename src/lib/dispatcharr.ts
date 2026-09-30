@@ -585,11 +585,16 @@ export function proposeFixOrder(
   });
   const kept = preferences.deadStreams === "move_to_end" ? [...other, ...dead] : other;
   const order = [...alive, ...untested, ...kept].map((entry) => entry.ref.streamId);
-  const current = channel.streams.map((entry) => entry.ref.streamId);
-  if (order.length === current.length && order.every((id, i) => id === current[i])) {
+  // Compared with hidden streams in place: one ahead of the working streams
+  // is what Dispatcharr actually plays first.
+  const proposed = withHiddenStreams(channel, order);
+  if (
+    proposed.length === channel.order.length &&
+    proposed.every((id, i) => id === channel.order[i])
+  ) {
     return { kind: "none" };
   }
-  return { kind: "change", order, removed: current.length - order.length };
+  return { kind: "change", order, removed: channel.streams.length - order.length };
 }
 
 /** The visible channels' primary results under the table filters. Standard

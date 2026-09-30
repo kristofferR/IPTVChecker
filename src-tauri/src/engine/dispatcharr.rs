@@ -1359,9 +1359,11 @@ pub(crate) fn build_m3u(
                 attr(ATTR_CHANNEL_UUID, uuid);
             }
             attr(ATTR_CHANNEL_STREAMS, &channel_streams);
+            // Every row names its server: channel and account ids are only
+            // unique within one.
+            attr(ATTR_SERVER, &base);
             match (account, stream.m3u_account) {
                 (Some(account), _) => {
-                    attr(ATTR_SERVER, &base);
                     attr(ATTR_ACCOUNT, &account.name);
                     attr(ATTR_ACCOUNT_ID, &account.id.to_string());
                     let limit = account.connection_limit();
@@ -1372,7 +1374,6 @@ pub(crate) fn build_m3u(
                 // Account details did not load: assume the strictest limit
                 // rather than scanning the provider without one.
                 (None, Some(account_id)) => {
-                    attr(ATTR_SERVER, &base);
                     attr(ATTR_ACCOUNT_ID, &account_id.to_string());
                     attr(ATTR_MAX_STREAMS, "1");
                 }
@@ -1413,6 +1414,7 @@ pub(crate) fn build_m3u(
                 attr(ATTR_CHANNEL_UUID, uuid);
             }
             attr(ATTR_CHANNEL_STREAMS, &channel_streams);
+            attr(ATTR_SERVER, &base);
             attr(ATTR_EMPTY, "1");
             m3u.push(',');
             m3u.push_str(&flatten_extinf_title(channel.display_name()));
@@ -1744,6 +1746,10 @@ mod tests {
             30
         );
         assert_eq!(row.url, "http://dvr.example:9191/proxy/ts/stream/uuid-30");
+        assert_eq!(
+            dispatcharr_server(&row.extinf_line),
+            "http://dvr.example:9191"
+        );
         // A title that merely quotes the marker is a normal row.
         assert!(!is_empty_channel_row(
             "#EXTINF:-1 x-dispatcharr-stream-id=\"4\",Test x-dispatcharr-empty=\"1\""
