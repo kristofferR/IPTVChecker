@@ -644,7 +644,11 @@ function escapeAttribute(value: string): string {
 }
 
 function setAttribute(extinfLine: string, key: string, value: string): string {
-  return extinfLine.replace(new RegExp(`(\\s${key}=)"(?:\\\\.|[^"\\\\])*"`), `$1"${value}"`);
+  // A callback keeps "$1" or "$&" in the value literal.
+  return extinfLine.replace(
+    new RegExp(`(\\s${key}=)"(?:\\\\.|[^"\\\\])*"`),
+    (_match, prefix: string) => `${prefix}"${value}"`,
+  );
 }
 
 /** A channel's streams as playlist rows in its current Dispatcharr order,

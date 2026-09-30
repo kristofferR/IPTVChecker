@@ -434,6 +434,8 @@ describe("dispatcharr helpers", () => {
     expect(parseDispatcharrIds(added.extinf_line)?.added).toBe(true);
     // It carries the channel's group, which found streams arrive without.
     expect(added.extinf_line).toContain('group-title="News"');
+    const dollar = addedStreamRow(found, { ...channel, group: "Sports $1 $&" }, 6);
+    expect(dollar.extinf_line).toContain('group-title="Sports $1 $&"');
     // The marker lands before the title, even when the title holds a quote.
     const quoted = addedStreamRow(
       makeResult(0, extinf(10, 8, 0, 1, 'News "One"', "Feed 8"), 'News "One"'),
