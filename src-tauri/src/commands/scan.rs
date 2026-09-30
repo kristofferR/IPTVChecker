@@ -191,6 +191,9 @@ struct SharedCheckContext<'a> {
     screenshot_format: ScreenshotFormat,
     diagnostics_semaphore: &'a Arc<Semaphore>,
     single_connection_mode: bool,
+    /// Media goes to the app cache, where a rescan's clip supersedes the
+    /// channel's previous one. Custom folders hold the user's files.
+    prune_superseded_clips: bool,
 }
 
 async fn compute_shared_url_result(
@@ -221,6 +224,7 @@ async fn compute_shared_url_result(
         screenshot_format,
         diagnostics_semaphore,
         single_connection_mode,
+        prune_superseded_clips,
     } = ctx;
     let dispatcharr_single_pass = ffmpeg_ok && checker::is_dispatcharr_proxy_url(channel_url);
     let check_started_at = Instant::now();
@@ -750,6 +754,15 @@ async fn compute_shared_url_result(
         if let Some(clip) = shared.sample_clip.take() {
             let _ = std::fs::remove_file(&clip.path);
         }
+    }
+    if let (Some(clip), Some(dir), true) =
+        (&shared.sample_clip, screenshots_dir, prune_superseded_clips)
+    {
+        crate::commands::media::remove_other_channel_clips(
+            std::path::Path::new(dir),
+            screenshot_file_name,
+            std::path::Path::new(&clip.path),
+        );
     }
     timing.diagnostics_ms = diagnostics_started_at.elapsed().as_secs_f64() * 1000.0;
 
@@ -2499,6 +2512,7 @@ async fn execute_scan_run(
                 screenshot_format,
                 diagnostics_semaphore: &diagnostics_semaphore,
                 single_connection_mode,
+                prune_superseded_clips: !using_custom_screenshots_dir,
             };
             let shared_result = result_cell
                 .get_or_init(|| async {

@@ -54,7 +54,13 @@ import {
   quickCheckChannel,
   readScreenshot,
 } from "./lib/tauri";
-import type { AppSettings, ChannelResult, ChromecastDevice, ScanConfig } from "./lib/types";
+import type {
+  AppSettings,
+  ChannelResult,
+  ChromecastDevice,
+  SampleClip,
+  ScanConfig,
+} from "./lib/types";
 import { selectResultByIndex, useAppStore } from "./store";
 import type { AppStore, OpenSourceDialogState } from "./store/types";
 
@@ -573,11 +579,12 @@ export default function App() {
   const openSourceDialogState = useAppStore((s) => s.openSourceDialogState);
   const pendingPlaybackChannel = useAppStore((s) => s.pendingPlaybackChannel);
   const [pendingPlaybackReason, setPendingPlaybackReason] = useState<
-    "scan" | "archive_probe" | null
+    "scan" | "archive_probe" | "sample_capture" | null
   >(null);
   const archiveProbeActive = useAppStore((state) =>
     Object.values(state.archiveProbes).some((probe) => probe.running),
   );
+  const sampleCaptureActive = useAppStore((state) => state.sampleCaptureActive);
   const liveSelectedChannel = useAppStore(selectLiveSelectedChannel);
   const showHistory = useAppStore((s) => s.showHistory);
   const historyEntries = useAppStore((s) => s.historyEntries);
@@ -996,7 +1003,8 @@ export default function App() {
       if (
         state.archiveVerifyRun ||
         state.archiveGuideTestRunning ||
-        Object.values(state.archiveProbes).some((entry) => entry.running)
+        Object.values(state.archiveProbes).some((entry) => entry.running) ||
+        (state.sampleCaptureActive && isSingleConnectionPlaylist(state.playlist))
       ) {
         return false;
       }
@@ -1318,6 +1326,11 @@ export default function App() {
         setPendingPlaybackReason("archive_probe");
         return;
       }
+      if (isSingleConnectionPlaylist(getStore().playlist) && getStore().sampleCaptureActive) {
+        getStore().setPendingPlaybackChannel(result);
+        setPendingPlaybackReason("sample_capture");
+        return;
+      }
       if (blockPlaybackDuringArchiveVerification()) return;
       // While a cast session is active, redirect the cast to the new channel
       // instead of starting a competing local stream. Single-connection IPTV
@@ -1397,6 +1410,12 @@ export default function App() {
         setPendingPlaybackReason("archive_probe");
         return;
       }
+      if (singleConnection && state.sampleCaptureActive) {
+        pendingArchivePlaybackRef.current = options;
+        state.setPendingPlaybackChannel(result);
+        setPendingPlaybackReason("sample_capture");
+        return;
+      }
       if (blockPlaybackDuringArchiveVerification()) return;
       pendingArchivePlaybackRef.current = null;
       playGuideArchive(result, options);
@@ -1429,10 +1448,13 @@ export default function App() {
     playStream(channel);
   }, [pendingPlaybackChannel, playGuideArchive, playStream]);
 
-  // A queued play waiting on catch-up probes resumes once they finish, unless
-  // a single-provider scan is still holding the connection.
+  // A queued play waiting on catch-up probes or a sample capture resumes once
+  // they finish, unless a single-provider scan is still holding the connection.
   useEffect(() => {
-    if (pendingPlaybackReason === "archive_probe" && !archiveProbeActive) {
+    const released =
+      (pendingPlaybackReason === "archive_probe" && !archiveProbeActive) ||
+      (pendingPlaybackReason === "sample_capture" && !sampleCaptureActive);
+    if (released) {
       const state = getStore();
       if (isScanActive(state.scanState) && isSingleConnectionPlaylist(state.playlist)) {
         setPendingPlaybackReason("scan");
@@ -1440,7 +1462,7 @@ export default function App() {
       }
       handleProceedPlayback();
     }
-  }, [archiveProbeActive, handleProceedPlayback, pendingPlaybackReason]);
+  }, [archiveProbeActive, handleProceedPlayback, pendingPlaybackReason, sampleCaptureActive]);
 
   // Successful playback is itself a channel check. Keep the result row and
   // detail panel in sync with everything the active player can establish.
@@ -1484,7 +1506,13 @@ export default function App() {
         }
         if (playIntentActive) handleStopPlayer();
       }
-      const clip = await captureSampleClip(result);
+      getStore().setSampleCaptureActive(true);
+      let clip: SampleClip;
+      try {
+        clip = await captureSampleClip(result);
+      } finally {
+        getStore().setSampleCaptureActive(false);
+      }
       const state = getStore();
       // Indices restart per playlist, so a capture that outlives its playlist
       // must not land on an unrelated channel.
@@ -1916,12 +1944,16 @@ export default function App() {
             <h2 className="text-[16px] font-semibold mb-2">
               {pendingPlaybackReason === "archive_probe"
                 ? "Catch-up test currently running"
-                : "Scan currently running"}
+                : pendingPlaybackReason === "sample_capture"
+                  ? "Sample capture currently running"
+                  : "Scan currently running"}
             </h2>
             <p className="text-[14px] text-text-secondary leading-relaxed">
               {pendingPlaybackReason === "archive_probe"
                 ? "Playback will start when the catch-up test finishes, so a single-connection server is not interrupted."
-                : "A scan is currently running. Playing a channel while scanning may interfere with the scan or cause playback issues if the server&apos;s max connection limit is exceeded."}
+                : pendingPlaybackReason === "sample_capture"
+                  ? "Playback will start when the sample capture finishes, so a single-connection server is not interrupted."
+                  : "A scan is currently running. Playing a channel while scanning may interfere with the scan or cause playback issues if the server&apos;s max connection limit is exceeded."}
             </p>
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
@@ -1935,7 +1967,7 @@ export default function App() {
               >
                 Cancel
               </button>
-              {pendingPlaybackReason !== "archive_probe" && (
+              {pendingPlaybackReason === "scan" && (
                 <button
                   onClick={handleProceedPlayback}
                   className="macos-btn macos-btn-primary px-3 py-2 min-h-9 text-[13px] font-medium bg-blue-600 hover:bg-blue-500 rounded-md"

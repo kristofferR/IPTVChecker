@@ -30,7 +30,9 @@ static PREVIEW_TOKEN: LazyLock<String> = LazyLock::new(cast_proxy::generate_toke
 /// Cache subdirectory for clips captured outside a scan. Its scan metadata
 /// keeps it under the same retention and low-space eviction as scan runs.
 const MANUAL_CAPTURE_DIR: &str = "manual-samples";
-const CAPTURE_URL_SCHEMES: &[&str] = &["http", "https", "rtmp", "rtmps", "rtsp", "rtp", "udp"];
+const CAPTURE_URL_SCHEMES: &[&str] = &[
+    "http", "https", "rtmp", "rtmps", "rtsp", "rtsps", "rtp", "udp",
+];
 
 /// Only hand ffmpeg network stream URLs, never local files or protocol
 /// wrappers such as `concat:`.
@@ -136,37 +138,36 @@ pub async fn capture_sample_clip(
     // A recapture supersedes this channel's earlier manual clips. Only the
     // app's own cache is pruned; a custom folder holds the user's files.
     if custom_dir_is_none {
-        remove_other_manual_clips(&output_dir, &file_name, Path::new(&clip.path));
+        remove_other_channel_clips(&output_dir, &file_name, Path::new(&clip.path));
     }
     Ok(clip)
 }
 
-/// Delete `stem.{mp4,ts}` and `stem-N.{mp4,ts}` in `dir`, except `keep`.
-fn remove_other_manual_clips(dir: &Path, stem: &str, keep: &Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for path in entries.flatten().map(|entry| entry.path()) {
-        let is_clip = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| matches!(ext, "mp4" | "ts"));
-        let same_channel = path
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| {
-                name == stem
-                    || name
-                        .strip_prefix(stem)
-                        .and_then(|rest| rest.strip_prefix('-'))
-                        .is_some_and(|suffix| {
-                            !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit())
-                        })
-            });
-        if is_clip && same_channel && path != keep {
-            if let Err(error) = std::fs::remove_file(&path) {
-                log::debug!("Failed to remove superseded sample clip: {}", error);
+/// Delete a channel's earlier clips (`stem.{mp4,ts}`, `stem-N.{mp4,ts}`) in
+/// `dir`, except `keep`. Probes the names new captures would take instead of
+/// listing the folder, so it stays cheap in large scan runs.
+pub(crate) fn remove_other_channel_clips(dir: &Path, stem: &str, keep: &Path) {
+    for n in 1..=9_999usize {
+        let name = if n == 1 {
+            stem.to_string()
+        } else {
+            format!("{stem}-{n}")
+        };
+        let mut found = false;
+        for ext in ["mp4", "ts"] {
+            let path = dir.join(format!("{name}.{ext}"));
+            if !path.exists() {
+                continue;
             }
+            found = true;
+            if path != keep {
+                if let Err(error) = std::fs::remove_file(&path) {
+                    log::debug!("Failed to remove superseded sample clip: {}", error);
+                }
+            }
+        }
+        if !found && n > 1 {
+            break;
         }
     }
 }
@@ -363,7 +364,7 @@ pub async fn try_serve_preview_request(
 #[cfg(test)]
 mod tests {
     use super::{
-        artifact_byte_span, ensure_capture_url, parse_preview_request, remove_other_manual_clips,
+        artifact_byte_span, ensure_capture_url, parse_preview_request, remove_other_channel_clips,
         PreviewRequest,
     };
 
@@ -371,12 +372,13 @@ mod tests {
     fn capture_url_must_be_a_network_stream() {
         assert!(ensure_capture_url("https://example.com/live/1.m3u8").is_ok());
         assert!(ensure_capture_url("rtmp://example.com/live/1").is_ok());
+        assert!(ensure_capture_url("rtsps://example.com/live/1").is_ok());
         assert!(ensure_capture_url("file:///etc/passwd").is_err());
         assert!(ensure_capture_url("concat:/tmp/a.ts|/tmp/b.ts").is_err());
     }
 
     #[test]
-    fn recapture_prunes_only_this_channels_other_clips() {
+    fn recapture_prunes_only_this_channels_clips() {
         let dir = std::env::temp_dir().join(format!("iptv-manual-prune-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("fixture dir");
         for name in [
@@ -390,7 +392,7 @@ mod tests {
             std::fs::write(dir.join(name), b"x").expect("fixture file");
         }
 
-        remove_other_manual_clips(&dir, "3-News", &dir.join("3-News-3.mp4"));
+        remove_other_channel_clips(&dir, "3-News", &dir.join("3-News-3.mp4"));
 
         let mut left: Vec<String> = std::fs::read_dir(&dir)
             .expect("fixture dir")
