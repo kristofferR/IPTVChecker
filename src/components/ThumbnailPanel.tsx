@@ -24,7 +24,7 @@ import type { ChannelResult } from "../lib/types";
 import { ArchiveCard } from "./ArchiveCard";
 import { CastMenu, type CastStartHandler } from "./CastMenu";
 import { PlaybackDiagnostics } from "./PlaybackDiagnostics";
-import { SampleClipCard } from "./SampleClipCard";
+import { SampleClipRow } from "./SampleClipRow";
 import { StatusBadge } from "./StatusBadge";
 import { StreamPlayer } from "./StreamPlayer";
 
@@ -545,7 +545,7 @@ export function ThumbnailPanel({
         <PlaybackDiagnostics channelIndex={result.index} />
 
         {onCaptureSample && (
-          <SampleClipCard
+          <SampleClipRow
             key={`sample-clip-${result.index}`}
             result={result}
             scanActive={scanActive}
