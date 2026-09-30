@@ -490,6 +490,11 @@ describe("dispatcharr helpers", () => {
     expect(getDispatcharrView(results, {})?.byChannelId.get(10)?.name).toBe("News One");
   });
 
+  it("keeps a native name that only looks like an export title", () => {
+    const results = channelRows(10, "Match [1/2] East", [{ id: 1 }, { id: 2 }]);
+    expect(getDispatcharrView(results, {})?.byChannelId.get(10)?.name).toBe("Match [1/2] East");
+  });
+
   it("shows a channel with no streams through its placeholder, never scanning it", () => {
     const streams = channelRows(10, "News One", [{ id: 1 }]);
     const line = extinf(30, 0, 0, 0, "Empty One");

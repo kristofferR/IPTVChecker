@@ -331,6 +331,19 @@ export function findDownAccounts(entries: DispatcharrStreamEntry[]): DownAccount
   return down;
 }
 
+/** A reopened export titles each row "Channel [n/m] Stream" (see
+ *  `dispatcharrChannelRows`). Strip that suffix only when it matches the
+ *  row's own position and stream name, so a real name that merely looks like
+ *  one stays whole. */
+function exportedChannelName(name: string, ref: DispatcharrStreamRef): string {
+  const marker = ` [${ref.streamOrder + 1}/${ref.streamCount}] `;
+  const at = name.indexOf(marker);
+  if (at < 0) return name;
+  const channelName = name.slice(0, at);
+  const streamName = name.slice(at + marker.length);
+  return streamName === (ref.streamName ?? channelName) ? channelName : name;
+}
+
 function buildView(results: ChannelResult[], orders: DispatcharrOrders): DispatcharrView | null {
   const byChannel = new Map<
     number,
@@ -350,10 +363,7 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
     if (!ref || result.playlist !== playlist) return null;
     let channel = byChannel.get(ref.channelId);
     if (!channel) {
-      // A reopened export titles each row "Channel [n/m] Stream"; the
-      // channel is the part before that suffix.
-      const name = result.name.replace(/ \[\d+\/\d+\] .*$/, "");
-      channel = { name, group: result.group, streams: [] };
+      channel = { name: exportedChannelName(result.name, ref), group: result.group, streams: [] };
       byChannel.set(ref.channelId, channel);
     }
     if (ref.empty) channel.placeholder = { ref, result, providerDown: false };
