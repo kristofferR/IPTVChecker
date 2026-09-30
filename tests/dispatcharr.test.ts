@@ -496,7 +496,7 @@ describe("dispatcharr helpers", () => {
     const title = line.lastIndexOf(",");
     const placeholder = makeResult(
       1,
-      `${line.slice(0, title)} x-dispatcharr-empty="1"${line.slice(title)}`,
+      `${line.slice(0, title)} x-dispatcharr-empty="1" x-dispatcharr-channel-streams=""${line.slice(title)}`,
       "Empty One",
       { status: "pending" },
     );
@@ -507,6 +507,7 @@ describe("dispatcharr helpers", () => {
     expect(empty?.noWorking).toBe(true);
     expect(empty?.streams).toEqual([]);
     expect(empty?.primary.index).toBe(1);
+    expect(empty?.order).toEqual([]);
     // Full scans cover the real stream only.
     expect(dispatcharrLinkedIndices(results, {})).toEqual([0]);
   });

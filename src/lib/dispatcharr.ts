@@ -166,6 +166,8 @@ export function parseDispatcharrIds(extinfLine: string): DispatcharrStreamRef | 
     channelStreams:
       extinfAttribute(extinfLine, "x-dispatcharr-channel-streams")
         ?.split(",")
+        // An empty list (a channel with no streams) has no ids, not a 0.
+        .filter((id) => id.trim() !== "")
         .map(Number)
         .filter(Number.isInteger) ?? null,
   };

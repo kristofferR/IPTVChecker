@@ -100,7 +100,14 @@ async function writeOrders(
       try {
         // The backend re-reads the channel and refuses the write if it no
         // longer has `from`, so edits made meanwhile are never overwritten.
-        await dispatcharrSetChannelStreams(target, change.channelId, change.to, change.from);
+        await dispatcharrSetChannelStreams(
+          target,
+          change.channelId,
+          change.to,
+          change.from,
+          // Undo restores an earlier order, empty only if the channel was.
+          undoing,
+        );
         if (!stillCurrent()) return;
         const primaryBefore = currentPrimary(change.channelId);
         store.commitDispatcharrOrder(change.channelId, change.to, undoing ? null : change.from);

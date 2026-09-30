@@ -123,12 +123,15 @@ export async function dispatcharrSetChannelStreams(
   streamIds: number[],
   /** The order the channel must still have; the write is refused otherwise. */
   expected: number[],
+  /** Undo may restore a channel that had no streams. */
+  allowEmpty = false,
 ): Promise<number[]> {
   return invoke("dispatcharr_set_channel_streams", {
     ...target,
     channelId,
     streamIds,
     expected,
+    allowEmpty,
   });
 }
 
