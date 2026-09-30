@@ -331,7 +331,10 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
     if (!ref || result.playlist !== playlist) return null;
     let channel = byChannel.get(ref.channelId);
     if (!channel) {
-      channel = { name: result.name, group: result.group, streams: [] };
+      // A reopened export titles each row "Channel [n/m] Stream"; the
+      // channel is the part before that suffix.
+      const name = result.name.replace(/ \[\d+\/\d+\] .*$/, "");
+      channel = { name, group: result.group, streams: [] };
       byChannel.set(ref.channelId, channel);
     }
     if (!channel.streams.some((entry) => entry.ref.streamId === ref.streamId)) {

@@ -469,4 +469,12 @@ describe("dispatcharr helpers", () => {
     const [second] = channelRows(10, "Other One", [{ id: 1 }], 1);
     expect(getDispatcharrView([first, { ...second, playlist: "other.m3u8" }], {})).toBeNull();
   });
+
+  it("names a reopened export's channels without the per-stream suffix", () => {
+    const results = channelRows(10, "News One", [{ id: 1 }, { id: 2 }]).map((row, position) => ({
+      ...row,
+      name: `News One [${position + 1}/2] Feed ${position + 1}`,
+    }));
+    expect(getDispatcharrView(results, {})?.byChannelId.get(10)?.name).toBe("News One");
+  });
 });

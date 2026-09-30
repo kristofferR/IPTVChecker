@@ -1027,6 +1027,17 @@ export default function App() {
       ) {
         return false;
       }
+      // Playback holds the provider connection a limited account allows;
+      // a scan would take a second one.
+      if (
+        state.playlist?.dispatcharr_limited_accounts &&
+        (state.playIntentActive || state.castActive || state.externalPlaybackActive)
+      ) {
+        state.setScanInputError(
+          "Stop playback first: the provider allows only so many connections at once.",
+        );
+        return false;
+      }
       // A scan snapshots the stream order; one still being written would
       // change underneath it.
       if (Object.values(state.dispatcharrRowStates).some((row) => row?.kind === "writing")) {
