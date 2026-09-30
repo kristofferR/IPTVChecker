@@ -614,6 +614,8 @@ export function ChannelTable({
         suppressClickRef.current = false;
       }, 0);
       if (!commit || target === null || target === position || target === position + 1) return;
+      // A scan started mid-drag judges the order it snapshotted; leave it.
+      if (isScanActive(useAppStore.getState().scanState)) return;
       const visible = channel.streams.map((entry) => entry.ref.streamId);
       const [streamId] = visible.splice(position, 1);
       visible.splice(target > position ? target - 1 : target, 0, streamId);
