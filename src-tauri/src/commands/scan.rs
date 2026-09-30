@@ -196,6 +196,9 @@ struct SharedCheckContext<'a> {
     /// channel's previous one. Custom folders hold the user's files.
     prune_superseded_clips: bool,
     low_space_threshold_gb: f64,
+    /// One clip written at a time per scan, so each free-space check sees
+    /// the space earlier clips already took rather than racing them.
+    clip_write_lock: &'a tokio::sync::Mutex<()>,
 }
 
 async fn compute_shared_url_result(
@@ -228,6 +231,7 @@ async fn compute_shared_url_result(
         single_connection_mode,
         prune_superseded_clips,
         low_space_threshold_gb,
+        clip_write_lock,
     } = ctx;
     let dispatcharr_single_pass = ffmpeg_ok && checker::is_dispatcharr_proxy_url(channel_url);
     let check_started_at = Instant::now();
@@ -434,6 +438,10 @@ async fn compute_shared_url_result(
         let mut combined_retries_used = 0u32;
         let (combined_result, final_attempt_elapsed) = loop {
             let attempt_started_at = Instant::now();
+            let clip_guard = match sample_clip_secs {
+                Some(_) => Some(clip_write_lock.lock().await),
+                None => None,
+            };
             let result = ffmpeg::run_combined_diagnostics(
                 app,
                 &target_url,
@@ -450,6 +458,7 @@ async fn compute_shared_url_result(
                 cancel,
             )
             .await;
+            drop(clip_guard);
             let attempt_elapsed = attempt_started_at.elapsed();
 
             let no_tracks_yet = matches!(
@@ -575,20 +584,22 @@ async fn compute_shared_url_result(
                         && want_screenshot
                         && !dispatcharr_single_pass
                         && !cancel.is_cancelled()
-                        && has_space_for_clip(dir)
                     {
-                        shared.sample_clip = ffmpeg::capture_sample_clip(
-                            app,
-                            &target_url,
-                            Some(channel_url),
-                            dir,
-                            screenshot_file_name,
-                            user_agent,
-                            secs,
-                            cancel,
-                        )
-                        .await
-                        .ok();
+                        let _clip_guard = clip_write_lock.lock().await;
+                        if has_space_for_clip(dir) {
+                            shared.sample_clip = ffmpeg::capture_sample_clip(
+                                app,
+                                &target_url,
+                                Some(channel_url),
+                                dir,
+                                screenshot_file_name,
+                                user_agent,
+                                secs,
+                                cancel,
+                            )
+                            .await
+                            .ok();
+                        }
                     }
                 }
             }
@@ -656,19 +667,24 @@ async fn compute_shared_url_result(
         let media_fut = async {
             let screenshot_result = screenshot_fut.await;
             let sample_clip = match (sample_clip_secs, screenshots_dir) {
-                (Some(secs), Some(dir)) if !cancel.is_cancelled() && has_space_for_clip(dir) => {
-                    ffmpeg::capture_sample_clip(
-                        app,
-                        &target_url,
-                        Some(channel_url),
-                        dir,
-                        screenshot_file_name,
-                        user_agent,
-                        secs,
-                        cancel,
-                    )
-                    .await
-                    .ok()
+                (Some(secs), Some(dir)) if !cancel.is_cancelled() => {
+                    let _clip_guard = clip_write_lock.lock().await;
+                    if has_space_for_clip(dir) {
+                        ffmpeg::capture_sample_clip(
+                            app,
+                            &target_url,
+                            Some(channel_url),
+                            dir,
+                            screenshot_file_name,
+                            user_agent,
+                            secs,
+                            cancel,
+                        )
+                        .await
+                        .ok()
+                    } else {
+                        None
+                    }
                 }
                 _ => None,
             };
@@ -1573,7 +1589,19 @@ async fn prepare_screenshots_dir(
                 .temp_dir()
                 .unwrap_or_else(|_| std::env::temp_dir());
             temp.join("iptv-checker-screenshots")
-                .join(format!("{}_{}", base_name, scope_suffix))
+                // Playlists can share a file name and filter; the source key
+                // keeps their scan folders, and post-scan sweeps, apart.
+                .join(format!(
+                    "{}_{}_{}",
+                    base_name,
+                    scope_suffix,
+                    crate::commands::media::source_key(
+                        config
+                            .source_identity
+                            .as_deref()
+                            .unwrap_or(&config.file_path)
+                    )
+                ))
                 .to_string_lossy()
                 .to_string()
         }
@@ -2418,6 +2446,7 @@ async fn execute_scan_run(
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
     // Disk space tracking for screenshot pause
+    let clip_write_lock = Arc::new(tokio::sync::Mutex::new(()));
     let full_scope_scan = config
         .selected_indices
         .as_ref()
@@ -2499,6 +2528,7 @@ async fn execute_scan_run(
         let shared_url_results = Arc::clone(&shared_url_results);
         let diagnostics_semaphore = Arc::clone(&diagnostics_semaphore);
         let shared_urls = Arc::clone(&shared_urls);
+        let clip_write_lock = Arc::clone(&clip_write_lock);
         let single_connection_mode = single_provider;
         let disk_guard = disk_guard.clone();
         let consecutive_net_failures = Arc::clone(&consecutive_net_failures);
@@ -2557,6 +2587,7 @@ async fn execute_scan_run(
                 single_connection_mode,
                 prune_superseded_clips,
                 low_space_threshold_gb,
+                clip_write_lock: &clip_write_lock,
             };
             let shared_result = result_cell
                 .get_or_init(|| async {

@@ -157,7 +157,7 @@ pub async fn capture_sample_clip(
 }
 
 /// Short stable key for a playlist source, used in manual clip names.
-fn source_key(source: &str) -> String {
+pub(crate) fn source_key(source: &str) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     source.hash(&mut hasher);
