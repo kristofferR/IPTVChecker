@@ -10,6 +10,7 @@ import {
   Library,
   Link2,
   Loader2,
+  Network,
   Pause,
   Play,
   Radar,
@@ -38,6 +39,15 @@ import {
   storeArchiveVerifyMode,
   verifyArchives,
 } from "../lib/archiveVerifyRun";
+import {
+  DISPATCHARR_STATUS_FILTERS,
+  type DispatcharrStatusFilter,
+  dispatcharrChannelRows,
+  filterDispatcharrPrimaries,
+  getDispatcharrView,
+  isDispatcharrPreview,
+  matchesDispatcharrStatus,
+} from "../lib/dispatcharr";
 import type { ExportScope } from "../lib/exportScope";
 import {
   CATCHUP_VERDICT_FILTERS,
@@ -49,6 +59,8 @@ import { measureUiPerf } from "../lib/perf";
 import { validateSourceFilterPattern } from "../lib/sourceFilter";
 import type { ChannelResult } from "../lib/types";
 import { useAppStore } from "../store";
+import { DispatcharrFindButton } from "./DispatcharrFindPanel";
+import { DispatcharrFixAll } from "./DispatcharrFixAll";
 import { ExportMenu } from "./ExportMenu";
 import {
   SFChevronDown,
@@ -67,6 +79,7 @@ interface ToolbarProps {
   onOpenFolder: () => void;
   onOpenUrl: () => void;
   onOpenXtream: () => void;
+  onOpenDispatcharr: () => void;
   onSavePlaylist: () => void;
   onManageSavedPlaylists: () => void;
   onStartScan: (verifyCatchup?: boolean) => void;
@@ -100,6 +113,7 @@ export const Toolbar = memo(function Toolbar({
   onOpenFolder,
   onOpenUrl,
   onOpenXtream,
+  onOpenDispatcharr,
   onSavePlaylist,
   onManageSavedPlaylists,
   onStartScan,
@@ -131,6 +145,8 @@ export const Toolbar = memo(function Toolbar({
   const menuExportRequest = useAppStore((s) => s.menuExportRequest);
   const showReport = useAppStore((s) => s.playlist !== null && s.showReportPanel);
   const hasPlaylist = useAppStore((s) => s.playlist !== null);
+  // A reopened Dispatcharr export shows channels but cannot write to them.
+  const dispatcharrConnected = useAppStore((s) => isDispatcharrPreview(s.playlist));
   const currentSourceDescriptor = useAppStore((s) => s.currentSourceDescriptor);
   const playlistName = useAppStore((s) => s.playlist?.file_name ?? "");
   const playlistPath = useAppStore((s) => s.playlist?.file_path ?? "");
@@ -150,29 +166,27 @@ export const Toolbar = memo(function Toolbar({
   const [verifyMode, setVerifyMode] = useState<ArchiveVerifyMode>(readArchiveVerifyMode);
   const [verifyScope, setVerifyScope] = useState<ExportScope>("all");
 
-  const filteredExportResults = useMemo(
+  const dispatcharrOrders = useAppStore((s) => s.dispatcharrOrders);
+  const dispatcharrView = useMemo(
+    () => getDispatcharrView(completedResults, dispatcharrOrders),
+    [completedResults, dispatcharrOrders],
+  );
+  // Dispatcharr sources filter channels (by their primary stream).
+  const visibleDispatcharrPrimaries = useMemo(
     () =>
-      measureUiPerf(
-        "toolbar.export-filter",
-        () =>
-          filterResultsShared(
-            completedResults,
+      dispatcharrView
+        ? filterDispatcharrPrimaries(
+            dispatcharrView,
             deferredSearch,
             groupFilter,
             statusFilter,
             duplicateIndices,
             separatePlaceholder,
             archiveProbes,
-          ),
-        {
-          rows: completedResults.length,
-          search: deferredSearch.length,
-          group: groupFilter,
-          status: statusFilter,
-        },
-      ),
+          )
+        : null,
     [
-      completedResults,
+      dispatcharrView,
       deferredSearch,
       groupFilter,
       statusFilter,
@@ -182,26 +196,82 @@ export const Toolbar = memo(function Toolbar({
     ],
   );
 
-  const statusOptionCounts = useMemo(
+  const filteredExportResults = useMemo(
     () =>
-      countStatusOptions(
-        completedResults,
-        deferredSearch,
-        groupFilter,
-        duplicateIndices,
-        sharedSearchTextCache,
-        separatePlaceholder,
-        archiveProbes,
+      measureUiPerf(
+        "toolbar.export-filter",
+        () =>
+          dispatcharrView && visibleDispatcharrPrimaries
+            ? // "Filtered" covers every stream of the visible channels.
+              visibleDispatcharrPrimaries.flatMap((primary) => {
+                const channel = dispatcharrView.byPrimaryIndex.get(primary.index);
+                return channel ? dispatcharrChannelRows(channel) : [];
+              })
+            : filterResultsShared(
+                completedResults,
+                deferredSearch,
+                groupFilter,
+                statusFilter,
+                duplicateIndices,
+                separatePlaceholder,
+                archiveProbes,
+              ),
+        {
+          rows: completedResults.length,
+          search: deferredSearch.length,
+          group: groupFilter,
+          status: statusFilter,
+        },
       ),
     [
       completedResults,
+      dispatcharrView,
+      visibleDispatcharrPrimaries,
       deferredSearch,
       groupFilter,
+      statusFilter,
       duplicateIndices,
       separatePlaceholder,
       archiveProbes,
     ],
   );
+
+  const statusOptionCounts = useMemo(() => {
+    const counts = countStatusOptions(
+      dispatcharrView?.primaries ?? completedResults,
+      deferredSearch,
+      groupFilter,
+      duplicateIndices,
+      sharedSearchTextCache,
+      separatePlaceholder,
+      archiveProbes,
+    );
+    if (dispatcharrView) {
+      const channels = filterResultsShared(
+        dispatcharrView.primaries,
+        deferredSearch,
+        groupFilter,
+        "all",
+        duplicateIndices,
+        separatePlaceholder,
+        archiveProbes,
+      ).flatMap((primary) => dispatcharrView.byPrimaryIndex.get(primary.index) ?? []);
+      for (const filter of Object.keys(DISPATCHARR_STATUS_FILTERS) as DispatcharrStatusFilter[]) {
+        counts[filter] = channels.filter((channel) =>
+          matchesDispatcharrStatus(channel, filter),
+        ).length;
+      }
+    }
+    return counts;
+  }, [
+    completedResults,
+    dispatcharrView,
+    deferredSearch,
+    groupFilter,
+    duplicateIndices,
+    separatePlaceholder,
+    archiveProbes,
+  ]);
   const catchupChannelCount = useMemo(
     () => completedResults.filter(hasArchive).length,
     [completedResults],
@@ -237,19 +307,30 @@ export const Toolbar = memo(function Toolbar({
     void verifyArchives(targets, verifyMode);
   };
 
+  // Dispatcharr exports follow the channels' current order and leave out
+  // streams unlinked this session.
+  const exportAllResults = useMemo(
+    () =>
+      dispatcharrView ? dispatcharrView.channels.flatMap(dispatcharrChannelRows) : completedResults,
+    [dispatcharrView, completedResults],
+  );
+
+  // The table already expands a selected channel to its streams (and keeps a
+  // lone primary-stream selection to that stream).
+  const exportSelectedIndices = selectedIndices;
   const exportContextRef = useRef({
-    all: completedResults,
+    all: exportAllResults,
     filtered: filteredExportResults,
     selectedIndices,
   });
 
   useEffect(() => {
     exportContextRef.current = {
-      all: completedResults,
+      all: exportAllResults,
       filtered: filteredExportResults,
-      selectedIndices,
+      selectedIndices: exportSelectedIndices,
     };
-  }, [completedResults, filteredExportResults, selectedIndices]);
+  }, [exportAllResults, filteredExportResults, exportSelectedIndices]);
 
   useLayoutEffect(() => {
     if (!verifyMenuVisible) {
@@ -334,14 +415,15 @@ export const Toolbar = memo(function Toolbar({
     return context.all.filter((result) => selectedSet.has(result.index));
   }, []);
 
-  const exportScopeCounts = useMemo(
-    () => ({
-      all: completedResults.length,
+  const exportScopeCounts = useMemo(() => {
+    // Count what "selected" exports: selected rows still in the export set.
+    const selected = new Set(exportSelectedIndices);
+    return {
+      all: exportAllResults.length,
       filtered: filteredExportResults.length,
-      selected: selectedIndices.length,
-    }),
-    [completedResults.length, filteredExportResults.length, selectedIndices.length],
-  );
+      selected: exportAllResults.filter((result) => selected.has(result.index)).length,
+    };
+  }, [exportAllResults, filteredExportResults.length, exportSelectedIndices]);
 
   // --- Derived values ---
   const useWindowDragRegion = platform !== "linux";
@@ -435,7 +517,7 @@ export const Toolbar = memo(function Toolbar({
     useAppStore.getState().setShowHistory(true);
   };
 
-  const handleOpenAction = (action: "file" | "folder" | "url" | "xtream") => {
+  const handleOpenAction = (action: "file" | "folder" | "url" | "xtream" | "dispatcharr") => {
     setOpenMenuVisible(false);
     if (action === "file") {
       onOpen();
@@ -447,6 +529,10 @@ export const Toolbar = memo(function Toolbar({
     }
     if (action === "xtream") {
       onOpenXtream();
+      return;
+    }
+    if (action === "dispatcharr") {
+      onOpenDispatcharr();
       return;
     }
     onOpenUrl();
@@ -811,6 +897,15 @@ export const Toolbar = memo(function Toolbar({
                   <KeyRound className="h-4 w-4 shrink-0" />
                   <span>Open Xtream</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenAction("dispatcharr")}
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[13px] text-text-primary transition-colors hover:bg-btn-hover"
+                  role="menuitem"
+                >
+                  <Network className="h-4 w-4 shrink-0" />
+                  <span>Open Dispatcharr</span>
+                </button>
               </div>
             )}
           </div>
@@ -907,7 +1002,10 @@ export const Toolbar = memo(function Toolbar({
         </div>
       </div>
       {hasPlaylist && (
-        <div data-no-window-drag className="toolbar-filters">
+        <div
+          data-no-window-drag
+          className={`toolbar-filters ${dispatcharrView ? "has-action" : ""}`}
+        >
           {/* Table / Guide mode switch */}
           <div
             data-no-window-drag
@@ -964,6 +1062,12 @@ export const Toolbar = memo(function Toolbar({
             <option value="drm">{statusLabel("drm", "DRM")}</option>
             <option value="dead">{statusLabel("dead", "Dead")}</option>
             <option value="geoblocked">{statusLabel("geoblocked", "Geoblocked")}</option>
+            {dispatcharrView &&
+              Object.entries(DISPATCHARR_STATUS_FILTERS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {statusLabel(value, label)}
+                </option>
+              ))}
             {(statusOptionCounts.placeholder ?? 0) > 0 && (
               <option value="placeholder">{statusLabel("placeholder", "Placeholder")}</option>
             )}
@@ -1008,6 +1112,21 @@ export const Toolbar = memo(function Toolbar({
               className="native-field h-7 w-full min-w-0 pl-7 pr-2 text-[12px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:cursor-not-allowed"
             />
           </div>
+          {dispatcharrView && dispatcharrConnected && (
+            <div className="flex shrink-0 items-center gap-2">
+              <DispatcharrFindButton view={dispatcharrView} />
+              {visibleDispatcharrPrimaries && (
+                <DispatcharrFixAll
+                  view={dispatcharrView}
+                  visiblePrimaries={visibleDispatcharrPrimaries}
+                  filtered={
+                    deferredSearch.trim() !== "" || groupFilter !== "all" || statusFilter !== "all"
+                  }
+                  disabled={inScanSession}
+                />
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

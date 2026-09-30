@@ -1,6 +1,16 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { Gauge, Layers, Network, SlidersHorizontal, Wrench } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Gauge,
+  Layers,
+  ListOrdered,
+  Network,
+  SlidersHorizontal,
+  Wrench,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { fixPreferencesFrom } from "../lib/dispatcharr";
 import { formatBytes } from "../lib/format";
 import {
   clampSampleClipDuration,
@@ -19,6 +29,7 @@ import {
 } from "../lib/tauri";
 import type {
   AppSettings,
+  DispatcharrRankSignal,
   ScanPresetCollection,
   ScanPresetConfig,
   ScanSettingsPreset,
@@ -26,7 +37,14 @@ import type {
 } from "../lib/types";
 import { useAppStore } from "../store";
 
-type SettingsTab = "general" | "scanning" | "media" | "network" | "advanced";
+type SettingsTab = "general" | "scanning" | "media" | "network" | "dispatcharr" | "advanced";
+
+const RANK_SIGNAL_LABELS: Record<DispatcharrRankSignal, string> = {
+  resolution: "Resolution",
+  frame_rate: "Frame rate",
+  bitrate: "Bitrate",
+  latency: "Low latency",
+};
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -508,6 +526,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
     { id: "scanning", label: "Scanning", Icon: Gauge },
     { id: "media", label: "Media", Icon: Layers },
     { id: "network", label: "Network", Icon: Network },
+    { id: "dispatcharr", label: "Dispatcharr", Icon: ListOrdered },
     { id: "advanced", label: "Advanced", Icon: Wrench },
   ];
 
@@ -1367,6 +1386,99 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     updateSetting("accept_invalid_certs", checked, { immediate: true })
                   }
                   ariaLabel="Skip certificate verification"
+                />
+              </div>
+            </section>
+          </>
+        )}
+
+        {activeTab === "dispatcharr" && (
+          <>
+            <section className={blockClass}>
+              <div className="px-4 pt-3 pb-2">
+                <p className="text-[13px] font-medium">Rank working streams by</p>
+                <p className="text-[11px] text-text-tertiary mt-0.5">
+                  Fix order compares streams on each signal in turn; a tie moves on to the next.
+                </p>
+              </div>
+              {fixPreferencesFrom(draft).rankOrder.map((signal, position, order) => {
+                const move = (offset: number) => {
+                  const next = [...order];
+                  next.splice(position, 1);
+                  next.splice(position + offset, 0, signal);
+                  updateSetting("dispatcharr_rank_order", next, { immediate: true });
+                };
+                return (
+                  <div key={signal} className={rowClass}>
+                    <p className="text-[13px]">
+                      <span className="mr-2 text-text-tertiary tabular-nums">{position + 1}</span>
+                      {RANK_SIGNAL_LABELS[signal]}
+                    </p>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        aria-label={`Move ${RANK_SIGNAL_LABELS[signal]} up`}
+                        disabled={position === 0}
+                        onClick={() => move(-1)}
+                        className="rounded-md border border-border-app bg-btn p-1 text-text-secondary hover:bg-btn-hover hover:text-text-primary disabled:opacity-40"
+                      >
+                        <ArrowUp className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Move ${RANK_SIGNAL_LABELS[signal]} down`}
+                        disabled={position === order.length - 1}
+                        onClick={() => move(1)}
+                        className="rounded-md border border-border-app bg-btn p-1 text-text-secondary hover:bg-btn-hover hover:text-text-primary disabled:opacity-40"
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              <p className="px-4 pb-3 text-[11px] text-text-tertiary">
+                Bitrate compares in 500 kbps steps and latency in 250 ms steps, so small differences
+                between scans do not reshuffle channels.
+              </p>
+            </section>
+
+            <section className={blockClass}>
+              <div className={rowClass}>
+                <div>
+                  <p className="text-[13px] font-medium">Dead streams</p>
+                  <p className="text-[11px] text-text-tertiary mt-0.5">
+                    Unlinked streams stay in Dispatcharr and can be added back.
+                  </p>
+                </div>
+                <SegmentedControl
+                  value={draft.dispatcharr_dead_streams ?? "unlink"}
+                  options={[
+                    { value: "unlink", label: "Unlink" },
+                    { value: "move_to_end", label: "Move to end" },
+                  ]}
+                  onChange={(value) =>
+                    updateSetting("dispatcharr_dead_streams", value, { immediate: true })
+                  }
+                />
+              </div>
+            </section>
+
+            <section className={blockClass}>
+              <div className={rowClass}>
+                <div>
+                  <p className="text-[13px] font-medium">Write probe results to Dispatcharr</p>
+                  <p className="text-[11px] text-text-tertiary mt-0.5">
+                    After scanning a Dispatcharr source, store each stream's codec, resolution, and
+                    bitrate in Dispatcharr.
+                  </p>
+                </div>
+                <Switch
+                  checked={draft.dispatcharr_write_stats}
+                  onChange={(checked) =>
+                    updateSetting("dispatcharr_write_stats", checked, { immediate: true })
+                  }
+                  ariaLabel="Write probe results to Dispatcharr"
                 />
               </div>
             </section>

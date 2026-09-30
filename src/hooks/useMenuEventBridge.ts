@@ -2,6 +2,7 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useRef } from "react";
 import { logger } from "../lib/logger";
+import { handleSelectAllCommand } from "../lib/shortcuts";
 import { syncViewMenu } from "../lib/tauri";
 import type { AppSettings, PlaylistLoadProgress, RecentPlaylistEntry } from "../lib/types";
 import { useAppStore } from "../store";
@@ -114,6 +115,7 @@ export function useMenuEventBridge(handlers: MenuEventHandlers): void {
             if (entry) handlersRef.current.handleOpenSaved(entry.id);
           }),
         ),
+        listen("menu://select-all", () => handleSelectAllCommand()),
         listen("menu://clear-recent", () => void handlersRef.current.handleClearRecentPlaylists()),
         listen("menu://manage-saved", () => handlersRef.current.handleManageSavedPlaylists()),
         listen("menu://export-csv", () => queueExport("csv")),

@@ -51,6 +51,7 @@ tauri-plugin-window-state = "2"
 # rejects Chromecast's self-signed certs with UnsupportedCertVersion before any
 # verifier runs, which makes rust_cast 0.19+ unusable against real devices.
 cast-sender = "0.3"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 mdns-sd = "0.19.1"
 local-ip-address = "0.6.12"
 

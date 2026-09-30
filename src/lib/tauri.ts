@@ -6,8 +6,12 @@ import type {
   ArchiveDownloadRequest,
   CastMediaRequest,
   CastSession,
+  Channel,
   ChannelResult,
   ChromecastDevice,
+  DispatcharrOpenRequest,
+  DispatcharrStatsPushReport,
+  DispatcharrTarget,
   EpgLoadSummary,
   EpgProgramme,
   PlaylistPreview,
@@ -88,6 +92,92 @@ export async function openPlaylistStalker(
     groupFilter: groupFilter ?? null,
     channelSearch: channelSearch ?? null,
   });
+}
+
+export async function openPlaylistDispatcharr(
+  source: DispatcharrOpenRequest,
+  groupFilter?: string,
+  channelSearch?: string,
+): Promise<PlaylistPreview> {
+  return invoke("open_playlist_dispatcharr", {
+    source,
+    groupFilter: groupFilter ?? null,
+    channelSearch: channelSearch ?? null,
+  });
+}
+
+export async function dispatcharrPushStreamStats(
+  target: DispatcharrTarget,
+  results: ChannelResult[],
+  scanStartedAt: number,
+): Promise<DispatcharrStatsPushReport> {
+  return invoke("dispatcharr_push_stream_stats", {
+    ...target,
+    results: toCommandChannelResults(results),
+    scanStartedAt,
+  });
+}
+
+/** `streamIds` must be the channel's complete intended list: Dispatcharr
+ *  unlinks every stream left out. */
+export async function dispatcharrSetChannelStreams(
+  target: DispatcharrTarget,
+  channelId: number,
+  streamIds: number[],
+  /** The order the channel must still have; the write is refused otherwise. */
+  expected: number[],
+  /** Undo may restore a channel that had no streams. */
+  allowEmpty = false,
+): Promise<number[]> {
+  return invoke("dispatcharr_set_channel_streams", {
+    ...target,
+    channelId,
+    streamIds,
+    expected,
+    allowEmpty,
+  });
+}
+
+/** A provider stream offered for a channel, as the row it would load as. */
+export interface DispatcharrCandidate {
+  channel: Channel;
+  stream_id: number;
+  /** Carries the channel's EPG ID. */
+  epg: boolean;
+  /** Name similarity with the channel, 0 to 100. */
+  similarity: number;
+  /** Country tag of the stream when it differs from the channel's; the same
+   *  name in another country is often a different channel. */
+  other_country: string | null;
+}
+
+export async function dispatcharrFindStreams(
+  target: DispatcharrTarget,
+  channelId: number,
+  query: string | null,
+): Promise<DispatcharrCandidate[]> {
+  return invoke("dispatcharr_find_streams", { ...target, channelId, query });
+}
+
+/** Probe candidates; results arrive as `dispatcharr://probe-result`. Cancel
+ *  with `cancelQuickCheck(requestId)`. */
+export async function dispatcharrProbeStreams(
+  requestId: string,
+  target: DispatcharrTarget,
+  channels: Channel[],
+): Promise<void> {
+  return invoke("dispatcharr_probe_streams", {
+    requestId,
+    connection: target.connection,
+    channels,
+  });
+}
+
+export async function dispatcharrRefreshAccount(
+  target: DispatcharrTarget,
+  accountId: number,
+): Promise<void> {
+  return invoke("dispatcharr_refresh_account", { ...target, accountId });
 }
 
 export async function startScan(config: ScanConfig): Promise<string> {

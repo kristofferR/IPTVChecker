@@ -2,12 +2,15 @@ import type { ScanUiMetrics } from "../hooks/useScan.helpers";
 import type { ArchiveDownload } from "../lib/archiveDownload";
 import type { ArchiveProbeEntry } from "../lib/archiveProbe";
 import type { ArchiveVerifyRun } from "../lib/archiveVerifyRun";
+import type { DispatcharrOrders } from "../lib/dispatcharr";
+import type { OrderChange } from "../lib/dispatcharrEdits";
 import type { Platform } from "../lib/platform";
 import type { ScanState } from "../lib/scanState";
 import type {
   AppSettings,
   ChannelResult,
   CurrentSourceDescriptor,
+  DispatcharrOpenRequest,
   EpgLoadSummary,
   PlaylistLoadProgress,
   PlaylistPreview,
@@ -71,6 +74,7 @@ export interface ScanRuntimeUpdate {
   telemetry?: ScanTelemetry;
   screenshotsPaused?: boolean;
   networkPaused?: boolean;
+  busyAccounts?: string[];
 }
 
 export interface ScanSlice {
@@ -87,6 +91,9 @@ export interface ScanSlice {
   telemetry: ScanTelemetry;
   screenshotsPaused: boolean;
   networkPaused: boolean;
+  /** Dispatcharr accounts whose rows wait because viewers hold every
+   *  connection. */
+  busyAccounts: string[];
 
   applyScanCollections: (update: ScanCollectionsUpdate) => void;
   applyScanRuntime: (update: ScanRuntimeUpdate) => void;
@@ -153,13 +160,16 @@ export interface SelectionSlice {
 // UI
 // ---------------------------------------------------------------------------
 
-export type OpenSourceMode = "url" | "xtream" | "stalker";
+export type OpenSourceMode = "url" | "xtream" | "stalker" | "dispatcharr";
 
 export interface OpenSourceDialogState {
   mode: OpenSourceMode;
   initialUrl: string;
   initialXtream: XtreamRecentSource | null;
   initialStalker: StalkerOpenRequest | null;
+  initialDispatcharr: DispatcharrOpenRequest | null;
+  /** Saved playlist that a successful Dispatcharr open replaces. */
+  convertSaved?: { id: string; name: string } | null;
 }
 
 export interface MenuExportRequest {
@@ -286,6 +296,55 @@ export interface SettingsSlice {
 }
 
 // ---------------------------------------------------------------------------
+// Dispatcharr edits
+// ---------------------------------------------------------------------------
+
+export type DispatcharrRowState =
+  | { kind: "writing" }
+  | { kind: "fixed"; label?: string }
+  | { kind: "failed"; error: string; retry: { from: number[]; to: number[] } };
+
+export interface DispatcharrToast {
+  fixed: number;
+  removed: number;
+  failed: number;
+  /** The bulk fix's own writes; "Undo all" reverses exactly these. */
+  changes: OrderChange[];
+}
+
+/** The Find streams panel: the channel it searches for, and whether it steps
+ *  through every channel whose streams are all dead. */
+export interface DispatcharrFind {
+  channelId: number;
+  queue: boolean;
+}
+
+export interface DispatcharrSlice {
+  /** Stream orders written to Dispatcharr this session, keyed by channel id. */
+  dispatcharrOrders: DispatcharrOrders;
+  /** Order each edited channel had before its last write, for Undo. */
+  dispatcharrUndo: DispatcharrOrders;
+  dispatcharrRowStates: Record<number, DispatcharrRowState>;
+  dispatcharrToast: DispatcharrToast | null;
+  dispatcharrFind: DispatcharrFind | null;
+  /** Every stream row linked from Find streams since the source loaded. The
+   *  source has no row for them, so a reapplied filter restores them from
+   *  here. */
+  dispatcharrAddedRows: ChannelResult[];
+  /** Bumped on every fresh load, so a write that started before it is not
+   *  applied to the rows loaded after. */
+  dispatcharrEditEpoch: number;
+
+  setDispatcharrRowState: (channelId: number, state: DispatcharrRowState | null) => void;
+  /** Record a written order; `undoOrder` null clears the channel's undo. */
+  commitDispatcharrOrder: (channelId: number, order: number[], undoOrder: number[] | null) => void;
+  setDispatcharrToast: (toast: DispatcharrToast | null) => void;
+  setDispatcharrFind: (find: DispatcharrFind | null) => void;
+  addDispatcharrRows: (rows: ChannelResult[]) => void;
+  resetDispatcharrEdits: () => void;
+}
+
+// ---------------------------------------------------------------------------
 // Combined store
 // ---------------------------------------------------------------------------
 
@@ -297,4 +356,5 @@ export type AppStore = PlaylistSlice &
   PlayerSlice &
   HistorySlice &
   SettingsSlice &
-  ArchiveSlice;
+  ArchiveSlice &
+  DispatcharrSlice;

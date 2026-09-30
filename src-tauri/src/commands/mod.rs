@@ -1,4 +1,5 @@
 pub mod chromecast;
+pub mod dispatcharr;
 pub mod download;
 pub mod epg;
 pub mod export;

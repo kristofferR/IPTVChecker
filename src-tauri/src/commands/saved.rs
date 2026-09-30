@@ -22,9 +22,23 @@ static NEXT_SAVED_ID: AtomicU64 = AtomicU64::new(1);
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RenameSourceDescriptor {
-    Path { path: String },
-    Url { url: String },
-    Xtream { server: String, username: String },
+    Path {
+        path: String,
+    },
+    Url {
+        url: String,
+    },
+    Xtream {
+        server: String,
+        username: String,
+    },
+    Dispatcharr {
+        server: String,
+        #[serde(default)]
+        username: Option<String>,
+        #[serde(default)]
+        api_key: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -83,6 +97,12 @@ fn default_display_name(source: &SavedPlaylistSource) -> String {
                 username
             )
         }
+        SavedPlaylistSource::Dispatcharr { server, .. } => {
+            crate::engine::dispatcharr::normalize_dispatcharr_server(server)
+                .map(|base| crate::engine::dispatcharr::dispatcharr_host_label(&base))
+                .unwrap_or_else(|_| server.to_string())
+                + " (Dispatcharr)"
+        }
     }
 }
 
@@ -131,6 +151,27 @@ pub(crate) fn source_identity_for_xtream(server: &str, username: &str) -> Result
         &normalized_server,
         username,
     ))
+}
+
+pub(crate) fn source_identity_for_dispatcharr(
+    server: &str,
+    username: Option<&str>,
+    api_key: Option<&str>,
+) -> Result<String, AppError> {
+    use crate::engine::dispatcharr::{
+        dispatcharr_source_key, login_identity_label, normalize_dispatcharr_server, DispatcharrAuth,
+    };
+    let base = normalize_dispatcharr_server(server)?;
+    fn clean(value: Option<&str>) -> Option<&str> {
+        value.map(str::trim).filter(|value| !value.is_empty())
+    }
+    // A key that was not remembered is only known to be "some API key".
+    let label = match (clean(api_key), clean(username)) {
+        (Some(key), _) => DispatcharrAuth::ApiKey(key.to_string()).identity_label(),
+        (None, Some(username)) => login_identity_label(username),
+        (None, None) => "api-key".to_string(),
+    };
+    Ok(dispatcharr_source_key(&base, &label))
 }
 
 fn sanitize_saved_playlist_entry(
@@ -207,6 +248,33 @@ fn sanitize_saved_playlist_entry(
                 preferred_server,
                 username,
                 password: Some(password),
+            }
+        }
+        SavedPlaylistSource::Dispatcharr {
+            server,
+            username,
+            password,
+            api_key,
+        } => {
+            let clean = |value: Option<String>| {
+                value
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+            };
+            let (username, password, api_key) = (clean(username), clean(password), clean(api_key));
+            crate::engine::dispatcharr::DispatcharrAuth::from_parts(
+                username.as_deref(),
+                password.as_deref(),
+                api_key.as_deref(),
+            )?;
+            SavedPlaylistSource::Dispatcharr {
+                server: crate::engine::dispatcharr::normalize_dispatcharr_server(&server)?
+                    .to_string()
+                    .trim_end_matches('/')
+                    .to_string(),
+                username,
+                password,
+                api_key,
             }
         }
     };
@@ -573,6 +641,11 @@ pub async fn rename_playlist_source(
         RenameSourceDescriptor::Xtream { server, username } => {
             source_identity_for_xtream(&server, &username)?
         }
+        RenameSourceDescriptor::Dispatcharr {
+            server,
+            username,
+            api_key,
+        } => source_identity_for_dispatcharr(&server, username.as_deref(), api_key.as_deref())?,
     };
 
     let mut names = load_source_display_names(&app);
@@ -705,6 +778,33 @@ pub async fn open_saved_playlist(
             }
 
             preview
+        }
+        SavedPlaylistSource::Dispatcharr {
+            server,
+            username,
+            password,
+            api_key,
+        } => {
+            let source = crate::commands::playlist::DispatcharrOpenRequest {
+                server: server.clone(),
+                username: username.clone(),
+                password: password.clone(),
+                api_key: api_key.clone(),
+            };
+            crate::commands::playlist::open_playlist_dispatcharr_inner(
+                &app,
+                &source,
+                group_filter.clone(),
+                channel_search.clone(),
+                Some(format!("saved:{}", entry.id)),
+            )
+            .await
+            .map_err(|error| {
+                AppError::Other(format!(
+                    "Failed to open saved Dispatcharr source \"{}\". {}",
+                    entry.display_name, error
+                ))
+            })?
         }
     };
 

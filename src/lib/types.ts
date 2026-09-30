@@ -83,6 +83,11 @@ export interface PlaylistPreview {
   single_provider: boolean;
   xtream_max_connections: number | null;
   xtream_account_info: XtreamAccountInfo | null;
+  /** Server and account a Dispatcharr source was loaded from. */
+  dispatcharr_connection?: string | null;
+  /** Dispatcharr provider accounts cap concurrent streams, so playback
+   *  shares their slots with a running scan. */
+  dispatcharr_limited_accounts?: boolean;
   total_channels: number;
   live_count: number;
   movie_count: number;
@@ -148,7 +153,18 @@ export interface XtreamOpenRequest {
   password: string;
 }
 
-export type SavedPlaylistKind = "file" | "url" | "xtream";
+/** Scan signals Fix order ranks working Dispatcharr streams by. */
+export type DispatcharrRankSignal = "resolution" | "frame_rate" | "bitrate" | "latency";
+
+/** API key wins when both are set. */
+export interface DispatcharrOpenRequest {
+  server: string;
+  username?: string | null;
+  password?: string | null;
+  api_key?: string | null;
+}
+
+export type SavedPlaylistKind = "file" | "url" | "xtream" | "dispatcharr";
 
 export type RenameSourceDescriptor =
   | {
@@ -163,6 +179,12 @@ export type RenameSourceDescriptor =
       kind: "xtream";
       server: string;
       username: string;
+    }
+  | {
+      kind: "dispatcharr";
+      server: string;
+      username?: string | null;
+      api_key?: string | null;
     };
 
 export type SavedPlaylistEntry =
@@ -186,6 +208,15 @@ export type SavedPlaylistEntry =
       preferred_server: string | null;
       username: string;
       password: string | null;
+    }
+  | {
+      id: string;
+      kind: "dispatcharr";
+      display_name: string;
+      server: string;
+      username: string | null;
+      password: string | null;
+      api_key: string | null;
     };
 
 export type SavedPlaylistDraft =
@@ -209,6 +240,15 @@ export type SavedPlaylistDraft =
       preferred_server?: string | null;
       username: string;
       password: string | null;
+    }
+  | {
+      id?: string | null;
+      kind: "dispatcharr";
+      display_name: string;
+      server: string;
+      username: string | null;
+      password: string | null;
+      api_key: string | null;
     };
 
 export interface SavedPlaylistUpsertResult {
@@ -245,7 +285,10 @@ export type CurrentSourceDescriptor =
     } & XtreamOpenRequest)
   | ({
       kind: "stalker";
-    } & StalkerOpenRequest);
+    } & StalkerOpenRequest)
+  | ({
+      kind: "dispatcharr";
+    } & DispatcharrOpenRequest);
 
 export interface XtreamRecentSource {
   server: string;
@@ -384,6 +427,9 @@ export interface AppSettings {
   show_header_button_text: boolean;
   external_player_path: string | null;
   persistent_xtream_connection_notice: boolean;
+  dispatcharr_write_stats: boolean;
+  dispatcharr_rank_order: DispatcharrRankSignal[];
+  dispatcharr_dead_streams: "unlink" | "move_to_end";
   automatic_update_checks: boolean;
 }
 
@@ -450,7 +496,7 @@ export interface ScreenshotCacheStats {
   disk_space: DiskSpaceInfo | null;
 }
 
-export type RecentPlaylistKind = "file" | "url" | "xtream";
+export type RecentPlaylistKind = "file" | "url" | "xtream" | "dispatcharr";
 
 export interface RecentPlaylistEntry {
   kind: RecentPlaylistKind;
@@ -543,4 +589,28 @@ export interface UpdateInstallMode {
 export interface UpdateCheckResult {
   version: string | null;
   notes: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Dispatcharr write-back
+// ---------------------------------------------------------------------------
+
+/** Where Dispatcharr writes go: the loaded source and its connection. */
+export interface DispatcharrTarget {
+  sourceIdentity: string;
+  connection: string;
+}
+
+export interface DispatcharrItemFailure {
+  id: number;
+  error: string;
+}
+
+export interface DispatcharrStatsPushReport {
+  updated: number[];
+  failed: DispatcharrItemFailure[];
+  /** Results that were not alive, had no Dispatcharr IDs, or no stats. */
+  skipped: number;
+  /** Dispatcharr accepted the first write but did not store the stats. */
+  rejected: boolean;
 }

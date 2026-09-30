@@ -5,24 +5,40 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { useFixPreferences } from "../hooks/useFixPreferences";
 import { resultAtIndex } from "../hooks/useScan.helpers";
 import { hasArchive } from "../lib/archive";
 import { createArchiveProbeSequenceGuard, probeChannelArchive } from "../lib/archiveProbe";
 import { channelRowHeightPixels } from "../lib/channelLogoSize";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { getChannelTableLayout } from "../lib/channelTableLayout";
+import {
+  type DispatcharrChannelView,
+  type DispatcharrView,
+  expandDispatcharrSelection,
+  filterDispatcharrPrimaries,
+  getDispatcharrView,
+  isDispatcharrPreview,
+  withHiddenStreams,
+} from "../lib/dispatcharr";
+import { applyOrderChanges, planFix, undoChannels } from "../lib/dispatcharrEdits";
 import type { SortDirection, SortField } from "../lib/filters";
 import { filterResultsShared, sortResults } from "../lib/filters";
 import { statusLabel } from "../lib/format";
 import { measureUiPerf } from "../lib/perf";
 import { isSingleConnectionPlaylist } from "../lib/playback";
 import { isScanActive } from "../lib/scanState";
-import { isInputLikeTarget, isPrimaryModifierPressed } from "../lib/shortcuts";
+import {
+  isInputLikeTarget,
+  isPrimaryModifierPressed,
+  SELECT_ALL_ROWS_EVENT,
+} from "../lib/shortcuts";
 import { detectChannelProtocol } from "../lib/streamProtocol";
 import {
   COLUMN_DEFINITION_MAP,
@@ -38,7 +54,9 @@ import {
 } from "../lib/tableColumns";
 import type { ChannelResult } from "../lib/types";
 import { useAppStore } from "../store";
-import { ChannelRow } from "./ChannelRow";
+import { ChannelRow, type DispatcharrRowMeta, type StreamAction } from "./ChannelRow";
+import type { DispatcharrRowActions } from "./DispatcharrCells";
+import { DispatcharrToast } from "./DispatcharrToast";
 
 interface ChannelTableProps {
   onSelectChannel: (result: ChannelResult) => void;
@@ -57,6 +75,7 @@ interface ChannelTableProps {
 
 /** ms to coalesce rapid arrow-key presses into one cast redirect. */
 const CAST_REDIRECT_DEBOUNCE_MS = 300;
+const DISPATCHARR_STATUS_WIDTH = 124;
 
 type CopyAction = "name" | "url" | "m3u" | "metadata";
 
@@ -127,6 +146,20 @@ function keepMenuInViewport(
   };
 }
 
+/** Result indices a table selection stands for: a channel row stands for all
+ *  of its streams; a primary stream row (negative key) for just its stream. */
+function selectionIndices(view: DispatcharrView | null, keys: Iterable<number>): number[] {
+  const rows: number[] = [];
+  const streams: number[] = [];
+  for (const key of keys) {
+    if (key < 0) streams.push(-key - 1);
+    else rows.push(key);
+  }
+  return Array.from(new Set([...expandDispatcharrSelection(view, rows), ...streams])).sort(
+    (a, b) => a - b,
+  );
+}
+
 export function ChannelTable({
   onSelectChannel,
   onOpenChannel,
@@ -154,6 +187,15 @@ export function ChannelTable({
   const externalPlaybackActive = useAppStore((s) => s.externalPlaybackActive);
   const separatePlaceholder = useAppStore((s) => s.settings.separate_placeholder_status);
   const onSelectionChange = useAppStore((s) => s.setSelectedChannelIndices);
+  const dispatcharrOrders = useAppStore((s) => s.dispatcharrOrders);
+  const dispatcharrRowStates = useAppStore((s) => s.dispatcharrRowStates);
+  const dispatcharrView = useMemo(
+    () => getDispatcharrView(completedResults, dispatcharrOrders),
+    [completedResults, dispatcharrOrders],
+  );
+  const dispatcharrViewRef = useRef(dispatcharrView);
+  dispatcharrViewRef.current = dispatcharrView;
+  const [expandedChannels, setExpandedChannels] = useState<ReadonlySet<number>>(() => new Set());
   const rawSearch = useAppStore((s) => s.search);
   const search = useDeferredValue(rawSearch);
   const parentRef = useRef<HTMLDivElement>(null);
@@ -286,26 +328,37 @@ export function ChannelTable({
     return () => ro.disconnect();
   }, []);
 
+  // Dispatcharr channel rows show a per-stream health strip in the status
+  // column, which needs more room than a status dot.
+  const hasDispatcharrRows = dispatcharrView !== null;
+  const layoutWidths = useMemo(
+    () =>
+      hasDispatcharrRows
+        ? { ...columnWidths, status: Math.max(columnWidths.status, DISPATCHARR_STATUS_WIDTH) }
+        : columnWidths,
+    [columnWidths, hasDispatcharrRows],
+  );
+
   const effectiveNameWidth = useMemo(() => {
     if (!columnOrder.includes("name") || containerWidth === 0) {
-      return columnWidths.name;
+      return layoutWidths.name;
     }
     const sumOther = columns.reduce(
-      (sum, col) => sum + (col.key === "name" ? 0 : columnWidths[col.key]),
+      (sum, col) => sum + (col.key === "name" ? 0 : layoutWidths[col.key]),
       0,
     );
     const autoWidth = containerWidth - sumOther - 32; // px-4 padding on each side
-    return Math.max(columnWidths.name, autoWidth);
-  }, [columns, columnOrder, columnWidths, containerWidth]);
+    return Math.max(layoutWidths.name, autoWidth);
+  }, [columns, columnOrder, layoutWidths, containerWidth]);
 
   const gridTemplateColumns = useMemo(
     () =>
       columns
         .map(
-          (column) => `${column.key === "name" ? effectiveNameWidth : columnWidths[column.key]}px`,
+          (column) => `${column.key === "name" ? effectiveNameWidth : layoutWidths[column.key]}px`,
         )
         .join(" "),
-    [columns, columnWidths, effectiveNameWidth],
+    [columns, layoutWidths, effectiveNameWidth],
   );
 
   const ROW_PADDING_PX = 32; // px-4 on each side
@@ -313,10 +366,10 @@ export function ChannelTable({
     () =>
       columns.reduce(
         (sum, column) =>
-          sum + (column.key === "name" ? effectiveNameWidth : columnWidths[column.key]),
+          sum + (column.key === "name" ? effectiveNameWidth : layoutWidths[column.key]),
         0,
       ) + ROW_PADDING_PX,
-    [columns, columnWidths, effectiveNameWidth],
+    [columns, layoutWidths, effectiveNameWidth],
   );
 
   const unsortedResults = useMemo(
@@ -324,15 +377,25 @@ export function ChannelTable({
       measureUiPerf(
         "table.filter",
         () =>
-          filterResultsShared(
-            completedResults,
-            search,
-            groupFilter,
-            statusFilter,
-            duplicateIndices,
-            separatePlaceholder,
-            archiveProbes,
-          ),
+          dispatcharrView
+            ? filterDispatcharrPrimaries(
+                dispatcharrView,
+                search,
+                groupFilter,
+                statusFilter,
+                duplicateIndices,
+                separatePlaceholder,
+                archiveProbes,
+              )
+            : filterResultsShared(
+                completedResults,
+                search,
+                groupFilter,
+                statusFilter,
+                duplicateIndices,
+                separatePlaceholder,
+                archiveProbes,
+              ),
         {
           rows: completedResults.length,
           search: search.length,
@@ -342,6 +405,7 @@ export function ChannelTable({
       ),
     [
       completedResults,
+      dispatcharrView,
       search,
       groupFilter,
       statusFilter,
@@ -353,7 +417,7 @@ export function ChannelTable({
 
   // Probe updates leave ordinary filters unchanged. Keep their sorted array
   // stable too, so the virtualizer does not rebuild its measurements.
-  const filteredResults = useMemo(
+  const sortedResults = useMemo(
     () =>
       measureUiPerf("table.sort", () => sortResults(unsortedResults, sortField, sortDir), {
         rows: unsortedResults.length,
@@ -362,13 +426,45 @@ export function ChannelTable({
     [unsortedResults, sortField, sortDir],
   );
 
+  // Dispatcharr sources show one row per channel (its primary stream), with
+  // the streams of expanded channels listed beneath in failover order.
+  const { filteredResults, rowMeta } = useMemo(() => {
+    if (!dispatcharrView) {
+      return { filteredResults: sortedResults, rowMeta: null };
+    }
+    const rows: ChannelResult[] = [];
+    const meta: DispatcharrRowMeta[] = [];
+    for (const primary of sortedResults) {
+      const channel = dispatcharrView.byPrimaryIndex.get(primary.index);
+      if (!channel) continue;
+      const expanded = expandedChannels.has(channel.channelId);
+      rows.push(primary);
+      meta.push({ kind: "channel", channel, expanded });
+      if (expanded) {
+        channel.streams.forEach((entry, position) => {
+          rows.push(entry.result);
+          meta.push({ kind: "stream", channel, entry, position });
+        });
+      }
+    }
+    return { filteredResults: rows, rowMeta: meta };
+  }, [dispatcharrView, sortedResults, expandedChannels]);
+
   const estimatedRowHeight = channelRowHeightPixels(channelLogoSize);
   const getVirtualItemKey = useCallback(
-    (index: number) => filteredResults[index]?.index ?? index,
+    (index: number) => {
+      const meta = rowMeta?.[index];
+      if (meta) {
+        return meta.kind === "channel"
+          ? `c${meta.channel.channelId}`
+          : `s${meta.channel.channelId}:${meta.entry.ref.streamId}`;
+      }
+      return filteredResults[index]?.index ?? index;
+    },
     // TanStack Virtual memoizes its key map by callback identity. Filters and
     // sorting can reorder rows without changing the item count, so the
     // callback must change with the ordered results.
-    [filteredResults],
+    [filteredResults, rowMeta],
   );
 
   const virtualizer = useVirtualizer({
@@ -390,16 +486,157 @@ export function ChannelTable({
   }, [channelLogoSize, virtualizer]);
 
   filteredResultsRef.current = filteredResults;
+  const rowMetaRef = useRef(rowMeta);
+  rowMetaRef.current = rowMeta;
   selectedIndicesRef.current = selectedIndices;
   contextMenuOpenRef.current = contextMenuState !== null;
 
+  /** Selection key of a table row: its result index, except a Dispatcharr
+   *  channel's primary stream row, which shares the channel row's result and
+   *  is keyed apart so selecting it picks just that stream. */
+  const rowKey = useCallback((rowIndex: number, result: ChannelResult): number => {
+    const meta = rowMetaRef.current?.[rowIndex];
+    return meta?.kind === "stream" && meta.position === 0 ? -(result.index + 1) : result.index;
+  }, []);
+
   const emitSelection = useCallback(
     (next: Set<number>) => {
-      const ordered = Array.from(next).sort((a, b) => a - b);
-      onSelectionChange?.(ordered);
+      onSelectionChange?.(selectionIndices(dispatcharrViewRef.current, next));
     },
     [onSelectionChange],
   );
+
+  const toggleChannelExpanded = useCallback((channelId: number) => {
+    setExpandedChannels((previous) => {
+      const next = new Set(previous);
+      if (!next.delete(channelId)) next.add(channelId);
+      return next;
+    });
+  }, []);
+
+  const fixPreferences = useFixPreferences();
+  const fixPreferencesRef = useRef(fixPreferences);
+  fixPreferencesRef.current = fixPreferences;
+  const handleFixChannel = useCallback((channel: DispatcharrChannelView) => {
+    const view = dispatcharrViewRef.current;
+    if (!view) return;
+    void applyOrderChanges(planFix(view, [channel.channelId], fixPreferencesRef.current).changes);
+  }, []);
+
+  const handleFindStreams = useCallback((channel: DispatcharrChannelView) => {
+    useAppStore.getState().setDispatcharrFind({ channelId: channel.channelId, queue: false });
+  }, []);
+
+  const handleUndoChannel = useCallback((channel: DispatcharrChannelView) => {
+    void undoChannels([channel.channelId]);
+  }, []);
+
+  const handleRetryChannel = useCallback((channel: DispatcharrChannelView) => {
+    const rowState = useAppStore.getState().dispatcharrRowStates[channel.channelId];
+    if (rowState?.kind === "failed") {
+      void applyOrderChanges([{ channelId: channel.channelId, ...rowState.retry }]);
+    }
+  }, []);
+
+  const handleStreamAction = useCallback(
+    (channel: DispatcharrChannelView, position: number, action: StreamAction) => {
+      const visible = channel.streams.map((entry) => entry.ref.streamId);
+      const [streamId] = visible.splice(position, 1);
+      if (action === "primary") visible.unshift(streamId);
+      else if (action === "up") visible.splice(Math.max(0, position - 1), 0, streamId);
+      else if (action === "down") visible.splice(position + 1, 0, streamId);
+      // "remove" leaves it out; the backend refuses to empty a channel.
+      const to = withHiddenStreams(channel, visible);
+      if (to.length === 0) return;
+      void applyOrderChanges([{ channelId: channel.channelId, from: channel.order, to }]);
+    },
+    [],
+  );
+
+  // Drag a stream row within its channel to reorder. Pointer events, not HTML
+  // drag and drop, so it works while the window accepts file drops.
+  const [streamDrag, setStreamDrag] = useState<{
+    channelId: number;
+    from: number;
+    /** Insertion point among the channel's streams, 0..count. */
+    to: number | null;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
+  const dispatcharrActionsRef = useRef<DispatcharrRowActions | undefined>(undefined);
+  const handleStreamPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || (event.target as HTMLElement).closest("button")) return;
+    const rowElement = (event.target as HTMLElement).closest<HTMLElement>("[data-row-index]");
+    const meta = rowElement ? rowMetaRef.current?.[Number(rowElement.dataset.rowIndex)] : undefined;
+    const actions = dispatcharrActionsRef.current;
+    if (meta?.kind !== "stream" || !actions?.canWrite || actions.disabled) return;
+    if (useAppStore.getState().dispatcharrRowStates[meta.channel.channelId]?.kind === "writing") {
+      return;
+    }
+    const { channel, position } = meta;
+    const startY = event.clientY;
+    let dragging = false;
+    let target: number | null = null;
+
+    const targetAt = (clientX: number, clientY: number): number | null => {
+      const element = document
+        .elementFromPoint(clientX, clientY)
+        ?.closest<HTMLElement>("[data-row-index]");
+      const over = element ? rowMetaRef.current?.[Number(element.dataset.rowIndex)] : undefined;
+      if (!element || over?.kind !== "stream" || over.channel.channelId !== channel.channelId) {
+        return null;
+      }
+      const box = element.getBoundingClientRect();
+      return over.position + (clientY > box.top + box.height / 2 ? 1 : 0);
+    };
+    const handleMove = (move: PointerEvent) => {
+      if (!dragging && Math.abs(move.clientY - startY) < 4) return;
+      dragging = true;
+      // Near the table's edges, scroll to reach the rest of the channel.
+      const container = parentRef.current;
+      if (container) {
+        const box = container.getBoundingClientRect();
+        if (move.clientY < box.top + 32) container.scrollTop -= 12;
+        else if (move.clientY > box.bottom - 32) container.scrollTop += 12;
+      }
+      target = targetAt(move.clientX, move.clientY);
+      setStreamDrag({ channelId: channel.channelId, from: position, to: target });
+    };
+    const finish = (commit: boolean) => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleCancel);
+      window.removeEventListener("keydown", handleKey);
+      setStreamDrag(null);
+      if (!dragging) return;
+      // The click that ends a drag must not select the row under it.
+      suppressClickRef.current = true;
+      setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
+      if (!commit || target === null || target === position || target === position + 1) return;
+      // A scan started mid-drag judges the order it snapshotted; leave it.
+      if (isScanActive(useAppStore.getState().scanState)) return;
+      const visible = channel.streams.map((entry) => entry.ref.streamId);
+      const [streamId] = visible.splice(position, 1);
+      visible.splice(target > position ? target - 1 : target, 0, streamId);
+      void applyOrderChanges([
+        {
+          channelId: channel.channelId,
+          from: channel.order,
+          to: withHiddenStreams(channel, visible),
+        },
+      ]);
+    };
+    const handleUp = () => finish(true);
+    const handleCancel = () => finish(false);
+    const handleKey = (key: KeyboardEvent) => {
+      if (key.key === "Escape") finish(false);
+    };
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleCancel);
+    window.addEventListener("keydown", handleKey);
+  }, []);
 
   // Compute the next selection outside the setState updater: updaters must be
   // pure (StrictMode double-invokes them, which would double-emit selection).
@@ -419,24 +656,40 @@ export function ChannelTable({
 
   useEffect(() => {
     let visible: Set<number> | undefined;
-    const isVisible = (index: number) => {
-      visible ??= new Set(filteredResults.map((r) => r.index));
-      return visible.has(index);
+    const isVisible = (key: number) => {
+      visible ??= new Set(filteredResults.map((r, row) => rowKey(row, r)));
+      return visible.has(key);
+    };
+
+    // A selected Dispatcharr channel whose primary changed stays selected
+    // through its current row; a selected primary stream row that moved
+    // down its channel stays selected as that stream.
+    const retarget = (key: number): number | null => {
+      if (isVisible(key)) return key;
+      if (key < 0) {
+        const index = -key - 1;
+        return isVisible(index) && !dispatcharrViewRef.current?.byPrimaryIndex.has(index)
+          ? index
+          : null;
+      }
+      const channel = dispatcharrViewRef.current?.byStreamIndex.get(key);
+      return channel && isVisible(channel.primary.index) ? channel.primary.index : null;
     };
 
     updateSelection((prev) => {
       if (prev.size === 0) return prev;
-      const next = new Set(Array.from(prev).filter(isVisible));
-      return next.size === prev.size ? prev : next;
+      const next = new Set(Array.from(prev).flatMap((index) => retarget(index) ?? []));
+      const unchanged = next.size === prev.size && Array.from(next).every((i) => prev.has(i));
+      return unchanged ? prev : next;
     });
 
-    setSelectionAnchor((prev) => (prev !== null && isVisible(prev) ? prev : null));
+    setSelectionAnchor((prev) => (prev === null ? null : retarget(prev)));
 
     const previous = focusedRowRef.current;
     const next =
       filteredResults.length === 0 ? null : Math.min(previous ?? 0, filteredResults.length - 1);
     if (next !== previous) updateFocusedRow(next);
-  }, [filteredResults, updateFocusedRow, updateSelection]);
+  }, [filteredResults, updateFocusedRow, updateSelection, rowKey]);
 
   useEffect(() => {
     if (!contextMenuState) {
@@ -547,14 +800,15 @@ export function ChannelTable({
 
   const selectSingle = useCallback(
     (result: ChannelResult, rowIndex: number) => {
-      const next = new Set<number>([result.index]);
+      const key = rowKey(rowIndex, result);
+      const next = new Set<number>([key]);
       setSelectedIndices(next);
       emitSelection(next);
-      setSelectionAnchor(result.index);
+      setSelectionAnchor(key);
       updateFocusedRow(rowIndex);
       onSelectChannel(result);
     },
-    [emitSelection, onSelectChannel, updateFocusedRow],
+    [emitSelection, onSelectChannel, updateFocusedRow, rowKey],
   );
 
   const selectRange = useCallback(
@@ -564,7 +818,9 @@ export function ChannelTable({
         return;
       }
 
-      const anchorRow = filteredResults.findIndex((result) => result.index === selectionAnchor);
+      const anchorRow = filteredResults.findIndex(
+        (result, row) => rowKey(row, result) === selectionAnchor,
+      );
       if (anchorRow < 0) {
         selectSingle(clickedResult, clickedRow);
         return;
@@ -574,7 +830,7 @@ export function ChannelTable({
       const end = Math.max(anchorRow, clickedRow);
       const next = new Set<number>();
       for (let i = start; i <= end; i += 1) {
-        next.add(filteredResults[i].index);
+        next.add(rowKey(i, filteredResults[i]));
       }
 
       setSelectedIndices(next);
@@ -589,18 +845,19 @@ export function ChannelTable({
       emitSelection,
       onSelectChannel,
       updateFocusedRow,
+      rowKey,
     ],
   );
 
   const selectAllVisible = useCallback(() => {
     if (filteredResults.length === 0) return;
-    const next = new Set(filteredResults.map((result) => result.index));
+    const next = new Set(filteredResults.map((result, row) => rowKey(row, result)));
     setSelectedIndices(next);
     emitSelection(next);
-    setSelectionAnchor(filteredResults[0].index);
+    setSelectionAnchor(rowKey(0, filteredResults[0]));
     updateFocusedRow(0);
     onSelectChannel(filteredResults[0]);
-  }, [filteredResults, emitSelection, onSelectChannel, updateFocusedRow]);
+  }, [filteredResults, emitSelection, onSelectChannel, updateFocusedRow, rowKey]);
 
   const clearSelection = useCallback(() => {
     const next = new Set<number>();
@@ -645,6 +902,14 @@ export function ChannelTable({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [isMac]);
+
+  // Edit > Select All (the app's own menu item, which Cmd+A triggers on
+  // macOS before keydown) selects every visible row.
+  useEffect(() => {
+    const handler = () => selectAllVisibleRef.current();
+    window.addEventListener(SELECT_ALL_ROWS_EVENT, handler);
+    return () => window.removeEventListener(SELECT_ALL_ROWS_EVENT, handler);
+  }, []);
 
   const handleSort = useCallback(
     (field: SortField) => {
@@ -710,17 +975,20 @@ export function ChannelTable({
       // All side effects (selection emit, playback/cast redirect, scroll) run
       // outside the focused-row state update — updaters must stay pure, and
       // StrictMode double-invocation here used to double-start playback.
-      const selectedRow = filteredResults.findIndex((result) => selectedIndices.has(result.index));
+      const selectedRow = filteredResults.findIndex((result, row) =>
+        selectedIndices.has(rowKey(row, result)),
+      );
       const current = focusedRowRef.current ?? (selectedRow >= 0 ? selectedRow : 0);
       const next = Math.min(filteredResults.length - 1, Math.max(0, current + delta));
 
       const result = filteredResults[next];
       if (result) {
-        const selected = new Set<number>([result.index]);
+        const key = rowKey(next, result);
+        const selected = new Set<number>([key]);
         selectedIndicesRef.current = selected;
         setSelectedIndices(selected);
         emitSelection(selected);
-        setSelectionAnchor(result.index);
+        setSelectionAnchor(key);
         onSelectChannel(result);
         if ((isPlaying || isCasting) && !isScanActive(scanState)) {
           if (isCasting) {
@@ -770,12 +1038,21 @@ export function ChannelTable({
       } else if (event.key === "ArrowUp") {
         event.preventDefault();
         moveFocusByRef.current(-1);
+      } else if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+        const row = focusedRowRef.current;
+        const meta = row === null ? undefined : rowMetaRef.current?.[row];
+        if (!meta) return;
+        const expanded = meta.kind === "stream" || meta.expanded;
+        if (expanded !== (event.key === "ArrowRight")) {
+          event.preventDefault();
+          toggleChannelExpanded(meta.channel.channelId);
+        }
       }
     };
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [toggleChannelExpanded]);
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -805,17 +1082,18 @@ export function ChannelTable({
         return;
       }
 
+      const key = rowKey(rowIndex, result);
       if (isPrimaryModifierPressed(event, isMac)) {
         updateSelection((prev) => {
           const next = new Set(prev);
-          if (next.has(result.index)) {
-            next.delete(result.index);
+          if (next.has(key)) {
+            next.delete(key);
           } else {
-            next.add(result.index);
+            next.add(key);
           }
           return next;
         });
-        setSelectionAnchor(result.index);
+        setSelectionAnchor(key);
         updateFocusedRow(rowIndex);
         onSelectChannel(result);
         return;
@@ -823,7 +1101,7 @@ export function ChannelTable({
 
       // Clicking the same single-selected row toggles back to no selection.
       const currentSelection = selectedIndicesRef.current;
-      if (currentSelection.size === 1 && currentSelection.has(result.index)) {
+      if (currentSelection.size === 1 && currentSelection.has(key)) {
         clearSelection();
         updateFocusedRow(rowIndex);
         return;
@@ -863,7 +1141,7 @@ export function ChannelTable({
       event.preventDefault();
       setColumnMenuState(null);
 
-      if (!selectedIndicesRef.current.has(result.index)) {
+      if (!selectedIndicesRef.current.has(rowKey(rowIndex, result))) {
         selectSingle(result, rowIndex);
       }
 
@@ -881,6 +1159,10 @@ export function ChannelTable({
     (
       event: React.MouseEvent<HTMLDivElement>,
     ): { rowIndex: number; result: ChannelResult } | null => {
+      // Inline row controls (Dispatcharr actions) handle their own clicks.
+      if (event.target instanceof Element && event.target.closest("button")) {
+        return null;
+      }
       const rowIndexRaw = event.currentTarget.dataset.rowIndex;
       const rowIndex = rowIndexRaw ? Number.parseInt(rowIndexRaw, 10) : Number.NaN;
       if (!Number.isFinite(rowIndex)) {
@@ -897,6 +1179,7 @@ export function ChannelTable({
 
   const handleRowClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
+      if (suppressClickRef.current) return;
       const row = getRowFromEvent(event);
       if (!row) return;
       handleRowClickAt(event, row.result, row.rowIndex);
@@ -927,8 +1210,13 @@ export function ChannelTable({
     [getRowFromEvent, onOpenChannel],
   );
 
+  const scanSelection = useMemo(
+    () => selectionIndices(dispatcharrView, selectedIndices),
+    [dispatcharrView, selectedIndices],
+  );
+
   const handleScanSelected = useCallback(() => {
-    const ordered = Array.from(selectedIndices).sort((a, b) => a - b);
+    const ordered = scanSelection;
     if (ordered.length === 0) {
       setContextMenuState(null);
       return;
@@ -936,13 +1224,13 @@ export function ChannelTable({
 
     onScanSelected?.(ordered);
     setContextMenuState(null);
-  }, [selectedIndices, onScanSelected]);
+  }, [scanSelection, onScanSelected]);
 
   const getSelectedChannels = useCallback((): ChannelResult[] => {
     if (selectedIndices.size <= 1 && contextMenuState) {
       return [contextMenuState.channel];
     }
-    const indexSet = selectedIndices;
+    const indexSet = new Set(selectionIndices(null, selectedIndices));
     return completedResults.filter((r) => indexSet.has(r.index)).sort((a, b) => a.index - b.index);
   }, [selectedIndices, contextMenuState, completedResults]);
 
@@ -1277,6 +1565,38 @@ export function ChannelTable({
     hasPortaledHeader: Boolean(portalTarget),
   });
 
+  const scanRunning = isScanActive(scanState);
+  const connected = useAppStore((s) => isDispatcharrPreview(s.playlist));
+  const playlistLoading = useAppStore((s) => s.playlistLoading);
+  const dispatcharrActions = useMemo(
+    () => ({
+      // Orders are judged on scan results, so edits wait for the scan (and
+      // for a source that is loading).
+      disabled: scanRunning || playlistLoading,
+      canWrite: connected,
+      onToggleExpand: toggleChannelExpanded,
+      onFix: handleFixChannel,
+      onUndo: handleUndoChannel,
+      onRetry: handleRetryChannel,
+      onStreamAction: handleStreamAction,
+      onFindStreams: handleFindStreams,
+    }),
+    [
+      scanRunning,
+      playlistLoading,
+      connected,
+      toggleChannelExpanded,
+      handleFixChannel,
+      handleUndoChannel,
+      handleRetryChannel,
+      handleStreamAction,
+      handleFindStreams,
+    ],
+  );
+  useLayoutEffect(() => {
+    dispatcharrActionsRef.current = dispatcharrActions;
+  }, [dispatcharrActions]);
+
   const renderVirtualRows = useCallback(
     (items: typeof virtualItems, mode: "main" | "reveal") =>
       items.map((virtualRow) => {
@@ -1284,6 +1604,7 @@ export function ChannelTable({
         if (!result) {
           return null;
         }
+        const meta = rowMeta?.[virtualRow.index];
 
         const rowTop =
           mode === "main"
@@ -1310,18 +1631,39 @@ export function ChannelTable({
               onRowClick={mode === "main" ? handleRowClick : noopRowEvent}
               onRowDoubleClick={mode === "main" ? handleRowDoubleClick : noopRowEvent}
               onRowContextMenu={mode === "main" ? handleRowContextMenu : noopRowEvent}
-              selected={selectedIndices.has(result.index)}
+              selected={selectedIndices.has(rowKey(virtualRow.index, result))}
               duplicate={duplicateIndices.has(result.index)}
               focused={focusedRow === virtualRow.index}
               columns={columns}
               gridTemplateColumns={gridTemplateColumns}
               tableWidth={tableWidth}
+              dispatcharr={meta}
+              dispatcharrRowState={
+                meta?.kind === "channel" ? dispatcharrRowStates[meta.channel.channelId] : undefined
+              }
+              dispatcharrActions={meta && mode === "main" ? dispatcharrActions : undefined}
+              dragState={
+                meta?.kind === "stream" && streamDrag?.channelId === meta.channel.channelId
+                  ? meta.position === streamDrag.from
+                    ? "dragging"
+                    : streamDrag.to === meta.position
+                      ? "before"
+                      : streamDrag.to === meta.position + 1 &&
+                          meta.position === meta.channel.streams.length - 1
+                        ? "after"
+                        : undefined
+                  : undefined
+              }
             />
           </div>
         );
       }),
     [
       channelLogoSize,
+      dispatcharrActions,
+      dispatcharrRowStates,
+      streamDrag,
+      rowMeta,
       columns,
       duplicateIndices,
       filteredResults,
@@ -1425,6 +1767,7 @@ export function ChannelTable({
 
   return (
     <div className="flex flex-col flex-1 min-h-0 relative">
+      {dispatcharrView && <DispatcharrToast />}
       {/* Column header — portaled into toolbar on macOS, or inline fallback */}
       {portalTarget ? createPortal(headerElement, portalTarget) : headerElement}
 
@@ -1456,6 +1799,7 @@ export function ChannelTable({
         ref={parentRef}
         tabIndex={0}
         onKeyDown={handleKeyDown}
+        onPointerDown={handleStreamPointerDown}
         onContextMenu={(event) => event.preventDefault()}
         onScroll={handleTableScroll}
         className={`channel-table-body native-scroll absolute left-0 right-0 bottom-0 overflow-auto focus:outline-none ${
@@ -1520,8 +1864,8 @@ export function ChannelTable({
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
             type="button"
           >
-            {selectedIndices.size > 0 &&
-            Array.from(selectedIndices).every((idx) => {
+            {scanSelection.length > 0 &&
+            scanSelection.every((idx) => {
               const r = resultAtIndex(
                 { flatResults: completedResults, positions: resultPositions },
                 idx,
@@ -1530,7 +1874,7 @@ export function ChannelTable({
             })
               ? "Rescan"
               : "Scan"}{" "}
-            Selected ({selectedIndices.size})
+            Selected ({scanSelection.length})
           </button>
           {(() => {
             const archiveCount = getSelectedChannels().filter(hasArchive).length;

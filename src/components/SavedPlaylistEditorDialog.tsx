@@ -37,6 +37,14 @@ function validateDraft(draft: SavedPlaylistDraft): string | null {
       return "Add at least one Xtream server.";
     }
   }
+  if (draft.kind === "dispatcharr") {
+    if (!/^https?:\/\//i.test(draft.server.trim())) {
+      return "Dispatcharr server must start with http:// or https://";
+    }
+    if (!draft.api_key?.trim() && !(draft.username?.trim() && draft.password?.trim())) {
+      return "Enter a Dispatcharr API key, or a username and password.";
+    }
+  }
   return null;
 }
 
@@ -117,11 +125,20 @@ export default function SavedPlaylistEditorDialog({
               display_name: form.display_name.trim(),
               url: form.url.trim(),
             }
-          : {
-              ...form,
-              display_name: form.display_name.trim(),
-              path: form.path.trim(),
-            };
+          : form.kind === "dispatcharr"
+            ? {
+                ...form,
+                display_name: form.display_name.trim(),
+                server: form.server.trim(),
+                username: form.username?.trim() || null,
+                password: form.password?.trim() || null,
+                api_key: form.api_key?.trim() || null,
+              }
+            : {
+                ...form,
+                display_name: form.display_name.trim(),
+                path: form.path.trim(),
+              };
 
     const validationError = validateDraft(normalized);
     if (validationError) {
@@ -297,6 +314,78 @@ export default function SavedPlaylistEditorDialog({
                       </option>
                     ))}
                 </select>
+              </div>
+            </>
+          )}
+
+          {form.kind === "dispatcharr" && (
+            <>
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="saved-playlist-dispatcharr-server"
+                  className="text-[12px] font-medium text-text-secondary"
+                >
+                  Server
+                </label>
+                <input
+                  id="saved-playlist-dispatcharr-server"
+                  type="text"
+                  value={form.server}
+                  onKeyDown={handleSelectAllShortcut}
+                  onChange={(event) => setForm({ ...form, server: event.target.value })}
+                  className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[13px] text-text-primary focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="saved-playlist-dispatcharr-api-key"
+                  className="text-[12px] font-medium text-text-secondary"
+                >
+                  API Key
+                </label>
+                <PasswordField
+                  id="saved-playlist-dispatcharr-api-key"
+                  value={form.api_key ?? ""}
+                  onKeyDown={handleSelectAllShortcut}
+                  onChange={(event) => setForm({ ...form, api_key: event.target.value })}
+                  className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[13px] text-text-primary focus:border-blue-500 focus:outline-none"
+                />
+                <p className="text-[11px] text-text-tertiary">
+                  Used instead of the username and password when set.
+                </p>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="saved-playlist-dispatcharr-username"
+                    className="text-[12px] font-medium text-text-secondary"
+                  >
+                    Username
+                  </label>
+                  <input
+                    id="saved-playlist-dispatcharr-username"
+                    type="text"
+                    value={form.username ?? ""}
+                    onKeyDown={handleSelectAllShortcut}
+                    onChange={(event) => setForm({ ...form, username: event.target.value })}
+                    className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[13px] text-text-primary focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="saved-playlist-dispatcharr-password"
+                    className="text-[12px] font-medium text-text-secondary"
+                  >
+                    Password
+                  </label>
+                  <PasswordField
+                    id="saved-playlist-dispatcharr-password"
+                    value={form.password ?? ""}
+                    onKeyDown={handleSelectAllShortcut}
+                    onChange={(event) => setForm({ ...form, password: event.target.value })}
+                    className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[13px] text-text-primary focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
               </div>
             </>
           )}

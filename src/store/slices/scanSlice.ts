@@ -24,6 +24,7 @@ export const createScanSlice: StateCreator<AppStore, [], [], ScanSlice> = (set) 
   telemetry: EMPTY_TELEMETRY,
   screenshotsPaused: false,
   networkPaused: false,
+  busyAccounts: [],
 
   applyScanCollections: (update: ScanCollectionsUpdate) =>
     set({

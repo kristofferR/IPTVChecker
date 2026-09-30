@@ -3,9 +3,16 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { applyXtreamArchiveUpdates, applyXtreamArchiveUpdatesToPreview } from "../lib/archive";
 import { cancelArchiveProbes } from "../lib/archiveProbe";
+import { apiKeyFingerprint, normalizeDispatcharrServer } from "../lib/dispatcharr";
+import { restoreAddedRows } from "../lib/dispatcharrEdits";
 import { errorToString, formatPlaylistOpenError, formatSourceReloadError } from "../lib/errors";
 import { logger } from "../lib/logger";
-import { parseXtreamRecent, serializeXtreamRecent } from "../lib/recentPlaylists";
+import {
+  parseDispatcharrRecent,
+  parseXtreamRecent,
+  serializeDispatcharrRecent,
+  serializeXtreamRecent,
+} from "../lib/recentPlaylists";
 import {
   buildSavedPlaylistDraftFromSource,
   findSavedPlaylistForCurrentSource,
@@ -27,6 +34,7 @@ import {
   getRecentPlaylists,
   getSavedPlaylists,
   openPlaylist,
+  openPlaylistDispatcharr,
   openPlaylistStalker,
   openPlaylistUrl,
   openPlaylistXtream,
@@ -36,6 +44,7 @@ import {
 import type {
   Channel,
   CurrentSourceDescriptor,
+  DispatcharrOpenRequest,
   PlaylistPreview,
   RecentPlaylistEntry,
   SavedPlaylistDraft,
@@ -123,6 +132,8 @@ function savedEntryToDraft(entry: SavedPlaylistEntry): SavedPlaylistDraft {
         username: entry.username,
         password: entry.password,
       };
+    case "dispatcharr":
+      return { ...entry };
   }
 }
 
@@ -269,12 +280,19 @@ export function usePlaylistSources({
         return false;
       }
 
+      // A fresh open reflects Dispatcharr's current orders, so session edits
+      // are moot; clear them before the new rows appear so no edit pairs
+      // new channel ids with the old source's orders.
+      if (mode === "freshOpen") getStore().resetDispatcharrEdits();
+
       const initStartedAt = performance.now();
       logger.info(`[App] Preparing scan cache for ${preview.channels.length} visible channels`);
       const initialized = await initFromPlaylist(preview.channels, shouldApply);
       if (!initialized || !shouldApply()) {
         return false;
       }
+      // Streams linked from Find streams have no row in the cached source.
+      if (mode === "reapplySourceFilter") restoreAddedRows();
       logger.info(`[App] Scan cache ready in ${(performance.now() - initStartedAt).toFixed(1)}ms`);
 
       await cancelEpgLoad().catch(() => {});
@@ -300,6 +318,8 @@ export function usePlaylistSources({
       state.setSelectedChannel(null);
       state.setSelectedChannelIndices([]);
       state.clearArchiveProbes();
+      // Re-applying a source filter keeps session edits (reset above for a
+      // fresh open): its cached preview predates them.
       state.setPendingPlaybackChannel(null);
 
       return true;
@@ -335,6 +355,10 @@ export function usePlaylistSources({
             undefined,
             undefined,
           );
+        case "dispatcharr": {
+          const { kind: _kind, ...source } = descriptor;
+          return openPlaylistDispatcharr(source, undefined, undefined);
+        }
       }
     },
     [],
@@ -382,6 +406,9 @@ export function usePlaylistSources({
             return `xtream server=${descriptor.server}, username=***`;
           case "stalker":
             return `stalker portal=${descriptor.portal}, mac=***`;
+          case "dispatcharr":
+            // Normalized origin only: a mistyped URL can carry credentials.
+            return `dispatcharr server=${normalizeDispatcharrServer(descriptor.server) ?? "(invalid)"}`;
         }
       })();
       const loadingAction =
@@ -594,6 +621,7 @@ export function usePlaylistSources({
       };
 
       void syncFromPlaylist(nextPreview.channels, true, shouldApply).then((synced) => {
+        if (synced && shouldApply()) restoreAddedRows();
         if (
           !synced ||
           !shouldApply() ||
@@ -664,14 +692,19 @@ export function usePlaylistSources({
                   kind: "url" as const,
                   value: savedEntry.url,
                 }
-              : {
-                  kind: "xtream" as const,
-                  value: serializeXtreamRecent({
-                    server: savedEntry.preferred_server ?? savedEntry.servers[0] ?? "",
-                    username: savedEntry.username,
-                    password: savedEntry.password ?? undefined,
-                  }),
-                };
+              : savedEntry.kind === "xtream"
+                ? {
+                    kind: "xtream" as const,
+                    value: serializeXtreamRecent({
+                      server: savedEntry.preferred_server ?? savedEntry.servers[0] ?? "",
+                      username: savedEntry.username,
+                      password: savedEntry.password ?? undefined,
+                    }),
+                  }
+                : {
+                    kind: "dispatcharr" as const,
+                    value: serializeDispatcharrRecent(savedEntry),
+                  };
 
         const entries = await addRecentPlaylist(
           recentPayload.kind,
@@ -815,6 +848,86 @@ export function usePlaylistSources({
       return true;
     },
     [loadAndCommitSource],
+  );
+
+  const openPlaylistDispatcharrValue = useCallback(
+    async (source: DispatcharrOpenRequest, rememberSecrets?: boolean): Promise<string | true> => {
+      const result = await loadAndCommitSource({ kind: "dispatcharr", ...source }, "freshOpen");
+      if (!result.ok) {
+        return result.superseded ? true : result.error;
+      }
+
+      try {
+        const usesApiKey = Boolean(source.api_key?.trim());
+        const entries = await addRecentPlaylist(
+          "dispatcharr",
+          serializeDispatcharrRecent(
+            {
+              server: source.server,
+              username: usesApiKey ? null : source.username,
+              password: rememberSecrets && !usesApiKey ? source.password : null,
+              api_key: rememberSecrets ? source.api_key : null,
+            },
+            // Keeps an unremembered key's account distinct in Recents.
+            usesApiKey && !rememberSecrets && source.api_key
+              ? await apiKeyFingerprint(source.api_key.trim())
+              : null,
+          ),
+          null,
+          null,
+        );
+        getStore().setRecentPlaylists(entries);
+      } catch (err) {
+        logger.warn("[Recent Playlists] Failed to record Dispatcharr source:", errorToString(err));
+      }
+
+      return true;
+    },
+    [loadAndCommitSource],
+  );
+
+  /** Replace a saved playlist (typically a Dispatcharr M3U export) with a
+   *  native Dispatcharr source under the same id and name. The old entry is
+   *  restored if the new source does not open. */
+  const convertSavedPlaylistToDispatcharr = useCallback(
+    async (savedId: string, source: DispatcharrOpenRequest): Promise<string | true> => {
+      const previous = getStore().savedPlaylists.find((entry) => entry.id === savedId);
+      if (!previous) {
+        return "The saved playlist no longer exists.";
+      }
+      // Confirm the Dispatcharr source works before replacing anything.
+      try {
+        await openPlaylistDispatcharr(source);
+      } catch (err) {
+        return formatPlaylistOpenError(err);
+      }
+      try {
+        const result = await upsertSavedPlaylist({
+          id: previous.id,
+          kind: "dispatcharr",
+          display_name: previous.display_name,
+          server: source.server,
+          username: source.username ?? null,
+          password: source.password ?? null,
+          api_key: source.api_key ?? null,
+        });
+        getStore().setSavedPlaylists(result.entries);
+      } catch (err) {
+        return errorToString(err);
+      }
+      // The entry is verified now; only a failed (not superseded) open restores.
+      const opened = await openSavedPlaylistById(savedId);
+      if (opened !== true) {
+        try {
+          const restored = await upsertSavedPlaylist(savedEntryToDraft(previous));
+          getStore().setSavedPlaylists(restored.entries);
+        } catch (err) {
+          logger.error("[Saved Playlists] Failed to restore after conversion:", err);
+        }
+      }
+      return opened;
+    },
+    [openSavedPlaylistById],
   );
 
   const openPlaylistStalkerValue = useCallback(
@@ -996,6 +1109,12 @@ export function usePlaylistSources({
     return { ok: result.ok, reapplied: result.ok };
   }, [loadAndCommitSource]);
 
+  /** Load the current source again from its origin, for new stream URLs. */
+  const reloadCurrentSource = useCallback(() => {
+    const descriptor = getStore().currentSourceDescriptor;
+    if (descriptor) void loadAndCommitSource(descriptor, "freshOpen");
+  }, [loadAndCommitSource]);
+
   const handleApplySourceFilter = useCallback(() => {
     const state = getStore();
     if (!state.currentSourceDescriptor) {
@@ -1042,12 +1161,34 @@ export function usePlaylistSources({
           initialUrl: "",
           initialXtream: source,
           initialStalker: null,
+          initialDispatcharr: null,
+        });
+        return;
+      }
+      if (entry.kind === "dispatcharr") {
+        const source = parseDispatcharrRecent(entry.value);
+        if (!source) {
+          getStore().setMenuInfo("This Dispatcharr recent entry is invalid.", "warn");
+          void refreshRecentPlaylists();
+          return;
+        }
+        if (source.api_key || (source.username && source.password)) {
+          void openPlaylistDispatcharrValue(source, true);
+          return;
+        }
+        getStore().setOpenSourceDialogState({
+          mode: "dispatcharr",
+          initialUrl: "",
+          initialXtream: null,
+          initialStalker: null,
+          initialDispatcharr: source,
         });
         return;
       }
       void openPlaylistPath(entry.value);
     },
     [
+      openPlaylistDispatcharrValue,
       openPlaylistPath,
       openPlaylistUrlValue,
       openPlaylistXtreamValue,
@@ -1066,6 +1207,8 @@ export function usePlaylistSources({
     openPlaylistUrlValue,
     openPlaylistXtreamValue,
     openPlaylistStalkerValue,
+    openPlaylistDispatcharrValue,
+    convertSavedPlaylistToDispatcharr,
     openSavedPlaylistById,
     handleOpenSaved,
     handleOpenRecent,
@@ -1077,6 +1220,7 @@ export function usePlaylistSources({
     handlePreferSavedXtreamServer,
     ensureSourceFilterApplied,
     handleApplySourceFilter,
+    reloadCurrentSource,
     savedPlaylistsDialogOpen,
     setSavedPlaylistsDialogOpen,
     savedPlaylistEditorDraft,
