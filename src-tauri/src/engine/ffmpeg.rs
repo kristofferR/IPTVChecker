@@ -2480,17 +2480,25 @@ mod tests {
     }
 
     #[cfg(unix)]
+    /// Write an executable test script without this process ever holding a
+    /// write handle on it. Tests run in parallel, and a child forked by
+    /// another thread inherits open fds until it execs; executing a file
+    /// still open for writing there fails with ETXTBSY ("Text file busy"),
+    /// which surfaced as a flaky ffmpeg-unavailable error. `install` writes
+    /// the final file in its own short-lived process instead.
     fn write_executable_script(dir: &Path, name: &str, body: &str) -> String {
-        use std::os::unix::fs::PermissionsExt;
-
         let path = dir.join(name);
-        std::fs::write(&path, body).expect("script should be writable");
-
-        let mut permissions = std::fs::metadata(&path)
-            .expect("script metadata should exist")
-            .permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&path, permissions).expect("script should be executable");
+        let staging = dir.join(format!(".{name}.staging"));
+        std::fs::write(&staging, body).expect("script should be writable");
+        let status = std::process::Command::new("install")
+            .arg("-m")
+            .arg("755")
+            .arg(&staging)
+            .arg(&path)
+            .status()
+            .expect("install should run");
+        assert!(status.success(), "install should copy the script");
+        std::fs::remove_file(&staging).expect("staging script should be removable");
 
         path.to_string_lossy().to_string()
     }
