@@ -964,7 +964,7 @@ export function ChannelTable({
       initialState.archiveGuideTestRunning ||
       Object.values(initialState.archiveProbes).some((probe) => probe.running) ||
       (isSingleConnectionPlaylist(initialState.playlist) &&
-        (initialState.playIntentActive || isCastingRef.current))
+        (initialState.playIntentActive || isCastingRef.current || initialState.sampleCaptureActive))
     ) {
       setContextMenuState(null);
       return;

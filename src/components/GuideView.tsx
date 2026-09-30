@@ -308,6 +308,7 @@ export function GuideView({
   );
   const playIntentActive = useAppStore((s) => s.playIntentActive);
   const castActive = useAppStore((s) => s.castActive);
+  const sampleCaptureActive = useAppStore((s) => s.sampleCaptureActive);
 
   const [nowEpochS, setNowEpochS] = useState(() => Math.floor(Date.now() / 1000));
 
@@ -549,6 +550,7 @@ export function GuideView({
         (state.playIntentActive ||
           state.castActive ||
           state.externalPlaybackActive ||
+          state.sampleCaptureActive ||
           isArchiveDownloadRunning(state.archiveDownloads)))
     );
   };
@@ -652,7 +654,8 @@ export function GuideView({
     archiveVerifyRun !== null ||
     archiveGuideTestRunning ||
     archiveProbeRunning ||
-    ((playIntentActive || castActive) && isSingleConnectionPlaylist(playlist));
+    ((playIntentActive || castActive || sampleCaptureActive) &&
+      isSingleConnectionPlaylist(playlist));
   const selectionAvailability =
     selection && programmePlaybackAvailability(selection.result, selection.programme, nowEpochS);
   const menuAvailability =

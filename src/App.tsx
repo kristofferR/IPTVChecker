@@ -1517,6 +1517,9 @@ export default function App() {
         if (externalPlaybackActive) {
           throw new Error("Close the external player to capture a sample from this playlist.");
         }
+        if (isArchiveVerificationBlockingPlayback()) {
+          throw new Error("Wait for the catch-up test or recording to finish before capturing.");
+        }
         if (playIntentActive) handleStopPlayer();
       }
       getStore().setSampleCaptureActive(true);
