@@ -1017,6 +1017,22 @@ export default function App() {
     return () => window.removeEventListener("contextmenu", handler);
   }, []);
 
+  /** Playback holds a connection a limited Dispatcharr account allows; a
+   *  scan would take another. Says so and returns true in that case. */
+  const playbackHoldsProvider = useCallback(() => {
+    const state = getStore();
+    if (
+      !state.playlist?.dispatcharr_limited_accounts ||
+      !(state.playIntentActive || state.castActive || state.externalPlaybackActive)
+    ) {
+      return false;
+    }
+    state.setScanInputError(
+      "Stop playback first: the provider allows only so many connections at once.",
+    );
+    return true;
+  }, []);
+
   const startScanWithSelection = useCallback(
     async (selection: number[], verifyCatchup = false) => {
       const state = getStore();
@@ -1027,17 +1043,7 @@ export default function App() {
       ) {
         return false;
       }
-      // Playback holds the provider connection a limited account allows;
-      // a scan would take a second one.
-      if (
-        state.playlist?.dispatcharr_limited_accounts &&
-        (state.playIntentActive || state.castActive || state.externalPlaybackActive)
-      ) {
-        state.setScanInputError(
-          "Stop playback first: the provider allows only so many connections at once.",
-        );
-        return false;
-      }
+      if (playbackHoldsProvider()) return false;
       // A scan snapshots the stream order; one still being written would
       // change underneath it.
       if (Object.values(state.dispatcharrRowStates).some((row) => row?.kind === "writing")) {
@@ -1134,6 +1140,8 @@ export default function App() {
 
       verifyCatchupScanStartedRef.current = verifyCatchup;
       refreshedState.setVerifyCatchupAfterScan(verifyCatchup);
+      // Playback may have started while the steps above awaited.
+      if (playbackHoldsProvider()) return false;
       await start(config, currentPlaylist.total_channels, effectiveSelection);
       return true;
     },

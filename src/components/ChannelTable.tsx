@@ -5,6 +5,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -603,6 +604,7 @@ export function ChannelTable({
     const finish = (commit: boolean) => {
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleCancel);
       window.removeEventListener("keydown", handleKey);
       setStreamDrag(null);
       if (!dragging) return;
@@ -624,11 +626,13 @@ export function ChannelTable({
       ]);
     };
     const handleUp = () => finish(true);
+    const handleCancel = () => finish(false);
     const handleKey = (key: KeyboardEvent) => {
       if (key.key === "Escape") finish(false);
     };
     window.addEventListener("pointermove", handleMove);
     window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleCancel);
     window.addEventListener("keydown", handleKey);
   }, []);
 
@@ -1584,7 +1588,9 @@ export function ChannelTable({
       handleFindStreams,
     ],
   );
-  dispatcharrActionsRef.current = dispatcharrActions;
+  useLayoutEffect(() => {
+    dispatcharrActionsRef.current = dispatcharrActions;
+  }, [dispatcharrActions]);
 
   const renderVirtualRows = useCallback(
     (items: typeof virtualItems, mode: "main" | "reveal") =>

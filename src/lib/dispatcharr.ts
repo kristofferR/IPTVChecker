@@ -60,7 +60,9 @@ function dispatcharrEndpointStart(path: string): number | null {
   for (const [marker, next] of endpoints) {
     for (let at = lower.indexOf(marker); at >= 0; at = lower.indexOf(marker, at + 1)) {
       const rest = lower.slice(at + marker.length);
-      if ((rest === "" || next.some((segment) => rest.startsWith(segment))) && at > (start ?? -1)) {
+      // Only slashes left: a bare "/api/" ending the URL.
+      const bare = rest.replaceAll("/", "") === "";
+      if ((bare || next.some((segment) => rest.startsWith(segment))) && at > (start ?? -1)) {
         start = at;
       }
     }

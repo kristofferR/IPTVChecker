@@ -134,7 +134,10 @@ fn dispatcharr_endpoint_start(path: &str) -> Option<usize> {
     for (marker, next) in ENDPOINTS {
         for (at, _) in lower.match_indices(marker) {
             let rest = &lower[at + marker.len()..];
-            if rest.is_empty() || next.iter().any(|segment| rest.starts_with(segment)) {
+            // Only slashes left: a bare "/api/" ending the URL.
+            if rest.trim_matches('/').is_empty()
+                || next.iter().any(|segment| rest.starts_with(segment))
+            {
                 start = start.max(Some(at));
             }
         }
@@ -1549,6 +1552,10 @@ mod tests {
             (
                 "https://example.com/api/dispatcharr",
                 "https://example.com/api/dispatcharr",
+            ),
+            (
+                "https://example.com/dispatcharr/api/",
+                "https://example.com/dispatcharr",
             ),
         ];
         for (input, expected) in cases {
