@@ -95,16 +95,35 @@ impl SharedUrlResult {
 }
 
 /// Per-URL memo of check results, so channels that share a stream URL are only
-/// fetched once. The `OnceCell` lets the second waiter block on the first
-/// worker's result instead of racing it.
-type SharedUrlResultCache = Arc<
-    tokio::sync::Mutex<
-        HashMap<
-            String,
-            Arc<tokio::sync::OnceCell<Result<(SharedUrlResult, WorkerTiming), AppError>>>,
-        >,
-    >,
->;
+/// fetched once.
+type SharedUrlResultCache = Arc<tokio::sync::Mutex<HashMap<String, Arc<SharedUrlProbe>>>>;
+
+/// One probe shared by the rows with the same URL. The row that registered it
+/// (the owner) probes first; the others wait until the owner is done, then
+/// take its result, or probe themselves if it stopped before probing. So a
+/// waiting row never needs the scan slot its owner holds.
+struct SharedUrlProbe {
+    cell: tokio::sync::OnceCell<Result<(SharedUrlResult, WorkerTiming), AppError>>,
+    owner_done: tokio::sync::watch::Sender<bool>,
+}
+
+impl SharedUrlProbe {
+    fn new() -> Self {
+        Self {
+            cell: tokio::sync::OnceCell::new(),
+            owner_done: tokio::sync::watch::channel(false).0,
+        }
+    }
+}
+
+/// Marks the owner done when dropped, however its task ends.
+struct SharedUrlOwner(Arc<SharedUrlProbe>);
+
+impl Drop for SharedUrlOwner {
+    fn drop(&mut self) {
+        self.0.owner_done.send_replace(true);
+    }
+}
 
 fn set_screenshot_capture_success(shared: &mut SharedUrlResult, path: String) {
     shared.screenshot_path = Some(path);
@@ -2531,7 +2550,7 @@ async fn execute_scan_run(
                     (Arc::clone(entry.get()), true)
                 }
                 std::collections::hash_map::Entry::Vacant(entry) => (
-                    Arc::clone(entry.insert(Arc::new(tokio::sync::OnceCell::new()))),
+                    Arc::clone(entry.insert(Arc::new(SharedUrlProbe::new()))),
                     false,
                 ),
             }
@@ -2632,7 +2651,16 @@ async fn execute_scan_run(
                 diagnostics_semaphore: &diagnostics_semaphore,
                 single_connection_mode,
             };
+            let owner = (!duplicate_url).then(|| SharedUrlOwner(Arc::clone(&result_cell)));
+            if duplicate_url {
+                let mut owner_done = result_cell.owner_done.subscribe();
+                tokio::select! {
+                    _ = owner_done.wait_for(|done| *done) => {}
+                    _ = cancel.cancelled() => return,
+                }
+            }
             let shared_result = result_cell
+                .cell
                 .get_or_init(|| async {
                     let mut busy_retries = 0;
                     loop {
@@ -2721,6 +2749,7 @@ async fn execute_scan_run(
                     }
                 })
                 .await;
+            drop(owner);
 
             let (mut shared, timing) = match shared_result {
                 Ok(value) => value.clone(),
@@ -3326,12 +3355,20 @@ pub async fn dispatcharr_probe_streams(
                                 account_id,
                                 limit,
                             );
-                            Some(tokio::select! {
-                                permit = slots.acquire_owned() => {
+                            let permit = tokio::select! {
+                                permit = Arc::clone(&slots).acquire_owned() => {
                                     permit.map_err(|_| AppError::Cancelled)?
                                 }
                                 _ = cancel.cancelled() => return Err(AppError::Cancelled),
-                            })
+                            };
+                            // Probes and viewers together stay within the limit.
+                            if let Some(viewers) = &viewers {
+                                let ours = limit.saturating_sub(slots.available_permits());
+                                if ours + viewers.on_account(account_id, false).await > limit {
+                                    return Ok(busy(&channel));
+                                }
+                            }
+                            Some(permit)
                         }
                         None => None,
                     };

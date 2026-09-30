@@ -120,6 +120,8 @@ export function DispatcharrFindPanel() {
   const [position, setPosition] = useState<"primary" | "end">("primary");
   const [linking, setLinking] = useState(false);
   const requestRef = useRef<string | null>(null);
+  // Searches for another channel, or an earlier query, must not land late.
+  const searchRef = useRef(0);
   const channelId = channel?.channelId ?? null;
 
   const stopProbe = () => {
@@ -140,9 +142,17 @@ export function DispatcharrFindPanel() {
     setAccount("all");
     setSearch({ kind: "loading" });
     setQuery(channel?.name ?? "");
+    const search = ++searchRef.current;
     dispatcharrFindStreams(target, channelId, null)
-      .then((found) => current && setSearch({ kind: "done", found }))
-      .catch((error) => current && setSearch({ kind: "failed", error: errorToString(error) }));
+      .then(
+        (found) => current && search === searchRef.current && setSearch({ kind: "done", found }),
+      )
+      .catch(
+        (error) =>
+          current &&
+          search === searchRef.current &&
+          setSearch({ kind: "failed", error: errorToString(error) }),
+      );
     return () => {
       current = false;
     };
@@ -248,9 +258,14 @@ export function DispatcharrFindPanel() {
     if (!target) return;
     stopProbe();
     setSearch({ kind: "loading" });
+    const search = ++searchRef.current;
     dispatcharrFindStreams(target, channel.channelId, query.trim() || null)
-      .then((result) => setSearch({ kind: "done", found: result }))
-      .catch((error) => setSearch({ kind: "failed", error: errorToString(error) }));
+      .then((result) => search === searchRef.current && setSearch({ kind: "done", found: result }))
+      .catch(
+        (error) =>
+          search === searchRef.current &&
+          setSearch({ kind: "failed", error: errorToString(error) }),
+      );
   };
 
   const probe = async () => {

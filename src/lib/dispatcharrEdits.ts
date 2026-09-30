@@ -166,6 +166,27 @@ export function reverseChanges(changes: OrderChange[]): Promise<ApplyOutcome> {
   );
 }
 
+/** Append rows (streams linked from Find streams), numbered after the
+ *  loaded ones. */
+export function appendStreamRows(rows: ChannelResult[]): void {
+  if (rows.length === 0) return;
+  const store = useAppStore.getState();
+  let next = store.flatResults.reduce((max, result) => Math.max(max, result.index), -1) + 1;
+  const added = rows.map((row) => ({ ...row, index: next++ }));
+  const flatResults = [...store.flatResults, ...added];
+  store.applyScanCollections({
+    flatResults,
+    resultPositions: new Map(flatResults.map((result, position) => [result.index, position])),
+    uiMetrics: {
+      presentCount: flatResults.length,
+      lowFpsCount: store.uiMetrics.lowFpsCount + added.filter((row) => row.low_framerate).length,
+      mislabeledCount:
+        store.uiMetrics.mislabeledCount +
+        added.filter((row) => row.label_mismatches.length > 0).length,
+    },
+  });
+}
+
 /** Link found provider streams to a channel, first or last in its order.
  *  Streams without a loaded row get one, so the channel shows them now. */
 export async function linkStreams(
@@ -173,10 +194,12 @@ export async function linkStreams(
   picked: ChannelResult[],
   position: "primary" | "end",
 ): Promise<boolean> {
+  // Only streams found for this channel, never one left over from another.
   const ids = picked.flatMap((result) => {
     const ref = parseDispatcharrIds(result.extinf_line);
-    return ref ? [ref.streamId] : [];
+    return ref && ref.channelId === channel.channelId ? [ref.streamId] : [];
   });
+  if (ids.length === 0) return false;
   const rest = channel.order.filter((id) => !ids.includes(id));
   const to = position === "primary" ? [...ids, ...rest] : [...rest, ...ids];
   const { applied } = await writeOrders(
@@ -186,34 +209,32 @@ export async function linkStreams(
   );
   if (applied.length === 0) return false;
 
-  const store = useAppStore.getState();
   const loaded = new Set(
-    store.flatResults.flatMap((result) => {
+    useAppStore.getState().flatResults.flatMap((result) => {
       const ref = parseDispatcharrIds(result.extinf_line);
       return ref?.channelId === channel.channelId ? [ref.streamId] : [];
     }),
   );
-  let next = store.flatResults.reduce((max, result) => Math.max(max, result.index), -1) + 1;
-  const added = picked
-    .filter((result) => {
-      const ref = parseDispatcharrIds(result.extinf_line);
-      return ref && !loaded.has(ref.streamId);
-    })
-    .map((result) => addedStreamRow(result, channel, next++));
-  if (added.length > 0) {
-    const flatResults = [...store.flatResults, ...added];
-    store.applyScanCollections({
-      flatResults,
-      resultPositions: new Map(flatResults.map((result, position) => [result.index, position])),
-      uiMetrics: {
-        presentCount: flatResults.length,
-        lowFpsCount:
-          store.uiMetrics.lowFpsCount + added.filter((result) => result.low_framerate).length,
-        mislabeledCount:
-          store.uiMetrics.mislabeledCount +
-          added.filter((result) => result.label_mismatches.length > 0).length,
-      },
-    });
+  appendStreamRows(
+    picked
+      .filter((result) => {
+        const ref = parseDispatcharrIds(result.extinf_line);
+        return ref && !loaded.has(ref.streamId);
+      })
+      .map((result) => addedStreamRow(result, channel, 0)),
+  );
+  // The new primary had no row when the write moved the selection; follow it now.
+  const store = useAppStore.getState();
+  const selected = store.selectedChannel;
+  const primary = currentPrimary(channel.channelId);
+  if (
+    position === "primary" &&
+    selected &&
+    primary &&
+    parseDispatcharrIds(selected.extinf_line)?.channelId === channel.channelId &&
+    selected.index !== primary.index
+  ) {
+    store.setSelectedChannel(primary);
   }
   return true;
 }

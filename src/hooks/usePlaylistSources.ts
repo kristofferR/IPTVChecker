@@ -3,7 +3,12 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { applyXtreamArchiveUpdates, applyXtreamArchiveUpdatesToPreview } from "../lib/archive";
 import { cancelArchiveProbes } from "../lib/archiveProbe";
-import { apiKeyFingerprint, normalizeDispatcharrServer } from "../lib/dispatcharr";
+import {
+  apiKeyFingerprint,
+  normalizeDispatcharrServer,
+  parseDispatcharrIds,
+} from "../lib/dispatcharr";
+import { appendStreamRows } from "../lib/dispatcharrEdits";
 import { errorToString, formatPlaylistOpenError, formatSourceReloadError } from "../lib/errors";
 import { logger } from "../lib/logger";
 import {
@@ -279,11 +284,26 @@ export function usePlaylistSources({
         return false;
       }
 
+      // Streams linked from Find streams have no row in the cached source;
+      // re-applying a filter keeps them with their channels.
+      const linkedRows =
+        mode === "reapplySourceFilter"
+          ? getStore().flatResults.filter((row) => parseDispatcharrIds(row.extinf_line)?.added)
+          : [];
+
       const initStartedAt = performance.now();
       logger.info(`[App] Preparing scan cache for ${preview.channels.length} visible channels`);
       const initialized = await initFromPlaylist(preview.channels, shouldApply);
       if (!initialized || !shouldApply()) {
         return false;
+      }
+      if (linkedRows.length > 0) {
+        const channels = new Set(
+          getStore().flatResults.map((row) => parseDispatcharrIds(row.extinf_line)?.channelId),
+        );
+        appendStreamRows(
+          linkedRows.filter((row) => channels.has(parseDispatcharrIds(row.extinf_line)?.channelId)),
+        );
       }
       logger.info(`[App] Scan cache ready in ${(performance.now() - initStartedAt).toFixed(1)}ms`);
 
