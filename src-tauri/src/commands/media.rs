@@ -156,12 +156,14 @@ pub async fn capture_sample_clip(
     Ok(clip)
 }
 
-/// Short stable key for a playlist source, used in manual clip names.
+/// Short key for a playlist source, used in media file and folder names.
+/// FNV-1a rather than `DefaultHasher`, whose output may change between Rust
+/// releases and would silently rename existing folders.
 pub(crate) fn source_key(source: &str) -> String {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    source.hash(&mut hasher);
-    format!("{:08x}", hasher.finish() as u32)
+    let hash = source.bytes().fold(0x811c_9dc5_u32, |hash, byte| {
+        (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+    });
+    format!("{hash:08x}")
 }
 
 /// Delete clips in a scan folder that no result references.
@@ -399,7 +401,7 @@ pub async fn try_serve_preview_request(
 mod tests {
     use super::{
         artifact_byte_span, ensure_capture_url, parse_preview_request, remove_other_channel_clips,
-        PreviewRequest,
+        source_key, PreviewRequest,
     };
 
     #[test]
@@ -451,6 +453,12 @@ mod tests {
         assert!(!dir.join("3-News-3.mp4").exists());
         assert!(dir.join("3-News.mp4").exists());
         std::fs::remove_dir_all(&dir).expect("fixture cleanup");
+    }
+
+    #[test]
+    fn source_key_is_stable_fnv1a() {
+        assert_eq!(source_key(""), "811c9dc5");
+        assert_eq!(source_key("a"), "e40c292c");
     }
 
     #[test]
