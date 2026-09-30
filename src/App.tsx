@@ -1475,9 +1475,14 @@ export default function App() {
 
   const handleCaptureSample = useCallback(
     async (result: ChannelResult) => {
+      const playlistAtStart = getStore().playlist;
       const clip = await captureSampleClip(result);
       const state = getStore();
-      const updated = withSampleClip(selectResultByIndex(state, result.index) ?? result, clip);
+      // Indices restart per playlist, so a capture that outlives its playlist
+      // must not land on an unrelated channel.
+      const current = selectResultByIndex(state, result.index);
+      if (state.playlist !== playlistAtStart || current?.url !== result.url) return;
+      const updated = withSampleClip(current, clip);
       updateResult(updated);
       if (state.selectedChannel?.index === result.index) {
         getStore().setSelectedChannel(updated);

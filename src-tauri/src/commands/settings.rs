@@ -171,6 +171,19 @@ pub(crate) async fn allowed_artifact_roots(app: &tauri::AppHandle) -> Vec<std::p
     }
 
     let state = app.state::<Arc<AppState>>();
+    let session_roots: Vec<std::path::PathBuf> = state
+        .media_roots
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .cloned()
+        .collect();
+    roots.extend(
+        session_roots
+            .iter()
+            .filter_map(|root| canonicalize_root_if_exists(root)),
+    );
+
     let settings = state.settings.lock().await;
     if let Some(custom_dir) = settings.screenshots_dir.as_deref() {
         if let Some(path) = canonicalize_root_if_exists(Path::new(custom_dir)) {
@@ -179,6 +192,16 @@ pub(crate) async fn allowed_artifact_roots(app: &tauri::AppHandle) -> Vec<std::p
     }
 
     roots.into_iter().collect()
+}
+
+/// Remember a folder media was written to, so it stays an allowed root for
+/// the rest of the session.
+pub(crate) fn register_media_root(app: &tauri::AppHandle, dir: &Path) {
+    app.state::<Arc<AppState>>()
+        .media_roots
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(dir.to_path_buf());
 }
 
 fn collect_dir_stats(path: &Path) -> Result<(u64, usize), std::io::Error> {

@@ -12,7 +12,8 @@ use tokio_util::sync::CancellationToken;
 use crate::commands::player::open_local_media;
 use crate::commands::scan::ffmpeg_target_url;
 use crate::commands::settings::{
-    allowed_artifact_roots, media_cache_root, validate_artifact_path, ArtifactKind,
+    allowed_artifact_roots, media_cache_root, register_media_root, validate_artifact_path,
+    ArtifactKind,
 };
 use crate::engine::proxy_common::parse_byte_range;
 use crate::engine::{cast_proxy, disk, ffmpeg, stream_proxy};
@@ -92,6 +93,7 @@ pub async fn capture_sample_clip(
     channel_name: String,
     url: String,
     stream_url: Option<String>,
+    replaces: Option<String>,
 ) -> Result<ffmpeg::SampleClip, AppError> {
     ensure_capture_url(&url)?;
     let stream_url = stream_url.filter(|value| ensure_capture_url(value).is_ok());
@@ -111,13 +113,15 @@ pub async fn capture_sample_clip(
         )
     };
     let cache_root = media_cache_root(&app);
+    let manual_dir = cache_root.join(MANUAL_CAPTURE_DIR);
     let output_dir = tokio::task::spawn_blocking(move || {
         prepare_manual_capture_dir(&cache_root, custom_dir.as_deref(), low_space_threshold_gb)
     })
     .await
     .map_err(|error| AppError::Other(format!("Failed to prepare sample clip: {}", error)))??;
+    register_media_root(&app, &output_dir);
 
-    ffmpeg::capture_sample_clip(
+    let clip = ffmpeg::capture_sample_clip(
         &app,
         &ffmpeg_target_url(&url, stream_url.as_deref()),
         Some(&url),
@@ -127,7 +131,38 @@ pub async fn capture_sample_clip(
         duration_secs,
         &CancellationToken::new(),
     )
-    .await
+    .await?;
+
+    if let Some(previous) = replaces {
+        remove_superseded_manual_clip(&app, &previous, &manual_dir, &clip.path).await;
+    }
+    Ok(clip)
+}
+
+/// Delete the clip a recapture replaced, but only from the app's own manual
+/// capture cache: scan-run clips follow retention, and a custom folder holds
+/// the user's files.
+async fn remove_superseded_manual_clip(
+    app: &tauri::AppHandle,
+    previous: &str,
+    manual_dir: &Path,
+    new_path: &str,
+) {
+    let Ok((previous, _)) = validated_media_path(app, previous, &[ArtifactKind::SampleClip]).await
+    else {
+        return;
+    };
+    let in_manual_dir = manual_dir
+        .canonicalize()
+        .is_ok_and(|dir| previous.parent() == Some(dir.as_path()));
+    let is_new = Path::new(new_path)
+        .canonicalize()
+        .is_ok_and(|path| path == previous);
+    if in_manual_dir && !is_new {
+        if let Err(error) = std::fs::remove_file(&previous) {
+            log::debug!("Failed to remove superseded sample clip: {}", error);
+        }
+    }
 }
 
 async fn validated_media_path(

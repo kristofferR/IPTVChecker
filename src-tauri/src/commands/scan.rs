@@ -549,11 +549,14 @@ async fn compute_shared_url_result(
                     png_fallback_result,
                 );
 
-                // Without a video track the screenshot output aborts the whole
-                // combined run, clip included, so record the clip on its own.
+                // A screenshot output that cannot start (no video track, a
+                // missing encoder) aborts the whole combined run, clip
+                // included. The stream opened, so record the clip on its own.
+                // Dispatcharr is skipped: a second connection right after the
+                // first hits its channel teardown.
                 if let (Some(secs), Some(dir)) = (sample_clip_secs, screenshots_dir) {
                     if shared.sample_clip.is_none()
-                        && shared.audio_only
+                        && has_tracks
                         && want_screenshot
                         && !dispatcharr_single_pass
                         && !cancel.is_cancelled()
@@ -1585,6 +1588,7 @@ async fn prepare_screenshots_dir(
         }
     }
 
+    settings::register_media_root(app, std::path::Path::new(&dir));
     Ok(Some(dir))
 }
 
@@ -1734,7 +1738,7 @@ impl AdaptiveThrottle {
 
 /// Disk-space guard for media capture (screenshots and sample clips). Every
 /// ~20 channels it re-checks free space on the media volume, evicting old
-/// cached runs when space is low and pausing capture (emitting
+/// cached runs (app cache only) when space is low and pausing capture (emitting
 /// `scan://screenshots-paused` once) when space is critical. Cloned into each
 /// worker task.
 #[derive(Clone)]
@@ -1784,9 +1788,6 @@ impl ScreenshotDiskGuard {
         if skip_media || self.paused.load(Ordering::Relaxed) {
             return true;
         }
-        if self.using_custom_dir {
-            return false;
-        }
         let count = self.check_counter.fetch_add(1, Ordering::Relaxed);
         if !count.is_multiple_of(20) {
             return false;
@@ -1800,6 +1801,9 @@ impl ScreenshotDiskGuard {
                 self.pause_and_emit(app, run_id);
                 true
             }
+            // A custom folder is the user's, so never evict from it; it still
+            // pauses on critical space above.
+            disk::DiskSpaceTier::Low if self.using_custom_dir => false,
             disk::DiskSpaceTier::Low => {
                 // Try eviction if not already running
                 if self.eviction_in_progress.swap(true, Ordering::Relaxed) {
