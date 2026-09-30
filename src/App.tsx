@@ -50,6 +50,7 @@ import {
   dispatcharrLinkedIndices,
   expandDispatcharrSelection,
   getDispatcharrView,
+  isDispatcharrPlaceholder,
 } from "./lib/dispatcharr";
 import {
   checkFfmpegAvailable,
@@ -1355,6 +1356,7 @@ export default function App() {
 
   const handleOpenExternal = useCallback(
     async (result: ChannelResult) => {
+      if (isDispatcharrPlaceholder(result)) return;
       if (blockPlaybackDuringArchiveVerification()) return;
       // An external player opens its own provider connection, which a
       // running scan of a connection-limited source may already hold.
@@ -1399,6 +1401,7 @@ export default function App() {
       );
       getStore().setSidebarHidden(false);
       pendingArchivePlaybackRef.current = null;
+      if (isDispatcharrPlaceholder(result)) return;
       if (isScanActive(getStore().scanState) && isSingleConnectionPlaylist(getStore().playlist)) {
         pendingArchivePlaybackRef.current = null;
         getStore().setPendingPlaybackChannel(result);

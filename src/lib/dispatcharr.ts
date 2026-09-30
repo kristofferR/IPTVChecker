@@ -259,6 +259,12 @@ function cachedIds(extinfLine: string): DispatcharrStreamRef | null {
   return ref;
 }
 
+/** The stand-in row of a channel with no streams: selectable (Find streams),
+ *  never played. */
+export function isDispatcharrPlaceholder(result: Pick<ChannelResult, "extinf_line">): boolean {
+  return cachedIds(result.extinf_line)?.empty === true;
+}
+
 export function dispatcharrStreamName(entry: DispatcharrStreamEntry): string {
   return entry.ref.streamName ?? entry.result.name;
 }

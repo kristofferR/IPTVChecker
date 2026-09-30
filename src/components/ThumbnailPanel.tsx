@@ -17,6 +17,7 @@ import type { UseChromecastResult } from "../hooks/useChromecast";
 import type { ArchivePlayOptions, ArchiveSession } from "../hooks/useStreamPlayer";
 import { buildCastRequest, isCastSessionActive } from "../lib/cast";
 import { getChannelErrorReason } from "../lib/channelResults";
+import { isDispatcharrPlaceholder } from "../lib/dispatcharr";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
 import { isScanActive, type ScanState } from "../lib/scanState";
 import { getThumbnailDisplayState } from "../lib/thumbnailState";
@@ -285,6 +286,7 @@ export function ThumbnailPanel({
     scanState,
   });
   const scanActive = isScanActive(scanState);
+  const playable = !isDispatcharrPlaceholder(result);
   const showResolvedUrl = !!resolvedUrl && resolvedUrl !== result.url;
   const mediaFrameClass =
     "relative w-full aspect-video overflow-hidden rounded-lg border border-border-app";
@@ -420,6 +422,7 @@ export function ThumbnailPanel({
         {(onPlayChannel || onScanChannel) && (
           <div className="flex items-center justify-center gap-2">
             {onPlayChannel &&
+              playable &&
               (isPlaying ? (
                 <button
                   type="button"
@@ -441,7 +444,7 @@ export function ThumbnailPanel({
                   Play
                 </button>
               ))}
-            {onOpenExternal && (
+            {onOpenExternal && playable && (
               <button
                 type="button"
                 onClick={() => externalPlaybackResult && onOpenExternal(externalPlaybackResult)}
@@ -481,7 +484,7 @@ export function ThumbnailPanel({
           // have to manually close the lightbox to find a way to stop or
           // retarget the cast.
           const hasCastSession = isCastSessionActive(chromecast.session);
-          if (!isPlaying && !hasCastSession) return null;
+          if (!playable || (!isPlaying && !hasCastSession)) return null;
           if (lightboxOpen && !hasCastSession) return null;
           return (
             <CastMenu

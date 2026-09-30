@@ -8,6 +8,7 @@ import {
   failureCause,
   fixPreferencesFrom,
   getDispatcharrView,
+  isDispatcharrPlaceholder,
   normalizeDispatcharrServer,
   parseDispatcharrIds,
   proposeFixOrder,
@@ -513,6 +514,8 @@ describe("dispatcharr helpers", () => {
     expect(empty?.streams).toEqual([]);
     expect(empty?.primary.index).toBe(1);
     expect(empty?.order).toEqual([]);
+    expect(isDispatcharrPlaceholder(placeholder)).toBe(true);
+    expect(isDispatcharrPlaceholder(streams[0])).toBe(false);
     // Find streams never offers the placeholder as a candidate.
     expect(empty && unlinkedStreams(results, empty)).toEqual([]);
     // Full scans cover the real stream only.
