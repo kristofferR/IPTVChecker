@@ -955,7 +955,7 @@ pub(crate) struct CandidateMatch {
     pub epg: bool,
     /// Name similarity with the channel, 0 to 100.
     pub similarity: u8,
-    /// Country tag from the stream name ("CH" in "CH: Sky Sport"), when it
+    /// Country tag from the stream name ("CH" in "CH: News One"), when it
     /// differs from every country the channel is known under. The same
     /// name in another country is often a different channel.
     pub other_country: Option<String>,
@@ -979,7 +979,7 @@ pub(crate) fn name_country(name: &str) -> Option<String> {
     })
 }
 
-/// Country of an EPG ID such as "SkySportF1.uk" or "Channel.uk@HD".
+/// Country of an EPG ID such as "NewsOne.uk" or "Channel.uk@HD".
 fn epg_country(epg_id: &str) -> Option<String> {
     let base = epg_id.split('@').next()?;
     let (_, suffix) = base.rsplit_once('.')?;
