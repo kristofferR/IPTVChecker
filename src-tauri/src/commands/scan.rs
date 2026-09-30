@@ -411,15 +411,14 @@ async fn compute_shared_url_result(
         std::time::Duration::from_secs_f64(ffprobe_timeout_secs.clamp(1.0, 300.0));
 
     let want_screenshot = !skip_screenshots && ffmpeg_ok && screenshots_dir.is_some();
-    // Checked again here, after the liveness check and diagnostics queue, so
-    // workers approved earlier cannot keep writing clips once space is gone.
-    let sample_clip_secs = sample_clip_secs.filter(|_| {
-        ffmpeg_ok
-            && screenshots_dir.is_some_and(|dir| {
-                disk::classify_space(std::path::Path::new(dir), low_space_threshold_gb)
-                    != disk::DiskSpaceTier::Critical
-            })
-    });
+    // Re-checked right before every clip write (after the liveness check,
+    // the diagnostics queue, screenshots, and retry backoff), so workers
+    // approved earlier cannot keep writing clips once space is critical.
+    let has_space_for_clip = |dir: &str| {
+        disk::classify_space(std::path::Path::new(dir), low_space_threshold_gb)
+            != disk::DiskSpaceTier::Critical
+    };
+    let sample_clip_secs = sample_clip_secs.filter(|_| ffmpeg_ok && screenshots_dir.is_some());
     let mut format_bitrate_kbps: Option<u32> = None;
 
     if (single_connection_mode || dispatcharr_single_pass) && ffmpeg_ok {
@@ -444,7 +443,8 @@ async fn compute_shared_url_result(
                 screenshot_file_name,
                 screenshot_format,
                 want_screenshot,
-                sample_clip_secs,
+                sample_clip_secs
+                    .filter(|_| screenshots_dir.is_some_and(|dir| has_space_for_clip(dir))),
                 profile_bitrate_flag,
                 diag_timeout,
                 cancel,
@@ -575,6 +575,7 @@ async fn compute_shared_url_result(
                         && want_screenshot
                         && !dispatcharr_single_pass
                         && !cancel.is_cancelled()
+                        && has_space_for_clip(dir)
                     {
                         shared.sample_clip = ffmpeg::capture_sample_clip(
                             app,
@@ -655,18 +656,20 @@ async fn compute_shared_url_result(
         let media_fut = async {
             let screenshot_result = screenshot_fut.await;
             let sample_clip = match (sample_clip_secs, screenshots_dir) {
-                (Some(secs), Some(dir)) if !cancel.is_cancelled() => ffmpeg::capture_sample_clip(
-                    app,
-                    &target_url,
-                    Some(channel_url),
-                    dir,
-                    screenshot_file_name,
-                    user_agent,
-                    secs,
-                    cancel,
-                )
-                .await
-                .ok(),
+                (Some(secs), Some(dir)) if !cancel.is_cancelled() && has_space_for_clip(dir) => {
+                    ffmpeg::capture_sample_clip(
+                        app,
+                        &target_url,
+                        Some(channel_url),
+                        dir,
+                        screenshot_file_name,
+                        user_agent,
+                        secs,
+                        cancel,
+                    )
+                    .await
+                    .ok()
+                }
                 _ => None,
             };
             (screenshot_result, sample_clip)
