@@ -194,6 +194,7 @@ struct SharedCheckContext<'a> {
     /// Media goes to the app cache, where a rescan's clip supersedes the
     /// channel's previous one. Custom folders hold the user's files.
     prune_superseded_clips: bool,
+    low_space_threshold_gb: f64,
 }
 
 async fn compute_shared_url_result(
@@ -225,6 +226,7 @@ async fn compute_shared_url_result(
         diagnostics_semaphore,
         single_connection_mode,
         prune_superseded_clips,
+        low_space_threshold_gb,
     } = ctx;
     let dispatcharr_single_pass = ffmpeg_ok && checker::is_dispatcharr_proxy_url(channel_url);
     let check_started_at = Instant::now();
@@ -408,7 +410,15 @@ async fn compute_shared_url_result(
         std::time::Duration::from_secs_f64(ffprobe_timeout_secs.clamp(1.0, 300.0));
 
     let want_screenshot = !skip_screenshots && ffmpeg_ok && screenshots_dir.is_some();
-    let sample_clip_secs = sample_clip_secs.filter(|_| ffmpeg_ok && screenshots_dir.is_some());
+    // Checked again here, after the liveness check and diagnostics queue, so
+    // workers approved earlier cannot keep writing clips once space is gone.
+    let sample_clip_secs = sample_clip_secs.filter(|_| {
+        ffmpeg_ok
+            && screenshots_dir.is_some_and(|dir| {
+                disk::classify_space(std::path::Path::new(dir), low_space_threshold_gb)
+                    != disk::DiskSpaceTier::Critical
+            })
+    });
     let mut format_bitrate_kbps: Option<u32> = None;
 
     if (single_connection_mode || dispatcharr_single_pass) && ffmpeg_ok {
@@ -2521,6 +2531,7 @@ async fn execute_scan_run(
                 diagnostics_semaphore: &diagnostics_semaphore,
                 single_connection_mode,
                 prune_superseded_clips: !using_custom_screenshots_dir,
+                low_space_threshold_gb,
             };
             let shared_result = result_cell
                 .get_or_init(|| async {

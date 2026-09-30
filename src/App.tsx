@@ -1520,8 +1520,13 @@ export default function App() {
         if (castActive) {
           throw new Error("Stop casting to capture a sample from this playlist.");
         }
+        // The app cannot see an external player exit, so ask instead of
+        // refusing forever, matching the catch-up flows.
         if (externalPlaybackActive) {
-          throw new Error("Close the external player to capture a sample from this playlist.");
+          if (!window.confirm("Close the external player before capturing a sample. Continue?")) {
+            return;
+          }
+          getStore().setExternalPlaybackActive(false);
         }
         if (isArchiveVerificationBlockingPlayback()) {
           throw new Error("Wait for the catch-up test or recording to finish before capturing.");
