@@ -192,7 +192,9 @@ struct SharedCheckContext<'a> {
     diagnostics_semaphore: &'a Arc<Semaphore>,
     single_connection_mode: bool,
     /// Media goes to the app cache, where a rescan's clip supersedes the
-    /// channel's previous one. Custom folders hold the user's files.
+    /// channel's previous one. Custom folders hold the user's files, and a
+    /// partial rescan leaves unselected duplicate-URL rows pointing at the
+    /// old clip, so only full-scope scans prune.
     prune_superseded_clips: bool,
     low_space_threshold_gb: f64,
 }
@@ -2400,6 +2402,11 @@ async fn execute_scan_run(
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
     // Disk space tracking for screenshot pause
+    let prune_superseded_clips = !using_custom_screenshots_dir
+        && config
+            .selected_indices
+            .as_ref()
+            .is_none_or(|indices| indices.is_empty());
     let disk_guard = ScreenshotDiskGuard::new(
         using_custom_screenshots_dir,
         low_space_threshold_gb,
@@ -2530,7 +2537,7 @@ async fn execute_scan_run(
                 screenshot_format,
                 diagnostics_semaphore: &diagnostics_semaphore,
                 single_connection_mode,
-                prune_superseded_clips: !using_custom_screenshots_dir,
+                prune_superseded_clips,
                 low_space_threshold_gb,
             };
             let shared_result = result_cell
