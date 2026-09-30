@@ -484,7 +484,9 @@ export function ThumbnailPanel({
           // have to manually close the lightbox to find a way to stop or
           // retarget the cast.
           const hasCastSession = isCastSessionActive(chromecast.session);
-          if (!playable || (!isPlaying && !hasCastSession)) return null;
+          // An active cast keeps its Stop control; only starting one needs a
+          // playable row.
+          if (!hasCastSession && (!playable || !isPlaying)) return null;
           if (lightboxOpen && !hasCastSession) return null;
           return (
             <CastMenu
