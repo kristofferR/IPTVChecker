@@ -43,6 +43,7 @@ import {
   DISPATCHARR_STATUS_FILTERS,
   type DispatcharrStatusFilter,
   dispatcharrChannelRows,
+  expandDispatcharrSelection,
   filterDispatcharrPrimaries,
   getDispatcharrView,
   isDispatcharrPreview,
@@ -315,6 +316,14 @@ export const Toolbar = memo(function Toolbar({
     [dispatcharrView, completedResults],
   );
 
+  // A selected (collapsed) Dispatcharr channel exports all of its streams.
+  const exportSelectedIndices = useMemo(
+    () =>
+      dispatcharrView
+        ? expandDispatcharrSelection(dispatcharrView, selectedIndices)
+        : selectedIndices,
+    [dispatcharrView, selectedIndices],
+  );
   const exportContextRef = useRef({
     all: exportAllResults,
     filtered: filteredExportResults,
@@ -325,9 +334,9 @@ export const Toolbar = memo(function Toolbar({
     exportContextRef.current = {
       all: exportAllResults,
       filtered: filteredExportResults,
-      selectedIndices,
+      selectedIndices: exportSelectedIndices,
     };
-  }, [exportAllResults, filteredExportResults, selectedIndices]);
+  }, [exportAllResults, filteredExportResults, exportSelectedIndices]);
 
   useLayoutEffect(() => {
     if (!verifyMenuVisible) {
@@ -414,13 +423,13 @@ export const Toolbar = memo(function Toolbar({
 
   const exportScopeCounts = useMemo(() => {
     // Count what "selected" exports: selected rows still in the export set.
-    const selected = new Set(selectedIndices);
+    const selected = new Set(exportSelectedIndices);
     return {
       all: exportAllResults.length,
       filtered: filteredExportResults.length,
       selected: exportAllResults.filter((result) => selected.has(result.index)).length,
     };
-  }, [exportAllResults, filteredExportResults.length, selectedIndices]);
+  }, [exportAllResults, filteredExportResults.length, exportSelectedIndices]);
 
   // --- Derived values ---
   const useWindowDragRegion = platform !== "linux";

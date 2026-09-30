@@ -2548,7 +2548,22 @@ async fn execute_scan_run(
         // scan slot that probe needs.
         let (result_cell, duplicate_url) = {
             let mut cache = shared_url_results.lock().await;
-            match cache.entry(canonicalize_stream_url(&channel.url)) {
+            // Rows share a probe only within one provider lane, so a row of an
+            // unlimited account never probes for one with a connection limit.
+            let lane = account_limit
+                .map(|(account_id, _)| {
+                    format!(
+                        "{}|{}",
+                        crate::engine::dispatcharr::dispatcharr_server(&channel.extinf_line),
+                        account_id
+                    )
+                })
+                .unwrap_or_default();
+            match cache.entry(format!(
+                "{}\n{}",
+                canonicalize_stream_url(&channel.url),
+                lane
+            )) {
                 std::collections::hash_map::Entry::Occupied(entry) => {
                     (Arc::clone(entry.get()), true)
                 }
