@@ -1774,18 +1774,23 @@ async fn prepare_screenshots_dir(
                 .temp_dir()
                 .unwrap_or_else(|_| std::env::temp_dir());
             temp.join("iptv-checker-screenshots")
-                // Playlists can share a file name and filter; the source key
-                // keeps their scan folders, and post-scan sweeps, apart.
+                // The readable suffix drops punctuation, so filters like
+                // "News-HD" and "News HD" collide. Key the folder on the exact
+                // source and scope so scans, and post-scan sweeps, stay apart.
                 .join(format!(
                     "{}_{}_{}",
                     base_name,
                     scope_suffix,
-                    crate::commands::media::source_key(
+                    crate::commands::media::source_key(&format!(
+                        "{}\n{}\n{}\n{}",
                         config
                             .source_identity
                             .as_deref()
-                            .unwrap_or(&config.file_path)
-                    )
+                            .unwrap_or(&config.file_path),
+                        config.group_filter.as_deref().unwrap_or_default(),
+                        config.channel_search.as_deref().unwrap_or_default(),
+                        config.hide_vod_content
+                    ))
                 ))
                 .to_string_lossy()
                 .to_string()
