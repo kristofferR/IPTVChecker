@@ -159,7 +159,7 @@ pub(crate) fn source_identity_for_dispatcharr(
     api_key: Option<&str>,
 ) -> Result<String, AppError> {
     use crate::engine::dispatcharr::{
-        dispatcharr_source_key, normalize_dispatcharr_server, DispatcharrAuth,
+        dispatcharr_source_key, login_identity_label, normalize_dispatcharr_server, DispatcharrAuth,
     };
     let base = normalize_dispatcharr_server(server)?;
     fn clean(value: Option<&str>) -> Option<&str> {
@@ -168,7 +168,7 @@ pub(crate) fn source_identity_for_dispatcharr(
     // A key that was not remembered is only known to be "some API key".
     let label = match (clean(api_key), clean(username)) {
         (Some(key), _) => DispatcharrAuth::ApiKey(key.to_string()).identity_label(),
-        (None, Some(username)) => username.to_string(),
+        (None, Some(username)) => login_identity_label(username),
         (None, None) => "api-key".to_string(),
     };
     Ok(dispatcharr_source_key(&base, &label))

@@ -55,7 +55,11 @@ pub(crate) const ATTR_EMPTY: &str = "x-dispatcharr-empty";
 
 /// A channel's no-streams placeholder row (see `ATTR_EMPTY`).
 pub(crate) fn is_empty_channel_row(extinf_line: &str) -> bool {
+    // Cheap reject first; a title or stream name may still quote the marker.
     extinf_line.contains(ATTR_EMPTY)
+        && parse_extinf_attributes(extinf_line)
+            .into_iter()
+            .any(|(key, value)| key == ATTR_EMPTY && value == "1")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,13 +94,18 @@ impl DispatcharrAuth {
     }
 
     /// Account part of the source identity. API keys contribute a short
-    /// fingerprint, so two keys on one server stay separate sources.
+    /// fingerprint, so two keys on one server stay separate sources. Logins
+    /// get their own prefix, so no username can pass for a key.
     pub(crate) fn identity_label(&self) -> String {
         match self {
             Self::ApiKey(key) => format!("api-key:{}", api_key_fingerprint(key)),
-            Self::Login { username, .. } => username.clone(),
+            Self::Login { username, .. } => login_identity_label(username),
         }
     }
+}
+
+pub(crate) fn login_identity_label(username: &str) -> String {
+    format!("user:{username}")
 }
 
 /// Short, non-reversible fingerprint of an API key (first 12 hex digits of
@@ -1633,6 +1642,17 @@ mod tests {
         assert_eq!(key("one"), key("one"));
         assert_ne!(key("one"), key("two"));
         assert!(!key("one").contains("one"));
+        let login = |username: &str| {
+            build_dispatcharr_source_key(
+                &base,
+                &DispatcharrAuth::Login {
+                    username: username.into(),
+                    password: "secret".into(),
+                },
+            )
+        };
+        let fingerprint = format!("api-key:{}", api_key_fingerprint("one"));
+        assert_ne!(login(&fingerprint), key("one"));
     }
 
     #[test]
@@ -1724,6 +1744,10 @@ mod tests {
             30
         );
         assert_eq!(row.url, "http://dvr.example:9191/proxy/ts/stream/uuid-30");
+        // A title that merely quotes the marker is a normal row.
+        assert!(!is_empty_channel_row(
+            "#EXTINF:-1 x-dispatcharr-stream-id=\"4\",Test x-dispatcharr-empty=\"1\""
+        ));
     }
 
     #[test]

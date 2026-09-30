@@ -121,6 +121,7 @@ describe("dispatcharr helpers", () => {
       added: false,
       empty: false,
       streamName: null,
+      server: null,
       channelStreams: null,
     });
     expect(parseDispatcharrIds('#EXTINF:-1 tvg-id="a",Plain')).toBeNull();
@@ -481,6 +482,24 @@ describe("dispatcharr helpers", () => {
     const [first] = channelRows(10, "News One", [{ id: 1 }]);
     const [second] = channelRows(10, "Other One", [{ id: 1 }], 1);
     expect(getDispatcharrView([first, { ...second, playlist: "other.m3u8" }], {})).toBeNull();
+  });
+
+  it("keeps an export spanning two servers a plain table", () => {
+    const withServer = (row: ChannelResult, server: string) => ({
+      ...row,
+      extinf_line: row.extinf_line.replace(
+        "#EXTINF:-1 ",
+        `#EXTINF:-1 x-dispatcharr-server="${server}" `,
+      ),
+    });
+    const [first] = channelRows(10, "News One", [{ id: 1 }]);
+    const [second] = channelRows(10, "Other One", [{ id: 2 }], 1);
+    const results = [
+      withServer(first, "http://dvr-a.example"),
+      withServer(second, "http://dvr-b.example"),
+    ];
+    expect(getDispatcharrView(results, {})).toBeNull();
+    expect(getDispatcharrView([results[0]], {})).not.toBeNull();
   });
 
   it("names a reopened export's channels without the per-stream suffix", () => {

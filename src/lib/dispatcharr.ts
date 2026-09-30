@@ -25,6 +25,8 @@ export interface DispatcharrStreamRef {
   empty: boolean;
   /** The provider stream's own name (rows are titled with the channel). */
   streamName: string | null;
+  /** The Dispatcharr server the row came from; ids are only unique there. */
+  server: string | null;
   /** The channel's complete stream order at load, including streams that
    *  have no row (no URL). */
   channelStreams: number[] | null;
@@ -165,6 +167,7 @@ export function parseDispatcharrIds(extinfLine: string): DispatcharrStreamRef | 
     added: extinfAttribute(extinfLine, ADDED_ATTR) === "1",
     empty: extinfAttribute(extinfLine, "x-dispatcharr-empty") === "1",
     streamName: extinfAttribute(extinfLine, "x-dispatcharr-stream-name") || null,
+    server: extinfAttribute(extinfLine, "x-dispatcharr-server") || null,
     channelStreams:
       extinfAttribute(extinfLine, "x-dispatcharr-channel-streams")
         ?.split(",")
@@ -363,12 +366,13 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
     }
   >();
   const playlist = results[0]?.playlist;
+  const server = results[0] && cachedIds(results[0].extinf_line)?.server;
   for (const result of results) {
     const ref = cachedIds(result.extinf_line);
     // Channel-first mode needs one pure Dispatcharr source: a mixed playlist
     // (a folder, or an export merged with other rows) stays a plain table,
     // and channel ids are only unique within one server.
-    if (!ref || result.playlist !== playlist) return null;
+    if (!ref || result.playlist !== playlist || ref.server !== server) return null;
     let channel = byChannel.get(ref.channelId);
     if (!channel) {
       channel = { name: exportedChannelName(result.name, ref), group: result.group, streams: [] };
