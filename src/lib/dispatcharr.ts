@@ -343,11 +343,13 @@ export function findDownAccounts(entries: DispatcharrStreamEntry[]): DownAccount
  *  one stays whole. */
 function exportedChannelName(name: string, ref: DispatcharrStreamRef): string {
   const marker = ` [${ref.streamOrder + 1}/${ref.streamCount}] `;
-  const at = name.indexOf(marker);
-  if (at < 0) return name;
-  const channelName = name.slice(0, at);
-  const streamName = name.slice(at + marker.length);
-  return streamName === (ref.streamName ?? channelName) ? channelName : name;
+  if (ref.streamName !== null) {
+    const suffix = `${marker}${ref.streamName}`;
+    return name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
+  }
+  // Without a stream name the export repeats the channel's: "X [n/m] X".
+  const channelName = name.slice(0, (name.length - marker.length) / 2);
+  return name === `${channelName}${marker}${channelName}` ? channelName : name;
 }
 
 function buildView(results: ChannelResult[], orders: DispatcharrOrders): DispatcharrView | null {

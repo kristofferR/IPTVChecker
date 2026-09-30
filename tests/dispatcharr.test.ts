@@ -496,6 +496,16 @@ describe("dispatcharr helpers", () => {
     expect(getDispatcharrView(results, {})?.byChannelId.get(10)?.name).toBe("Match [1/2] East");
   });
 
+  it("strips only the trailing export suffix from a name that contains the same marker", () => {
+    const results = channelRows(10, "Match [1/2] East", [{ id: 1 }, { id: 2 }]).map(
+      (row, position) => ({
+        ...row,
+        name: `Match [1/2] East [${position + 1}/2] Feed ${position + 1}`,
+      }),
+    );
+    expect(getDispatcharrView(results, {})?.byChannelId.get(10)?.name).toBe("Match [1/2] East");
+  });
+
   it("shows a channel with no streams through its placeholder, never scanning it", () => {
     const streams = channelRows(10, "News One", [{ id: 1 }]);
     const line = extinf(30, 0, 0, 0, "Empty One");
