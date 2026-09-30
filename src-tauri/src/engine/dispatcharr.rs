@@ -103,6 +103,45 @@ pub(crate) fn api_key_fingerprint(key: &str) -> String {
         .collect()
 }
 
+/// Where a pasted Dispatcharr endpoint ("/proxy/ts/...", "/output/m3u",
+/// "/api/channels/...", or a bare trailing "/api") starts in a URL path. A
+/// segment such as "/api/" that is not followed by a Dispatcharr endpoint
+/// belongs to a reverse-proxy prefix ("/api/dispatcharr") and is kept.
+fn dispatcharr_endpoint_start(path: &str) -> Option<usize> {
+    const ENDPOINTS: &[(&str, &[&str])] = &[
+        ("/proxy/", &["ts/", "hls/", "vod/"]),
+        ("/output/", &["m3u", "epg"]),
+        (
+            "/api/",
+            &[
+                "channels/",
+                "m3u/",
+                "epg/",
+                "accounts/",
+                "core/",
+                "hdhr/",
+                "vod/",
+                "catchup/",
+                "connect/",
+                "plugins/",
+                "schema/",
+            ],
+        ),
+    ];
+    // Trailing slash so a path ending in a marker ("/dispatcharr/api") matches.
+    let lower = format!("{}/", path.to_ascii_lowercase());
+    let mut start = None;
+    for (marker, next) in ENDPOINTS {
+        for (at, _) in lower.match_indices(marker) {
+            let rest = &lower[at + marker.len()..];
+            if rest.is_empty() || next.iter().any(|segment| rest.starts_with(segment)) {
+                start = start.max(Some(at));
+            }
+        }
+    }
+    start
+}
+
 /// Normalize a Dispatcharr base URL. Accepts pasted proxy/output/API URLs and
 /// keeps any reverse-proxy path prefix in front of them.
 pub(crate) fn normalize_dispatcharr_server(server: &str) -> Result<Url, AppError> {
@@ -118,15 +157,7 @@ pub(crate) fn normalize_dispatcharr_server(server: &str) -> Result<Url, AppError
         ));
     }
     let path = parsed.path().to_string();
-    // Trailing slash so a path ending in a marker ("/dispatcharr/api") matches.
-    // The last marker is Dispatcharr's own; earlier ones belong to a
-    // reverse-proxy prefix such as "/api/dispatcharr".
-    let lower = format!("{}/", path.to_ascii_lowercase());
-    let prefix_end = ["/proxy/", "/output/", "/api/"]
-        .iter()
-        .filter_map(|marker| lower.rfind(marker))
-        .max()
-        .unwrap_or(path.len());
+    let prefix_end = dispatcharr_endpoint_start(&path).unwrap_or(path.len());
     let prefix = path[..prefix_end.min(path.len())].trim_end_matches('/');
     parsed.set_path(if prefix.is_empty() { "/" } else { prefix });
     parsed.set_query(None);
@@ -1513,6 +1544,10 @@ mod tests {
             ),
             (
                 "https://example.com/api/dispatcharr/proxy/ts/stream/abc",
+                "https://example.com/api/dispatcharr",
+            ),
+            (
+                "https://example.com/api/dispatcharr",
                 "https://example.com/api/dispatcharr",
             ),
         ];

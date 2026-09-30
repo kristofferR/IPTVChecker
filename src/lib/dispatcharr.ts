@@ -28,6 +28,46 @@ export interface DispatcharrStreamRef {
   channelStreams: number[] | null;
 }
 
+/** Where a pasted Dispatcharr endpoint ("/proxy/ts/...", "/output/m3u",
+ *  "/api/channels/...", or a bare trailing "/api") starts in a URL path. A
+ *  segment such as "/api/" not followed by a Dispatcharr endpoint belongs to
+ *  a reverse-proxy prefix ("/api/dispatcharr") and is kept. Mirrors the
+ *  backend. */
+function dispatcharrEndpointStart(path: string): number | null {
+  const endpoints: Array<[string, string[]]> = [
+    ["/proxy/", ["ts/", "hls/", "vod/"]],
+    ["/output/", ["m3u", "epg"]],
+    [
+      "/api/",
+      [
+        "channels/",
+        "m3u/",
+        "epg/",
+        "accounts/",
+        "core/",
+        "hdhr/",
+        "vod/",
+        "catchup/",
+        "connect/",
+        "plugins/",
+        "schema/",
+      ],
+    ],
+  ];
+  // Trailing slash so a path ending in a marker ("/dispatcharr/api") matches.
+  const lower = `${path.toLowerCase()}/`;
+  let start: number | null = null;
+  for (const [marker, next] of endpoints) {
+    for (let at = lower.indexOf(marker); at >= 0; at = lower.indexOf(marker, at + 1)) {
+      const rest = lower.slice(at + marker.length);
+      if ((rest === "" || next.some((segment) => rest.startsWith(segment))) && at > (start ?? -1)) {
+        start = at;
+      }
+    }
+  }
+  return start;
+}
+
 /** Base URL of a Dispatcharr instance, accepting pasted proxy, output, or API
  *  URLs and keeping any reverse-proxy path prefix. */
 export function normalizeDispatcharrServer(value: string): string | null {
@@ -35,14 +75,8 @@ export function normalizeDispatcharrServer(value: string): string | null {
     const parsed = new URL(value.trim());
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
     if (!parsed.hostname || parsed.username || parsed.password) return null;
-    // Trailing slash so a path ending in a marker ("/dispatcharr/api") matches.
-    // The last marker is Dispatcharr's own; earlier ones belong to a
-    // reverse-proxy prefix such as "/api/dispatcharr".
-    const lower = `${parsed.pathname.toLowerCase()}/`;
-    const cut = Math.max(
-      ...["/proxy/", "/output/", "/api/"].map((marker) => lower.lastIndexOf(marker)),
-    );
-    const prefix = parsed.pathname.slice(0, cut >= 0 ? cut : undefined);
+    const cut = dispatcharrEndpointStart(parsed.pathname);
+    const prefix = parsed.pathname.slice(0, cut ?? undefined);
     return `${parsed.origin}${prefix.replace(/\/+$/, "")}`;
   } catch {
     return null;
