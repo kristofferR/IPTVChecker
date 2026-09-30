@@ -1075,6 +1075,12 @@ export default function App() {
             ? explicitSelection.filter((index) => linkedSet.has(index))
             : explicitSelection
           : (linked ?? []);
+      if (linked && linked.length === 0 && explicitSelection.length === 0) {
+        // Only streams linked from Find streams are left; the source has no
+        // row to scan them from until it is reloaded.
+        getStore().setMenuInfo("Reload the source to scan streams linked from Find streams.");
+        return false;
+      }
       if (explicitSelection.length > 0 && effectiveSelection.length === 0) {
         // Everything selected was unlinked; an empty selection must not
         // widen into a scan of the whole playlist.

@@ -732,7 +732,10 @@ fn parse_playlist_reader<R: BufRead>(
         xtream_max_connections: None,
         xtream_account_info: None,
         dispatcharr_connection: None,
-        dispatcharr_limited_accounts: false,
+        // Reopened Dispatcharr exports keep their account limits.
+        dispatcharr_limited_accounts: channels.iter().any(|channel| {
+            crate::engine::dispatcharr::dispatcharr_connection_limit(&channel.extinf_line).is_some()
+        }),
         total_channels: channels.len(),
         live_count,
         movie_count,
@@ -912,7 +915,10 @@ fn parse_playlist_directory(
         xtream_max_connections: None,
         xtream_account_info: None,
         dispatcharr_connection: None,
-        dispatcharr_limited_accounts: false,
+        // Reopened Dispatcharr exports keep their account limits.
+        dispatcharr_limited_accounts: channels.iter().any(|channel| {
+            crate::engine::dispatcharr::dispatcharr_connection_limit(&channel.extinf_line).is_some()
+        }),
         total_channels: channels.len(),
         live_count,
         movie_count,

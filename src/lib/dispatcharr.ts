@@ -78,6 +78,7 @@ export function addedStreamRow(
   return {
     ...result,
     index,
+    playlist: channel.primary.playlist,
     name: channel.name,
     group: channel.group,
     extinf_line: `${result.extinf_line.slice(0, cut)} ${ADDED_ATTR}="1"${result.extinf_line.slice(cut)}`,
@@ -287,11 +288,13 @@ function buildView(results: ChannelResult[], orders: DispatcharrOrders): Dispatc
     number,
     { name: string; group: string; streams: DispatcharrStreamEntry[] }
   >();
+  const playlist = results[0]?.playlist;
   for (const result of results) {
     const ref = cachedIds(result.extinf_line);
-    // Channel-first mode needs a pure Dispatcharr source; a mixed playlist
-    // (a folder, or an export merged with other rows) stays a plain table.
-    if (!ref) return null;
+    // Channel-first mode needs one pure Dispatcharr source: a mixed playlist
+    // (a folder, or an export merged with other rows) stays a plain table,
+    // and channel ids are only unique within one server.
+    if (!ref || result.playlist !== playlist) return null;
     let channel = byChannel.get(ref.channelId);
     if (!channel) {
       channel = { name: result.name, group: result.group, streams: [] };

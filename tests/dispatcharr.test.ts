@@ -460,4 +460,10 @@ describe("dispatcharr helpers", () => {
     });
     expect(getDispatcharrView(results, {})?.downAccounts).toEqual([]);
   });
+
+  it("keeps exports from different sources out of channel-first mode", () => {
+    const [first] = channelRows(10, "News One", [{ id: 1 }]);
+    const [second] = channelRows(10, "Other One", [{ id: 1 }], 1);
+    expect(getDispatcharrView([first, { ...second, playlist: "other.m3u8" }], {})).toBeNull();
+  });
 });

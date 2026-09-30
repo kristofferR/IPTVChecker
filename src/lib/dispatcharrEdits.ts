@@ -187,6 +187,27 @@ export function appendStreamRows(rows: ChannelResult[]): void {
   });
 }
 
+/** Put back rows linked from Find streams after the results were rebuilt
+ *  from the source (a source filter or Hide VOD), for channels still shown. */
+export function restoreAddedRows(): void {
+  const { flatResults, dispatcharrAddedRows } = useAppStore.getState();
+  if (dispatcharrAddedRows.length === 0) return;
+  const channels = new Set<number>();
+  const streams = new Set<string>();
+  for (const row of flatResults) {
+    const ref = parseDispatcharrIds(row.extinf_line);
+    if (!ref) continue;
+    channels.add(ref.channelId);
+    streams.add(`${ref.channelId}:${ref.streamId}`);
+  }
+  appendStreamRows(
+    dispatcharrAddedRows.filter((row) => {
+      const ref = parseDispatcharrIds(row.extinf_line);
+      return ref && channels.has(ref.channelId) && !streams.has(`${ref.channelId}:${ref.streamId}`);
+    }),
+  );
+}
+
 /** Link found provider streams to a channel, first or last in its order.
  *  Streams without a loaded row get one, so the channel shows them now. */
 export async function linkStreams(

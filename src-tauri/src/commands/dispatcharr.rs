@@ -117,6 +117,18 @@ pub async fn dispatcharr_push_stream_stats(
     connection: String,
     results: Vec<ChannelResult>,
 ) -> Result<DispatcharrStatsPushReport, AppError> {
+    // One push per connection at a time, across windows, so an older scan's
+    // writes never land after a newer one's.
+    let push_lock = {
+        type Locks = HashMap<String, Arc<tokio::sync::Mutex<()>>>;
+        static LOCKS: std::sync::OnceLock<std::sync::Mutex<Locks>> = std::sync::OnceLock::new();
+        let mut locks = LOCKS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Arc::clone(locks.entry(connection.clone()).or_default())
+    };
+    let _pushing = push_lock.lock().await;
     let client = resolve_session(&app, &source_identity, &connection).await?;
     let (updates, skipped) = collect_stream_stats(&results);
     let mut report = DispatcharrStatsPushReport {
