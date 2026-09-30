@@ -1166,6 +1166,18 @@ pub(crate) fn account_viewers(connection: &str) -> Option<Arc<AccountViewers>> {
     Some(Arc::clone(entry))
 }
 
+/// An async lock per key, shared across windows. Waiters are served in the
+/// order they asked, so the latest caller always runs last.
+pub(crate) fn keyed_lock(key: String) -> Arc<tokio::sync::Mutex<()>> {
+    type Locks = HashMap<String, Arc<tokio::sync::Mutex<()>>>;
+    static LOCKS: OnceLock<std::sync::Mutex<Locks>> = OnceLock::new();
+    let mut locks = LOCKS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    Arc::clone(locks.entry(key).or_default())
+}
+
 pub(crate) fn register_session(source_identity: &str, client: Arc<DispatcharrClient>) {
     if let Ok(mut sessions) = sessions().lock() {
         sessions.insert(source_identity.to_string(), client);

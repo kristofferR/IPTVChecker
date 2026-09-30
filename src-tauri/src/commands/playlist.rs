@@ -1033,6 +1033,11 @@ pub(crate) async fn open_playlist_dispatcharr_inner(
     )?;
     let source_key = dispatcharr::build_dispatcharr_source_key(&base, &auth);
     let source_identity = source_identity_override.unwrap_or_else(|| source_key.clone());
+    // Overlapping loads of one source (a double Reload) run in turn, so the
+    // newest one publishes the cache and session last.
+    let _loading = dispatcharr::keyed_lock(format!("load:{source_key}"))
+        .lock_owned()
+        .await;
     let client = Arc::new(dispatcharr::DispatcharrClient::new(
         base.clone(),
         auth,

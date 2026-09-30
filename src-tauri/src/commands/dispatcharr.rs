@@ -4,7 +4,7 @@
 //! aborts the rest.
 
 use crate::engine::dispatcharr::{
-    build_dispatcharr_source_key, build_m3u, dispatcharr_ids_from_extinf, get_session,
+    build_dispatcharr_source_key, build_m3u, dispatcharr_ids_from_extinf, get_session, keyed_lock,
     normalize_dispatcharr_server, register_session, stats_stuck, stream_stats_from_result,
     CandidateMatch, DispatcharrAuth, DispatcharrChannel, DispatcharrClient,
 };
@@ -119,16 +119,7 @@ pub async fn dispatcharr_push_stream_stats(
 ) -> Result<DispatcharrStatsPushReport, AppError> {
     // One push per connection at a time, across windows, so an older scan's
     // writes never land after a newer one's.
-    let push_lock = {
-        type Locks = HashMap<String, Arc<tokio::sync::Mutex<()>>>;
-        static LOCKS: std::sync::OnceLock<std::sync::Mutex<Locks>> = std::sync::OnceLock::new();
-        let mut locks = LOCKS
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        Arc::clone(locks.entry(connection.clone()).or_default())
-    };
-    let _pushing = push_lock.lock().await;
+    let _pushing = keyed_lock(format!("push:{connection}")).lock_owned().await;
     let client = resolve_session(&app, &source_identity, &connection).await?;
     let (updates, skipped) = collect_stream_stats(&results);
     let mut report = DispatcharrStatsPushReport {
@@ -222,20 +213,9 @@ pub async fn dispatcharr_set_channel_streams(
     let client = resolve_session(&app, &source_identity, &connection).await?;
     // Check and write as one step per channel, across windows: an edit made
     // meanwhile (here or in Dispatcharr) is refused, never overwritten.
-    let channel_lock = {
-        type Locks = HashMap<String, Arc<tokio::sync::Mutex<()>>>;
-        static LOCKS: std::sync::OnceLock<std::sync::Mutex<Locks>> = std::sync::OnceLock::new();
-        let mut locks = LOCKS
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        Arc::clone(
-            locks
-                .entry(format!("{}#{}", connection, channel_id))
-                .or_default(),
-        )
-    };
-    let _writing = channel_lock.lock().await;
+    let _writing = keyed_lock(format!("channel:{connection}#{channel_id}"))
+        .lock_owned()
+        .await;
     if let Some(expected) = expected {
         let current = client.fetch_channel(channel_id).await?.ok_or_else(|| {
             AppError::Other("Channel no longer exists in Dispatcharr".to_string())
