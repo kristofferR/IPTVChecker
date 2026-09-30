@@ -2734,12 +2734,19 @@ async fn execute_scan_run(
                         // A probe refused while a viewer holds the account
                         // says nothing about the stream: probe again once a
                         // connection is free.
-                        if let (Ok((shared, _)), Some(viewers), Some((account_id, _))) =
-                            (&outcome, &viewers, account_limit)
+                        if let (
+                            Ok((shared, _)),
+                            Some(viewers),
+                            Some((account_id, limit)),
+                            Some(account),
+                        ) = (&outcome, &viewers, account_limit, &account_semaphore)
                         {
+                            // Only when viewers filled the account: this probe's
+                            // own slot is still held, so it counts in `ours`.
+                            let ours = limit.saturating_sub(account.available_permits());
                             if shared.status == ChannelStatus::Dead
                                 && busy_retries < BUSY_ACCOUNT_RETRIES
-                                && viewers.on_account(account_id, true).await > 0
+                                && ours + viewers.on_account(account_id, true).await > limit
                             {
                                 busy_retries += 1;
                                 continue;
