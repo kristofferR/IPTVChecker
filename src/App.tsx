@@ -1497,12 +1497,25 @@ export default function App() {
 
   const handleCaptureSample = useCallback(
     async (result: ChannelResult) => {
-      const { playlist: playlistAtStart, playIntentActive, castActive } = getStore();
+      const {
+        playlist: playlistAtStart,
+        playIntentActive,
+        castActive,
+        externalPlaybackActive,
+        sampleCaptureActive,
+      } = getStore();
+      // One capture at a time: the shared flag gates scans and playback.
+      if (sampleCaptureActive) {
+        throw new Error("Another sample is being captured.");
+      }
       // Single-connection providers reject a second stream, so the capture
       // would fail or kick the viewer.
       if (isSingleConnectionPlaylist(playlistAtStart)) {
         if (castActive) {
           throw new Error("Stop casting to capture a sample from this playlist.");
+        }
+        if (externalPlaybackActive) {
+          throw new Error("Close the external player to capture a sample from this playlist.");
         }
         if (playIntentActive) handleStopPlayer();
       }
