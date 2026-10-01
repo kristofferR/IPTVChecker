@@ -729,7 +729,6 @@ export default {
       language: {
         label: "Langue",
         description: "Les modifications s'appliquent après un redémarrage.",
-        system: "Système",
         restart: "Redémarrer pour appliquer",
       },
       theme: {
@@ -1830,5 +1829,14 @@ export default {
     clear: "Effacer le journal",
     entriesLabel: "Entrées du journal",
     scrollToBottom: "Défiler jusqu'en bas",
+  },
+  languagePrompt: {
+    available: "IPTV Checker est disponible en français.",
+    switchTo: "Passer en français",
+    systemLanguage:
+      "La langue de votre système est {language}. Passer IPTV Checker dans cette langue ?",
+    keepEnglish: "Garder l'anglais",
+    otherLanguage: "Autre langue",
+    changeLater: "Vous pourrez changer cela plus tard dans les Paramètres.",
   },
 } satisfies LocaleTranslation;

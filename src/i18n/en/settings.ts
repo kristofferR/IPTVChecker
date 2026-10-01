@@ -17,7 +17,6 @@ export default {
     language: {
       label: "Language",
       description: "Changes apply after a restart.",
-      system: "System",
       restart: "Restart to apply",
     },
     theme: {

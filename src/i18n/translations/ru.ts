@@ -753,7 +753,6 @@ export default {
       language: {
         label: "Язык",
         description: "Изменения вступят в силу после перезапуска.",
-        system: "Системный",
         restart: "Перезапустить для применения",
       },
       theme: {
@@ -1959,5 +1958,13 @@ export default {
     clear: "Очистить журнал",
     entriesLabel: "Записи журнала",
     scrollToBottom: "Прокрутить вниз",
+  },
+  languagePrompt: {
+    available: "IPTV Checker доступен на русском.",
+    switchTo: "Переключить на русский",
+    systemLanguage: "Язык системы: {language}. Переключить IPTV Checker на него?",
+    keepEnglish: "Оставить английский",
+    otherLanguage: "Другой язык",
+    changeLater: "Это можно изменить позже в настройках.",
   },
 } satisfies LocaleTranslation;

@@ -752,7 +752,6 @@ export default {
       language: {
         label: "Мова",
         description: "Зміни набудуть чинності після перезапуску.",
-        system: "Системна",
         restart: "Перезапустити, щоб застосувати",
       },
       theme: {
@@ -1958,5 +1957,13 @@ export default {
     clear: "Очистити журнал",
     entriesLabel: "Записи журналу",
     scrollToBottom: "Прокрутити вниз",
+  },
+  languagePrompt: {
+    available: "IPTV Checker доступний українською.",
+    switchTo: "Перейти на українську",
+    systemLanguage: "Мова системи: {language}. Перемкнути IPTV Checker на неї?",
+    keepEnglish: "Залишити англійську",
+    otherLanguage: "Інша мова",
+    changeLater: "Це можна змінити пізніше в налаштуваннях.",
   },
 } satisfies LocaleTranslation;

@@ -654,7 +654,6 @@ export default {
       language: {
         label: "Bahasa",
         description: "Perubahan berlaku setelah aplikasi dimulai ulang.",
-        system: "Sistem",
         restart: "Mulai ulang untuk menerapkan",
       },
       theme: {
@@ -1617,5 +1616,13 @@ export default {
     clear: "Hapus log",
     entriesLabel: "Entri log",
     scrollToBottom: "Gulir ke bawah",
+  },
+  languagePrompt: {
+    available: "IPTV Checker tersedia dalam bahasa Indonesia.",
+    switchTo: "Beralih ke bahasa Indonesia",
+    systemLanguage: "Bahasa sistem Anda adalah {language}. Ubah IPTV Checker ke bahasa ini?",
+    keepEnglish: "Tetap bahasa Inggris",
+    otherLanguage: "Bahasa lain",
+    changeLater: "Anda dapat mengubahnya nanti di Pengaturan.",
   },
 } satisfies LocaleTranslation;

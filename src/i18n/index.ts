@@ -53,7 +53,10 @@ const english = flatten(en, new Map());
 let messages = english;
 let locale: LocaleCode = "en";
 let formatLocale = "en";
-let launchLanguage: string | null = null;
+let suggestion: LanguageSuggestion | null = null;
+
+/** The system language offered at first start, with its pitch in that language. */
+export type LanguageSuggestion = { code: LocaleCode; available: string; switchTo: string };
 let pluralRules = new Intl.PluralRules("en");
 let countFormat = new Intl.NumberFormat("en");
 
@@ -80,8 +83,16 @@ function pickFormatLocale(code: LocaleCode, system: string | null): string {
  * Loads the launch locale. Call once before the first render; the language
  * stays fixed for the life of the window (changes apply after a restart).
  */
-export async function initI18n({ locale: code, preference, system }: UiLocale) {
-  launchLanguage = preference;
+export async function initI18n({ locale: code, suggested, system }: UiLocale) {
+  if (suggested && isLocaleCode(suggested)) {
+    const { default: offered } = await LOCALES[suggested].load();
+    const pitch = flatten(offered, new Map(english));
+    suggestion = {
+      code: suggested,
+      available: pitch.get("languagePrompt.available") as string,
+      switchTo: pitch.get("languagePrompt.switchTo") as string,
+    };
+  }
   if (!isLocaleCode(code)) return;
   const { default: translation } = await LOCALES[code].load();
   messages = flatten(translation, new Map(english));
@@ -97,9 +108,9 @@ export function getLocale(): LocaleCode {
   return locale;
 }
 
-/** The `language` setting this process launched with; null follows the system. */
-export function getLaunchLanguage(): string | null {
-  return launchLanguage;
+/** Set when the system language is supported and no language has been chosen yet. */
+export function getLanguageSuggestion(): LanguageSuggestion | null {
+  return suggestion;
 }
 
 /** The locale for `Intl` date, time and number formatting. */

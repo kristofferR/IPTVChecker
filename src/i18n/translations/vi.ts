@@ -638,7 +638,6 @@ export default {
       language: {
         label: "Ngôn ngữ",
         description: "Thay đổi có hiệu lực sau khi khởi động lại.",
-        system: "Theo hệ thống",
         restart: "Khởi động lại để áp dụng",
       },
       theme: {
@@ -1601,5 +1600,14 @@ export default {
     clear: "Xóa nhật ký",
     entriesLabel: "Mục nhật ký",
     scrollToBottom: "Cuộn xuống cuối",
+  },
+  languagePrompt: {
+    available: "IPTV Checker đã có bản tiếng Việt.",
+    switchTo: "Chuyển sang tiếng Việt",
+    systemLanguage:
+      "Ngôn ngữ hệ thống của bạn là {language}. Chuyển IPTV Checker sang ngôn ngữ này?",
+    keepEnglish: "Giữ tiếng Anh",
+    otherLanguage: "Ngôn ngữ khác",
+    changeLater: "Bạn có thể đổi lại sau trong Cài đặt.",
   },
 } satisfies LocaleTranslation;

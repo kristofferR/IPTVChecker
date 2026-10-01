@@ -9,6 +9,7 @@ import filters from "./filters";
 import format from "./format";
 import guide from "./guide";
 import history from "./history";
+import languagePrompt from "./languagePrompt";
 import log from "./log";
 import player from "./player";
 import reasons from "./reasons";
@@ -47,4 +48,5 @@ export default {
   cast,
   dispatcharr,
   log,
+  languagePrompt,
 } as const;

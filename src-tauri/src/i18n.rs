@@ -1,8 +1,8 @@
 //! Native UI language: menus, tray, dialogs and notifications.
 //!
-//! The language is resolved once per launch from the `language` setting or the
-//! system locale; changing it applies after a restart. The webview loads the
-//! same locale through `get_ui_locale`, so both halves always agree.
+//! The language comes from the `language` setting once per launch (English
+//! until the user picks one); changing it applies after a restart. The webview
+//! loads the same locale through `get_ui_locale`, so both halves always agree.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -36,8 +36,8 @@ fn catalog_source(locale: &str) -> Option<&'static str> {
 #[derive(Debug, Clone, Serialize)]
 pub struct UiLocale {
     pub locale: &'static str,
-    /// The `language` setting at launch, so the UI can tell a restart is pending.
-    pub preference: Option<String>,
+    /// A supported system language to offer when none has been chosen yet.
+    pub suggested: Option<&'static str>,
     /// The system's preferred locale, for regional date and number formats.
     pub system: Option<String>,
 }
@@ -61,11 +61,15 @@ fn launch() -> &'static Launch {
 }
 
 fn start(preference: Option<String>) -> Launch {
-    let locale = resolve(preference.as_deref(), sys_locale::get_locales());
+    let locale = preference.as_deref().and_then(match_tag).unwrap_or("en");
+    let suggested = preference
+        .is_none()
+        .then(|| suggest(sys_locale::get_locales()))
+        .flatten();
     Launch {
         ui: UiLocale {
             locale,
-            preference,
+            suggested,
             system: sys_locale::get_locale(),
         },
         messages: parse(locale),
@@ -117,11 +121,12 @@ pub fn text_with(key: &str, params: &[(&str, &str)]) -> String {
     })
 }
 
-fn resolve(preference: Option<&str>, system: impl IntoIterator<Item = String>) -> &'static str {
-    preference
-        .and_then(match_tag)
-        .or_else(|| system.into_iter().find_map(|tag| match_tag(&tag)))
-        .unwrap_or("en")
+/// The first supported system language, unless that is English already.
+fn suggest(system: impl IntoIterator<Item = String>) -> Option<&'static str> {
+    system
+        .into_iter()
+        .find_map(|tag| match_tag(&tag))
+        .filter(|locale| *locale != "en")
 }
 
 /// Maps a BCP 47 or POSIX locale (`pt_BR.UTF-8`, `zh-Hans-CN`) to a supported tag.
@@ -163,14 +168,10 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_to_english() {
-        assert_eq!(resolve(None, system(&["xx-YY", "C"])), "en");
-        assert_eq!(resolve(Some("xx"), Vec::new()), "en");
-    }
-
-    #[test]
-    fn preference_wins_over_system() {
-        assert_eq!(resolve(Some("en"), system(&["xx"])), "en");
+    fn suggests_supported_non_english_system_languages() {
+        assert_eq!(suggest(system(&["xx-YY", "C"])), None);
+        assert_eq!(suggest(system(&["en-US", "de-DE"])), None);
+        assert_eq!(suggest(system(&["nb-NO", "de-DE"])), Some("de"));
     }
 
     #[test]
@@ -200,6 +201,6 @@ mod tests {
         assert_eq!(match_tag("zh-Hans-CN"), Some("zh-CN"));
         assert_eq!(match_tag("zh-TW"), None);
         assert_eq!(match_tag("zh-Hant"), None);
-        assert_eq!(resolve(None, system(&["zh-HK", "uk-UA"])), "uk");
+        assert_eq!(suggest(system(&["zh-HK", "uk-UA"])), Some("uk"));
     }
 }

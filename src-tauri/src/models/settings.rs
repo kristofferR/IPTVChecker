@@ -112,7 +112,8 @@ pub struct AppSettings {
     pub scan_notifications: bool,
     pub low_fps_threshold: f64,
     pub theme: ThemePreference,
-    /// UI language tag; `None` follows the system. Applies after a restart.
+    /// UI language tag; `None` until chosen (English, with a first-start offer
+    /// of the system language). Applies after a restart.
     pub language: Option<String>,
     /// Linux only: title bar visibility (auto / show / hide).
     pub title_bar: TitleBarPreference,

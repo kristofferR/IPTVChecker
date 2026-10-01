@@ -120,6 +120,9 @@ This is safe — it just rebuilds on next `bun tauri dev` or `bun tauri build`. 
   (they are persisted, exported and compared). Map new ones in
   `src/i18n/reasons.ts` and display them with `translateReason()`.
 - Format dates and numbers with `getFormatLocale()` or `formatCount()`.
+- The UI is English until a language is chosen. On first start, when the OS
+  language is supported, `LanguagePromptDialog` offers it (pitch in that
+  language, the rest in English); every choice is saved explicitly.
 - Adding a language: add it to `LOCALES` in `src/i18n/index.ts` and to
   `SUPPORTED`/`catalog_source` in `src-tauri/src/i18n.rs`. Arabic and Persian
   wait for right-to-left layout support.

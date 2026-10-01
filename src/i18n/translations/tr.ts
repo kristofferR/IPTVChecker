@@ -699,7 +699,6 @@ export default {
       language: {
         label: "Dil",
         description: "Değişiklikler yeniden başlatmadan sonra uygulanır.",
-        system: "Sistem",
         restart: "Uygulamak için yeniden başlat",
       },
       theme: {
@@ -1688,5 +1687,13 @@ export default {
     clear: "Günlüğü temizle",
     entriesLabel: "Günlük kayıtları",
     scrollToBottom: "En alta kaydır",
+  },
+  languagePrompt: {
+    available: "IPTV Checker Türkçe olarak kullanılabilir.",
+    switchTo: "Türkçeye geç",
+    systemLanguage: "Sistem diliniz: {language}. IPTV Checker bu dile geçirilsin mi?",
+    keepEnglish: "İngilizce kalsın",
+    otherLanguage: "Başka bir dil",
+    changeLater: "Bunu daha sonra Ayarlar'dan değiştirebilirsiniz.",
   },
 } satisfies LocaleTranslation;

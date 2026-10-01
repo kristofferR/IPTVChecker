@@ -412,7 +412,7 @@ export interface AppSettings {
   scan_notifications: boolean;
   low_fps_threshold: number;
   theme: ThemePreference;
-  /** UI language tag, or null to follow the system. Applies after a restart. */
+  /** UI language tag; null until chosen (English). Applies after a restart. */
   language: string | null;
   title_bar: TitleBarPreference;
   log_level: string;
@@ -541,8 +541,8 @@ export type ThemePreference = "system" | "light" | "dark";
 /** The UI language this process launched with. */
 export interface UiLocale {
   locale: string;
-  /** The `language` setting at launch; differs from the saved one until restart. */
-  preference: string | null;
+  /** A supported system language to offer when none has been chosen yet. */
+  suggested: string | null;
   /** The system's preferred locale, for regional date and number formats. */
   system: string | null;
 }

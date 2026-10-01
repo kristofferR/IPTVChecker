@@ -626,7 +626,6 @@ export default {
       language: {
         label: "语言",
         description: "重启后生效。",
-        system: "跟随系统",
         restart: "重启以应用",
       },
       theme: {
@@ -1570,5 +1569,13 @@ export default {
     clear: "清除日志",
     entriesLabel: "日志记录",
     scrollToBottom: "滚动到底部",
+  },
+  languagePrompt: {
+    available: "IPTV Checker 提供简体中文版本。",
+    switchTo: "切换到简体中文",
+    systemLanguage: "你的系统语言是{language}。要将 IPTV Checker 切换为该语言吗？",
+    keepEnglish: "保留英文",
+    otherLanguage: "其他语言",
+    changeLater: "你可以稍后在设置中更改。",
   },
 } satisfies LocaleTranslation;

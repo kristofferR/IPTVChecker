@@ -10,7 +10,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatCount, getLaunchLanguage, LOCALES, type MessageKey, t } from "../i18n";
+import { formatCount, getLocale, LOCALES, type MessageKey, t } from "../i18n";
 import { fixPreferencesFrom } from "../lib/dispatcharr";
 import { formatBytes } from "../lib/format";
 import {
@@ -616,7 +616,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {draft.language !== getLaunchLanguage() && (
+                  {(draft.language ?? "en") !== getLocale() && (
                     <button
                       type="button"
                       onClick={() => void restartWithSavedSettings()}
@@ -626,13 +626,12 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     </button>
                   )}
                   <select
-                    value={draft.language ?? ""}
+                    value={draft.language ?? "en"}
                     onChange={(event) =>
-                      updateSetting("language", event.target.value || null, { immediate: true })
+                      updateSetting("language", event.target.value, { immediate: true })
                     }
                     className={`${inputClass} w-44`}
                   >
-                    <option value="">{t("settings.general.language.system")}</option>
                     {Object.entries(LOCALES).map(([code, { name }]) => (
                       <option key={code} value={code}>
                         {name}

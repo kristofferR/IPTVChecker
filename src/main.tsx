@@ -34,7 +34,7 @@ document.documentElement.dataset.window = isLogWindow
 // module scope are already translated.
 async function render() {
   await initI18n(
-    await getUiLocale().catch(() => ({ locale: "en", preference: null, system: null })),
+    await getUiLocale().catch(() => ({ locale: "en", suggested: null, system: null })),
   );
   const { ErrorBoundary } = await import("./components/ErrorBoundary");
   const View = isLogWindow

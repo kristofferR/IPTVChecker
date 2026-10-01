@@ -41,7 +41,7 @@ import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
 import { type ArchivePlayOptions, useStreamPlayer } from "./hooks/useStreamPlayer";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
-import { getFormatLocale, t } from "./i18n";
+import { getFormatLocale, getLanguageSuggestion, t } from "./i18n";
 import { resolveArchivePlayback } from "./lib/archive";
 import { cancelArchiveProbes } from "./lib/archiveProbe";
 import { registerArchiveTimezoneResolver } from "./lib/archiveTimezone";
@@ -74,6 +74,7 @@ import { selectResultByIndex, useAppStore } from "./store";
 import type { AppStore, OpenSourceDialogState } from "./store/types";
 
 const KeyboardShortcutsDialog = lazy(() => import("./components/KeyboardShortcutsDialog"));
+const LanguagePromptDialog = lazy(() => import("./components/LanguagePromptDialog"));
 const HistoryPanel = lazy(() => import("./components/HistoryPanel"));
 const OpenSourceDialog = lazy(() => import("./components/OpenSourceDialog"));
 const XtreamServerTestDialog = lazy(() =>
@@ -595,6 +596,9 @@ export default function App() {
   const dispatcharrFind = useAppStore((s) => s.dispatcharrFind);
   const reportSidebarWidth = useAppStore((s) => s.reportSidebarWidth);
   const showKeyboardShortcuts = useAppStore((s) => s.showKeyboardShortcuts);
+  const languageSetting = useAppStore((s) => s.settings.language);
+  const settingsHydrated = useAppStore((s) => s.settingsHydrated);
+  const languageSuggestion = getLanguageSuggestion();
   const isDragOver = useAppStore((s) => s.isDragOver);
   const ffmpegWarning = useAppStore((s) => s.ffmpegWarning);
   const openSourceDialogState = useAppStore((s) => s.openSourceDialogState);
@@ -2064,6 +2068,12 @@ export default function App() {
             }
             onClose={() => setSavedXtreamTestEntry(null)}
           />
+        </Suspense>
+      )}
+
+      {languageSuggestion && settingsHydrated && languageSetting === null && (
+        <Suspense fallback={null}>
+          <LanguagePromptDialog suggestion={languageSuggestion} />
         </Suspense>
       )}
 
