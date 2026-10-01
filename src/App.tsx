@@ -48,6 +48,7 @@ import { registerArchiveTimezoneResolver } from "./lib/archiveTimezone";
 import { isArchiveVerificationBlockingPlayback, verifyAllArchives } from "./lib/archiveVerifyRun";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
 import {
+  channelPrimaryIndex,
   dispatcharrLinkedIndices,
   expandDispatcharrSelection,
   getDispatcharrView,
@@ -1515,11 +1516,10 @@ export default function App() {
   const handleGuidePlayArchive = useCallback(
     (result: ChannelResult, options: ArchivePlayOptions) => {
       getStore().setSelectedChannel(result);
+      // The result may be a channel's catch-up stream; select the whole channel.
+      const view = getDispatcharrView(getStore().flatResults, getStore().dispatcharrOrders);
       getStore().setSelectedChannelIndices(
-        expandDispatcharrSelection(
-          getDispatcharrView(getStore().flatResults, getStore().dispatcharrOrders),
-          [result.index],
-        ),
+        expandDispatcharrSelection(view, [channelPrimaryIndex(view, result.index)]),
       );
       getStore().setSidebarHidden(false);
       const state = getStore();

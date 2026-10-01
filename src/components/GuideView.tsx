@@ -23,6 +23,7 @@ import {
 } from "../lib/archiveProbe";
 import {
   channelArchiveStream,
+  channelPrimaryIndex,
   expandDispatcharrSelection,
   filterDispatcharrPrimaries,
   getDispatcharrView,
@@ -236,8 +237,9 @@ const GuideRow = memo(function GuideRow({
             state.setSelectedChannel(result);
             // A Dispatcharr channel row stands for all of its streams.
             const view = getDispatcharrView(state.flatResults, state.dispatcharrOrders);
-            const primary = view?.byStreamIndex.get(result.index)?.primary ?? result;
-            state.setSelectedChannelIndices(expandDispatcharrSelection(view, [primary.index]));
+            state.setSelectedChannelIndices(
+              expandDispatcharrSelection(view, [channelPrimaryIndex(view, result.index)]),
+            );
           }}
           onDoubleClick={() => onPlayLive(result)}
           onKeyDown={(event) => {
@@ -307,7 +309,7 @@ interface ProgrammeMenuState {
 
 export function GuideView({
   onPlayArchive,
-  onPlayLive,
+  onPlayLive: playResultLive,
   headerPortalRef,
 }: {
   onPlayArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
@@ -323,6 +325,16 @@ export function GuideView({
 }) {
   const flatResults = useAppStore((s) => s.flatResults);
   const dispatcharrOrders = useAppStore((s) => s.dispatcharrOrders);
+  // A Dispatcharr channel's guide row is its catch-up stream; live plays the
+  // primary, as in the table.
+  const onPlayLive = useCallback(
+    (result: ChannelResult) =>
+      playResultLive(
+        getDispatcharrView(flatResults, dispatcharrOrders)?.byStreamIndex.get(result.index)
+          ?.primary ?? result,
+      ),
+    [playResultLive, flatResults, dispatcharrOrders],
+  );
   const playlist = useAppStore((s) => s.playlist);
   const search = useAppStore((s) => s.search);
   const groupFilter = useAppStore((s) => s.groupFilter);
@@ -424,11 +436,13 @@ export function GuideView({
   // a Dispatcharr channel resolves to its current primary, which an edit can
   // change.
   const currentResult = useCallback(
-    (selected: ChannelResult) =>
-      getDispatcharrView(flatResults, dispatcharrOrders)?.byStreamIndex.get(selected.index)
-        ?.primary ??
-      flatResults.find((result) => result.index === selected.index) ??
-      selected,
+    (selected: ChannelResult) => {
+      const channel = getDispatcharrView(flatResults, dispatcharrOrders)?.byStreamIndex.get(
+        selected.index,
+      );
+      if (channel) return channelArchiveStream(channel) ?? channel.primary;
+      return flatResults.find((result) => result.index === selected.index) ?? selected;
+    },
     [flatResults, dispatcharrOrders],
   );
   const selection = useMemo(

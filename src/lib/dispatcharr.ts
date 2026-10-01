@@ -547,6 +547,23 @@ export function channelArchiveStream(channel: DispatcharrChannelView): ChannelRe
   return channel.streams.find((entry) => hasArchive(entry.result))?.result ?? null;
 }
 
+/** What a selection's catch-up acts on. A whole selected channel (its primary
+ *  with every stream selected) uses its catch-up stream; a stream is itself. */
+export function selectedArchiveStream(
+  result: ChannelResult,
+  view: DispatcharrView | null,
+  selectedIndices: number[],
+): ChannelResult {
+  const channel = view?.byPrimaryIndex.get(result.index);
+  const archive = channel && channelArchiveStream(channel);
+  return archive && selectedIndices.includes(archive.index) ? archive : result;
+}
+
+/** The index a Dispatcharr selection expands from: a stream's channel primary. */
+export function channelPrimaryIndex(view: DispatcharrView | null, index: number): number {
+  return view?.byStreamIndex.get(index)?.primary.index ?? index;
+}
+
 /** Status filters judged per channel: the Dispatcharr ones, and catch-up. */
 export const DISPATCHARR_CHANNEL_FILTERS = [
   ...(Object.keys(DISPATCHARR_STATUS_FILTERS) as DispatcharrStatusFilter[]),

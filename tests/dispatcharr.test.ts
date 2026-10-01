@@ -13,6 +13,7 @@ import {
   normalizeDispatcharrServer,
   parseDispatcharrIds,
   proposeFixOrder,
+  selectedArchiveStream,
   unlinkedStreams,
 } from "../src/lib/dispatcharr";
 import { planFix } from "../src/lib/dispatcharrEdits";
@@ -420,6 +421,12 @@ describe("dispatcharr helpers", () => {
     expect(names("catchup")).toEqual(["News One"]);
     expect(names("catchup_untested")).toEqual(["News One"]);
     expect(names("catchup_fake")).toEqual([]);
+
+    // A whole selected channel acts through its catch-up stream; the primary
+    // stream selected alone stays itself.
+    const [primary, archive] = results;
+    expect(selectedArchiveStream(primary, view, [0, 1])).toBe(archive);
+    expect(selectedArchiveStream(primary, view, [0])).toBe(primary);
   });
 
   it("treats a provider whose streams all failed the same way as down, not dead", () => {

@@ -22,6 +22,7 @@ import { channelRowHeightPixels } from "../lib/channelLogoSize";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { getChannelTableLayout } from "../lib/channelTableLayout";
 import {
+  channelArchiveStream,
   type DispatcharrChannelView,
   type DispatcharrView,
   expandDispatcharrSelection,
@@ -239,6 +240,8 @@ export function ChannelTable({
     x: number;
     y: number;
     channel: ChannelResult;
+    /** What catch-up actions use: a channel row's catch-up stream. */
+    archive: ChannelResult;
   } | null>(null);
   const [copiedAction, setCopiedAction] = useState<CopyAction | null>(null);
   const [columnMenuState, setColumnMenuState] = useState<{
@@ -520,6 +523,16 @@ export function ChannelTable({
     const meta = rowMetaRef.current?.[rowIndex];
     return meta?.kind === "stream" && meta.position === 0 ? -(result.index + 1) : result.index;
   }, []);
+
+  // A Dispatcharr channel row's catch-up actions go through the stream
+  // Dispatcharr plays its catch-up from; play and copy keep the primary.
+  const archiveTarget = useCallback(
+    (key: number, result: ChannelResult): ChannelResult => {
+      const channel = key >= 0 ? dispatcharrView?.byPrimaryIndex.get(key) : undefined;
+      return (channel && channelArchiveStream(channel)) || result;
+    },
+    [dispatcharrView],
+  );
 
   const emitSelection = useCallback(
     (next: Set<number>) => {
@@ -1172,9 +1185,10 @@ export function ChannelTable({
         x: event.clientX,
         y: event.clientY,
         channel: result,
+        archive: archiveTarget(rowKey(rowIndex, result), result),
       });
     },
-    [selectSingle],
+    [selectSingle, archiveTarget, rowKey],
   );
 
   const getRowFromEvent = useCallback(
@@ -1256,8 +1270,21 @@ export function ChannelTable({
     return completedResults.filter((r) => indexSet.has(r.index)).sort((a, b) => a.index - b.index);
   }, [selectedIndices, contextMenuState, completedResults]);
 
+  const getSelectedArchives = useCallback((): ChannelResult[] => {
+    if (selectedIndices.size <= 1 && contextMenuState) {
+      return [contextMenuState.archive];
+    }
+    const byIndex = new Map(completedResults.map((result) => [result.index, result]));
+    return Array.from(selectedIndices)
+      .flatMap((key) => {
+        const result = byIndex.get(key < 0 ? -key - 1 : key);
+        return result ? [archiveTarget(key, result)] : [];
+      })
+      .sort((a, b) => a.index - b.index);
+  }, [selectedIndices, contextMenuState, completedResults, archiveTarget]);
+
   const handleBrowseCatchup = useCallback(() => {
-    const channel = contextMenuState?.channel;
+    const channel = contextMenuState?.archive;
     setContextMenuState(null);
     if (!channel || !hasArchive(channel)) {
       return;
@@ -1288,7 +1315,7 @@ export function ChannelTable({
       return;
     }
     initialState.setExternalPlaybackActive(false);
-    const targets = getSelectedChannels().filter(hasArchive);
+    const targets = getSelectedArchives().filter(hasArchive);
     const playlist = initialState.playlist;
     setContextMenuState(null);
     if (targets.length === 0) {
@@ -1327,7 +1354,7 @@ export function ChannelTable({
         );
       }
     })();
-  }, [getSelectedChannels]);
+  }, [getSelectedArchives]);
 
   const handleCopyChannelName = useCallback(async () => {
     if (!contextMenuState) return;
@@ -1902,7 +1929,7 @@ export function ChannelTable({
             )}
           </button>
           {(() => {
-            const archiveCount = getSelectedChannels().filter(hasArchive).length;
+            const archiveCount = getSelectedArchives().filter(hasArchive).length;
             if (archiveCount === 0) return null;
             return (
               <>
@@ -1924,7 +1951,7 @@ export function ChannelTable({
                 >
                   {t("table.contextMenu.testCatchup", { count: archiveCount })}
                 </button>
-                {hasArchive(contextMenuState.channel) && (
+                {hasArchive(contextMenuState.archive) && (
                   <button
                     onClick={handleBrowseCatchup}
                     className="w-full text-start px-3 py-2 text-[13px] hover:bg-btn-hover"
