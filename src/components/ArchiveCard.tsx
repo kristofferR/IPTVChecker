@@ -2,13 +2,17 @@ import { ChevronRight, CircleCheck, CircleX, LoaderCircle, Play } from "lucide-r
 import { useEffect, useMemo, useState } from "react";
 import { useDisclosure } from "../hooks/useDisclosure";
 import type { ArchivePlayOptions, ArchiveSession } from "../hooks/useStreamPlayer";
+import { formatCount, getFormatLocale, t } from "../i18n";
+import { translateReason } from "../i18n/reasons";
 import { archivePickerDefault, archiveTitle, hasArchive, MAX_CATCHUP_DAYS } from "../lib/archive";
+import type { ArchiveProbeOutcome } from "../lib/archiveProbe";
 import { probeChannelArchive } from "../lib/archiveProbe";
 import { archiveFailure, archiveFailureSentence, archiveVerdict } from "../lib/archiveVerification";
 import { ensureEpgLoaded, epgSourcesFor } from "../lib/epgLoader";
 import { isSingleConnectionPlaylist } from "../lib/playback";
 import { isScanActive } from "../lib/scanState";
 import { getEpgProgrammes } from "../lib/tauri";
+import { dayLabel } from "../lib/timeFormat";
 import type { ChannelResult, EpgProgramme } from "../lib/types";
 import { useAppStore } from "../store";
 
@@ -24,17 +28,18 @@ interface ArchiveCardProps {
 
 const MAX_RENDERED_PROGRAMMES = 2_000;
 
-function dayLabel(epochS: number, now: Date): string {
-  const date = new Date(epochS * 1000);
-  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const dayDiff = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
-  if (dayDiff === 0) return "Today";
-  if (dayDiff === 1) return "Yesterday";
-  return date.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+function timeLabel(epochS: number): string {
+  return new Date(epochS * 1000).toLocaleTimeString(getFormatLocale(), {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
-function timeLabel(epochS: number): string {
-  return new Date(epochS * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+/** Probe point name; derived from depth so the stored label stays a stable key. */
+function outcomePointLabel(outcome: ArchiveProbeOutcome): string {
+  return outcome.daysBack <= 0
+    ? t("archive.outcome.pointNear")
+    : t("archive.outcome.pointDays", { days: formatCount(outcome.daysBack) });
 }
 
 function ArchiveProbe({ result, isCasting }: Pick<ArchiveCardProps, "result" | "isCasting">) {
@@ -78,7 +83,7 @@ function ArchiveProbe({ result, isCasting }: Pick<ArchiveCardProps, "result" | "
     if (
       state.externalPlaybackActive &&
       isSingleConnectionPlaylist(state.playlist) &&
-      !window.confirm("Close the external player before testing catch-up. Continue?")
+      !window.confirm(t("archive.confirmCloseExternalPlayerTest"))
     ) {
       return;
     }
@@ -114,52 +119,64 @@ function ArchiveProbe({ result, isCasting }: Pick<ArchiveCardProps, "result" | "
         disabled={disabled}
         title={
           isScanActive(scanState)
-            ? "Wait for the scan to finish"
+            ? t("archive.card.waitForScan")
             : playbackBlocksProbe
-              ? "Stop playback before testing catch-up"
+              ? t("archive.card.stopPlaybackFirst")
               : externalPlaybackActive && isSingleConnectionPlaylist(playlist)
-                ? "Confirm the external player is closed before testing catch-up"
+                ? t("archive.card.confirmExternalPlayerClosed")
                 : undefined
         }
         onClick={runProbe}
         className="flex w-full items-center justify-center gap-1.5 rounded-md bg-btn px-3 py-1.5 text-[12px] font-medium text-text-primary border border-border-app shadow-sm hover:bg-btn-hover transition-colors disabled:opacity-40"
       >
         {running && <LoaderCircle className="h-3 w-3 animate-spin" />}
-        {running ? "Testing catch-up..." : "Test catch-up"}
+        {running ? t("archive.card.testing") : t("archive.card.test")}
       </button>
       {failure && (
         <p className="mt-2 text-[11px] leading-snug text-red-300">
-          <span className="font-semibold">Fake catch-up.</span> {archiveFailureSentence(failure)}
+          <span className="font-semibold">{t("archive.card.fake")}</span>{" "}
+          {archiveFailureSentence(failure)}
         </p>
       )}
-      {outcomes.map((outcome) => (
-        <div
-          key={outcome.label}
-          className="mt-1.5 flex items-center justify-between gap-2 text-[11px]"
-        >
-          <span className="text-text-secondary">{outcome.label}</span>
-          {outcome.ok && outcome.depthVerified ? (
-            <span className="flex items-center gap-1 font-medium text-green-400">
-              <CircleCheck className="h-3 w-3" />
-              OK{outcome.latencyMs != null ? ` \u00b7 ${outcome.latencyMs} ms` : ""}
-            </span>
-          ) : outcome.ok ? (
-            <span className="flex items-center gap-1 font-medium text-amber-400">
-              <CircleCheck className="h-3 w-3" />
-              {outcome.depthUnknown ? "Reachable" : "Unverified"}
-              {outcome.latencyMs != null ? ` \u00b7 ${outcome.latencyMs} ms` : ""}
-            </span>
-          ) : (
-            <span
-              className="flex min-w-0 items-center gap-1 font-medium text-red-400"
-              title={outcome.error ?? undefined}
-            >
-              <CircleX className="h-3 w-3 shrink-0" />
-              <span className="truncate">{outcome.error ?? "Failed"}</span>
-            </span>
-          )}
-        </div>
-      ))}
+      {outcomes.map((outcome) => {
+        const latency = outcome.latencyMs != null ? formatCount(outcome.latencyMs) : null;
+        const error = outcome.error != null ? translateReason(outcome.error) : null;
+        return (
+          <div
+            key={outcome.label}
+            className="mt-1.5 flex items-center justify-between gap-2 text-[11px]"
+          >
+            <span className="text-text-secondary">{outcomePointLabel(outcome)}</span>
+            {outcome.ok && outcome.depthVerified ? (
+              <span className="flex items-center gap-1 font-medium text-green-400">
+                <CircleCheck className="h-3 w-3" />
+                {latency != null
+                  ? t("archive.outcome.okWithLatency", { latency })
+                  : t("archive.outcome.ok")}
+              </span>
+            ) : outcome.ok ? (
+              <span className="flex items-center gap-1 font-medium text-amber-400">
+                <CircleCheck className="h-3 w-3" />
+                {outcome.depthUnknown
+                  ? latency != null
+                    ? t("archive.outcome.reachableWithLatency", { latency })
+                    : t("archive.outcome.reachable")
+                  : latency != null
+                    ? t("archive.outcome.unverifiedWithLatency", { latency })
+                    : t("archive.outcome.unverified")}
+              </span>
+            ) : (
+              <span
+                className="flex min-w-0 items-center gap-1 font-medium text-red-400"
+                title={error ?? undefined}
+              >
+                <CircleX className="h-3 w-3 shrink-0" />
+                <span className="truncate">{error ?? t("archive.outcome.failed")}</span>
+              </span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -215,7 +232,7 @@ function ArchivePicker({
         className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-[12px] font-medium text-white shadow-sm hover:bg-blue-500 transition-colors"
       >
         <Play className="h-3 w-3" />
-        Watch from here
+        {t("archive.card.watchFromHere")}
       </button>
     </div>
   );
@@ -310,10 +327,12 @@ export function ArchiveCard({
     >
       <summary className="flex cursor-pointer list-none items-center gap-2 p-2 text-[12px] font-medium text-violet-300 [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-blue-500">
         <span className="min-w-0" title={archiveTitle(result) ?? undefined}>
-          Archive
+          {t("archive.card.heading")}
           <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-violet-300/80">
             {result.catchup ?? "default"}
-            {result.catchup_days != null ? ` · ${result.catchup_days} d` : ""}
+            {result.catchup_days != null
+              ? ` · ${t("archive.card.depthDays", { days: formatCount(result.catchup_days) })}`
+              : ""}
           </span>
         </span>
         <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 group-open/archive:rotate-90" />
@@ -322,10 +341,13 @@ export function ArchiveCard({
         {programmes === null ? (
           <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-text-tertiary">
             <LoaderCircle className="h-3 w-3 animate-spin" />
-            Loading guide...
+            {t("archive.card.loadingGuide")}
           </div>
         ) : dayGroups.length > 0 ? (
-          <section className="mt-1 max-h-80 overflow-y-auto pr-1" aria-label="Catch-up programmes">
+          <section
+            className="mt-1 max-h-80 overflow-y-auto pr-1"
+            aria-label={t("archive.card.programmesLabel")}
+          >
             {dayGroups.map((group) => (
               <div key={group.label}>
                 <p className="mt-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-text-tertiary">

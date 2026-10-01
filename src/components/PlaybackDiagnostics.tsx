@@ -3,6 +3,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { ChevronRight, Download } from "lucide-react";
 import { useCallback, useState, useSyncExternalStore } from "react";
 import { useDisclosure } from "../hooks/useDisclosure";
+import { formatCount, getFormatLocale, type MessageKey, t } from "../i18n";
 import {
   type PlaybackEventKind,
   type PlaybackRecord,
@@ -10,34 +11,41 @@ import {
   sanitizePlaybackText,
 } from "../lib/playbackTelemetry";
 
-const eventLabels: Record<PlaybackEventKind, string> = {
-  route: "Playback route",
-  route_failure: "Playback route failed",
-  stream_format: "Stream format",
-  ready: "Media ready",
-  first_frame: "First frame presented",
-  waiting: "Waiting for media",
-  stalled: "Media loading stalled",
-  reconnect: "Clean reconnect started",
-  reconnect_restored: "Clean reconnect restored playback",
-  resync: "Timestamp gap skipped",
-  latency_trim: "Accumulated latency trimmed",
-  library_recovery: "In-place engine recovery",
-  player_failure: "Playback could not resume",
-  media_error: "Media error",
-  engine_error: "Player engine error",
-  append_error: "Buffer append error",
-  remove_error: "Buffer removal error",
-  upstream_eof: "Upstream ended",
-  upstream_timeout: "Upstream timed out",
-  upstream_error: "Upstream request failed",
-  proxy_reconnect: "Proxy reconnect started",
-  proxy_connected: "Proxy connection established",
-  pacing_warning: "Transport clock re-anchored",
-  remux_warning: "Transport remux warning",
-};
+const eventLabels = {
+  route: "player.diagnostics.eventKinds.route",
+  route_failure: "player.diagnostics.eventKinds.routeFailure",
+  stream_format: "player.diagnostics.eventKinds.streamFormat",
+  ready: "player.diagnostics.eventKinds.ready",
+  first_frame: "player.diagnostics.eventKinds.firstFrame",
+  waiting: "player.diagnostics.eventKinds.waiting",
+  stalled: "player.diagnostics.eventKinds.stalled",
+  reconnect: "player.diagnostics.eventKinds.reconnect",
+  reconnect_restored: "player.diagnostics.eventKinds.reconnectRestored",
+  resync: "player.diagnostics.eventKinds.resync",
+  latency_trim: "player.diagnostics.eventKinds.latencyTrim",
+  library_recovery: "player.diagnostics.eventKinds.libraryRecovery",
+  player_failure: "player.diagnostics.eventKinds.playerFailure",
+  media_error: "player.diagnostics.eventKinds.mediaError",
+  engine_error: "player.diagnostics.eventKinds.engineError",
+  append_error: "player.diagnostics.eventKinds.appendError",
+  remove_error: "player.diagnostics.eventKinds.removeError",
+  upstream_eof: "player.diagnostics.eventKinds.upstreamEof",
+  upstream_timeout: "player.diagnostics.eventKinds.upstreamTimeout",
+  upstream_error: "player.diagnostics.eventKinds.upstreamError",
+  proxy_reconnect: "player.diagnostics.eventKinds.proxyReconnect",
+  proxy_connected: "player.diagnostics.eventKinds.proxyConnected",
+  pacing_warning: "player.diagnostics.eventKinds.pacingWarning",
+  remux_warning: "player.diagnostics.eventKinds.remuxWarning",
+} as const satisfies Record<PlaybackEventKind, MessageKey>;
+/** One-decimal number in the UI locale. */
+const decimal = (value: number, digits = 1) =>
+  value.toLocaleString(getFormatLocale(), {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+const secondsValue = (value: number) => t("player.diagnostics.seconds", { value: decimal(value) });
 const seconds = (ms: number | null) =>
-  ms === null ? "Not available" : `${(ms / 1000).toFixed(1)} s`;
+  ms === null ? t("player.diagnostics.notAvailable") : secondsValue(ms / 1000);
 function clock(ms: number) {
   const total = Math.floor(ms / 1000);
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
@@ -82,7 +90,7 @@ function ExportDiagnostics({ record }: { record?: PlaybackRecord }) {
         className="mt-2 flex items-center gap-1 text-[10px] text-blue-500 hover:underline disabled:opacity-50"
       >
         <Download className="h-3 w-3" />
-        {busy ? "Exporting…" : "Export diagnostics…"}
+        {busy ? t("player.diagnostics.exporting") : t("player.diagnostics.export")}
       </button>
       {error && (
         <p role="alert" className="mt-1 text-[10px] text-red-400 break-words">
@@ -101,22 +109,29 @@ export function PlaybackDiagnostics({ channelIndex }: { channelIndex: number }) 
   if (!record) return null;
   const { summary: s } = record;
   const count = (kind: PlaybackEventKind) => s.counters[kind] ?? 0;
-  const state = s.ended
-    ? s.ended === "failed"
-      ? "Failed"
-      : "Completed"
-    : s.context === "paused"
-      ? "Paused"
-      : s.context === "background"
-        ? "Background"
-        : s.phase === "starting"
-          ? "Connecting"
-          : s.phase === "reconnecting"
-            ? "Reconnecting"
-            : "Playing";
+  const state = t(
+    s.ended
+      ? s.ended === "failed"
+        ? "player.diagnostics.state.failed"
+        : "player.diagnostics.state.completed"
+      : s.context === "paused"
+        ? "player.diagnostics.state.paused"
+        : s.context === "background"
+          ? "player.diagnostics.state.background"
+          : s.phase === "starting"
+            ? "player.diagnostics.state.connecting"
+            : s.phase === "reconnecting"
+              ? "player.diagnostics.state.reconnecting"
+              : "player.diagnostics.state.playing",
+  );
+  const notAvailable = t("player.diagnostics.notAvailable");
   const dropRate =
     s.framesAvailable && s.foregroundFrames > 0
-      ? `${((s.foregroundDropped / s.foregroundFrames) * 100).toFixed(2)}%`
+      ? new Intl.NumberFormat(getFormatLocale(), {
+          style: "percent",
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(s.foregroundDropped / s.foregroundFrames)
       : "—";
   const recent = record.samples;
   const maxBuffer = Math.max(1, ...recent.map((sample) => sample.bufferSeconds));
@@ -132,86 +147,117 @@ export function PlaybackDiagnostics({ channelIndex }: { channelIndex: number }) 
     )
     .join(" ");
   const technical = [
-    ["Engine", `${s.engine ?? "Not selected"} · ${s.streamType}`],
-    ["Media ready", seconds(s.readyMs)],
-    ["Media progress", `${s.mediaTime.toFixed(1)} s`],
-    ["No-progress intervals", String(s.noProgressIntervals)],
-    ["Waiting / stalled", `${count("waiting")} / ${count("stalled")} events`],
-    ["In-place resyncs / skipped", `${count("resync")} / ${s.skippedSeconds.toFixed(1)} s`],
-    ["Latency trims", String(count("latency_trim"))],
     [
-      "Clean reconnects",
-      `${count("reconnect_restored")} restored / ${count("reconnect")} attempted`,
+      "player.diagnostics.technical.engine",
+      `${s.engine ?? t("player.diagnostics.notSelected")} · ${s.streamType}`,
     ],
-    ["Engine recovery attempts", String(count("library_recovery"))],
-    ["Media / engine errors", `${count("media_error")} / ${count("engine_error")}`],
+    ["player.diagnostics.technical.mediaReady", seconds(s.readyMs)],
+    ["player.diagnostics.technical.mediaProgress", secondsValue(s.mediaTime)],
+    ["player.diagnostics.technical.noProgressIntervals", formatCount(s.noProgressIntervals)],
     [
-      "Foreground frames",
+      "player.diagnostics.technical.waitingStalled",
+      t("player.diagnostics.events", {
+        waiting: formatCount(count("waiting")),
+        stalled: formatCount(count("stalled")),
+      }),
+    ],
+    [
+      "player.diagnostics.technical.resyncsSkipped",
+      `${formatCount(count("resync"))} / ${secondsValue(s.skippedSeconds)}`,
+    ],
+    ["player.diagnostics.technical.latencyTrims", formatCount(count("latency_trim"))],
+    [
+      "player.diagnostics.technical.cleanReconnects",
+      t("player.diagnostics.reconnects", {
+        restored: formatCount(count("reconnect_restored")),
+        attempted: formatCount(count("reconnect")),
+      }),
+    ],
+    ["player.diagnostics.technical.engineRecoveryAttempts", formatCount(count("library_recovery"))],
+    [
+      "player.diagnostics.technical.mediaEngineErrors",
+      `${formatCount(count("media_error"))} / ${formatCount(count("engine_error"))}`,
+    ],
+    [
+      "player.diagnostics.technical.foregroundFrames",
       s.framesAvailable
-        ? `${s.foregroundDropped} dropped / ${s.foregroundFrames}`
-        : "Not available",
+        ? t("player.diagnostics.frames", {
+            dropped: formatCount(s.foregroundDropped),
+            total: formatCount(s.foregroundFrames),
+          })
+        : notAvailable,
     ],
     [
-      "Background frames",
+      "player.diagnostics.technical.backgroundFrames",
       s.framesAvailable
-        ? `${s.backgroundDropped} dropped / ${s.backgroundFrames}`
-        : "Not available",
+        ? t("player.diagnostics.frames", {
+            dropped: formatCount(s.backgroundDropped),
+            total: formatCount(s.backgroundFrames),
+          })
+        : notAvailable,
     ],
-    ["Foreground / background", `${clock(s.foregroundMs)} / ${clock(s.backgroundMs)}`],
-    ["Unobserved time", clock(s.unobservedMs)],
     [
-      "Buffer min / median / max",
+      "player.diagnostics.technical.foregroundBackground",
+      `${clock(s.foregroundMs)} / ${clock(s.backgroundMs)}`,
+    ],
+    ["player.diagnostics.technical.unobservedTime", clock(s.unobservedMs)],
+    [
+      "player.diagnostics.technical.bufferMinMedianMax",
       s.bufferMin === null
-        ? "Not available"
-        : `${s.bufferMin.toFixed(1)} / ${s.bufferMedian === 60 ? "≥60" : `≈${s.bufferMedian?.toFixed(1)}`} / ${s.bufferMax?.toFixed(1)} s`,
+        ? notAvailable
+        : t("player.diagnostics.seconds", {
+            value: `${decimal(s.bufferMin)} / ${s.bufferMedian === 60 ? "≥60" : `≈${s.bufferMedian === null ? "" : decimal(s.bufferMedian)}`} / ${s.bufferMax === null ? "" : decimal(s.bufferMax)}`,
+          }),
     ],
     [
-      "Buffer appends / removes",
-      s.sourceBufferAvailable ? `${s.appends} / ${s.removes}` : "Not available",
-    ],
-    [
-      "Bytes appended",
+      "player.diagnostics.technical.bufferAppendsRemoves",
       s.sourceBufferAvailable
-        ? `${(s.appendedBytes / 1024 / 1024).toFixed(1)} MB`
-        : "Not available",
+        ? `${formatCount(s.appends)} / ${formatCount(s.removes)}`
+        : notAvailable,
     ],
     [
-      "Append / remove errors",
+      "player.diagnostics.technical.bytesAppended",
       s.sourceBufferAvailable
-        ? `${count("append_error")} / ${count("remove_error")}`
-        : "Not available",
+        ? t("player.diagnostics.megabytes", { value: decimal(s.appendedBytes / 1024 / 1024) })
+        : notAvailable,
     ],
     [
-      "Upstream EOF / timeout / errors",
-      s.transportAvailable
-        ? `${count("upstream_eof")} / ${count("upstream_timeout")} / ${count("upstream_error")}`
-        : "Not available",
+      "player.diagnostics.technical.appendRemoveErrors",
+      s.sourceBufferAvailable
+        ? `${formatCount(count("append_error"))} / ${formatCount(count("remove_error"))}`
+        : notAvailable,
     ],
     [
-      "Proxy reconnects / connected",
+      "player.diagnostics.technical.upstreamEofTimeoutErrors",
       s.transportAvailable
-        ? `${count("proxy_reconnect")} / ${count("proxy_connected")}`
-        : "Not available",
+        ? `${formatCount(count("upstream_eof"))} / ${formatCount(count("upstream_timeout"))} / ${formatCount(count("upstream_error"))}`
+        : notAvailable,
     ],
     [
-      "Pacing / remux warnings",
+      "player.diagnostics.technical.proxyReconnectsConnected",
       s.transportAvailable
-        ? `${count("pacing_warning")} / ${count("remux_warning")}`
-        : "Not available",
+        ? `${formatCount(count("proxy_reconnect"))} / ${formatCount(count("proxy_connected"))}`
+        : notAvailable,
     ],
-    ["Environment", `${s.platform} · ${s.appVersion}`],
-  ];
+    [
+      "player.diagnostics.technical.pacingRemuxWarnings",
+      s.transportAvailable
+        ? `${formatCount(count("pacing_warning"))} / ${formatCount(count("remux_warning"))}`
+        : notAvailable,
+    ],
+    ["player.diagnostics.technical.environment", `${s.platform} · ${s.appVersion}`],
+  ] as const satisfies ReadonlyArray<readonly [MessageKey, string]>;
   return (
     <details
-      aria-label="Playback diagnostics"
+      aria-label={t("player.diagnostics.label")}
       open={expanded}
       onToggle={(event) => setExpanded(event.currentTarget.open)}
       className="group/diagnostics overflow-hidden rounded border border-border-app bg-panel-muted"
     >
       <summary className="flex cursor-pointer list-none items-center gap-2 p-2 [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-blue-500">
         <span className="text-[12px] font-medium">
-          {s.ended ? "Last playback" : "Playback"}
-          {s.mode === "archive" ? " · Archive" : ""}
+          {s.ended ? t("player.diagnostics.lastPlayback") : t("player.diagnostics.playback")}
+          {s.mode === "archive" ? ` · ${t("player.diagnostics.archive")}` : ""}
         </span>
         <span
           className={`ml-auto text-[9px] tabular-nums ${s.ended === "failed" ? "text-red-400" : s.phase === "reconnecting" && !s.ended ? "text-amber-500" : "text-text-secondary"}`}
@@ -222,23 +268,23 @@ export function PlaybackDiagnostics({ channelIndex }: { channelIndex: number }) 
       </summary>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2 p-2">
         <Metric
-          label="First frame"
+          label={t("player.diagnostics.firstFrame")}
           value={s.firstFrameMs === null ? "—" : seconds(s.firstFrameMs)}
-          note={s.firstFrameMs === null ? "Not observed" : undefined}
+          note={s.firstFrameMs === null ? t("player.diagnostics.notObserved") : undefined}
         />
         <Metric
-          label="Buffer ahead"
-          value={s.bufferSeconds === null ? "—" : `${s.bufferSeconds.toFixed(1)} s`}
+          label={t("player.diagnostics.bufferAhead")}
+          value={s.bufferSeconds === null ? "—" : secondsValue(s.bufferSeconds)}
         />
         <Metric
-          label="Interruptions"
-          value={String(s.interruptions)}
-          note={`${seconds(s.interruptionMs)} total`}
+          label={t("player.diagnostics.interruptions")}
+          value={formatCount(s.interruptions)}
+          note={t("player.diagnostics.totalDuration", { duration: seconds(s.interruptionMs) })}
         />
         <Metric
-          label="Dropped frames"
+          label={t("player.diagnostics.droppedFrames")}
           value={dropRate}
-          note={dropRate === "—" ? "Not available" : "foreground"}
+          note={dropRate === "—" ? notAvailable : t("player.diagnostics.foreground")}
         />
       </div>
       <details
@@ -247,12 +293,12 @@ export function PlaybackDiagnostics({ channelIndex }: { channelIndex: number }) 
         className="group/playback border-t border-border-subtle"
       >
         <summary className="flex min-h-8 cursor-pointer list-none items-center gap-2 px-2 text-[10px] [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-blue-500">
-          <span>Session activity</span>
+          <span>{t("player.diagnostics.sessionActivity")}</span>
           <span className="ml-auto text-[9px] text-text-secondary">
             {s.ended === "failed"
-              ? "Unrecovered"
+              ? t("player.diagnostics.unrecovered")
               : count("reconnect_restored") || count("resync")
-                ? "Recovery observed"
+                ? t("player.diagnostics.recoveryObserved")
                 : ""}
           </span>
           <ChevronRight className="h-3 w-3 shrink-0 group-open/playback:rotate-90" />
@@ -261,14 +307,14 @@ export function PlaybackDiagnostics({ channelIndex }: { channelIndex: number }) 
           {activityOpen && recent.length > 1 && (
             <div className="pb-2">
               <div className="flex justify-between text-[9px] text-text-secondary">
-                <span>Buffer ahead</span>
-                <span>Scale 0–{maxBuffer.toFixed(1)} s</span>
+                <span>{t("player.diagnostics.bufferAhead")}</span>
+                <span>{t("player.diagnostics.scale", { max: decimal(maxBuffer) })}</span>
               </div>
               <svg
                 viewBox="0 0 260 64"
                 className="h-16 w-full"
                 role="img"
-                aria-label="Recent buffer depth"
+                aria-label={t("player.diagnostics.recentBufferDepth")}
               >
                 <polyline
                   points={points}
@@ -293,31 +339,31 @@ export function PlaybackDiagnostics({ channelIndex }: { channelIndex: number }) 
                   {clock(event.atMs)}
                 </time>
                 <div className="min-w-0">
-                  <p className="text-[10px] font-medium">{eventLabels[event.kind]}</p>
+                  <p className="text-[10px] font-medium">{t(eventLabels[event.kind])}</p>
                   {(event.detail || event.seconds !== undefined) && (
                     <p className="break-words text-[9px] text-text-secondary">
                       {event.detail}
-                      {event.seconds !== undefined ? ` · ${event.seconds.toFixed(1)} s` : ""}
+                      {event.seconds !== undefined ? ` · ${secondsValue(event.seconds)}` : ""}
                     </p>
                   )}
                 </div>
               </div>
             ))}
           <p className="mt-2 text-[9px] text-text-secondary">
-            Background drops, pauses and seeks are excluded from interruption measurements.{" "}
+            {t("player.diagnostics.exclusionNote")}{" "}
             {s.ended === "failed"
-              ? "Playback could not resume; the cause may be unconfirmed."
-              : "Observations do not change the availability scan result."}
+              ? t("player.diagnostics.failedNote")
+              : t("player.diagnostics.observationNote")}
           </p>
           <details className="group/technical mt-2 border-t border-border-subtle">
             <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between gap-2 text-[10px] [&::-webkit-details-marker]:hidden">
-              <span>Technical counters</span>
+              <span>{t("player.diagnostics.technicalCounters")}</span>
               <ChevronRight className="h-3 w-3 group-open/technical:rotate-90" />
             </summary>
             <dl className="space-y-1">
               {technical.map(([label, value]) => (
                 <div key={label} className="flex flex-wrap justify-between gap-x-2 text-[9px]">
-                  <dt className="text-text-secondary">{label}</dt>
+                  <dt className="text-text-secondary">{t(label)}</dt>
                   <dd className="break-words tabular-nums">{value}</dd>
                 </div>
               ))}
@@ -325,7 +371,7 @@ export function PlaybackDiagnostics({ channelIndex }: { channelIndex: number }) 
           </details>
           {(s.omittedEvents > 0 || s.omittedSamples > 0 || (s.ended && !record.events.length)) && (
             <p className="mt-2 text-[9px] text-text-secondary">
-              Recent details are bounded. Summary totals cover the whole session.
+              {t("player.diagnostics.boundedNote")}
             </p>
           )}
           <ExportDiagnostics record={record} />
@@ -344,14 +390,17 @@ export function PlaybackReportSummary() {
   const completed = summaries.filter((s) => s.ended);
   return (
     <section className="rounded-lg border border-border-app bg-panel-muted p-3">
-      <h3 className="text-[11px] font-medium text-text-secondary">PLAYBACK OBSERVATIONS</h3>
+      <h3 className="text-[11px] font-medium text-text-secondary">
+        {t("player.diagnostics.report.heading")}
+      </h3>
       <p className="mt-2 text-[12px]">
-        {summaries.length} {summaries.length === 1 ? "channel" : "channels"} observed ·{" "}
-        {completed.length} completed
+        {t("player.diagnostics.report.observed", {
+          count: summaries.length,
+          completed: formatCount(completed.length),
+        })}
       </p>
       <p className="mt-1 text-[10px] text-text-secondary">
-        Latest session per channel. Select a channel for details. Live totals update when the
-        session ends.
+        {t("player.diagnostics.report.description")}
       </p>
       <ExportDiagnostics />
     </section>

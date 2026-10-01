@@ -1,5 +1,6 @@
 import { Clock3, RefreshCw, Trash2, X } from "lucide-react";
 import { useMemo } from "react";
+import { getFormatLocale, t } from "../i18n";
 import type { ScanHistoryItem } from "../lib/types";
 
 interface HistoryPanelProps {
@@ -16,15 +17,15 @@ interface HistoryPanelProps {
 function formatScope(entry: ScanHistoryItem): string {
   const parts: string[] = [];
   if (entry.group_filter) {
-    parts.push(`Group: ${entry.group_filter}`);
+    parts.push(t("history.scope.group", { group: entry.group_filter }));
   }
   if (entry.channel_search) {
-    parts.push(`Regex: ${entry.channel_search}`);
+    parts.push(t("history.scope.regex", { regex: entry.channel_search }));
   }
   if (entry.selected_count > 0) {
-    parts.push(`Selected: ${entry.selected_count}`);
+    parts.push(t("history.scope.selected", { count: entry.selected_count }));
   }
-  return parts.length > 0 ? parts.join(" | ") : "Full playlist";
+  return parts.length > 0 ? parts.join(" | ") : t("history.scope.fullPlaylist");
 }
 
 export default function HistoryPanel({
@@ -48,23 +49,23 @@ export default function HistoryPanel({
       className="fixed inset-0 z-50 flex"
       role="dialog"
       aria-modal="true"
-      aria-label="Scan history"
+      aria-label={t("history.dialogLabel")}
     >
       <div className="flex-1 bg-black/40" onClick={onClose} />
       <div className="w-[44rem] max-w-[96vw] border-l border-border-app bg-overlay backdrop-blur-xl flex flex-col">
         <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-border-app">
           <div>
             <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-1">
-              Scan History
+              {t("history.title")}
             </p>
-            <h2 className="text-[17px] font-semibold">{playlistName || "Current Playlist"}</h2>
-            <p className="text-[12px] text-text-secondary mt-1">
-              Completed scans are saved automatically and compared against the previous run.
-            </p>
+            <h2 className="text-[17px] font-semibold">
+              {playlistName || t("history.currentPlaylist")}
+            </h2>
+            <p className="text-[12px] text-text-secondary mt-1">{t("history.description")}</p>
           </div>
           <button
             onClick={onClose}
-            aria-label="Close history panel"
+            aria-label={t("history.closePanel")}
             className="p-1.5 hover:bg-btn-hover rounded-md transition-colors"
             type="button"
           >
@@ -74,7 +75,7 @@ export default function HistoryPanel({
 
         <div className="flex items-center justify-between gap-2 px-5 py-3 border-b border-border-app bg-panel-subtle">
           <div className="text-[12px] text-text-secondary">
-            {loading ? "Loading history..." : `${entries.length} scans saved`}
+            {loading ? t("history.loading") : t("history.scansSaved", { count: entries.length })}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -85,7 +86,7 @@ export default function HistoryPanel({
             >
               <span className="inline-flex items-center gap-1.5">
                 <RefreshCw className="w-3.5 h-3.5" />
-                Refresh
+                {t("history.refresh")}
               </span>
             </button>
             <button
@@ -96,7 +97,7 @@ export default function HistoryPanel({
             >
               <span className="inline-flex items-center gap-1.5">
                 <Trash2 className="w-3.5 h-3.5" />
-                {clearing ? "Clearing..." : "Clear History"}
+                {clearing ? t("history.clearing") : t("history.clearHistory")}
               </span>
             </button>
           </div>
@@ -111,12 +112,12 @@ export default function HistoryPanel({
 
           {!loading && sortedEntries.length === 0 && !error && (
             <div className="rounded-xl border border-border-app bg-panel-subtle px-4 py-5 text-[13px] text-text-secondary">
-              No completed scans are saved for this playlist yet.
+              {t("history.empty")}
             </div>
           )}
 
           {sortedEntries.map((entry) => {
-            const when = new Date(entry.scanned_at_epoch_ms).toLocaleString();
+            const when = new Date(entry.scanned_at_epoch_ms).toLocaleString(getFormatLocale());
             return (
               <article
                 key={entry.id}
@@ -130,34 +131,44 @@ export default function HistoryPanel({
                 <p className="text-[12px] text-text-secondary mb-2">{formatScope(entry)}</p>
 
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
-                  <span className="text-text-secondary">{entry.summary.total} total</span>
-                  <span className="text-green-400">{entry.summary.alive} alive</span>
-                  <span className="text-cyan-400">{entry.summary.drm} drm</span>
-                  <span className="text-red-400">{entry.summary.dead} dead</span>
-                  <span className="text-yellow-400">{entry.summary.geoblocked} geoblocked</span>
+                  <span className="text-text-secondary">
+                    {t("history.summary.total", { count: entry.summary.total })}
+                  </span>
+                  <span className="text-green-400">
+                    {t("history.summary.alive", { count: entry.summary.alive })}
+                  </span>
+                  <span className="text-cyan-400">
+                    {t("history.summary.drm", { count: entry.summary.drm })}
+                  </span>
+                  <span className="text-red-400">
+                    {t("history.summary.dead", { count: entry.summary.dead })}
+                  </span>
+                  <span className="text-yellow-400">
+                    {t("history.summary.geoblocked", { count: entry.summary.geoblocked })}
+                  </span>
                 </div>
 
                 {entry.diff ? (
                   <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-[12px]">
                     <div className="rounded-md bg-panel px-2 py-1">
-                      +{entry.diff.channels_gained} gained
+                      {t("history.diff.gained", { count: entry.diff.channels_gained })}
                     </div>
                     <div className="rounded-md bg-panel px-2 py-1">
-                      -{entry.diff.channels_lost} lost
+                      {t("history.diff.lost", { count: entry.diff.channels_lost })}
                     </div>
                     <div className="rounded-md bg-panel px-2 py-1">
-                      {entry.diff.status_changed} changed
+                      {t("history.diff.changed", { count: entry.diff.status_changed })}
                     </div>
                     <div className="rounded-md bg-panel px-2 py-1 text-green-400">
-                      {entry.diff.became_alive} up
+                      {t("history.diff.up", { count: entry.diff.became_alive })}
                     </div>
                     <div className="rounded-md bg-panel px-2 py-1 text-red-400">
-                      {entry.diff.became_dead} down
+                      {t("history.diff.down", { count: entry.diff.became_dead })}
                     </div>
                   </div>
                 ) : (
                   <p className="mt-3 text-[12px] text-text-tertiary">
-                    No comparable previous scan in the same scope.
+                    {t("history.noComparableScan")}
                   </p>
                 )}
               </article>

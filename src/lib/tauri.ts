@@ -28,6 +28,7 @@ import type {
   ScanPresetConfig,
   ScreenshotCacheStats,
   StalkerOpenRequest,
+  UiLocale,
   UpdateCheckResult,
   UpdateInstallMode,
   XtreamOpenRequest,
@@ -288,6 +289,14 @@ export async function exportAppLog(text: string): Promise<void> {
 
 export async function getSettings(): Promise<AppSettings> {
   return invoke("get_settings");
+}
+
+export async function getUiLocale(): Promise<UiLocale> {
+  return invoke("get_ui_locale");
+}
+
+export async function restartApp(): Promise<void> {
+  return invoke("restart_app");
 }
 
 export async function syncViewMenu(visibility: {

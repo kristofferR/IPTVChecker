@@ -14,19 +14,25 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { UseChromecastResult } from "../hooks/useChromecast";
 import { type ArchiveSession, MAX_PLAYBACK_RECOVERY_ATTEMPTS } from "../hooks/useStreamPlayer";
+import { formatCount, getFormatLocale, t } from "../i18n";
 import { isCastSessionActive } from "../lib/cast";
 import type { CastMediaRequest } from "../lib/types";
 import { CastMenu, type CastStartHandler } from "./CastMenu";
 
 function formatArchiveClock(epochS: number): string {
-  return new Date(epochS * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(epochS * 1000).toLocaleTimeString(getFormatLocale(), {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function formatBehindLive(seconds: number): string {
   const total = Math.max(0, Math.round(seconds));
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
-  return hours > 0 ? `−${hours} h ${minutes} m` : `−${minutes} m`;
+  return hours > 0
+    ? t("player.behindLiveHours", { hours: formatCount(hours), minutes: formatCount(minutes) })
+    : t("player.behindLiveMinutes", { minutes: formatCount(minutes) });
 }
 
 interface StreamPlayerProps {
@@ -200,14 +206,16 @@ export function StreamPlayer({
           onClick={onGoLive}
           className="absolute top-2 right-2 px-2 py-0.5 rounded border border-white/40 bg-black/45 text-[10px] font-semibold text-white hover:bg-black/70 transition-colors"
         >
-          GO LIVE
+          {t("player.goLive")}
         </button>
       )}
 
       {showCastUi && isCasting && chromecast?.session && (
         <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-1 rounded-md bg-blue-600/85 text-white text-[11px] font-medium shadow-md backdrop-blur-sm">
           <Cast className="w-3 h-3" />
-          <span className="truncate max-w-[180px]">Casting to {chromecast.session.deviceName}</span>
+          <span className="truncate max-w-[180px]">
+            {t("cast.castingTo", { device: chromecast.session.deviceName })}
+          </span>
         </div>
       )}
 
@@ -220,14 +228,18 @@ export function StreamPlayer({
         >
           <LoaderCircle className="h-6 w-6 animate-spin text-white" />
           <span className="text-[12px] font-medium text-white/85">
-            {isRecovering ? (recoveryMessage ?? "Reconnecting...") : "Connecting..."}
+            {isRecovering ? (recoveryMessage ?? t("player.reconnecting")) : t("player.connecting")}
           </span>
           {isRecovering && (
             <div className="flex items-center gap-1.5 text-[11px] text-amber-100/85">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
               <span>
-                Trying a clean reconnect
-                {recoveryAttempt ? ` (${recoveryAttempt}/${MAX_PLAYBACK_RECOVERY_ATTEMPTS})` : ""}
+                {recoveryAttempt
+                  ? t("player.cleanReconnectAttempt", {
+                      attempt: formatCount(recoveryAttempt),
+                      maxAttempts: formatCount(MAX_PLAYBACK_RECOVERY_ATTEMPTS),
+                    })
+                  : t("player.cleanReconnect")}
               </span>
             </div>
           )}
@@ -238,7 +250,7 @@ export function StreamPlayer({
       {playerState === "error" && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/80 px-4 text-center">
           <p className="text-[12px] text-red-300 font-medium leading-relaxed max-w-[90%]">
-            {errorMessage || "Playback failed"}
+            {errorMessage || t("player.playbackFailed")}
           </p>
           <div className="flex items-center gap-2">
             <button
@@ -246,14 +258,14 @@ export function StreamPlayer({
               onClick={onRetry}
               className="px-3 py-1.5 text-[11px] font-medium rounded-md bg-white/10 hover:bg-white/20 text-white transition-colors"
             >
-              Retry
+              {t("common.retry")}
             </button>
             <button
               type="button"
               onClick={onOpenExternal}
               className="px-3 py-1.5 text-[11px] font-medium rounded-md bg-blue-600 hover:bg-blue-500 text-white transition-colors"
             >
-              Open External
+              {t("player.openExternal")}
             </button>
           </div>
         </div>
@@ -307,7 +319,7 @@ export function StreamPlayer({
               type="button"
               onClick={onTogglePause}
               className="p-1 text-white hover:text-white/80 transition-colors"
-              title={isPaused ? "Play" : "Pause"}
+              title={isPaused ? t("player.play") : t("player.pause")}
             >
               {isPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
             </button>
@@ -315,7 +327,7 @@ export function StreamPlayer({
               type="button"
               onClick={onStop}
               className="p-1 text-white hover:text-white/80 transition-colors"
-              title="Stop"
+              title={t("player.stop")}
             >
               <Square className="w-3.5 h-3.5" />
             </button>
@@ -323,7 +335,7 @@ export function StreamPlayer({
               type="button"
               onClick={onToggleMute}
               className="p-1 text-white hover:text-white/80 transition-colors ml-auto"
-              title={muted ? "Unmute" : "Mute"}
+              title={muted ? t("player.unmute") : t("player.mute")}
             >
               {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
             </button>
@@ -338,7 +350,12 @@ export function StreamPlayer({
                 if (muted) onToggleMute();
               }}
               className="w-16 h-1 accent-white cursor-pointer"
-              title={`Volume: ${Math.round((muted ? 0 : volume) * 100)}%`}
+              title={t("player.volume", {
+                percent: new Intl.NumberFormat(getFormatLocale(), {
+                  style: "percent",
+                  maximumFractionDigits: 0,
+                }).format(muted ? 0 : volume),
+              })}
             />
             {showCastUi && castRequest && chromecast && (
               <CastMenu
@@ -354,7 +371,7 @@ export function StreamPlayer({
                 type="button"
                 onClick={onPip}
                 className="p-1 text-white hover:text-white/80 transition-colors ml-1"
-                title="Picture-in-Picture"
+                title={t("player.pictureInPicture")}
               >
                 <PictureInPicture2 className="w-4 h-4" />
               </button>
@@ -364,7 +381,7 @@ export function StreamPlayer({
                 type="button"
                 onClick={onFullscreen}
                 className="p-1 text-white hover:text-white/80 transition-colors ml-1"
-                title="Fullscreen"
+                title={t("player.fullscreen")}
               >
                 <Maximize className="w-4 h-4" />
               </button>

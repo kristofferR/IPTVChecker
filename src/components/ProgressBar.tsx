@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { formatCount, getFormatLocale, t } from "../i18n";
 import { isScanActive } from "../lib/scanState";
 import { useAppStore } from "../store";
 
@@ -9,9 +10,9 @@ function formatEta(seconds: number | null): string {
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const secs = totalSeconds % 60;
 
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m ${secs}s`;
-  return `${secs}s`;
+  if (hours > 0) return t("toolbar.progress.etaHours", { hours, minutes });
+  if (minutes > 0) return t("toolbar.progress.etaMinutes", { minutes, seconds: secs });
+  return t("toolbar.progress.etaSeconds", { seconds: secs });
 }
 
 export const ProgressBar = memo(function ProgressBar() {
@@ -30,14 +31,17 @@ export const ProgressBar = memo(function ProgressBar() {
     if (scanState === "paused") {
       telemetryLabel = "—";
     } else if (scanState === "cancelling") {
-      telemetryLabel = "Stopping scan…";
+      telemetryLabel = t("toolbar.progress.stoppingScan");
     } else if (throughputChannelsPerSecond == null) {
-      telemetryLabel = "Calculating speed…";
+      telemetryLabel = t("toolbar.progress.calculatingSpeed");
     } else {
       const chPerMin = throughputChannelsPerSecond * 60;
-      const throughputDisplay =
-        chPerMin >= 10 ? `${Math.round(chPerMin)} ch/min` : `${chPerMin.toFixed(1)} ch/min`;
-      telemetryLabel = `${throughputDisplay} · ~${formatEta(etaSeconds)} remaining`;
+      const fractionDigits = chPerMin >= 10 ? 0 : 1;
+      const rate = new Intl.NumberFormat(getFormatLocale(), {
+        minimumFractionDigits: fractionDigits,
+        maximumFractionDigits: fractionDigits,
+      }).format(chPerMin);
+      telemetryLabel = t("toolbar.progress.telemetry", { rate, eta: formatEta(etaSeconds) });
     }
   }
 
@@ -51,16 +55,20 @@ export const ProgressBar = memo(function ProgressBar() {
           />
         </div>
         <span className="text-[12px] text-text-secondary tabular-nums whitespace-nowrap">
-          {progress.completed}/{progress.total} ({percent}%)
+          {t("toolbar.progress.counter", {
+            completed: formatCount(progress.completed),
+            total: formatCount(progress.total),
+            percent: formatCount(percent),
+          })}
         </span>
         {scanState === "paused" && (
           <span className="text-[12px] text-yellow-400 font-medium uppercase tracking-[0.04em]">
-            Paused
+            {t("toolbar.progress.paused")}
           </span>
         )}
         {scanState === "cancelling" && (
           <span className="text-[12px] text-orange-400 font-medium uppercase tracking-[0.04em]">
-            Stopping
+            {t("toolbar.progress.stopping")}
           </span>
         )}
       </div>

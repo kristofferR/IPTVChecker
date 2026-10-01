@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useAppStore } from "../store";
 import { hasArchive } from "./archive";
 import { isArchiveDownloadRunning } from "./archiveDownload";
@@ -95,7 +96,7 @@ export async function verifyArchives(
   if (
     initialState.externalPlaybackActive &&
     singleConnection &&
-    !window.confirm("Close the external player before verifying catch-up. Continue?")
+    !window.confirm(t("archive.confirmCloseExternalPlayerVerify"))
   ) {
     return;
   }

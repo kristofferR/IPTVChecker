@@ -33,6 +33,8 @@ tokio-util = { version = "0.7", features = ["rt"] }
 log = "0.4"
 tauri-plugin-log = "2"
 tauri-plugin-os = "2"
+sys-locale = "0.3"
+dirs = "6"
 base64 = "0.22.1"
 sha2 = "0.10"
 quick-xml = { version = "0.37", features = ["encoding"] }

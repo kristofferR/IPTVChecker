@@ -1,6 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderOpen, X } from "lucide-react";
 import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useState } from "react";
+import { t } from "../i18n";
 import type { SavedPlaylistDraft } from "../lib/types";
 import PasswordField from "./PasswordField";
 
@@ -12,37 +13,37 @@ interface SavedPlaylistEditorDialogProps {
 
 function validateDraft(draft: SavedPlaylistDraft): string | null {
   if (!draft.display_name.trim()) {
-    return "Display name cannot be empty.";
+    return t("saved.editor.validation.displayNameEmpty");
   }
   if (draft.kind === "file" && !draft.path.trim()) {
-    return "Path cannot be empty.";
+    return t("saved.editor.validation.pathEmpty");
   }
   if (draft.kind === "url") {
     const value = draft.url.trim();
     if (!value) {
-      return "URL cannot be empty.";
+      return t("saved.editor.validation.urlEmpty");
     }
     if (!/^https?:\/\//i.test(value)) {
-      return "URL must start with http:// or https://";
+      return t("saved.editor.validation.urlScheme");
     }
   }
   if (draft.kind === "xtream") {
     if (!draft.username.trim()) {
-      return "Xtream username cannot be empty.";
+      return t("saved.editor.validation.xtreamUsernameEmpty");
     }
     if (!draft.password?.trim()) {
-      return "Xtream password cannot be empty.";
+      return t("saved.editor.validation.xtreamPasswordEmpty");
     }
     if (draft.servers.filter((value) => value.trim().length > 0).length === 0) {
-      return "Add at least one Xtream server.";
+      return t("saved.editor.validation.xtreamServersEmpty");
     }
   }
   if (draft.kind === "dispatcharr") {
     if (!/^https?:\/\//i.test(draft.server.trim())) {
-      return "Dispatcharr server must start with http:// or https://";
+      return t("saved.editor.validation.dispatcharrServerScheme");
     }
     if (!draft.api_key?.trim() && !(draft.username?.trim() && draft.password?.trim())) {
-      return "Enter a Dispatcharr API key, or a username and password.";
+      return t("saved.editor.validation.dispatcharrCredentialsMissing");
     }
   }
   return null;
@@ -93,7 +94,7 @@ export default function SavedPlaylistEditorDialog({
     const path = await open({
       multiple: false,
       directory: false,
-      filters: [{ name: "M3U Playlists", extensions: ["m3u", "m3u8"] }],
+      filters: [{ name: t("saved.editor.fileFilterName"), extensions: ["m3u", "m3u8"] }],
     });
     const selected = Array.isArray(path) ? path[0] : path;
     if (!selected || form.kind !== "file") {
@@ -156,7 +157,7 @@ export default function SavedPlaylistEditorDialog({
     }
   };
 
-  const title = form.id ? "Edit Playlist" : "Save Playlist";
+  const title = form.id ? t("saved.editor.editTitle") : t("saved.editor.saveTitle");
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center px-4">
@@ -170,7 +171,7 @@ export default function SavedPlaylistEditorDialog({
             type="button"
             onClick={onClose}
             className="rounded-md p-1.5 hover:bg-btn-hover transition-colors"
-            aria-label="Close saved playlist editor"
+            aria-label={t("saved.editor.closeLabel")}
           >
             <X className="w-[18px] h-[18px]" />
           </button>
@@ -178,7 +179,9 @@ export default function SavedPlaylistEditorDialog({
 
         <div className="space-y-4 p-5">
           <div className="space-y-1.5">
-            <label className="text-[12px] font-medium text-text-secondary">Display Name</label>
+            <label className="text-[12px] font-medium text-text-secondary">
+              {t("saved.editor.displayName")}
+            </label>
             <input
               type="text"
               value={form.display_name}
@@ -192,7 +195,9 @@ export default function SavedPlaylistEditorDialog({
 
           {form.kind === "file" && (
             <div className="space-y-1.5">
-              <label className="text-[12px] font-medium text-text-secondary">Path</label>
+              <label className="text-[12px] font-medium text-text-secondary">
+                {t("saved.editor.path")}
+              </label>
               <div className="flex items-center gap-2">
                 <input
                   type="text"
@@ -209,7 +214,7 @@ export default function SavedPlaylistEditorDialog({
                   className="inline-flex items-center gap-1.5 rounded-md bg-btn px-3 py-2 text-[12px] text-text-primary hover:bg-btn-hover transition-colors"
                 >
                   <FolderOpen className="h-3.5 w-3.5" />
-                  Browse
+                  {t("saved.editor.browse")}
                 </button>
               </div>
             </div>
@@ -234,7 +239,9 @@ export default function SavedPlaylistEditorDialog({
             <>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-1.5">
-                  <label className="text-[12px] font-medium text-text-secondary">Username</label>
+                  <label className="text-[12px] font-medium text-text-secondary">
+                    {t("saved.editor.username")}
+                  </label>
                   <input
                     type="text"
                     value={form.username}
@@ -253,7 +260,7 @@ export default function SavedPlaylistEditorDialog({
                     htmlFor="saved-playlist-xtream-password"
                     className="text-[12px] font-medium text-text-secondary"
                   >
-                    Password
+                    {t("saved.editor.password")}
                   </label>
                   <PasswordField
                     id="saved-playlist-xtream-password"
@@ -272,7 +279,7 @@ export default function SavedPlaylistEditorDialog({
 
               <div className="space-y-1.5">
                 <label className="text-[12px] font-medium text-text-secondary">
-                  Servers (one per line)
+                  {t("saved.editor.servers")}
                 </label>
                 <textarea
                   rows={5}
@@ -287,12 +294,12 @@ export default function SavedPlaylistEditorDialog({
                   }
                   className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[13px] text-text-primary focus:border-blue-500 focus:outline-none font-mono resize-none"
                 />
-                <p className="text-[11px] text-text-tertiary">Enter one server URL per line.</p>
+                <p className="text-[11px] text-text-tertiary">{t("saved.editor.serversHint")}</p>
               </div>
 
               <div className="space-y-1.5">
                 <label className="text-[12px] font-medium text-text-secondary">
-                  Preferred Server
+                  {t("saved.editor.preferredServer")}
                 </label>
                 <select
                   value={form.preferred_server ?? ""}
@@ -304,7 +311,7 @@ export default function SavedPlaylistEditorDialog({
                   }
                   className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[13px] text-text-primary focus:border-blue-500 focus:outline-none"
                 >
-                  <option value="">First available</option>
+                  <option value="">{t("saved.editor.firstAvailable")}</option>
                   {form.servers
                     .map((server) => server.trim())
                     .filter(Boolean)
@@ -325,7 +332,7 @@ export default function SavedPlaylistEditorDialog({
                   htmlFor="saved-playlist-dispatcharr-server"
                   className="text-[12px] font-medium text-text-secondary"
                 >
-                  Server
+                  {t("saved.editor.server")}
                 </label>
                 <input
                   id="saved-playlist-dispatcharr-server"
@@ -341,7 +348,7 @@ export default function SavedPlaylistEditorDialog({
                   htmlFor="saved-playlist-dispatcharr-api-key"
                   className="text-[12px] font-medium text-text-secondary"
                 >
-                  API Key
+                  {t("saved.editor.apiKey")}
                 </label>
                 <PasswordField
                   id="saved-playlist-dispatcharr-api-key"
@@ -350,9 +357,7 @@ export default function SavedPlaylistEditorDialog({
                   onChange={(event) => setForm({ ...form, api_key: event.target.value })}
                   className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[13px] text-text-primary focus:border-blue-500 focus:outline-none"
                 />
-                <p className="text-[11px] text-text-tertiary">
-                  Used instead of the username and password when set.
-                </p>
+                <p className="text-[11px] text-text-tertiary">{t("saved.editor.apiKeyHint")}</p>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-1.5">
@@ -360,7 +365,7 @@ export default function SavedPlaylistEditorDialog({
                     htmlFor="saved-playlist-dispatcharr-username"
                     className="text-[12px] font-medium text-text-secondary"
                   >
-                    Username
+                    {t("saved.editor.username")}
                   </label>
                   <input
                     id="saved-playlist-dispatcharr-username"
@@ -376,7 +381,7 @@ export default function SavedPlaylistEditorDialog({
                     htmlFor="saved-playlist-dispatcharr-password"
                     className="text-[12px] font-medium text-text-secondary"
                   >
-                    Password
+                    {t("saved.editor.password")}
                   </label>
                   <PasswordField
                     id="saved-playlist-dispatcharr-password"
@@ -398,7 +403,7 @@ export default function SavedPlaylistEditorDialog({
               onClick={onClose}
               className="rounded-md bg-btn px-3 py-2 text-[13px] text-text-primary hover:bg-btn-hover transition-colors"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="button"
@@ -406,7 +411,7 @@ export default function SavedPlaylistEditorDialog({
               disabled={busy}
               className="rounded-md bg-blue-600 px-3 py-2 text-[13px] font-medium text-white hover:bg-blue-500 disabled:opacity-50 disabled:pointer-events-none transition-colors"
             >
-              {busy ? "Saving..." : "Save"}
+              {busy ? t("saved.editor.saving") : t("common.save")}
             </button>
           </div>
         </div>

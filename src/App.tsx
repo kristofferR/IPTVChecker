@@ -41,6 +41,7 @@ import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
 import { type ArchivePlayOptions, useStreamPlayer } from "./hooks/useStreamPlayer";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
+import { getFormatLocale, getLanguageSuggestion, t } from "./i18n";
 import { resolveArchivePlayback } from "./lib/archive";
 import { cancelArchiveProbes } from "./lib/archiveProbe";
 import { registerArchiveTimezoneResolver } from "./lib/archiveTimezone";
@@ -73,6 +74,7 @@ import { selectResultByIndex, useAppStore } from "./store";
 import type { AppStore, OpenSourceDialogState } from "./store/types";
 
 const KeyboardShortcutsDialog = lazy(() => import("./components/KeyboardShortcutsDialog"));
+const LanguagePromptDialog = lazy(() => import("./components/LanguagePromptDialog"));
 const HistoryPanel = lazy(() => import("./components/HistoryPanel"));
 const OpenSourceDialog = lazy(() => import("./components/OpenSourceDialog"));
 const XtreamServerTestDialog = lazy(() =>
@@ -120,12 +122,9 @@ const TABLE_PROFILER_ROW_LIMIT = 50_000;
 const getStore = () => useAppStore.getState();
 // Xtream panels interpret timeshift starts in their own timezone.
 registerArchiveTimezoneResolver(() => getStore().playlist?.xtream_account_info?.timezone ?? null);
-const ARCHIVE_VERIFICATION_PLAYBACK_ERROR =
-  "Cancel the running catch-up verification or download before starting playback";
-
 function blockPlaybackDuringArchiveVerification(): boolean {
   if (!isArchiveVerificationBlockingPlayback()) return false;
-  getStore().setPlaybackError(ARCHIVE_VERIFICATION_PLAYBACK_ERROR);
+  getStore().setPlaybackError(t("app.playback.blockedByArchiveVerification"));
   return true;
 }
 
@@ -137,16 +136,19 @@ function formatScanNotificationBody(stats: {
   playlist_score?: { overall: number } | null;
 }): string {
   const parts = [
-    `Alive ${stats.alive}`,
-    ...(stats.drm > 0 ? [`DRM ${stats.drm}`] : []),
-    `Dead ${stats.dead}`,
-    `Geoblocked ${stats.geoblocked}`,
+    t("app.scanNotification.alive", { count: stats.alive }),
+    ...(stats.drm > 0 ? [t("app.scanNotification.drm", { count: stats.drm })] : []),
+    t("app.scanNotification.dead", { count: stats.dead }),
+    t("app.scanNotification.geoblocked", { count: stats.geoblocked }),
   ];
-  const base = parts.join(" | ");
-  if (!stats.playlist_score) {
-    return base;
+  if (stats.playlist_score) {
+    const score = new Intl.NumberFormat(getFormatLocale(), {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    }).format(stats.playlist_score.overall);
+    parts.push(t("app.scanNotification.score", { score }));
   }
-  return `${base} | Score ${stats.playlist_score.overall.toFixed(1)}/10`;
+  return parts.join(" | ");
 }
 
 async function canSendNotifications(requiresPermission: boolean): Promise<boolean> {
@@ -182,24 +184,21 @@ function ScanPauseBanners() {
     <>
       {screenshotsPaused && isScanActive(scanState) && (
         <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-[13px]">
-          <span className="flex-1">Screenshot and clip capture paused: low disk space</span>
+          <span className="flex-1">{t("banners.capturePaused")}</span>
         </div>
       )}
 
       {networkPaused && isScanActive(scanState) && (
         <div className="flex items-center gap-2 px-4 py-2 bg-orange-500/10 border-b border-orange-500/20 text-orange-400 text-[13px]">
           <AlertTriangle className="w-4 h-4 shrink-0" />
-          <span className="flex-1">
-            Scan paused — network connectivity lost. Waiting for recovery...
-          </span>
+          <span className="flex-1">{t("banners.networkPaused")}</span>
         </div>
       )}
 
       {busyAccounts.length > 0 && isScanActive(scanState) && (
         <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-[13px]">
           <span className="flex-1">
-            Waiting for {busyAccounts.join(", ")}: someone is watching through Dispatcharr, and the
-            provider allows no more connections.
+            {t("banners.busyAccounts", { accounts: busyAccounts.join(", ") })}
           </span>
         </div>
       )}
@@ -431,7 +430,10 @@ function ScanRuntimeEffects({ refreshHistory }: { refreshHistory: () => Promise<
     if (!scanNotifications || !summary) return;
     if (scanState !== "complete" && scanState !== "cancelled") return;
 
-    const title = scanState === "complete" ? "Scan complete" : "Scan cancelled";
+    const title =
+      scanState === "complete"
+        ? t("app.scanNotification.complete")
+        : t("app.scanNotification.cancelled");
     const playlistPrefix = playlist ? `${playlist.file_name} | ` : "";
     const body = `${playlistPrefix}${formatScanNotificationBody(summary)}`;
 
@@ -594,6 +596,9 @@ export default function App() {
   const dispatcharrFind = useAppStore((s) => s.dispatcharrFind);
   const reportSidebarWidth = useAppStore((s) => s.reportSidebarWidth);
   const showKeyboardShortcuts = useAppStore((s) => s.showKeyboardShortcuts);
+  const languageSetting = useAppStore((s) => s.settings.language);
+  const settingsHydrated = useAppStore((s) => s.settingsHydrated);
+  const languageSuggestion = getLanguageSuggestion();
   const isDragOver = useAppStore((s) => s.isDragOver);
   const ffmpegWarning = useAppStore((s) => s.ffmpegWarning);
   const openSourceDialogState = useAppStore((s) => s.openSourceDialogState);
@@ -646,7 +651,7 @@ export default function App() {
   const wrappedCast = useCallback<UseChromecastResult["cast"]>(
     async (device, request) => {
       if (blockPlaybackDuringArchiveVerification()) {
-        throw new Error(ARCHIVE_VERIFICATION_PLAYBACK_ERROR);
+        throw new Error(t("app.playback.blockedByArchiveVerification"));
       }
       lastCastDeviceRef.current = device;
       getStore().setCastActive(true);
@@ -903,7 +908,7 @@ export default function App() {
 
   const openHistoryPanel = useCallback(() => {
     if (!playlist) {
-      getStore().setMenuInfo("Open a playlist first to view scan history.");
+      getStore().setMenuInfo(t("app.notices.openPlaylistForHistory"));
       return;
     }
     getStore().setShowHistory(true);
@@ -959,7 +964,7 @@ export default function App() {
       }
 
       if (paths.length > 1) {
-        getStore().setMenuInfo(`Opened ${paths.length} items. Loaded the first one.`);
+        getStore().setMenuInfo(t("app.notices.openedMultiple", { count: paths.length }));
       }
 
       void restoreAndFocusWindow(getCurrentWindow()).catch(() => {});
@@ -973,7 +978,7 @@ export default function App() {
       const playlistPath = paths.find((path) => isPlaylistLikePath(path));
 
       if (!playlistPath) {
-        getStore().setMenuInfo("Dropped file is not an M3U/M3U8 playlist.", "warn");
+        getStore().setMenuInfo(t("app.notices.droppedNotPlaylist"), "warn");
         return;
       }
 
@@ -1042,7 +1047,7 @@ export default function App() {
       state.externalPlaybackActive &&
       !state.playIntentActive &&
       !state.castActive &&
-      window.confirm("Close the external player before scanning. Continue?")
+      window.confirm(t("app.scan.confirmCloseExternalPlayer"))
     ) {
       state.setExternalPlaybackActive(false);
       return false;
@@ -1050,9 +1055,7 @@ export default function App() {
     if (!(state.playIntentActive || state.castActive || state.externalPlaybackActive)) {
       return false;
     }
-    state.setScanInputError(
-      "Stop playback first: the provider allows only so many connections at once.",
-    );
+    state.setScanInputError(t("app.scan.stopPlaybackFirst"));
     return true;
   }, []);
 
@@ -1072,13 +1075,15 @@ export default function App() {
       // A scan snapshots the stream order; one still being written would
       // change underneath it.
       if (Object.values(state.dispatcharrRowStates).some((row) => row?.kind === "writing")) {
-        state.setScanInputError("Wait for the Dispatcharr changes to finish saving.");
+        state.setScanInputError(t("app.scan.waitForDispatcharrSave"));
         return false;
       }
       const currentChannelSearchError = validateSourceFilterPattern(state.channelSearch);
 
       if (currentChannelSearchError) {
-        state.setScanInputError(`Invalid source filter regex: ${currentChannelSearchError}`);
+        state.setScanInputError(
+          t("app.scan.invalidSourceFilter", { error: currentChannelSearchError }),
+        );
         return false;
       }
 
@@ -1121,13 +1126,13 @@ export default function App() {
       if (linked && linked.length === 0 && explicitSelection.length === 0) {
         // Only streams linked from Find streams are left; the source has no
         // row to scan them from until it is reloaded.
-        getStore().setMenuInfo("Reload the source to scan streams linked from Find streams.");
+        getStore().setMenuInfo(t("app.scan.reloadToScanLinked"));
         return false;
       }
       if (explicitSelection.length > 0 && effectiveSelection.length === 0) {
         // Everything selected was unlinked; an empty selection must not
         // widen into a scan of the whole playlist.
-        getStore().setMenuInfo("The selected streams were removed from their channels.");
+        getStore().setMenuInfo(t("app.scan.selectedStreamsRemoved"));
         return false;
       }
 
@@ -1298,7 +1303,7 @@ export default function App() {
       url: `${baseUrl}?window=settings`,
       ...(platform === "windows" ? { dataDirectory: "settings-webview" } : {}),
       ...(platform === "linux" ? { decorations: await getTitleBarVisibility() } : {}),
-      title: "Settings",
+      title: t("app.windows.settings"),
       width: 620,
       height: 680,
       minWidth: 520,
@@ -1324,7 +1329,7 @@ export default function App() {
       url: `${baseUrl}?window=log`,
       ...(platform === "windows" ? { dataDirectory: "log-webview" } : {}),
       ...(platform === "linux" ? { decorations: await getTitleBarVisibility() } : {}),
-      title: "Log",
+      title: t("app.windows.log"),
       width: 900,
       height: 600,
       minWidth: 500,
@@ -1380,15 +1385,11 @@ export default function App() {
       // An external player opens its own provider connection, which a
       // running scan of a connection-limited source may already hold.
       if (isScanActive(getStore().scanState) && isSingleConnectionPlaylist(getStore().playlist)) {
-        getStore().setPlaybackError(
-          "Stop the scan first: the provider allows only so many connections at once.",
-        );
+        getStore().setPlaybackError(t("app.playback.stopScanFirst"));
         return;
       }
       if (isSingleConnectionPlaylist(getStore().playlist) && getStore().sampleCaptureActive) {
-        getStore().setPlaybackError(
-          "Wait for the sample capture to finish before playing externally.",
-        );
+        getStore().setPlaybackError(t("app.playback.waitForSampleCapture"));
         return;
       }
       try {
@@ -1549,7 +1550,9 @@ export default function App() {
     if (!video) return;
     void togglePictureInPicture(video).catch((error) => {
       logger.warn("[Player] Picture-in-picture failed:", errorToString(error));
-      getStore().setPlaybackError(`Picture-in-picture: ${errorToString(error)}`);
+      getStore().setPlaybackError(
+        t("app.playback.pictureInPictureFailed", { error: errorToString(error) }),
+      );
     });
   }, [playbackVideoElement]);
 
@@ -1635,24 +1638,24 @@ export default function App() {
       } = getStore();
       // One capture at a time: the shared flag gates scans and playback.
       if (sampleCaptureActive) {
-        throw new Error("Another sample is being captured.");
+        throw new Error(t("app.sample.alreadyCapturing"));
       }
       // Single-connection providers reject a second stream, so the capture
       // would fail or kick the viewer.
       if (isSingleConnectionPlaylist(playlistAtStart)) {
         if (castActive) {
-          throw new Error("Stop casting to capture a sample from this playlist.");
+          throw new Error(t("app.sample.stopCasting"));
         }
         // The app cannot see an external player exit, so ask instead of
         // refusing forever, matching the catch-up flows.
         if (externalPlaybackActive) {
-          if (!window.confirm("Close the external player before capturing a sample. Continue?")) {
+          if (!window.confirm(t("app.sample.confirmCloseExternalPlayer"))) {
             return;
           }
           getStore().setExternalPlaybackActive(false);
         }
         if (isArchiveVerificationBlockingPlayback()) {
-          throw new Error("Wait for the catch-up test or recording to finish before capturing.");
+          throw new Error(t("app.sample.waitForCatchup"));
         }
         if (playIntentActive) handleStopPlayer();
       }
@@ -1922,7 +1925,7 @@ export default function App() {
         {ffmpegWarning && (
           <div className="flex items-center gap-2 px-4 py-2.5 bg-yellow-500/10 border-b border-yellow-500/20 text-yellow-400 text-[13px]">
             <AlertTriangle className="w-4 h-4" />
-            ffmpeg/ffprobe not found. Screenshots and media info will be disabled.
+            {t("banners.ffmpegMissing")}
           </div>
         )}
         <ScanPauseBanners />
@@ -2068,6 +2071,12 @@ export default function App() {
         </Suspense>
       )}
 
+      {languageSuggestion && settingsHydrated && languageSetting === null && (
+        <Suspense fallback={null}>
+          <LanguagePromptDialog suggestion={languageSuggestion} />
+        </Suspense>
+      )}
+
       {showKeyboardShortcuts && (
         <Suspense fallback={null}>
           <KeyboardShortcutsDialog
@@ -2102,10 +2111,10 @@ export default function App() {
           <div className="absolute inset-0 flex items-center justify-center px-4">
             <div className="rounded-2xl border-2 border-dashed border-blue-400/70 bg-overlay/90 px-8 py-6 text-center shadow-2xl">
               <p className="text-[11px] uppercase tracking-[0.08em] text-blue-300 mb-1">
-                Drop Playlist
+                {t("app.dropOverlay.title")}
               </p>
               <p className="text-[16px] font-semibold text-text-primary">
-                Release to open `.m3u` / `.m3u8`
+                {t("app.dropOverlay.hint")}
               </p>
             </div>
           </div>
@@ -2117,17 +2126,17 @@ export default function App() {
           <div className="w-full max-w-xl rounded-xl border border-border-app bg-overlay p-5 shadow-2xl">
             <h2 className="text-[16px] font-semibold mb-2">
               {pendingPlaybackReason === "archive_probe"
-                ? "Catch-up test currently running"
+                ? t("app.pendingPlayback.archiveProbeTitle")
                 : pendingPlaybackReason === "sample_capture"
-                  ? "Sample capture currently running"
-                  : "Scan currently running"}
+                  ? t("app.pendingPlayback.sampleCaptureTitle")
+                  : t("app.pendingPlayback.scanTitle")}
             </h2>
             <p className="text-[14px] text-text-secondary leading-relaxed">
               {pendingPlaybackReason === "archive_probe"
-                ? "Playback will start when the catch-up test finishes, so a single-connection server is not interrupted."
+                ? t("app.pendingPlayback.archiveProbeBody")
                 : pendingPlaybackReason === "sample_capture"
-                  ? "Playback will start when the sample capture finishes, so a single-connection server is not interrupted."
-                  : "A scan is currently running. Playing a channel while scanning may interfere with the scan or cause playback issues if the server&apos;s max connection limit is exceeded."}
+                  ? t("app.pendingPlayback.sampleCaptureBody")
+                  : t("app.pendingPlayback.scanBody")}
             </p>
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
@@ -2139,7 +2148,7 @@ export default function App() {
                 className="macos-btn px-3 py-2 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
                 type="button"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               {pendingPlaybackReason === "scan" && (
                 <button
@@ -2147,7 +2156,7 @@ export default function App() {
                   className="macos-btn macos-btn-primary px-3 py-2 min-h-9 text-[13px] font-medium bg-blue-600 hover:bg-blue-500 rounded-md"
                   type="button"
                 >
-                  Proceed
+                  {t("app.pendingPlayback.proceed")}
                 </button>
               )}
             </div>

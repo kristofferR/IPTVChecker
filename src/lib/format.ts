@@ -1,9 +1,10 @@
+import { getFormatLocale, type MessageKey, t } from "../i18n";
 import type { ChannelResult, ChannelStatus } from "./types";
 
 const STATUS_METADATA: Record<
   ChannelStatus,
   {
-    label: string;
+    label: Extract<MessageKey, `format.status.${string}`>;
     color: string;
     background: string;
     icon: string;
@@ -11,63 +12,63 @@ const STATUS_METADATA: Record<
   }
 > = {
   alive: {
-    label: "Alive",
+    label: "format.status.alive",
     color: "text-green-400",
     background: "bg-green-500/10 text-green-400 border-green-500/20",
     icon: "✓",
     dot: "bg-green-500",
   },
   drm: {
-    label: "DRM",
+    label: "format.status.drm",
     color: "text-cyan-400",
     background: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
     icon: "⚿",
     dot: "bg-cyan-500",
   },
   dead: {
-    label: "Dead",
+    label: "format.status.dead",
     color: "text-red-400",
     background: "bg-red-500/10 text-red-400 border-red-500/20",
     icon: "✕",
     dot: "bg-red-500",
   },
   placeholder: {
-    label: "Placeholder",
+    label: "format.status.placeholder",
     color: "text-orange-400",
     background: "bg-orange-500/10 text-orange-400 border-orange-500/20",
     icon: "▪",
     dot: "bg-orange-500",
   },
   geoblocked: {
-    label: "Geoblocked",
+    label: "format.status.geoblocked",
     color: "text-yellow-400",
     background: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
     icon: "🔒",
     dot: "bg-yellow-500",
   },
   geoblocked_confirmed: {
-    label: "Geoblocked (Confirmed)",
+    label: "format.status.geoblockedConfirmed",
     color: "text-yellow-400",
     background: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
     icon: "🔒",
     dot: "bg-yellow-500",
   },
   geoblocked_unconfirmed: {
-    label: "Geoblocked (Unconfirmed)",
+    label: "format.status.geoblockedUnconfirmed",
     color: "text-yellow-400",
     background: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
     icon: "🔒",
     dot: "bg-yellow-500",
   },
   checking: {
-    label: "Checking...",
+    label: "format.status.checking",
     color: "text-blue-400",
     background: "bg-blue-500/10 text-blue-400 border-blue-500/20",
     icon: "⟳",
     dot: "bg-blue-500",
   },
   pending: {
-    label: "Pending",
+    label: "format.status.pending",
     color: "text-text-tertiary",
     background: "bg-zinc-500/10 text-text-tertiary border-zinc-500/20",
     icon: "·",
@@ -76,7 +77,7 @@ const STATUS_METADATA: Record<
 };
 
 export function statusLabel(status: ChannelStatus): string {
-  return STATUS_METADATA[status].label;
+  return t(STATUS_METADATA[status].label);
 }
 
 export function statusColor(status: ChannelStatus): string {
@@ -121,7 +122,7 @@ export function statusDotColor(status: ChannelStatus): string {
 export function formatAudioInfo(result: ChannelResult): string {
   const parts: string[] = [];
   if (result.audio_bitrate) {
-    parts.push(`${result.audio_bitrate} kbps`);
+    parts.push(t("format.kbps", { value: result.audio_bitrate }));
   }
   if (result.audio_codec && result.audio_codec !== "Unknown") {
     parts.push(result.audio_codec);
@@ -167,15 +168,45 @@ export function normalizeCodecName(raw: string): string {
   return raw.toUpperCase();
 }
 
+const fixedFormats = new Map<number, Intl.NumberFormat>();
+
+/** Locale-aware `value.toFixed(digits)`, without digit grouping. */
+function formatFixed(value: number, digits: number): string {
+  let format = fixedFormats.get(digits);
+  if (!format) {
+    format = new Intl.NumberFormat(getFormatLocale(), {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+      useGrouping: false,
+    });
+    fixedFormats.set(digits, format);
+  }
+  return format.format(value);
+}
+
+const BYTE_UNITS = [
+  "format.bytes.kb",
+  "format.bytes.mb",
+  "format.bytes.gb",
+  "format.bytes.tb",
+] as const;
+
 /** Human-readable byte count, e.g. "12.3 MB". */
 export function formatBytes(totalBytes: number): string {
-  if (totalBytes < 1024) return `${totalBytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
+  if (totalBytes < 1024) return t("format.bytes.b", { value: formatFixed(totalBytes, 0) });
   let value = totalBytes / 1024;
   let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
+  while (value >= 1024 && unitIndex < BYTE_UNITS.length - 1) {
     value /= 1024;
     unitIndex += 1;
   }
-  return `${value.toFixed(1)} ${units[unitIndex]}`;
+  return t(BYTE_UNITS[unitIndex], { value: formatFixed(value, 1) });
+}
+
+/** Stream latency, e.g. "450 ms" or "2.3 s". */
+export function formatLatency(latencyMs: number): string {
+  if (latencyMs < 1000) {
+    return t("format.milliseconds", { value: formatFixed(latencyMs, 0) });
+  }
+  return t("format.seconds", { value: formatFixed(latencyMs / 1000, 1) });
 }

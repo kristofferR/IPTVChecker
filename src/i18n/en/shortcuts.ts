@@ -1,0 +1,38 @@
+export default {
+  dialogLabel: "Keyboard shortcuts",
+  eyebrow: "Help",
+  title: "Keyboard Shortcuts",
+  close: "Close keyboard shortcuts",
+  sections: {
+    general: "General",
+    tableNavigation: "Table Navigation",
+    selection: "Selection",
+    scanPlayback: "Scan & Playback",
+  },
+  /** Mouse gestures; keyboard key names stay untranslated. */
+  gestures: {
+    click: "Click",
+    shiftClick: "Shift + Click",
+    modifierClick: "{modifier} + Click",
+    doubleClick: "Double-click",
+    doubleClickRow: "Double-click row",
+    contextMenu: "Context menu",
+  },
+  actions: {
+    openPlaylist: "Open playlist",
+    openSettings: "Open settings",
+    openShortcuts: "Open this shortcuts dialog",
+    openLog: "Open log window",
+    closeOverlays: "Close open dialogs and overlays",
+    moveRowFocus: "Move row focus and selection",
+    toggleLightbox: "Open or close the screenshot lightbox",
+    openInPlayer: "Open selected channel in player",
+    selectSingle: "Select single channel",
+    selectRange: "Select range",
+    toggleRowSelection: "Toggle row selection",
+    selectAllVisible: "Select all visible channels",
+    toggleScan: "Start or stop scan",
+    scanSelected: "Scan selected channels",
+    openInDefaultPlayer: "Open in default player",
+  },
+} as const;

@@ -1,3 +1,5 @@
+import { t } from "../i18n";
+
 interface WebKitVideo extends HTMLVideoElement {
   webkitPresentationMode?: "inline" | "fullscreen" | "picture-in-picture";
   webkitSupportsPresentationMode?: (mode: string) => boolean;
@@ -20,7 +22,7 @@ export async function togglePictureInPicture(video: HTMLVideoElement): Promise<v
     const mode =
       native.webkitPresentationMode === "picture-in-picture" ? "inline" : "picture-in-picture";
     if (mode === "picture-in-picture" && !native.webkitSupportsPresentationMode?.(mode)) {
-      throw new Error("Picture-in-picture is unavailable for this video.");
+      throw new Error(t("player.pip.unavailable"));
     }
     await new Promise<void>((resolve, reject) => {
       const finish = (error?: Error) => {
@@ -32,10 +34,7 @@ export async function togglePictureInPicture(video: HTMLVideoElement): Promise<v
       const changed = () => {
         if (native.webkitPresentationMode === mode) finish();
       };
-      const timer = setTimeout(
-        () => finish(new Error("Picture-in-picture did not respond. Please try again.")),
-        2000,
-      );
+      const timer = setTimeout(() => finish(new Error(t("player.pip.noResponse"))), 2000);
       video.addEventListener("webkitpresentationmodechanged", changed);
       try {
         native.webkitSetPresentationMode?.(mode);

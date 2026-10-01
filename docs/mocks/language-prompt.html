@@ -1,0 +1,96 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IPTV Checker: first-start language prompt</title><style>
+:root{color-scheme:dark}*{box-sizing:border-box}
+body{margin:0;background:#000;color:#f4f4f5;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans SC",sans-serif}
+main{max-width:1100px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:36px 0 10px;display:flex;gap:10px;align-items:center}
+p,li{color:#c4c4cc}.badge{font-size:11px;font-weight:600;background:#14532d;color:#86efac;border-radius:6px;padding:2px 8px}
+.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0}
+button{font:inherit;color:#f4f4f5;background:#27272a;border:1px solid #3f3f46;border-radius:6px;padding:4px 10px;cursor:pointer}
+button[aria-pressed=true]{background:#1d4ed8;border-color:#3b82f6}
+.pc{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px}.pc div{background:#18181b;border:1px solid #27272a;border-radius:8px;padding:10px 14px}
+.pc b{display:block;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#a1a1aa;margin-bottom:4px}.pc ul{margin:0;padding-inline-start:18px}
+.scroll{overflow-x:auto}
+table.notes{border-collapse:collapse;width:100%;font-size:13px}table.notes td,table.notes th{border-bottom:1px solid #27272a;padding:6px 8px;text-align:start;vertical-align:top}table.notes th{color:#a1a1aa;font-weight:500;white-space:nowrap}
+/* app */
+.win{position:relative;inline-size:980px;block-size:520px;background:#18181b;border:1px solid #3f3f46;border-radius:10px;overflow:hidden;font-size:12.5px;display:flex;flex-direction:column}
+.bar{display:flex;gap:16px;padding:6px 12px;color:#a1a1aa;border-bottom:1px solid #27272a}
+.tools{display:flex;gap:6px;padding:8px 12px}.tb{padding:8px 12px;border-radius:7px;background:#27272a;color:#e4e4e7}.tb.blue{background:#2563eb}.tb.dim{color:#71717a}.grow{flex:1}
+.start{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+.start h3{margin:0;font-size:17px;font-weight:500;color:#a1a1aa}.start p{margin:0;color:#a1a1aa}
+kbd{border:1px solid #3f3f46;border-radius:4px;padding:0 5px;font-size:11.5px}
+.acts{display:flex;gap:8px;margin-top:10px}.act{padding:9px 16px;border-radius:9px;background:#27272a;font-size:13.5px}.act.blue{background:#2563eb}
+.ic{inline-size:18px;block-size:18px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;flex:none}
+.ic.big{inline-size:28px;block-size:28px;color:#60a5fa}
+.btn{display:inline-flex;align-items:center;justify-content:center;padding:4px 11px;border-radius:6px;border:1px solid #3f3f46;background:#27272a;white-space:nowrap}
+.btn.primary{background:#2563eb;border-color:#2563eb;color:#fff}
+.sel{font:inherit;font-size:12.5px;color:#e4e4e7;background:#27272a;border:1px solid #3f3f46;border-radius:6px;padding:3px 6px}
+.banner{display:flex;align-items:center;gap:10px;padding:8px 14px;background:#1e3a8a33;border-bottom:1px solid #3b82f633;color:#93c5fd}
+.banner .msg{flex:1;display:flex;flex-direction:column;line-height:1.35}.banner b{color:#dbeafe;font-weight:600}.sub{color:#93a3bd;font-size:12px}
+.x{color:#93c5fd;display:flex}
+.scrim{position:absolute;inset:0;background:#000a;display:grid;place-items:center}
+.dialog{inline-size:380px;background:#232326;border:1px solid #3f3f46;border-radius:12px;padding:22px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;box-shadow:0 20px 60px #000c}
+.dialog h4{margin:6px 0 0;font-size:16px}.dialog .sub{margin:0 0 10px;font-size:12.5px;color:#a1a1aa}
+.col{display:flex;flex-direction:column;gap:7px;inline-size:100%}.wide{inline-size:100%;padding:7px 11px}
+.fine{margin:6px 0 0;font-size:11.5px;color:#71717a}
+.card{display:flex;gap:10px;align-items:flex-start;inline-size:620px;padding:12px 14px;margin-bottom:18px;border:1px solid #3b82f655;background:#1e3a8a22;border-radius:10px;color:#93c5fd}
+.card .msg{display:flex;flex-direction:column;gap:2px}.card b{color:#dbeafe}.card .row{display:flex;gap:8px;margin-top:8px}
+</style></head><body><main>
+<h1>First-start language prompt</h1>
+<p>Shown once, on the first start of the localized version, when the OS language is one of the 12. The app stays in English until the user answers. Each control speaks the language of whoever is likely to press it: the switch in the OS language, Keep English and the list in English.</p>
+<div class="controls"><span style="color:#a1a1aa">OS language:</span><button type="button" data-lang="de" aria-pressed="true">Deutsch</button><button type="button" data-lang="ru" aria-pressed="false">Русский</button><button type="button" data-lang="zh-CN" aria-pressed="false">简体中文</button><button type="button" data-lang="es" aria-pressed="false">Español</button></div>
+
+<h2>A. Banner <span class="badge">Anbefalt</span></h2>
+<div class="scroll"><div class="win">
+<div class="bar"><span class="menu">File</span><span class="menu">Edit</span><span class="menu">Scan</span><span class="menu">View</span><span class="menu">Help</span></div>
+<div class="tools"><span class="tb blue">Scan</span><span class="tb">Open</span><span class="tb dim">Save</span><span class="tb">Saved</span><span class="grow"></span><span class="tb dim">Export</span><span class="tb dim">Report</span><span class="tb dim">History</span><span class="tb">Settings</span></div>
+<div class="banner"><svg viewBox="0 0 20 20" class="ic"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c2 2.2 2.8 4.5 2.8 7s-.8 4.8-2.8 7M10 3c-2 2.2-2.8 4.5-2.8 7s.8 4.8 2.8 7"/></svg><div class="msg"><b><span data-l="msg">IPTV Checker gibt es auf Deutsch.</span></b><span class="sub">Your system language is <span data-l="name">German</span>. Switch IPTV Checker to it?</span></div><span class="btn primary"><span data-l="switch">Auf Deutsch wechseln</span></span><span class="btn">Keep English</span><select class="sel " aria-label="Other language"><option selected>Other language</option><option>Bahasa Indonesia</option><option>Deutsch</option><option>Español</option><option>Français</option><option>Italiano</option><option>Polski</option><option>Português (Brasil)</option><option>Tiếng Việt</option><option>Türkçe</option><option>Русский</option><option>Українська</option><option>简体中文</option></select><span class="x"><svg viewBox="0 0 20 20" class="ic"><path d="M6 6l8 8M14 6l-8 8"/></svg></span></div>
+<div class="start"><h3>No playlist loaded</h3><p>Click Open or press <kbd>Ctrl+O</kbd> to load an M3U playlist</p>
+<div class="acts"><span class="act blue">Open File</span><span class="act">Open Folder</span><span class="act">Add URL</span><span class="act">Add Xtream</span><span class="act">Add Dispatcharr</span></div></div>
+</div></div>
+<div class="pc"><div><b>Pros</b><ul><li>Matches the existing notice banners.</li><li>Does not block someone who launched with a playlist.</li><li>Stays until answered or dismissed.</li></ul></div><div><b>Cons</b><ul><li>Easier to overlook than a dialog.</li><li>Busy on narrow windows; the subline drops first.</li></ul></div></div>
+
+<h2>B. First-start dialog</h2>
+<div class="scroll"><div class="win">
+<div class="bar"><span class="menu">File</span><span class="menu">Edit</span><span class="menu">Scan</span><span class="menu">View</span><span class="menu">Help</span></div>
+<div class="tools"><span class="tb blue">Scan</span><span class="tb">Open</span><span class="tb dim">Save</span><span class="tb">Saved</span><span class="grow"></span><span class="tb dim">Export</span><span class="tb dim">Report</span><span class="tb dim">History</span><span class="tb">Settings</span></div>
+
+<div class="start"><h3>No playlist loaded</h3><p>Click Open or press <kbd>Ctrl+O</kbd> to load an M3U playlist</p>
+<div class="acts"><span class="act blue">Open File</span><span class="act">Open Folder</span><span class="act">Add URL</span><span class="act">Add Xtream</span><span class="act">Add Dispatcharr</span></div></div>
+<div class="scrim"><div class="dialog"><svg viewBox="0 0 20 20" class="ic big"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c2 2.2 2.8 4.5 2.8 7s-.8 4.8-2.8 7M10 3c-2 2.2-2.8 4.5-2.8 7s.8 4.8 2.8 7"/></svg>
+<h4><span data-l="msg">IPTV Checker gibt es auf Deutsch.</span></h4><p class="sub">Your system language is <span data-l="name">German</span>. Switch IPTV Checker to it?</p>
+<div class="col"><span class="btn primary wide"><span data-l="switch">Auf Deutsch wechseln</span></span><span class="btn wide">Keep English</span><select class="sel wide" aria-label="Other language"><option selected>Other language</option><option>Bahasa Indonesia</option><option>Deutsch</option><option>Español</option><option>Français</option><option>Italiano</option><option>Polski</option><option>Português (Brasil)</option><option>Tiếng Việt</option><option>Türkçe</option><option>Русский</option><option>Українська</option><option>简体中文</option></select></div>
+<p class="fine">You can change this later in Settings.</p></div></div></div></div>
+<div class="pc"><div><b>Pros</b><ul><li>Impossible to miss; one clear decision.</li><li>Room for both languages without crowding.</li></ul></div><div><b>Cons</b><ul><li>Blocks the window on the very first impression.</li><li>Interrupts a launch that opened a playlist.</li></ul></div></div>
+
+<h2>C. Start-screen card</h2>
+<div class="scroll"><div class="win">
+<div class="bar"><span class="menu">File</span><span class="menu">Edit</span><span class="menu">Scan</span><span class="menu">View</span><span class="menu">Help</span></div>
+<div class="tools"><span class="tb blue">Scan</span><span class="tb">Open</span><span class="tb dim">Save</span><span class="tb">Saved</span><span class="grow"></span><span class="tb dim">Export</span><span class="tb dim">Report</span><span class="tb dim">History</span><span class="tb">Settings</span></div>
+
+<div class="start"><div class="card"><svg viewBox="0 0 20 20" class="ic"><circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c2 2.2 2.8 4.5 2.8 7s-.8 4.8-2.8 7M10 3c-2 2.2-2.8 4.5-2.8 7s.8 4.8 2.8 7"/></svg><div class="msg"><b><span data-l="msg">IPTV Checker gibt es auf Deutsch.</span></b><span class="sub">Your system language is <span data-l="name">German</span>. Switch IPTV Checker to it?</span><div class="row"><span class="btn primary"><span data-l="switch">Auf Deutsch wechseln</span></span><span class="btn">Keep English</span><select class="sel " aria-label="Other language"><option selected>Other language</option><option>Bahasa Indonesia</option><option>Deutsch</option><option>Español</option><option>Français</option><option>Italiano</option><option>Polski</option><option>Português (Brasil)</option><option>Tiếng Việt</option><option>Türkçe</option><option>Русский</option><option>Українська</option><option>简体中文</option></select></div></div></div><h3>No playlist loaded</h3><p>Click Open or press <kbd>Ctrl+O</kbd> to load an M3U playlist</p>
+<div class="acts"><span class="act blue">Open File</span><span class="act">Open Folder</span><span class="act">Add URL</span><span class="act">Add Xtream</span><span class="act">Add Dispatcharr</span></div></div>
+</div></div>
+<div class="pc"><div><b>Pros</b><ul><li>Calm, part of the empty state.</li><li>No extra chrome over the toolbar.</li></ul></div><div><b>Cons</b><ul><li>Never seen when launching straight into a playlist.</li><li>Disappears once a playlist loads, unanswered.</li></ul></div></div>
+
+<h2>Behavior</h2>
+<table class="notes"><tbody>
+<tr><th>Switch</th><td>Saves the language and restarts. At first start nothing is loaded yet, so the restart is instant.</td></tr>
+<tr><th>Keep English</th><td>Saves English; never asks again.</td></tr>
+<tr><th>Other language</th><td>Picking any entry saves it and restarts.</td></tr>
+<tr><th>Dismiss (A)</th><td>Treated as Keep English.</td></tr>
+<tr><th>Unsupported OS language</th><td>No prompt. English, and Settings lists all languages.</td></tr>
+<tr><th>Settings</th><td>"System" leaves the list: the language is always an explicit choice after this.</td></tr>
+</tbody></table>
+</main><script>
+(function(){
+  var L={"de": {"name": "German", "native": "Deutsch", "msg": "IPTV Checker gibt es auf Deutsch.", "switch": "Auf Deutsch wechseln"}, "ru": {"name": "Russian", "native": "Русский", "msg": "IPTV Checker доступен на русском.", "switch": "Переключить на русский"}, "zh-CN": {"name": "Simplified Chinese", "native": "简体中文", "msg": "IPTV Checker 提供简体中文版本。", "switch": "切换到简体中文"}, "es": {"name": "Spanish", "native": "Español", "msg": "IPTV Checker está disponible en español.", "switch": "Cambiar a español"}};
+  var btns=[].slice.call(document.querySelectorAll('[data-lang]'));
+  function set(code){
+    var d=L[code];
+    [].slice.call(document.querySelectorAll('[data-l]')).forEach(function(el){el.textContent=d[el.dataset.l];});
+    btns.forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.lang===code));});
+  }
+  btns.forEach(function(b){b.addEventListener('click',function(){set(b.dataset.lang);});});
+})();
+</script></body></html>

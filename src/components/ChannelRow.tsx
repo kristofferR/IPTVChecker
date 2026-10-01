@@ -1,4 +1,6 @@
 import { memo, useMemo } from "react";
+import { formatCount, t } from "../i18n";
+import { translateReason } from "../i18n/reasons";
 import { archiveBadgeText, archiveTitle } from "../lib/archive";
 import {
   archiveDepthMeasured,
@@ -10,6 +12,7 @@ import {
 } from "../lib/archiveVerification";
 import { channelLogoPixels, channelRowHeightPixels } from "../lib/channelLogoSize";
 import { getChannelErrorReason } from "../lib/channelResults";
+import { formatLatency } from "../lib/format";
 import { detectChannelProtocol } from "../lib/streamProtocol";
 import type { ColumnDefinition } from "../lib/tableColumns";
 import type { ChannelLogoSize, ChannelResult } from "../lib/types";
@@ -24,13 +27,6 @@ import {
   StreamNameCell,
 } from "./DispatcharrCells";
 import { StatusBadge } from "./StatusBadge";
-
-function formatLatency(latencyMs: number): string {
-  if (latencyMs < 1000) {
-    return `${latencyMs} ms`;
-  }
-  return `${(latencyMs / 1000).toFixed(1)} s`;
-}
 
 function latencyTone(latencyMs: number): string {
   if (latencyMs < 500) {
@@ -86,8 +82,11 @@ function ChannelRowImpl({
   const isAlive = result.status === "alive";
   const logoSizePx = useMemo(() => channelLogoPixels(channelLogoSize), [channelLogoSize]);
   const rowHeightPx = useMemo(() => channelRowHeightPixels(channelLogoSize), [channelLogoSize]);
-  const errorReason = getChannelErrorReason(result);
-  const drmStatusTitle = result.drm_system ? `DRM: ${result.drm_system}` : "DRM-protected stream";
+  const rawErrorReason = getChannelErrorReason(result);
+  const errorReason = rawErrorReason ? translateReason(rawErrorReason) : null;
+  const drmStatusTitle = result.drm_system
+    ? t("table.drmSystem", { system: translateReason(result.drm_system) })
+    : t("table.drmProtected");
   const streamProtocol = useMemo(() => detectChannelProtocol(result), [result]);
   const probeEntry = useAppStore((s) => s.archiveProbes[result.index]);
 
@@ -174,7 +173,7 @@ function ChannelRowImpl({
           <span className="flex min-w-0 items-center gap-2 px-2">
             {duplicate && (
               <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-amber-300 ring-1 ring-amber-500/30">
-                duplicate
+                {t("table.duplicate")}
               </span>
             )}
             {streamProtocol && (
@@ -218,7 +217,7 @@ function ChannelRowImpl({
       case "audio":
         return (
           <span className="text-text-secondary tabular-nums">
-            {result.audio_bitrate ? `${result.audio_bitrate} kbps` : "—"}
+            {result.audio_bitrate ? t("format.kbps", { value: result.audio_bitrate }) : "—"}
           </span>
         );
       case "audio_codec":
@@ -243,12 +242,16 @@ function ChannelRowImpl({
           fake: "bg-red-500/15 text-red-300 ring-red-500/30",
         }[verdict];
         const measured = verdict === "shallower" ? measuredDepthDays(probeEntry) : null;
-        const measuredLabel = measured != null && measured < 1 ? "<1" : measured;
+        const measuredText = measured == null ? "?" : formatCount(measured);
+        const days = result.catchup_days == null ? "?" : formatCount(result.catchup_days);
         const chipText =
           verdict === "verified"
             ? `✓ ${badge}`
             : verdict === "shallower"
-              ? `⚠ ${measuredLabel ?? "?"}/${result.catchup_days ?? "?"}d`
+              ? t("table.catchup.shallowerChip", {
+                  measured: measured != null && measured < 1 ? "<1" : measuredText,
+                  days,
+                })
               : verdict === "fake"
                 ? `✕ ${failure ? archiveFailureLabel(failure) : badge}`
                 : badge;
@@ -257,13 +260,15 @@ function ChannelRowImpl({
             ? null
             : verdict === "shallower"
               ? measured != null && measured < 1
-                ? `Verified depth less than 1 of ${result.catchup_days ?? "?"} days`
-                : `Verified depth ${measured ?? "?"} of ${result.catchup_days ?? "?"} days`
+                ? t("table.catchup.depthBelowOne", { days })
+                : t("table.catchup.depth", { measured: measuredText, days })
               : verdict === "fake"
-                ? `Fake catch-up: ${failure ? archiveFailureSentence(failure) : "the archive does not answer"}`
+                ? failure
+                  ? t("table.catchup.fake", { reason: archiveFailureSentence(failure) })
+                  : t("table.catchup.fakeNoAnswer")
                 : archiveDepthMeasured(probeEntry)
-                  ? "Archive verified at the advertised depth"
-                  : "Archive verified one hour back (quick check)";
+                  ? t("table.catchup.verifiedFull")
+                  : t("table.catchup.verifiedQuick");
         return (
           <span
             className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] ring-1 tabular-nums ${chipClass}`}

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { formatCount, t } from "../i18n";
 import { dispatcharrTarget, isDispatcharrPreview } from "../lib/dispatcharr";
 import { errorToString } from "../lib/errors";
 import { logger } from "../lib/logger";
@@ -57,22 +58,22 @@ async function pushStats(
     const report = await dispatcharrPushStreamStats(target, scanned, scanStartedAt);
     const store = useAppStore.getState();
     if (report.rejected) {
-      store.setMenuInfo(
-        "Dispatcharr did not keep the probe results. This Dispatcharr version may not accept them.",
-        "warn",
-      );
+      store.setMenuInfo(t("dispatcharr.statsPush.rejected"), "warn");
     } else if (report.failed.length > 0) {
       store.setMenuInfo(
-        `Wrote probe results for ${report.updated.length} streams to Dispatcharr; ${report.failed.length} failed.`,
+        t("dispatcharr.statsPush.partial", {
+          count: report.updated.length,
+          failed: formatCount(report.failed.length),
+        }),
         "warn",
       );
     } else if (report.updated.length > 0) {
-      store.setMenuInfo(`Wrote probe results for ${report.updated.length} streams to Dispatcharr.`);
+      store.setMenuInfo(t("dispatcharr.statsPush.wrote", { count: report.updated.length }));
     }
   } catch (error) {
     logger.warn("[Dispatcharr] Writing probe results failed:", errorToString(error));
     useAppStore
       .getState()
-      .setMenuInfo(`Could not write probe results to Dispatcharr: ${errorToString(error)}`, "warn");
+      .setMenuInfo(t("dispatcharr.statsPush.failed", { error: errorToString(error) }), "warn");
   }
 }

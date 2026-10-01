@@ -12,6 +12,7 @@ import {
   areStreamMetadataEqual,
   classifyStream,
   decidePlaybackRecovery,
+  describePlaybackFailure,
   formatPlaybackRecoveryMessage,
   getArchiveFallbackRoutes,
   getAudioTranscodeRoute,
@@ -518,7 +519,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       setPlayerState("error");
       // Archive failures are usually "the provider stored nothing for that
       // time", not network faults; say so instead of surfacing hls.js codes.
-      setErrorMessage(archiveSessionRef.current ? describeArchiveFailure(reason) : reason);
+      setErrorMessage(
+        archiveSessionRef.current
+          ? describeArchiveFailure(reason)
+          : describePlaybackFailure(reason),
+      );
       setIsPaused(false);
       setActiveChannelIndex(null);
       // A failed archive URL says nothing about the live channel's health, so

@@ -1,9 +1,12 @@
 import { listen } from "@tauri-apps/api/event";
 import { Check, ChevronRight, Radar, Search, TextSearch, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { formatCount, t } from "../i18n";
+import { translateReason } from "../i18n/reasons";
 import {
   type DispatcharrChannelView,
   type DispatcharrView,
+  dispatcharrStatusLabel,
   dispatcharrTarget,
   getDispatcharrView,
   isUntestedStatus,
@@ -50,7 +53,7 @@ function candidateOf(found: DispatcharrCandidate): Omit<Candidate, "result"> {
   const ref = parseDispatcharrIds(found.channel.extinf_line);
   return {
     streamId: found.stream_id,
-    account: ref?.account ?? "Provider",
+    account: ref?.account ?? t("dispatcharr.provider"),
     name: ref?.streamName ?? found.channel.name,
     tag: found.epg ? { kind: "epg" } : { kind: "name", similarity: found.similarity },
     otherCountry: found.other_country,
@@ -62,18 +65,18 @@ function Tag({ tag }: { tag: Candidate["tag"] }) {
   if (tag.kind === "epg")
     return (
       <span className="shrink-0 rounded bg-green-500/15 px-1.5 text-[10.5px] text-green-300">
-        EPG match
+        {t("dispatcharr.find.epgMatch")}
       </span>
     );
   if (tag.kind === "was")
     return (
       <span className="shrink-0 rounded bg-blue-500/15 px-1.5 text-[10.5px] text-blue-300">
-        Was linked
+        {t("dispatcharr.find.wasLinked")}
       </span>
     );
   return (
     <span className="shrink-0 rounded bg-btn px-1.5 text-[10.5px] text-text-secondary">
-      {tag.similarity}%
+      {t("dispatcharr.find.similarity", { value: formatCount(tag.similarity) })}
     </span>
   );
 }
@@ -86,7 +89,11 @@ const DOT: Partial<Record<ChannelResult["status"], string>> = {
 
 function Outcome({ result, probing }: { result: ChannelResult | null; probing: boolean }) {
   if (!result)
-    return <span className="text-text-tertiary">{probing ? "Scanning..." : "Not scanned"}</span>;
+    return (
+      <span className="text-text-tertiary">
+        {probing ? t("dispatcharr.find.scanning") : t("dispatcharr.find.outcomeNotScanned")}
+      </span>
+    );
   if (result.status === "alive")
     return (
       <span className="flex gap-3 tabular-nums text-text-secondary">
@@ -98,10 +105,11 @@ function Outcome({ result, probing }: { result: ChannelResult | null; probing: b
         </span>
       </span>
     );
-  if (result.status === "dead") return <span className="text-red-400">Dead</span>;
+  if (result.status === "dead")
+    return <span className="text-red-400">{t("dispatcharr.find.outcomeDead")}</span>;
   if (result.error_reason === "Account busy")
-    return <span className="text-text-tertiary">Account busy</span>;
-  return <span className="text-text-tertiary">{result.status}</span>;
+    return <span className="text-text-tertiary">{translateReason(result.error_reason)}</span>;
+  return <span className="text-text-tertiary">{dispatcharrStatusLabel(result.status)}</span>;
 }
 
 /** Find provider streams for a channel, scan them, and link the working
@@ -204,14 +212,19 @@ export function DispatcharrFindPanel() {
       style={{ width: `${PANEL_WIDTH}px` }}
     >
       <header className="flex items-center gap-2 border-b border-border-app px-3 py-2.5">
-        <h3 className="text-[13px] font-semibold text-text-primary">Find streams</h3>
+        <h3 className="text-[13px] font-semibold text-text-primary">
+          {t("dispatcharr.findStreams")}
+        </h3>
         {find.queue && channel && stuck.length > 0 && (
           <span className="ml-auto flex items-center gap-1 text-text-tertiary">
-            No working stream · {Math.max(1, stuck.indexOf(channel) + 1)} of {stuck.length}
+            {t("dispatcharr.find.queueProgress", {
+              position: formatCount(Math.max(1, stuck.indexOf(channel) + 1)),
+              total: formatCount(stuck.length),
+            })}
             <button
               type="button"
-              aria-label="Next channel with no working stream"
-              title="Next channel with no working stream"
+              aria-label={t("dispatcharr.find.nextChannel")}
+              title={t("dispatcharr.find.nextChannel")}
               onClick={() => {
                 const at = stuck.indexOf(channel);
                 const next = stuck[(at + 1) % stuck.length];
@@ -225,7 +238,7 @@ export function DispatcharrFindPanel() {
         )}
         <button
           type="button"
-          aria-label="Close Find streams"
+          aria-label={t("dispatcharr.find.close")}
           onClick={close}
           className={`${find.queue && channel && stuck.length > 0 ? "" : "ml-auto"} rounded p-0.5 text-text-secondary hover:text-text-primary`}
         >
@@ -239,7 +252,7 @@ export function DispatcharrFindPanel() {
   if (!channel) {
     return frame(
       <p className="px-3 py-10 text-center text-text-secondary">
-        {find.queue ? "Every channel has a working stream now." : "This channel is not loaded."}
+        {find.queue ? t("dispatcharr.find.allWorking") : t("dispatcharr.find.notLoaded")}
       </p>,
     );
   }
@@ -247,7 +260,7 @@ export function DispatcharrFindPanel() {
   const found = search.kind === "done" ? search.found : [];
   const was = unlinkedStreams(flatResults, channel).map<Candidate>((entry) => ({
     streamId: entry.ref.streamId,
-    account: entry.ref.account ?? "Provider",
+    account: entry.ref.account ?? t("dispatcharr.provider"),
     name: entry.ref.streamName ?? entry.result.name,
     tag: { kind: "was" },
     otherCountry: null,
@@ -337,11 +350,18 @@ export function DispatcharrFindPanel() {
         <span className="font-semibold text-text-primary">{channel.name}</span>
         {scanned > 0 && (
           <span className={alive > 0 ? "text-text-secondary" : "text-red-400"}>
-            {alive}/{scanned} alive
+            {t("dispatcharr.find.aliveOfScanned", {
+              alive: formatCount(alive),
+              scanned: formatCount(scanned),
+            })}
           </span>
         )}
-        {unscanned > 0 && <span className="text-text-tertiary">{unscanned} not scanned</span>}
-        {channel.empty && <span className="text-amber-400">No streams</span>}
+        {unscanned > 0 && (
+          <span className="text-text-tertiary">
+            {t("dispatcharr.find.notScanned", { count: unscanned })}
+          </span>
+        )}
+        {channel.empty && <span className="text-amber-400">{t("dispatcharr.noStreams")}</span>}
       </div>
       <ol className="mx-3 rounded-md border border-border-app">
         {channel.streams.map((entry, position) => (
@@ -353,7 +373,9 @@ export function DispatcharrFindPanel() {
             <i
               className={`h-1.5 w-1.5 rounded-full ${DOT[entry.result.status] ?? "bg-zinc-500"}`}
             />
-            <span className="text-text-primary">{entry.ref.account ?? "Provider"}</span>
+            <span className="text-text-primary">
+              {entry.ref.account ?? t("dispatcharr.provider")}
+            </span>
             <span className="truncate text-text-tertiary">
               {entry.ref.streamName ?? entry.result.name}
             </span>
@@ -371,7 +393,7 @@ export function DispatcharrFindPanel() {
           <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-tertiary" />
           <input
             type="search"
-            aria-label="Search provider streams"
+            aria-label={t("dispatcharr.find.searchLabel")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             spellCheck={false}
@@ -379,12 +401,12 @@ export function DispatcharrFindPanel() {
           />
         </label>
         <select
-          aria-label="Provider account"
+          aria-label={t("dispatcharr.find.accountLabel")}
           value={account}
           onChange={(event) => setAccount(event.target.value)}
           className="native-field h-7 rounded-md border border-border-app bg-input px-2 text-[12px] text-text-primary"
         >
-          <option value="all">All accounts</option>
+          <option value="all">{t("dispatcharr.find.allAccounts")}</option>
           {accounts.map((name) => (
             <option key={name} value={name}>
               {name}
@@ -393,13 +415,16 @@ export function DispatcharrFindPanel() {
         </select>
       </form>
       <div className="flex justify-between px-3 py-1 text-[11px] text-text-tertiary">
-        <span className="uppercase tracking-[0.06em]">Candidates</span>
+        <span className="uppercase tracking-[0.06em]">{t("dispatcharr.find.candidates")}</span>
         <span>
           {search.kind === "loading"
-            ? "Searching..."
+            ? t("dispatcharr.find.searching")
             : probing
-              ? "Scanning..."
-              : `${shown.filter((entry) => entry.result).length} of ${shown.length} scanned`}
+              ? t("dispatcharr.find.scanning")
+              : t("dispatcharr.find.scannedOf", {
+                  scanned: formatCount(shown.filter((entry) => entry.result).length),
+                  count: shown.length,
+                })}
         </span>
       </div>
       <ul className="min-h-0 flex-1 overflow-auto border-t border-border-app">
@@ -408,7 +433,7 @@ export function DispatcharrFindPanel() {
         )}
         {search.kind === "done" && shown.length === 0 && (
           <li className="px-3 py-6 text-center text-text-secondary">
-            No other provider streams match. Try another search.
+            {t("dispatcharr.find.noMatches")}
           </li>
         )}
         {shown.map((entry) => {
@@ -453,7 +478,7 @@ export function DispatcharrFindPanel() {
                 </span>
                 {entry.otherCountry && (
                   <span
-                    title="Tagged for another country than this channel; may be a different channel"
+                    title={t("dispatcharr.find.otherCountry")}
                     className="shrink-0 rounded bg-amber-500/15 px-1.5 text-[10.5px] text-amber-300"
                   >
                     {entry.otherCountry}
@@ -473,46 +498,52 @@ export function DispatcharrFindPanel() {
           <>
             <span className="text-text-secondary">
               {unprobed.length > 0
-                ? `${unprobed.length} not scanned`
-                : "Pick working streams to link"}
+                ? t("dispatcharr.find.notScanned", { count: unprobed.length })
+                : t("dispatcharr.find.pickToLink")}
             </span>
             <button
               type="button"
               disabled={scanning || playing || probing || unprobed.length === 0}
               title={
                 scanning
-                  ? "Available when the scan finishes"
+                  ? t("dispatcharr.availableAfterScan")
                   : playing
-                    ? "Stop playback first; it uses the provider's connection"
+                    ? t("dispatcharr.find.stopPlaybackFirst")
                     : undefined
               }
               onClick={() => void probe()}
               className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-2.5 py-1 font-medium text-white hover:bg-blue-500 disabled:opacity-40"
             >
               <Radar className="h-3.5 w-3.5" />
-              {probing ? "Scanning..." : `Scan ${unprobed.length}`}
+              {probing
+                ? t("dispatcharr.find.scanning")
+                : t("dispatcharr.find.scanCount", { count: unprobed.length })}
             </button>
           </>
         ) : (
           <>
-            <span className="text-text-secondary">{pickedCandidates.length} selected</span>
+            <span className="text-text-secondary">
+              {t("dispatcharr.find.selected", { count: pickedCandidates.length })}
+            </span>
             <select
-              aria-label="Where to link"
+              aria-label={t("dispatcharr.find.whereToLink")}
               value={position}
               onChange={(event) => setPosition(event.target.value === "end" ? "end" : "primary")}
               className="native-field ml-auto h-7 rounded-md border border-border-app bg-input px-2 text-[12px] text-text-primary"
             >
-              <option value="primary">As primary</option>
-              <option value="end">At the end</option>
+              <option value="primary">{t("dispatcharr.find.asPrimary")}</option>
+              <option value="end">{t("dispatcharr.find.atEnd")}</option>
             </select>
             <button
               type="button"
               disabled={scanning || linking}
-              title={scanning ? "Available when the scan finishes" : undefined}
+              title={scanning ? t("dispatcharr.availableAfterScan") : undefined}
               onClick={() => void link(channel)}
               className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-2.5 py-1 font-medium text-white hover:bg-blue-500 disabled:opacity-40"
             >
-              {linking ? "Linking..." : `Link ${pickedCandidates.length}`}
+              {linking
+                ? t("dispatcharr.find.linking")
+                : t("dispatcharr.find.linkCount", { count: pickedCandidates.length })}
             </button>
           </>
         )}
@@ -531,14 +562,14 @@ export function DispatcharrFindButton({ view }: { view: DispatcharrView }) {
   return (
     <button
       type="button"
-      title="Find working streams for the channels with no working stream"
+      title={t("dispatcharr.find.queueButtonTitle")}
       onClick={() => getStore().setDispatcharrFind({ channelId: first.channelId, queue: true })}
       className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border-app px-2.5 text-[12px] text-text-primary hover:bg-btn-hover ${
         open ? "bg-btn-hover" : "bg-btn"
       }`}
     >
       <TextSearch className="h-3.5 w-3.5" />
-      Find streams ({stuck.length})
+      {t("dispatcharr.find.queueButton", { count: stuck.length })}
     </button>
   );
 }

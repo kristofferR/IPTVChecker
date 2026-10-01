@@ -3,6 +3,7 @@ import { emitTo, listen } from "@tauri-apps/api/event";
 import { LogLevel } from "@tauri-apps/plugin-log";
 import { ArrowDown, Download, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { formatCount, type MessageKey, t } from "../i18n";
 import {
   APP_LOG_CLEAR_EVENT,
   APP_LOG_ENTRY_EVENT,
@@ -20,29 +21,31 @@ import {
 } from "../lib/logEntries";
 import { exportAppLog } from "../lib/tauri";
 
-const LEVEL_META: Record<LogLevel, { label: string; color: string; activeColor: string }> = {
+type LevelLabel = Extract<MessageKey, `log.levels.${string}`>;
+
+const LEVEL_META: Record<LogLevel, { label: LevelLabel; color: string; activeColor: string }> = {
   [LogLevel.Trace]: {
-    label: "TRACE",
+    label: "log.levels.trace",
     color: "text-zinc-500",
     activeColor: "bg-zinc-500/15 text-zinc-500 ring-zinc-500/30",
   },
   [LogLevel.Debug]: {
-    label: "DEBUG",
+    label: "log.levels.debug",
     color: "text-zinc-400",
     activeColor: "bg-zinc-400/15 text-zinc-400 ring-zinc-400/30",
   },
   [LogLevel.Info]: {
-    label: "INFO",
+    label: "log.levels.info",
     color: "text-blue-400",
     activeColor: "bg-blue-500/15 text-blue-400 ring-blue-400/30",
   },
   [LogLevel.Warn]: {
-    label: "WARN",
+    label: "log.levels.warn",
     color: "text-amber-400",
     activeColor: "bg-amber-500/15 text-amber-400 ring-amber-400/30",
   },
   [LogLevel.Error]: {
-    label: "ERROR",
+    label: "log.levels.error",
     color: "text-red-400",
     activeColor: "bg-red-500/15 text-red-400 ring-red-400/30",
   },
@@ -282,7 +285,7 @@ export function LogWindowContent() {
     try {
       await exportAppLog(`${text}\n`);
     } catch (error) {
-      setExportError(`Could not export log: ${String(error)}`);
+      setExportError(t("log.exportFailed", { error: String(error) }));
     } finally {
       setExporting(false);
     }
@@ -383,7 +386,7 @@ export function LogWindowContent() {
                       : "text-text-tertiary opacity-40 hover:opacity-70"
                   }`}
                 >
-                  {meta.label}
+                  {t(meta.label)}
                 </button>
               );
             })}
@@ -396,7 +399,7 @@ export function LogWindowContent() {
               type="text"
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
-              placeholder="Filter logs..."
+              placeholder={t("log.filterPlaceholder")}
               className="w-full pl-7 pr-2 py-1 rounded-md border border-border-app bg-input text-text-primary text-[12px] placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500/50"
             />
           </div>
@@ -404,8 +407,11 @@ export function LogWindowContent() {
           {/* Entry count */}
           <span className="text-[11px] text-text-tertiary whitespace-nowrap ml-auto">
             {filteredCount === totalCount
-              ? `${totalCount} entries`
-              : `${filteredCount} / ${totalCount}`}
+              ? t("log.entryCount", { count: totalCount })
+              : t("log.filteredCount", {
+                  shown: formatCount(filteredCount),
+                  total: formatCount(totalCount),
+                })}
           </span>
 
           <button
@@ -413,10 +419,10 @@ export function LogWindowContent() {
             onClick={() => void handleExport()}
             disabled={exporting || filteredCount === 0}
             className="flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[12px] text-text-secondary hover:bg-btn-hover disabled:opacity-40 transition-colors cursor-default whitespace-nowrap"
-            title="Save matching log entries as a file"
+            title={t("log.exportTitle")}
           >
             <Download className="w-3.5 h-3.5" />
-            {exporting ? "Exporting…" : "Export Log…"}
+            {exporting ? t("log.exporting") : t("log.export")}
           </button>
 
           {/* Clear button */}
@@ -424,7 +430,7 @@ export function LogWindowContent() {
             type="button"
             onClick={clearEntries}
             className="p-1.5 rounded-md text-text-tertiary hover:bg-btn-hover transition-colors cursor-default"
-            title="Clear log"
+            title={t("log.clear")}
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
@@ -440,7 +446,7 @@ export function LogWindowContent() {
       {/* Log list */}
       <section
         ref={scrollContainerRef}
-        aria-label="Log entries"
+        aria-label={t("log.entriesLabel")}
         // biome-ignore lint/a11y/noNoninteractiveTabindex: Scrollable logs need keyboard focus for scrolling and copying.
         tabIndex={0}
         onScroll={handleScroll}
@@ -475,7 +481,7 @@ export function LogWindowContent() {
                   {formatLogTimestamp(entry.timestampMs)}
                 </span>
                 <span className={`${meta.color} font-semibold shrink-0 w-[5ch] text-right`}>
-                  {meta.label}
+                  {t(meta.label)}
                 </span>
                 <span className="text-text-primary break-all select-all">{entry.message}</span>
               </div>
@@ -490,7 +496,7 @@ export function LogWindowContent() {
           type="button"
           onClick={scrollToBottom}
           className="absolute bottom-4 right-4 p-2 rounded-full bg-panel border border-border-app shadow-lg text-text-secondary hover:bg-btn-hover transition-colors cursor-default"
-          title="Scroll to bottom"
+          title={t("log.scrollToBottom")}
         >
           <ArrowDown className="w-4 h-4" />
         </button>

@@ -1,0 +1,25 @@
+export default {
+  status: {
+    alive: "Alive",
+    drm: "DRM",
+    dead: "Dead",
+    placeholder: "Placeholder",
+    geoblocked: "Geoblocked",
+    geoblockedConfirmed: "Geoblocked (Confirmed)",
+    geoblockedUnconfirmed: "Geoblocked (Unconfirmed)",
+    checking: "Checking...",
+    pending: "Pending",
+  },
+  bytes: {
+    b: "{value} B",
+    kb: "{value} KB",
+    mb: "{value} MB",
+    gb: "{value} GB",
+    tb: "{value} TB",
+  },
+  kbps: "{value} kbps",
+  milliseconds: "{value} ms",
+  seconds: "{value} s",
+  today: "Today",
+  yesterday: "Yesterday",
+} as const;

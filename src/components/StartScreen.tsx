@@ -1,11 +1,28 @@
 import { FolderOpen, Loader2 } from "lucide-react";
 import { useMemo } from "react";
+import { formatCount, getFormatLocale, type MessageKey, t, tRich } from "../i18n";
+import { translateReason } from "../i18n/reasons";
 import { recentTitle, recentValueLabel } from "../lib/recentPlaylists";
 import { savedPlaylistSecondaryLabel } from "../lib/savedPlaylists";
 import type { PlaylistLoadProgress, RecentPlaylistEntry, SavedPlaylistEntry } from "../lib/types";
 
 const START_SCREEN_RECENT_LIMIT = 5;
 const START_SCREEN_SAVED_LIMIT = 8;
+
+const LOAD_STAGE_KEYS = {
+  Connecting: "start.loading.connecting",
+  Downloading: "start.loading.downloading",
+  Saving: "start.loading.saving",
+  Parsing: "start.loading.parsing",
+  Processing: "start.loading.processing",
+} as const satisfies Record<PlaylistLoadProgress["stage"], MessageKey>;
+
+function formatMegabytes(bytes: number): string {
+  return new Intl.NumberFormat(getFormatLocale(), {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(bytes / (1024 * 1024));
+}
 
 interface StartScreenProps {
   playlistLoading: boolean;
@@ -59,72 +76,74 @@ export function StartScreen({
           <div className="select-none">
             <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-blue-500" />
             <p className="text-lg font-medium">
-              {playlistLoadProgress?.stage === "Connecting"
-                ? "Connecting…"
-                : playlistLoadProgress?.stage === "Downloading"
-                  ? "Downloading playlist…"
-                  : playlistLoadProgress?.stage === "Saving"
-                    ? "Saving to cache…"
-                    : playlistLoadProgress?.stage === "Parsing"
-                      ? "Parsing playlist…"
-                      : playlistLoadProgress?.stage === "Processing"
-                        ? "Processing…"
-                        : "Loading playlist…"}
+              {t(
+                playlistLoadProgress
+                  ? LOAD_STAGE_KEYS[playlistLoadProgress.stage]
+                  : "start.loading.loading",
+              )}
             </p>
             {(playlistLoadProgress?.stage === "Connecting" ||
               playlistLoadProgress?.stage === "Saving") && (
-              <p className="text-sm mt-1 text-text-quaternary">{playlistLoadProgress.detail}</p>
+              <p className="text-sm mt-1 text-text-quaternary">
+                {translateReason(playlistLoadProgress.detail)}
+              </p>
             )}
             {playlistLoadProgress?.stage === "Downloading" && (
               <p className="text-sm mt-1 tabular-nums">
-                {(playlistLoadProgress.bytes_downloaded / (1024 * 1024)).toFixed(1)} MB
+                {t("start.downloadedSize", {
+                  size: formatMegabytes(playlistLoadProgress.bytes_downloaded),
+                })}
                 {playlistLoadProgress.elapsed_secs > 0 && (
                   <span className="ml-2 text-text-quaternary">
-                    {(
-                      playlistLoadProgress.bytes_downloaded /
-                      playlistLoadProgress.elapsed_secs /
-                      (1024 * 1024)
-                    ).toFixed(1)}{" "}
-                    MB/s
+                    {t("start.downloadSpeed", {
+                      speed: formatMegabytes(
+                        playlistLoadProgress.bytes_downloaded / playlistLoadProgress.elapsed_secs,
+                      ),
+                    })}
                   </span>
                 )}
               </p>
             )}
             {playlistLoadProgress?.stage === "Parsing" && (
               <div className="text-sm mt-1 tabular-nums">
-                <p>{playlistLoadProgress.channels_found.toLocaleString()} entries found</p>
+                <p>{t("start.entriesFound", { count: playlistLoadProgress.channels_found })}</p>
                 <p className="text-text-quaternary">
-                  {playlistLoadProgress.live_found.toLocaleString()} channels
+                  {t("common.channels", { count: playlistLoadProgress.live_found })}
                   <span className="mx-2">•</span>
-                  {(
-                    playlistLoadProgress.movie_found + playlistLoadProgress.series_found
-                  ).toLocaleString()}{" "}
-                  VOD
+                  {t("start.vodCount", {
+                    count: playlistLoadProgress.movie_found + playlistLoadProgress.series_found,
+                  })}
                   {(playlistLoadProgress.movie_found > 0 ||
                     playlistLoadProgress.series_found > 0) && (
                     <span className="ml-2">
-                      ({playlistLoadProgress.movie_found.toLocaleString()} movies,{" "}
-                      {playlistLoadProgress.series_found.toLocaleString()} series)
+                      {t("start.vodBreakdown", {
+                        movies: formatCount(playlistLoadProgress.movie_found),
+                        series: formatCount(playlistLoadProgress.series_found),
+                      })}
                     </span>
                   )}
                 </p>
               </div>
             )}
             {playlistLoadProgress?.stage === "Processing" && (
-              <p className="text-sm mt-1 text-text-quaternary">{playlistLoadProgress.detail}</p>
+              <p className="text-sm mt-1 text-text-quaternary">
+                {translateReason(playlistLoadProgress.detail)}
+              </p>
             )}
           </div>
         ) : (
           <>
             <div className="flex flex-col items-center">
               <div className="select-none pt-3">
-                <p className="text-lg font-medium mb-2">No playlist loaded</p>
+                <p className="text-lg font-medium mb-2">{t("start.noPlaylist")}</p>
                 <p className="text-[15px] mb-4">
-                  Click Open or press{" "}
-                  <kbd className="px-2 py-0.5 bg-input rounded text-[13px] border border-border-app">
-                    {modKey}+O
-                  </kbd>{" "}
-                  to load an M3U playlist
+                  {tRich("start.openHint", {
+                    shortcut: (
+                      <kbd className="px-2 py-0.5 bg-input rounded text-[13px] border border-border-app">
+                        {modKey}+O
+                      </kbd>
+                    ),
+                  })}
                 </p>
               </div>
               <div className="flex flex-wrap items-center justify-center gap-2">
@@ -134,7 +153,7 @@ export function StartScreen({
                   type="button"
                 >
                   <FolderOpen className="w-4 h-4" />
-                  Open File
+                  {t("start.openFile")}
                 </button>
                 <button
                   onClick={onOpenFolder}
@@ -142,28 +161,28 @@ export function StartScreen({
                   type="button"
                 >
                   <FolderOpen className="w-4 h-4" />
-                  Open Folder
+                  {t("start.openFolder")}
                 </button>
                 <button
                   onClick={onOpenUrl}
                   className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
                   type="button"
                 >
-                  Add URL
+                  {t("start.addUrl")}
                 </button>
                 <button
                   onClick={onOpenXtream}
                   className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
                   type="button"
                 >
-                  Add Xtream
+                  {t("start.addXtream")}
                 </button>
                 <button
                   onClick={onOpenDispatcharr}
                   className="inline-flex items-center gap-2 px-5 py-3 rounded-xl text-[15px] font-medium bg-btn text-text-primary hover:bg-btn-hover border border-border-app transition-colors"
                   type="button"
                 >
-                  Add Dispatcharr
+                  {t("start.addDispatcharr")}
                 </button>
               </div>
             </div>
@@ -173,14 +192,14 @@ export function StartScreen({
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-[12px] uppercase tracking-[0.08em] text-text-tertiary">
-                      Saved Playlists
+                      {t("start.savedPlaylists")}
                     </p>
                     <button
                       onClick={onManageSavedPlaylists}
                       className="text-[12px] text-text-tertiary hover:text-text-primary transition-colors"
                       type="button"
                     >
-                      Manage…
+                      {t("start.manageSaved")}
                     </button>
                   </div>
                   <div className="space-y-1">
@@ -208,7 +227,7 @@ export function StartScreen({
                 <div className={startScreenSavedPlaylists.length > 0 ? "mt-6" : ""}>
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-[12px] uppercase tracking-[0.08em] text-text-tertiary">
-                      Open Recent
+                      {t("start.openRecent")}
                     </p>
                     <button
                       onClick={() => {
@@ -217,7 +236,7 @@ export function StartScreen({
                       className="text-[12px] text-text-tertiary hover:text-text-primary transition-colors"
                       type="button"
                     >
-                      Clear
+                      {t("start.clearRecent")}
                     </button>
                   </div>
                   <div className="space-y-1">

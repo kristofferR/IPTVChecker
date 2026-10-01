@@ -26,6 +26,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   scan_notifications: true,
   low_fps_threshold: 23.0,
   theme: "system",
+  language: null,
   title_bar: "auto",
   log_level: "error",
   show_prescan_filter: false,

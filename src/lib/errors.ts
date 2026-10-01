@@ -1,5 +1,7 @@
 /** Shared error-formatting helpers for user-facing messages. */
 
+import { t } from "../i18n";
+
 export function errorToString(err: unknown): string {
   if (typeof err === "string") {
     return err;
@@ -32,7 +34,7 @@ export function redactUrlCredentials(value: string): string {
 function formatUserFacingError(
   err: unknown,
   fallback: string,
-  prefix: string,
+  frame: (error: string) => string,
   existingPrefix: RegExp,
   normalizedPrefix?: RegExp,
 ): string {
@@ -47,14 +49,14 @@ function formatUserFacingError(
   if (!normalized || normalized === "[object Object]") {
     return fallback;
   }
-  return existingPrefix.test(normalized) ? normalized : `${prefix}: ${normalized}`;
+  return existingPrefix.test(normalized) ? normalized : frame(normalized);
 }
 
 export function formatPlaylistOpenError(err: unknown): string {
   return formatUserFacingError(
     err,
-    "Failed to open playlist. Please verify the file path and playlist format.",
-    "Failed to open playlist",
+    t("app.errors.openPlaylistFallback"),
+    (error) => t("app.errors.openPlaylist", { error }),
     /^failed to open playlist(?:\s*:|$)/i,
   );
 }
@@ -62,8 +64,8 @@ export function formatPlaylistOpenError(err: unknown): string {
 export function formatSourceReloadError(err: unknown): string {
   return formatUserFacingError(
     err,
-    "Failed to reload source. Please verify the source settings and filter.",
-    "Failed to reload source",
+    t("app.errors.reloadSourceFallback"),
+    (error) => t("app.errors.reloadSource", { error }),
     /^failed to reload source(?:\s*:|$)/i,
     /^failed to open playlist:\s*/i,
   );

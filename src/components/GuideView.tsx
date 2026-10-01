@@ -12,6 +12,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { ArchivePlayOptions } from "../hooks/useStreamPlayer";
+import { formatCount, t } from "../i18n";
+import { translateReason } from "../i18n/reasons";
 import { archiveBadgeText, hasArchive, resolveArchivePlayback } from "../lib/archive";
 import { isArchiveDownloadRunning, startArchiveDownload } from "../lib/archiveDownload";
 import {
@@ -69,7 +71,11 @@ function isProgrammePlayable(selection: GuideSelection, nowEpochS: number): bool
 
 function programmePlayLabel(selection: GuideSelection, nowEpochS: number): string {
   const available = programmePlaybackAvailability(selection.result, selection.programme, nowEpochS);
-  return available.archive ? (available.live ? "Play from beginning" : "Play") : "Play live";
+  return available.archive
+    ? available.live
+      ? t("guide.playFromBeginning")
+      : t("guide.play")
+    : t("guide.playLive");
 }
 
 function selectionKey(selection: GuideSelection | null): string | null {
@@ -125,6 +131,11 @@ const GuideProgramme = memo(function GuideProgramme({
   if (width < 2) return null;
   const selection: GuideSelection = { result, programme };
   const playable = isProgrammePlayable(selection, nowEpochS);
+  const tooltipParams = {
+    start: timeLabel(programme.start),
+    stop: timeLabel(programme.stop),
+    title: programme.title,
+  };
   return (
     <button
       type="button"
@@ -136,9 +147,13 @@ const GuideProgramme = memo(function GuideProgramme({
         onSelect(selection);
         onContextMenu(selection, event.clientX, event.clientY);
       }}
-      title={`${timeLabel(programme.start)}–${timeLabel(programme.stop)} ${programme.title}${
-        playable ? (hasArchive(result) ? "" : " (live now)") : " (unavailable)"
-      }`}
+      title={
+        playable
+          ? hasArchive(result)
+            ? t("guide.programmeTooltip", tooltipParams)
+            : t("guide.programmeTooltipLiveNow", tooltipParams)
+          : t("guide.programmeTooltipUnavailable", tooltipParams)
+      }
       className={`absolute inset-y-[3px] flex items-center gap-1 overflow-hidden rounded px-1.5 text-left text-[10.5px] transition-colors ${
         selected
           ? "bg-violet-500/35 text-violet-100 ring-1 ring-violet-400/70"
@@ -230,7 +245,7 @@ const GuideRow = memo(function GuideRow({
               onPlayLive(result);
             }
           }}
-          title={`Select ${result.name}; double-click or press Enter to play live`}
+          title={t("guide.channelTooltip", { name: result.name })}
         >
           <ChannelLogo result={result} size={20} />
           <span className="min-w-0 flex-1 truncate text-[11px] font-semibold" title={result.name}>
@@ -249,14 +264,14 @@ const GuideRow = memo(function GuideRow({
             className="sticky flex h-full w-max items-center px-2 text-[10px] text-text-tertiary"
             style={{ left: `${CHANNEL_COL_PX}px` }}
           >
-            <LoaderCircle className="mr-1.5 h-3 w-3 animate-spin" /> Loading...
+            <LoaderCircle className="mr-1.5 h-3 w-3 animate-spin" /> {t("guide.loading")}
           </div>
         ) : programmes.length === 0 ? (
           <div
             className="sticky flex h-full w-max items-center px-2 text-[10px] text-text-tertiary"
             style={{ left: `${CHANNEL_COL_PX}px` }}
           >
-            {result.tvg_id ? "No programme data" : "No EPG id"}
+            {result.tvg_id ? t("guide.noProgrammeData") : t("guide.noEpgId")}
           </div>
         ) : (
           visibleProgrammes.map((programme) => (
@@ -617,7 +632,7 @@ export function GuideView({
     if (
       state.externalPlaybackActive &&
       isSingleConnectionPlaylist(state.playlist) &&
-      !window.confirm("Close the external player before testing catch-up. Continue?")
+      !window.confirm(t("archive.confirmCloseExternalPlayerTest"))
     ) {
       return;
     }
@@ -771,7 +786,7 @@ export function GuideView({
           onClick={() => scrollToTime(nowEpochS)}
           className="shrink-0 rounded-md px-2.5 py-0.5 text-[11px] text-text-primary hover:bg-panel-subtle"
         >
-          Now
+          {t("guide.now")}
         </button>
       </div>
       <div className="ml-auto flex min-w-0 max-w-[45%] items-center gap-2">
@@ -779,20 +794,28 @@ export function GuideView({
           (testOutcome.ok && testOutcome.depthVerified ? (
             <span className="flex items-center gap-1 text-[11px] font-medium text-green-400">
               <CircleCheck className="h-3 w-3" />
-              OK{testOutcome.latencyMs != null ? ` · ${testOutcome.latencyMs} ms` : ""}
+              {testOutcome.latencyMs != null
+                ? t("archive.outcome.okWithLatency", {
+                    latency: formatCount(testOutcome.latencyMs),
+                  })
+                : t("archive.outcome.ok")}
             </span>
           ) : testOutcome.ok ? (
             <span className="flex items-center gap-1 text-[11px] font-medium text-amber-400">
               <CircleCheck className="h-3 w-3" />
-              Unverified{testOutcome.latencyMs != null ? ` · ${testOutcome.latencyMs} ms` : ""}
+              {testOutcome.latencyMs != null
+                ? t("archive.outcome.unverifiedWithLatency", {
+                    latency: formatCount(testOutcome.latencyMs),
+                  })
+                : t("archive.outcome.unverified")}
             </span>
           ) : (
             <span
               className="flex items-center gap-1 text-[11px] font-medium text-red-400"
-              title={testOutcome.error ?? undefined}
+              title={testOutcome.error != null ? translateReason(testOutcome.error) : undefined}
             >
               <CircleX className="h-3 w-3" />
-              Failed
+              {t("archive.outcome.failed")}
             </span>
           ))}
         {selection && (
@@ -806,7 +829,7 @@ export function GuideView({
               type="button"
               disabled={!selectionPlayable || testing}
               onClick={() => activate(selection)}
-              title={selectionPlayable ? undefined : "This programme is outside catch-up range"}
+              title={selectionPlayable ? undefined : t("guide.outsideCatchupRange")}
               className="flex shrink-0 items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-500 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Play className="h-3 w-3" />
@@ -819,7 +842,7 @@ export function GuideView({
                 onClick={() => playLive(selection)}
                 className="flex shrink-0 items-center gap-1 rounded-md border border-border-app bg-btn px-2.5 py-1 text-[11px] font-medium text-text-primary hover:bg-btn-hover transition-colors disabled:opacity-40"
               >
-                <Play className="h-3 w-3" /> Play live
+                <Play className="h-3 w-3" /> {t("guide.playLive")}
               </button>
             )}
             <button
@@ -828,7 +851,7 @@ export function GuideView({
               onClick={() => void runTest()}
               className="shrink-0 rounded-md border border-border-app bg-btn px-2.5 py-1 text-[11px] font-medium text-text-primary hover:bg-btn-hover transition-colors disabled:opacity-40"
             >
-              {testing ? "Testing..." : "Test"}
+              {testing ? t("guide.testing") : t("guide.test")}
             </button>
           </>
         )}
@@ -842,7 +865,7 @@ export function GuideView({
 
       {channels.length === 0 ? (
         <div className="flex flex-1 items-center justify-center text-sm text-text-tertiary">
-          No channels match the current filters
+          {t("guide.noMatchingChannels")}
         </div>
       ) : (
         <div
@@ -965,7 +988,7 @@ export function GuideView({
               }}
               className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
             >
-              <Play className="h-3.5 w-3.5" /> Play live
+              <Play className="h-3.5 w-3.5" /> {t("guide.playLive")}
             </button>
           )}
           {menuArchive && (
@@ -976,18 +999,14 @@ export function GuideView({
                 const target = menu.selection;
                 setMenu(null);
                 if (providerBusy()) {
-                  useAppStore
-                    .getState()
-                    .setMenuInfo(
-                      "Stop playback, scans, and tests before recording on this provider.",
-                    );
+                  useAppStore.getState().setMenuInfo(t("guide.menu.providerBusy"));
                   return;
                 }
                 void startArchiveDownload(target.result, playOptionsFor(target));
               }}
               className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
             >
-              <Download className="h-3.5 w-3.5" /> Download…
+              <Download className="h-3.5 w-3.5" /> {t("guide.menu.download")}
             </button>
           )}
           <div className="my-1 h-px bg-border-subtle" />
@@ -1001,7 +1020,7 @@ export function GuideView({
             }}
             className="w-full px-3 py-2 text-left text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
           >
-            Test Catch-up
+            {t("guide.menu.testCatchup")}
           </button>
           <button
             type="button"
@@ -1016,7 +1035,7 @@ export function GuideView({
             }}
             className="w-full px-3 py-2 text-left text-[13px] hover:bg-btn-hover"
           >
-            {menuArchive ? "Copy Archive URL" : "Copy URL"}
+            {menuArchive ? t("guide.menu.copyArchiveUrl") : t("guide.menu.copyUrl")}
           </button>
         </div>
       )}

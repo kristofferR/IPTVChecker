@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFixPreferences } from "../hooks/useFixPreferences";
+import { formatCount, t } from "../i18n";
 import { type DispatcharrView, isUntestedStatus } from "../lib/dispatcharr";
 import { applyFixPlan, planFix } from "../lib/dispatcharrEdits";
 import type { ChannelResult } from "../lib/types";
-
-const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 interface DispatcharrFixAllProps {
   view: DispatcharrView;
@@ -42,16 +41,14 @@ export function DispatcharrFixAll({
   // Why the button is unavailable. Disabled buttons do not reliably show a
   // tooltip, so the wrapper carries it.
   const unavailableReason = useMemo(() => {
-    if (disabled) return "Available when the scan finishes";
+    if (disabled) return t("dispatcharr.availableAfterScan");
     if (count > 0) return undefined;
     const scanned = visiblePrimaries.some((primary) =>
       view.byPrimaryIndex
         .get(primary.index)
         ?.streams.some((entry) => !isUntestedStatus(entry.result.status)),
     );
-    return scanned
-      ? "Every shown channel is already in order"
-      : "Scan the channels first; Fix order uses the scan results";
+    return scanned ? t("dispatcharr.fixAll.alreadyInOrder") : t("dispatcharr.fixAll.scanFirst");
   }, [disabled, count, visiblePrimaries, view]);
 
   // A scan starting while the confirm is open would change the plan under it.
@@ -97,50 +94,52 @@ export function DispatcharrFixAll({
           open ? "bg-btn-hover" : "bg-btn"
         }`}
       >
-        {applying ? "Fixing..." : `${filtered ? "Fix shown" : "Fix all"} (${count})`}
+        {applying
+          ? t("dispatcharr.fixAll.fixing")
+          : filtered
+            ? t("dispatcharr.fixAll.fixShown", { count })
+            : t("dispatcharr.fixAll.fixAll", { count })}
       </button>
       {open && (
         <div className="macos-popover absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-border-app bg-dropdown p-3 text-[12px] text-text-secondary shadow-xl">
           <p className="mb-2 text-[13px] font-semibold text-text-primary">
-            Fix {plural(count, "channel")}?
+            {t("dispatcharr.fixAll.confirmTitle", { count })}
           </p>
           <dl className="space-y-1">
             <div className="flex justify-between">
-              <dt>Reordered</dt>
+              <dt>{t("dispatcharr.fixAll.reordered")}</dt>
               <dd className="text-text-primary tabular-nums">
-                {plural(plan.reordered, "channel")}
+                {t("common.channels", { count: plan.reordered })}
               </dd>
             </div>
             {preferences.deadStreams === "move_to_end" ? (
               <div className="flex justify-between">
-                <dt>Dead streams moved to end</dt>
-                <dd className="text-text-primary tabular-nums">{plan.movedDead}</dd>
+                <dt>{t("dispatcharr.fixAll.deadMovedToEnd")}</dt>
+                <dd className="text-text-primary tabular-nums">{formatCount(plan.movedDead)}</dd>
               </div>
             ) : (
               <div className="flex justify-between">
-                <dt>Dead streams removed</dt>
-                <dd className="text-red-400 tabular-nums">{plan.removed}</dd>
+                <dt>{t("dispatcharr.fixAll.deadRemoved")}</dt>
+                <dd className="text-red-400 tabular-nums">{formatCount(plan.removed)}</dd>
               </div>
             )}
             {plan.skippedAllDead > 0 && (
               <div className="flex justify-between">
-                <dt>Skipped, all streams dead</dt>
+                <dt>{t("dispatcharr.fixAll.skippedAllDead")}</dt>
                 <dd className="text-yellow-400 tabular-nums">
-                  {plural(plan.skippedAllDead, "channel")}
+                  {t("common.channels", { count: plan.skippedAllDead })}
                 </dd>
               </div>
             )}
           </dl>
-          <p className="mt-2 text-text-tertiary">
-            Writes to Dispatcharr now. Undo restores the previous order.
-          </p>
+          <p className="mt-2 text-text-tertiary">{t("dispatcharr.fixAll.writesNow")}</p>
           <div className="mt-3 flex justify-end gap-2">
             <button
               type="button"
               onClick={() => setOpen(false)}
               className="rounded-md bg-btn px-2.5 py-1 text-text-primary hover:bg-btn-hover"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="button"
@@ -148,7 +147,9 @@ export function DispatcharrFixAll({
               onClick={() => void handleConfirm()}
               className="rounded-md bg-blue-600 px-2.5 py-1 font-medium text-white hover:bg-blue-500 disabled:opacity-50"
             >
-              {applying ? "Fixing..." : `Fix ${plural(count, "channel")}`}
+              {applying
+                ? t("dispatcharr.fixAll.fixing")
+                : t("dispatcharr.fixAll.confirm", { count })}
             </button>
           </div>
         </div>

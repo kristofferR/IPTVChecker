@@ -1,6 +1,7 @@
 import { save } from "@tauri-apps/plugin-dialog";
 import { BarChart3, X } from "lucide-react";
 import { memo, useMemo, useState } from "react";
+import { formatCount, getFormatLocale, t } from "../i18n";
 import { hasArchive } from "../lib/archive";
 import { realCatchupResults, stripFakeCatchupResults } from "../lib/archiveExport";
 import {
@@ -40,6 +41,15 @@ interface QualityBuckets {
   sd: number;
 }
 
+/** Verified catch-up depth buckets, in days. */
+const DEPTH_BUCKETS = [
+  ["underOneDay", (days: number) => days < 1],
+  ["oneToTwoDays", (days: number) => days >= 1 && days < 3],
+  ["threeToSixDays", (days: number) => days >= 3 && days < 7],
+  ["sevenDays", (days: number) => days >= 7 && days < 8],
+  ["eightPlusDays", (days: number) => days >= 8],
+] as const;
+
 const CHART_COLORS = ["#38bdf8", "#22d3ee", "#4ade80", "#f59e0b", "#fb7185", "#a78bfa"];
 
 function clamp01(value: number): number {
@@ -54,6 +64,28 @@ function round1(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
+function formatDecimal(value: number, digits = 1): string {
+  return value.toLocaleString(getFormatLocale(), {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+/** `value` is 0-100, as computed by the summaries. */
+function formatPercent(value: number, digits = 1): string {
+  return (value / 100).toLocaleString(getFormatLocale(), {
+    style: "percent",
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+function formatMs(value: number | null): string {
+  return value == null
+    ? t("report.notAvailable")
+    : t("report.milliseconds", { ms: formatCount(Math.round(value)) });
+}
+
 function formatVerifiedAt(epochS: number): string {
   const date = new Date(epochS * 1000);
   const today = new Date();
@@ -61,14 +93,17 @@ function formatVerifiedAt(epochS: number): string {
     date.getFullYear() === today.getFullYear() &&
     date.getMonth() === today.getMonth() &&
     date.getDate() === today.getDate();
-  const time = date.toLocaleTimeString([], {
+  const time = date.toLocaleTimeString(getFormatLocale(), {
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
   });
   return sameDay
-    ? `today ${time}`
-    : `${date.toLocaleDateString([], { day: "numeric", month: "short" })} ${time}`;
+    ? t("report.catchup.verifiedToday", { time })
+    : t("report.catchup.verifiedOn", {
+        date: date.toLocaleDateString(getFormatLocale(), { day: "numeric", month: "short" }),
+        time,
+      });
 }
 
 function median(values: number[]): number | null {
@@ -172,10 +207,10 @@ function computeLiveScore(results: ChannelResult[], total: number): PlaylistScor
 }
 
 function formatEpoch(epoch: number | null | undefined): string {
-  if (!epoch) return "N/A";
+  if (!epoch) return t("report.notAvailable");
   const date = new Date(epoch * 1000);
-  if (Number.isNaN(date.getTime())) return "N/A";
-  return date.toLocaleDateString(undefined, {
+  if (Number.isNaN(date.getTime())) return t("report.notAvailable");
+  return date.toLocaleDateString(getFormatLocale(), {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -276,20 +311,13 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
         if (outcome.ok && outcome.latencyMs != null) latencies.push(outcome.latencyMs);
       }
     }
-    const buckets: Array<{ label: string; count: number }> = [
-      { label: "<1 d", count: depths.filter((d) => d < 1).length },
-      { label: "1-2 d", count: depths.filter((d) => d >= 1 && d < 3).length },
-      { label: "3-6 d", count: depths.filter((d) => d >= 3 && d < 7).length },
-      { label: "7 d", count: depths.filter((d) => d >= 7 && d < 8).length },
-      { label: "8+ d", count: depths.filter((d) => d >= 8).length },
-    ];
-    const fakeReasons: Array<{ label: string; count: number }> = [
-      { label: "empty", count: failures.empty },
-      { label: "serves live", count: failures.live },
-      { label: "http error", count: failures.http },
-      { label: "timeout", count: failures.timeout },
-      { label: "unreachable", count: failures.unreachable },
-    ].filter((reason) => reason.count > 0);
+    const buckets = DEPTH_BUCKETS.map(([id, inBucket]) => ({
+      id,
+      count: depths.filter(inBucket).length,
+    }));
+    const fakeReasons = (Object.keys(failures) as Array<ArchiveFailure["kind"]>)
+      .map((kind) => ({ kind, count: failures[kind] }))
+      .filter((reason) => reason.count > 0);
     const medianLatency = median(latencies);
     return {
       advertised: channels.length,
@@ -315,7 +343,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
     const stem = playlist.file_name.replace(/\.[^.]+$/, "") || "playlist";
     const path = await save({
       defaultPath: `${stem}_${variant === "real" ? "real-catchup" : "no-fake-catchup"}.m3u8`,
-      filters: [{ name: "M3U Playlist", extensions: ["m3u8", "m3u"] }],
+      filters: [{ name: t("report.catchup.m3uFilterName"), extensions: ["m3u8", "m3u"] }],
     });
     if (!path) return;
     setCatchupExportBusy(true);
@@ -352,7 +380,8 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
 
     for (const result of alive) {
       buckets[qualityBucket(result)] += 1;
-      const codec = (result.codec ?? "Unknown").trim() || "Unknown";
+      // "" groups channels without a codec; labelled at render.
+      const codec = result.codec?.trim() ?? "";
       codecs.set(codec, (codecs.get(codec) ?? 0) + 1);
     }
 
@@ -386,7 +415,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
   const ringCircumference = 2 * Math.PI * ringRadius;
 
   const aliveOrDrm = (statusSnapshot?.alive ?? 0) + (statusSnapshot?.drm ?? 0);
-  const statusLabel = aliveOrDrm > 0 ? "Active" : "Inactive";
+  const statusLabel = aliveOrDrm > 0 ? t("report.status.active") : t("report.status.inactive");
   const statusClass = aliveOrDrm > 0 ? "text-emerald-300" : "text-red-300";
 
   return (
@@ -410,7 +439,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
         <div className="flex items-start justify-between gap-2">
           <div>
             <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary">
-              Playlist Report
+              {t("report.title")}
             </p>
             <div className="flex items-center gap-2 mt-1">
               <BarChart3 className="w-4 h-4 text-blue-300" />
@@ -426,7 +455,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
             onClick={onClose}
             className="p-1.5 rounded-md hover:bg-btn-hover text-text-tertiary hover:text-text-primary transition-colors"
             type="button"
-            title="Hide report"
+            title={t("report.hide")}
           >
             <X className="w-4 h-4" />
           </button>
@@ -445,8 +474,8 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
           <span className="text-text-tertiary">•</span>
           <span className="text-text-secondary">
             {latencyStats.average == null
-              ? "Ping N/A"
-              : `Avg ${Math.round(latencyStats.average)} ms`}
+              ? t("report.pingNotAvailable")
+              : t("report.averagePing", { ms: formatCount(Math.round(latencyStats.average)) })}
           </span>
         </div>
       </div>
@@ -456,7 +485,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
         {showHealthScore && (
           <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
             <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">
-              Health Score
+              {t("report.health.title")}
             </p>
             <div className="flex items-center gap-3">
               <div className="relative w-24 h-24 shrink-0">
@@ -483,36 +512,40 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                   />
                 </svg>
                 <div className="absolute inset-0 flex items-center justify-center text-[18px] font-semibold text-text-primary">
-                  {ringScore.toFixed(1)}
+                  {formatDecimal(ringScore)}
                 </div>
               </div>
               <div className="grid grid-cols-1 gap-1 text-[12px] flex-1">
                 <div className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1">
-                  <span className="text-text-tertiary">Ping</span>
-                  <span className="text-text-primary">{(displayScore?.ping ?? 0).toFixed(1)}</span>
-                </div>
-                <div className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1">
-                  <span className="text-text-tertiary">Content</span>
+                  <span className="text-text-tertiary">{t("report.health.ping")}</span>
                   <span className="text-text-primary">
-                    {(displayScore?.content ?? 0).toFixed(1)}
+                    {formatDecimal(displayScore?.ping ?? 0)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1">
-                  <span className="text-text-tertiary">Quality</span>
+                  <span className="text-text-tertiary">{t("report.health.content")}</span>
                   <span className="text-text-primary">
-                    {(displayScore?.quality ?? 0).toFixed(1)}
+                    {formatDecimal(displayScore?.content ?? 0)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1">
+                  <span className="text-text-tertiary">{t("report.health.quality")}</span>
+                  <span className="text-text-primary">
+                    {formatDecimal(displayScore?.quality ?? 0)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1 ring-1 ring-violet-500/25">
-                  <span className="text-violet-400">Catch-up</span>
+                  <span className="text-violet-400">{t("report.health.catchup")}</span>
                   <span className={catchupScore != null ? "text-violet-300" : "text-text-tertiary"}>
-                    {catchupScore != null ? catchupScore.toFixed(1) : "N/A"}
+                    {catchupScore != null ? formatDecimal(catchupScore) : t("report.notAvailable")}
                   </span>
                 </div>
               </div>
             </div>
             <p className="mt-2 text-[11px] text-text-tertiary">
-              {scanState === "complete" ? "Final score" : "Live estimate during scan"}
+              {scanState === "complete"
+                ? t("report.health.finalScore")
+                : t("report.health.liveEstimate")}
             </p>
           </section>
         )}
@@ -520,24 +553,28 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
         {showContentCounts && (
           <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
             <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">
-              Content Counts
+              {t("report.contentCounts.title")}
             </p>
             <div className="grid grid-cols-2 gap-2 text-[12px]">
               <div className="rounded-md bg-input/60 px-2 py-1.5">
-                <p className="text-text-tertiary">Live</p>
-                <p className="text-text-primary font-medium">{playlist.live_count}</p>
+                <p className="text-text-tertiary">{t("report.contentCounts.live")}</p>
+                <p className="text-text-primary font-medium">{formatCount(playlist.live_count)}</p>
               </div>
               <div className="rounded-md bg-input/60 px-2 py-1.5">
-                <p className="text-text-tertiary">Movies</p>
-                <p className="text-text-primary font-medium">{playlist.movie_count}</p>
+                <p className="text-text-tertiary">{t("report.contentCounts.movies")}</p>
+                <p className="text-text-primary font-medium">{formatCount(playlist.movie_count)}</p>
               </div>
               <div className="rounded-md bg-input/60 px-2 py-1.5">
-                <p className="text-text-tertiary">Series</p>
-                <p className="text-text-primary font-medium">{playlist.series_count}</p>
+                <p className="text-text-tertiary">{t("report.contentCounts.series")}</p>
+                <p className="text-text-primary font-medium">
+                  {formatCount(playlist.series_count)}
+                </p>
               </div>
               <div className="rounded-md bg-input/60 px-2 py-1.5">
-                <p className="text-text-tertiary">Total</p>
-                <p className="text-text-primary font-medium">{playlist.total_channels}</p>
+                <p className="text-text-tertiary">{t("report.contentCounts.total")}</p>
+                <p className="text-text-primary font-medium">
+                  {formatCount(playlist.total_channels)}
+                </p>
               </div>
             </div>
           </section>
@@ -546,17 +583,17 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
         {showLanguageDistribution && (
           <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
             <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">
-              Language Distribution
+              {t("report.languages.title")}
             </p>
             {languageSummary.entries.length === 0 ? (
-              <p className="text-[12px] text-text-tertiary">No language metadata detected.</p>
+              <p className="text-[12px] text-text-tertiary">{t("report.languages.empty")}</p>
             ) : (
               <div className="space-y-1.5">
                 {languageSummary.entries.map((entry, index) => (
                   <div key={entry.language}>
                     <div className="flex items-center justify-between text-[11px] mb-0.5">
                       <span className="text-text-secondary">{entry.language}</span>
-                      <span className="text-text-tertiary">{entry.percentage.toFixed(1)}%</span>
+                      <span className="text-text-tertiary">{formatPercent(entry.percentage)}</span>
                     </div>
                     <div className="h-1.5 rounded-full bg-input overflow-hidden">
                       <div
@@ -571,7 +608,9 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                 ))}
                 {languageSummary.otherCount > 0 && (
                   <p className="text-[11px] text-text-tertiary">
-                    Other: {languageSummary.otherPercentage.toFixed(1)}%
+                    {t("report.languages.otherShare", {
+                      percent: formatPercent(languageSummary.otherPercentage),
+                    })}
                   </p>
                 )}
               </div>
@@ -581,7 +620,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
 
         <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
           <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">
-            Video Quality Distribution
+            {t("report.videoQuality.title")}
           </p>
           <div className="flex h-3 rounded-full overflow-hidden bg-input">
             {(
@@ -599,16 +638,27 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
             })}
           </div>
           <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
-            <div className="rounded-md bg-input/60 px-2 py-1">4K: {quality.buckets.uhd4k}</div>
-            <div className="rounded-md bg-input/60 px-2 py-1">1080p: {quality.buckets.hd1080}</div>
-            <div className="rounded-md bg-input/60 px-2 py-1">720p: {quality.buckets.hd720}</div>
-            <div className="rounded-md bg-input/60 px-2 py-1">SD: {quality.buckets.sd}</div>
+            {(
+              [
+                ["uhd4k", "4K"],
+                ["hd1080", "1080p"],
+                ["hd720", "720p"],
+                ["sd", "SD"],
+              ] as const
+            ).map(([key, label]) => (
+              <div key={key} className="rounded-md bg-input/60 px-2 py-1">
+                {t("report.videoQuality.bucket", {
+                  label,
+                  count: formatCount(quality.buckets[key]),
+                })}
+              </div>
+            ))}
           </div>
         </section>
 
         <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
           <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">
-            EPG Coverage
+            {t("report.epg.title")}
           </p>
           <div className="flex items-center gap-3">
             <div
@@ -618,18 +668,25 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
               }}
             >
               <div className="absolute inset-[14px] rounded-full bg-panel flex items-center justify-center text-[11px] text-text-primary">
-                {epgSummary.coveragePercent.toFixed(0)}%
+                {formatPercent(epgSummary.coveragePercent, 0)}
               </div>
             </div>
             <div className="text-[12px] space-y-1">
               <p className="text-text-secondary">
-                {epgSummary.channelsWithEpg} / {epgSummary.totalChannels} channels
+                {t("report.epg.channelsWithEpg", {
+                  covered: formatCount(epgSummary.channelsWithEpg),
+                  count: epgSummary.totalChannels,
+                })}
               </p>
-              <p className="text-text-secondary">Unique EPG IDs: {epgSummary.uniqueEpgSources}</p>
+              <p className="text-text-secondary">
+                {t("report.epg.uniqueIds", { count: formatCount(epgSummary.uniqueEpgSources) })}
+              </p>
               {epgLoadSummary && (
                 <p className="text-text-secondary">
-                  Programme data: {epgLoadSummary.channels_matched} channels ·{" "}
-                  {epgLoadSummary.programme_count.toLocaleString()} programmes
+                  {t("report.epg.programmeData", {
+                    channels: formatCount(epgLoadSummary.channels_matched),
+                    programmes: formatCount(epgLoadSummary.programme_count),
+                  })}
                 </p>
               )}
             </div>
@@ -640,11 +697,14 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
           <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
             <div className="mb-2 flex items-center justify-between">
               <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary">
-                Catch-up
+                {t("report.catchup.title")}
                 {catchupStats.verifiedAt != null && (
                   <span className="normal-case tracking-normal text-text-tertiary/80">
                     {" "}
-                    · verified {formatVerifiedAt(catchupStats.verifiedAt)}
+                    ·{" "}
+                    {t("report.catchup.verifiedAt", {
+                      when: formatVerifiedAt(catchupStats.verifiedAt),
+                    })}
                   </span>
                 )}
               </p>
@@ -654,7 +714,10 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                   onClick={cancelArchiveVerification}
                   className="rounded-md border border-border-app bg-btn px-2 py-0.5 text-[11px] text-text-primary hover:bg-btn-hover transition-colors"
                 >
-                  {archiveVerifyRun.done}/{archiveVerifyRun.total} · Cancel
+                  {t("report.catchup.cancelProgress", {
+                    done: formatCount(archiveVerifyRun.done),
+                    total: formatCount(archiveVerifyRun.total),
+                  })}
                 </button>
               ) : (
                 <button
@@ -668,62 +731,64 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                   }
                   title={
                     playbackBlocksVerification
-                      ? "Stop playback before verifying catch-up"
+                      ? t("report.catchup.stopPlaybackFirst")
                       : isScanActive(scanState)
-                        ? "Wait for the scan to finish"
+                        ? t("report.catchup.waitForScan")
                         : archiveGuideTestRunning || archiveProbeRunning
-                          ? "Another catch-up verification is running"
+                          ? t("report.catchup.otherVerificationRunning")
                           : undefined
                   }
                   className="rounded-md border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium text-violet-300 hover:bg-violet-500/20 transition-colors disabled:opacity-40 disabled:pointer-events-none"
                 >
-                  Verify all ({catchupStats.advertised})
+                  {t("report.catchup.verifyAll", {
+                    count: formatCount(catchupStats.advertised),
+                  })}
                 </button>
               )}
             </div>
             <div className="grid grid-cols-2 gap-2 text-[11px]">
               <div className="rounded-md bg-input/60 px-2 py-1.5">
                 <span className="block text-[15px] font-semibold text-green-400 tabular-nums">
-                  {catchupStats.verified}
+                  {formatCount(catchupStats.verified)}
                 </span>
                 <span className="text-text-tertiary uppercase text-[9px] tracking-[0.04em]">
-                  real
+                  {t("report.catchup.real")}
                 </span>
               </div>
               <div className="rounded-md bg-input/60 px-2 py-1.5">
                 <span className="block text-[15px] font-semibold text-red-400 tabular-nums">
-                  {catchupStats.fake}
+                  {formatCount(catchupStats.fake)}
                 </span>
                 <span className="text-text-tertiary uppercase text-[9px] tracking-[0.04em]">
-                  fake
+                  {t("report.catchup.fake")}
                 </span>
               </div>
               <div className="rounded-md bg-input/60 px-2 py-1.5">
                 <span className="block text-[15px] font-semibold text-amber-400 tabular-nums">
-                  {catchupStats.shallower}
+                  {formatCount(catchupStats.shallower)}
                 </span>
                 <span className="text-text-tertiary uppercase text-[9px] tracking-[0.04em]">
-                  shallower
+                  {t("report.catchup.shallower")}
                 </span>
               </div>
               <div className="rounded-md bg-input/60 px-2 py-1.5">
                 <span className="block text-[15px] font-semibold text-violet-300 tabular-nums">
-                  {catchupStats.advertised}
+                  {formatCount(catchupStats.advertised)}
                 </span>
                 <span className="text-text-tertiary uppercase text-[9px] tracking-[0.04em]">
-                  advertised
+                  {t("report.catchup.advertised")}
                 </span>
               </div>
             </div>
             {catchupStats.fakeReasons.length > 0 && (
               <>
                 <p className="mt-3 mb-1 text-[11px] uppercase tracking-[0.08em] text-text-tertiary">
-                  Why fake
+                  {t("report.catchup.whyFake")}
                 </p>
                 {catchupStats.fakeReasons.map((reason) => (
-                  <div key={reason.label} className="mb-1 flex items-center gap-2 text-[10px]">
+                  <div key={reason.kind} className="mb-1 flex items-center gap-2 text-[10px]">
                     <span className="w-14 shrink-0 text-right text-text-secondary">
-                      {reason.label}
+                      {t(`report.catchup.fakeReasons.${reason.kind}`)}
                     </span>
                     <div className="h-2 flex-1 overflow-hidden rounded-full bg-btn/40">
                       <div
@@ -732,7 +797,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                       />
                     </div>
                     <span className="w-7 shrink-0 text-text-tertiary tabular-nums">
-                      {reason.count}
+                      {formatCount(reason.count)}
                     </span>
                   </div>
                 ))}
@@ -741,14 +806,14 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
             {catchupStats.tested > 0 && (
               <>
                 <p className="mt-3 mb-1 text-[11px] uppercase tracking-[0.08em] text-text-tertiary">
-                  Verified depth
+                  {t("report.catchup.verifiedDepth")}
                 </p>
                 {catchupStats.buckets.map((bucket) => {
                   const maxCount = Math.max(1, ...catchupStats.buckets.map((b) => b.count));
                   return (
-                    <div key={bucket.label} className="mb-1 flex items-center gap-2 text-[10px]">
+                    <div key={bucket.id} className="mb-1 flex items-center gap-2 text-[10px]">
                       <span className="w-8 shrink-0 text-right text-text-secondary tabular-nums">
-                        {bucket.label}
+                        {t(`report.catchup.depthBuckets.${bucket.id}`)}
                       </span>
                       <div className="h-2 flex-1 overflow-hidden rounded-full bg-btn/40">
                         <div
@@ -757,26 +822,26 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                         />
                       </div>
                       <span className="w-7 shrink-0 text-text-tertiary tabular-nums">
-                        {bucket.count}
+                        {formatCount(bucket.count)}
                       </span>
                     </div>
                   );
                 })}
                 <div className="mt-2 space-y-1 text-[12px]">
                   <div className="flex items-center justify-between">
-                    <span className="text-text-tertiary">Median archive start</span>
+                    <span className="text-text-tertiary">
+                      {t("report.catchup.medianArchiveStart")}
+                    </span>
                     <span className="text-text-primary tabular-nums">
-                      {catchupStats.medianLatency != null
-                        ? `${Math.round(catchupStats.medianLatency)} ms`
-                        : "N/A"}
+                      {formatMs(catchupStats.medianLatency)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-text-tertiary">Average live start</span>
+                    <span className="text-text-tertiary">
+                      {t("report.catchup.averageLiveStart")}
+                    </span>
                     <span className="text-text-primary tabular-nums">
-                      {latencyStats.average != null
-                        ? `${Math.round(latencyStats.average)} ms`
-                        : "N/A"}
+                      {formatMs(latencyStats.average)}
                     </span>
                   </div>
                 </div>
@@ -787,19 +852,21 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                       catchupExportBusy || catchupStats.verified + catchupStats.shallower === 0
                     }
                     onClick={() => void exportCatchupPlaylist("real")}
-                    title="Only channels whose archive answered, with the measured depth written back"
+                    title={t("report.catchup.exportRealTitle")}
                     className="w-full rounded-md border border-border-app bg-btn px-2 py-1.5 text-[11.5px] font-medium text-text-primary hover:bg-btn-hover transition-colors disabled:opacity-40 disabled:pointer-events-none"
                   >
-                    Export real catch-up · M3U ({catchupStats.verified + catchupStats.shallower})
+                    {t("report.catchup.exportReal", {
+                      count: formatCount(catchupStats.verified + catchupStats.shallower),
+                    })}
                   </button>
                   <button
                     type="button"
                     disabled={catchupExportBusy || catchupStats.fake === 0}
                     onClick={() => void exportCatchupPlaylist("stripped")}
-                    title="The full playlist with catch-up attributes removed from fake channels"
+                    title={t("report.catchup.exportStrippedTitle")}
                     className="w-full rounded-md border border-border-app bg-btn px-2 py-1.5 text-[11.5px] font-medium text-text-primary hover:bg-btn-hover transition-colors disabled:opacity-40 disabled:pointer-events-none"
                   >
-                    Export playlist, fake flags stripped
+                    {t("report.catchup.exportStripped")}
                   </button>
                 </div>
               </>
@@ -809,73 +876,83 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
 
         <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
           <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">
-            Technical Details
+            {t("report.technical.title")}
           </p>
           <div className="space-y-1 text-[12px]">
             <div className="flex items-center justify-between">
-              <span className="text-text-tertiary">Quality (HD+4K)</span>
+              <span className="text-text-tertiary">{t("report.technical.quality")}</span>
               <span className="text-text-primary">
                 {quality.aliveCount === 0
-                  ? "N/A"
-                  : `${(((quality.buckets.uhd4k + quality.buckets.hd1080 + quality.buckets.hd720) / quality.aliveCount) * 100).toFixed(1)}%`}
+                  ? t("report.notAvailable")
+                  : formatPercent(
+                      ((quality.buckets.uhd4k + quality.buckets.hd1080 + quality.buckets.hd720) /
+                        quality.aliveCount) *
+                        100,
+                    )}
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-text-tertiary">Protocol</span>
+              <span className="text-text-tertiary">{t("report.technical.protocol")}</span>
               <span className="text-text-primary">
-                HTTPS {protocolSummary.https} / HTTP {protocolSummary.http}
+                {t("report.technical.protocolCounts", {
+                  https: formatCount(protocolSummary.https),
+                  http: formatCount(protocolSummary.http),
+                })}
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-text-tertiary">Security</span>
+              <span className="text-text-tertiary">{t("report.technical.security")}</span>
               <span className="text-text-primary">
                 {protocolSummary.httpsPct >= 80
-                  ? "Mostly secure"
+                  ? t("report.technical.mostlySecure")
                   : protocolSummary.httpsPct > 0
-                    ? "Mixed"
-                    : "Insecure"}
+                    ? t("report.technical.mixed")
+                    : t("report.technical.insecure")}
               </span>
             </div>
             {playlist.xtream_account_info && (
               <div className="flex items-center justify-between">
-                <span className="text-text-tertiary">Xtream Expiration</span>
+                <span className="text-text-tertiary">{t("report.technical.xtreamExpiration")}</span>
                 <span className="text-text-primary">
                   {formatEpoch(playlist.xtream_account_info.expires_at_epoch)}
                 </span>
               </div>
             )}
             <div className="flex items-center justify-between">
-              <span className="text-text-tertiary">Total content</span>
-              <span className="text-text-primary">{playlist.total_channels}</span>
+              <span className="text-text-tertiary">{t("report.technical.totalContent")}</span>
+              <span className="text-text-primary">{formatCount(playlist.total_channels)}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-text-tertiary">Alive / Dead / Geo</span>
+              <span className="text-text-tertiary">{t("report.technical.statusLabel")}</span>
               <span className="text-text-primary">
-                {statusSnapshot?.alive ?? 0} / {statusSnapshot?.dead ?? 0} /{" "}
-                {statusSnapshot?.geoblocked ?? 0}
+                {t("report.technical.statusCounts", {
+                  alive: formatCount(statusSnapshot?.alive ?? 0),
+                  dead: formatCount(statusSnapshot?.dead ?? 0),
+                  geo: formatCount(statusSnapshot?.geoblocked ?? 0),
+                })}
               </span>
             </div>
             {(statusSnapshot?.placeholder ?? 0) > 0 && (
               <div className="flex items-center justify-between">
-                <span className="text-text-tertiary">Placeholder</span>
-                <span className="text-orange-400">{statusSnapshot?.placeholder}</span>
+                <span className="text-text-tertiary">{t("report.technical.placeholder")}</span>
+                <span className="text-orange-400">
+                  {formatCount(statusSnapshot?.placeholder ?? 0)}
+                </span>
               </div>
             )}
             <div className="flex items-center justify-between">
-              <span className="text-text-tertiary">Ping P50</span>
-              <span className="text-text-primary">
-                {latencyStats.p50 == null ? "N/A" : `${Math.round(latencyStats.p50)} ms`}
-              </span>
+              <span className="text-text-tertiary">{t("report.technical.pingP50")}</span>
+              <span className="text-text-primary">{formatMs(latencyStats.p50)}</span>
             </div>
           </div>
         </section>
 
         <section className="rounded-xl border border-border-app bg-panel-subtle p-3">
           <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-2">
-            Codec Distribution
+            {t("report.codecs.title")}
           </p>
           {quality.codecEntries.length === 0 ? (
-            <p className="text-[12px] text-text-tertiary">No codec data yet.</p>
+            <p className="text-[12px] text-text-tertiary">{t("report.codecs.empty")}</p>
           ) : (
             <div className="space-y-1 text-[12px]">
               {quality.codecEntries.slice(0, 5).map(([codec, count]) => (
@@ -883,8 +960,10 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                   key={codec}
                   className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1"
                 >
-                  <span className="text-text-secondary truncate mr-2">{codec}</span>
-                  <span className="text-text-primary">{count}</span>
+                  <span className="text-text-secondary truncate mr-2">
+                    {codec || t("common.unknown")}
+                  </span>
+                  <span className="text-text-primary">{formatCount(count)}</span>
                 </div>
               ))}
             </div>

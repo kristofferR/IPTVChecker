@@ -2,6 +2,7 @@
 // URL classification, Xtream HLS conversion, streaming-proxy URL builders,
 // recovery-window math, and live-buffer resync/rate policy. Keep this module
 // free of React and player-instance side effects so it stays unit-testable.
+import { formatCount, type MessageKey, t } from "../i18n";
 import type { ContentType, PlaylistPreview } from "./types";
 
 export type PlayerState = "idle" | "loading" | "playing" | "error";
@@ -283,6 +284,53 @@ export function readMediaErrorMessage(mediaErr: MediaError | null): string | nul
   return codeMap[mediaErr.code] ?? mediaErr.message ?? "Unknown media error";
 }
 
+/**
+ * Failure reasons stay English internally: they are matched by the routing
+ * logic and recorded in diagnostics. Translate known ones only for display.
+ */
+const PLAYBACK_FAILURE_MESSAGES = {
+  "Playback aborted": "player.failure.aborted",
+  "Network error": "player.failure.network",
+  "Decode error": "player.failure.decode",
+  "Format not supported": "player.failure.formatNotSupported",
+  "Unknown media error": "player.failure.unknownMediaError",
+  "Media error during playback": "player.failure.mediaErrorDuringPlayback",
+  "Live stream ended unexpectedly": "app.playback.liveEnded",
+  "Playback ended": "app.playback.ended",
+  "Stream stalled during playback": "app.playback.stalled",
+  "Playback stopped progressing": "app.playback.stoppedProgressing",
+  "Native playback did not expose a video track": "player.failure.nativeNoVideoTrack",
+  "Native playback timed out": "player.failure.nativeTimedOut",
+  "Archive remux failed": "player.failure.archiveRemuxFailed",
+  "hls.js is not supported by this WebView": "player.failure.hlsUnsupported",
+  "HLS media error": "player.failure.hlsMediaError",
+  "HLS playback timed out": "player.failure.hlsTimedOut",
+  "Could not initialize HLS playback": "player.failure.hlsInitFailed",
+  "mpegts.js is not supported by this WebView": "player.failure.mpegtsUnsupported",
+  "MPEG-TS media error": "player.failure.mpegtsMediaError",
+  "mpegts.js error": "player.failure.mpegtsError",
+  "Stream startup timed out": "player.failure.startupTimedOut",
+  "Could not initialize MPEG-TS playback": "player.failure.mpegtsInitFailed",
+  "Connection timed out": "player.failure.connectionTimedOut",
+  "Unable to play stream": "player.failure.unableToPlay",
+  "Could not start playback": "player.failure.couldNotStart",
+} as const satisfies Record<string, MessageKey>;
+
+const UNSUPPORTED_AUDIO_CODEC_PREFIX = "Unsupported audio codec: ";
+
+/** The player's display text for a failure reason; engine and backend detail passes through. */
+export function describePlaybackFailure(reason: string): string {
+  if (Object.hasOwn(PLAYBACK_FAILURE_MESSAGES, reason)) {
+    return t(PLAYBACK_FAILURE_MESSAGES[reason as keyof typeof PLAYBACK_FAILURE_MESSAGES]);
+  }
+  if (reason.startsWith(UNSUPPORTED_AUDIO_CODEC_PREFIX)) {
+    return t("player.failure.unsupportedAudioCodec", {
+      codec: reason.slice(UNSUPPORTED_AUDIO_CODEC_PREFIX.length),
+    });
+  }
+  return reason;
+}
+
 /** A decoder failure is more useful than a later route rejecting the container. */
 export function selectPlaybackFailure(previous: string | null, next: string | null): string | null {
   if (!next || previous === "Decode error") return previous;
@@ -461,7 +509,10 @@ export function formatPlaybackRecoveryMessage(
   attempt: number,
   maxAttempts = MAX_PLAYBACK_RECOVERY_ATTEMPTS,
 ): string {
-  return `Stream interrupted. Reconnecting (${attempt}/${maxAttempts})...`;
+  return t("player.recoveryStatus", {
+    attempt: formatCount(attempt),
+    maxAttempts: formatCount(maxAttempts),
+  });
 }
 
 export function decidePlaybackRecovery(

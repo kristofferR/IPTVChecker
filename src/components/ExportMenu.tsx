@@ -1,6 +1,7 @@
 import { save } from "@tauri-apps/plugin-dialog";
 import { ChevronDown, CircleAlert, CircleCheck, Download, Info, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { formatCount, t } from "../i18n";
 import { realCatchupResults, stripFakeCatchupResults } from "../lib/archiveExport";
 import type { ArchiveProbeEntry } from "../lib/archiveProbe";
 import { type ExportScope, exportScopeFileSuffix, exportScopeLabel } from "../lib/exportScope";
@@ -107,20 +108,20 @@ export function ExportMenu({
     if (scope === "selected") {
       showFeedback({
         kind: "info",
-        message: "No selected channels to export.",
+        message: t("exportMenu.feedback.noSelected"),
       });
       return null;
     }
     if (scope === "filtered") {
       showFeedback({
         kind: "info",
-        message: "No channels match the current filters.",
+        message: t("exportMenu.feedback.noFiltered"),
       });
       return null;
     }
     showFeedback({
       kind: "info",
-      message: "No channels available to export.",
+      message: t("exportMenu.feedback.noChannels"),
     });
     return null;
   }, [scope, resolveScopeResults, showFeedback]);
@@ -135,14 +136,12 @@ export function ExportMenu({
       filters: [{ name: "CSV", extensions: ["csv"] }],
     });
     if (!path) {
-      showFeedback({ kind: "info", message: "Export CSV cancelled." });
+      showFeedback({ kind: "info", message: t("exportMenu.feedback.csvCancelled") });
       return;
     }
 
     setBusyAction("csv");
-    logger.info(
-      `[Export] Starting ${exportScopeLabel(scope)} CSV export: channels=${scoped.length}, path=${path}`,
-    );
+    logger.info(`[Export] Starting ${scope} CSV export: channels=${scoped.length}, path=${path}`);
     try {
       await exportCsv(
         scoped,
@@ -152,13 +151,13 @@ export function ExportMenu({
       );
       showFeedback({
         kind: "success",
-        message: `Exported ${exportScopeLabel(scope)} CSV (${scoped.length} channels) to ${path}.`,
+        message: t(`exportMenu.feedback.csvExported.${scope}`, { count: scoped.length, path }),
       });
       void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
     } catch (err) {
       showFeedback({
         kind: "error",
-        message: `CSV export failed: ${String(err)}`,
+        message: t("exportMenu.feedback.csvFailed", { error: String(err) }),
       });
     } finally {
       setBusyAction(null);
@@ -172,19 +171,22 @@ export function ExportMenu({
     setOpen(false);
     setBusyAction("split");
     logger.info(
-      `[Export] Starting ${exportScopeLabel(scope)} split export: channels=${scoped.length}, source=${playlistPath}`,
+      `[Export] Starting ${scope} split export: channels=${scoped.length}, source=${playlistPath}`,
     );
     try {
       await exportSplit(scoped, playlistPath);
       showFeedback({
         kind: "success",
-        message: `Exported ${exportScopeLabel(scope)} split playlists (${scoped.length} channels) to ${sourceDir}.`,
+        message: t(`exportMenu.feedback.splitExported.${scope}`, {
+          count: scoped.length,
+          path: sourceDir,
+        }),
       });
       void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
     } catch (err) {
       showFeedback({
         kind: "error",
-        message: `Split export failed: ${String(err)}`,
+        message: t("exportMenu.feedback.splitFailed", { error: String(err) }),
       });
     } finally {
       setBusyAction(null);
@@ -198,19 +200,22 @@ export function ExportMenu({
     setOpen(false);
     setBusyAction("renamed");
     logger.info(
-      `[Export] Starting ${exportScopeLabel(scope)} renamed-playlist export: channels=${scoped.length}, source=${playlistPath}`,
+      `[Export] Starting ${scope} renamed-playlist export: channels=${scoped.length}, source=${playlistPath}`,
     );
     try {
       await exportRenamed(scoped, playlistPath);
       showFeedback({
         kind: "success",
-        message: `Exported ${exportScopeLabel(scope)} renamed playlist (${scoped.length} channels) to ${sourceDir}/${sourceStem}_renamed.m3u8.`,
+        message: t(`exportMenu.feedback.renamedExported.${scope}`, {
+          count: scoped.length,
+          path: `${sourceDir}/${sourceStem}_renamed.m3u8`,
+        }),
       });
       void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
     } catch (err) {
       showFeedback({
         kind: "error",
-        message: `Renamed export failed: ${String(err)}`,
+        message: t("exportMenu.feedback.renamedFailed", { error: String(err) }),
       });
     } finally {
       setBusyAction(null);
@@ -225,28 +230,26 @@ export function ExportMenu({
 
     const path = await save({
       defaultPath: `${sourceStem}_${exportScopeFileSuffix(scope)}${partialSuffix}.m3u8`,
-      filters: [{ name: "M3U Playlist", extensions: ["m3u8", "m3u"] }],
+      filters: [{ name: t("exportMenu.dialogFilterM3u"), extensions: ["m3u8", "m3u"] }],
     });
     if (!path) {
-      showFeedback({ kind: "info", message: "M3U export cancelled." });
+      showFeedback({ kind: "info", message: t("exportMenu.feedback.m3uCancelled") });
       return;
     }
 
     setBusyAction("m3u");
-    logger.info(
-      `[Export] Starting ${exportScopeLabel(scope)} M3U export: channels=${scoped.length}, path=${path}`,
-    );
+    logger.info(`[Export] Starting ${scope} M3U export: channels=${scoped.length}, path=${path}`);
     try {
       await exportM3u(scoped, path);
       showFeedback({
         kind: "success",
-        message: `Exported ${exportScopeLabel(scope)} M3U (${scoped.length} channels) to ${path}.`,
+        message: t(`exportMenu.feedback.m3uExported.${scope}`, { count: scoped.length, path }),
       });
       void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
     } catch (err) {
       showFeedback({
         kind: "error",
-        message: `M3U export failed: ${String(err)}`,
+        message: t("exportMenu.feedback.m3uFailed", { error: String(err) }),
       });
     } finally {
       setBusyAction(null);
@@ -264,16 +267,16 @@ export function ExportMenu({
           ? realCatchupResults(scoped, probes)
           : stripFakeCatchupResults(scoped, probes);
       if (results.length === 0) {
-        showFeedback({ kind: "info", message: "No verified catch-up channels to export." });
+        showFeedback({ kind: "info", message: t("exportMenu.feedback.noVerifiedCatchup") });
         return;
       }
       const suffix = variant === "real" ? "real-catchup" : "no-fake-catchup";
       const path = await save({
         defaultPath: `${sourceStem}_${exportScopeFileSuffix(scope)}_${suffix}.m3u8`,
-        filters: [{ name: "M3U Playlist", extensions: ["m3u8", "m3u"] }],
+        filters: [{ name: t("exportMenu.dialogFilterM3u"), extensions: ["m3u8", "m3u"] }],
       });
       if (!path) {
-        showFeedback({ kind: "info", message: "M3U export cancelled." });
+        showFeedback({ kind: "info", message: t("exportMenu.feedback.m3uCancelled") });
         return;
       }
       setBusyAction("m3u");
@@ -283,11 +286,14 @@ export function ExportMenu({
           kind: "success",
           message:
             variant === "real"
-              ? `Exported ${results.length} channels with working catch-up to ${path}.`
-              : `Exported ${results.length} channels with fake catch-up flags removed to ${path}.`,
+              ? t("exportMenu.feedback.realCatchupExported", { count: results.length, path })
+              : t("exportMenu.feedback.strippedCatchupExported", { count: results.length, path }),
         });
       } catch (err) {
-        showFeedback({ kind: "error", message: `M3U export failed: ${String(err)}` });
+        showFeedback({
+          kind: "error",
+          message: t("exportMenu.feedback.m3uFailed", { error: String(err) }),
+        });
       } finally {
         setBusyAction(null);
       }
@@ -299,7 +305,7 @@ export function ExportMenu({
     if (scanState === "idle") {
       showFeedback({
         kind: "info",
-        message: "Run a scan first to generate a scan log.",
+        message: t("exportMenu.feedback.scanLogNeedsScan"),
       });
       return;
     }
@@ -310,7 +316,7 @@ export function ExportMenu({
       filters: [{ name: "JSON", extensions: ["json"] }],
     });
     if (!path) {
-      showFeedback({ kind: "info", message: "Scan log export cancelled." });
+      showFeedback({ kind: "info", message: t("exportMenu.feedback.scanLogCancelled") });
       return;
     }
 
@@ -320,13 +326,13 @@ export function ExportMenu({
       await exportScanLogJson(path);
       showFeedback({
         kind: "success",
-        message: `Exported structured scan log to ${path}.`,
+        message: t("exportMenu.feedback.scanLogExported", { path }),
       });
       void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
     } catch (err) {
       showFeedback({
         kind: "error",
-        message: `Scan log export failed: ${String(err)}`,
+        message: t("exportMenu.feedback.scanLogFailed", { error: String(err) }),
       });
     } finally {
       setBusyAction(null);
@@ -367,7 +373,7 @@ export function ExportMenu({
       <button
         onClick={() => setOpen(!open)}
         disabled={disabled || exporting}
-        title="Export"
+        title={t("exportMenu.button")}
         className={
           showButtonText
             ? isMac
@@ -377,7 +383,7 @@ export function ExportMenu({
               ? "flex items-center justify-center px-3 py-[6px] toolbar-btn disabled:opacity-40 disabled:pointer-events-none"
               : "flex items-center justify-center px-2.5 py-1.5 min-h-9 text-[14px] rounded-md toolbar-btn disabled:opacity-40 disabled:pointer-events-none"
         }
-        aria-label={exporting ? "Exporting" : "Export"}
+        aria-label={exporting ? t("exportMenu.exporting") : t("exportMenu.button")}
       >
         {exporting ? (
           <LoaderCircle
@@ -388,10 +394,10 @@ export function ExportMenu({
         )}
         {showButtonText &&
           (exporting ? (
-            <span className="leading-none">Exporting...</span>
+            <span className="leading-none">{t("exportMenu.exportingEllipsis")}</span>
           ) : (
             <span className="inline-flex items-center gap-1 leading-none">
-              <span>Export</span>
+              <span>{t("exportMenu.button")}</span>
               <IconChevron className="h-3 w-3" />
             </span>
           ))}
@@ -400,23 +406,15 @@ export function ExportMenu({
         <div className="macos-popover absolute right-0 top-full mt-1 w-64 bg-dropdown backdrop-blur-xl border border-border-app rounded-lg shadow-xl z-50 py-1">
           {isPartial && (
             <div className="px-3 pt-2 pb-1.5 border-b border-border-subtle">
-              <p className="text-[11px] text-yellow-400">
-                Scan in progress — exported files will contain partial results
-              </p>
+              <p className="text-[11px] text-yellow-400">{t("exportMenu.partialWarning")}</p>
             </div>
           )}
           <div className="px-3 pt-2 pb-1.5 border-b border-border-subtle">
             <p className="text-[11px] uppercase tracking-[0.04em] text-text-tertiary mb-1.5">
-              Export Scope
+              {t("exportMenu.scopeHeading")}
             </p>
             <div className="grid grid-cols-3 gap-1">
-              {(
-                [
-                  ["all", "All"],
-                  ["filtered", "Filtered"],
-                  ["selected", "Selected"],
-                ] as const
-              ).map(([value, label]) => (
+              {(["all", "filtered", "selected"] as const).map((value) => (
                 <button
                   key={value}
                   type="button"
@@ -428,9 +426,9 @@ export function ExportMenu({
                       : "text-text-secondary hover:bg-btn-hover/70"
                   }`}
                 >
-                  <span className="block leading-tight">{label}</span>
+                  <span className="block leading-tight">{exportScopeLabel(value)}</span>
                   <span className="block leading-tight text-[10px] text-text-tertiary">
-                    {scopeCounts[value]}
+                    {formatCount(scopeCounts[value])}
                   </span>
                 </button>
               ))}
@@ -441,28 +439,28 @@ export function ExportMenu({
             disabled={exporting}
             className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
           >
-            Export CSV
+            {t("exportMenu.actions.csv")}
           </button>
           <button
             onClick={handleExportSplit}
             disabled={exporting}
             className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
           >
-            Split Playlists
+            {t("exportMenu.actions.split")}
           </button>
           <button
             onClick={handleExportRenamed}
             disabled={exporting}
             className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
           >
-            Renamed Playlist
+            {t("exportMenu.actions.renamed")}
           </button>
           <button
             onClick={handleExportM3u}
             disabled={exporting}
             className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
           >
-            Export M3U/M3U8
+            {t("exportMenu.actions.m3u")}
           </button>
           {catchupVerdictsAvailable && (
             <>
@@ -470,17 +468,17 @@ export function ExportMenu({
                 onClick={() => void exportCatchupPlaylist("real")}
                 disabled={exporting}
                 className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
-                title="Only channels whose archive answered, with the measured depth written back"
+                title={t("exportMenu.actions.realCatchupHint")}
               >
-                Real Catch-up Only (M3U)
+                {t("exportMenu.actions.realCatchup")}
               </button>
               <button
                 onClick={() => void exportCatchupPlaylist("stripped")}
                 disabled={exporting}
                 className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
-                title="The full list with catch-up attributes removed from fake channels"
+                title={t("exportMenu.actions.strippedCatchupHint")}
               >
-                Playlist Without Fake Catch-up
+                {t("exportMenu.actions.strippedCatchup")}
               </button>
             </>
           )}
@@ -488,9 +486,9 @@ export function ExportMenu({
             onClick={handleExportScanLog}
             disabled={exporting || scanState === "idle"}
             className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
-            title={scanState === "idle" ? "Run a scan first" : undefined}
+            title={scanState === "idle" ? t("exportMenu.actions.scanLogNeedsScan") : undefined}
           >
-            Export Scan Log (JSON)
+            {t("exportMenu.actions.scanLog")}
           </button>
         </div>
       )}

@@ -519,10 +519,10 @@ fn apply_recent_menu_update(app: &tauri::AppHandle, entries: &[RecentPlaylistEnt
     let mut inserted_any = false;
     for (slot, entry) in visible_entries {
         let prefix = match entry.kind {
-            RecentPlaylistKind::File => "File",
-            RecentPlaylistKind::Url => "URL",
-            RecentPlaylistKind::Xtream => "Xtream",
-            RecentPlaylistKind::Dispatcharr => "Dispatcharr",
+            RecentPlaylistKind::File => crate::i18n::text("menu.file.recent.kind_file"),
+            RecentPlaylistKind::Url => "URL".to_string(),
+            RecentPlaylistKind::Xtream => "Xtream".to_string(),
+            RecentPlaylistKind::Dispatcharr => "Dispatcharr".to_string(),
         };
         let Ok(item) = MenuItem::with_id(
             app,
@@ -545,7 +545,7 @@ fn apply_recent_menu_update(app: &tauri::AppHandle, entries: &[RecentPlaylistEnt
     } else if let Ok(empty_item) = MenuItem::with_id(
         app,
         "menu.file.recent.empty",
-        "No recent playlists",
+        crate::i18n::text("menu.file.recent.empty"),
         false,
         None::<&str>,
     ) {

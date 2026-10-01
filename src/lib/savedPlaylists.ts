@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { normalizeDispatcharrServer } from "./dispatcharr";
 import type {
   CurrentSourceDescriptor,
@@ -59,15 +60,15 @@ export function normalizeXtreamServer(value: string): string | null {
 export function savedPlaylistSecondaryLabel(entry: SavedPlaylistEntry): string {
   switch (entry.kind) {
     case "file":
-      return `Path - ${entry.path}`;
+      return t("saved.secondary.path", { path: entry.path });
     case "url":
-      return `URL - ${entry.url}`;
+      return t("saved.secondary.url", { url: entry.url });
     case "xtream": {
-      const primary = entry.preferred_server ?? entry.servers[0] ?? "Xtream";
-      return `Xtream - ${primary} (${entry.username})`;
+      const server = entry.preferred_server ?? entry.servers[0] ?? "Xtream";
+      return t("saved.secondary.xtream", { server, username: entry.username });
     }
     case "dispatcharr":
-      return `Dispatcharr - ${entry.server}`;
+      return t("saved.secondary.dispatcharr", { server: entry.server });
   }
 }
 

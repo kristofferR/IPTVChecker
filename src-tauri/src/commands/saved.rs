@@ -523,7 +523,7 @@ fn apply_saved_menu_update(app: &tauri::AppHandle, entries: &[SavedPlaylistEntry
         if let Ok(empty_item) = MenuItem::with_id(
             app,
             "menu.file.saved.empty",
-            "No saved playlists",
+            crate::i18n::text("menu.file.saved.empty"),
             false,
             None::<&str>,
         ) {

@@ -1,9 +1,11 @@
 import { ArrowDown, ArrowUp, ChevronRight, TextSearch, X } from "lucide-react";
 import { useMemo } from "react";
 import { useFixPreferences } from "../hooks/useFixPreferences";
+import { t } from "../i18n";
 import {
   type DispatcharrChannelView,
   type DispatcharrStreamEntry,
+  dispatcharrStatusLabel,
   dispatcharrStreamName,
   proposeFixOrder,
 } from "../lib/dispatcharr";
@@ -65,11 +67,14 @@ export function ChannelHealth({ channel }: { channel: DispatcharrChannelView }) 
       ? "text-yellow-400"
       : "text-text-secondary";
   const title = channel.streams
-    .map(
-      (entry, i) =>
-        `${i + 1}. ${dispatcharrStreamName(entry)}: ${
-          entry.providerDown ? "provider down" : entry.result.status
-        }`,
+    .map((entry, i) =>
+      t("dispatcharr.cells.healthLine", {
+        position: i + 1,
+        name: dispatcharrStreamName(entry),
+        status: entry.providerDown
+          ? t("dispatcharr.streamStatus.providerDown")
+          : dispatcharrStatusLabel(entry.result.status),
+      }),
     )
     .join("\n");
   return (
@@ -106,11 +111,15 @@ function ChannelRowStatus({
 }) {
   switch (rowState?.kind) {
     case "writing":
-      return <span className="text-[12px] text-text-tertiary">Saving...</span>;
+      return (
+        <span className="text-[12px] text-text-tertiary">{t("dispatcharr.cells.saving")}</span>
+      );
     case "fixed":
       return (
         <>
-          <span className="shrink-0 text-[12px] text-green-400">{rowState.label ?? "Fixed"}</span>
+          <span className="shrink-0 text-[12px] text-green-400">
+            {rowState.label ?? t("dispatcharr.cells.fixed")}
+          </span>
           {actions && (
             <button
               type="button"
@@ -121,7 +130,7 @@ function ChannelRowStatus({
                 actions.onUndo(channel);
               }}
             >
-              Undo
+              {t("dispatcharr.cells.undo")}
             </button>
           )}
         </>
@@ -142,20 +151,36 @@ function ChannelRowStatus({
                 actions.onRetry(channel);
               }}
             >
-              Retry
+              {t("common.retry")}
             </button>
           )}
         </>
       );
     default:
       if (channel.empty)
-        return <span className="whitespace-nowrap text-[12px] text-amber-400">No streams</span>;
+        return (
+          <span className="whitespace-nowrap text-[12px] text-amber-400">
+            {t("dispatcharr.noStreams")}
+          </span>
+        );
       if (channel.allDead)
-        return <span className="whitespace-nowrap text-[12px] text-red-400">All dead</span>;
+        return (
+          <span className="whitespace-nowrap text-[12px] text-red-400">
+            {t("dispatcharr.cells.allDead")}
+          </span>
+        );
       if (channel.primaryDead)
-        return <span className="whitespace-nowrap text-[12px] text-red-400">Primary dead</span>;
+        return (
+          <span className="whitespace-nowrap text-[12px] text-red-400">
+            {t("dispatcharr.cells.primaryDead")}
+          </span>
+        );
       if (channel.primaryProviderDown)
-        return <span className="whitespace-nowrap text-[12px] text-amber-400">Provider down</span>;
+        return (
+          <span className="whitespace-nowrap text-[12px] text-amber-400">
+            {t("dispatcharr.cells.providerDown")}
+          </span>
+        );
       return null;
   }
 }
@@ -183,7 +208,11 @@ export function ChannelNameCell({
     <span className="flex min-w-0 flex-1 items-center gap-1.5 px-2">
       <button
         type="button"
-        aria-label={expanded ? `Collapse ${channel.name}` : `Expand ${channel.name}`}
+        aria-label={
+          expanded
+            ? t("dispatcharr.cells.collapse", { name: channel.name })
+            : t("dispatcharr.cells.expand", { name: channel.name })
+        }
         aria-expanded={expanded}
         onClick={(event) => {
           stop(event);
@@ -202,13 +231,13 @@ export function ChannelNameCell({
             type="button"
             className={`${buttonClass} ${expanded ? "" : "sr-only group-hover:not-sr-only focus:not-sr-only"}`}
             disabled={actions.disabled}
-            title={actions.disabled ? "Available when the scan finishes" : undefined}
+            title={actions.disabled ? t("dispatcharr.availableAfterScan") : undefined}
             onClick={(event) => {
               stop(event);
               actions.onFix(channel);
             }}
           >
-            Fix order
+            {t("dispatcharr.cells.fixOrder")}
           </button>
         )}
         {actions?.canWrite &&
@@ -225,13 +254,13 @@ export function ChannelNameCell({
               }}
             >
               <TextSearch className="h-3 w-3" />
-              Find streams
+              {t("dispatcharr.findStreams")}
             </button>
           ) : (
             <button
               type="button"
-              aria-label="Find streams"
-              title="Find streams"
+              aria-label={t("dispatcharr.findStreams")}
+              title={t("dispatcharr.findStreams")}
               className={`${iconButtonClass} ${expanded ? "" : "sr-only group-hover:not-sr-only focus:not-sr-only"}`}
               onClick={(event) => {
                 stop(event);
@@ -264,11 +293,11 @@ export function StreamNameCell({
   };
   return (
     <span className="flex min-w-0 flex-1 items-center gap-2 pl-8 pr-2">
-      <span className="shrink-0 text-text-primary">{entry.ref.account ?? "Unknown"}</span>
+      <span className="shrink-0 text-text-primary">{entry.ref.account ?? t("common.unknown")}</span>
       <span className="truncate text-text-tertiary">{dispatcharrStreamName(entry)}</span>
       {position === 0 && (
         <span className="shrink-0 text-[10px] uppercase tracking-[0.06em] text-text-tertiary">
-          Primary
+          {t("dispatcharr.cells.primary")}
         </span>
       )}
       {actions?.canWrite && (
@@ -280,12 +309,12 @@ export function StreamNameCell({
               disabled={actions.disabled}
               onClick={act("primary")}
             >
-              Make primary
+              {t("dispatcharr.cells.makePrimary")}
             </button>
           )}
           <button
             type="button"
-            aria-label="Move up"
+            aria-label={t("dispatcharr.cells.moveUp")}
             className={iconButtonClass}
             disabled={actions.disabled || position === 0}
             onClick={act("up")}
@@ -294,7 +323,7 @@ export function StreamNameCell({
           </button>
           <button
             type="button"
-            aria-label="Move down"
+            aria-label={t("dispatcharr.cells.moveDown")}
             className={iconButtonClass}
             disabled={actions.disabled || last}
             onClick={act("down")}
@@ -303,8 +332,8 @@ export function StreamNameCell({
           </button>
           <button
             type="button"
-            aria-label="Remove from channel"
-            title="Remove from channel"
+            aria-label={t("dispatcharr.cells.removeFromChannel")}
+            title={t("dispatcharr.cells.removeFromChannel")}
             className={iconButtonClass}
             disabled={actions.disabled || channel.streams.length === 1}
             onClick={act("remove")}

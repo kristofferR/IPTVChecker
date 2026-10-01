@@ -1,7 +1,9 @@
+import { type MessageKey, t } from "../i18n";
 import { type ArchiveProbes, filterResultsShared } from "./filters";
 import type {
   AppSettings,
   ChannelResult,
+  ChannelStatus,
   DispatcharrRankSignal,
   DispatcharrTarget,
   PlaylistPreview,
@@ -204,7 +206,7 @@ export interface DownAccount {
   account: string;
   failed: number;
   scanned: number;
-  /** The shared failure, e.g. "HTTP 502". */
+  /** The shared failure for display, e.g. "HTTP 502" or "timeouts". */
   error: string;
 }
 
@@ -280,6 +282,23 @@ export function isUntestedStatus(status: ChannelResult["status"]): boolean {
   return status === "pending" || status === "checking";
 }
 
+const STATUS_LABELS = {
+  alive: "dispatcharr.streamStatus.alive",
+  dead: "dispatcharr.streamStatus.dead",
+  pending: "dispatcharr.streamStatus.pending",
+  checking: "dispatcharr.streamStatus.checking",
+  drm: "dispatcharr.streamStatus.drm",
+  placeholder: "dispatcharr.streamStatus.placeholder",
+  geoblocked: "dispatcharr.streamStatus.geoblocked",
+  geoblocked_confirmed: "dispatcharr.streamStatus.geoblockedConfirmed",
+  geoblocked_unconfirmed: "dispatcharr.streamStatus.geoblockedUnconfirmed",
+} as const satisfies Record<ChannelStatus, MessageKey>;
+
+/** A stream's raw status for display. */
+export function dispatcharrStatusLabel(status: ChannelStatus): string {
+  return t(STATUS_LABELS[status]);
+}
+
 /** Fewest scanned streams before an account can count as down. */
 const DOWN_ACCOUNT_MIN_STREAMS = 5;
 /** Share of scanned streams that failed, and share of failures with the
@@ -297,6 +316,13 @@ export function failureCause(result: ChannelResult): string | null {
     return "connection errors";
   }
   return null;
+}
+
+/** A `failureCause` for display; HTTP codes read the same in every language. */
+function describeFailureCause(cause: string): string {
+  if (cause === "timeouts") return t("dispatcharr.failureCause.timeouts");
+  if (cause === "connection errors") return t("dispatcharr.failureCause.connectionErrors");
+  return cause;
 }
 
 /** Accounts whose scanned streams nearly all failed with one cause: the
@@ -331,10 +357,10 @@ export function findDownAccounts(entries: DispatcharrStreamEntry[]): DownAccount
     if (count < failed.length * DOWN_ACCOUNT_SAME_CAUSE_SHARE) continue;
     down.push({
       accountId,
-      account: list[0].ref.account ?? `Account ${accountId}`,
+      account: list[0].ref.account ?? t("dispatcharr.accountFallback", { id: accountId }),
       failed: failed.length,
       scanned: scanned.length,
-      error,
+      error: describeFailureCause(error),
     });
   }
   return down;
@@ -481,12 +507,13 @@ export function getDispatcharrView(
   return viewValue;
 }
 
-/** Channel-level status filters, only offered for Dispatcharr sources. */
+/** Channel-level status filters, only offered for Dispatcharr sources. Keys
+ *  are filter values; labels are translated once, at module load. */
 export const DISPATCHARR_STATUS_FILTERS = {
-  primary_dead: "Primary dead",
-  has_dead: "Has dead streams",
-  all_dead: "All dead",
-} as const;
+  primary_dead: t("dispatcharr.statusFilters.primaryDead"),
+  has_dead: t("dispatcharr.statusFilters.hasDead"),
+  all_dead: t("dispatcharr.statusFilters.allDead"),
+};
 
 export type DispatcharrStatusFilter = keyof typeof DISPATCHARR_STATUS_FILTERS;
 

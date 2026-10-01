@@ -620,6 +620,24 @@ fn set_default_m3u8_handler(_app: &tauri::AppHandle) -> Result<String, AppError>
 }
 
 #[tauri::command]
+pub fn get_ui_locale() -> crate::i18n::UiLocale {
+    crate::i18n::ui_locale()
+}
+
+/// Relaunches the app, e.g. to apply a new UI language.
+#[tauri::command]
+pub fn restart_app(app: tauri::AppHandle) {
+    // The store writes to disk on a debounce; flush it so a just-saved
+    // language survives the restart.
+    if let Ok(store) = app.store("settings.json") {
+        if let Err(error) = store.save() {
+            log::warn!("Failed to save settings before restart: {error}");
+        }
+    }
+    app.restart();
+}
+
+#[tauri::command]
 pub async fn get_settings(app: tauri::AppHandle) -> Result<AppSettings, AppError> {
     let state = app.state::<Arc<AppState>>();
     let settings = state.settings.lock().await;
@@ -662,25 +680,25 @@ pub fn sync_view_menu_labels(
         return Ok(());
     };
     for (id, visible, subject) in [
-        ("menu.view.toggle_sidebar", sidebar_visible, "Sidebar"),
-        ("menu.view.toggle_report", report_visible, "Report"),
+        ("menu.view.toggle_sidebar", sidebar_visible, "sidebar"),
+        ("menu.view.toggle_report", report_visible, "report"),
         (
             "menu.view.toggle_prescan_filter",
             source_filter_visible,
-            "Source Filter",
+            "source_filter",
         ),
         (
             "menu.view.toggle_header_button_text",
             header_button_text_visible,
-            "Header Button Text",
+            "header_button_text",
         ),
     ] {
         if let Some(item) = view_menu
             .get(id)
             .and_then(|item| item.as_menuitem().cloned())
         {
-            let action = if visible { "Hide" } else { "Show" };
-            item.set_text(format!("{action} {subject}"))
+            let action = if visible { "hide" } else { "show" };
+            item.set_text(crate::i18n::text(&format!("menu.view.{action}_{subject}")))
                 .map_err(|error| error.to_string())?;
         }
     }

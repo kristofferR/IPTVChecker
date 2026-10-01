@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { Cpu, KeyRound, Link2, Loader2, Network, Server, X } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { t } from "../i18n";
 import { normalizeDispatcharrServer } from "../lib/dispatcharr";
 import { testXtreamServers } from "../lib/tauri";
 import type {
@@ -33,13 +34,15 @@ interface OpenSourceDialogProps {
   onClose: () => void;
 }
 
-function validateHttpUrl(url: string, label: string): string | null {
+type UrlField = "playlistUrl" | "stalkerPortal" | "dispatcharrServer" | "xtreamServer";
+
+function validateHttpUrl(url: string, field: UrlField): string | null {
   const trimmed = url.trim();
   if (!trimmed) {
-    return `${label} cannot be empty.`;
+    return t(`sources.validation.${field}Empty`);
   }
   if (!/^https?:\/\//i.test(trimmed)) {
-    return `${label} must start with http:// or https://`;
+    return t(`sources.validation.${field}Scheme`);
   }
   return null;
 }
@@ -97,7 +100,7 @@ export function ServerTestModal({
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
     if (lines.length === 0) {
-      setTestError("Enter at least one server URL.");
+      setTestError(t("sources.serverTest.noServers"));
       return;
     }
     setTestError(null);
@@ -126,13 +129,15 @@ export function ServerTestModal({
             <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-1">
               Xtream
             </p>
-            <h2 className="text-[18px] font-semibold text-text-primary">Test Servers</h2>
+            <h2 className="text-[18px] font-semibold text-text-primary">
+              {t("sources.serverTest.title")}
+            </h2>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="rounded-md p-1.5 hover:bg-btn-hover transition-colors"
-            aria-label="Close server test"
+            aria-label={t("sources.serverTest.closeLabel")}
           >
             <X className="w-[18px] h-[18px]" />
           </button>
@@ -144,7 +149,7 @@ export function ServerTestModal({
               htmlFor="server-test-urls"
               className="text-[12px] font-medium text-text-secondary"
             >
-              Server URLs (one per line)
+              {t("sources.serverTest.serverUrls")}
             </label>
             <textarea
               id="server-test-urls"
@@ -165,12 +170,12 @@ export function ServerTestModal({
               className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-blue-500 disabled:opacity-50 disabled:pointer-events-none transition-colors"
             >
               {testRunning && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              {testRunning ? "Testing..." : "Run Test"}
+              {testRunning ? t("sources.serverTest.testing") : t("sources.serverTest.runTest")}
             </button>
 
             {testRunning && (
               <span className="text-[12px] text-text-tertiary">
-                {testProgress || "Starting..."}
+                {testProgress || t("sources.serverTest.starting")}
               </span>
             )}
           </div>
@@ -181,11 +186,14 @@ export function ServerTestModal({
             <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
               <div className="flex items-center gap-4 text-[12px] text-text-tertiary">
                 <span className={testReport.same_cdn ? "text-yellow-400" : "text-green-400"}>
-                  {testReport.same_cdn ? "Same CDN" : "Different CDNs"}
+                  {testReport.same_cdn
+                    ? t("sources.serverTest.sameCdn")
+                    : t("sources.serverTest.differentCdns")}
                 </span>
                 <span>
-                  Tested {testReport.channels_probed} channel
-                  {testReport.channels_probed !== 1 ? "s" : ""} per server
+                  {t("sources.serverTest.channelsProbed", {
+                    count: testReport.channels_probed,
+                  })}
                 </span>
               </div>
 
@@ -238,7 +246,7 @@ export function ServerTestModal({
                       }}
                       title={
                         result.success
-                          ? `Click to use ${result.server}`
+                          ? t("sources.serverTest.clickToUse", { server: result.server })
                           : (result.error ?? undefined)
                       }
                     >
@@ -248,7 +256,7 @@ export function ServerTestModal({
                           <div className="flex items-center gap-2.5 min-w-0">
                             {i === 0 && result.success && (
                               <span className="shrink-0 rounded bg-green-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-green-400 uppercase tracking-wide">
-                                Best
+                                {t("sources.serverTest.best")}
                               </span>
                             )}
                             <span className="text-[14px] font-semibold text-text-primary truncate">
@@ -273,7 +281,9 @@ export function ServerTestModal({
                               {result.api_latency_ms != null ? `${result.api_latency_ms}ms` : "—"}
                             </span>
                             <span className={`tabular-nums ${streamLatencyColor}`}>
-                              <span className="text-text-muted">Stream</span>{" "}
+                              <span className="text-text-muted">
+                                {t("sources.serverTest.stream")}
+                              </span>{" "}
                               {result.avg_stream_latency_ms != null
                                 ? `${result.avg_stream_latency_ms}ms`
                                 : "—"}
@@ -293,12 +303,14 @@ export function ServerTestModal({
                               {probe.screenshot ? (
                                 <img
                                   src={probe.screenshot}
-                                  alt={`Channel ${probe.stream_id}`}
+                                  alt={t("sources.serverTest.channelScreenshotAlt", {
+                                    id: probe.stream_id,
+                                  })}
                                   className="w-full h-auto rounded"
                                 />
                               ) : (
                                 <div className="aspect-video bg-black/30 rounded flex items-center justify-center text-[10px] text-text-muted">
-                                  No image
+                                  {t("sources.serverTest.noImage")}
                                 </div>
                               )}
                             </div>
@@ -310,9 +322,7 @@ export function ServerTestModal({
                 })}
               </div>
 
-              <p className="text-[11px] text-text-muted">
-                Click a server to select it and return to the login form.
-              </p>
+              <p className="text-[11px] text-text-muted">{t("sources.serverTest.selectHint")}</p>
             </div>
           )}
         </div>
@@ -469,7 +479,7 @@ export default function OpenSourceDialog({
 
     try {
       if (mode === "url") {
-        const validationError = validateHttpUrl(url, "Playlist URL");
+        const validationError = validateHttpUrl(url, "playlistUrl");
         if (validationError) {
           setLocalError(validationError);
           return;
@@ -485,7 +495,7 @@ export default function OpenSourceDialog({
       }
 
       if (mode === "stalker") {
-        const portalError = validateHttpUrl(stalkerPortal, "Stalker portal");
+        const portalError = validateHttpUrl(stalkerPortal, "stalkerPortal");
         if (portalError) {
           setLocalError(portalError);
           return;
@@ -493,7 +503,7 @@ export default function OpenSourceDialog({
 
         const mac = stalkerMac.trim();
         if (!mac) {
-          setLocalError("Stalker MAC address cannot be empty.");
+          setLocalError(t("sources.validation.stalkerMacEmpty"));
           return;
         }
 
@@ -510,7 +520,7 @@ export default function OpenSourceDialog({
       }
 
       if (mode === "dispatcharr") {
-        const serverError = validateHttpUrl(dispatcharrServer, "Dispatcharr server");
+        const serverError = validateHttpUrl(dispatcharrServer, "dispatcharrServer");
         if (serverError) {
           setLocalError(serverError);
           return;
@@ -519,11 +529,11 @@ export default function OpenSourceDialog({
         const username = dispatcharrUsername.trim();
         const password = dispatcharrPassword.trim();
         if (dispatcharrAuthMode === "apiKey" && !apiKey) {
-          setLocalError("Dispatcharr API key cannot be empty.");
+          setLocalError(t("sources.validation.dispatcharrApiKeyEmpty"));
           return;
         }
         if (dispatcharrAuthMode === "login" && (!username || !password)) {
-          setLocalError("Enter the Dispatcharr username and password.");
+          setLocalError(t("sources.validation.dispatcharrLoginMissing"));
           return;
         }
         const dispatcharrResult = await onOpenDispatcharr(
@@ -540,7 +550,7 @@ export default function OpenSourceDialog({
         return;
       }
 
-      const serverError = validateHttpUrl(xtreamServer, "Xtream server");
+      const serverError = validateHttpUrl(xtreamServer, "xtreamServer");
       if (serverError) {
         setLocalError(serverError);
         return;
@@ -548,13 +558,13 @@ export default function OpenSourceDialog({
 
       const username = xtreamUsername.trim();
       if (!username) {
-        setLocalError("Xtream username cannot be empty.");
+        setLocalError(t("sources.validation.xtreamUsernameEmpty"));
         return;
       }
 
       const password = xtreamPassword.trim();
       if (!password) {
-        setLocalError("Xtream password cannot be empty.");
+        setLocalError(t("sources.validation.xtreamPasswordEmpty"));
         return;
       }
 
@@ -594,7 +604,7 @@ export default function OpenSourceDialog({
     const u = xtreamUsername.trim();
     const p = xtreamPassword.trim();
     if (!u || !p) {
-      setLocalError("Enter username and password before testing servers.");
+      setLocalError(t("sources.validation.credentialsBeforeTest"));
       return;
     }
     setLocalError(null);
@@ -614,16 +624,16 @@ export default function OpenSourceDialog({
           <div className="flex items-start justify-between border-b border-border-app px-5 pb-3 pt-4">
             <div>
               <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-1">
-                Source
+                {t("sources.eyebrow")}
               </p>
-              <h2 className="text-[18px] font-semibold text-text-primary">Open Playlist Source</h2>
+              <h2 className="text-[18px] font-semibold text-text-primary">{t("sources.title")}</h2>
             </div>
             <button
               type="button"
               onClick={requestClose}
               disabled={conversionPending}
               className="rounded-md p-1.5 hover:bg-btn-hover transition-colors"
-              aria-label="Close source dialog"
+              aria-label={t("sources.closeLabel")}
             >
               <X className="w-[18px] h-[18px]" />
             </button>
@@ -667,7 +677,7 @@ export default function OpenSourceDialog({
                   htmlFor="open-source-url"
                   className="text-[12px] font-medium text-text-secondary"
                 >
-                  Playlist URL
+                  {t("sources.playlistUrl")}
                 </label>
                 <input
                   id="open-source-url"
@@ -686,7 +696,7 @@ export default function OpenSourceDialog({
                     htmlFor="open-source-xtream-server"
                     className="text-[12px] font-medium text-text-secondary"
                   >
-                    Xtream Server
+                    {t("sources.xtreamServer")}
                   </label>
                   <input
                     id="open-source-xtream-server"
@@ -703,7 +713,7 @@ export default function OpenSourceDialog({
                     htmlFor="open-source-xtream-username"
                     className="text-[12px] font-medium text-text-secondary"
                   >
-                    Username
+                    {t("sources.username")}
                   </label>
                   <input
                     id="open-source-xtream-username"
@@ -718,7 +728,7 @@ export default function OpenSourceDialog({
                     htmlFor="open-source-xtream-password"
                     className="text-[12px] font-medium text-text-secondary"
                   >
-                    Password
+                    {t("sources.password")}
                   </label>
                   <PasswordField
                     id="open-source-xtream-password"
@@ -736,7 +746,7 @@ export default function OpenSourceDialog({
                       className="rounded border-border-app accent-blue-600"
                     />
                     <span className="text-[12px] text-text-secondary">
-                      Save password in recents
+                      {t("sources.savePasswordInRecents")}
                     </span>
                   </label>
                   <button
@@ -745,7 +755,7 @@ export default function OpenSourceDialog({
                     className="inline-flex items-center gap-1.5 rounded-md bg-btn px-2.5 py-1.5 text-[12px] text-text-secondary hover:bg-btn-hover hover:text-text-primary transition-colors"
                   >
                     <Server className="w-3.5 h-3.5" />
-                    Test Servers
+                    {t("sources.testServers")}
                   </button>
                 </div>
               </div>
@@ -756,7 +766,7 @@ export default function OpenSourceDialog({
                     htmlFor="open-source-dispatcharr-server"
                     className="text-[12px] font-medium text-text-secondary"
                   >
-                    Dispatcharr Server
+                    {t("sources.dispatcharrServer")}
                   </label>
                   <input
                     id="open-source-dispatcharr-server"
@@ -768,16 +778,20 @@ export default function OpenSourceDialog({
                     className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[14px] text-text-primary placeholder:text-text-muted focus:border-blue-500 focus:outline-none"
                   />
                   {dispatcharrServerAutofilled && (
-                    <p className="text-[11px] text-text-tertiary">From pasted stream URL</p>
+                    <p className="text-[11px] text-text-tertiary">
+                      {t("sources.fromPastedStreamUrl")}
+                    </p>
                   )}
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[12px] font-medium text-text-secondary">Sign in with</span>
+                  <span className="text-[12px] font-medium text-text-secondary">
+                    {t("sources.signInWith")}
+                  </span>
                   <div className="inline-flex rounded-md bg-btn p-0.5" role="radiogroup">
                     {(
                       [
-                        ["apiKey", "API key"],
-                        ["login", "Username"],
+                        ["apiKey", "sources.apiKey"],
+                        ["login", "sources.username"],
                       ] as const
                     ).map(([value, label]) => (
                       <button
@@ -795,7 +809,7 @@ export default function OpenSourceDialog({
                             : "text-text-secondary hover:text-text-primary"
                         }`}
                       >
-                        {label}
+                        {t(label)}
                       </button>
                     ))}
                   </div>
@@ -803,7 +817,7 @@ export default function OpenSourceDialog({
                 {dispatcharrAuthMode === "apiKey" ? (
                   <PasswordField
                     id="open-source-dispatcharr-api-key"
-                    aria-label="API key"
+                    aria-label={t("sources.apiKey")}
                     value={dispatcharrApiKey}
                     onChange={(event) => setDispatcharrApiKey(event.target.value)}
                     className="w-full rounded-md border border-border-app bg-input px-3 py-2 text-[14px] text-text-primary placeholder:text-text-muted focus:border-blue-500 focus:outline-none"
@@ -815,7 +829,7 @@ export default function OpenSourceDialog({
                         htmlFor="open-source-dispatcharr-username"
                         className="text-[12px] font-medium text-text-secondary"
                       >
-                        Username
+                        {t("sources.username")}
                       </label>
                       <input
                         id="open-source-dispatcharr-username"
@@ -830,7 +844,7 @@ export default function OpenSourceDialog({
                         htmlFor="open-source-dispatcharr-password"
                         className="text-[12px] font-medium text-text-secondary"
                       >
-                        Password
+                        {t("sources.password")}
                       </label>
                       <PasswordField
                         id="open-source-dispatcharr-password"
@@ -843,7 +857,7 @@ export default function OpenSourceDialog({
                 )}
                 {convertSaved ? (
                   <p className="text-[12px] text-text-secondary">
-                    Replaces the saved playlist "{convertSaved.name}".
+                    {t("sources.replacesSavedPlaylist", { name: convertSaved.name })}
                   </p>
                 ) : (
                   <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -854,7 +868,7 @@ export default function OpenSourceDialog({
                       className="rounded border-border-app accent-blue-600"
                     />
                     <span className="text-[12px] text-text-secondary">
-                      Save credentials in recents
+                      {t("sources.saveCredentialsInRecents")}
                     </span>
                   </label>
                 )}
@@ -866,7 +880,7 @@ export default function OpenSourceDialog({
                     htmlFor="open-source-stalker-portal"
                     className="text-[12px] font-medium text-text-secondary"
                   >
-                    Stalker Portal URL
+                    {t("sources.stalkerPortalUrl")}
                   </label>
                   <input
                     id="open-source-stalker-portal"
@@ -883,7 +897,7 @@ export default function OpenSourceDialog({
                     htmlFor="open-source-stalker-mac"
                     className="text-[12px] font-medium text-text-secondary"
                   >
-                    MAC Address
+                    {t("sources.macAddress")}
                   </label>
                   <input
                     id="open-source-stalker-mac"
@@ -906,14 +920,14 @@ export default function OpenSourceDialog({
                 disabled={conversionPending}
                 className="rounded-md bg-btn px-3 py-2 text-[13px] text-text-primary hover:bg-btn-hover transition-colors disabled:opacity-50"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               <button
                 type="submit"
                 disabled={submitting}
                 className="rounded-md bg-blue-600 px-3 py-2 text-[13px] font-medium text-white hover:bg-blue-500 disabled:opacity-50 disabled:pointer-events-none transition-colors"
               >
-                {submitting ? "Opening..." : "Open"}
+                {submitting ? t("sources.opening") : t("common.open")}
               </button>
             </div>
           </form>

@@ -7,6 +7,7 @@
 pub mod commands;
 pub mod engine;
 pub mod error;
+pub mod i18n;
 #[cfg(target_os = "linux")]
 pub mod linux;
 pub mod models;
@@ -621,170 +622,207 @@ pub fn run() {
     // One menu builder for all desktop platforms; only the modifier key,
     // the macOS app/Window menus, and where Settings/Quit live differ.
     let builder = builder.menu(|app| {
+        use crate::i18n::text;
         use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 
+        crate::i18n::init(app);
         let is_macos = cfg!(target_os = "macos");
         let modifier = if is_macos { "Cmd" } else { "Ctrl" };
         let accel = |keys: &str| format!("{modifier}+{keys}");
 
-        let settings_item = MenuItemBuilder::with_id("menu.app.settings", "Settings...")
-            .accelerator(accel(","))
-            .build(app)?;
+        let settings_item =
+            MenuItemBuilder::with_id("menu.app.settings", text("menu.app.settings"))
+                .accelerator(accel(","))
+                .build(app)?;
 
         #[cfg(target_os = "macos")]
         let app_menu = SubmenuBuilder::new(app, "IPTV Checker")
-            .about(Some(tauri::menu::AboutMetadata::default()))
+            .about_with_text(
+                text("menu.app.about"),
+                Some(tauri::menu::AboutMetadata::default()),
+            )
             .separator()
             .item(&settings_item)
             .separator()
-            .services()
+            .services_with_text(text("menu.app.services"))
             .separator()
-            .hide()
-            .hide_others()
-            .show_all()
+            .hide_with_text(text("menu.app.hide"))
+            .hide_others_with_text(text("menu.app.hide_others"))
+            .show_all_with_text(text("menu.app.show_all"))
             .separator()
-            .quit()
+            .quit_with_text(text("menu.app.quit"))
             .build()?;
 
-        let new_window_item = MenuItemBuilder::with_id("menu.file.new_window", "New Window")
-            .accelerator(accel("N"))
-            .build(app)?;
-        let open_item = MenuItemBuilder::with_id("menu.file.open", "Open Playlist...")
+        let new_window_item =
+            MenuItemBuilder::with_id("menu.file.new_window", text("menu.file.new_window"))
+                .accelerator(accel("N"))
+                .build(app)?;
+        let open_item = MenuItemBuilder::with_id("menu.file.open", text("menu.file.open"))
             .accelerator(accel("O"))
             .build(app)?;
-        let open_folder_item = MenuItemBuilder::with_id("menu.file.open_folder", "Open Folder...")
-            .accelerator(accel("Shift+O"))
-            .build(app)?;
-        let open_url_item = MenuItemBuilder::with_id("menu.file.open_url", "Open URL...")
-            .accelerator(accel("Shift+U"))
-            .build(app)?;
-        let export_csv_item = MenuItemBuilder::with_id("menu.file.export_csv", "Export CSV")
-            .accelerator(accel("Shift+E"))
-            .build(app)?;
+        let open_folder_item =
+            MenuItemBuilder::with_id("menu.file.open_folder", text("menu.file.open_folder"))
+                .accelerator(accel("Shift+O"))
+                .build(app)?;
+        let open_url_item =
+            MenuItemBuilder::with_id("menu.file.open_url", text("menu.file.open_url"))
+                .accelerator(accel("Shift+U"))
+                .build(app)?;
+        let export_csv_item =
+            MenuItemBuilder::with_id("menu.file.export_csv", text("menu.file.export_csv"))
+                .accelerator(accel("Shift+E"))
+                .build(app)?;
 
         let file_menu = {
-            let file_builder = SubmenuBuilder::with_id(app, "menu.file", "File")
+            let file_builder = SubmenuBuilder::with_id(app, "menu.file", text("menu.file"))
                 .item(&new_window_item)
                 .separator()
                 .item(&open_item)
                 .item(&open_folder_item)
                 .item(&open_url_item)
                 .item(
-                    &SubmenuBuilder::with_id(app, "menu.file.open_recent", "Open Recent")
-                        .text("menu.file.recent.0", "No recent playlists")
-                        .separator()
-                        .text("menu.file.recent.clear", "Clear Recent")
-                        .build()?,
+                    &SubmenuBuilder::with_id(
+                        app,
+                        "menu.file.open_recent",
+                        text("menu.file.open_recent"),
+                    )
+                    .text("menu.file.recent.0", text("menu.file.recent.empty"))
+                    .separator()
+                    .text("menu.file.recent.clear", text("menu.file.recent.clear"))
+                    .build()?,
                 )
                 .item(
-                    &SubmenuBuilder::with_id(app, "menu.file.open_saved", "Open Saved")
-                        .text("menu.file.saved.0", "No saved playlists")
-                        .build()?,
+                    &SubmenuBuilder::with_id(
+                        app,
+                        "menu.file.open_saved",
+                        text("menu.file.open_saved"),
+                    )
+                    .text("menu.file.saved.0", text("menu.file.saved.empty"))
+                    .build()?,
                 )
-                .text("menu.file.manage_saved", "Manage Saved Playlists…")
+                .text("menu.file.manage_saved", text("menu.file.manage_saved"))
                 .separator()
                 .item(&export_csv_item)
-                .text("menu.file.export_split", "Export Split Playlists")
-                .text("menu.file.export_renamed", "Export Renamed Playlist")
-                .text("menu.file.export_filtered_m3u", "Export Filtered M3U/M3U8")
-                .text("menu.file.export_scan_log", "Export Scan Log (JSON)");
+                .text("menu.file.export_split", text("menu.file.export_split"))
+                .text("menu.file.export_renamed", text("menu.file.export_renamed"))
+                .text(
+                    "menu.file.export_filtered_m3u",
+                    text("menu.file.export_filtered_m3u"),
+                )
+                .text(
+                    "menu.file.export_scan_log",
+                    text("menu.file.export_scan_log"),
+                );
 
             // Settings and Quit live in the app menu on macOS, in File elsewhere.
             #[cfg(not(target_os = "macos"))]
-            let file_builder = file_builder.separator().item(&settings_item).quit();
+            let file_builder = file_builder
+                .separator()
+                .item(&settings_item)
+                .quit_with_text(text(if cfg!(windows) {
+                    "menu.app.exit"
+                } else {
+                    "menu.app.quit"
+                }));
 
             file_builder.build()?
         };
 
         // The app's own Select All: the stock item selects the page's text on
         // macOS before the table sees Cmd+A.
-        let select_all_item = MenuItemBuilder::with_id("menu.edit.select_all", "Select All")
-            .accelerator(accel("A"))
-            .build(app)?;
-        let edit_menu = SubmenuBuilder::new(app, "Edit")
-            .undo()
-            .redo()
+        let select_all_item =
+            MenuItemBuilder::with_id("menu.edit.select_all", text("menu.edit.select_all"))
+                .accelerator(accel("A"))
+                .build(app)?;
+        let edit_menu = SubmenuBuilder::new(app, text("menu.edit"))
+            .undo_with_text(text("menu.edit.undo"))
+            .redo_with_text(text("menu.edit.redo"))
             .separator()
-            .cut()
-            .copy()
-            .paste()
+            .cut_with_text(text("menu.edit.cut"))
+            .copy_with_text(text("menu.edit.copy"))
+            .paste_with_text(text("menu.edit.paste"))
             .item(&select_all_item)
             .build()?;
 
         let toggle_sidebar_item =
-            MenuItemBuilder::with_id("menu.view.toggle_sidebar", "Show Sidebar")
+            MenuItemBuilder::with_id("menu.view.toggle_sidebar", text("menu.view.show_sidebar"))
                 .accelerator(accel("Shift+L"))
                 .build(app)?;
-        let toggle_report_item = MenuItemBuilder::with_id("menu.view.toggle_report", "Show Report")
-            .accelerator(accel("Shift+R"))
-            .build(app)?;
-        let toggle_prescan_item =
-            MenuItemBuilder::with_id("menu.view.toggle_prescan_filter", "Show Source Filter")
-                .accelerator(accel("Shift+F"))
+        let toggle_report_item =
+            MenuItemBuilder::with_id("menu.view.toggle_report", text("menu.view.show_report"))
+                .accelerator(accel("Shift+R"))
                 .build(app)?;
+        let toggle_prescan_item = MenuItemBuilder::with_id(
+            "menu.view.toggle_prescan_filter",
+            text("menu.view.show_source_filter"),
+        )
+        .accelerator(accel("Shift+F"))
+        .build(app)?;
         let toggle_header_button_text_item = MenuItemBuilder::with_id(
             "menu.view.toggle_header_button_text",
-            "Show Header Button Text",
+            text("menu.view.show_header_button_text"),
         )
         .build(app)?;
         let clear_filters_item =
-            MenuItemBuilder::with_id("menu.view.clear_filters", "Clear Filters")
+            MenuItemBuilder::with_id("menu.view.clear_filters", text("menu.view.clear_filters"))
                 .accelerator(accel("Shift+X"))
                 .build(app)?;
 
-        let log_window_item = MenuItemBuilder::with_id("menu.view.log_window", "Log")
-            .accelerator(if is_macos { "Alt+Cmd+L" } else { "Ctrl+Alt+L" })
-            .build(app)?;
+        let log_window_item =
+            MenuItemBuilder::with_id("menu.view.log_window", text("menu.view.log_window"))
+                .accelerator(if is_macos { "Alt+Cmd+L" } else { "Ctrl+Alt+L" })
+                .build(app)?;
 
-        let view_menu = SubmenuBuilder::with_id(app, "menu.view", "View")
+        let view_menu = SubmenuBuilder::with_id(app, "menu.view", text("menu.view"))
             .item(&toggle_sidebar_item)
             .item(&toggle_report_item)
             .item(&toggle_prescan_item)
             .item(&toggle_header_button_text_item)
             .item(&clear_filters_item)
-            .text("menu.view.history", "Scan History")
+            .text("menu.view.history", text("menu.view.history"))
             .separator()
             .item(&log_window_item)
             .build()?;
 
-        let start_scan_item = MenuItemBuilder::with_id("menu.scan.start", "Start Scan")
+        let start_scan_item = MenuItemBuilder::with_id("menu.scan.start", text("menu.scan.start"))
             .accelerator(accel("R"))
             .build(app)?;
-        let pause_scan_item = MenuItemBuilder::with_id("menu.scan.pause", "Pause Scan")
+        let pause_scan_item = MenuItemBuilder::with_id("menu.scan.pause", text("menu.scan.pause"))
             .accelerator(accel("P"))
             .build(app)?;
-        let stop_scan_item = MenuItemBuilder::with_id("menu.scan.stop", "Stop Scan")
+        let stop_scan_item = MenuItemBuilder::with_id("menu.scan.stop", text("menu.scan.stop"))
             .accelerator(accel("."))
             .build(app)?;
 
-        let scan_menu = SubmenuBuilder::new(app, "Scan")
+        let scan_menu = SubmenuBuilder::new(app, text("menu.scan"))
             .item(&start_scan_item)
             .item(&pause_scan_item)
-            .text("menu.scan.resume", "Resume Scan")
+            .text("menu.scan.resume", text("menu.scan.resume"))
             .item(&stop_scan_item)
             .separator()
-            .text("menu.scan.settings", "Scan Settings")
+            .text("menu.scan.settings", text("menu.scan.settings"))
             .build()?;
 
-        let shortcuts_item = MenuItemBuilder::with_id("menu.help.shortcuts", "Keyboard Shortcuts")
-            .accelerator(accel("/"))
-            .build(app)?;
+        let shortcuts_item =
+            MenuItemBuilder::with_id("menu.help.shortcuts", text("menu.help.shortcuts"))
+                .accelerator(accel("/"))
+                .build(app)?;
 
-        let help_menu = SubmenuBuilder::new(app, "Help")
+        let help_menu = SubmenuBuilder::new(app, text("menu.help"))
             .item(&shortcuts_item)
             .separator()
-            .text("menu.help.check_updates", "Check for Updates")
+            .text("menu.help.check_updates", text("menu.help.check_updates"))
             .build()?;
 
         #[cfg(target_os = "macos")]
         {
             let window_menu =
-                SubmenuBuilder::with_id(app, tauri::menu::WINDOW_SUBMENU_ID, "Window")
-                    .minimize()
-                    .maximize()
-                    .fullscreen()
+                SubmenuBuilder::with_id(app, tauri::menu::WINDOW_SUBMENU_ID, text("menu.window"))
+                    .minimize_with_text(text("menu.window.minimize"))
+                    .maximize_with_text(text("menu.window.zoom"))
+                    .fullscreen_with_text(text("menu.window.fullscreen"))
                     .separator()
-                    .close_window()
+                    .close_window_with_text(text("menu.window.close"))
                     .build()?;
 
             MenuBuilder::new(app)
@@ -1002,8 +1040,9 @@ pub fn run() {
                 use tauri::tray::TrayIconBuilder;
 
                 let open_item =
-                    MenuItemBuilder::with_id("tray.open", "Open IPTV Checker").build(app)?;
-                let quit_item = MenuItemBuilder::with_id("tray.quit", "Quit").build(app)?;
+                    MenuItemBuilder::with_id("tray.open", i18n::text("tray.open")).build(app)?;
+                let quit_item =
+                    MenuItemBuilder::with_id("tray.quit", i18n::text("tray.quit")).build(app)?;
 
                 let tray_menu = MenuBuilder::new(app)
                     .item(&open_item)
@@ -1107,6 +1146,8 @@ pub fn run() {
             commands::export::export_app_log,
             commands::export::export_playback_diagnostics,
             commands::settings::get_settings,
+            commands::settings::get_ui_locale,
+            commands::settings::restart_app,
             commands::settings::sync_view_menu,
             commands::settings::get_scan_presets,
             commands::settings::save_scan_preset,

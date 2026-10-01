@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { hasArchive, MAX_CATCHUP_DAYS } from "./archive";
 import {
   type ArchiveProbeEntry,
@@ -54,30 +55,32 @@ export function archiveFailure(entry: ArchiveProbeEntry | undefined): ArchiveFai
 export function archiveFailureLabel(failure: ArchiveFailure): string {
   switch (failure.kind) {
     case "empty":
-      return "EMPTY";
+      return t("archive.failureLabel.empty");
     case "live":
-      return "LIVE";
+      return t("archive.failureLabel.live");
     case "http":
       return failure.status != null ? String(failure.status) : "HTTP";
     case "timeout":
-      return "TIMEOUT";
+      return t("archive.failureLabel.timeout");
     default:
-      return "ERROR";
+      return t("archive.failureLabel.error");
   }
 }
 
 export function archiveFailureSentence(failure: ArchiveFailure): string {
   switch (failure.kind) {
     case "empty":
-      return "The provider answers archive requests but serves no media. The channel is flagged for catch-up yet keeps nothing.";
+      return t("archive.failureSentence.empty");
     case "live":
-      return "Archive requests return the live stream instead of the requested time. The provider ignores the catch-up start.";
+      return t("archive.failureSentence.live");
     case "http":
-      return `Archive requests fail with HTTP ${failure.status ?? "error"} while the channel itself answers.`;
+      return failure.status != null
+        ? t("archive.failureSentence.httpStatus", { status: failure.status })
+        : t("archive.failureSentence.httpUnknown");
     case "timeout":
-      return "Archive requests never answer.";
+      return t("archive.failureSentence.timeout");
     default:
-      return "Archive requests fail before any media arrives.";
+      return t("archive.failureSentence.unreachable");
   }
 }
 

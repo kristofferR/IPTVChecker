@@ -2,6 +2,7 @@ import { emit } from "@tauri-apps/api/event";
 import { useEffect } from "react";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { useSettings } from "./hooks/useSettings";
+import { t } from "./i18n";
 
 export function SettingsWindow() {
   const { settings, save, loading } = useSettings();
@@ -27,7 +28,7 @@ export function SettingsWindow() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full bg-overlay">
-        <p className="text-text-tertiary text-[13px]">Loading settings...</p>
+        <p className="text-text-tertiary text-[13px]">{t("app.loadingSettings")}</p>
       </div>
     );
   }

@@ -412,6 +412,8 @@ export interface AppSettings {
   scan_notifications: boolean;
   low_fps_threshold: number;
   theme: ThemePreference;
+  /** UI language tag; null until chosen (English). Applies after a restart. */
+  language: string | null;
   title_bar: TitleBarPreference;
   log_level: string;
   show_prescan_filter: boolean;
@@ -535,6 +537,15 @@ export interface XtreamServerTestReport {
 
 export type RetryBackoff = "none" | "linear" | "exponential";
 export type ThemePreference = "system" | "light" | "dark";
+
+/** The UI language this process launched with. */
+export interface UiLocale {
+  locale: string;
+  /** A supported system language to offer when none has been chosen yet. */
+  suggested: string | null;
+  /** The system's preferred locale, for regional date and number formats. */
+  system: string | null;
+}
 
 /** Linux only: "auto" hides the title bar on tiling window managers. */
 export type TitleBarPreference = "auto" | "show" | "hide";
