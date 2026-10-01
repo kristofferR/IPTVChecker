@@ -11,11 +11,25 @@ use serde::Serialize;
 use tauri::Manager;
 
 /// Mirrors `LOCALES` in `src/i18n/index.ts`; each has `locales/<tag>.json`.
-pub const SUPPORTED: &[&str] = &["en"];
+pub const SUPPORTED: &[&str] = &[
+    "en", "zh-CN", "ru", "es", "uk", "pt-BR", "tr", "fr", "de", "it", "pl", "vi", "id",
+];
 
 fn catalog_source(locale: &str) -> Option<&'static str> {
     match locale {
         "en" => Some(include_str!("../locales/en.json")),
+        "zh-CN" => Some(include_str!("../locales/zh-CN.json")),
+        "ru" => Some(include_str!("../locales/ru.json")),
+        "es" => Some(include_str!("../locales/es.json")),
+        "uk" => Some(include_str!("../locales/uk.json")),
+        "pt-BR" => Some(include_str!("../locales/pt-BR.json")),
+        "tr" => Some(include_str!("../locales/tr.json")),
+        "fr" => Some(include_str!("../locales/fr.json")),
+        "de" => Some(include_str!("../locales/de.json")),
+        "it" => Some(include_str!("../locales/it.json")),
+        "pl" => Some(include_str!("../locales/pl.json")),
+        "vi" => Some(include_str!("../locales/vi.json")),
+        "id" => Some(include_str!("../locales/id.json")),
         _ => None,
     }
 }
@@ -163,18 +177,26 @@ mod tests {
     }
 
     #[test]
-    fn catalogs_parse_and_cover_english_keys() {
+    fn catalogs_match_english_keys() {
         let english = parse("en");
         assert!(!english.is_empty());
+        let mut expected: Vec<_> = english.keys().collect();
+        expected.sort();
         for locale in SUPPORTED {
             let messages = parse(locale);
-            assert!(
-                !messages.is_empty(),
-                "{locale} catalog is missing or invalid"
-            );
-            for key in messages.keys() {
-                assert!(english.contains_key(key), "{locale} has unknown key {key}");
-            }
+            let mut keys: Vec<_> = messages.keys().collect();
+            keys.sort();
+            assert_eq!(keys, expected, "{locale} catalog keys differ from English");
         }
+    }
+
+    #[test]
+    fn matches_supported_languages() {
+        assert_eq!(match_tag("de-AT"), Some("de"));
+        assert_eq!(match_tag("pt_PT.UTF-8"), Some("pt-BR"));
+        assert_eq!(match_tag("zh-Hans-CN"), Some("zh-CN"));
+        assert_eq!(match_tag("zh-TW"), None);
+        assert_eq!(match_tag("zh-Hant"), None);
+        assert_eq!(resolve(None, system(&["zh-HK", "uk-UA"])), "uk");
     }
 }

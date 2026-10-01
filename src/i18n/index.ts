@@ -14,7 +14,20 @@ type TranslationModule = { default: LocaleTranslation };
  * `src-tauri/src/i18n.rs` to resolve the launch locale and label the menu.
  */
 export const LOCALES = {
+  // Ordered as the Language setting lists them.
   en: { name: "English", load: async (): Promise<TranslationModule> => ({ default: {} }) },
+  id: { name: "Bahasa Indonesia", load: () => import("./translations/id") },
+  de: { name: "Deutsch", load: () => import("./translations/de") },
+  es: { name: "Español", load: () => import("./translations/es") },
+  fr: { name: "Français", load: () => import("./translations/fr") },
+  it: { name: "Italiano", load: () => import("./translations/it") },
+  pl: { name: "Polski", load: () => import("./translations/pl") },
+  "pt-BR": { name: "Português (Brasil)", load: () => import("./translations/pt-BR") },
+  vi: { name: "Tiếng Việt", load: () => import("./translations/vi") },
+  tr: { name: "Türkçe", load: () => import("./translations/tr") },
+  ru: { name: "Русский", load: () => import("./translations/ru") },
+  uk: { name: "Українська", load: () => import("./translations/uk") },
+  "zh-CN": { name: "简体中文", load: () => import("./translations/zh-CN") },
 } as const satisfies Record<string, { name: string; load: () => Promise<TranslationModule> }>;
 
 export type LocaleCode = keyof typeof LOCALES;

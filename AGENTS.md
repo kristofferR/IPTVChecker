@@ -104,6 +104,26 @@ This is safe — it just rebuilds on next `bun tauri dev` or `bun tauri build`. 
 - TypeScript: strict mode, no unused locals/params, types in `lib/types.ts` mirror Rust models
 - Components: functional with hooks, Tailwind for styling, no CSS-in-JS
 
+## Localization
+- UI text goes through `t()`/`tRich()` from `src/i18n`. Add English to the
+  matching namespace in `src/i18n/en/`; keys and `{placeholders}` are
+  type-checked. Use plural objects (`{ one, other }`) with a `count` param
+  instead of building plurals by hand, and keep each sentence one message.
+- Translations live in `src/i18n/translations/<tag>.ts`. New or changed
+  English messages need translating in every language in the same change:
+  `bun test tests/i18n.test.ts` (run in CI) fails on gaps, placeholder
+  mismatches and missing plural forms. At runtime a gap falls back to English.
+- Native menu, tray, dialog and notification text lives in
+  `src-tauri/locales/<tag>.json` (`crate::i18n::text`). Every catalog must
+  have exactly the English keys.
+- Rust keeps failure reasons and progress details as fixed English strings
+  (they are persisted, exported and compared). Map new ones in
+  `src/i18n/reasons.ts` and display them with `translateReason()`.
+- Format dates and numbers with `getFormatLocale()` or `formatCount()`.
+- Adding a language: add it to `LOCALES` in `src/i18n/index.ts` and to
+  `SUPPORTED`/`catalog_source` in `src-tauri/src/i18n.rs`. Arabic and Persian
+  wait for right-to-left layout support.
+
 ## MCP Tools (tauri-plugin-mcp)
 
 Debug-only Tauri plugin that exposes the app's webview to Claude Code via MCP tools (`mcp__tauri-mcp__*`). Requires `bun tauri dev` to be running (creates IPC socket at `/tmp/tauri-mcp-iptv-checker.sock`).
