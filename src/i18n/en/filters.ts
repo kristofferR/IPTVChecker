@@ -10,5 +10,6 @@ export default {
   regexAlternation: "alternation",
   regexExamples: "Examples:",
   regexCaseNote: "Matches are case-insensitive. Lookahead filters are supported.",
-  applyHint: "Click Apply to reload the current source. Scan applies pending changes automatically.",
+  applyHint:
+    "Click Apply to reload the current source. Scan applies pending changes automatically.",
 } as const;

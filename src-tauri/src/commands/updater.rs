@@ -14,6 +14,7 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 use crate::error::AppError;
+use crate::i18n;
 use crate::state::AppState;
 
 const AUTOMATIC_UPDATE_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -539,23 +540,21 @@ async fn run_automatic_update_check(app: &AppHandle) {
                     log::warn!("failed to emit {UPDATE_AVAILABLE_EVENT}: {error}");
                 }
                 let body = match current_install_mode_off_main().await {
-                    Ok(mode) if mode.is_manual() => format!(
-                        "IPTV Checker {version} is available. Open Settings for \
-                         package-manager instructions."
-                    ),
-                    Ok(_) => format!(
-                        "IPTV Checker {version} is available. Open Settings to review and \
-                         install it."
-                    ),
+                    Ok(mode) if mode.is_manual() => {
+                        i18n::text_with("update.body_manual", &[("version", version.as_str())])
+                    }
+                    Ok(_) => {
+                        i18n::text_with("update.body_install", &[("version", version.as_str())])
+                    }
                     Err(error) => {
                         log::warn!("failed to detect the update install mode: {error}");
-                        format!("IPTV Checker {version} is available.")
+                        i18n::text_with("update.body", &[("version", version.as_str())])
                     }
                 };
                 if let Err(error) = app
                     .notification()
                     .builder()
-                    .title("IPTV Checker update available")
+                    .title(i18n::text("update.title"))
                     .body(body)
                     .show()
                 {

@@ -1,5 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { t } from "../i18n";
 import { castToDevice, discoverChromecasts, getCastStatus, stopCast } from "../lib/tauri";
 import type { CastMediaRequest, CastSession, ChromecastDevice } from "../lib/types";
 
@@ -94,7 +95,7 @@ export function useChromecast(): UseChromecastResult {
           }
           setSession(next);
           if (next.state === "error") {
-            setError(next.errorMessage ?? "Cast session error");
+            setError(next.errorMessage ?? t("cast.sessionError"));
           } else {
             // A healthy update means whatever caused a previous error has
             // recovered — drop the stale message so the menu doesn't keep

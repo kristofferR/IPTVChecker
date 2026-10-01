@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import { useEffect } from "react";
+import { t } from "../i18n";
 
 interface ShortcutEntry {
   keys: string;
@@ -14,38 +15,44 @@ interface ShortcutSection {
 function buildSections(modifierLabel: string): ShortcutSection[] {
   return [
     {
-      title: "General",
+      title: t("shortcuts.sections.general"),
       entries: [
-        { keys: `${modifierLabel} + O`, action: "Open playlist" },
-        { keys: `${modifierLabel} + ,`, action: "Open settings" },
-        { keys: `${modifierLabel} + /`, action: "Open this shortcuts dialog" },
-        { keys: `Alt + ${modifierLabel} + L`, action: "Open log window" },
-        { keys: "Escape", action: "Close open dialogs and overlays" },
+        { keys: `${modifierLabel} + O`, action: t("shortcuts.actions.openPlaylist") },
+        { keys: `${modifierLabel} + ,`, action: t("shortcuts.actions.openSettings") },
+        { keys: `${modifierLabel} + /`, action: t("shortcuts.actions.openShortcuts") },
+        { keys: `Alt + ${modifierLabel} + L`, action: t("shortcuts.actions.openLog") },
+        { keys: "Escape", action: t("shortcuts.actions.closeOverlays") },
       ],
     },
     {
-      title: "Table Navigation",
+      title: t("shortcuts.sections.tableNavigation"),
       entries: [
-        { keys: "Arrow Up / Down", action: "Move row focus and selection" },
-        { keys: "Space", action: "Open or close the screenshot lightbox" },
-        { keys: "Double-click", action: "Open selected channel in player" },
+        { keys: "Arrow Up / Down", action: t("shortcuts.actions.moveRowFocus") },
+        { keys: "Space", action: t("shortcuts.actions.toggleLightbox") },
+        { keys: t("shortcuts.gestures.doubleClick"), action: t("shortcuts.actions.openInPlayer") },
       ],
     },
     {
-      title: "Selection",
+      title: t("shortcuts.sections.selection"),
       entries: [
-        { keys: "Click", action: "Select single channel" },
-        { keys: "Shift + Click", action: "Select range" },
-        { keys: `${modifierLabel} + Click`, action: "Toggle row selection" },
-        { keys: `${modifierLabel} + A`, action: "Select all visible channels" },
+        { keys: t("shortcuts.gestures.click"), action: t("shortcuts.actions.selectSingle") },
+        { keys: t("shortcuts.gestures.shiftClick"), action: t("shortcuts.actions.selectRange") },
+        {
+          keys: t("shortcuts.gestures.modifierClick", { modifier: modifierLabel }),
+          action: t("shortcuts.actions.toggleRowSelection"),
+        },
+        { keys: `${modifierLabel} + A`, action: t("shortcuts.actions.selectAllVisible") },
       ],
     },
     {
-      title: "Scan & Playback",
+      title: t("shortcuts.sections.scanPlayback"),
       entries: [
-        { keys: "S", action: "Start or stop scan" },
-        { keys: "Context menu", action: "Scan selected channels" },
-        { keys: "Double-click row", action: "Open in default player" },
+        { keys: "S", action: t("shortcuts.actions.toggleScan") },
+        { keys: t("shortcuts.gestures.contextMenu"), action: t("shortcuts.actions.scanSelected") },
+        {
+          keys: t("shortcuts.gestures.doubleClickRow"),
+          action: t("shortcuts.actions.openInDefaultPlayer"),
+        },
       ],
     },
   ];
@@ -78,19 +85,21 @@ export default function KeyboardShortcutsDialog({
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
-      aria-label="Keyboard shortcuts"
+      aria-label={t("shortcuts.dialogLabel")}
     >
       <div className="absolute inset-0 bg-black/45" onClick={onClose} />
       <div className="relative w-full max-w-3xl rounded-2xl border border-border-app bg-overlay shadow-2xl">
         <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-border-app">
           <div>
-            <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-1">Help</p>
-            <h2 className="text-[18px] font-semibold text-text-primary">Keyboard Shortcuts</h2>
+            <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-1">
+              {t("shortcuts.eyebrow")}
+            </p>
+            <h2 className="text-[18px] font-semibold text-text-primary">{t("shortcuts.title")}</h2>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close keyboard shortcuts"
+            aria-label={t("shortcuts.close")}
             className="p-1.5 rounded-md hover:bg-btn-hover transition-colors"
           >
             <X className="w-[18px] h-[18px]" />

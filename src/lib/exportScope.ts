@@ -1,16 +1,10 @@
+import { t } from "../i18n";
 import type { ChannelResult } from "./types";
 
 export type ExportScope = "all" | "filtered" | "selected";
 
 export function exportScopeLabel(scope: ExportScope): string {
-  switch (scope) {
-    case "all":
-      return "All";
-    case "filtered":
-      return "Filtered";
-    case "selected":
-      return "Selected";
-  }
+  return t(`exportMenu.scope.${scope}`);
 }
 
 export function exportScopeFileSuffix(scope: ExportScope): string {

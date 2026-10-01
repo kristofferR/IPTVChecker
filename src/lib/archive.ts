@@ -1,3 +1,4 @@
+import { formatCount, t } from "../i18n";
 import { currentArchiveTimezone } from "./archiveTimezone";
 import type { ChannelResult, PlaylistPreview, XtreamArchiveChannelUpdate } from "./types";
 
@@ -16,19 +17,28 @@ export function hasArchive(result: ArchiveFields): boolean {
 /** Short table-chip text, e.g. "7d", or the raw type when depth is unknown. */
 export function archiveBadgeText(result: ArchiveFields): string | null {
   if (!hasArchive(result)) return null;
-  if (result.catchup_days != null) return `${result.catchup_days}d`;
-  return result.catchup === "default" ? "yes" : (result.catchup ?? "yes");
+  if (result.catchup_days != null) {
+    return t("archive.badgeDays", { days: formatCount(result.catchup_days) });
+  }
+  // Other catch-up types are raw M3U attribute values, shown as-is.
+  return result.catchup == null || result.catchup === "default"
+    ? t("archive.badgeYes")
+    : result.catchup;
 }
 
 export function archiveTitle(result: ArchiveFields): string | null {
   if (!hasArchive(result)) return null;
   const type = result.catchup ?? "default";
-  const depth =
-    result.catchup_days != null
-      ? `${result.catchup_days} day${result.catchup_days === 1 ? "" : "s"}`
-      : "unknown depth";
-  const source = result.catchup_source ? ` · Source: ${result.catchup_source}` : "";
-  return `Catch-up: ${type} · ${depth}${source}`;
+  const source = result.catchup_source;
+  const count = result.catchup_days;
+  if (count != null) {
+    return source
+      ? t("archive.title.daysWithSource", { type, count, source })
+      : t("archive.title.days", { type, count });
+  }
+  return source
+    ? t("archive.title.unknownDepthWithSource", { type, source })
+    : t("archive.title.unknownDepth", { type });
 }
 
 /** Sort key: advertised depth in days; depth-less catch-up sorts below dated ones. */
@@ -283,7 +293,7 @@ export function resolveArchivePlayback(
  */
 export function describeArchiveFailure(reason: string): string {
   if (/manifestParsingError|manifestLoadError|timed out|404|levelEmptyError|empty/i.test(reason)) {
-    return "The provider returned no archive for this time. The channel advertises catch-up, but nothing is stored for it (or the start is outside the retained window).";
+    return t("archive.playbackNoArchive");
   }
-  return `Archive playback failed: ${reason}`;
+  return t("archive.playbackFailed", { reason });
 }

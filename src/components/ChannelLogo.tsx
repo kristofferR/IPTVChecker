@@ -1,5 +1,6 @@
 import { Radio, Tv } from "lucide-react";
 import { memo, useMemo, useState } from "react";
+import { t } from "../i18n";
 import { extractTvgLogoUrl, normalizeTvgLogoUrl } from "../lib/extinf";
 import { useLogoCacheStatus } from "../lib/logoCache";
 import type { ChannelResult } from "../lib/types";
@@ -24,7 +25,7 @@ export const ChannelLogo = memo(function ChannelLogo({ result, size }: ChannelLo
     return (
       <img
         src={logoUrl}
-        alt={`${result.name} logo`}
+        alt={t("table.logoAlt", { name: result.name })}
         className={`${frameClass} object-contain`}
         style={style}
         loading="lazy"
@@ -36,7 +37,7 @@ export const ChannelLogo = memo(function ChannelLogo({ result, size }: ChannelLo
   }
 
   const KindIcon = result.audio_only ? Radio : Tv;
-  const kindLabel = result.audio_only ? "Audio-only stream" : "Video stream";
+  const kindLabel = result.audio_only ? t("table.audioOnlyStream") : t("table.videoStream");
   return (
     <span
       className={`${frameClass} ${result.audio_only ? "text-cyan-400" : "text-text-tertiary"}`}

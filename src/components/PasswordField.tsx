@@ -1,5 +1,6 @@
 import { Eye, EyeOff } from "lucide-react";
 import { type ComponentPropsWithoutRef, useId, useState } from "react";
+import { t } from "../i18n";
 
 interface PasswordFieldProps extends Omit<ComponentPropsWithoutRef<"input">, "type"> {
   wrapperClassName?: string;
@@ -22,7 +23,7 @@ export default function PasswordField({
   const generatedId = useId();
   const [revealed, setRevealed] = useState(false);
   const inputId = id ?? generatedId;
-  const toggleLabel = revealed ? "Hide password" : "Show password";
+  const toggleLabel = revealed ? t("settings.password.hide") : t("settings.password.show");
 
   return (
     <div className={joinClassNames("relative", wrapperClassName)}>

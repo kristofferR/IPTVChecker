@@ -543,6 +543,8 @@ export interface UiLocale {
   locale: string;
   /** The `language` setting at launch; differs from the saved one until restart. */
   preference: string | null;
+  /** The system's preferred locale, for regional date and number formats. */
+  system: string | null;
 }
 
 /** Linux only: "auto" hides the title bar on tiling window managers. */

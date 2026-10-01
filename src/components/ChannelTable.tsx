@@ -13,6 +13,8 @@ import {
 import { createPortal } from "react-dom";
 import { useFixPreferences } from "../hooks/useFixPreferences";
 import { resultAtIndex } from "../hooks/useScan.helpers";
+import { t } from "../i18n";
+import { translateReason } from "../i18n/reasons";
 import { hasArchive } from "../lib/archive";
 import { createArchiveProbeSequenceGuard, probeChannelArchive } from "../lib/archiveProbe";
 import { channelRowHeightPixels } from "../lib/channelLogoSize";
@@ -89,34 +91,35 @@ const DEFAULT_VISIBLE_SINGLE_PLAYLIST_COLUMN_ORDER: ColumnKey[] =
   DEFAULT_VISIBLE_COLUMN_ORDER.filter((key) => key !== "playlist");
 
 function buildChannelMetadataSummary(channel: ChannelResult): string {
-  const videoBitrate = channel.video_bitrate ?? "Unknown";
-  const audioBitrate = channel.audio_bitrate ? `${channel.audio_bitrate} kbps` : "Unknown";
-  const audioCodec = channel.audio_codec ?? "Unknown";
-  const hdrFormat = channel.hdr_format ?? "Unknown";
-  const audioLayout = channel.audio_channel_layout ?? "Unknown";
+  const unknown = t("common.unknown");
+  const audioBitrate = channel.audio_bitrate
+    ? t("format.kbps", { value: channel.audio_bitrate })
+    : unknown;
   const resolvedStreamUrl = channel.stream_url?.trim() || null;
   const hasResolvedStreamUrl = !!resolvedStreamUrl && resolvedStreamUrl !== channel.url;
-  const protocol = detectChannelProtocol(channel) ?? "Unknown";
-  const errorReason = getChannelErrorReason(channel) ?? "N/A";
+  const protocol = (detectChannelProtocol(channel) ?? unknown).toUpperCase();
+  const errorReason = getChannelErrorReason(channel);
 
   const lines = [
-    `Name: ${channel.name}`,
-    `Group: ${channel.group}`,
-    `Playlist: ${channel.playlist}`,
-    `Status: ${statusLabel(channel.status)}`,
-    `Protocol: ${protocol.toUpperCase()}`,
-    `Error Reason: ${errorReason}`,
-    `URL: ${channel.url}`,
-    `Codec: ${channel.codec ?? "Unknown"}`,
-    `HDR: ${hdrFormat}`,
-    `Resolution: ${channel.resolution ?? "Unknown"}`,
-    `Video Bitrate: ${videoBitrate}`,
-    `Audio: ${audioBitrate} ${audioCodec}`,
-    `Audio Layout: ${audioLayout}`,
+    t("table.metadata.name", { value: channel.name }),
+    t("table.metadata.group", { value: channel.group }),
+    t("table.metadata.playlist", { value: channel.playlist }),
+    t("table.metadata.status", { value: statusLabel(channel.status) }),
+    t("table.metadata.protocol", { value: protocol }),
+    t("table.metadata.errorReason", {
+      value: errorReason ? translateReason(errorReason) : t("table.metadata.notApplicable"),
+    }),
+    t("table.metadata.url", { value: channel.url }),
+    t("table.metadata.codec", { value: channel.codec ?? unknown }),
+    t("table.metadata.hdr", { value: channel.hdr_format ?? unknown }),
+    t("table.metadata.resolution", { value: channel.resolution ?? unknown }),
+    t("table.metadata.videoBitrate", { value: channel.video_bitrate ?? unknown }),
+    t("table.metadata.audio", { bitrate: audioBitrate, codec: channel.audio_codec ?? unknown }),
+    t("table.metadata.audioLayout", { value: channel.audio_channel_layout ?? unknown }),
   ];
 
   if (hasResolvedStreamUrl) {
-    lines.splice(7, 0, `Resolved URL: ${resolvedStreamUrl}`);
+    lines.splice(7, 0, t("table.metadata.resolvedUrl", { value: resolvedStreamUrl }));
   }
 
   return lines.join("\n");
@@ -939,9 +942,7 @@ export function ChannelTable({
 
   const resetColumnsToDefaults = useCallback(() => {
     if (hasColumnCustomizations) {
-      const confirmed = window.confirm(
-        "Reset table columns to defaults? This restores default order, widths, and visibility.",
-      );
+      const confirmed = window.confirm(t("table.resetColumnsConfirm"));
       if (!confirmed) return;
     }
 
@@ -1261,7 +1262,7 @@ export function ChannelTable({
     if (
       initialState.externalPlaybackActive &&
       isSingleConnectionPlaylist(initialState.playlist) &&
-      !window.confirm("Close the external player before testing catch-up. Continue?")
+      !window.confirm(t("table.contextMenu.testCatchupExternalPlayerConfirm"))
     ) {
       setContextMenuState(null);
       return;
@@ -1707,6 +1708,7 @@ export function ChannelTable({
         }}
       >
         {columns.map((column) => {
+          const label = t(column.labelKey);
           const alignClass =
             column.align === "right"
               ? "justify-end"
@@ -1735,14 +1737,14 @@ export function ChannelTable({
               } ${
                 dragOverColumn === column.key ? "bg-blue-500/10 rounded-sm" : ""
               } cursor-grab active:cursor-grabbing`}
-              title={`Drag to reorder ${column.label}. Right-click for column visibility.`}
+              title={t("table.columnHeaderTitle", { column: label })}
             >
               <button
                 className="h-full px-2 hover:text-text-primary flex items-center gap-1 cursor-pointer"
                 onClick={() => handleSort(column.key)}
                 type="button"
               >
-                {column.label}
+                {label}
                 {sortField === column.key &&
                   (sortDir === "asc" ? (
                     <ArrowUp className="w-3 h-3" />
@@ -1752,7 +1754,7 @@ export function ChannelTable({
               </button>
               <div
                 role="separator"
-                aria-label={`Resize ${column.label} column`}
+                aria-label={t("table.resizeColumn", { column: label })}
                 className="absolute top-0 right-0 h-full w-2 cursor-col-resize hover:bg-blue-500/20"
                 onMouseDown={(event) => handleResizeStart(event, column.key)}
                 onClick={(event) => event.stopPropagation()}
@@ -1816,7 +1818,7 @@ export function ChannelTable({
         >
           {filteredResults.length === 0 ? (
             <div className="flex items-center justify-center text-text-tertiary text-sm min-h-64">
-              No channels match the current filters
+              {t("table.noMatches")}
             </div>
           ) : (
             <div
@@ -1865,17 +1867,19 @@ export function ChannelTable({
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
             type="button"
           >
-            {scanSelection.length > 0 &&
-            scanSelection.every((idx) => {
-              const r = resultAtIndex(
-                { flatResults: completedResults, positions: resultPositions },
-                idx,
-              );
-              return r != null && r.status !== "pending" && r.status !== "checking";
-            })
-              ? "Rescan"
-              : "Scan"}{" "}
-            Selected ({scanSelection.length})
+            {t(
+              scanSelection.length > 0 &&
+                scanSelection.every((idx) => {
+                  const r = resultAtIndex(
+                    { flatResults: completedResults, positions: resultPositions },
+                    idx,
+                  );
+                  return r != null && r.status !== "pending" && r.status !== "checking";
+                })
+                ? "table.contextMenu.rescanSelected"
+                : "table.contextMenu.scanSelected",
+              { count: scanSelection.length },
+            )}
           </button>
           {(() => {
             const archiveCount = getSelectedChannels().filter(hasArchive).length;
@@ -1892,13 +1896,13 @@ export function ChannelTable({
                   }
                   title={
                     externalPlaybackActive && singleConnection
-                      ? "Confirm the external player is closed before testing catch-up"
+                      ? t("table.contextMenu.testCatchupExternalPlayerTitle")
                       : undefined
                   }
                   className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
                   type="button"
                 >
-                  Test Catch-up ({archiveCount})
+                  {t("table.contextMenu.testCatchup", { count: archiveCount })}
                 </button>
                 {hasArchive(contextMenuState.channel) && (
                   <button
@@ -1906,7 +1910,7 @@ export function ChannelTable({
                     className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
                     type="button"
                   >
-                    Browse Catch-up
+                    {t("table.contextMenu.browseCatchup")}
                   </button>
                 )}
               </>
@@ -1918,14 +1922,14 @@ export function ChannelTable({
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
-            Preview
+            {t("table.contextMenu.preview")}
           </button>
           <button
             onClick={handleOpenInExternalPlayer}
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
-            Open in External Player
+            {t("table.contextMenu.openExternal")}
           </button>
           <button
             onClick={handleCopyChannelName}
@@ -1933,10 +1937,10 @@ export function ChannelTable({
             type="button"
           >
             {copiedAction === "name"
-              ? "Copied!"
+              ? t("table.contextMenu.copied")
               : selectedIndices.size > 1
-                ? `Copy ${selectedIndices.size} Names`
-                : "Copy Channel Name"}
+                ? t("table.contextMenu.copyNames", { count: selectedIndices.size })
+                : t("table.contextMenu.copyName")}
           </button>
           <button
             onClick={handleCopyChannelUrl}
@@ -1944,10 +1948,10 @@ export function ChannelTable({
             type="button"
           >
             {copiedAction === "url"
-              ? "Copied!"
+              ? t("table.contextMenu.copied")
               : selectedIndices.size > 1
-                ? `Copy ${selectedIndices.size} URLs`
-                : "Copy URL"}
+                ? t("table.contextMenu.copyUrls", { count: selectedIndices.size })
+                : t("table.contextMenu.copyUrl")}
           </button>
           <button
             onClick={handleCopyM3uEntry}
@@ -1955,10 +1959,10 @@ export function ChannelTable({
             type="button"
           >
             {copiedAction === "m3u"
-              ? "Copied!"
+              ? t("table.contextMenu.copied")
               : selectedIndices.size > 1
-                ? `Copy ${selectedIndices.size} M3U Entries`
-                : "Copy M3U Entry"}
+                ? t("table.contextMenu.copyM3uEntries", { count: selectedIndices.size })
+                : t("table.contextMenu.copyM3uEntry")}
           </button>
           <button
             onClick={handleCopyAllMetadata}
@@ -1966,10 +1970,10 @@ export function ChannelTable({
             type="button"
           >
             {copiedAction === "metadata"
-              ? "Copied!"
+              ? t("table.contextMenu.copied")
               : selectedIndices.size > 1
-                ? `Copy ${selectedIndices.size} Metadata`
-                : "Copy All Metadata"}
+                ? t("table.contextMenu.copyMetadataMany", { count: selectedIndices.size })
+                : t("table.contextMenu.copyMetadata")}
           </button>
         </div>
       )}
@@ -1985,7 +1989,7 @@ export function ChannelTable({
           }}
         >
           <p className="px-3 py-2 text-[11px] uppercase tracking-[0.06em] text-text-tertiary">
-            Visible Columns
+            {t("table.visibleColumns")}
           </p>
           {COLUMN_DEFINITIONS.map((column) => {
             const checked = columnOrder.includes(column.key);
@@ -1998,8 +2002,10 @@ export function ChannelTable({
                 className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none flex items-center justify-between"
                 type="button"
               >
-                <span>{column.label}</span>
-                <span className="text-[11px] text-text-tertiary">{checked ? "On" : "Off"}</span>
+                <span>{t(column.labelKey)}</span>
+                <span className="text-[11px] text-text-tertiary">
+                  {checked ? t("common.on") : t("common.off")}
+                </span>
               </button>
             );
           })}
@@ -2010,7 +2016,7 @@ export function ChannelTable({
             className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
             type="button"
           >
-            Reset to Defaults
+            {t("table.resetColumns")}
           </button>
         </div>
       )}
@@ -2025,7 +2031,7 @@ export function ChannelTable({
             transform: "translate(-50%, -50%)",
           }}
         >
-          {COLUMN_DEFINITION_MAP[dragPreview.key].label}
+          {t(COLUMN_DEFINITION_MAP[dragPreview.key].labelKey)}
           {sortField === dragPreview.key &&
             (sortDir === "asc" ? (
               <ArrowUp className="w-3 h-3 ml-1.5" />

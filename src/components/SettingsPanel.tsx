@@ -10,6 +10,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { formatCount, getLaunchLanguage, LOCALES, type MessageKey, t } from "../i18n";
 import { fixPreferencesFrom } from "../lib/dispatcharr";
 import { formatBytes } from "../lib/format";
 import {
@@ -23,6 +24,7 @@ import {
   getScanPresets,
   getScreenshotCacheStats,
   renameScanPreset,
+  restartApp,
   saveScanPreset,
   setDefaultM3u8FileAssociation,
   setDefaultScanPreset,
@@ -39,12 +41,12 @@ import { useAppStore } from "../store";
 
 type SettingsTab = "general" | "scanning" | "media" | "network" | "dispatcharr" | "advanced";
 
-const RANK_SIGNAL_LABELS: Record<DispatcharrRankSignal, string> = {
-  resolution: "Resolution",
-  frame_rate: "Frame rate",
-  bitrate: "Bitrate",
-  latency: "Low latency",
-};
+const RANK_SIGNAL_LABELS = {
+  resolution: "settings.dispatcharr.rankSignals.resolution",
+  frame_rate: "settings.dispatcharr.rankSignals.frameRate",
+  bitrate: "settings.dispatcharr.rankSignals.bitrate",
+  latency: "settings.dispatcharr.rankSignals.latency",
+} as const satisfies Record<DispatcharrRankSignal, MessageKey>;
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -323,7 +325,9 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
   const handleSelectProxy = async () => {
     const path = await open({
       multiple: false,
-      filters: [{ name: "Text files", extensions: ["txt", "json"] }],
+      filters: [
+        { name: t("settings.network.proxyFile.textFilesFilter"), extensions: ["txt", "json"] },
+      ],
     });
     if (path) {
       updateSetting("proxy_file", path as string, { immediate: true });
@@ -345,13 +349,18 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
     try {
       const filters =
         platform === "macos"
-          ? [{ name: "Applications", extensions: ["app"] }]
+          ? [{ name: t("settings.general.externalPlayer.applicationsFilter"), extensions: ["app"] }]
           : platform === "windows"
-            ? [{ name: "Applications", extensions: ["exe"] }]
+            ? [
+                {
+                  name: t("settings.general.externalPlayer.applicationsFilter"),
+                  extensions: ["exe"],
+                },
+              ]
             : undefined;
       const path = await open({
         multiple: false,
-        title: "Choose External Player",
+        title: t("settings.general.externalPlayer.dialogTitle"),
         ...(filters ? { filters } : {}),
       });
       if (typeof path === "string") {
@@ -394,11 +403,15 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
   const handleSavePreset = async () => {
     const name = presetNameDraft.trim() || selectedPresetName.trim();
     if (!name) {
-      setPresetError("Enter a preset name first.");
+      setPresetError(t("settings.scanning.presets.errors.nameRequired"));
       return;
     }
     if (name.length > PRESET_NAME_MAX_LENGTH) {
-      setPresetError(`Preset name must be ${PRESET_NAME_MAX_LENGTH} characters or fewer.`);
+      setPresetError(
+        t("settings.scanning.presets.errors.nameTooLong", {
+          max: formatCount(PRESET_NAME_MAX_LENGTH),
+        }),
+      );
       return;
     }
 
@@ -410,7 +423,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
       setPresetCollection(next);
       setSelectedPresetName(name);
       setPresetNameDraft(name);
-      setPresetNotice(`Saved preset "${name}".`);
+      setPresetNotice(t("settings.scanning.presets.notices.saved", { name }));
     } catch (error) {
       setPresetError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -420,25 +433,31 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
 
   const handleLoadPreset = () => {
     if (!selectedPreset) {
-      setPresetError("Select a preset to load.");
+      setPresetError(t("settings.scanning.presets.errors.selectToLoad"));
       return;
     }
     setPresetError(null);
-    setPresetNotice(`Loaded preset "${selectedPreset.name}".`);
+    setPresetNotice(t("settings.scanning.presets.notices.loaded", { name: selectedPreset.name }));
     applyPresetToDraft(selectedPreset.config);
   };
 
   const handleRenamePreset = async () => {
     if (!selectedPreset) {
-      setPresetError("Select a preset to rename.");
+      setPresetError(t("settings.scanning.presets.errors.selectToRename"));
       return;
     }
-    const nextName = window.prompt("Rename preset", selectedPreset.name)?.trim();
+    const nextName = window
+      .prompt(t("settings.scanning.presets.renamePrompt"), selectedPreset.name)
+      ?.trim();
     if (!nextName || nextName === selectedPreset.name) {
       return;
     }
     if (nextName.length > PRESET_NAME_MAX_LENGTH) {
-      setPresetError(`Preset name must be ${PRESET_NAME_MAX_LENGTH} characters or fewer.`);
+      setPresetError(
+        t("settings.scanning.presets.errors.nameTooLong", {
+          max: formatCount(PRESET_NAME_MAX_LENGTH),
+        }),
+      );
       return;
     }
 
@@ -450,7 +469,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
       setPresetCollection(next);
       setSelectedPresetName(nextName);
       setPresetNameDraft(nextName);
-      setPresetNotice(`Renamed preset to "${nextName}".`);
+      setPresetNotice(t("settings.scanning.presets.notices.renamed", { name: nextName }));
     } catch (error) {
       setPresetError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -460,10 +479,12 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
 
   const handleDeletePreset = async () => {
     if (!selectedPreset) {
-      setPresetError("Select a preset to delete.");
+      setPresetError(t("settings.scanning.presets.errors.selectToDelete"));
       return;
     }
-    if (!window.confirm(`Delete preset "${selectedPreset.name}"?`)) {
+    if (
+      !window.confirm(t("settings.scanning.presets.deleteConfirm", { name: selectedPreset.name }))
+    ) {
       return;
     }
 
@@ -475,7 +496,9 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
       setPresetCollection(next);
       setPresetNameDraft("");
       setSelectedPresetName(next.default_preset ?? next.presets[0]?.name ?? "");
-      setPresetNotice(`Deleted preset "${selectedPreset.name}".`);
+      setPresetNotice(
+        t("settings.scanning.presets.notices.deleted", { name: selectedPreset.name }),
+      );
     } catch (error) {
       setPresetError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -485,7 +508,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
 
   const handleSetDefaultPreset = async () => {
     if (!selectedPreset) {
-      setPresetError("Select a preset to mark as default.");
+      setPresetError(t("settings.scanning.presets.errors.selectToMarkDefault"));
       return;
     }
     setPresetBusy(true);
@@ -494,7 +517,9 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
     try {
       const next = await setDefaultScanPreset(selectedPreset.name);
       setPresetCollection(next);
-      setPresetNotice(`Default preset set to "${selectedPreset.name}".`);
+      setPresetNotice(
+        t("settings.scanning.presets.notices.defaultSet", { name: selectedPreset.name }),
+      );
     } catch (error) {
       setPresetError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -509,7 +534,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
     try {
       const next = await setDefaultScanPreset(null);
       setPresetCollection(next);
-      setPresetNotice("Cleared default preset.");
+      setPresetNotice(t("settings.scanning.presets.notices.defaultCleared"));
     } catch (error) {
       setPresetError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -522,12 +547,12 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
     label: string;
     Icon: typeof SlidersHorizontal;
   }> = [
-    { id: "general", label: "General", Icon: SlidersHorizontal },
-    { id: "scanning", label: "Scanning", Icon: Gauge },
-    { id: "media", label: "Media", Icon: Layers },
-    { id: "network", label: "Network", Icon: Network },
+    { id: "general", label: t("settings.tabs.general"), Icon: SlidersHorizontal },
+    { id: "scanning", label: t("settings.tabs.scanning"), Icon: Gauge },
+    { id: "media", label: t("settings.tabs.media"), Icon: Layers },
+    { id: "network", label: t("settings.tabs.network"), Icon: Network },
     { id: "dispatcharr", label: "Dispatcharr", Icon: ListOrdered },
-    { id: "advanced", label: "Advanced", Icon: Wrench },
+    { id: "advanced", label: t("settings.tabs.advanced"), Icon: Wrench },
   ];
 
   return (
@@ -565,7 +590,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
       <div className="flex-1 overflow-y-auto p-5 space-y-4">
         {saveError && (
           <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">
-            Could not save one or more changes: {saveError}
+            {t("settings.saveError", { error: saveError })}
           </div>
         )}
 
@@ -574,17 +599,51 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
             <section className={blockClass}>
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Theme</p>
+                  <p className="text-[13px] font-medium">{t("settings.general.language.label")}</p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Choose system, light, or dark appearance.
+                    {t("settings.general.language.description")}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {draft.language !== getLaunchLanguage() && (
+                    <button
+                      type="button"
+                      onClick={() => void restartApp()}
+                      className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
+                    >
+                      {t("settings.general.language.restart")}
+                    </button>
+                  )}
+                  <select
+                    value={draft.language ?? ""}
+                    onChange={(event) =>
+                      updateSetting("language", event.target.value || null, { immediate: true })
+                    }
+                    className={`${inputClass} w-44`}
+                  >
+                    <option value="">{t("settings.general.language.system")}</option>
+                    {Object.entries(LOCALES).map(([code, { name }]) => (
+                      <option key={code} value={code}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className={rowClass}>
+                <div>
+                  <p className="text-[13px] font-medium">{t("settings.general.theme.label")}</p>
+                  <p className="text-[11px] text-text-tertiary mt-0.5">
+                    {t("settings.general.theme.description")}
                   </p>
                 </div>
                 <SegmentedControl
                   value={draft.theme}
                   options={[
-                    { value: "system", label: "System" },
-                    { value: "light", label: "Light" },
-                    { value: "dark", label: "Dark" },
+                    { value: "system", label: t("settings.general.theme.system") },
+                    { value: "light", label: t("settings.general.theme.light") },
+                    { value: "dark", label: t("settings.general.theme.dark") },
                   ]}
                   onChange={(value) => updateSetting("theme", value, { immediate: true })}
                 />
@@ -592,9 +651,9 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
 
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Channel logo size</p>
+                  <p className="text-[13px] font-medium">{t("settings.general.logoSize.label")}</p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Controls logo size in the channel name column.
+                    {t("settings.general.logoSize.description")}
                   </p>
                 </div>
                 <select
@@ -608,20 +667,21 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   }
                   className={`${inputClass} w-44`}
                 >
-                  <option value="small">Small (16px)</option>
-                  <option value="medium">Medium (24px)</option>
-                  <option value="large">Large (36px)</option>
-                  <option value="huge">Huge (48px)</option>
+                  <option value="small">{t("settings.general.logoSize.small")}</option>
+                  <option value="medium">{t("settings.general.logoSize.medium")}</option>
+                  <option value="large">{t("settings.general.logoSize.large")}</option>
+                  <option value="huge">{t("settings.general.logoSize.huge")}</option>
                 </select>
               </div>
 
               {platform === "linux" && (
                 <div className={rowClass}>
                   <div>
-                    <p className="text-[13px] font-medium">Title bar</p>
+                    <p className="text-[13px] font-medium">
+                      {t("settings.general.titleBar.label")}
+                    </p>
                     <p className="text-[11px] text-text-tertiary mt-0.5">
-                      Automatic hides the title bar on tiling window managers (Hyprland, Sway, i3…)
-                      and keeps it on regular desktops.
+                      {t("settings.general.titleBar.description")}
                     </p>
                   </div>
                   <select
@@ -633,9 +693,9 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     }
                     className={`${inputClass} w-44`}
                   >
-                    <option value="auto">Automatic</option>
-                    <option value="show">Shown</option>
-                    <option value="hide">Hidden</option>
+                    <option value="auto">{t("settings.general.titleBar.auto")}</option>
+                    <option value="show">{t("settings.general.titleBar.show")}</option>
+                    <option value="hide">{t("settings.general.titleBar.hide")}</option>
                   </select>
                 </div>
               )}
@@ -644,13 +704,18 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
             <section className={blockClass}>
               <div className={rowClass}>
                 <div className="min-w-0">
-                  <p className="text-[13px] font-medium">External player</p>
+                  <p className="text-[13px] font-medium">
+                    {t("settings.general.externalPlayer.label")}
+                  </p>
                   <p
                     className="text-[11px] text-text-tertiary mt-0.5 truncate"
-                    title={draft.external_player_path ?? "System default"}
+                    title={
+                      draft.external_player_path ??
+                      t("settings.general.externalPlayer.systemDefaultTitle")
+                    }
                   >
                     {draft.external_player_path ??
-                      "Use the operating system default for external playback."}
+                      t("settings.general.externalPlayer.systemDefaultDescription")}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
@@ -659,7 +724,9 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
                     type="button"
                   >
-                    {draft.external_player_path ? "Change" : "Choose App"}
+                    {draft.external_player_path
+                      ? t("settings.general.externalPlayer.change")
+                      : t("settings.general.externalPlayer.chooseApp")}
                   </button>
                   {draft.external_player_path && (
                     <button
@@ -667,7 +734,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                       className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
                       type="button"
                     >
-                      System Default
+                      {t("settings.general.externalPlayer.useSystemDefault")}
                     </button>
                   )}
                 </div>
@@ -682,9 +749,11 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
             <section className={blockClass}>
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Profile video bitrate</p>
+                  <p className="text-[13px] font-medium">
+                    {t("settings.general.profileBitrate.label")}
+                  </p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Captures 10s of each stream for accurate video bitrate values. Much slower.
+                    {t("settings.general.profileBitrate.description")}
                   </p>
                 </div>
                 <Switch
@@ -692,7 +761,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   onChange={(checked) =>
                     updateSetting("profile_bitrate", checked, { immediate: true })
                   }
-                  ariaLabel="Profile bitrate"
+                  ariaLabel={t("settings.general.profileBitrate.ariaLabel")}
                 />
               </div>
             </section>
@@ -700,9 +769,11 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
             <section className={blockClass}>
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Show source filter bar</p>
+                  <p className="text-[13px] font-medium">
+                    {t("settings.general.sourceFilterBar.label")}
+                  </p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Display the regex source filter bar above the table.
+                    {t("settings.general.sourceFilterBar.description")}
                   </p>
                 </div>
                 <Switch
@@ -710,16 +781,15 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   onChange={(checked) =>
                     updateSetting("show_prescan_filter", checked, { immediate: true })
                   }
-                  ariaLabel="Show source filter bar"
+                  ariaLabel={t("settings.general.sourceFilterBar.label")}
                 />
               </div>
 
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Hide VOD / series entries</p>
+                  <p className="text-[13px] font-medium">{t("settings.general.hideVod.label")}</p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Remove movies and series from loaded playlists, scans, and exports until
-                    re-enabled.
+                    {t("settings.general.hideVod.description")}
                   </p>
                 </div>
                 <Switch
@@ -727,15 +797,17 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   onChange={(checked) =>
                     updateSetting("hide_vod_content", checked, { immediate: true })
                   }
-                  ariaLabel="Hide VOD and series entries"
+                  ariaLabel={t("settings.general.hideVod.ariaLabel")}
                 />
               </div>
 
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Auto-reveal report panel</p>
+                  <p className="text-[13px] font-medium">
+                    {t("settings.general.reportAutoReveal.label")}
+                  </p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Slide in the playlist report near scan completion.
+                    {t("settings.general.reportAutoReveal.description")}
                   </p>
                 </div>
                 <Switch
@@ -743,16 +815,17 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   onChange={(checked) =>
                     updateSetting("report_auto_reveal", checked, { immediate: true })
                   }
-                  ariaLabel="Auto-reveal report panel"
+                  ariaLabel={t("settings.general.reportAutoReveal.label")}
                 />
               </div>
 
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Separate placeholder status</p>
+                  <p className="text-[13px] font-medium">
+                    {t("settings.general.placeholderStatus.label")}
+                  </p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Show placeholder streams as a distinct status. When off, they are grouped under
-                    Dead.
+                    {t("settings.general.placeholderStatus.description")}
                   </p>
                 </div>
                 <Switch
@@ -760,17 +833,19 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   onChange={(checked) =>
                     updateSetting("separate_placeholder_status", checked, { immediate: true })
                   }
-                  ariaLabel="Separate placeholder status"
+                  ariaLabel={t("settings.general.placeholderStatus.label")}
                 />
               </div>
 
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Show header button text</p>
+                  <p className="text-[13px] font-medium">
+                    {t("settings.general.headerButtonText.label")}
+                  </p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
                     {platform === "macos"
-                      ? "Display labels beside toolbar icons instead of the default icon-only macOS header."
-                      : "Display labels beside toolbar icons in the main window header."}
+                      ? t("settings.general.headerButtonText.descriptionMacos")
+                      : t("settings.general.headerButtonText.description")}
                   </p>
                 </div>
                 <Switch
@@ -780,7 +855,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                       immediate: true,
                     })
                   }
-                  ariaLabel="Show header button text"
+                  ariaLabel={t("settings.general.headerButtonText.label")}
                 />
               </div>
             </section>
@@ -788,9 +863,11 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
             <section className={blockClass}>
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Scan completion notifications</p>
+                  <p className="text-[13px] font-medium">
+                    {t("settings.general.scanNotifications.label")}
+                  </p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Show native notifications when scans complete or are cancelled.
+                    {t("settings.general.scanNotifications.description")}
                   </p>
                 </div>
                 <Switch
@@ -798,7 +875,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   onChange={(checked) =>
                     updateSetting("scan_notifications", checked, { immediate: true })
                   }
-                  ariaLabel="Scan completion notifications"
+                  ariaLabel={t("settings.general.scanNotifications.label")}
                 />
               </div>
             </section>
@@ -806,10 +883,11 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
             <section className={blockClass}>
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Automatic update checks</p>
+                  <p className="text-[13px] font-medium">
+                    {t("settings.general.updateChecks.label")}
+                  </p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Look for a signed update on launch and every six hours. Updates are only ever
-                    installed after you confirm.
+                    {t("settings.general.updateChecks.description")}
                   </p>
                 </div>
                 <Switch
@@ -817,7 +895,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   onChange={(checked) =>
                     updateSetting("automatic_update_checks", checked, { immediate: true })
                   }
-                  ariaLabel="Automatic update checks"
+                  ariaLabel={t("settings.general.updateChecks.label")}
                 />
               </div>
             </section>
@@ -825,9 +903,11 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
             <section className={blockClass}>
               <div className={rowClass}>
                 <div className="min-w-0">
-                  <p className="text-[13px] font-medium">Default app for .m3u/.m3u8</p>
+                  <p className="text-[13px] font-medium">
+                    {t("settings.general.fileAssociation.label")}
+                  </p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Open playlist files in IPTV Checker by default.
+                    {t("settings.general.fileAssociation.description")}
                   </p>
                 </div>
                 <button
@@ -836,7 +916,9 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
                   type="button"
                 >
-                  {associationBusy ? "Applying..." : "Set as Default"}
+                  {associationBusy
+                    ? t("settings.general.fileAssociation.applying")
+                    : t("settings.general.fileAssociation.setAsDefault")}
                 </button>
               </div>
               {associationNotice && (
@@ -857,10 +939,14 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
           <>
             <section className={`${blockClass} px-4 py-3 space-y-2`}>
               <div className="flex items-center justify-between gap-3">
-                <p className="text-[12px] font-medium text-text-primary">Scan Presets</p>
+                <p className="text-[12px] font-medium text-text-primary">
+                  {t("settings.scanning.presets.title")}
+                </p>
                 {presetCollection.default_preset && (
                   <span className="text-[10px] text-text-tertiary">
-                    Default: {presetCollection.default_preset}
+                    {t("settings.scanning.presets.defaultName", {
+                      name: presetCollection.default_preset,
+                    })}
                   </span>
                 )}
               </div>
@@ -877,12 +963,15 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     disabled={presetBusy || presetCollection.presets.length === 0}
                   >
                     <option value="">
-                      {presetCollection.presets.length === 0 ? "No presets" : "Select preset"}
+                      {presetCollection.presets.length === 0
+                        ? t("settings.scanning.presets.none")
+                        : t("settings.scanning.presets.select")}
                     </option>
                     {presetCollection.presets.map((preset) => (
                       <option key={preset.name} value={preset.name}>
-                        {preset.name}
-                        {presetCollection.default_preset === preset.name ? " (Default)" : ""}
+                        {presetCollection.default_preset === preset.name
+                          ? t("settings.scanning.presets.optionDefault", { name: preset.name })
+                          : preset.name}
                       </option>
                     ))}
                   </select>
@@ -892,7 +981,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     disabled={presetBusy || !selectedPreset}
                     className="macos-btn px-2.5 py-1 min-h-[30px] text-[12px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
                   >
-                    Load
+                    {t("settings.scanning.presets.load")}
                   </button>
                 </div>
                 <div className="flex gap-1.5">
@@ -902,7 +991,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     onChange={(event) =>
                       setPresetNameDraft(event.target.value.slice(0, PRESET_NAME_MAX_LENGTH))
                     }
-                    placeholder="Preset name"
+                    placeholder={t("settings.scanning.presets.namePlaceholder")}
                     className={`${inputClass} min-w-0 flex-1`}
                     disabled={presetBusy}
                   />
@@ -912,7 +1001,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     disabled={presetBusy}
                     className="macos-btn px-2.5 py-1 min-h-[30px] text-[12px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
                   >
-                    Save
+                    {t("common.save")}
                   </button>
                 </div>
               </div>
@@ -925,7 +1014,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     onChange={(event) => setPresetSetAsDefault(event.target.checked)}
                     disabled={presetBusy}
                   />
-                  Save as default
+                  {t("settings.scanning.presets.saveAsDefault")}
                 </label>
                 <button
                   type="button"
@@ -933,7 +1022,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   disabled={presetBusy || !selectedPreset}
                   className="macos-btn px-2 py-0.5 text-[11px] bg-btn hover:bg-btn-hover rounded disabled:opacity-50 disabled:pointer-events-none"
                 >
-                  Mark Default
+                  {t("settings.scanning.presets.markDefault")}
                 </button>
                 <button
                   type="button"
@@ -941,7 +1030,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   disabled={presetBusy || !presetCollection.default_preset}
                   className="macos-btn px-2 py-0.5 text-[11px] bg-btn hover:bg-btn-hover rounded disabled:opacity-50 disabled:pointer-events-none"
                 >
-                  Clear Default
+                  {t("settings.scanning.presets.clearDefault")}
                 </button>
                 <button
                   type="button"
@@ -949,7 +1038,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   disabled={presetBusy || !selectedPreset}
                   className="macos-btn px-2 py-0.5 text-[11px] bg-btn hover:bg-btn-hover rounded disabled:opacity-50 disabled:pointer-events-none"
                 >
-                  Rename
+                  {t("settings.scanning.presets.rename")}
                 </button>
                 <button
                   type="button"
@@ -957,7 +1046,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   disabled={presetBusy || !selectedPreset}
                   className="macos-btn px-2 py-0.5 text-[11px] bg-btn hover:bg-btn-hover rounded disabled:opacity-50 disabled:pointer-events-none text-red-400"
                 >
-                  Delete
+                  {t("common.delete")}
                 </button>
               </div>
 
@@ -969,7 +1058,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Timeout (seconds)
+                    {t("settings.scanning.timeout")}
                   </label>
                   <input
                     type="number"
@@ -986,7 +1075,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
 
                 <div>
                   <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Extended Timeout (seconds)
+                    {t("settings.scanning.extendedTimeout")}
                   </label>
                   <input
                     type="number"
@@ -1002,7 +1091,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                         Number.isNaN(value) ? null : Math.max(1, value),
                       );
                     }}
-                    placeholder="Disabled"
+                    placeholder={t("settings.scanning.extendedTimeoutPlaceholder")}
                     step="1"
                     min="1"
                     className={inputClass}
@@ -1011,12 +1100,12 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
 
                 <div>
                   <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Concurrency
+                    {t("settings.scanning.concurrency")}
                   </label>
                   <input
                     type="number"
                     value={draft.concurrency || ""}
-                    placeholder="Auto"
+                    placeholder={t("settings.scanning.concurrencyPlaceholder")}
                     onChange={(event) => {
                       const raw = event.target.value.trim();
                       if (raw === "") {
@@ -1034,8 +1123,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     className={inputClass}
                   />
                   <p className="text-[11px] text-text-quaternary mt-1">
-                    0 or empty = auto (Xtream max for Xtream playlists, 10 for multi-server, 1 for
-                    single-server)
+                    {t("settings.scanning.concurrencyHint")}
                   </p>
                 </div>
               </div>
@@ -1045,7 +1133,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Max Retries
+                    {t("settings.scanning.maxRetries")}
                   </label>
                   <input
                     type="number"
@@ -1065,14 +1153,17 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
 
                 <div>
                   <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Retry Backoff
+                    {t("settings.scanning.retryBackoff.label")}
                   </label>
                   <SegmentedControl
                     value={draft.retry_backoff}
                     options={[
-                      { value: "none", label: "None" },
-                      { value: "linear", label: "Linear" },
-                      { value: "exponential", label: "Exponential" },
+                      { value: "none", label: t("common.none") },
+                      { value: "linear", label: t("settings.scanning.retryBackoff.linear") },
+                      {
+                        value: "exponential",
+                        label: t("settings.scanning.retryBackoff.exponential"),
+                      },
                     ]}
                     onChange={(value) => updateSetting("retry_backoff", value, { immediate: true })}
                   />
@@ -1083,9 +1174,9 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
             <section className={blockClass}>
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Low FPS threshold</p>
+                  <p className="text-[13px] font-medium">{t("settings.scanning.lowFps.label")}</p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Streams below this FPS are flagged as low framerate.
+                    {t("settings.scanning.lowFps.description")}
                   </p>
                 </div>
                 <input
@@ -1109,9 +1200,11 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
             <section className={blockClass}>
               <div className={rowClass}>
                 <div className="min-w-0">
-                  <p className="text-[13px] font-medium">User agent</p>
+                  <p className="text-[13px] font-medium">
+                    {t("settings.scanning.userAgent.label")}
+                  </p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    HTTP user agent string sent with stream requests.
+                    {t("settings.scanning.userAgent.description")}
                   </p>
                 </div>
                 <input
@@ -1130,9 +1223,11 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
             <section className={blockClass}>
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Skip screenshots</p>
+                  <p className="text-[13px] font-medium">
+                    {t("settings.media.skipScreenshots.label")}
+                  </p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Disable frame captures for faster checks.
+                    {t("settings.media.skipScreenshots.description")}
                   </p>
                 </div>
                 <Switch
@@ -1140,15 +1235,17 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   onChange={(checked) =>
                     updateSetting("skip_screenshots", checked, { immediate: true })
                   }
-                  ariaLabel="Skip screenshots"
+                  ariaLabel={t("settings.media.skipScreenshots.label")}
                 />
               </div>
 
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Screenshot format</p>
+                  <p className="text-[13px] font-medium">
+                    {t("settings.media.screenshotFormat.label")}
+                  </p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    WebP is faster and smaller. PNG is lossless.
+                    {t("settings.media.screenshotFormat.description")}
                   </p>
                 </div>
                 <select
@@ -1170,10 +1267,11 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
 
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Auto-capture sample clips</p>
+                  <p className="text-[13px] font-medium">
+                    {t("settings.media.autoCaptureClips.label")}
+                  </p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Record a clip from every alive channel during scans. Adds scan time and disk
-                    usage.
+                    {t("settings.media.autoCaptureClips.description")}
                   </p>
                 </div>
                 <Switch
@@ -1181,16 +1279,20 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   onChange={(checked) =>
                     updateSetting("auto_capture_sample_clips", checked, { immediate: true })
                   }
-                  ariaLabel="Auto-capture sample clips"
+                  ariaLabel={t("settings.media.autoCaptureClips.label")}
                 />
               </div>
 
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Sample clip duration</p>
+                  <p className="text-[13px] font-medium">
+                    {t("settings.media.clipDuration.label")}
+                  </p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Seconds recorded per clip, {MIN_SAMPLE_CLIP_DURATION_SECS} to{" "}
-                    {MAX_SAMPLE_CLIP_DURATION_SECS}. Clips are saved without re-encoding.
+                    {t("settings.media.clipDuration.description", {
+                      min: formatCount(MIN_SAMPLE_CLIP_DURATION_SECS),
+                      max: formatCount(MAX_SAMPLE_CLIP_DURATION_SECS),
+                    })}
                   </p>
                 </div>
                 <input
@@ -1204,19 +1306,19 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   }
                   min={MIN_SAMPLE_CLIP_DURATION_SECS}
                   max={MAX_SAMPLE_CLIP_DURATION_SECS}
-                  aria-label="Sample clip duration in seconds"
+                  aria-label={t("settings.media.clipDuration.ariaLabel")}
                   className={`${inputClass} w-24`}
                 />
               </div>
 
               <div className={rowClass}>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-medium">Save media to</p>
+                  <p className="text-[13px] font-medium">{t("settings.media.saveMediaTo.label")}</p>
                   <p
                     className="text-[11px] text-text-tertiary mt-0.5 truncate"
-                    title={draft.screenshots_dir ?? "Not saved (preview only)"}
+                    title={draft.screenshots_dir ?? t("settings.media.saveMediaTo.notSaved")}
                   >
-                    {draft.screenshots_dir ?? "Not saved (preview only)"}
+                    {draft.screenshots_dir ?? t("settings.media.saveMediaTo.notSaved")}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1225,7 +1327,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
                     type="button"
                   >
-                    Browse
+                    {t("settings.browse")}
                   </button>
                   {draft.screenshots_dir && (
                     <button
@@ -1233,7 +1335,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                       className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
                       type="button"
                     >
-                      Clear
+                      {t("settings.clear")}
                     </button>
                   )}
                 </div>
@@ -1243,14 +1345,20 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
             <section className={blockClass}>
               <div className={rowClass}>
                 <div className="min-w-0">
-                  <p className="text-[13px] font-medium">Temp Media Cache</p>
+                  <p className="text-[13px] font-medium">{t("settings.media.cache.label")}</p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
                     {cacheStats
-                      ? `${formatBytes(cacheStats.total_bytes)} (${cacheStats.file_count} files)`
-                      : "Unavailable"}
+                      ? t("settings.media.cache.size", {
+                          size: formatBytes(cacheStats.total_bytes),
+                          count: cacheStats.file_count,
+                        })
+                      : t("settings.media.cache.unavailable")}
                     {cacheStats?.disk_space && (
                       <span className="ml-1.5 text-text-tertiary/70">
-                        · {formatBytes(cacheStats.disk_space.available_bytes)} free
+                        ·{" "}
+                        {t("settings.media.cache.free", {
+                          size: formatBytes(cacheStats.disk_space.available_bytes),
+                        })}
                       </span>
                     )}
                   </p>
@@ -1261,7 +1369,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md disabled:opacity-50 disabled:pointer-events-none"
                   type="button"
                 >
-                  {cacheBusy ? "Clearing..." : "Clear Cache"}
+                  {cacheBusy ? t("settings.media.cache.clearing") : t("settings.media.cache.clear")}
                 </button>
               </div>
 
@@ -1277,7 +1385,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
               <div className="grid grid-cols-2 gap-3 p-4 border-t border-border-subtle">
                 <div>
                   <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Media Retention
+                    {t("settings.media.retention")}
                   </label>
                   <input
                     type="number"
@@ -1297,7 +1405,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
 
                 <div>
                   <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Low Space Threshold (GB)
+                    {t("settings.media.lowSpaceThreshold")}
                   </label>
                   <input
                     type="number"
@@ -1325,12 +1433,12 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
             <section className={blockClass}>
               <div className={rowClass}>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-medium">Proxy file</p>
+                  <p className="text-[13px] font-medium">{t("settings.network.proxyFile.label")}</p>
                   <p
                     className="text-[11px] text-text-tertiary mt-0.5 truncate"
-                    title={draft.proxy_file ?? "No proxy file selected"}
+                    title={draft.proxy_file ?? t("settings.network.proxyFile.none")}
                   >
-                    {draft.proxy_file ?? "No proxy file selected"}
+                    {draft.proxy_file ?? t("settings.network.proxyFile.none")}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1339,7 +1447,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
                     type="button"
                   >
-                    Browse
+                    {t("settings.browse")}
                   </button>
                   {draft.proxy_file && (
                     <button
@@ -1347,7 +1455,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                       className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
                       type="button"
                     >
-                      Clear
+                      {t("settings.clear")}
                     </button>
                   )}
                 </div>
@@ -1355,9 +1463,9 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
 
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Confirm geoblocks with proxies</p>
+                  <p className="text-[13px] font-medium">{t("settings.network.geoblock.label")}</p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Re-test geoblocked streams through your proxy list.
+                    {t("settings.network.geoblock.description")}
                   </p>
                 </div>
                 <Switch
@@ -1365,7 +1473,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   onChange={(checked) =>
                     updateSetting("test_geoblock", checked, { immediate: true })
                   }
-                  ariaLabel="Confirm geoblocks with proxies"
+                  ariaLabel={t("settings.network.geoblock.label")}
                 />
               </div>
             </section>
@@ -1374,10 +1482,10 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
               <div className={rowClass}>
                 <div>
                   <p className="text-[13px] font-medium">
-                    Skip certificate verification (insecure)
+                    {t("settings.network.insecureCerts.label")}
                   </p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Accept invalid/self-signed TLS certificates during stream checks.
+                    {t("settings.network.insecureCerts.description")}
                   </p>
                 </div>
                 <Switch
@@ -1385,7 +1493,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   onChange={(checked) =>
                     updateSetting("accept_invalid_certs", checked, { immediate: true })
                   }
-                  ariaLabel="Skip certificate verification"
+                  ariaLabel={t("settings.network.insecureCerts.ariaLabel")}
                 />
               </div>
             </section>
@@ -1396,9 +1504,11 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
           <>
             <section className={blockClass}>
               <div className="px-4 pt-3 pb-2">
-                <p className="text-[13px] font-medium">Rank working streams by</p>
+                <p className="text-[13px] font-medium">
+                  {t("settings.dispatcharr.rankOrder.label")}
+                </p>
                 <p className="text-[11px] text-text-tertiary mt-0.5">
-                  Fix order compares streams on each signal in turn; a tie moves on to the next.
+                  {t("settings.dispatcharr.rankOrder.description")}
                 </p>
               </div>
               {fixPreferencesFrom(draft).rankOrder.map((signal, position, order) => {
@@ -1408,16 +1518,19 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   next.splice(position + offset, 0, signal);
                   updateSetting("dispatcharr_rank_order", next, { immediate: true });
                 };
+                const signalLabel = t(RANK_SIGNAL_LABELS[signal]);
                 return (
                   <div key={signal} className={rowClass}>
                     <p className="text-[13px]">
                       <span className="mr-2 text-text-tertiary tabular-nums">{position + 1}</span>
-                      {RANK_SIGNAL_LABELS[signal]}
+                      {signalLabel}
                     </p>
                     <div className="flex gap-1">
                       <button
                         type="button"
-                        aria-label={`Move ${RANK_SIGNAL_LABELS[signal]} up`}
+                        aria-label={t("settings.dispatcharr.rankOrder.moveUp", {
+                          signal: signalLabel,
+                        })}
                         disabled={position === 0}
                         onClick={() => move(-1)}
                         className="rounded-md border border-border-app bg-btn p-1 text-text-secondary hover:bg-btn-hover hover:text-text-primary disabled:opacity-40"
@@ -1426,7 +1539,9 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                       </button>
                       <button
                         type="button"
-                        aria-label={`Move ${RANK_SIGNAL_LABELS[signal]} down`}
+                        aria-label={t("settings.dispatcharr.rankOrder.moveDown", {
+                          signal: signalLabel,
+                        })}
                         disabled={position === order.length - 1}
                         onClick={() => move(1)}
                         className="rounded-md border border-border-app bg-btn p-1 text-text-secondary hover:bg-btn-hover hover:text-text-primary disabled:opacity-40"
@@ -1438,24 +1553,28 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                 );
               })}
               <p className="px-4 pb-3 text-[11px] text-text-tertiary">
-                Bitrate compares in 500 kbps steps and latency in 250 ms steps, so small differences
-                between scans do not reshuffle channels.
+                {t("settings.dispatcharr.rankOrder.footnote")}
               </p>
             </section>
 
             <section className={blockClass}>
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Dead streams</p>
+                  <p className="text-[13px] font-medium">
+                    {t("settings.dispatcharr.deadStreams.label")}
+                  </p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Unlinked streams stay in Dispatcharr and can be added back.
+                    {t("settings.dispatcharr.deadStreams.description")}
                   </p>
                 </div>
                 <SegmentedControl
                   value={draft.dispatcharr_dead_streams ?? "unlink"}
                   options={[
-                    { value: "unlink", label: "Unlink" },
-                    { value: "move_to_end", label: "Move to end" },
+                    { value: "unlink", label: t("settings.dispatcharr.deadStreams.unlink") },
+                    {
+                      value: "move_to_end",
+                      label: t("settings.dispatcharr.deadStreams.moveToEnd"),
+                    },
                   ]}
                   onChange={(value) =>
                     updateSetting("dispatcharr_dead_streams", value, { immediate: true })
@@ -1467,10 +1586,11 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
             <section className={blockClass}>
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Write probe results to Dispatcharr</p>
+                  <p className="text-[13px] font-medium">
+                    {t("settings.dispatcharr.writeStats.label")}
+                  </p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    After scanning a Dispatcharr source, store each stream's codec, resolution, and
-                    bitrate in Dispatcharr.
+                    {t("settings.dispatcharr.writeStats.description")}
                   </p>
                 </div>
                 <Switch
@@ -1478,7 +1598,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   onChange={(checked) =>
                     updateSetting("dispatcharr_write_stats", checked, { immediate: true })
                   }
-                  ariaLabel="Write probe results to Dispatcharr"
+                  ariaLabel={t("settings.dispatcharr.writeStats.label")}
                 />
               </div>
             </section>
@@ -1490,9 +1610,11 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
             <section className={blockClass}>
               <div className={rowClass}>
                 <div>
-                  <p className="text-[13px] font-medium">Keep Xtream connection notice visible</p>
+                  <p className="text-[13px] font-medium">
+                    {t("settings.advanced.xtreamNotice.label")}
+                  </p>
                   <p className="text-[11px] text-text-tertiary mt-0.5">
-                    Keep the detected max-connections banner visible until you dismiss it.
+                    {t("settings.advanced.xtreamNotice.description")}
                   </p>
                 </div>
                 <Switch
@@ -1502,7 +1624,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                       immediate: true,
                     })
                   }
-                  ariaLabel="Keep Xtream connection notice visible"
+                  ariaLabel={t("settings.advanced.xtreamNotice.label")}
                 />
               </div>
             </section>
@@ -1511,7 +1633,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Log Level
+                    {t("settings.advanced.logLevel.label")}
                   </label>
                   <select
                     value={draft.log_level}
@@ -1520,17 +1642,17 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     }
                     className={inputClass}
                   >
-                    <option value="error">Error</option>
-                    <option value="warn">Warning</option>
-                    <option value="info">Info</option>
-                    <option value="debug">Debug</option>
-                    <option value="trace">Trace</option>
+                    <option value="error">{t("settings.advanced.logLevel.error")}</option>
+                    <option value="warn">{t("settings.advanced.logLevel.warn")}</option>
+                    <option value="info">{t("settings.advanced.logLevel.info")}</option>
+                    <option value="debug">{t("settings.advanced.logLevel.debug")}</option>
+                    <option value="trace">{t("settings.advanced.logLevel.trace")}</option>
                   </select>
                 </div>
 
                 <div>
                   <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    Scan History Retention
+                    {t("settings.advanced.historyRetention")}
                   </label>
                   <input
                     type="number"
@@ -1555,7 +1677,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
               <div className="grid grid-cols-1 grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    ffprobe timeout (seconds)
+                    {t("settings.advanced.ffprobeTimeout")}
                   </label>
                   <input
                     type="number"
@@ -1576,7 +1698,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
 
                 <div>
                   <label className="block text-[12px] font-medium text-text-secondary mb-1.5">
-                    ffmpeg bitrate timeout (seconds)
+                    {t("settings.advanced.ffmpegBitrateTimeout")}
                   </label>
                   <input
                     type="number"

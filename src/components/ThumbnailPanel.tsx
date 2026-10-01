@@ -15,6 +15,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal, flushSync } from "react-dom";
 import type { UseChromecastResult } from "../hooks/useChromecast";
 import type { ArchivePlayOptions, ArchiveSession } from "../hooks/useStreamPlayer";
+import { formatCount, t } from "../i18n";
+import { translateReason } from "../i18n/reasons";
 import { buildCastRequest, isCastSessionActive } from "../lib/cast";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { isDispatcharrPlaceholder } from "../lib/dispatcharr";
@@ -275,7 +277,7 @@ export function ThumbnailPanel({
   if (!result || !castRequest) {
     return (
       <div className="flex items-center justify-center h-full text-text-tertiary text-[12px]">
-        Select a channel to view details
+        {t("player.panel.selectChannel")}
       </div>
     );
   }
@@ -357,7 +359,7 @@ export function ThumbnailPanel({
               className="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.015]"
             />
             <div className="absolute inset-x-0 bottom-0 px-2 py-1 text-[11px] text-white/90 bg-black/45 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-              Click to enlarge
+              {t("player.panel.clickToEnlarge")}
             </div>
           </button>
         ) : thumbnailState.showLoadingPlaceholder ? (
@@ -367,60 +369,68 @@ export function ThumbnailPanel({
               <LoaderCircle className="h-5 w-5 animate-spin" />
               <span className="text-[11px] font-medium">
                 {thumbnailState.waitingForScanResult
-                  ? "Waiting for scan result..."
-                  : "Loading thumbnail..."}
+                  ? t("player.panel.waitingForScanResult")
+                  : t("player.panel.loadingThumbnail")}
               </span>
             </div>
           </div>
         ) : thumbnailState.showStoredScreenshotLoadError ? (
           <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 text-center">
             <ImageOff className="h-9 w-9 text-red-300/90" strokeWidth={1.75} />
-            <p className="text-[12px] font-medium text-red-200">Thumbnail unavailable</p>
-            <p className="text-[11px] text-red-200/80">
-              Saved screenshot could not be read from disk.
+            <p className="text-[12px] font-medium text-red-200">
+              {t("player.panel.thumbnailUnavailable")}
             </p>
+            <p className="text-[11px] text-red-200/80">{t("player.panel.screenshotUnreadable")}</p>
           </div>
         ) : thumbnailState.showCaptureError ? (
           <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 text-center">
             <ImageOff className="h-9 w-9 text-red-300/90" strokeWidth={1.75} />
-            <p className="text-[12px] font-medium text-red-200">Thumbnail unavailable</p>
+            <p className="text-[12px] font-medium text-red-200">
+              {t("player.panel.thumbnailUnavailable")}
+            </p>
             <p className="text-[11px] text-red-200/80">
-              Capture failed: {thumbnailState.screenshotErrorReason}
+              {t("player.panel.captureFailed", {
+                reason: translateReason(thumbnailState.screenshotErrorReason ?? ""),
+              })}
             </p>
           </div>
         ) : thumbnailState.showDrmPlaceholder ? (
           <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 text-center">
             <CircleHelp className="h-8 w-8 text-cyan-300/90" strokeWidth={1.75} />
-            <p className="text-[12px] font-medium text-cyan-200">DRM-protected stream</p>
+            <p className="text-[12px] font-medium text-cyan-200">
+              {t("player.panel.drmProtected")}
+            </p>
             <p className="text-[11px] text-cyan-200/80">
               {result.drm_system
-                ? `Detected system: ${result.drm_system}`
-                : "Detected encrypted playback requirements."}
+                ? t("player.panel.drmDetectedSystem", {
+                    system: translateReason(result.drm_system),
+                  })
+                : t("player.panel.drmEncryptedRequirements")}
             </p>
           </div>
         ) : thumbnailState.showNoThumbnailCaptured ? (
           <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
             <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
-            <p className="text-[12px] font-medium text-text-secondary">No thumbnail captured</p>
-            <p className="text-[11px] text-text-tertiary">
-              This channel scanned successfully, but no frame was saved.
+            <p className="text-[12px] font-medium text-text-secondary">
+              {t("player.panel.noThumbnailCaptured")}
             </p>
+            <p className="text-[11px] text-text-tertiary">{t("player.panel.noFrameSaved")}</p>
           </div>
         ) : thumbnailState.showUnscannedPlaceholder ? (
           <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
             <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
-            <p className="text-[12px] font-medium text-text-secondary">Unscanned</p>
-            <p className="text-[11px] text-text-tertiary">
-              Start a scan to capture this thumbnail.
+            <p className="text-[12px] font-medium text-text-secondary">
+              {t("player.panel.unscanned")}
             </p>
+            <p className="text-[11px] text-text-tertiary">{t("player.panel.startScanToCapture")}</p>
           </div>
         ) : thumbnailState.showScreenshotsDisabled ? (
           <div className="flex w-full aspect-video flex-col items-center justify-center gap-2 rounded-lg border border-border-subtle bg-panel-subtle px-3 text-center">
             <CircleHelp className="h-8 w-8 text-text-tertiary" strokeWidth={1.75} />
-            <p className="text-[12px] font-medium text-text-secondary">Screenshots disabled</p>
-            <p className="text-[11px] text-text-tertiary">
-              Enable screenshots in Settings to capture thumbnails.
+            <p className="text-[12px] font-medium text-text-secondary">
+              {t("player.panel.screenshotsDisabled")}
             </p>
+            <p className="text-[11px] text-text-tertiary">{t("player.panel.enableScreenshots")}</p>
           </div>
         ) : null}
 
@@ -433,20 +443,20 @@ export function ThumbnailPanel({
                   type="button"
                   onClick={onStopPlayer}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-red-600 hover:bg-red-500 text-white shadow-sm transition-colors"
-                  title="Stop playback"
+                  title={t("player.panel.stopPlayback")}
                 >
                   <Square className="w-3.5 h-3.5" />
-                  Stop
+                  {t("player.stop")}
                 </button>
               ) : (
                 <button
                   type="button"
                   onClick={() => onPlayChannel(result)}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition-colors"
-                  title="Preview in app"
+                  title={t("player.panel.previewInApp")}
                 >
                   <Play className="w-3.5 h-3.5" />
-                  Play
+                  {t("player.play")}
                 </button>
               ))}
             {onOpenExternal && playable && (
@@ -454,7 +464,7 @@ export function ThumbnailPanel({
                 type="button"
                 onClick={() => externalPlaybackResult && onOpenExternal(externalPlaybackResult)}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-btn hover:bg-btn-hover text-text-primary border border-border-app shadow-sm transition-colors"
-                title="Open in external player"
+                title={t("player.panel.openInExternalPlayer")}
               >
                 <ExternalLink className="w-3.5 h-3.5" />
               </button>
@@ -467,14 +477,16 @@ export function ThumbnailPanel({
                 className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-btn hover:bg-btn-hover text-text-primary border border-border-app shadow-sm transition-colors disabled:opacity-40 disabled:pointer-events-none"
                 title={
                   scanActive
-                    ? "Scan in progress"
+                    ? t("player.panel.scanInProgress")
                     : result.status === "pending" || result.status === "checking"
-                      ? "Scan channel"
-                      : "Rescan channel"
+                      ? t("player.panel.scanChannel")
+                      : t("player.panel.rescanChannel")
                 }
               >
                 <RotateCw className="w-3.5 h-3.5" />
-                {result.status === "pending" || result.status === "checking" ? "Scan" : "Rescan"}
+                {result.status === "pending" || result.status === "checking"
+                  ? t("player.panel.scan")
+                  : t("player.panel.rescan")}
               </button>
             )}
           </div>
@@ -512,26 +524,26 @@ export function ThumbnailPanel({
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto [&>*]:shrink-0">
         <div className="grid grid-cols-2 gap-2 text-[11px]">
           <div>
-            <span className="text-text-tertiary">Status</span>
+            <span className="text-text-tertiary">{t("player.panel.status")}</span>
             <p className="font-medium text-[12px]">{statusLabel(result.status)}</p>
           </div>
           <div>
-            <span className="text-text-tertiary">Group</span>
+            <span className="text-text-tertiary">{t("player.panel.group")}</span>
             <p className="font-medium text-[12px]">{result.group}</p>
           </div>
           {(result.status === "alive" || result.resolution || result.codec) && (
             <>
               <div>
-                <span className="text-text-tertiary">Video</span>
+                <span className="text-text-tertiary">{t("player.panel.video")}</span>
                 <p className="font-medium text-[12px]">{formatVideoInfo(result)}</p>
               </div>
               <div>
-                <span className="text-text-tertiary">Audio</span>
+                <span className="text-text-tertiary">{t("player.panel.audio")}</span>
                 <p className="font-medium text-[12px]">{formatAudioInfo(result)}</p>
               </div>
               {result.resolution && (
                 <div>
-                  <span className="text-text-tertiary">Resolution</span>
+                  <span className="text-text-tertiary">{t("player.panel.resolution")}</span>
                   <p className="font-medium text-[12px]">
                     {result.width}x{result.height}
                   </p>
@@ -539,8 +551,10 @@ export function ThumbnailPanel({
               )}
               {result.fps && (
                 <div>
-                  <span className="text-text-tertiary">Frame Rate</span>
-                  <p className="font-medium text-[12px]">{result.fps} fps</p>
+                  <span className="text-text-tertiary">{t("player.panel.frameRate")}</span>
+                  <p className="font-medium text-[12px]">
+                    {t("player.panel.fps", { fps: formatCount(result.fps) })}
+                  </p>
                 </div>
               )}
             </>
@@ -571,20 +585,28 @@ export function ThumbnailPanel({
 
         {result.status === "drm" && (
           <div className="p-2 rounded bg-cyan-500/10 border border-cyan-500/20">
-            <p className="text-[12px] font-medium text-cyan-300">DRM Detection</p>
+            <p className="text-[12px] font-medium text-cyan-300">
+              {t("player.panel.drmDetection")}
+            </p>
             <p className="text-[11px] text-cyan-200/90 mt-1">
-              System: {result.drm_system ?? "Encrypted stream"}
+              {t("player.panel.drmSystem", {
+                system: result.drm_system
+                  ? translateReason(result.drm_system)
+                  : t("player.panel.encryptedStream"),
+              })}
             </p>
           </div>
         )}
 
         {result.label_mismatches.length > 0 && (
           <div className="p-2 rounded bg-orange-500/10 border border-orange-500/20">
-            <p className="text-[12px] font-medium text-orange-400">Label Mismatch</p>
+            <p className="text-[12px] font-medium text-orange-400">
+              {t("player.panel.labelMismatch")}
+            </p>
             {result.label_mismatches.map((m, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: plain-text list; mismatch strings can repeat, so index is the only stable key.
               <p key={i} className="text-[11px] text-orange-300">
-                {m}
+                {translateReason(m)}
               </p>
             ))}
           </div>
@@ -592,19 +614,27 @@ export function ThumbnailPanel({
 
         {result.low_framerate && (
           <div className="p-2 rounded bg-orange-500/10 border border-orange-500/20">
-            <p className="text-[11px] text-orange-400">Low framerate: {result.fps} fps</p>
+            <p className="text-[11px] text-orange-400">
+              {t("player.panel.lowFramerate", {
+                fps: result.fps == null ? "" : formatCount(result.fps),
+              })}
+            </p>
           </div>
         )}
 
         {(retryCount > 0 || lastErrorReason) && (
           <div className="p-2 rounded bg-panel-subtle border border-border-subtle">
-            <p className="text-[12px] font-medium text-text-primary">Diagnostics</p>
+            <p className="text-[12px] font-medium text-text-primary">
+              {t("player.panel.diagnostics")}
+            </p>
             {retryCount > 0 && (
-              <p className="text-[11px] text-text-secondary mt-1">Retries used: {retryCount}</p>
+              <p className="text-[11px] text-text-secondary mt-1">
+                {t("player.panel.retriesUsed", { count: formatCount(retryCount) })}
+              </p>
             )}
             {lastErrorReason && (
               <p className="text-[11px] text-text-secondary mt-1 break-words">
-                Last error: {lastErrorReason}
+                {t("player.panel.lastError", { reason: translateReason(lastErrorReason) })}
               </p>
             )}
           </div>
@@ -613,13 +643,15 @@ export function ThumbnailPanel({
         {showResolvedUrl && (
           <div className="p-2 rounded bg-panel-subtle border border-border-subtle">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-[12px] font-medium text-text-primary">Resolved URL</p>
+              <p className="text-[12px] font-medium text-text-primary">
+                {t("player.panel.resolvedUrl")}
+              </p>
               <button
                 type="button"
                 onClick={handleCopyResolvedUrl}
                 className="macos-btn px-2 py-1 text-[11px] bg-btn hover:bg-btn-hover rounded-md"
               >
-                {resolvedUrlCopied ? "Copied" : "Copy"}
+                {resolvedUrlCopied ? t("common.copied") : t("common.copy")}
               </button>
             </div>
             <p className="text-[11px] text-text-secondary mt-1 break-all">{resolvedUrl}</p>
@@ -649,7 +681,7 @@ export function ThumbnailPanel({
               type="button"
               onClick={closeLightbox}
               className={`absolute top-5 right-5 p-2 rounded-full bg-black/35 text-white hover:bg-black/55 transition-colors ${theaterMode ? "hidden" : ""}`}
-              aria-label="Close image preview"
+              aria-label={t("player.panel.closeImagePreview")}
             >
               <X className="w-5 h-5" />
             </button>
@@ -726,7 +758,7 @@ export function ThumbnailPanel({
                     className={`absolute top-3 right-3 p-2.5 rounded-xl bg-black/50 text-white hover:bg-black/70 transition-all duration-200 ${
                       theaterHover ? "opacity-100" : "opacity-0"
                     }`}
-                    title={theaterMode ? "Exit fullscreen" : "Fullscreen"}
+                    title={theaterMode ? t("player.exitFullscreen") : t("player.fullscreen")}
                   >
                     {theaterMode ? (
                       <Shrink className="w-6 h-6" />
@@ -741,7 +773,7 @@ export function ThumbnailPanel({
                       className="absolute -bottom-14 left-1/2 -translate-x-1/2 flex items-center gap-2 px-6 py-3 text-[15px] font-medium rounded-xl bg-red-600 hover:bg-red-500 text-white shadow-lg transition-colors"
                     >
                       <Square className="w-4 h-4" />
-                      Stop
+                      {t("player.stop")}
                     </button>
                   )}
                 </div>
@@ -765,7 +797,9 @@ export function ThumbnailPanel({
                   ) : result.status === "pending" ? (
                     <>
                       <CircleHelp className="w-24 h-24 text-white/40" strokeWidth={1.5} />
-                      <span className="text-white/50 text-[14px] font-medium">Unscanned</span>
+                      <span className="text-white/50 text-[14px] font-medium">
+                        {t("player.panel.unscanned")}
+                      </span>
                     </>
                   ) : (
                     <X className="w-24 h-24 text-red-500/80" strokeWidth={2.5} />
@@ -781,7 +815,7 @@ export function ThumbnailPanel({
                       className="flex items-center gap-2 px-4 py-2 text-[13px] font-medium rounded-lg bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-colors"
                     >
                       <Play className="w-4 h-4" />
-                      Play
+                      {t("player.play")}
                     </button>
                   )}
                   {onScanChannel && (
@@ -793,8 +827,8 @@ export function ThumbnailPanel({
                     >
                       <RotateCw className="w-4 h-4" />
                       {result.status === "pending" || result.status === "checking"
-                        ? "Scan"
-                        : "Rescan"}
+                        ? t("player.panel.scan")
+                        : t("player.panel.rescan")}
                     </button>
                   )}
                 </div>
@@ -811,7 +845,7 @@ export function ThumbnailPanel({
                     )}
                     {result.fps && (
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">
-                        {result.fps} fps
+                        {t("player.panel.fps", { fps: formatCount(result.fps) })}
                       </span>
                     )}
                     {result.video_bitrate &&
@@ -828,12 +862,12 @@ export function ThumbnailPanel({
                     )}
                     {result.audio_bitrate && (
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">
-                        {result.audio_bitrate} kbps audio
+                        {t("player.panel.audioBitrate", { bitrate: result.audio_bitrate })}
                       </span>
                     )}
                     {result.audio_channel_layout && (
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">
-                        {result.audio_channel_layout} audio
+                        {t("player.panel.audioLayout", { layout: result.audio_channel_layout })}
                       </span>
                     )}
                   </>

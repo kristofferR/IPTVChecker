@@ -1,1 +1,24 @@
-export default {} as const;
+export default {
+  channels: { one: "{count} channel", other: "{count} channels" },
+  total: { other: "{count} total" },
+  primaryDead: { other: "{count} primary dead" },
+  withDeadStreams: { other: "{count} with dead streams" },
+  allDead: { other: "{count} all dead" },
+  catchup: {
+    real: { other: "{count} real" },
+    shallower: { other: "{count} shallower" },
+    fake: { other: "{count} fake" },
+    untested: { other: "{count} untested" },
+    all: { other: "{count} catch-up" },
+    visible: { other: "{visible} of {count} catch-up" },
+  },
+  score: "Score {score}/10",
+  streamsChecked: { other: "{checked} of {count} streams checked" },
+  selected: { other: "{count} selected" },
+  withCatchup: { other: "{count} with catch-up" },
+  paused: "Paused",
+  stopping: "Stopping",
+  lowFps: { other: "{count} low fps" },
+  mislabeled: { other: "{count} mislabeled" },
+  duplicates: { one: "{count} duplicate", other: "{count} duplicates" },
+} as const;

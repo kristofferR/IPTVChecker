@@ -1,1 +1,92 @@
-export default {} as const;
+/**
+ * Failure reasons produced by the Rust checker. The English text must match
+ * Rust exactly; `translateReason` maps the stored strings onto these keys.
+ */
+export default {
+  timeout: "Timeout",
+  connectionRefused: "Connection refused",
+  dnsFailure: "DNS failure",
+  tlsError: "SSL/TLS error",
+  invalidUrl: "Invalid URL",
+  redirectLoop: "Redirect loop",
+  playlistRecursionLimit: "Playlist recursion limit exceeded",
+  manifestReadFailed: "Failed to read manifest body",
+  emptyManifest: "Empty manifest body",
+  noPlayableUri: "No playable URI found in playlist",
+  cancelled: "Cancelled",
+  scanCancelled: "Scan cancelled",
+  accountBusy: "Account busy",
+  invalidTimeout: "Invalid timeout: must be greater than 0 seconds",
+  invalidExtendedTimeout: "Invalid extended timeout: must be greater than 0 seconds",
+  streamReadInterrupted: "Stream read interrupted: {error}",
+  insufficientData: {
+    one: "No data (insufficient stream data: {count} byte)",
+    other: "No data (insufficient stream data: {count} bytes)",
+  },
+  manifestTooLarge: "Manifest body exceeded {size} MiB cap",
+  unexpectedContentType: "Unexpected text content type: {type}",
+  http: {
+    status: "HTTP {code}",
+    missingLocation: "HTTP {code} without Location header",
+    invalidLocation: "HTTP {code} with invalid redirect location",
+  },
+  ffprobe: {
+    checkFailed: "ffprobe check failed",
+    required: "ffprobe is required for RTSP/RTMP liveness checks, but it is not available",
+    noTracks: "No decodable audio/video tracks reported by ffprobe",
+    unsupportedScheme: "Unsupported non-HTTP stream scheme for ffprobe liveness check: {scheme}",
+  },
+  ffmpeg: {
+    unavailable: "ffmpeg/ffprobe not available",
+    noTracks: "No decodable audio/video tracks reported by ffmpeg",
+    rejected5xx: "server rejected ffmpeg connection (HTTP 5XX)",
+    rejected403: "server rejected ffmpeg connection (HTTP 403 Forbidden)",
+    rejected401: "server rejected ffmpeg connection (HTTP 401 Unauthorized)",
+    rejected4xx: "server rejected ffmpeg connection (HTTP 4XX)",
+    notFound: "stream not found for ffmpeg (HTTP 404)",
+    connectionRefused: "connection refused while opening stream",
+    connectionReset: "connection reset while reading stream",
+    openTimedOut: "timed out while opening stream",
+    invalidData: "invalid stream data for ffmpeg",
+    couldNotOpen: "ffmpeg could not open the stream",
+    noStderr: "no stderr output",
+    terminatedBySignal: "terminated by signal",
+    timedOut: "ffmpeg timed out after {seconds}s",
+    exited: "ffmpeg exited with {code} - {details}",
+    toolTimedOut: "{tool} timed out after {seconds}s (binary: {binary}) - {details}",
+    toolFailed: "{tool} failed (binary: {binary}, exit: {code}) - {details}",
+  },
+  screenshot: {
+    outputMissing: "output file missing",
+    outputMissingDetails: "output file missing - {details}",
+    invalidOutput: "invalid screenshot output - {details}",
+    emptyImage: "output image is empty",
+    incompleteHeader: "output image header is incomplete",
+    invalidHeader: "output image header is invalid",
+    metadataReadFailed: "failed to read output metadata: {error}",
+    openFailed: "failed to open output image: {error}",
+    readFailed: "failed to read output image: {error}",
+  },
+  drm: {
+    detected: "Detected DRM system: {system}",
+    hlsEncrypted: "HLS Encrypted",
+    dashEncrypted: "DASH Encrypted",
+  },
+  /** Channel name promises a resolution the stream doesn't deliver (engine/ffmpeg.rs). */
+  label: {
+    expected: "Expected {expected}, got {actual}",
+    expectedHd: "Expected 720p or 1080p, got {actual}",
+    unlabeled4k: "4K channel not labeled as such",
+  },
+  /** Playlist loading progress details (commands/playlist.rs, engine/remote_cache.rs). */
+  progress: {
+    analyzingUrls: "Analyzing channel URLs",
+    lookingUpServer: "Looking up server location",
+    fetchingDispatcharrChannels: "Fetching Dispatcharr channels",
+    fetchingDispatcharrStreams: "Fetching Dispatcharr streams",
+    cachingDispatcharr: "Caching Dispatcharr playlist",
+    initializingClient: "Initializing HTTP client",
+    waitingForServer: "Waiting for server",
+    writingToDisk: "Writing to disk",
+  },
+} as const;

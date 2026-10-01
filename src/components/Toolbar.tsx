@@ -32,6 +32,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { formatCount, type MessageKey, t } from "../i18n";
 import { hasArchive } from "../lib/archive";
 import { type ArchiveVerifyMode, archiveVerdict } from "../lib/archiveVerification";
 import {
@@ -107,7 +108,12 @@ const dragIgnoreSelector =
   "button, input, textarea, select, a, [role='button'], [contenteditable='true'], [data-no-window-drag]";
 
 const EMPTY_GROUPS: string[] = [];
-const GROUP_FILTER_LABEL = "All Groups";
+const DISPATCHARR_STATUS_LABELS = {
+  primary_dead: "toolbar.status.primaryDead",
+  has_dead: "toolbar.status.hasDead",
+  all_dead: "toolbar.status.allDead",
+} as const satisfies Record<DispatcharrStatusFilter, MessageKey>;
+const CATCHUP_VERDICT_INDENT = "\u00a0\u00a0\u00a0\u00a0";
 export const Toolbar = memo(function Toolbar({
   onOpen,
   onOpenFolder,
@@ -429,7 +435,7 @@ export const Toolbar = memo(function Toolbar({
   const useWindowDragRegion = platform !== "linux";
   const scanBlockedReason = useMemo(() => {
     const err = validateSourceFilterPattern(channelSearch);
-    return err ? `Invalid source filter regex: ${err}` : null;
+    return err ? t("toolbar.scan.invalidSourceFilter", { error: err }) : null;
   }, [channelSearch]);
 
   const isMac = platform === "macos";
@@ -440,23 +446,27 @@ export const Toolbar = memo(function Toolbar({
   const inScanSession = scanning || paused || cancelling;
   const hasResults = exportScopeCounts.all > 0;
   const scanLabel =
-    selectedIndices.length > 0 ? `Scan Selected (${selectedIndices.length})` : "Scan";
+    selectedIndices.length > 0
+      ? t("toolbar.scan.scanSelected", { count: selectedIndices.length })
+      : t("toolbar.scan.scan");
   const scanDisabledReason = !hasPlaylist
-    ? "Open a playlist first"
+    ? t("toolbar.scan.openPlaylistFirst")
     : archiveVerifyRun || archiveGuideTestRunning || archiveProbeRunning
-      ? "Wait for catch-up verification to finish"
+      ? t("toolbar.scan.waitForVerification")
       : scanBlockedReason;
   const verifyDisabledReason = archiveVerifyRun
-    ? "Verification running; cancel it from the progress row"
+    ? t("toolbar.verify.busyVerifying")
     : inScanSession
-      ? "Wait for the scan to finish"
+      ? t("toolbar.verify.busyScanning")
       : archiveGuideTestRunning || archiveProbeRunning
-        ? "Another catch-up test is running"
+        ? t("toolbar.verify.busyOtherTest")
         : null;
   const canSavePlaylist =
     hasPlaylist && currentSourceDescriptor !== null && currentSourceDescriptor.kind !== "stalker";
   const statusLabel = (value: string, label: string) =>
-    hasPlaylist ? `${label} (${statusOptionCounts[value] ?? 0})` : label;
+    hasPlaylist
+      ? t("toolbar.statusWithCount", { label, count: statusOptionCounts[value] ?? 0 })
+      : label;
 
   useEffect(() => {
     if (inScanSession) {
@@ -559,7 +569,7 @@ export const Toolbar = memo(function Toolbar({
   const inlinePlaylistNameClass = isMac
     ? "absolute top-[6px] left-1/2 max-w-[40%] -translate-x-1/2 truncate text-[13px] text-text-tertiary pointer-events-none"
     : "ml-1 max-w-64 truncate text-[13px] text-text-tertiary";
-  const selectedGroupTitle = groupFilter === "all" ? GROUP_FILTER_LABEL : groupFilter;
+  const selectedGroupTitle = groupFilter === "all" ? t("toolbar.allGroups") : groupFilter;
 
   return (
     <div
@@ -585,42 +595,42 @@ export const Toolbar = memo(function Toolbar({
                 <button
                   disabled
                   className={btnWithOptionalText("toolbar-btn-stop")}
-                  title="Stopping Scan"
-                  aria-label="Stopping Scan"
+                  title={t("toolbar.scan.stopping")}
+                  aria-label={t("toolbar.scan.stopping")}
                 >
                   <Loader2 className="w-[19px] h-[19px] animate-spin" />
-                  {showButtonText && "Stopping…"}
+                  {showButtonText && t("toolbar.scan.stoppingShort")}
                 </button>
               ) : scanning ? (
                 <button
                   onClick={onPauseScan}
                   className={btnWithOptionalText()}
-                  title="Pause Scan"
-                  aria-label="Pause Scan"
+                  title={t("toolbar.scan.pause")}
+                  aria-label={t("toolbar.scan.pause")}
                 >
                   <IconPause className="w-[22px] h-[22px]" />
-                  {showButtonText && "Pause"}
+                  {showButtonText && t("toolbar.scan.pauseShort")}
                 </button>
               ) : (
                 <button
                   onClick={onResumeScan}
                   className={btnWithOptionalText("toolbar-btn-primary")}
-                  title="Resume Scan"
-                  aria-label="Resume Scan"
+                  title={t("toolbar.scan.resume")}
+                  aria-label={t("toolbar.scan.resume")}
                 >
                   <IconPlay className="w-[22px] h-[22px]" />
-                  {showButtonText && "Resume"}
+                  {showButtonText && t("toolbar.scan.resumeShort")}
                 </button>
               )}
               {!cancelling && (
                 <button
                   onClick={onStopScan}
                   className={btnWithOptionalText("toolbar-btn-stop")}
-                  title="Stop Scan"
-                  aria-label="Stop Scan"
+                  title={t("toolbar.scan.stop")}
+                  aria-label={t("toolbar.scan.stop")}
                 >
                   <IconStop className="w-[19px] h-[19px]" />
-                  {showButtonText && "Stop"}
+                  {showButtonText && t("toolbar.scan.stopShort")}
                 </button>
               )}
             </>
@@ -635,7 +645,7 @@ export const Toolbar = memo(function Toolbar({
                   }
                 }}
                 disabled={scanDisabledReason !== null}
-                title={scanDisabledReason ?? "Scan"}
+                title={scanDisabledReason ?? t("toolbar.scan.scan")}
                 className={btnWithOptionalText("toolbar-btn-primary")}
                 aria-label={scanLabel}
               >
@@ -659,8 +669,8 @@ export const Toolbar = memo(function Toolbar({
                   }}
                   disabled={scanDisabledReason !== null}
                   className={`toolbar-scan-options absolute flex items-center justify-center rounded-sm hover:bg-white/10 disabled:opacity-40 disabled:pointer-events-none ${isMac ? "text-text-primary" : "text-white"} ${showButtonText ? "bottom-0.5 right-2 h-5 w-5" : "right-1.5 top-1/2 h-6 w-6 -translate-y-1/2"}`}
-                  title="Scan options"
-                  aria-label="Scan options"
+                  title={t("toolbar.scan.options")}
+                  aria-label={t("toolbar.scan.options")}
                   aria-controls={scanMenuId}
                   aria-expanded={scanMenuVisible}
                 >
@@ -682,7 +692,7 @@ export const Toolbar = memo(function Toolbar({
                     }}
                     className="w-full px-3 py-2 text-left text-[13px] hover:bg-btn-hover"
                   >
-                    Scan
+                    {t("toolbar.scan.scan")}
                   </button>
                   <button
                     type="button"
@@ -692,7 +702,7 @@ export const Toolbar = memo(function Toolbar({
                     }}
                     className="w-full px-3 py-2 text-left text-[13px] hover:bg-btn-hover"
                   >
-                    Scan + Verify Catch-up ({catchupChannelCount})
+                    {t("toolbar.scan.scanAndVerify", { count: catchupChannelCount })}
                   </button>
                 </div>
               )}
@@ -712,16 +722,18 @@ export const Toolbar = memo(function Toolbar({
                   if (verifyDisabledReason === null) setVerifyMenuVisible(true);
                 }}
                 disabled={verifyDisabledReason !== null}
-                title={verifyDisabledReason ?? "Verify catch-up: real vs fake"}
+                title={verifyDisabledReason ?? t("toolbar.verify.title")}
                 className={btnWithOptionalText("gap-1.5")}
-                aria-label="Verify catch-up"
+                aria-label={t("toolbar.verify.label")}
                 aria-haspopup="dialog"
                 aria-expanded={verifyMenuVisible}
               >
                 <IconVerify className="w-[22px] h-[22px]" />
                 {showButtonText && (
                   <span className="inline-flex items-center gap-1 leading-none">
-                    <span>{archiveVerifyRun ? "Verifying…" : "Verify"}</span>
+                    <span>
+                      {archiveVerifyRun ? t("toolbar.verify.running") : t("toolbar.verify.button")}
+                    </span>
                     {!archiveVerifyRun && <IconChevron className="h-3 w-3 opacity-70" />}
                   </span>
                 )}
@@ -738,15 +750,15 @@ export const Toolbar = memo(function Toolbar({
                       visibility: verifyPosition ? "visible" : "hidden",
                     }}
                     role="dialog"
-                    aria-label="Verify catch-up"
+                    aria-label={t("toolbar.verify.label")}
                   >
                     <p className="px-3 pt-1.5 pb-1 text-[10px] uppercase tracking-[0.08em] text-text-tertiary">
-                      Mode
+                      {t("toolbar.verify.mode")}
                     </p>
                     {(
                       [
-                        ["quick", "Quick · real vs fake", "1 request / channel"],
-                        ["full", "Full · measure depth", "2-5 requests / channel"],
+                        ["quick", "toolbar.verify.modeQuick", "toolbar.verify.modeQuickCost"],
+                        ["full", "toolbar.verify.modeFull", "toolbar.verify.modeFullCost"],
                       ] as const
                     ).map(([value, label, cost]) => (
                       <button
@@ -766,18 +778,18 @@ export const Toolbar = memo(function Toolbar({
                               : "border-text-tertiary"
                           }`}
                         />
-                        <span className="flex-1">{label}</span>
-                        <span className="text-[11px] text-text-tertiary">{cost}</span>
+                        <span className="flex-1">{t(label)}</span>
+                        <span className="text-[11px] text-text-tertiary">{t(cost)}</span>
                       </button>
                     ))}
                     <p className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-[0.08em] text-text-tertiary">
-                      Scope
+                      {t("toolbar.verify.scope")}
                     </p>
                     {(
                       [
-                        ["all", "All advertised"],
-                        ["filtered", "Filtered"],
-                        ["selected", "Selected"],
+                        ["all", "toolbar.verify.scopeAll"],
+                        ["filtered", "toolbar.verify.scopeFiltered"],
+                        ["selected", "toolbar.verify.scopeSelected"],
                       ] as const
                     ).map(([value, label]) => (
                       <button
@@ -795,14 +807,18 @@ export const Toolbar = memo(function Toolbar({
                               : "border-text-tertiary"
                           }`}
                         />
-                        <span className="flex-1">{label}</span>
+                        <span className="flex-1">{t(label)}</span>
                         <span className="text-[11px] tabular-nums text-text-tertiary">
-                          {verifyScopeCounts[value]}
                           {value === verifyScope &&
                           verifyMode === "quick" &&
                           verifyScopeCounts[value] > 0
-                            ? ` · ~${Math.max(1, Math.round(verifyScopeCounts[value] / 60))} min`
-                            : ""}
+                            ? t("toolbar.verify.countWithEstimate", {
+                                count: verifyScopeCounts[value],
+                                minutes: formatCount(
+                                  Math.max(1, Math.round(verifyScopeCounts[value] / 60)),
+                                ),
+                              })
+                            : formatCount(verifyScopeCounts[value])}
                         </span>
                       </button>
                     ))}
@@ -813,7 +829,7 @@ export const Toolbar = memo(function Toolbar({
                         disabled={verifyScopeCounts[verifyScope] === 0}
                         className="w-full rounded-md bg-violet-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-violet-500 transition-colors disabled:opacity-40 disabled:pointer-events-none"
                       >
-                        Start verification ({verifyScopeCounts[verifyScope]})
+                        {t("toolbar.verify.start", { count: verifyScopeCounts[verifyScope] })}
                       </button>
                     </div>
                   </div>,
@@ -835,15 +851,15 @@ export const Toolbar = memo(function Toolbar({
               }}
               disabled={inScanSession}
               className={btnWithOptionalText("gap-1.5")}
-              title="Open Playlist Source"
-              aria-label="Open Playlist Source"
+              title={t("toolbar.open.title")}
+              aria-label={t("toolbar.open.title")}
               aria-haspopup="menu"
               aria-expanded={openMenuVisible}
             >
               <IconOpen className="w-[22px] h-[22px]" />
               {showButtonText ? (
                 <span className="inline-flex items-center gap-1 leading-none">
-                  <span>Open</span>
+                  <span>{t("common.open")}</span>
                   <IconChevron className="h-3 w-3 opacity-70" />
                 </span>
               ) : (
@@ -859,7 +875,7 @@ export const Toolbar = memo(function Toolbar({
                     : "absolute left-0 top-full mt-1 z-50 w-52 rounded-lg border border-border-app bg-dropdown/95 p-1.5 shadow-xl backdrop-blur-xl"
                 }
                 role="menu"
-                aria-label="Open playlist source"
+                aria-label={t("toolbar.open.menuLabel")}
               >
                 <button
                   type="button"
@@ -868,7 +884,7 @@ export const Toolbar = memo(function Toolbar({
                   role="menuitem"
                 >
                   <IconOpen className="h-4 w-4 shrink-0" />
-                  <span>Open File</span>
+                  <span>{t("toolbar.open.file")}</span>
                 </button>
                 <button
                   type="button"
@@ -877,7 +893,7 @@ export const Toolbar = memo(function Toolbar({
                   role="menuitem"
                 >
                   <IconFolder className="h-4 w-4 shrink-0" />
-                  <span>Open Folder</span>
+                  <span>{t("toolbar.open.folder")}</span>
                 </button>
                 <button
                   type="button"
@@ -886,7 +902,7 @@ export const Toolbar = memo(function Toolbar({
                   role="menuitem"
                 >
                   <IconLink className="h-4 w-4 shrink-0" />
-                  <span>Open URL</span>
+                  <span>{t("toolbar.open.url")}</span>
                 </button>
                 <button
                   type="button"
@@ -895,7 +911,7 @@ export const Toolbar = memo(function Toolbar({
                   role="menuitem"
                 >
                   <KeyRound className="h-4 w-4 shrink-0" />
-                  <span>Open Xtream</span>
+                  <span>{t("toolbar.open.xtream")}</span>
                 </button>
                 <button
                   type="button"
@@ -904,7 +920,7 @@ export const Toolbar = memo(function Toolbar({
                   role="menuitem"
                 >
                   <Network className="h-4 w-4 shrink-0" />
-                  <span>Open Dispatcharr</span>
+                  <span>{t("toolbar.open.dispatcharr")}</span>
                 </button>
               </div>
             )}
@@ -917,22 +933,22 @@ export const Toolbar = memo(function Toolbar({
             onClick={onSavePlaylist}
             disabled={!canSavePlaylist || inScanSession}
             className={btnWithOptionalText()}
-            title="Save Playlist"
-            aria-label="Save Playlist"
+            title={t("toolbar.savePlaylist")}
+            aria-label={t("toolbar.savePlaylist")}
           >
             <IconSavePlaylist className="w-[22px] h-[22px]" />
-            {showButtonText && "Save"}
+            {showButtonText && t("toolbar.saveShort")}
           </button>
 
           <button
             onClick={onManageSavedPlaylists}
             disabled={inScanSession}
             className={btnWithOptionalText()}
-            title="Saved Playlists"
-            aria-label="Saved Playlists"
+            title={t("toolbar.savedPlaylists")}
+            aria-label={t("toolbar.savedPlaylists")}
           >
             <IconSavedPlaylists className="w-[22px] h-[22px]" />
-            {showButtonText && "Saved"}
+            {showButtonText && t("toolbar.savedShort")}
           </button>
         </div>
 
@@ -972,32 +988,32 @@ export const Toolbar = memo(function Toolbar({
             onClick={onToggleReport}
             disabled={!hasPlaylist}
             className={`${btnWithOptionalText()} ${showReport ? "toolbar-btn-primary" : ""}`.trim()}
-            title={showReport ? "Hide Report" : "Show Report"}
-            aria-label={showReport ? "Hide Report" : "Show Report"}
+            title={showReport ? t("toolbar.hideReport") : t("toolbar.showReport")}
+            aria-label={showReport ? t("toolbar.hideReport") : t("toolbar.showReport")}
           >
             <IconReport className="w-[22px] h-[22px]" />
-            {showButtonText && "Report"}
+            {showButtonText && t("toolbar.report")}
           </button>
 
           <button
             onClick={handleOpenHistory}
             disabled={!hasPlaylist}
             className={btnWithOptionalText()}
-            title="History"
-            aria-label="History"
+            title={t("toolbar.history")}
+            aria-label={t("toolbar.history")}
           >
             <IconHistory className="w-[22px] h-[22px]" />
-            {showButtonText && "History"}
+            {showButtonText && t("toolbar.history")}
           </button>
 
           <button
             onClick={onOpenSettings}
             className={btnWithOptionalText("min-w-9")}
-            title="Settings"
-            aria-label="Settings"
+            title={t("toolbar.settings")}
+            aria-label={t("toolbar.settings")}
           >
             <IconSettings className="w-[22px] h-[22px]" />
-            {showButtonText && "Settings"}
+            {showButtonText && t("toolbar.settings")}
           </button>
         </div>
       </div>
@@ -1021,7 +1037,7 @@ export const Toolbar = memo(function Toolbar({
                   : "text-text-secondary hover:text-text-primary"
               }`}
             >
-              Table
+              {t("toolbar.viewTable")}
             </button>
             <button
               type="button"
@@ -1033,18 +1049,18 @@ export const Toolbar = memo(function Toolbar({
                   : "text-text-secondary hover:text-text-primary"
               }`}
             >
-              Guide
+              {t("toolbar.viewGuide")}
             </button>
           </div>
 
           <select
-            aria-label="Channel group"
+            aria-label={t("toolbar.groupFilterLabel")}
             value={groupFilter}
             title={selectedGroupTitle}
             onChange={(e) => handleGroupChange(e.target.value)}
             className="toolbar-select native-field h-7 w-full min-w-0 pl-2.5 pr-7 bg-input border border-border-app rounded-md text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
           >
-            <option value="all">{GROUP_FILTER_LABEL}</option>
+            <option value="all">{t("toolbar.allGroups")}</option>
             {groups.map((g) => (
               <option key={g} value={g}>
                 {g}
@@ -1052,61 +1068,83 @@ export const Toolbar = memo(function Toolbar({
             ))}
           </select>
           <select
-            aria-label="Channel status"
+            aria-label={t("toolbar.statusFilterLabel")}
             value={statusFilter}
             onChange={(e) => handleStatusChange(e.target.value)}
             className="toolbar-select native-field h-7 w-full min-w-0 pl-2.5 pr-7 bg-input border border-border-app rounded-md text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
           >
-            <option value="all">{statusLabel("all", "All Status")}</option>
-            <option value="alive">{statusLabel("alive", "Alive")}</option>
-            <option value="drm">{statusLabel("drm", "DRM")}</option>
-            <option value="dead">{statusLabel("dead", "Dead")}</option>
-            <option value="geoblocked">{statusLabel("geoblocked", "Geoblocked")}</option>
+            <option value="all">{statusLabel("all", t("toolbar.status.all"))}</option>
+            <option value="alive">{statusLabel("alive", t("toolbar.status.alive"))}</option>
+            <option value="drm">{statusLabel("drm", t("toolbar.status.drm"))}</option>
+            <option value="dead">{statusLabel("dead", t("toolbar.status.dead"))}</option>
+            <option value="geoblocked">
+              {statusLabel("geoblocked", t("toolbar.status.geoblocked"))}
+            </option>
             {dispatcharrView &&
-              Object.entries(DISPATCHARR_STATUS_FILTERS).map(([value, label]) => (
+              Object.entries(DISPATCHARR_STATUS_LABELS).map(([value, label]) => (
                 <option key={value} value={value}>
-                  {statusLabel(value, label)}
+                  {statusLabel(value, t(label))}
                 </option>
               ))}
             {(statusOptionCounts.placeholder ?? 0) > 0 && (
-              <option value="placeholder">{statusLabel("placeholder", "Placeholder")}</option>
+              <option value="placeholder">
+                {statusLabel("placeholder", t("toolbar.status.placeholder"))}
+              </option>
             )}
             {((statusOptionCounts.catchup ?? 0) > 0 ||
               statusFilter === "catchup" ||
               catchupVerdictsAvailable ||
               statusFilter in CATCHUP_VERDICT_FILTERS) && (
-              <option value="catchup">{statusLabel("catchup", "Catch-up")}</option>
+              <option value="catchup">{statusLabel("catchup", t("toolbar.status.catchup"))}</option>
             )}
             {(catchupVerdictsAvailable || statusFilter in CATCHUP_VERDICT_FILTERS) && (
               <>
                 <option value="catchup_real">
-                  {statusLabel("catchup_real", "\u00a0\u00a0\u00a0\u00a0Real")}
+                  {statusLabel(
+                    "catchup_real",
+                    CATCHUP_VERDICT_INDENT + t("toolbar.status.catchupReal"),
+                  )}
                 </option>
                 <option value="catchup_shallower">
-                  {statusLabel("catchup_shallower", "\u00a0\u00a0\u00a0\u00a0Shallower")}
+                  {statusLabel(
+                    "catchup_shallower",
+                    CATCHUP_VERDICT_INDENT + t("toolbar.status.catchupShallower"),
+                  )}
                 </option>
                 <option value="catchup_fake">
-                  {statusLabel("catchup_fake", "\u00a0\u00a0\u00a0\u00a0Fake")}
+                  {statusLabel(
+                    "catchup_fake",
+                    CATCHUP_VERDICT_INDENT + t("toolbar.status.catchupFake"),
+                  )}
                 </option>
                 <option value="catchup_untested">
-                  {statusLabel("catchup_untested", "\u00a0\u00a0\u00a0\u00a0Untested")}
+                  {statusLabel(
+                    "catchup_untested",
+                    CATCHUP_VERDICT_INDENT + t("toolbar.status.catchupUntested"),
+                  )}
                 </option>
               </>
             )}
-            <option value="mislabeled">{statusLabel("mislabeled", "Mislabeled")}</option>
-            <option value="audio_only">{statusLabel("audio_only", "Audio Only")}</option>
-            <option value="duplicates">{statusLabel("duplicates", "Duplicates")}</option>
-            <option value="pending">{statusLabel("pending", "Pending")}</option>
+            <option value="mislabeled">
+              {statusLabel("mislabeled", t("toolbar.status.mislabeled"))}
+            </option>
+            <option value="audio_only">
+              {statusLabel("audio_only", t("toolbar.status.audioOnly"))}
+            </option>
+            <option value="duplicates">
+              {statusLabel("duplicates", t("toolbar.status.duplicates"))}
+            </option>
+            <option value="pending">{statusLabel("pending", t("toolbar.status.pending"))}</option>
           </select>
           <div className="relative min-w-0">
             <Search className="search-icon absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary" />
             <input
               ref={searchInputRef}
               type="search"
-              aria-label="Search channels"
+              aria-label={t("toolbar.searchLabel")}
               autoCorrect="off"
               spellCheck={false}
-              placeholder="Search..."
+              placeholder={t("toolbar.searchPlaceholder")}
               value={search}
               onChange={(e) => handleSearchChange(e.target.value)}
               className="native-field h-7 w-full min-w-0 pl-7 pr-2 text-[12px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:cursor-not-allowed"

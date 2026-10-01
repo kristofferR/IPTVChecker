@@ -1,12 +1,11 @@
 import { X } from "lucide-react";
 import { useState } from "react";
+import { t } from "../i18n";
 import { reverseChanges } from "../lib/dispatcharrEdits";
 import { isScanActive } from "../lib/scanState";
 import { useAppStore } from "../store";
 
 const getStore = () => useAppStore.getState();
-
-const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 /** Outcome of a bulk fix. Stays until dismissed so Undo all remains reachable. */
 export function DispatcharrToast() {
@@ -46,24 +45,28 @@ export function DispatcharrToast() {
       className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-border-app bg-dropdown px-4 py-2 text-[12px] text-text-primary shadow-xl"
     >
       <span>
-        {plural(toast.fixed, "channel")} fixed
-        {toast.removed > 0 && ` · ${plural(toast.removed, "dead stream")} removed`}
+        {t("dispatcharr.toast.fixed", { count: toast.fixed })}
+        {toast.removed > 0 && ` · ${t("dispatcharr.toast.deadRemoved", { count: toast.removed })}`}
       </span>
-      {toast.failed > 0 && <span className="text-red-400">{toast.failed} failed</span>}
+      {toast.failed > 0 && (
+        <span className="text-red-400">
+          {t("dispatcharr.toast.failed", { count: toast.failed })}
+        </span>
+      )}
       {toast.changes.length > 0 && (
         <button
           type="button"
           disabled={undoing || scanning}
-          title={scanning ? "Available when the scan finishes" : undefined}
+          title={scanning ? t("dispatcharr.availableAfterScan") : undefined}
           onClick={() => void handleUndoAll()}
           className="text-blue-400 hover:text-blue-300 disabled:opacity-50"
         >
-          {undoing ? "Undoing..." : "Undo all"}
+          {undoing ? t("dispatcharr.toast.undoing") : t("dispatcharr.toast.undoAll")}
         </button>
       )}
       <button
         type="button"
-        aria-label="Dismiss"
+        aria-label={t("common.dismiss")}
         onClick={() => setToast(null)}
         className="rounded p-0.5 text-text-tertiary hover:text-text-primary"
       >

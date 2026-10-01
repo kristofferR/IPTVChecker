@@ -1,5 +1,6 @@
 import { CircleDot, ExternalLink, FolderOpen, Play, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { formatCount, t, tRich } from "../i18n";
 import { getSampleClipActions } from "../lib/sampleClip";
 import { getSampleClipPreviewUrl, openMediaArtifact, revealMediaArtifact } from "../lib/tauri";
 import type { ChannelResult } from "../lib/types";
@@ -107,9 +108,10 @@ export function SampleClipRow({ result, scanActive, durationSecs, onCapture }: S
       }
     });
 
+  const duration = formatCount(durationSecs);
   const captureTitle = scanActive
-    ? "Scan in progress"
-    : `Capture ${durationSecs}s sample without re-encoding`;
+    ? t("player.panel.scanInProgress")
+    : t("player.sample.captureTitle", { duration });
   const showPreview = previewing && actions.canPreview;
 
   return (
@@ -133,7 +135,7 @@ export function SampleClipRow({ result, scanActive, durationSecs, onCapture }: S
       <div className="flex min-h-7 items-center justify-between gap-2">
         {capturing ? (
           <>
-            <span className="text-text-tertiary">Recording {durationSecs}s</span>
+            <span className="text-text-tertiary">{t("player.sample.recording", { duration })}</span>
             <CaptureProgress durationSecs={durationSecs} />
           </>
         ) : clipPath ? (
@@ -141,15 +143,16 @@ export function SampleClipRow({ result, scanActive, durationSecs, onCapture }: S
             <span
               className="whitespace-nowrap"
               title={
-                result.sample_clip_format === "ts"
-                  ? "MPEG-TS clips play in an external player"
-                  : undefined
+                result.sample_clip_format === "ts" ? t("player.sample.tsExternalOnly") : undefined
               }
             >
-              Sample{" "}
-              <span className="text-text-tertiary">
-                {result.sample_clip_format?.toUpperCase() ?? ""}
-              </span>
+              {tRich("player.sample.label", {
+                format: (
+                  <span className="text-text-tertiary">
+                    {result.sample_clip_format?.toUpperCase() ?? ""}
+                  </span>
+                ),
+              })}
             </span>
             <span className="flex items-center gap-0.5">
               {actions.canPreview && (
@@ -157,8 +160,8 @@ export function SampleClipRow({ result, scanActive, durationSecs, onCapture }: S
                   type="button"
                   onClick={() => setPreviewing((value) => !value)}
                   className={iconButtonClass}
-                  aria-label={previewing ? "Stop sample" : "Play sample"}
-                  title={previewing ? "Stop sample" : "Play sample"}
+                  aria-label={previewing ? t("player.sample.stop") : t("player.sample.play")}
+                  title={previewing ? t("player.sample.stop") : t("player.sample.play")}
                 >
                   {previewing ? (
                     <Square className="h-3.5 w-3.5" />
@@ -171,8 +174,8 @@ export function SampleClipRow({ result, scanActive, durationSecs, onCapture }: S
                 type="button"
                 onClick={() => run(() => openMediaArtifact(clipPath))}
                 className={iconButtonClass}
-                aria-label="Open sample in external player"
-                title="Open in external player"
+                aria-label={t("player.sample.openExternalLabel")}
+                title={t("player.panel.openInExternalPlayer")}
               >
                 <ExternalLink className="h-3.5 w-3.5" />
               </button>
@@ -180,8 +183,8 @@ export function SampleClipRow({ result, scanActive, durationSecs, onCapture }: S
                 type="button"
                 onClick={() => run(() => revealMediaArtifact(clipPath))}
                 className={iconButtonClass}
-                aria-label="Show sample in folder"
-                title="Show in folder"
+                aria-label={t("player.sample.showInFolderLabel")}
+                title={t("player.sample.showInFolder")}
               >
                 <FolderOpen className="h-3.5 w-3.5" />
               </button>
@@ -190,7 +193,7 @@ export function SampleClipRow({ result, scanActive, durationSecs, onCapture }: S
                 onClick={handleCapture}
                 disabled={!actions.canCapture}
                 className={iconButtonClass}
-                aria-label="Capture sample again"
+                aria-label={t("player.sample.captureAgain")}
                 title={captureTitle}
               >
                 <CircleDot className="h-3.5 w-3.5" />
@@ -199,7 +202,7 @@ export function SampleClipRow({ result, scanActive, durationSecs, onCapture }: S
           </>
         ) : (
           <>
-            <span className="text-text-tertiary">No sample</span>
+            <span className="text-text-tertiary">{t("player.sample.none")}</span>
             <button
               type="button"
               onClick={handleCapture}
@@ -208,25 +211,23 @@ export function SampleClipRow({ result, scanActive, durationSecs, onCapture }: S
               title={captureTitle}
             >
               <CircleDot className="h-3.5 w-3.5" />
-              Capture {durationSecs}s
+              {t("player.sample.capture", { duration })}
             </button>
           </>
         )}
       </div>
 
       {previewFailed && (
-        <p className="text-[11px] text-text-tertiary">
-          Preview unavailable in app. Use Open or Show in folder.
-        </p>
+        <p className="text-[11px] text-text-tertiary">{t("player.sample.previewUnavailable")}</p>
       )}
       <p role="alert" className="text-[11px] text-red-300 break-words empty:hidden">
         {error}
       </p>
       <span role="status" className="sr-only">
         {capturing
-          ? `Recording ${durationSecs} second sample`
+          ? t("player.sample.recordingStatus", { count: durationSecs })
           : previewFailed
-            ? "Sample preview unavailable"
+            ? t("player.sample.previewUnavailableStatus")
             : ""}
       </span>
     </div>

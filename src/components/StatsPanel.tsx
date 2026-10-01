@@ -1,4 +1,5 @@
 import { memo, type ReactNode, startTransition, useDeferredValue, useMemo } from "react";
+import { formatCount, getFormatLocale, t } from "../i18n";
 import { hasArchive } from "../lib/archive";
 import { archiveVerdict } from "../lib/archiveVerification";
 import { computeCatchupScore, withCatchupScore } from "../lib/catchupScore";
@@ -184,14 +185,22 @@ export const StatsPanel = memo(function StatsPanel() {
   }, [channels, selectedChannelIndices]);
   const catchupLabel =
     verdictTally.tested > 0
-      ? `${verdictTally.real} real${
-          verdictTally.shallower > 0 ? ` · ${verdictTally.shallower} shallower` : ""
-        } · ${verdictTally.fake} fake${
-          verdictTally.untested > 0 ? ` · ${verdictTally.untested} untested` : ""
-        }`
+      ? [
+          t("stats.catchup.real", { count: verdictTally.real }),
+          verdictTally.shallower > 0 &&
+            t("stats.catchup.shallower", { count: verdictTally.shallower }),
+          t("stats.catchup.fake", { count: verdictTally.fake }),
+          verdictTally.untested > 0 &&
+            t("stats.catchup.untested", { count: verdictTally.untested }),
+        ]
+          .filter(Boolean)
+          .join(" · ")
       : visibleCatchupCount === catchupCount
-        ? `${catchupCount} catch-up`
-        : `${visibleCatchupCount} of ${catchupCount} catch-up`;
+        ? t("stats.catchup.all", { count: catchupCount })
+        : t("stats.catchup.visible", {
+            visible: formatCount(visibleCatchupCount),
+            count: catchupCount,
+          });
   // Before verification the pill toggles the catch-up filter; after it, clicks
   // cycle through the real and fake verdicts.
   const cycleCatchupFilter = () => {
@@ -228,7 +237,11 @@ export const StatsPanel = memo(function StatsPanel() {
     <div className="flex items-center gap-2 px-4 py-1.5 border-t border-border-app bg-panel-subtle glass-material select-none">
       <Pill
         icon={<SFListNumber className={iconSize} />}
-        label={channelStats ? `${channelStats.channels} channels` : `${totalChannels} total`}
+        label={
+          channelStats
+            ? t("stats.channels", { count: channelStats.channels })
+            : t("stats.total", { count: totalChannels })
+        }
         color="neutral"
         active={statusFilter === "all"}
         onClick={() => handleStatusChange("all")}
@@ -237,7 +250,7 @@ export const StatsPanel = memo(function StatsPanel() {
         <>
           <Pill
             icon={<SFCheckmarkCircleFill className={iconSize} />}
-            label={String(channelStats.alive)}
+            label={formatCount(channelStats.alive)}
             color="green"
             active={statusFilter === "alive"}
             onClick={() => toggleFilter("alive")}
@@ -245,7 +258,7 @@ export const StatsPanel = memo(function StatsPanel() {
           {channelStats.primaryDead > 0 && (
             <Pill
               icon={<SFXmarkCircleFill className={iconSize} />}
-              label={`${channelStats.primaryDead} primary dead`}
+              label={t("stats.primaryDead", { count: channelStats.primaryDead })}
               color="red"
               active={statusFilter === "primary_dead"}
               onClick={() => toggleFilter("primary_dead")}
@@ -254,7 +267,7 @@ export const StatsPanel = memo(function StatsPanel() {
           {channelStats.hasDead > 0 && (
             <Pill
               icon={<SFExclamationTriangleFill className={iconSize} />}
-              label={`${channelStats.hasDead} with dead streams`}
+              label={t("stats.withDeadStreams", { count: channelStats.hasDead })}
               color="orange"
               active={statusFilter === "has_dead"}
               onClick={() => toggleFilter("has_dead")}
@@ -263,7 +276,7 @@ export const StatsPanel = memo(function StatsPanel() {
           {channelStats.allDead > 0 && (
             <Pill
               icon={<SFXmarkCircleFill className={iconSize} />}
-              label={`${channelStats.allDead} all dead`}
+              label={t("stats.allDead", { count: channelStats.allDead })}
               color="red"
               active={statusFilter === "all_dead"}
               onClick={() => toggleFilter("all_dead")}
@@ -275,7 +288,7 @@ export const StatsPanel = memo(function StatsPanel() {
         <>
           <Pill
             icon={<SFCheckmarkCircleFill className={iconSize} />}
-            label={String(stats.alive)}
+            label={formatCount(stats.alive)}
             color="green"
             active={statusFilter === "alive"}
             onClick={() => toggleFilter("alive")}
@@ -283,7 +296,7 @@ export const StatsPanel = memo(function StatsPanel() {
           {stats.drm > 0 && (
             <Pill
               icon={<SFShieldFill className={iconSize} />}
-              label={String(stats.drm)}
+              label={formatCount(stats.drm)}
               color="cyan"
               active={statusFilter === "drm"}
               onClick={() => toggleFilter("drm")}
@@ -291,14 +304,14 @@ export const StatsPanel = memo(function StatsPanel() {
           )}
           <Pill
             icon={<SFXmarkCircleFill className={iconSize} />}
-            label={String(stats.dead)}
+            label={formatCount(stats.dead)}
             color="red"
             active={statusFilter === "dead"}
             onClick={() => toggleFilter("dead")}
           />
           <Pill
             icon={<SFLockFill className={iconSize} />}
-            label={String(stats.geoblocked)}
+            label={formatCount(stats.geoblocked)}
             color="yellow"
             active={statusFilter === "geoblocked"}
             onClick={() => toggleFilter("geoblocked")}
@@ -306,7 +319,7 @@ export const StatsPanel = memo(function StatsPanel() {
           {stats.placeholder > 0 && (
             <Pill
               icon={<SFPhotoFill className={iconSize} />}
-              label={String(stats.placeholder)}
+              label={formatCount(stats.placeholder)}
               color="orange"
               active={statusFilter === "placeholder"}
               onClick={() => toggleFilter("placeholder")}
@@ -326,45 +339,55 @@ export const StatsPanel = memo(function StatsPanel() {
       {displayScore && (
         <Pill
           icon={null}
-          label={`Score ${displayScore.overall.toFixed(1)}/10`}
+          label={t("stats.score", {
+            score: displayScore.overall.toLocaleString(getFormatLocale(), {
+              minimumFractionDigits: 1,
+              maximumFractionDigits: 1,
+            }),
+          })}
           color="blue"
           onClick={toggleReportPanel}
         />
       )}
       {channelStats && stats && (
         <span className="text-[12px] text-text-tertiary tabular-nums">
-          {channelStats.checked} of {channelStats.streams} streams checked
+          {t("stats.streamsChecked", {
+            checked: formatCount(channelStats.checked),
+            count: channelStats.streams,
+          })}
         </span>
       )}
       {showRightStatus && (
         <div className="ml-auto flex items-center gap-2">
           {showSelectionInfo && (
             <span className="text-[12px] text-text-tertiary tabular-nums">
-              {selectedChannelIndices.length} selected ·{" "}
-              <span className="text-violet-400">{selectedCatchupCount} with catch-up</span>
+              {t("stats.selected", { count: selectedChannelIndices.length })} ·{" "}
+              <span className="text-violet-400">
+                {t("stats.withCatchup", { count: selectedCatchupCount })}
+              </span>
             </span>
           )}
           {scanState === "paused" && (
             <span className="text-[12px] text-yellow-400 font-medium uppercase tracking-[0.04em]">
-              Paused
+              {t("stats.paused")}
             </span>
           )}
           {scanState === "cancelling" && (
             <span className="text-[12px] text-orange-400 font-medium uppercase tracking-[0.04em]">
-              Stopping
+              {t("stats.stopping")}
             </span>
           )}
           {effectiveLowFpsCount > 0 && (
             <Pill
               icon={<SFExclamationTriangleFill className={iconSize} />}
-              label={`${effectiveLowFpsCount} low fps`}
+              label={t("stats.lowFps", { count: effectiveLowFpsCount })}
               color="orange"
             />
           )}
           {effectiveMislabeledCount > 0 && (
             <Pill
               icon={<SFTagFill className={iconSize} />}
-              label={`${effectiveMislabeledCount} mislabeled`}
+              label={t("stats.mislabeled", { count: effectiveMislabeledCount })}
               color="orange"
               active={statusFilter === "mislabeled"}
               onClick={() => toggleFilter("mislabeled")}
@@ -373,7 +396,7 @@ export const StatsPanel = memo(function StatsPanel() {
           {duplicateCount > 0 && (
             <Pill
               icon={<SFDocOnDocFill className={iconSize} />}
-              label={`${duplicateCount} duplicates`}
+              label={t("stats.duplicates", { count: duplicateCount })}
               color="orange"
               active={statusFilter === "duplicates"}
               onClick={() => toggleFilter("duplicates")}

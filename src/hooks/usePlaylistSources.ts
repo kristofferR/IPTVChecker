@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { formatCount, t } from "../i18n";
 import { applyXtreamArchiveUpdates, applyXtreamArchiveUpdatesToPreview } from "../lib/archive";
 import { cancelArchiveProbes } from "../lib/archiveProbe";
 import { apiKeyFingerprint, normalizeDispatcharrServer } from "../lib/dispatcharr";
@@ -748,7 +749,7 @@ export function usePlaylistSources({
   const handleOpen = useCallback(async () => {
     const path = await open({
       multiple: false,
-      filters: [{ name: "M3U Playlists", extensions: ["m3u", "m3u8"] }],
+      filters: [{ name: t("app.sources.m3uFileFilter"), extensions: ["m3u", "m3u8"] }],
       directory: false,
     });
     if (!path) return;
@@ -821,7 +822,10 @@ export function usePlaylistSources({
           1,
           Math.min(20, Math.round(result.preview.xtream_max_connections)),
         );
-        const message = `Xtream max connections detected: ${result.preview.xtream_max_connections}. Scan concurrency will use ${effectiveConcurrency}.`;
+        const message = t("app.sources.xtreamMaxConnections", {
+          max: formatCount(result.preview.xtream_max_connections),
+          concurrency: formatCount(effectiveConcurrency),
+        });
         getStore().setMenuInfo(
           message,
           "warn",
@@ -893,7 +897,7 @@ export function usePlaylistSources({
     async (savedId: string, source: DispatcharrOpenRequest): Promise<string | true> => {
       const previous = getStore().savedPlaylists.find((entry) => entry.id === savedId);
       if (!previous) {
-        return "The saved playlist no longer exists.";
+        return t("app.sources.savedPlaylistMissing");
       }
       // Confirm the Dispatcharr source works before replacing anything.
       try {
@@ -982,7 +986,7 @@ export function usePlaylistSources({
       null,
     );
     if (!draft) {
-      state.setMenuInfo("Open a file, URL, or Xtream source first.");
+      state.setMenuInfo(t("app.sources.openSourceFirst"));
       return;
     }
     setSavedPlaylistEditorDraft(draft);
@@ -1031,7 +1035,7 @@ export function usePlaylistSources({
 
   const handleDeleteSavedPlaylistById = useCallback(
     async (id: string) => {
-      const confirmed = window.confirm("Delete this saved playlist?");
+      const confirmed = window.confirm(t("app.sources.confirmDeleteSaved"));
       if (!confirmed) {
         return;
       }
@@ -1145,7 +1149,7 @@ export function usePlaylistSources({
       if (entry.kind === "xtream") {
         const source = parseXtreamRecent(entry.value);
         if (!source) {
-          getStore().setMenuInfo("This Xtream recent entry is invalid.", "warn");
+          getStore().setMenuInfo(t("app.sources.invalidXtreamRecent"), "warn");
           void refreshRecentPlaylists();
           return;
         }
@@ -1168,7 +1172,7 @@ export function usePlaylistSources({
       if (entry.kind === "dispatcharr") {
         const source = parseDispatcharrRecent(entry.value);
         if (!source) {
-          getStore().setMenuInfo("This Dispatcharr recent entry is invalid.", "warn");
+          getStore().setMenuInfo(t("app.sources.invalidDispatcharrRecent"), "warn");
           void refreshRecentPlaylists();
           return;
         }

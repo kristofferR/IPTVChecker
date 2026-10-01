@@ -1,3 +1,5 @@
+import { getFormatLocale, t } from "../i18n";
+
 let dayFormatter: Intl.DateTimeFormat | undefined;
 let timeFormatter: Intl.DateTimeFormat | undefined;
 
@@ -12,9 +14,9 @@ export function dayLabel(epochS: number, now: Date = new Date()): string {
   const date = new Date(epochS * 1000);
   const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const dayDiff = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
-  if (dayDiff === 0) return "Today";
-  if (dayDiff === 1) return "Yesterday";
-  dayFormatter ??= new Intl.DateTimeFormat([], {
+  if (dayDiff === 0) return t("format.today");
+  if (dayDiff === 1) return t("format.yesterday");
+  dayFormatter ??= new Intl.DateTimeFormat(getFormatLocale(), {
     weekday: "short",
     day: "numeric",
     month: "short",
@@ -27,7 +29,7 @@ export function dayLabel(epochS: number, now: Date = new Date()): string {
 export function timeLabel(epochS: number): string {
   // Guide rows format hundreds of labels while scrolling. Reuse the locale
   // formatter rather than constructing one for each programme.
-  timeFormatter ??= new Intl.DateTimeFormat([], {
+  timeFormatter ??= new Intl.DateTimeFormat(getFormatLocale(), {
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",

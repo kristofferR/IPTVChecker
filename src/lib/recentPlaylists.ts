@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import type { DispatcharrOpenRequest, RecentPlaylistEntry, XtreamRecentSource } from "./types";
 
 /** Helpers for encoding/labeling recent-playlist entries (Xtream and
@@ -65,20 +66,22 @@ export function parseDispatcharrRecent(value: string): DispatcharrOpenRequest | 
 
 export function recentValueLabel(entry: RecentPlaylistEntry): string {
   if (entry.kind === "file") {
-    return `Path - ${entry.value}`;
+    return t("app.recent.path", { value: entry.value });
   }
   if (entry.kind === "url") {
-    return `URL - ${entry.value}`;
+    return t("app.recent.url", { value: entry.value });
   }
   if (entry.kind === "dispatcharr") {
     const source = parseDispatcharrRecent(entry.value);
-    return source ? `Dispatcharr - ${source.server}` : "Dispatcharr - Invalid source";
+    return source
+      ? t("app.recent.dispatcharr", { server: source.server })
+      : t("app.recent.dispatcharrInvalid");
   }
   const source = parseXtreamRecent(entry.value);
   if (!source) {
-    return "Xtream - Invalid source";
+    return t("app.recent.xtreamInvalid");
   }
-  return `Xtream - ${source.server} (${source.username})`;
+  return t("app.recent.xtream", { server: source.server, username: source.username });
 }
 
 export function recentTitle(entry: RecentPlaylistEntry): string {

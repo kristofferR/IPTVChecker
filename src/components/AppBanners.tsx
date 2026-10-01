@@ -1,6 +1,7 @@
 import { Download, ExternalLink, Info, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { dismissUpdateNotice } from "../hooks/useUpdateCheck";
+import { formatCount, getFormatLocale, t } from "../i18n";
 import { type ArchiveDownload, cancelArchiveDownload } from "../lib/archiveDownload";
 import {
   type DownAccount,
@@ -69,22 +70,19 @@ function DispatcharrConvertBanner() {
   return (
     <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-500/10 border-b border-blue-500/20 text-blue-400 text-[13px]">
       <Info className="w-4 h-4" />
-      <span className="flex-1">
-        This playlist comes from Dispatcharr. Convert it to a Dispatcharr source to check each
-        channel's provider streams and fix their order.
-      </span>
+      <span className="flex-1">{t("banners.dispatcharrConvert.message")}</span>
       <button
         type="button"
         onClick={convert}
         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-blue-400/30 hover:bg-blue-500/15 transition-colors"
       >
-        Convert
+        {t("banners.dispatcharrConvert.convert")}
       </button>
       <button
         onClick={dismiss}
         className="p-1 hover:bg-blue-500/20 rounded transition-colors"
         type="button"
-        aria-label="Dismiss Dispatcharr suggestion"
+        aria-label={t("banners.dispatcharrConvert.dismiss")}
       >
         <X className="w-4 h-4" />
       </button>
@@ -112,10 +110,25 @@ function DispatcharrProviderDownBanner({
   onDismiss: () => void;
 }) {
   const [refresh, setRefresh] = useState<RefreshState>({ kind: "idle" });
-  const count =
+  const cause =
+    account.error === "timeouts"
+      ? t("banners.providerDown.causes.timeouts")
+      : account.error === "connection errors"
+        ? t("banners.providerDown.causes.connectionErrors")
+        : account.error;
+  const message =
     account.failed === account.scanned
-      ? `All ${account.scanned} streams`
-      : `${account.failed} of ${account.scanned} streams`;
+      ? t("banners.providerDown.allFailed", {
+          count: account.scanned,
+          account: account.account,
+          cause,
+        })
+      : t("banners.providerDown.someFailed", {
+          failed: formatCount(account.failed),
+          count: account.scanned,
+          account: account.account,
+          cause,
+        });
   const handleRefresh = async () => {
     const target = dispatcharrTarget(getStore().playlist);
     if (!target) return;
@@ -143,11 +156,10 @@ function DispatcharrProviderDownBanner({
   return (
     <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-[13px]">
       <span className="flex-1 min-w-0">
-        {count} from {account.account} failed with {account.error}. The provider may be down; Fix
-        order keeps its streams.
-        {refresh.kind === "sent" &&
-          " Dispatcharr is refreshing it; reload once it finishes to get the new stream URLs."}
-        {refresh.kind === "failed" && ` Refresh failed: ${refresh.error}`}
+        {message}
+        {refresh.kind === "sent" && ` ${t("banners.providerDown.refreshing")}`}
+        {refresh.kind === "failed" &&
+          ` ${t("banners.providerDown.refreshFailed", { error: refresh.error })}`}
       </span>
       <button
         type="button"
@@ -155,22 +167,22 @@ function DispatcharrProviderDownBanner({
         onClick={() => void handleRefresh()}
         className={buttonClass}
       >
-        Refresh in Dispatcharr
+        {t("banners.providerDown.refresh")}
       </button>
       {refresh.kind === "sent" ? (
         <button type="button" onClick={onReload} className={buttonClass}>
-          Reload
+          {t("banners.providerDown.reload")}
         </button>
       ) : (
         <button type="button" onClick={handleRescan} className={buttonClass}>
-          Rescan
+          {t("banners.providerDown.rescan")}
         </button>
       )}
       <button
         onClick={onDismiss}
         className="p-1 hover:bg-amber-500/20 rounded transition-colors"
         type="button"
-        aria-label={`Dismiss the notice about ${account.account}`}
+        aria-label={t("banners.providerDown.dismiss", { account: account.account })}
       >
         <X className="w-4 h-4" />
       </button>
@@ -245,19 +257,22 @@ function ArchiveDownloadBanner({ download }: { download: ArchiveDownload }) {
     return (
       <div className="flex items-center gap-3 px-4 py-2 bg-violet-500/10 border-b border-violet-500/20 text-violet-300 text-[13px]">
         <Download className="w-4 h-4 shrink-0" />
-        <span className="min-w-0 truncate">Recording {downloadLabel(download)}</span>
+        <span className="min-w-0 truncate">
+          {t("banners.recording.progress", { title: downloadLabel(download) })}
+        </span>
         <div className="flex-1 h-1.5 min-w-16 rounded-full bg-violet-500/20 overflow-hidden">
           <div className="h-full bg-violet-400 rounded-full" style={{ width: `${percent}%` }} />
         </div>
         <span className="tabular-nums shrink-0 text-violet-200">
-          {percent}% · {formatBytes(download.bytes)}
+          {new Intl.NumberFormat(getFormatLocale(), { style: "percent" }).format(percent / 100)} ·{" "}
+          {formatBytes(download.bytes)}
         </span>
         <button
           onClick={() => void cancelArchiveDownload(download.id)}
           className="shrink-0 rounded border border-violet-400/40 px-2 py-0.5 text-[12px] hover:bg-violet-500/20 transition-colors"
           type="button"
         >
-          Cancel
+          {t("common.cancel")}
         </button>
       </div>
     );
@@ -270,10 +285,13 @@ function ArchiveDownloadBanner({ download }: { download: ArchiveDownload }) {
         : "bg-panel-muted border-border-subtle text-text-secondary";
   const message =
     download.status === "done"
-      ? `Saved ${downloadLabel(download)} to ${download.path}`
+      ? t("banners.recording.saved", { title: downloadLabel(download), path: download.path })
       : download.status === "failed"
-        ? `Recording ${downloadLabel(download)} failed: ${download.error ?? "unknown error"}`
-        : `Recording ${downloadLabel(download)} cancelled`;
+        ? t("banners.recording.failed", {
+            title: downloadLabel(download),
+            error: download.error ?? t("banners.recording.unknownError"),
+          })
+        : t("banners.recording.cancelled", { title: downloadLabel(download) });
   return (
     <div className={`flex items-center gap-2 px-4 py-2 border-b text-[13px] ${tone}`}>
       <span className="flex-1 min-w-0 truncate" title={message}>
@@ -283,7 +301,7 @@ function ArchiveDownloadBanner({ download }: { download: ArchiveDownload }) {
         onClick={dismiss}
         className="p-1 rounded hover:bg-white/10 transition-colors"
         type="button"
-        aria-label="Dismiss recording notice"
+        aria-label={t("banners.recording.dismiss")}
       >
         <X className="w-4 h-4" />
       </button>
@@ -358,7 +376,7 @@ export function AppBanners({ onInstallUpdate, onScanRows, onReloadSource }: AppB
             onClick={() => getStore().setErrorDismissed(true)}
             className="p-1 hover:bg-red-500/20 rounded transition-colors"
             type="button"
-            aria-label="Dismiss scan error"
+            aria-label={t("banners.dismissScanError")}
           >
             <X className="w-4 h-4" />
           </button>
@@ -372,7 +390,7 @@ export function AppBanners({ onInstallUpdate, onScanRows, onReloadSource }: AppB
             onClick={() => getStore().setPlaybackError(null)}
             className="p-1 hover:bg-red-500/20 rounded transition-colors"
             type="button"
-            aria-label="Dismiss playback error"
+            aria-label={t("banners.dismissPlaybackError")}
           >
             <X className="w-4 h-4" />
           </button>
@@ -386,7 +404,7 @@ export function AppBanners({ onInstallUpdate, onScanRows, onReloadSource }: AppB
             onClick={() => getStore().setPlaylistOpenError(null)}
             className="p-1 hover:bg-red-500/20 rounded transition-colors"
             type="button"
-            aria-label="Dismiss playlist error"
+            aria-label={t("banners.dismissPlaylistError")}
           >
             <X className="w-4 h-4" />
           </button>
@@ -400,7 +418,7 @@ export function AppBanners({ onInstallUpdate, onScanRows, onReloadSource }: AppB
             onClick={() => getStore().setScanInputError(null)}
             className="p-1 hover:bg-red-500/20 rounded transition-colors"
             type="button"
-            aria-label="Dismiss input error"
+            aria-label={t("banners.dismissInputError")}
           >
             <X className="w-4 h-4" />
           </button>
@@ -418,7 +436,7 @@ export function AppBanners({ onInstallUpdate, onScanRows, onReloadSource }: AppB
             onClick={() => getStore().setMenuInfo(null)}
             className="p-1 hover:bg-blue-500/20 rounded transition-colors"
             type="button"
-            aria-label="Dismiss notification"
+            aria-label={t("banners.dismissNotification")}
           >
             <X className="w-4 h-4" />
           </button>
@@ -448,7 +466,7 @@ export function AppBanners({ onInstallUpdate, onScanRows, onReloadSource }: AppB
             onClick={dismissUpdateNotice}
             className="p-1 hover:bg-emerald-500/20 rounded transition-colors"
             type="button"
-            aria-label="Dismiss update notice"
+            aria-label={t("banners.update.dismiss")}
           >
             <X className="w-4 h-4" />
           </button>

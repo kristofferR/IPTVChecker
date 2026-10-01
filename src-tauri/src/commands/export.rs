@@ -61,9 +61,9 @@ pub async fn export_app_log(window: tauri::WebviewWindow, text: String) -> Resul
             .dialog()
             .file()
             .set_parent(&window)
-            .set_title("Export Log")
+            .set_title(crate::i18n::text("export_log.title"))
             .set_file_name("iptv-checker.log")
-            .add_filter("Log files", &["log", "txt"])
+            .add_filter(crate::i18n::text("export_log.filter"), &["log", "txt"])
             .blocking_save_file()
         else {
             return Ok(());

@@ -1,5 +1,6 @@
 import { FolderOpen, Pencil, Server, Trash2, X } from "lucide-react";
 import { useEffect } from "react";
+import { t } from "../i18n";
 import { savedPlaylistSecondaryLabel } from "../lib/savedPlaylists";
 import type { SavedPlaylistEntry } from "../lib/types";
 
@@ -43,15 +44,17 @@ export default function SavedPlaylistsDialog({
         <div className="flex items-start justify-between border-b border-border-app px-5 pb-3 pt-4">
           <div>
             <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-1">
-              Library
+              {t("saved.library.eyebrow")}
             </p>
-            <h2 className="text-[18px] font-semibold text-text-primary">Saved Playlists</h2>
+            <h2 className="text-[18px] font-semibold text-text-primary">
+              {t("saved.library.title")}
+            </h2>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="rounded-md p-1.5 hover:bg-btn-hover transition-colors"
-            aria-label="Close saved playlists"
+            aria-label={t("saved.library.closeLabel")}
           >
             <X className="w-[18px] h-[18px]" />
           </button>
@@ -60,7 +63,7 @@ export default function SavedPlaylistsDialog({
         <div className="max-h-[70vh] overflow-y-auto p-5">
           {playlists.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border-app px-4 py-8 text-center text-text-tertiary">
-              No saved playlists yet.
+              {t("saved.library.empty")}
             </div>
           ) : (
             <div className="space-y-3">
@@ -92,7 +95,7 @@ export default function SavedPlaylistsDialog({
                         className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-blue-500 transition-colors"
                       >
                         <FolderOpen className="h-3.5 w-3.5" />
-                        Open
+                        {t("common.open")}
                       </button>
                       <button
                         type="button"
@@ -100,7 +103,7 @@ export default function SavedPlaylistsDialog({
                         className="inline-flex items-center gap-1.5 rounded-md bg-btn px-3 py-1.5 text-[12px] text-text-primary hover:bg-btn-hover transition-colors"
                       >
                         <Pencil className="h-3.5 w-3.5" />
-                        Edit
+                        {t("common.edit")}
                       </button>
                       {entry.kind === "xtream" && (
                         <button
@@ -109,7 +112,7 @@ export default function SavedPlaylistsDialog({
                           className="inline-flex items-center gap-1.5 rounded-md bg-btn px-3 py-1.5 text-[12px] text-text-primary hover:bg-btn-hover transition-colors"
                         >
                           <Server className="h-3.5 w-3.5" />
-                          Test Servers
+                          {t("saved.library.testServers")}
                         </button>
                       )}
                       <button
@@ -118,7 +121,7 @@ export default function SavedPlaylistsDialog({
                         className="inline-flex items-center gap-1.5 rounded-md bg-red-500/15 px-3 py-1.5 text-[12px] text-red-300 hover:bg-red-500/25 transition-colors"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
-                        Delete
+                        {t("common.delete")}
                       </button>
                     </div>
                   </div>

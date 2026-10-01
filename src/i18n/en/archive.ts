@@ -1,1 +1,71 @@
-export default {} as const;
+export default {
+  badgeDays: "{days}d",
+  badgeYes: "yes",
+  title: {
+    days: { one: "Catch-up: {type} · {count} day", other: "Catch-up: {type} · {count} days" },
+    daysWithSource: {
+      one: "Catch-up: {type} · {count} day · Source: {source}",
+      other: "Catch-up: {type} · {count} days · Source: {source}",
+    },
+    unknownDepth: "Catch-up: {type} · unknown depth",
+    unknownDepthWithSource: "Catch-up: {type} · unknown depth · Source: {source}",
+  },
+  playbackNoArchive:
+    "The provider returned no archive for this time. The channel advertises catch-up, but nothing is stored for it (or the start is outside the retained window).",
+  playbackFailed: "Archive playback failed: {reason}",
+  failureLabel: {
+    empty: "EMPTY",
+    live: "LIVE",
+    timeout: "TIMEOUT",
+    error: "ERROR",
+  },
+  failureSentence: {
+    empty:
+      "The provider answers archive requests but serves no media. The channel is flagged for catch-up yet keeps nothing.",
+    live: "Archive requests return the live stream instead of the requested time. The provider ignores the catch-up start.",
+    httpStatus: "Archive requests fail with HTTP {status} while the channel itself answers.",
+    httpUnknown: "Archive requests fail with HTTP error while the channel itself answers.",
+    timeout: "Archive requests never answer.",
+    unreachable: "Archive requests fail before any media arrives.",
+  },
+  confirmCloseExternalPlayerTest: "Close the external player before testing catch-up. Continue?",
+  confirmCloseExternalPlayerVerify:
+    "Close the external player before verifying catch-up. Continue?",
+  outcome: {
+    ok: "OK",
+    okWithLatency: "OK · {latency} ms",
+    reachable: "Reachable",
+    reachableWithLatency: "Reachable · {latency} ms",
+    unverified: "Unverified",
+    unverifiedWithLatency: "Unverified · {latency} ms",
+    failed: "Failed",
+    pointNear: "Archive −1 h",
+    pointDays: "Archive −{days} d",
+  },
+  card: {
+    heading: "Archive",
+    depthDays: "{days} d",
+    loadingGuide: "Loading guide...",
+    programmesLabel: "Catch-up programmes",
+    watchFromHere: "Watch from here",
+    waitForScan: "Wait for the scan to finish",
+    stopPlaybackFirst: "Stop playback before testing catch-up",
+    confirmExternalPlayerClosed: "Confirm the external player is closed before testing catch-up",
+    testing: "Testing catch-up...",
+    test: "Test catch-up",
+    fake: "Fake catch-up.",
+  },
+  verifyBar: {
+    quick: "Verifying catch-up",
+    full: "Verifying catch-up · full",
+    progress: "{done}/{total} ({percent})",
+    measuringSpeed: "Measuring speed…",
+    telemetry: "{rate} ch/min · ~{eta} remaining",
+    etaHours: "{hours}h {minutes}m",
+    etaMinutes: "{minutes}m {seconds}s",
+    etaSeconds: "{seconds}s",
+    real: { other: "{count} real" },
+    fake: { other: "{count} fake" },
+    shallower: { other: "{count} shallower" },
+  },
+} as const;

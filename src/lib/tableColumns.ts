@@ -1,3 +1,4 @@
+import type { MessageKey } from "../i18n";
 import type { SortField } from "./filters";
 
 export type ColumnKey = SortField;
@@ -6,36 +7,96 @@ export const COLUMN_WIDTH_STORAGE_KEY = "iptv-checker.column-widths.v1";
 
 export interface ColumnDefinition {
   key: ColumnKey;
-  label: string;
+  labelKey: Extract<MessageKey, `table.columns.${string}`>;
   defaultWidth: number;
   minWidth: number;
   align?: "left" | "center" | "right";
 }
 
 export const COLUMN_DEFINITIONS: ColumnDefinition[] = [
-  { key: "index", label: "#", defaultWidth: 58, minWidth: 46, align: "left" },
-  { key: "status", label: "Status", defaultWidth: 40, minWidth: 32, align: "left" },
-  { key: "error", label: "Error", defaultWidth: 240, minWidth: 140, align: "left" },
-  { key: "playlist", label: "Playlist", defaultWidth: 190, minWidth: 130, align: "left" },
-  { key: "name", label: "Channel Name", defaultWidth: 360, minWidth: 180, align: "left" },
-  { key: "url", label: "URL", defaultWidth: 320, minWidth: 180, align: "left" },
-  { key: "group", label: "Group", defaultWidth: 220, minWidth: 120, align: "left" },
-  { key: "resolution", label: "Res", defaultWidth: 84, minWidth: 68, align: "center" },
-  { key: "codec", label: "Codec", defaultWidth: 66, minWidth: 50, align: "center" },
-  { key: "fps", label: "FPS", defaultWidth: 48, minWidth: 40, align: "center" },
-  { key: "bitrate", label: "Bitrate", defaultWidth: 100, minWidth: 80, align: "right" },
-  { key: "hdr", label: "HDR", defaultWidth: 90, minWidth: 70, align: "center" },
-  { key: "latency", label: "Latency", defaultWidth: 76, minWidth: 62, align: "right" },
-  { key: "audio", label: "Audio", defaultWidth: 84, minWidth: 66, align: "right" },
-  { key: "audio_codec", label: "Codec", defaultWidth: 72, minWidth: 56, align: "center" },
+  { key: "index", labelKey: "table.columns.index", defaultWidth: 58, minWidth: 46, align: "left" },
+  {
+    key: "status",
+    labelKey: "table.columns.status",
+    defaultWidth: 40,
+    minWidth: 32,
+    align: "left",
+  },
+  {
+    key: "error",
+    labelKey: "table.columns.error",
+    defaultWidth: 240,
+    minWidth: 140,
+    align: "left",
+  },
+  {
+    key: "playlist",
+    labelKey: "table.columns.playlist",
+    defaultWidth: 190,
+    minWidth: 130,
+    align: "left",
+  },
+  { key: "name", labelKey: "table.columns.name", defaultWidth: 360, minWidth: 180, align: "left" },
+  { key: "url", labelKey: "table.columns.url", defaultWidth: 320, minWidth: 180, align: "left" },
+  {
+    key: "group",
+    labelKey: "table.columns.group",
+    defaultWidth: 220,
+    minWidth: 120,
+    align: "left",
+  },
+  {
+    key: "resolution",
+    labelKey: "table.columns.resolution",
+    defaultWidth: 84,
+    minWidth: 68,
+    align: "center",
+  },
+  {
+    key: "codec",
+    labelKey: "table.columns.codec",
+    defaultWidth: 66,
+    minWidth: 50,
+    align: "center",
+  },
+  { key: "fps", labelKey: "table.columns.fps", defaultWidth: 48, minWidth: 40, align: "center" },
+  {
+    key: "bitrate",
+    labelKey: "table.columns.bitrate",
+    defaultWidth: 100,
+    minWidth: 80,
+    align: "right",
+  },
+  { key: "hdr", labelKey: "table.columns.hdr", defaultWidth: 90, minWidth: 70, align: "center" },
+  {
+    key: "latency",
+    labelKey: "table.columns.latency",
+    defaultWidth: 76,
+    minWidth: 62,
+    align: "right",
+  },
+  { key: "audio", labelKey: "table.columns.audio", defaultWidth: 84, minWidth: 66, align: "right" },
+  {
+    key: "audio_codec",
+    labelKey: "table.columns.audioCodec",
+    defaultWidth: 72,
+    minWidth: 56,
+    align: "center",
+  },
   {
     key: "audio_layout",
-    label: "Channels",
+    labelKey: "table.columns.audioLayout",
     defaultWidth: 92,
     minWidth: 72,
     align: "center",
   },
-  { key: "catchup", label: "Catch-up", defaultWidth: 92, minWidth: 72, align: "center" },
+  {
+    key: "catchup",
+    labelKey: "table.columns.catchup",
+    defaultWidth: 92,
+    minWidth: 72,
+    align: "center",
+  },
 ];
 
 export const COLUMN_DEFINITION_MAP: Record<ColumnKey, ColumnDefinition> = COLUMN_DEFINITIONS.reduce(

@@ -1,4 +1,5 @@
 import { createElement, Fragment, type ReactNode } from "react";
+import type { UiLocale } from "../lib/types";
 import en from "./en";
 import type { Catalog, Message, MessageAt, MessageKeys, ParamArgs, Translation } from "./types";
 
@@ -38,25 +39,59 @@ function flatten(catalog: Catalog | LocaleTranslation, into: Map<string, Message
 const english = flatten(en, new Map());
 let messages = english;
 let locale: LocaleCode = "en";
+let formatLocale = "en";
+let launchLanguage: string | null = null;
 let pluralRules = new Intl.PluralRules("en");
 let countFormat = new Intl.NumberFormat("en");
+
+function canonical(tag: string | null): string | undefined {
+  try {
+    return tag ? Intl.getCanonicalLocales(tag)[0] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Regional formats follow the system unless the user reads a different
+ * language, so an English UI on a Norwegian system keeps 24-hour clocks.
+ */
+function pickFormatLocale(code: LocaleCode, system: string | null): string {
+  const systemTag = canonical(system);
+  if (!systemTag) return code;
+  const systemLanguage = new Intl.Locale(systemTag).language;
+  return code === "en" || systemLanguage === new Intl.Locale(code).language ? systemTag : code;
+}
 
 /**
  * Loads the launch locale. Call once before the first render; the language
  * stays fixed for the life of the window (changes apply after a restart).
  */
-export async function initI18n(code: string) {
+export async function initI18n({ locale: code, preference, system }: UiLocale) {
+  launchLanguage = preference;
   if (!isLocaleCode(code)) return;
   const { default: translation } = await LOCALES[code].load();
   messages = flatten(translation, new Map(english));
   locale = code;
+  formatLocale = pickFormatLocale(code, system);
   pluralRules = new Intl.PluralRules(code);
-  countFormat = new Intl.NumberFormat(code);
+  countFormat = new Intl.NumberFormat(formatLocale);
   document.documentElement.lang = code;
 }
 
+/** The UI language. */
 export function getLocale(): LocaleCode {
   return locale;
+}
+
+/** The `language` setting this process launched with; null follows the system. */
+export function getLaunchLanguage(): string | null {
+  return launchLanguage;
+}
+
+/** The locale for `Intl` date, time and number formatting. */
+export function getFormatLocale(): string {
+  return formatLocale;
 }
 
 type Value = string | number;
@@ -83,7 +118,9 @@ export function t<K extends MessageKey>(
   return text.replace(/\{(\w+)\}/g, (match, name: string) => {
     const value = values[name];
     if (value === undefined) return match;
-    return name === "count" && typeof value === "number" ? countFormat.format(value) : String(value);
+    return name === "count" && typeof value === "number"
+      ? countFormat.format(value)
+      : String(value);
   });
 }
 

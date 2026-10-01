@@ -109,8 +109,9 @@ export function FilterBar({ onApply, variant = "content" }: FilterBarProps) {
             <div className="macos-popover absolute top-full right-0 mt-1 z-50 w-80 max-w-[calc(100vw-2rem)] bg-dropdown border border-border-app rounded-lg shadow-xl p-3 text-[12px] text-text-secondary leading-relaxed">
               <p className="font-semibold text-text-primary mb-1">{t("filters.regexReference")}</p>
               <p>
-                <code>.</code> {t("filters.regexAnyChar")}, <code>*</code> {t("filters.regexZeroOrMore")},{" "}
-                <code>+</code> {t("filters.regexOneOrMore")}, <code>?</code> {t("filters.regexOptional")}
+                <code>.</code> {t("filters.regexAnyChar")}, <code>*</code>{" "}
+                {t("filters.regexZeroOrMore")}, <code>+</code> {t("filters.regexOneOrMore")},{" "}
+                <code>?</code> {t("filters.regexOptional")}
               </p>
               <p>
                 <code>[abc]</code>, <code>[a-z]</code>, <code>\d</code>, <code>\w</code>
@@ -123,15 +124,11 @@ export function FilterBar({ onApply, variant = "content" }: FilterBarProps) {
                 {t("filters.regexExamples")} <code>(?i)sport</code>, <code>^(HBO|CNN)</code>,{" "}
                 <code>^(?!.*(event|ppv))</code>
               </p>
-              <p className="mt-1 text-text-tertiary">
-                {t("filters.regexCaseNote")}
-              </p>
+              <p className="mt-1 text-text-tertiary">{t("filters.regexCaseNote")}</p>
             </div>
           )}
         </div>
-        <p className="mt-1 text-[11px] text-text-tertiary">
-          {t("filters.applyHint")}
-        </p>
+        <p className="mt-1 text-[11px] text-text-tertiary">{t("filters.applyHint")}</p>
         {channelSearchError && (
           <p className="mt-1 text-[11px] text-red-400 truncate" title={channelSearchError}>
             {channelSearchError}

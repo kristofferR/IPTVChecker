@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import { useAppStore } from "../store";
 import {
   addedStreamRow,
@@ -91,7 +92,7 @@ async function writeOrders(
       retry: { from: change.from, to: change.to },
     });
   if (!target || changes.length === 0) {
-    for (const change of changes) fail(change, "Not connected to Dispatcharr");
+    for (const change of changes) fail(change, t("dispatcharr.notConnected"));
     return { applied: [], failed: changes.length };
   }
 
@@ -226,7 +227,7 @@ export async function linkStreams(
   const { applied } = await writeOrders(
     [{ channelId: channel.channelId, from: channel.order, to }],
     false,
-    `Linked ${ids.length}`,
+    t("dispatcharr.cells.linked", { count: ids.length }),
   );
   if (applied.length === 0) return false;
 

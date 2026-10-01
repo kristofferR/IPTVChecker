@@ -1,6 +1,7 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef } from "react";
+import { t } from "../i18n";
 import { errorToString } from "../lib/errors";
 import { logger } from "../lib/logger";
 import {
@@ -93,13 +94,17 @@ export function useUpdateCheck(): {
         getStore().setUpdateNotice(null);
         if (force) {
           const current = getStore().appVersion;
-          getStore().setMenuInfo(`You're up to date${current ? ` (v${current})` : ""}.`);
+          getStore().setMenuInfo(
+            current
+              ? t("banners.update.upToDateVersion", { version: current })
+              : t("banners.update.upToDate"),
+          );
         }
       } catch (err) {
         if (!isCurrentRequest()) return;
         if (force) {
           getStore().setMenuInfo(
-            `Update check failed: ${updateFailureDetail(errorToString(err))}`,
+            t("banners.update.checkFailed", { error: updateFailureDetail(errorToString(err)) }),
             "error",
           );
         } else {
@@ -132,7 +137,7 @@ export function useUpdateCheck(): {
         await openManualUpdate();
       } catch (err) {
         getStore().setMenuInfo(
-          `Could not open the update page: ${updateFailureDetail(errorToString(err))}`,
+          t("banners.update.openPageFailed", { error: updateFailureDetail(errorToString(err)) }),
           "error",
         );
       }
@@ -145,11 +150,11 @@ export function useUpdateCheck(): {
       const installed = await invokeInstallUpdate();
       if (!installed) {
         getStore().setUpdateNotice(null);
-        getStore().setMenuInfo("IPTV Checker is already up to date.");
+        getStore().setMenuInfo(t("banners.update.alreadyUpToDate"));
       }
     } catch (err) {
       getStore().setMenuInfo(
-        `Update install failed: ${updateFailureDetail(errorToString(err))}`,
+        t("banners.update.installFailed", { error: updateFailureDetail(errorToString(err)) }),
         "error",
       );
     } finally {

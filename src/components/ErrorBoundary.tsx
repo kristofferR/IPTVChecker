@@ -1,5 +1,6 @@
 import type { ErrorInfo, ReactNode } from "react";
 import { Component } from "react";
+import { t } from "../i18n";
 
 interface Props {
   children: ReactNode;
@@ -29,15 +30,15 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div className="flex items-center justify-center h-screen bg-zinc-900 text-zinc-100">
           <div className="text-center p-8 max-w-md">
-            <h1 className="text-lg font-semibold mb-2">Something went wrong</h1>
+            <h1 className="text-lg font-semibold mb-2">{t("app.errorBoundary.title")}</h1>
             <p className="text-sm text-zinc-400 mb-4">
-              {this.state.error?.message ?? "An unexpected error occurred"}
+              {this.state.error?.message ?? t("app.errorBoundary.fallback")}
             </p>
             <button
               onClick={() => this.setState({ hasError: false, error: null })}
               className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 rounded-md transition-colors"
             >
-              Try Again
+              {t("app.errorBoundary.tryAgain")}
             </button>
           </div>
         </div>

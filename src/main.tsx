@@ -33,7 +33,9 @@ document.documentElement.dataset.window = isLogWindow
 // The locale loads before the UI modules are evaluated, so strings built at
 // module scope are already translated.
 async function render() {
-  await initI18n(await getUiLocale().then(({ locale }) => locale, () => "en"));
+  await initI18n(
+    await getUiLocale().catch(() => ({ locale: "en", preference: null, system: null })),
+  );
   const { ErrorBoundary } = await import("./components/ErrorBoundary");
   const View = isLogWindow
     ? (await import("./LogWindow")).LogWindow

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { getFormatLocale } from "../src/i18n";
 import { dayLabel, timeLabel } from "../src/lib/timeFormat";
 
 describe("guide time labels", () => {
@@ -9,7 +10,7 @@ describe("guide time labels", () => {
       new Date(2026, 6, 15, 12, 30),
     ]) {
       expect(timeLabel(date.getTime() / 1000)).toBe(
-        date.toLocaleTimeString([], {
+        date.toLocaleTimeString(getFormatLocale(), {
           hour: "2-digit",
           minute: "2-digit",
           hourCycle: "h23",
@@ -24,7 +25,11 @@ describe("guide time labels", () => {
     expect(dayLabel(new Date(2025, 11, 31, 23).getTime() / 1000, now)).toBe("Yesterday");
     for (const date of [new Date(2025, 11, 30, 12), new Date(2026, 0, 2, 12)]) {
       expect(dayLabel(date.getTime() / 1000, now)).toBe(
-        date.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" }),
+        date.toLocaleDateString(getFormatLocale(), {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+        }),
       );
     }
   });
@@ -36,14 +41,18 @@ describe("guide time labels", () => {
         process.env.TZ = timeZone;
         for (const date of [new Date("2026-01-15T23:30:00Z"), new Date("2026-07-15T23:30:00Z")]) {
           expect(timeLabel(date.getTime() / 1000)).toBe(
-            date.toLocaleTimeString([], {
+            date.toLocaleTimeString(getFormatLocale(), {
               hour: "2-digit",
               minute: "2-digit",
               hourCycle: "h23",
             }),
           );
           expect(dayLabel(date.getTime() / 1000, new Date("2026-08-01T12:00:00Z"))).toBe(
-            date.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" }),
+            date.toLocaleDateString(getFormatLocale(), {
+              weekday: "short",
+              day: "numeric",
+              month: "short",
+            }),
           );
         }
       }
