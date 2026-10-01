@@ -191,7 +191,6 @@ export default {
       waitForSampleCapture:
         "Przed odtwarzaniem zewnętrznym poczekaj na zakończenie nagrywania próbki.",
       pictureInPictureFailed: "Obraz w obrazie: {error}",
-      mediaError: "Błąd multimediów podczas odtwarzania",
       liveEnded: "Transmisja na żywo nieoczekiwanie się zakończyła",
       ended: "Odtwarzanie zakończone",
       stalled: "Strumień zaciął się podczas odtwarzania",

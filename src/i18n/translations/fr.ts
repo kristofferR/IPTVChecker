@@ -186,7 +186,6 @@ export default {
       waitForSampleCapture:
         "Attendez la fin de la capture de l'extrait avant de lire dans un lecteur externe.",
       pictureInPictureFailed: "Image dans l'image : {error}",
-      mediaError: "Erreur multimédia pendant la lecture",
       liveEnded: "Le direct s'est arrêté de manière inattendue",
       ended: "Lecture terminée",
       stalled: "Le flux s'est bloqué pendant la lecture",

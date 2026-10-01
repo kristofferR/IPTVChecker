@@ -178,7 +178,6 @@ export default {
       stopScanFirst: "请先停止扫描：服务商限制了同时连接数。",
       waitForSampleCapture: "请等待样片录制完成后再用外部播放器播放。",
       pictureInPictureFailed: "画中画：{error}",
-      mediaError: "播放时出现媒体错误",
       liveEnded: "直播流意外结束",
       ended: "播放结束",
       stalled: "播放时流卡住",

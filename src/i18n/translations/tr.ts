@@ -184,7 +184,6 @@ export default {
         "Önce taramayı durdurun: sağlayıcı aynı anda yalnızca sınırlı sayıda bağlantıya izin veriyor.",
       waitForSampleCapture: "Harici oynatıcıda oynatmadan önce örnek kaydının bitmesini bekleyin.",
       pictureInPictureFailed: "Resim içinde resim: {error}",
-      mediaError: "Oynatma sırasında medya hatası",
       liveEnded: "Canlı yayın beklenmedik şekilde sona erdi",
       ended: "Oynatma sona erdi",
       stalled: "Oynatma sırasında yayın takıldı",

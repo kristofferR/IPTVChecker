@@ -627,6 +627,13 @@ pub fn get_ui_locale() -> crate::i18n::UiLocale {
 /// Relaunches the app, e.g. to apply a new UI language.
 #[tauri::command]
 pub fn restart_app(app: tauri::AppHandle) {
+    // The store writes to disk on a debounce; flush it so a just-saved
+    // language survives the restart.
+    if let Ok(store) = app.store("settings.json") {
+        if let Err(error) = store.save() {
+            log::warn!("Failed to save settings before restart: {error}");
+        }
+    }
     app.restart();
 }
 

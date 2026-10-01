@@ -309,6 +309,17 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
     };
   }, [flushPendingSave]);
 
+  // Restarting before the language save lands would reopen in the old language.
+  const restartWithSavedSettings = async () => {
+    if (debounceTimerRef.current !== null) {
+      window.clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    flushPendingSave();
+    await saveQueueRef.current;
+    await restartApp();
+  };
+
   const refreshCacheStats = useCallback(async () => {
     try {
       const stats = await getScreenshotCacheStats();
@@ -608,7 +619,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   {draft.language !== getLaunchLanguage() && (
                     <button
                       type="button"
-                      onClick={() => void restartApp()}
+                      onClick={() => void restartWithSavedSettings()}
                       className="macos-btn px-3 py-1.5 min-h-9 text-[13px] bg-btn hover:bg-btn-hover rounded-md"
                     >
                       {t("settings.general.language.restart")}

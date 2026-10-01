@@ -3,7 +3,6 @@
 // that wires stall detection, live-buffer resync, latency trimming, and the
 // watchdog interval, and returns a cleanup function that tears all of it down.
 
-import { t } from "../i18n";
 import { logger } from "./logger";
 import {
   type BufferedTimeRange,
@@ -269,13 +268,13 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
     }, 100);
   });
   addHandler(videoElement, "error", () => {
-    const reason = readMediaErrorMessage(videoElement.error) ?? t("app.playback.mediaError");
+    const reason = readMediaErrorMessage(videoElement.error) ?? "Media error during playback";
     triggerRuntimeIssue("media_error", reason);
   });
   addHandler(videoElement, "ended", () => {
     triggerRuntimeIssue(
       "ended",
-      result.content_type === "live" ? t("app.playback.liveEnded") : t("app.playback.ended"),
+      result.content_type === "live" ? "Live stream ended unexpectedly" : "Playback ended",
     );
   });
 
@@ -403,7 +402,7 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
         return;
       }
       if (now - monitor.stallStartedAt >= PLAYBACK_STALL_GRACE_MS) {
-        triggerRuntimeIssue("watchdog_stall", t("app.playback.stalled"));
+        triggerRuntimeIssue("watchdog_stall", "Stream stalled during playback");
       }
       return;
     }
@@ -414,7 +413,7 @@ export function createRuntimeMonitor(params: RuntimeMonitorParams): () => void {
     }
 
     if (noProgressDuration >= PLAYBACK_NO_PROGRESS_STALL_MS) {
-      triggerRuntimeIssue("watchdog_stall", t("app.playback.stoppedProgressing"));
+      triggerRuntimeIssue("watchdog_stall", "Playback stopped progressing");
     }
   }, PLAYBACK_WATCHDOG_POLL_MS);
 

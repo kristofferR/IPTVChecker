@@ -183,7 +183,6 @@ export default {
       stopScanFirst: "Hãy dừng quét trước: nhà cung cấp giới hạn số kết nối đồng thời.",
       waitForSampleCapture: "Chờ ghi clip mẫu xong rồi mới phát bằng trình phát ngoài.",
       pictureInPictureFailed: "Hình trong hình: {error}",
-      mediaError: "Lỗi media khi phát",
       liveEnded: "Luồng trực tiếp kết thúc bất ngờ",
       ended: "Đã phát xong",
       stalled: "Luồng bị đứng khi phát",

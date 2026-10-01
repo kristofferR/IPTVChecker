@@ -183,7 +183,6 @@ export default {
         "Stoppe zuerst den Scan: Der Anbieter erlaubt nur begrenzt viele gleichzeitige Verbindungen.",
       waitForSampleCapture: "Warte, bis die Clip-Aufnahme fertig ist, bevor du extern abspielst.",
       pictureInPictureFailed: "Bild-in-Bild: {error}",
-      mediaError: "Medienfehler während der Wiedergabe",
       liveEnded: "Livestream unerwartet beendet",
       ended: "Wiedergabe beendet",
       stalled: "Stream bei der Wiedergabe hängen geblieben",

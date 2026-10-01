@@ -40,7 +40,6 @@ export default {
     stopScanFirst: "Stop the scan first: the provider allows only so many connections at once.",
     waitForSampleCapture: "Wait for the sample capture to finish before playing externally.",
     pictureInPictureFailed: "Picture-in-picture: {error}",
-    mediaError: "Media error during playback",
     liveEnded: "Live stream ended unexpectedly",
     ended: "Playback ended",
     stalled: "Stream stalled during playback",

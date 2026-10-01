@@ -186,7 +186,6 @@ export default {
       waitForSampleCapture:
         "Aguarde o fim da captura de amostra antes de reproduzir em um player externo.",
       pictureInPictureFailed: "Picture-in-picture: {error}",
-      mediaError: "Erro de mídia durante a reprodução",
       liveEnded: "A transmissão ao vivo terminou inesperadamente",
       ended: "Reprodução encerrada",
       stalled: "O stream travou durante a reprodução",

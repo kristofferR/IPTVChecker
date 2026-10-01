@@ -182,7 +182,6 @@ export default {
         "Hentikan pemindaian terlebih dahulu: penyedia hanya mengizinkan sejumlah koneksi sekaligus.",
       waitForSampleCapture: "Tunggu perekaman sampel selesai sebelum memutar di pemutar eksternal.",
       pictureInPictureFailed: "Gambar-dalam-gambar: {error}",
-      mediaError: "Kesalahan media saat pemutaran",
       liveEnded: "Siaran langsung berakhir secara tak terduga",
       ended: "Pemutaran berakhir",
       stalled: "Stream tersendat saat pemutaran",
