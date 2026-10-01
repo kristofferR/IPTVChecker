@@ -1,5 +1,6 @@
 import { CircleHelp, Filter } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { t } from "../i18n";
 import { isScanActive } from "../lib/scanState";
 import { hasDirtySourceFilter, validateSourceFilterPattern } from "../lib/sourceFilter";
 import { useAppStore } from "../store";
@@ -69,7 +70,7 @@ export function FilterBar({ onApply, variant = "content" }: FilterBarProps) {
           <Filter className="search-icon absolute left-3 top-1/2 -translate-y-1/2 w-[15px] h-[15px] text-text-tertiary" />
           <input
             type="text"
-            placeholder="Source Filter (regex)"
+            placeholder={t("filters.sourceFilterPlaceholder")}
             value={channelSearch}
             onChange={(e) => setChannelSearch(e.target.value)}
             onKeyDown={(event) => {
@@ -91,12 +92,12 @@ export function FilterBar({ onApply, variant = "content" }: FilterBarProps) {
                 disabled={!canApply}
                 className="rounded-md border border-border-app bg-btn px-2 py-1 text-[11px] font-medium text-text-primary hover:bg-btn-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {playlistLoading ? "Applying..." : "Apply"}
+                {playlistLoading ? t("common.applying") : t("common.apply")}
               </button>
             )}
             <button
               type="button"
-              aria-label="Regex quick reference"
+              aria-label={t("filters.regexReference")}
               aria-expanded={showRegexHelp}
               onClick={() => setShowRegexHelp((open) => !open)}
               className="p-1 text-text-tertiary hover:text-text-primary rounded"
@@ -106,29 +107,30 @@ export function FilterBar({ onApply, variant = "content" }: FilterBarProps) {
           </div>
           {showRegexHelp && (
             <div className="macos-popover absolute top-full right-0 mt-1 z-50 w-80 max-w-[calc(100vw-2rem)] bg-dropdown border border-border-app rounded-lg shadow-xl p-3 text-[12px] text-text-secondary leading-relaxed">
-              <p className="font-semibold text-text-primary mb-1">Regex quick reference</p>
+              <p className="font-semibold text-text-primary mb-1">{t("filters.regexReference")}</p>
               <p>
-                <code>.</code> any char, <code>*</code> zero or more, <code>+</code> one or more,{" "}
-                <code>?</code> optional
+                <code>.</code> {t("filters.regexAnyChar")}, <code>*</code> {t("filters.regexZeroOrMore")},{" "}
+                <code>+</code> {t("filters.regexOneOrMore")}, <code>?</code> {t("filters.regexOptional")}
               </p>
               <p>
                 <code>[abc]</code>, <code>[a-z]</code>, <code>\d</code>, <code>\w</code>
               </p>
               <p>
-                <code>^</code> start, <code>$</code> end, <code>foo|bar</code> alternation
+                <code>^</code> {t("filters.regexStart")}, <code>$</code> {t("filters.regexEnd")},{" "}
+                <code>foo|bar</code> {t("filters.regexAlternation")}
               </p>
               <p className="mt-1">
-                Examples: <code>(?i)sport</code>, <code>^(HBO|CNN)</code>,{" "}
+                {t("filters.regexExamples")} <code>(?i)sport</code>, <code>^(HBO|CNN)</code>,{" "}
                 <code>^(?!.*(event|ppv))</code>
               </p>
               <p className="mt-1 text-text-tertiary">
-                Matches are case-insensitive. Lookahead filters are supported.
+                {t("filters.regexCaseNote")}
               </p>
             </div>
           )}
         </div>
         <p className="mt-1 text-[11px] text-text-tertiary">
-          Click Apply to reload the current source. Scan applies pending changes automatically.
+          {t("filters.applyHint")}
         </p>
         {channelSearchError && (
           <p className="mt-1 text-[11px] text-red-400 truncate" title={channelSearchError}>

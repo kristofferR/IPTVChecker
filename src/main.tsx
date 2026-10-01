@@ -1,10 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import App from "./App";
-import { ErrorBoundary } from "./components/ErrorBoundary";
-import { LogWindow } from "./LogWindow";
+import { initI18n } from "./i18n";
 import { startMainLogBridge } from "./lib/logBridge";
-import { SettingsWindow } from "./SettingsWindow";
+import { getUiLocale } from "./lib/tauri";
 import "./index.css";
 
 // Initialize MCP plugin listeners for AI agent debugging (dev builds only)
@@ -32,10 +30,23 @@ document.documentElement.dataset.window = isLogWindow
     ? "settings"
     : "main";
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <ErrorBoundary>
-      {isLogWindow ? <LogWindow /> : isSettingsWindow ? <SettingsWindow /> : <App />}
-    </ErrorBoundary>
-  </StrictMode>,
-);
+// The locale loads before the UI modules are evaluated, so strings built at
+// module scope are already translated.
+async function render() {
+  await initI18n(await getUiLocale().then(({ locale }) => locale, () => "en"));
+  const { ErrorBoundary } = await import("./components/ErrorBoundary");
+  const View = isLogWindow
+    ? (await import("./LogWindow")).LogWindow
+    : isSettingsWindow
+      ? (await import("./SettingsWindow")).SettingsWindow
+      : (await import("./App")).default;
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <ErrorBoundary>
+        <View />
+      </ErrorBoundary>
+    </StrictMode>,
+  );
+}
+
+void render();
