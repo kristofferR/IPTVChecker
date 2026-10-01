@@ -1887,6 +1887,17 @@ async fn pause_if_network_down(
     true
 }
 
+/// Halves a counter atomically. `fetch_update` is deprecated on stable, while
+/// its replacement `try_update` is still unstable on the fuzz job's nightly.
+fn halve(counter: &AtomicU32) {
+    let mut current = counter.load(Ordering::Relaxed);
+    while let Err(actual) =
+        counter.compare_exchange_weak(current, current / 2, Ordering::Relaxed, Ordering::Relaxed)
+    {
+        current = actual;
+    }
+}
+
 /// Adaptive concurrency throttle — workers report pressure signals (timeouts,
 /// HTTP 429s, retries) versus clean successes, and the dispatch loop delays
 /// new work when the pressure ratio climbs. Emits `scan://adaptive-throttle`
@@ -1979,12 +1990,8 @@ impl AdaptiveThrottle {
 
         // Decay pressure counters periodically to make the system responsive to changes
         if total_so_far > 100 {
-            self.timeout_pressure
-                .try_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v / 2))
-                .ok();
-            self.success_count
-                .try_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v / 2))
-                .ok();
+            halve(&self.timeout_pressure);
+            halve(&self.success_count);
         }
     }
 }
