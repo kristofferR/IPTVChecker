@@ -14,7 +14,7 @@ import {
   hasPresentedVideoFrame,
   hlsHttpFailureMessage,
   httpFailureMessage,
-  isHttpFailure,
+  isFinalHttpFailure,
   isSingleConnectionPlaylist,
   isUnsupportedAudioCodec,
   PLAYBACK_RECOVERY_WINDOW_MS,
@@ -76,8 +76,9 @@ describe("useStreamPlayer helpers", () => {
       "HTTP 503",
     );
     expect(httpFailureMessage(undefined)).toBeNull();
-    expect(isHttpFailure("HTTP 404")).toBe(true);
-    expect(isHttpFailure("networkError: manifestLoadError")).toBe(false);
+    expect(isFinalHttpFailure("HTTP 404")).toBe(true);
+    expect(isFinalHttpFailure("HTTP 502")).toBe(false);
+    expect(isFinalHttpFailure("networkError: manifestLoadError")).toBe(false);
     expect(selectPlaybackFailure("Format not supported", "HTTP 404")).toBe("HTTP 404");
   });
 

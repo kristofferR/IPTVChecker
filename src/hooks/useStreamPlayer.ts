@@ -20,9 +20,9 @@ import {
   hasPresentedVideoFrame,
   hlsHttpFailureMessage,
   httpFailureMessage,
+  isFinalHttpFailure,
   isHlsManifestRejection,
   isHlsMediaRejection,
-  isHttpFailure,
   isUnsupportedAudioCodec,
   MAX_PLAYBACK_RECOVERY_ATTEMPTS,
   type PlaybackRecoveryIssue,
@@ -1126,11 +1126,11 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         finalizePlaybackFailure(result, reason, true);
       };
 
-      // An HTTP error for the channel's own URL is final: every remaining
+      // A client error for the channel's own URL is final: every remaining
       // route would request the same URL again.
       const failOnHttpError = (): boolean => {
         const reason = lastErrorRef.current;
-        if (!isHttpFailure(reason)) return false;
+        if (!isFinalHttpFailure(reason)) return false;
         // Earlier route failures came from other URLs; the status is the answer.
         previousFailure = null;
         clearLoadingTimer();
@@ -1296,7 +1296,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         }
         hlsManifestRejected =
           isHlsManifestRejection(lastErrorRef.current) ||
-          (hasTimeshiftTsVariant && isHttpFailure(lastErrorRef.current));
+          (hasTimeshiftTsVariant && isFinalHttpFailure(lastErrorRef.current));
         hlsMediaRejected = isHlsMediaRejection(lastErrorRef.current);
         if (hlsManifestRejected) {
           logger.info(
