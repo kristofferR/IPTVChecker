@@ -873,7 +873,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             if (data.fatal) {
               const detail = data.details ?? "fatal hls.js error";
               const type = data.type ?? "hls.js";
-              fail(hlsHttpFailureMessage(data.response?.code) ?? `${type}: ${detail}`);
+              fail(hlsHttpFailureMessage(data) ?? `${type}: ${detail}`);
             }
           };
           const onAbort = () => {

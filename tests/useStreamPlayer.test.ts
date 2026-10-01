@@ -68,9 +68,13 @@ describe("useStreamPlayer helpers", () => {
     expect(httpFailureMessage(409)).toBe("HTTP 409");
     expect(httpFailureMessage(502)).toBe("HTTP 502");
     expect(httpFailureMessage(200)).toBeNull();
-    expect(hlsHttpFailureMessage(404)).toBe("HTTP 404");
-    expect(hlsHttpFailureMessage(409)).toBeNull();
-    expect(hlsHttpFailureMessage(502)).toBeNull();
+    const manifestError = (code: number) => ({ details: "manifestLoadError", response: { code } });
+    expect(hlsHttpFailureMessage(manifestError(404))).toBe("HTTP 404");
+    expect(hlsHttpFailureMessage(manifestError(409))).toBeNull();
+    expect(hlsHttpFailureMessage(manifestError(502))).toBeNull();
+    expect(hlsHttpFailureMessage({ details: "fragLoadError", response: { code: 503 } })).toBe(
+      "HTTP 503",
+    );
     expect(httpFailureMessage(undefined)).toBeNull();
     expect(isHttpFailure("HTTP 404")).toBe(true);
     expect(isHttpFailure("networkError: manifestLoadError")).toBe(false);

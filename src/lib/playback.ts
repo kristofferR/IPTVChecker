@@ -494,14 +494,14 @@ export function httpFailureMessage(status: unknown): string | null {
 }
 
 /**
- * The HTTP failures hls.js can treat as the channel's own. The buffered
- * playlist proxy answers 409 for URLs that serve raw media and its own 5xx
- * when a body cannot be buffered, so those are left to the MPEG-TS routes.
+ * The HTTP failure behind a fatal hls.js error. A playlist URL that serves raw
+ * media gets the buffered proxy's own 409, or a 5xx when its body cannot be
+ * buffered, so those manifest statuses are left to the MPEG-TS routes.
  */
-export function hlsHttpFailureMessage(status: unknown): string | null {
-  return typeof status === "number" && status < 500 && status !== 409
-    ? httpFailureMessage(status)
-    : null;
+export function hlsHttpFailureMessage({ details, response }: HlsErrorPayload): string | null {
+  const status = response?.code;
+  if (details === "manifestLoadError" && (status === 409 || (status ?? 0) >= 500)) return null;
+  return httpFailureMessage(status);
 }
 
 export function isHttpFailure(reason: string | null | undefined): reason is string {
