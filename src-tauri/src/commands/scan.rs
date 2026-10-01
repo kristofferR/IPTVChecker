@@ -1980,10 +1980,10 @@ impl AdaptiveThrottle {
         // Decay pressure counters periodically to make the system responsive to changes
         if total_so_far > 100 {
             self.timeout_pressure
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v / 2))
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v / 2))
                 .ok();
             self.success_count
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v / 2))
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |v| Some(v / 2))
                 .ok();
         }
     }
