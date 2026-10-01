@@ -18,6 +18,7 @@ import {
   getMpegtsPlaybackRoutes,
   type HlsErrorPayload,
   hasPresentedVideoFrame,
+  hlsHttpFailureMessage,
   httpFailureMessage,
   isHlsManifestRejection,
   isHlsMediaRejection,
@@ -872,7 +873,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             if (data.fatal) {
               const detail = data.details ?? "fatal hls.js error";
               const type = data.type ?? "hls.js";
-              fail(httpFailureMessage(data.response?.code) ?? `${type}: ${detail}`);
+              fail(hlsHttpFailureMessage(data.response?.code) ?? `${type}: ${detail}`);
             }
           };
           const onAbort = () => {
@@ -1130,6 +1131,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       const failOnHttpError = (): boolean => {
         const reason = lastErrorRef.current;
         if (!isHttpFailure(reason)) return false;
+        // Earlier route failures came from other URLs; the status is the answer.
+        previousFailure = null;
         clearLoadingTimer();
         failCurrentAttempt(reason);
         return true;

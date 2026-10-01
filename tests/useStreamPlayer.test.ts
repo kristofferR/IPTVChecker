@@ -12,6 +12,7 @@ import {
   getMpegtsPlaybackRoutes,
   getNextPlaybackRecoveryAttempt,
   hasPresentedVideoFrame,
+  hlsHttpFailureMessage,
   httpFailureMessage,
   isHttpFailure,
   isSingleConnectionPlaylist,
@@ -62,11 +63,14 @@ describe("useStreamPlayer helpers", () => {
     expect(selectPlaybackFailure(null, null)).toBeNull();
     expect(selectPlaybackFailure("Format not supported", "Network error")).toBe("Network error");
   });
-  it("labels HTTP error statuses except the proxy's raw-media 409", () => {
+  it("labels HTTP error statuses, leaving playlist proxy statuses to MPEG-TS routes", () => {
     expect(httpFailureMessage(404)).toBe("HTTP 404");
+    expect(httpFailureMessage(409)).toBe("HTTP 409");
     expect(httpFailureMessage(502)).toBe("HTTP 502");
-    expect(httpFailureMessage(409)).toBeNull();
     expect(httpFailureMessage(200)).toBeNull();
+    expect(hlsHttpFailureMessage(404)).toBe("HTTP 404");
+    expect(hlsHttpFailureMessage(409)).toBeNull();
+    expect(hlsHttpFailureMessage(502)).toBeNull();
     expect(httpFailureMessage(undefined)).toBeNull();
     expect(isHttpFailure("HTTP 404")).toBe(true);
     expect(isHttpFailure("networkError: manifestLoadError")).toBe(false);

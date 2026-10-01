@@ -488,13 +488,20 @@ export function decidePlaybackRecovery(
   };
 }
 
-/**
- * A user-facing label for an HTTP error status, or null when the status is not
- * a failure. The proxy answers 409 for playlist URLs that serve raw media, which
- * the MPEG-TS routes handle, so it is not a failure here.
- */
+/** A user-facing label for an HTTP error status, or null when the status is not a failure. */
 export function httpFailureMessage(status: unknown): string | null {
-  return typeof status === "number" && status >= 400 && status !== 409 ? `HTTP ${status}` : null;
+  return typeof status === "number" && status >= 400 ? `HTTP ${status}` : null;
+}
+
+/**
+ * The HTTP failures hls.js can treat as the channel's own. The buffered
+ * playlist proxy answers 409 for URLs that serve raw media and its own 5xx
+ * when a body cannot be buffered, so those are left to the MPEG-TS routes.
+ */
+export function hlsHttpFailureMessage(status: unknown): string | null {
+  return typeof status === "number" && status < 500 && status !== 409
+    ? httpFailureMessage(status)
+    : null;
 }
 
 export function isHttpFailure(reason: string | null | undefined): reason is string {
