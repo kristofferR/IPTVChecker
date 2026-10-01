@@ -12,6 +12,8 @@ import {
   getMpegtsPlaybackRoutes,
   getNextPlaybackRecoveryAttempt,
   hasPresentedVideoFrame,
+  httpFailureMessage,
+  isHttpFailure,
   isSingleConnectionPlaylist,
   isUnsupportedAudioCodec,
   PLAYBACK_RECOVERY_WINDOW_MS,
@@ -60,6 +62,17 @@ describe("useStreamPlayer helpers", () => {
     expect(selectPlaybackFailure(null, null)).toBeNull();
     expect(selectPlaybackFailure("Format not supported", "Network error")).toBe("Network error");
   });
+  it("labels HTTP error statuses except the proxy's raw-media 409", () => {
+    expect(httpFailureMessage(404)).toBe("HTTP 404");
+    expect(httpFailureMessage(502)).toBe("HTTP 502");
+    expect(httpFailureMessage(409)).toBeNull();
+    expect(httpFailureMessage(200)).toBeNull();
+    expect(httpFailureMessage(undefined)).toBeNull();
+    expect(isHttpFailure("HTTP 404")).toBe(true);
+    expect(isHttpFailure("networkError: manifestLoadError")).toBe(false);
+    expect(selectPlaybackFailure("Format not supported", "HTTP 404")).toBe("HTTP 404");
+  });
+
   it("does not accept native video when every decoded frame was dropped", () => {
     expect(hasPresentedVideoFrame({ totalVideoFrames: 0, droppedVideoFrames: 0 })).toBe(false);
     expect(hasPresentedVideoFrame({ totalVideoFrames: 1249, droppedVideoFrames: 1249 })).toBe(

@@ -18,8 +18,10 @@ import {
   getMpegtsPlaybackRoutes,
   type HlsErrorPayload,
   hasPresentedVideoFrame,
+  httpFailureMessage,
   isHlsManifestRejection,
   isHlsMediaRejection,
+  isHttpFailure,
   isUnsupportedAudioCodec,
   MAX_PLAYBACK_RECOVERY_ATTEMPTS,
   type PlaybackRecoveryIssue,
@@ -870,7 +872,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             if (data.fatal) {
               const detail = data.details ?? "fatal hls.js error";
               const type = data.type ?? "hls.js";
-              fail(`${type}: ${detail}`);
+              fail(httpFailureMessage(data.response?.code) ?? `${type}: ${detail}`);
             }
           };
           const onAbort = () => {
@@ -1018,7 +1020,14 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             const segments = [errorType, errorDetail].filter(
               (value): value is string => typeof value === "string" && value.length > 0,
             );
-            fail(segments.join(": ") || "mpegts.js error");
+            const httpFailure =
+              errorDetail === "HttpStatusCodeInvalid" &&
+              typeof info === "object" &&
+              info !== null &&
+              "code" in info
+                ? httpFailureMessage(info.code)
+                : null;
+            fail(httpFailure ?? (segments.join(": ") || "mpegts.js error"));
           };
           player.on?.("media_info", () => {
             const audioCodec = player.mediaInfo?.audioCodec;
@@ -1114,6 +1123,16 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           return;
         }
         finalizePlaybackFailure(result, reason, true);
+      };
+
+      // An HTTP error for the channel's own URL is final: every remaining
+      // route would request the same URL again.
+      const failOnHttpError = (): boolean => {
+        const reason = lastErrorRef.current;
+        if (!isHttpFailure(reason)) return false;
+        clearLoadingTimer();
+        failCurrentAttempt(reason);
+        return true;
       };
 
       const handleSuccessfulStart = async (): Promise<boolean> => {
@@ -1267,7 +1286,14 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             return;
           }
         }
-        hlsManifestRejected = isHlsManifestRejection(lastErrorRef.current);
+        // Xtream catch-up playlists can fail while their raw `.ts` form still plays.
+        const hasTimeshiftTsVariant = xtreamTimeshiftTsVariant(url) !== null;
+        if (!hasTimeshiftTsVariant && failOnHttpError()) {
+          return;
+        }
+        hlsManifestRejected =
+          isHlsManifestRejection(lastErrorRef.current) ||
+          (hasTimeshiftTsVariant && isHttpFailure(lastErrorRef.current));
         hlsMediaRejected = isHlsMediaRejection(lastErrorRef.current);
         if (hlsManifestRejected) {
           logger.info(
@@ -1397,6 +1423,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             return;
           }
           if (mpegtsOk && (await handleSuccessfulStart())) {
+            return;
+          }
+          if (route.kind === "direct" && failOnHttpError()) {
             return;
           }
           if (unsupportedAudio) break;

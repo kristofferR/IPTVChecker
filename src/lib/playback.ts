@@ -134,6 +134,7 @@ export interface HlsErrorPayload {
   type?: string;
   details?: string;
   error?: unknown;
+  response?: { code?: number };
 }
 
 export type HlsFatalRecoveryAction = "restart_network" | "recover_media" | "reconnect";
@@ -485,6 +486,19 @@ export function decidePlaybackRecovery(
     kind: "retry",
     nextAttempt,
   };
+}
+
+/**
+ * A user-facing label for an HTTP error status, or null when the status is not
+ * a failure. The proxy answers 409 for playlist URLs that serve raw media, which
+ * the MPEG-TS routes handle, so it is not a failure here.
+ */
+export function httpFailureMessage(status: unknown): string | null {
+  return typeof status === "number" && status >= 400 && status !== 409 ? `HTTP ${status}` : null;
+}
+
+export function isHttpFailure(reason: string | null | undefined): reason is string {
+  return /^HTTP \d{3}$/.test(reason ?? "");
 }
 
 /**
