@@ -12,6 +12,10 @@ import {
   getMpegtsPlaybackRoutes,
   getNextPlaybackRecoveryAttempt,
   hasPresentedVideoFrame,
+  hlsHttpFailureMessage,
+  httpFailureMessage,
+  isFinalHttpFailure,
+  isHttpFailure,
   isSingleConnectionPlaylist,
   isUnsupportedAudioCodec,
   PLAYBACK_RECOVERY_WINDOW_MS,
@@ -60,6 +64,26 @@ describe("useStreamPlayer helpers", () => {
     expect(selectPlaybackFailure(null, null)).toBeNull();
     expect(selectPlaybackFailure("Format not supported", "Network error")).toBe("Network error");
   });
+  it("labels HTTP error statuses, leaving playlist proxy statuses to MPEG-TS routes", () => {
+    expect(httpFailureMessage(404)).toBe("HTTP 404");
+    expect(httpFailureMessage(409)).toBe("HTTP 409");
+    expect(httpFailureMessage(502)).toBe("HTTP 502");
+    expect(httpFailureMessage(200)).toBeNull();
+    const manifestError = (code: number) => ({ details: "manifestLoadError", response: { code } });
+    expect(hlsHttpFailureMessage(manifestError(404))).toBe("HTTP 404");
+    expect(hlsHttpFailureMessage(manifestError(409))).toBeNull();
+    expect(hlsHttpFailureMessage(manifestError(502))).toBeNull();
+    expect(hlsHttpFailureMessage({ details: "fragLoadError", response: { code: 503 } })).toBe(
+      "HTTP 503",
+    );
+    expect(httpFailureMessage(undefined)).toBeNull();
+    expect(isFinalHttpFailure("HTTP 404")).toBe(true);
+    expect(isFinalHttpFailure("HTTP 502")).toBe(false);
+    expect(isHttpFailure("HTTP 502")).toBe(true);
+    expect(isFinalHttpFailure("networkError: manifestLoadError")).toBe(false);
+    expect(selectPlaybackFailure("Format not supported", "HTTP 404")).toBe("HTTP 404");
+  });
+
   it("does not accept native video when every decoded frame was dropped", () => {
     expect(hasPresentedVideoFrame({ totalVideoFrames: 0, droppedVideoFrames: 0 })).toBe(false);
     expect(hasPresentedVideoFrame({ totalVideoFrames: 1249, droppedVideoFrames: 1249 })).toBe(

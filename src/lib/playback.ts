@@ -134,6 +134,7 @@ export interface HlsErrorPayload {
   type?: string;
   details?: string;
   error?: unknown;
+  response?: { code?: number };
 }
 
 export type HlsFatalRecoveryAction = "restart_network" | "recover_media" | "reconnect";
@@ -485,6 +486,34 @@ export function decidePlaybackRecovery(
     kind: "retry",
     nextAttempt,
   };
+}
+
+/** A user-facing label for an HTTP error status, or null when the status is not a failure. */
+export function httpFailureMessage(status: unknown): string | null {
+  return typeof status === "number" && status >= 400 ? `HTTP ${status}` : null;
+}
+
+/**
+ * The HTTP failure behind a fatal hls.js error. A playlist URL that serves raw
+ * media gets the buffered proxy's own 409, or a 5xx when its body cannot be
+ * buffered, so those manifest statuses are left to the MPEG-TS routes.
+ */
+export function hlsHttpFailureMessage({ details, response }: HlsErrorPayload): string | null {
+  const status = response?.code;
+  if (details === "manifestLoadError" && (status === 409 || (status ?? 0) >= 500)) return null;
+  return httpFailureMessage(status);
+}
+
+export function isHttpFailure(reason: string | null | undefined): reason is string {
+  return /^HTTP \d{3}$/.test(reason ?? "");
+}
+
+/**
+ * A 4xx is the channel URL's own answer. A 5xx can come from the local proxies
+ * after a transient failure, so a later route may still succeed.
+ */
+export function isFinalHttpFailure(reason: string | null | undefined): reason is string {
+  return isHttpFailure(reason) && reason.startsWith("HTTP 4");
 }
 
 /**
