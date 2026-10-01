@@ -446,7 +446,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
             <div className="flex items-center gap-2 mt-1">
               <BarChart3 className="w-4 h-4 text-blue-300" />
               <p
-                dir="ltr"
+                dir="auto"
                 className="text-[14px] font-semibold text-text-primary truncate"
                 title={playlist.file_name}
               >

@@ -1882,8 +1882,8 @@ export default function App() {
 
   const tableChromeStyle = isMac
     ? {
-        marginLeft: liveSelectedChannel && !sidebarHidden ? `${sidebarWidth}px` : undefined,
-        marginRight: playlist && showReportPanel ? `${reportSidebarWidth}px` : undefined,
+        marginInlineStart: liveSelectedChannel && !sidebarHidden ? `${sidebarWidth}px` : undefined,
+        marginInlineEnd: playlist && showReportPanel ? `${reportSidebarWidth}px` : undefined,
       }
     : undefined;
 

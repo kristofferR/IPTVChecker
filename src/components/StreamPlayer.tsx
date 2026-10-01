@@ -320,7 +320,7 @@ export function StreamPlayer({
               title={formatArchiveClock(archiveScrubEpochS ?? archiveCurrentEpochS)}
             />
           )}
-          <div className="flex items-center gap-2">
+          <div dir="ltr" className="flex items-center gap-2">
             <button
               type="button"
               onClick={onTogglePause}

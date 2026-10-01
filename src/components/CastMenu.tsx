@@ -1,6 +1,6 @@
 import { Cast, ChevronDown, RefreshCw, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { t, tRich } from "../i18n";
+import { getLocale, localeDirection, t, tRich } from "../i18n";
 import { isCastSessionActive } from "../lib/cast";
 import type { CastMediaRequest, CastSession, ChromecastDevice } from "../lib/types";
 
@@ -139,7 +139,11 @@ function CastMenuPopover({
         <Cast className="w-4 h-4" />
       </button>
       {open && (
-        <div className="absolute bottom-full end-0 mb-2 w-64 rounded-md border border-white/10 bg-black/90 backdrop-blur-sm shadow-xl text-white text-[12px] z-10">
+        // The player's control row is always left to right; restore the UI direction for the menu text.
+        <div
+          dir={localeDirection(getLocale())}
+          className="absolute bottom-full right-0 mb-2 w-64 rounded-md border border-white/10 bg-black/90 backdrop-blur-sm shadow-xl text-white text-[12px] z-10"
+        >
           <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
             <span className="font-medium">
               {isCasting ? t("cast.casting") : t("cast.castToDevice")}
