@@ -2420,6 +2420,7 @@ dependencies = [
  "flate2",
  "fs2",
  "futures",
+ "gtk",
  "libc",
  "local-ip-address",
  "log",

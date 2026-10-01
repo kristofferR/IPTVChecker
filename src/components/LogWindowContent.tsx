@@ -393,19 +393,19 @@ export function LogWindowContent() {
           </div>
 
           {/* Search input */}
-          <div className="relative flex-1 min-w-[120px] max-w-[280px] ml-2">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary pointer-events-none" />
+          <div className="relative flex-1 min-w-[120px] max-w-[280px] ms-2">
+            <Search className="absolute start-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary pointer-events-none" />
             <input
               type="text"
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               placeholder={t("log.filterPlaceholder")}
-              className="w-full pl-7 pr-2 py-1 rounded-md border border-border-app bg-input text-text-primary text-[12px] placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+              className="w-full ps-7 pe-2 py-1 rounded-md border border-border-app bg-input text-text-primary text-[12px] placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500/50"
             />
           </div>
 
           {/* Entry count */}
-          <span className="text-[11px] text-text-tertiary whitespace-nowrap ml-auto">
+          <span className="text-[11px] text-text-tertiary whitespace-nowrap ms-auto">
             {filteredCount === totalCount
               ? t("log.entryCount", { count: totalCount })
               : t("log.filteredCount", {
@@ -480,7 +480,7 @@ export function LogWindowContent() {
                 <span className="text-text-tertiary shrink-0 select-all">
                   {formatLogTimestamp(entry.timestampMs)}
                 </span>
-                <span className={`${meta.color} font-semibold shrink-0 w-[5ch] text-right`}>
+                <span className={`${meta.color} font-semibold shrink-0 w-[5ch] text-end`}>
                   {t(meta.label)}
                 </span>
                 <span className="text-text-primary break-all select-all">{entry.message}</span>
@@ -495,7 +495,7 @@ export function LogWindowContent() {
         <button
           type="button"
           onClick={scrollToBottom}
-          className="absolute bottom-4 right-4 p-2 rounded-full bg-panel border border-border-app shadow-lg text-text-secondary hover:bg-btn-hover transition-colors cursor-default"
+          className="absolute bottom-4 end-4 p-2 rounded-full bg-panel border border-border-app shadow-lg text-text-secondary hover:bg-btn-hover transition-colors cursor-default"
           title={t("log.scrollToBottom")}
         >
           <ArrowDown className="w-4 h-4" />

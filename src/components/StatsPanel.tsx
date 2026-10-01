@@ -358,7 +358,7 @@ export const StatsPanel = memo(function StatsPanel() {
         </span>
       )}
       {showRightStatus && (
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ms-auto flex items-center gap-2">
           {showSelectionInfo && (
             <span className="text-[12px] text-text-tertiary tabular-nums">
               {t("stats.selected", { count: selectedChannelIndices.length })} ·{" "}

@@ -189,7 +189,7 @@ export function StreamPlayer({
       {/* Video element is appended here by ThumbnailPanel */}
 
       {archiveSession && playerState !== "error" && archiveCurrentEpochS != null && (
-        <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-1 rounded-md bg-violet-600/85 text-white text-[11px] font-medium shadow-md backdrop-blur-sm">
+        <div className="absolute top-2 start-2 flex items-center gap-1.5 px-2 py-1 rounded-md bg-violet-600/85 text-white text-[11px] font-medium shadow-md backdrop-blur-sm">
           <History className="w-3 h-3" />
           <span className="truncate max-w-[200px]">
             {archiveSession.title ?? formatArchiveClock(archiveCurrentEpochS)}
@@ -204,14 +204,14 @@ export function StreamPlayer({
         <button
           type="button"
           onClick={onGoLive}
-          className="absolute top-2 right-2 px-2 py-0.5 rounded border border-white/40 bg-black/45 text-[10px] font-semibold text-white hover:bg-black/70 transition-colors"
+          className="absolute top-2 end-2 px-2 py-0.5 rounded border border-white/40 bg-black/45 text-[10px] font-semibold text-white hover:bg-black/70 transition-colors"
         >
           {t("player.goLive")}
         </button>
       )}
 
       {showCastUi && isCasting && chromecast?.session && (
-        <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-1 rounded-md bg-blue-600/85 text-white text-[11px] font-medium shadow-md backdrop-blur-sm">
+        <div className="absolute top-2 start-2 flex items-center gap-1.5 px-2 py-1 rounded-md bg-blue-600/85 text-white text-[11px] font-medium shadow-md backdrop-blur-sm">
           <Cast className="w-3 h-3" />
           <span className="truncate max-w-[180px]">
             {t("cast.castingTo", { device: chromecast.session.deviceName })}
@@ -334,7 +334,7 @@ export function StreamPlayer({
             <button
               type="button"
               onClick={onToggleMute}
-              className="p-1 text-white hover:text-white/80 transition-colors ml-auto"
+              className="p-1 text-white hover:text-white/80 transition-colors ms-auto"
               title={muted ? t("player.unmute") : t("player.mute")}
             >
               {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
@@ -370,7 +370,7 @@ export function StreamPlayer({
               <button
                 type="button"
                 onClick={onPip}
-                className="p-1 text-white hover:text-white/80 transition-colors ml-1"
+                className="p-1 text-white hover:text-white/80 transition-colors ms-1"
                 title={t("player.pictureInPicture")}
               >
                 <PictureInPicture2 className="w-4 h-4" />
@@ -380,7 +380,7 @@ export function StreamPlayer({
               <button
                 type="button"
                 onClick={onFullscreen}
-                className="p-1 text-white hover:text-white/80 transition-colors ml-1"
+                className="p-1 text-white hover:text-white/80 transition-colors ms-1"
                 title={t("player.fullscreen")}
               >
                 <Maximize className="w-4 h-4" />

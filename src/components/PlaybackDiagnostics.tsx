@@ -260,7 +260,7 @@ export function PlaybackDiagnostics({ channelIndex }: { channelIndex: number }) 
           {s.mode === "archive" ? ` · ${t("player.diagnostics.archive")}` : ""}
         </span>
         <span
-          className={`ml-auto text-[9px] tabular-nums ${s.ended === "failed" ? "text-red-400" : s.phase === "reconnecting" && !s.ended ? "text-amber-500" : "text-text-secondary"}`}
+          className={`ms-auto text-[9px] tabular-nums ${s.ended === "failed" ? "text-red-400" : s.phase === "reconnecting" && !s.ended ? "text-amber-500" : "text-text-secondary"}`}
         >
           {state} · {clock(s.durationMs)}
         </span>
@@ -294,7 +294,7 @@ export function PlaybackDiagnostics({ channelIndex }: { channelIndex: number }) 
       >
         <summary className="flex min-h-8 cursor-pointer list-none items-center gap-2 px-2 text-[10px] [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-blue-500">
           <span>{t("player.diagnostics.sessionActivity")}</span>
-          <span className="ml-auto text-[9px] text-text-secondary">
+          <span className="ms-auto text-[9px] text-text-secondary">
             {s.ended === "failed"
               ? t("player.diagnostics.unrecovered")
               : count("reconnect_restored") || count("resync")

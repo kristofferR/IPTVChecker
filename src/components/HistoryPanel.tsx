@@ -52,7 +52,7 @@ export default function HistoryPanel({
       aria-label={t("history.dialogLabel")}
     >
       <div className="flex-1 bg-black/40" onClick={onClose} />
-      <div className="w-[44rem] max-w-[96vw] border-l border-border-app bg-overlay backdrop-blur-xl flex flex-col">
+      <div className="w-[44rem] max-w-[96vw] border-s border-border-app bg-overlay backdrop-blur-xl flex flex-col">
         <div className="flex items-start justify-between px-6 pt-5 pb-4 border-b border-border-app">
           <div>
             <p className="text-[11px] uppercase tracking-[0.08em] text-text-tertiary mb-1">

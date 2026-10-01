@@ -94,7 +94,7 @@ export function StartScreen({
                   size: formatMegabytes(playlistLoadProgress.bytes_downloaded),
                 })}
                 {playlistLoadProgress.elapsed_secs > 0 && (
-                  <span className="ml-2 text-text-quaternary">
+                  <span className="ms-2 text-text-quaternary">
                     {t("start.downloadSpeed", {
                       speed: formatMegabytes(
                         playlistLoadProgress.bytes_downloaded / playlistLoadProgress.elapsed_secs,
@@ -115,7 +115,7 @@ export function StartScreen({
                   })}
                   {(playlistLoadProgress.movie_found > 0 ||
                     playlistLoadProgress.series_found > 0) && (
-                    <span className="ml-2">
+                    <span className="ms-2">
                       {t("start.vodBreakdown", {
                         movies: formatCount(playlistLoadProgress.movie_found),
                         series: formatCount(playlistLoadProgress.series_found),
@@ -187,7 +187,7 @@ export function StartScreen({
               </div>
             </div>
 
-            <div className="mt-6 w-full max-w-xl text-left">
+            <div className="mt-6 w-full max-w-xl text-start">
               {startScreenSavedPlaylists.length > 0 && (
                 <div>
                   <div className="flex items-center justify-between mb-2">
@@ -207,7 +207,7 @@ export function StartScreen({
                       <button
                         key={entry.id}
                         onClick={() => onOpenSaved(entry.id)}
-                        className="w-full text-left px-3 py-2 rounded-lg border border-border-subtle hover:border-border-app hover:bg-panel-subtle transition-colors"
+                        className="w-full text-start px-3 py-2 rounded-lg border border-border-subtle hover:border-border-app hover:bg-panel-subtle transition-colors"
                         type="button"
                         title={savedPlaylistSecondaryLabel(entry)}
                       >
@@ -244,7 +244,7 @@ export function StartScreen({
                       <button
                         key={`${entry.kind}:${entry.value}`}
                         onClick={() => onOpenRecent(entry)}
-                        className="w-full text-left px-3 py-2 rounded-lg border border-border-subtle hover:border-border-app hover:bg-panel-subtle transition-colors"
+                        className="w-full text-start px-3 py-2 rounded-lg border border-border-subtle hover:border-border-app hover:bg-panel-subtle transition-colors"
                         type="button"
                         title={recentTitle(entry)}
                       >

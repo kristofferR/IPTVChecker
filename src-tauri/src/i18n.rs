@@ -11,8 +11,11 @@ use serde::Serialize;
 
 /// Mirrors `LOCALES` in `src/i18n/index.ts`; each has `locales/<tag>.json`.
 pub const SUPPORTED: &[&str] = &[
-    "en", "zh-CN", "ru", "es", "uk", "pt-BR", "tr", "fr", "de", "it", "pl", "vi", "id",
+    "en", "zh-CN", "ru", "es", "uk", "pt-BR", "tr", "fr", "de", "it", "pl", "vi", "id", "ar", "fa",
 ];
+
+/// Languages written right to left.
+const RTL: &[&str] = &["ar", "fa"];
 
 fn catalog_source(locale: &str) -> Option<&'static str> {
     match locale {
@@ -29,6 +32,8 @@ fn catalog_source(locale: &str) -> Option<&'static str> {
         "pl" => Some(include_str!("../locales/pl.json")),
         "vi" => Some(include_str!("../locales/vi.json")),
         "id" => Some(include_str!("../locales/id.json")),
+        "ar" => Some(include_str!("../locales/ar.json")),
+        "fa" => Some(include_str!("../locales/fa.json")),
         _ => None,
     }
 }
@@ -81,7 +86,13 @@ fn start(preference: Option<String>) -> Launch {
 /// built, before plugins (including the settings store) are initialized.
 pub fn init(app: &tauri::AppHandle) {
     let preference = persisted_language(app);
-    LAUNCH.get_or_init(|| start(preference));
+    let launch = LAUNCH.get_or_init(|| start(preference));
+    // GTK lays out its native menu bar from the system locale; mirror it for
+    // a right-to-left UI language. macOS and Windows menus keep the OS direction.
+    #[cfg(target_os = "linux")]
+    if RTL.contains(&launch.ui.locale) {
+        gtk::Widget::set_default_direction(gtk::TextDirection::Rtl);
+    }
 }
 
 fn persisted_language(app: &tauri::AppHandle) -> Option<String> {

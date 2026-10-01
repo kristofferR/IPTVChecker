@@ -680,7 +680,7 @@ export function ThumbnailPanel({
             <button
               type="button"
               onClick={closeLightbox}
-              className={`absolute top-5 right-5 p-2 rounded-full bg-black/35 text-white hover:bg-black/55 transition-colors ${theaterMode ? "hidden" : ""}`}
+              className={`absolute top-5 end-5 p-2 rounded-full bg-black/35 text-white hover:bg-black/55 transition-colors ${theaterMode ? "hidden" : ""}`}
               aria-label={t("player.panel.closeImagePreview")}
             >
               <X className="w-5 h-5" />
@@ -755,7 +755,7 @@ export function ThumbnailPanel({
                       setTheaterMode(next);
                       void getCurrentWindow().setFullscreen(next);
                     }}
-                    className={`absolute top-3 right-3 p-2.5 rounded-xl bg-black/50 text-white hover:bg-black/70 transition-all duration-200 ${
+                    className={`absolute top-3 end-3 p-2.5 rounded-xl bg-black/50 text-white hover:bg-black/70 transition-all duration-200 ${
                       theaterHover ? "opacity-100" : "opacity-0"
                     }`}
                     title={theaterMode ? t("player.exitFullscreen") : t("player.fullscreen")}

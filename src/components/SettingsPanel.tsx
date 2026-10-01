@@ -134,7 +134,7 @@ function Switch({
     >
       <span
         className={`h-4 w-4 rounded-full bg-white shadow transition-transform ${
-          checked ? "translate-x-5" : "translate-x-1"
+          checked ? "translate-x-5 rtl:-translate-x-5" : "translate-x-1 rtl:-translate-x-1"
         }`}
       />
     </button>
@@ -1364,7 +1364,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                         })
                       : t("settings.media.cache.unavailable")}
                     {cacheStats?.disk_space && (
-                      <span className="ml-1.5 text-text-tertiary/70">
+                      <span className="ms-1.5 text-text-tertiary/70">
                         ·{" "}
                         {t("settings.media.cache.free", {
                           size: formatBytes(cacheStats.disk_space.available_bytes),
@@ -1532,7 +1532,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                 return (
                   <div key={signal} className={rowClass}>
                     <p className="text-[13px]">
-                      <span className="mr-2 text-text-tertiary tabular-nums">{position + 1}</span>
+                      <span className="me-2 text-text-tertiary tabular-nums">{position + 1}</span>
                       {signalLabel}
                     </p>
                     <div className="flex gap-1">

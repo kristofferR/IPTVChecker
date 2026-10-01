@@ -183,7 +183,7 @@ export function ServerTestModal({
           {testError && <p className="text-[12px] text-red-400">{testError}</p>}
 
           {testReport && (
-            <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
+            <div className="space-y-4 max-h-[65vh] overflow-y-auto pe-1">
               <div className="flex items-center gap-4 text-[12px] text-text-tertiary">
                 <span className={testReport.same_cdn ? "text-yellow-400" : "text-green-400"}>
                   {testReport.same_cdn

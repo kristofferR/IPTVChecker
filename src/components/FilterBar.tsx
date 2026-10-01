@@ -67,7 +67,7 @@ export function FilterBar({ onApply, variant = "content" }: FilterBarProps) {
     >
       <div className="flex flex-col flex-1 max-w-sm">
         <div ref={regexHelpRef} className="relative">
-          <Filter className="search-icon absolute left-3 top-1/2 -translate-y-1/2 w-[15px] h-[15px] text-text-tertiary" />
+          <Filter className="search-icon absolute start-3 top-1/2 -translate-y-1/2 w-[15px] h-[15px] text-text-tertiary" />
           <input
             type="text"
             placeholder={t("filters.sourceFilterPlaceholder")}
@@ -80,11 +80,11 @@ export function FilterBar({ onApply, variant = "content" }: FilterBarProps) {
               }
             }}
             disabled={isScanning}
-            className={`native-field w-full min-h-9 pl-9 pr-[8.75rem] py-1.5 text-[13px] bg-input border rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 ${
+            className={`native-field w-full min-h-9 ps-9 pe-[8.75rem] py-1.5 text-[13px] bg-input border rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 ${
               channelSearchError ? "border-red-500" : "border-border-app"
             }`}
           />
-          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+          <div className="absolute end-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
             {showApplyButton && (
               <button
                 type="button"
@@ -106,7 +106,7 @@ export function FilterBar({ onApply, variant = "content" }: FilterBarProps) {
             </button>
           </div>
           {showRegexHelp && (
-            <div className="macos-popover absolute top-full right-0 mt-1 z-50 w-80 max-w-[calc(100vw-2rem)] bg-dropdown border border-border-app rounded-lg shadow-xl p-3 text-[12px] text-text-secondary leading-relaxed">
+            <div className="macos-popover absolute top-full end-0 mt-1 z-50 w-80 max-w-[calc(100vw-2rem)] bg-dropdown border border-border-app rounded-lg shadow-xl p-3 text-[12px] text-text-secondary leading-relaxed">
               <p className="font-semibold text-text-primary mb-1">{t("filters.regexReference")}</p>
               <p>
                 <code>.</code> {t("filters.regexAnyChar")}, <code>*</code>{" "}

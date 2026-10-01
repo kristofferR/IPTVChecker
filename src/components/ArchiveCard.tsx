@@ -208,7 +208,7 @@ function ArchivePicker({
         <select
           value={daysBack}
           onChange={(e) => setDaysBack(Number.parseInt(e.target.value, 10))}
-          className="native-field h-7 flex-1 min-w-0 rounded-md border border-border-app bg-input pl-2 pr-6 text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="native-field h-7 flex-1 min-w-0 rounded-md border border-border-app bg-input ps-2 pe-6 text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
         >
           {Array.from({ length: depthDays + 1 }, (_, daysAgo) => {
             const label = dayLabel(Date.now() / 1000 - daysAgo * 86_400, now);
@@ -328,14 +328,14 @@ export function ArchiveCard({
       <summary className="flex cursor-pointer list-none items-center gap-2 p-2 text-[12px] font-medium text-violet-300 [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-blue-500">
         <span className="min-w-0" title={archiveTitle(result) ?? undefined}>
           {t("archive.card.heading")}
-          <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-violet-300/80">
+          <span className="ms-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-violet-300/80">
             {result.catchup ?? "default"}
             {result.catchup_days != null
               ? ` · ${t("archive.card.depthDays", { days: formatCount(result.catchup_days) })}`
               : ""}
           </span>
         </span>
-        <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 group-open/archive:rotate-90" />
+        <ChevronRight className="ms-auto h-3.5 w-3.5 shrink-0 group-open/archive:rotate-90" />
       </summary>
       <div className="px-2 pb-2">
         {programmes === null ? (
@@ -345,7 +345,7 @@ export function ArchiveCard({
           </div>
         ) : dayGroups.length > 0 ? (
           <section
-            className="mt-1 max-h-80 overflow-y-auto pr-1"
+            className="mt-1 max-h-80 overflow-y-auto pe-1"
             aria-label={t("archive.card.programmesLabel")}
           >
             {dayGroups.map((group) => (
@@ -366,7 +366,7 @@ export function ArchiveCard({
                           title: programme.title,
                         })
                       }
-                      className={`flex w-full items-center gap-2 rounded px-1.5 py-0.5 text-left text-[11px] transition-colors ${
+                      className={`flex w-full items-center gap-2 rounded px-1.5 py-0.5 text-start text-[11px] transition-colors ${
                         playing
                           ? "bg-violet-500/20 text-violet-200"
                           : "text-text-secondary hover:bg-panel-subtle hover:text-text-primary"

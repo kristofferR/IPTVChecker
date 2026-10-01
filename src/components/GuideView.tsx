@@ -154,7 +154,7 @@ const GuideProgramme = memo(function GuideProgramme({
             : t("guide.programmeTooltipLiveNow", tooltipParams)
           : t("guide.programmeTooltipUnavailable", tooltipParams)
       }
-      className={`absolute inset-y-[3px] flex items-center gap-1 overflow-hidden rounded px-1.5 text-left text-[10.5px] transition-colors ${
+      className={`absolute inset-y-[3px] flex items-center gap-1 overflow-hidden rounded px-1.5 text-start text-[10.5px] transition-colors ${
         selected
           ? "bg-violet-500/35 text-violet-100 ring-1 ring-violet-400/70"
           : playable
@@ -221,12 +221,12 @@ const GuideRow = memo(function GuideRow({
   return (
     <div className="channel-row guide-row flex h-full items-stretch border-b border-border-subtle hover:bg-panel-subtle">
       <div
-        className="sticky left-0 z-10 shrink-0 border-r border-border-subtle"
+        className="sticky start-0 z-10 shrink-0 border-e border-border-subtle"
         style={{ width: `${CHANNEL_COL_PX}px`, background: "var(--dropdown-bg)" }}
       >
         <button
           type="button"
-          className="guide-channel-button flex h-full w-full items-center gap-1.5 px-2 text-left"
+          className="guide-channel-button flex h-full w-full items-center gap-1.5 px-2 text-start"
           onClick={() => {
             const state = useAppStore.getState();
             state.setSelectedChannel(result);
@@ -264,7 +264,7 @@ const GuideRow = memo(function GuideRow({
             className="sticky flex h-full w-max items-center px-2 text-[10px] text-text-tertiary"
             style={{ left: `${CHANNEL_COL_PX}px` }}
           >
-            <LoaderCircle className="mr-1.5 h-3 w-3 animate-spin" /> {t("guide.loading")}
+            <LoaderCircle className="me-1.5 h-3 w-3 animate-spin" /> {t("guide.loading")}
           </div>
         ) : programmes.length === 0 ? (
           <div
@@ -789,7 +789,7 @@ export function GuideView({
           {t("guide.now")}
         </button>
       </div>
-      <div className="ml-auto flex min-w-0 max-w-[45%] items-center gap-2">
+      <div className="ms-auto flex min-w-0 max-w-[45%] items-center gap-2">
         {testOutcome &&
           (testOutcome.ok && testOutcome.depthVerified ? (
             <span className="flex items-center gap-1 text-[11px] font-medium text-green-400">
@@ -881,7 +881,7 @@ export function GuideView({
               style={{ height: `${AXIS_HEIGHT_PX}px` }}
             >
               <div
-                className="sticky left-0 z-30 shrink-0 border-r border-border-subtle"
+                className="sticky start-0 z-30 shrink-0 border-e border-border-subtle"
                 style={{ width: `${CHANNEL_COL_PX}px`, background: "var(--dropdown-bg)" }}
               />
               <div className="relative flex-1">
@@ -889,7 +889,7 @@ export function GuideView({
                   hour < renderRange.from || hour > renderRange.to ? null : (
                     <span
                       key={hour}
-                      className="absolute top-0 flex h-full items-end border-l border-border-subtle/50 px-1 pb-0.5 tabular-nums"
+                      className="absolute top-0 flex h-full items-end border-s border-border-subtle/50 px-1 pb-0.5 tabular-nums"
                       style={{ left: `${xOf(hour) - CHANNEL_COL_PX}px` }}
                     >
                       {axis.dayStarts.has(hour) ? "" : timeLabel(hour)}
@@ -899,7 +899,7 @@ export function GuideView({
                 {axis.days.map((day) => (
                   <span
                     key={day}
-                    className="absolute top-0 flex h-full items-end border-l border-border-app px-1 pb-0.5 text-[9px] font-semibold text-text-secondary"
+                    className="absolute top-0 flex h-full items-end border-s border-border-app px-1 pb-0.5 text-[9px] font-semibold text-text-secondary"
                     style={{ left: `${xOf(day) - CHANNEL_COL_PX}px` }}
                   >
                     {dayLabel(day + 43_200)} 00:00
@@ -973,7 +973,7 @@ export function GuideView({
               setMenu(null);
               activate(target);
             }}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
+            className="flex w-full items-center gap-2 px-3 py-2 text-start text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
           >
             <Play className="h-3.5 w-3.5" /> {programmePlayLabel(menu.selection, nowEpochS)}
           </button>
@@ -986,7 +986,7 @@ export function GuideView({
                 setMenu(null);
                 playLive(target);
               }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
+              className="flex w-full items-center gap-2 px-3 py-2 text-start text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
             >
               <Play className="h-3.5 w-3.5" /> {t("guide.playLive")}
             </button>
@@ -1004,7 +1004,7 @@ export function GuideView({
                 }
                 void startArchiveDownload(target.result, playOptionsFor(target));
               }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
+              className="flex w-full items-center gap-2 px-3 py-2 text-start text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
             >
               <Download className="h-3.5 w-3.5" /> {t("guide.menu.download")}
             </button>
@@ -1018,7 +1018,7 @@ export function GuideView({
               setMenu(null);
               void runTest(target);
             }}
-            className="w-full px-3 py-2 text-left text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
+            className="w-full px-3 py-2 text-start text-[13px] hover:bg-btn-hover disabled:pointer-events-none disabled:opacity-50"
           >
             {t("guide.menu.testCatchup")}
           </button>
@@ -1033,7 +1033,7 @@ export function GuideView({
                 void navigator.clipboard.writeText(target.result.url);
               }
             }}
-            className="w-full px-3 py-2 text-left text-[13px] hover:bg-btn-hover"
+            className="w-full px-3 py-2 text-start text-[13px] hover:bg-btn-hover"
           >
             {menuArchive ? t("guide.menu.copyArchiveUrl") : t("guide.menu.copyUrl")}
           </button>

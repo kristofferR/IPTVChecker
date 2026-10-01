@@ -311,12 +311,12 @@ function SelectedChannelSidebar({
 
   return (
     <div
-      className="relative border-r border-border-app bg-panel-muted shrink-0"
+      className="relative border-e border-border-app bg-panel-muted shrink-0"
       style={{ width: `${sidebarWidth}px` }}
     >
       <div
         onMouseDown={onResizeStart}
-        className="absolute right-0 top-0 bottom-0 w-1 translate-x-1/2 cursor-col-resize z-10 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors"
+        className="absolute end-0 top-0 bottom-0 w-1 translate-x-1/2 rtl:-translate-x-1/2 cursor-col-resize z-10 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors"
       />
       <ThumbnailPanel
         result={liveSelectedChannel}

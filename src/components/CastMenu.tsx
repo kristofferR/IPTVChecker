@@ -121,7 +121,7 @@ function CastMenuPopover({
   }, [chromecast]);
 
   return (
-    <div ref={ref} className="relative ml-1">
+    <div ref={ref} className="relative ms-1">
       <button
         type="button"
         onClick={() => (open ? setOpen(false) : openMenu())}
@@ -139,7 +139,7 @@ function CastMenuPopover({
         <Cast className="w-4 h-4" />
       </button>
       {open && (
-        <div className="absolute bottom-full right-0 mb-2 w-64 rounded-md border border-white/10 bg-black/90 backdrop-blur-sm shadow-xl text-white text-[12px] z-10">
+        <div className="absolute bottom-full end-0 mb-2 w-64 rounded-md border border-white/10 bg-black/90 backdrop-blur-sm shadow-xl text-white text-[12px] z-10">
           <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
             <span className="font-medium">
               {isCasting ? t("cast.casting") : t("cast.castToDevice")}
@@ -185,7 +185,7 @@ function CastMenuPopover({
                     type="button"
                     onClick={() => void handleCast(device)}
                     disabled={starting || active}
-                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-left"
+                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-start"
                   >
                     <Cast className="w-3.5 h-3.5 shrink-0 text-white/70" />
                     <div className="flex-1 min-w-0">
@@ -294,7 +294,7 @@ function CastMenuInline({ chromecast, castRequest, onCastStart }: Omit<CastMenuP
           <button
             type="button"
             onClick={handleToggle}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-panel-muted"
+            className="flex w-full items-center gap-2 px-3 py-2 text-start transition-colors hover:bg-panel-muted"
           >
             <Cast className="h-3.5 w-3.5 shrink-0 text-text-secondary" />
             <span className="flex-1 text-[12px] font-medium text-text-primary">
@@ -338,7 +338,7 @@ function CastMenuInline({ chromecast, castRequest, onCastStart }: Omit<CastMenuP
                       type="button"
                       onClick={() => void handleCast(device)}
                       disabled={starting}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-panel-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-start transition-colors hover:bg-panel-muted disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Cast className="h-3.5 w-3.5 shrink-0 text-text-secondary" />
                       <div className="flex-1 min-w-0">

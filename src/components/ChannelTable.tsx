@@ -1688,7 +1688,7 @@ export function ChannelTable({
       className={
         portalTarget
           ? "h-8 select-none overflow-hidden"
-          : "absolute top-0 left-0 right-0 z-10 h-8 bg-panel select-none overflow-hidden"
+          : "absolute top-0 start-0 end-0 z-10 h-8 bg-panel select-none overflow-hidden"
       }
       style={
         portalTarget
@@ -1755,7 +1755,7 @@ export function ChannelTable({
               <div
                 role="separator"
                 aria-label={t("table.resizeColumn", { column: label })}
-                className="absolute top-0 right-0 h-full w-2 cursor-col-resize hover:bg-blue-500/20"
+                className="absolute top-0 end-0 h-full w-2 cursor-col-resize hover:bg-blue-500/20"
                 onMouseDown={(event) => handleResizeStart(event, column.key)}
                 onClick={(event) => event.stopPropagation()}
                 draggable={false}
@@ -1777,7 +1777,7 @@ export function ChannelTable({
       {hasMacHeaderReveal && revealVirtualItems.length > 0 && (
         <div
           aria-hidden="true"
-          className="channel-table-reveal absolute left-0 right-0 overflow-hidden pointer-events-none"
+          className="channel-table-reveal absolute start-0 end-0 overflow-hidden pointer-events-none"
           style={{
             top: `${-toolbarHeight}px`,
             height: `${toolbarHeight}px`,
@@ -1805,7 +1805,7 @@ export function ChannelTable({
         onPointerDown={handleStreamPointerDown}
         onContextMenu={(event) => event.preventDefault()}
         onScroll={handleTableScroll}
-        className={`channel-table-body native-scroll absolute left-0 right-0 bottom-0 overflow-auto focus:outline-none ${
+        className={`channel-table-body native-scroll absolute start-0 end-0 bottom-0 overflow-auto focus:outline-none ${
           isTableScrolling ? "is-scrolling" : ""
         }`}
         style={{ top: scrollContainerTop }}
@@ -1829,7 +1829,7 @@ export function ChannelTable({
               }}
             >
               {hasMacHeaderReveal ? (
-                <div className="sticky top-0 left-0 h-0 overflow-visible">
+                <div className="sticky top-0 start-0 h-0 overflow-visible">
                   <div
                     className="channel-table-viewport"
                     style={{
@@ -1864,7 +1864,7 @@ export function ChannelTable({
           <button
             onClick={handleScanSelected}
             disabled={selectedIndices.size === 0 || isScanActive(scanState)}
-            className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
+            className="w-full text-start px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
             type="button"
           >
             {t(
@@ -1899,7 +1899,7 @@ export function ChannelTable({
                       ? t("table.contextMenu.testCatchupExternalPlayerTitle")
                       : undefined
                   }
-                  className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
+                  className="w-full text-start px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
                   type="button"
                 >
                   {t("table.contextMenu.testCatchup", { count: archiveCount })}
@@ -1907,7 +1907,7 @@ export function ChannelTable({
                 {hasArchive(contextMenuState.channel) && (
                   <button
                     onClick={handleBrowseCatchup}
-                    className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+                    className="w-full text-start px-3 py-2 text-[13px] hover:bg-btn-hover"
                     type="button"
                   >
                     {t("table.contextMenu.browseCatchup")}
@@ -1919,21 +1919,21 @@ export function ChannelTable({
           <div className="h-px my-1 bg-border-subtle" />
           <button
             onClick={handlePreviewChannel}
-            className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+            className="w-full text-start px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
             {t("table.contextMenu.preview")}
           </button>
           <button
             onClick={handleOpenInExternalPlayer}
-            className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+            className="w-full text-start px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
             {t("table.contextMenu.openExternal")}
           </button>
           <button
             onClick={handleCopyChannelName}
-            className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+            className="w-full text-start px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
             {copiedAction === "name"
@@ -1944,7 +1944,7 @@ export function ChannelTable({
           </button>
           <button
             onClick={handleCopyChannelUrl}
-            className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+            className="w-full text-start px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
             {copiedAction === "url"
@@ -1955,7 +1955,7 @@ export function ChannelTable({
           </button>
           <button
             onClick={handleCopyM3uEntry}
-            className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+            className="w-full text-start px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
             {copiedAction === "m3u"
@@ -1966,7 +1966,7 @@ export function ChannelTable({
           </button>
           <button
             onClick={handleCopyAllMetadata}
-            className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover"
+            className="w-full text-start px-3 py-2 text-[13px] hover:bg-btn-hover"
             type="button"
           >
             {copiedAction === "metadata"
@@ -1999,7 +1999,7 @@ export function ChannelTable({
                 key={column.key}
                 onClick={() => toggleColumnVisibility(column.key)}
                 disabled={disableHide}
-                className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none flex items-center justify-between"
+                className="w-full text-start px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none flex items-center justify-between"
                 type="button"
               >
                 <span>{t(column.labelKey)}</span>
@@ -2013,7 +2013,7 @@ export function ChannelTable({
           <button
             onClick={resetColumnsToDefaults}
             disabled={!hasColumnCustomizations}
-            className="w-full text-left px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
+            className="w-full text-start px-3 py-2 text-[13px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
             type="button"
           >
             {t("table.resetColumns")}
@@ -2034,9 +2034,9 @@ export function ChannelTable({
           {t(COLUMN_DEFINITION_MAP[dragPreview.key].labelKey)}
           {sortField === dragPreview.key &&
             (sortDir === "asc" ? (
-              <ArrowUp className="w-3 h-3 ml-1.5" />
+              <ArrowUp className="w-3 h-3 ms-1.5" />
             ) : (
-              <ArrowDown className="w-3 h-3 ml-1.5" />
+              <ArrowDown className="w-3 h-3 ms-1.5" />
             ))}
         </div>
       )}

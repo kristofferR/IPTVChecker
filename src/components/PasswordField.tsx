@@ -43,7 +43,7 @@ export default function PasswordField({
         disabled={disabled}
         onClick={() => setRevealed((current) => !current)}
         className={joinClassNames(
-          "absolute inset-y-0 right-0 flex items-center rounded-md px-2 text-text-tertiary transition-colors hover:text-text-primary focus:outline-none focus-visible:text-text-primary focus-visible:ring-1 focus-visible:ring-blue-500/50 disabled:pointer-events-none disabled:opacity-50",
+          "absolute inset-y-0 end-0 flex items-center rounded-md px-2 text-text-tertiary transition-colors hover:text-text-primary focus:outline-none focus-visible:text-text-primary focus-visible:ring-1 focus-visible:ring-blue-500/50 disabled:pointer-events-none disabled:opacity-50",
           toggleButtonClassName,
         )}
       >

@@ -99,7 +99,7 @@ function ChannelRowImpl({
             {result.tvg_chno ?? result.index + 1}
           </span>
         ) : (
-          <span className="pl-3 text-text-tertiary tabular-nums">{meta.position + 1}</span>
+          <span className="ps-3 text-text-tertiary tabular-nums">{meta.position + 1}</span>
         );
       case "status":
         return isChannel ? <ChannelHealth channel={meta.channel} /> : undefined;
@@ -318,10 +318,10 @@ function ChannelRowImpl({
       {columns.map((column) => {
         const alignClass =
           column.align === "right"
-            ? "justify-end text-right"
+            ? "justify-end text-end"
             : column.align === "center"
               ? "justify-center text-center"
-              : "justify-start text-left";
+              : "justify-start text-start";
 
         return (
           <div key={column.key} className={`h-full flex items-center ${alignClass}`}>

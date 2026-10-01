@@ -422,8 +422,8 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
     <aside
       className={`relative h-full shrink-0 ${
         placement === "right"
-          ? "border-l report-panel-enter-right"
-          : "border-r report-panel-enter-left"
+          ? "border-s report-panel-enter-right"
+          : "border-e report-panel-enter-left"
       } border-border-app bg-panel/70 backdrop-blur-sm overflow-auto select-none`}
       style={{ width: `${widthPx}px` }}
     >
@@ -431,7 +431,9 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
         <div
           onMouseDown={onResizeStart}
           className={`absolute top-0 bottom-0 w-1 cursor-col-resize z-10 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors ${
-            placement === "right" ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2"
+            placement === "right"
+              ? "start-0 -translate-x-1/2 rtl:translate-x-1/2"
+              : "end-0 translate-x-1/2 rtl:-translate-x-1/2"
           }`}
         />
       )}
@@ -787,7 +789,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                 </p>
                 {catchupStats.fakeReasons.map((reason) => (
                   <div key={reason.kind} className="mb-1 flex items-center gap-2 text-[10px]">
-                    <span className="w-14 shrink-0 text-right text-text-secondary">
+                    <span className="w-14 shrink-0 text-end text-text-secondary">
                       {t(`report.catchup.fakeReasons.${reason.kind}`)}
                     </span>
                     <div className="h-2 flex-1 overflow-hidden rounded-full bg-btn/40">
@@ -812,7 +814,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                   const maxCount = Math.max(1, ...catchupStats.buckets.map((b) => b.count));
                   return (
                     <div key={bucket.id} className="mb-1 flex items-center gap-2 text-[10px]">
-                      <span className="w-8 shrink-0 text-right text-text-secondary tabular-nums">
+                      <span className="w-8 shrink-0 text-end text-text-secondary tabular-nums">
                         {t(`report.catchup.depthBuckets.${bucket.id}`)}
                       </span>
                       <div className="h-2 flex-1 overflow-hidden rounded-full bg-btn/40">
@@ -960,7 +962,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                   key={codec}
                   className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1"
                 >
-                  <span className="text-text-secondary truncate mr-2">
+                  <span className="text-text-secondary truncate me-2">
                     {codec || t("common.unknown")}
                   </span>
                   <span className="text-text-primary">{formatCount(count)}</span>
