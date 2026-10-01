@@ -23,7 +23,7 @@ import {
 } from "../lib/archiveProbe";
 import {
   channelArchiveStream,
-  channelPrimaryIndex,
+  channelPrimary,
   expandDispatcharrSelection,
   filterDispatcharrPrimaries,
   getDispatcharrView,
@@ -234,12 +234,12 @@ const GuideRow = memo(function GuideRow({
           className="guide-channel-button flex h-full w-full items-center gap-1.5 px-2 text-start"
           onClick={() => {
             const state = useAppStore.getState();
-            state.setSelectedChannel(result);
-            // A Dispatcharr channel row stands for all of its streams.
+            // A Dispatcharr channel row stands for all of its streams, and
+            // selects its primary even when the row shows its catch-up stream.
             const view = getDispatcharrView(state.flatResults, state.dispatcharrOrders);
-            state.setSelectedChannelIndices(
-              expandDispatcharrSelection(view, [channelPrimaryIndex(view, result.index)]),
-            );
+            const primary = channelPrimary(view, result);
+            state.setSelectedChannel(primary);
+            state.setSelectedChannelIndices(expandDispatcharrSelection(view, [primary.index]));
           }}
           onDoubleClick={() => onPlayLive(result)}
           onKeyDown={(event) => {
@@ -329,10 +329,7 @@ export function GuideView({
   // primary, as in the table.
   const onPlayLive = useCallback(
     (result: ChannelResult) =>
-      playResultLive(
-        getDispatcharrView(flatResults, dispatcharrOrders)?.byStreamIndex.get(result.index)
-          ?.primary ?? result,
-      ),
+      playResultLive(channelPrimary(getDispatcharrView(flatResults, dispatcharrOrders), result)),
     [playResultLive, flatResults, dispatcharrOrders],
   );
   const playlist = useAppStore((s) => s.playlist);

@@ -422,6 +422,34 @@ describe("dispatcharr helpers", () => {
     expect(names("catchup_untested")).toEqual(["News One"]);
     expect(names("catchup_fake")).toEqual([]);
 
+    // Verdicts are judged on the catch-up stream the channel row shows.
+    const fakeFirst = channelRows(30, "Replay", [
+      { id: 5 },
+      { id: 6, catchup: true },
+      { id: 7, catchup: true },
+    ]);
+    const replay = getDispatcharrView(fakeFirst, {});
+    if (!replay) throw new Error("missing view");
+    const failed = {
+      label: "Archive -1 h",
+      daysBack: 0,
+      ok: false,
+      depthVerified: false,
+      depthUnknown: false,
+      requestedStartEpochS: 0,
+      requestUrl: "http://panel.example/timeshift",
+      responseUrl: null,
+      latencyMs: 10,
+      error: "HTTP 404",
+    };
+    const probes = { [fakeFirst[1].index]: { running: false, checkedAt: 1, outcomes: [failed] } };
+    const replayNames = (filter: string) =>
+      filterDispatcharrPrimaries(replay, "", "all", filter, undefined, false, probes).map(
+        (primary) => primary.name,
+      );
+    expect(replayNames("catchup_fake")).toEqual(["Replay"]);
+    expect(replayNames("catchup_untested")).toEqual([]);
+
     // A whole selected channel acts through its catch-up stream; the primary
     // stream selected alone stays itself.
     const [primary, archive] = results;

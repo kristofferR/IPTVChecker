@@ -23,6 +23,7 @@ import { getChannelErrorReason } from "../lib/channelResults";
 import { getChannelTableLayout } from "../lib/channelTableLayout";
 import {
   channelArchiveStream,
+  channelPrimary,
   type DispatcharrChannelView,
   type DispatcharrView,
   expandDispatcharrSelection,
@@ -218,6 +219,16 @@ export function ChannelTable({
   );
   const dispatcharrViewRef = useRef(dispatcharrView);
   dispatcharrViewRef.current = dispatcharrView;
+
+  // A Dispatcharr channel row's catch-up actions go through the stream
+  // Dispatcharr plays its catch-up from; play and copy keep the primary.
+  const archiveTarget = useCallback(
+    (key: number, result: ChannelResult): ChannelResult => {
+      const channel = key >= 0 ? dispatcharrView?.byPrimaryIndex.get(key) : undefined;
+      return (channel && channelArchiveStream(channel)) || result;
+    },
+    [dispatcharrView],
+  );
   const [expandedChannels, setExpandedChannels] = useState<ReadonlySet<number>>(() => new Set());
   const rawSearch = useAppStore((s) => s.search);
   const search = useDeferredValue(rawSearch);
@@ -442,13 +453,25 @@ export function ChannelTable({
 
   // Probe updates leave ordinary filters unchanged. Keep their sorted array
   // stable too, so the virtualizer does not rebuild its measurements.
+  // Dispatcharr channels sort on the catch-up their row shows: their catch-up
+  // stream's, not the primary's.
+  const sortRows = useCallback(
+    (rows: ChannelResult[]) => {
+      if (!dispatcharrView || sortField !== "catchup") return sortResults(rows, sortField, sortDir);
+      const archives = rows.map((primary) => archiveTarget(primary.index, primary));
+      return sortResults(archives, sortField, sortDir).map((row) =>
+        channelPrimary(dispatcharrView, row),
+      );
+    },
+    [dispatcharrView, sortField, sortDir, archiveTarget],
+  );
   const sortedResults = useMemo(
     () =>
-      measureUiPerf("table.sort", () => sortResults(unsortedResults, sortField, sortDir), {
+      measureUiPerf("table.sort", () => sortRows(unsortedResults), {
         rows: unsortedResults.length,
         sort: `${sortField}:${sortDir}`,
       }),
-    [unsortedResults, sortField, sortDir],
+    [unsortedResults, sortRows],
   );
 
   // Dispatcharr sources show one row per channel (its primary stream), with
@@ -523,16 +546,6 @@ export function ChannelTable({
     const meta = rowMetaRef.current?.[rowIndex];
     return meta?.kind === "stream" && meta.position === 0 ? -(result.index + 1) : result.index;
   }, []);
-
-  // A Dispatcharr channel row's catch-up actions go through the stream
-  // Dispatcharr plays its catch-up from; play and copy keep the primary.
-  const archiveTarget = useCallback(
-    (key: number, result: ChannelResult): ChannelResult => {
-      const channel = key >= 0 ? dispatcharrView?.byPrimaryIndex.get(key) : undefined;
-      return (channel && channelArchiveStream(channel)) || result;
-    },
-    [dispatcharrView],
-  );
 
   const emitSelection = useCallback(
     (next: Set<number>) => {
@@ -1275,12 +1288,15 @@ export function ChannelTable({
       return [contextMenuState.archive];
     }
     const byIndex = new Map(completedResults.map((result) => [result.index, result]));
-    return Array.from(selectedIndices)
-      .flatMap((key) => {
-        const result = byIndex.get(key < 0 ? -key - 1 : key);
-        return result ? [archiveTarget(key, result)] : [];
-      })
-      .sort((a, b) => a.index - b.index);
+    // Keyed by index: a channel and its own catch-up stream can both be selected.
+    const archives = new Map<number, ChannelResult>();
+    for (const key of selectedIndices) {
+      const result = byIndex.get(key < 0 ? -key - 1 : key);
+      if (!result) continue;
+      const archive = archiveTarget(key, result);
+      archives.set(archive.index, archive);
+    }
+    return Array.from(archives.values()).sort((a, b) => a.index - b.index);
   }, [selectedIndices, contextMenuState, completedResults, archiveTarget]);
 
   const handleBrowseCatchup = useCallback(() => {

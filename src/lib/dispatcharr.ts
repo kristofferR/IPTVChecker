@@ -559,9 +559,9 @@ export function selectedArchiveStream(
   return archive && selectedIndices.includes(archive.index) ? archive : result;
 }
 
-/** The index a Dispatcharr selection expands from: a stream's channel primary. */
-export function channelPrimaryIndex(view: DispatcharrView | null, index: number): number {
-  return view?.byStreamIndex.get(index)?.primary.index ?? index;
+/** A stream's channel primary: what selecting the channel selects. */
+export function channelPrimary(view: DispatcharrView | null, result: ChannelResult): ChannelResult {
+  return view?.byStreamIndex.get(result.index)?.primary ?? result;
 }
 
 /** Status filters judged per channel: the Dispatcharr ones, and catch-up. */
@@ -572,7 +572,7 @@ export const DISPATCHARR_CHANNEL_FILTERS = [
 ];
 
 /** Whether a channel passes one of `DISPATCHARR_CHANNEL_FILTERS`. Catch-up
- *  matches when any stream does, since the primary often has no archive. */
+ *  is judged on the channel's catch-up stream, the one its badge shows. */
 export function matchesDispatcharrChannel(
   channel: DispatcharrChannelView,
   statusFilter: string,
@@ -581,8 +581,10 @@ export function matchesDispatcharrChannel(
   if (isDispatcharrStatusFilter(statusFilter)) {
     return matchesDispatcharrStatus(channel, statusFilter);
   }
-  return channel.streams.some((entry) =>
-    matchesStatusFilter(entry.result, statusFilter, undefined, undefined, archiveProbes),
+  const archive = channelArchiveStream(channel);
+  return (
+    archive != null &&
+    matchesStatusFilter(archive, statusFilter, undefined, undefined, archiveProbes)
   );
 }
 
