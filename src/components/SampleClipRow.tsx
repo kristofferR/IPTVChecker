@@ -120,6 +120,8 @@ export function SampleClipRow({ result, scanActive, durationSecs, onCapture }: S
         // biome-ignore lint/a11y/useMediaCaption: stream-copied clips carry no caption track.
         <video
           ref={videoRef}
+          // Native media controls keep their left-to-right timeline.
+          dir="ltr"
           controls
           playsInline
           onCanPlay={(event) => {
@@ -148,7 +150,7 @@ export function SampleClipRow({ result, scanActive, durationSecs, onCapture }: S
             >
               {tRich("player.sample.label", {
                 format: (
-                  <span className="text-text-tertiary">
+                  <span dir="ltr" className="text-text-tertiary">
                     {result.sample_clip_format?.toUpperCase() ?? ""}
                   </span>
                 ),
@@ -177,7 +179,7 @@ export function SampleClipRow({ result, scanActive, durationSecs, onCapture }: S
                 aria-label={t("player.sample.openExternalLabel")}
                 title={t("player.panel.openInExternalPlayer")}
               >
-                <ExternalLink className="h-3.5 w-3.5" />
+                <ExternalLink className="h-3.5 w-3.5 rtl:-scale-x-100" />
               </button>
               <button
                 type="button"

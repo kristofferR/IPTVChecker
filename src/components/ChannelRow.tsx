@@ -99,7 +99,7 @@ function ChannelRowImpl({
             {result.tvg_chno ?? result.index + 1}
           </span>
         ) : (
-          <span className="pl-3 text-text-tertiary tabular-nums">{meta.position + 1}</span>
+          <span className="ps-3 text-text-tertiary tabular-nums">{meta.position + 1}</span>
         );
       case "status":
         return isChannel ? <ChannelHealth channel={meta.channel} /> : undefined;
@@ -156,7 +156,7 @@ function ChannelRowImpl({
         );
       case "playlist":
         return (
-          <span className="truncate px-2 text-text-secondary" title={result.playlist}>
+          <span className="truncate px-2 text-text-secondary" dir="auto" title={result.playlist}>
             {result.playlist}
           </span>
         );
@@ -164,7 +164,9 @@ function ChannelRowImpl({
         return (
           <span className="inline-flex min-w-0 items-center gap-1.5 px-2 font-medium">
             <ChannelLogo result={result} size={logoSizePx} />
-            <span className="truncate">{result.name}</span>
+            <span className="truncate" dir="auto">
+              {result.name}
+            </span>
           </span>
         );
       }
@@ -181,19 +183,35 @@ function ChannelRowImpl({
                 {streamProtocol}
               </span>
             )}
-            <span className="truncate text-text-secondary" title={result.url}>
+            <span className="truncate text-text-secondary" dir="ltr" title={result.url}>
               {result.url}
             </span>
           </span>
         );
       case "group":
-        return <span className="truncate px-2 text-text-secondary">{result.group}</span>;
+        return (
+          <span className="truncate px-2 text-text-secondary" dir="auto">
+            {result.group}
+          </span>
+        );
       case "resolution":
-        return <span className="text-text-secondary tabular-nums">{result.resolution ?? "—"}</span>;
+        return (
+          <span className="text-text-secondary tabular-nums" dir="ltr">
+            {result.resolution ?? "—"}
+          </span>
+        );
       case "codec":
-        return <span className="text-text-secondary">{result.codec ?? "—"}</span>;
+        return (
+          <span className="text-text-secondary" dir="ltr">
+            {result.codec ?? "—"}
+          </span>
+        );
       case "hdr":
-        return <span className="text-text-secondary">{result.hdr_format ?? "—"}</span>;
+        return (
+          <span className="text-text-secondary" dir="ltr">
+            {result.hdr_format ?? "—"}
+          </span>
+        );
       case "fps":
         return (
           <span className="text-text-secondary tabular-nums">{result.fps ? result.fps : "—"}</span>
@@ -210,7 +228,7 @@ function ChannelRowImpl({
       }
       case "bitrate":
         return (
-          <span className="text-text-secondary tabular-nums">
+          <span className="text-text-secondary tabular-nums" dir="ltr">
             {result.video_bitrate ? result.video_bitrate : "—"}
           </span>
         );
@@ -222,12 +240,16 @@ function ChannelRowImpl({
         );
       case "audio_codec":
         return (
-          <span className="text-text-secondary">
+          <span className="text-text-secondary" dir="ltr">
             {result.audio_codec && result.audio_codec !== "Unknown" ? result.audio_codec : "—"}
           </span>
         );
       case "audio_layout":
-        return <span className="text-text-secondary">{result.audio_channel_layout ?? "—"}</span>;
+        return (
+          <span className="text-text-secondary" dir="ltr">
+            {result.audio_channel_layout ?? "—"}
+          </span>
+        );
       case "catchup": {
         const badge = archiveBadgeText(result);
         if (!badge) {
@@ -317,11 +339,11 @@ function ChannelRowImpl({
     >
       {columns.map((column) => {
         const alignClass =
-          column.align === "right"
-            ? "justify-end text-right"
+          column.align === "end"
+            ? "justify-end text-end"
             : column.align === "center"
               ? "justify-center text-center"
-              : "justify-start text-left";
+              : "justify-start text-start";
 
         return (
           <div key={column.key} className={`h-full flex items-center ${alignClass}`}>

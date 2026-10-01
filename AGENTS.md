@@ -124,8 +124,14 @@ This is safe — it just rebuilds on next `bun tauri dev` or `bun tauri build`. 
   language is supported, `LanguagePromptDialog` offers it (pitch in that
   language, the rest in English); every choice is saved explicitly.
 - Adding a language: add it to `LOCALES` in `src/i18n/index.ts` and to
-  `SUPPORTED`/`catalog_source` in `src-tauri/src/i18n.rs`. Arabic and Persian
-  wait for right-to-left layout support.
+  `SUPPORTED`/`catalog_source` in `src-tauri/src/i18n.rs`.
+- Arabic and Persian lay out right to left (`<html dir>` from the locale; see
+  `docs/mocks/rtl-layout.html`). Use logical Tailwind classes (`ms-`/`pe-`,
+  `start-`/`end-`, `text-start`, `border-s`), never `ml-`/`left-`/`text-left`.
+  Give directional icons `rtl:-scale-x-100`. Render playlist data (channel,
+  group, programme names) with `dir="auto"` and technical values (URLs, regex,
+  codecs) with `dir="ltr"`. Media scrubbers and playback controls stay left to
+  right. Digits stay Latin.
 
 ## MCP Tools (tauri-plugin-mcp)
 

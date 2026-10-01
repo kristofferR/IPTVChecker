@@ -1,6 +1,13 @@
 import { Globe } from "lucide-react";
 import { useState } from "react";
-import { getLocale, type LanguageSuggestion, LOCALES, type LocaleCode, t } from "../i18n";
+import {
+  getLocale,
+  type LanguageSuggestion,
+  LOCALES,
+  type LocaleCode,
+  localeDirection,
+  t,
+} from "../i18n";
 import { logger } from "../lib/logger";
 import { restartApp } from "../lib/tauri";
 import { useAppStore } from "../store";
@@ -47,6 +54,7 @@ export default function LanguagePromptDialog({ suggestion }: { suggestion: Langu
         <h2
           id="language-prompt-title"
           lang={suggestion.code}
+          dir={localeDirection(suggestion.code)}
           className="mt-1.5 text-[16px] font-semibold text-text-primary"
         >
           {suggestion.available}
@@ -58,6 +66,7 @@ export default function LanguagePromptDialog({ suggestion }: { suggestion: Langu
           <button
             type="button"
             lang={suggestion.code}
+            dir={localeDirection(suggestion.code)}
             disabled={saving}
             // biome-ignore lint/a11y/noAutofocus: the dialog needs an answer before the app is usable.
             autoFocus

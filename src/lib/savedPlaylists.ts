@@ -1,4 +1,4 @@
-import { t } from "../i18n";
+import { isolateLtr, t } from "../i18n";
 import { normalizeDispatcharrServer } from "./dispatcharr";
 import type {
   CurrentSourceDescriptor,
@@ -60,15 +60,18 @@ export function normalizeXtreamServer(value: string): string | null {
 export function savedPlaylistSecondaryLabel(entry: SavedPlaylistEntry): string {
   switch (entry.kind) {
     case "file":
-      return t("saved.secondary.path", { path: entry.path });
+      return t("saved.secondary.path", { path: isolateLtr(entry.path) });
     case "url":
-      return t("saved.secondary.url", { url: entry.url });
+      return t("saved.secondary.url", { url: isolateLtr(entry.url) });
     case "xtream": {
       const server = entry.preferred_server ?? entry.servers[0] ?? "Xtream";
-      return t("saved.secondary.xtream", { server, username: entry.username });
+      return t("saved.secondary.xtream", {
+        server: isolateLtr(server),
+        username: isolateLtr(entry.username),
+      });
     }
     case "dispatcharr":
-      return t("saved.secondary.dispatcharr", { server: entry.server });
+      return t("saved.secondary.dispatcharr", { server: isolateLtr(entry.server) });
   }
 }
 

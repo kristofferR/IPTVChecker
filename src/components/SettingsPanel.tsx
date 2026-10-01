@@ -10,7 +10,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatCount, getLocale, LOCALES, type MessageKey, t } from "../i18n";
+import { formatCount, getLocale, isolate, LOCALES, type MessageKey, t } from "../i18n";
 import { fixPreferencesFrom } from "../lib/dispatcharr";
 import { formatBytes } from "../lib/format";
 import {
@@ -134,7 +134,7 @@ function Switch({
     >
       <span
         className={`h-4 w-4 rounded-full bg-white shadow transition-transform ${
-          checked ? "translate-x-5" : "translate-x-1"
+          checked ? "translate-x-5 rtl:-translate-x-5" : "translate-x-1 rtl:-translate-x-1"
         }`}
       />
     </button>
@@ -434,7 +434,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
       setPresetCollection(next);
       setSelectedPresetName(name);
       setPresetNameDraft(name);
-      setPresetNotice(t("settings.scanning.presets.notices.saved", { name }));
+      setPresetNotice(t("settings.scanning.presets.notices.saved", { name: isolate(name) }));
     } catch (error) {
       setPresetError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -448,7 +448,9 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
       return;
     }
     setPresetError(null);
-    setPresetNotice(t("settings.scanning.presets.notices.loaded", { name: selectedPreset.name }));
+    setPresetNotice(
+      t("settings.scanning.presets.notices.loaded", { name: isolate(selectedPreset.name) }),
+    );
     applyPresetToDraft(selectedPreset.config);
   };
 
@@ -480,7 +482,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
       setPresetCollection(next);
       setSelectedPresetName(nextName);
       setPresetNameDraft(nextName);
-      setPresetNotice(t("settings.scanning.presets.notices.renamed", { name: nextName }));
+      setPresetNotice(t("settings.scanning.presets.notices.renamed", { name: isolate(nextName) }));
     } catch (error) {
       setPresetError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -494,7 +496,9 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
       return;
     }
     if (
-      !window.confirm(t("settings.scanning.presets.deleteConfirm", { name: selectedPreset.name }))
+      !window.confirm(
+        t("settings.scanning.presets.deleteConfirm", { name: isolate(selectedPreset.name) }),
+      )
     ) {
       return;
     }
@@ -508,7 +512,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
       setPresetNameDraft("");
       setSelectedPresetName(next.default_preset ?? next.presets[0]?.name ?? "");
       setPresetNotice(
-        t("settings.scanning.presets.notices.deleted", { name: selectedPreset.name }),
+        t("settings.scanning.presets.notices.deleted", { name: isolate(selectedPreset.name) }),
       );
     } catch (error) {
       setPresetError(error instanceof Error ? error.message : String(error));
@@ -529,7 +533,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
       const next = await setDefaultScanPreset(selectedPreset.name);
       setPresetCollection(next);
       setPresetNotice(
-        t("settings.scanning.presets.notices.defaultSet", { name: selectedPreset.name }),
+        t("settings.scanning.presets.notices.defaultSet", { name: isolate(selectedPreset.name) }),
       );
     } catch (error) {
       setPresetError(error instanceof Error ? error.message : String(error));
@@ -724,8 +728,11 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                       t("settings.general.externalPlayer.systemDefaultTitle")
                     }
                   >
-                    {draft.external_player_path ??
-                      t("settings.general.externalPlayer.systemDefaultDescription")}
+                    {draft.external_player_path ? (
+                      <bdi dir="ltr">{draft.external_player_path}</bdi>
+                    ) : (
+                      t("settings.general.externalPlayer.systemDefaultDescription")
+                    )}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
@@ -955,7 +962,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                 {presetCollection.default_preset && (
                   <span className="text-[10px] text-text-tertiary">
                     {t("settings.scanning.presets.defaultName", {
-                      name: presetCollection.default_preset,
+                      name: isolate(presetCollection.default_preset),
                     })}
                   </span>
                 )}
@@ -980,7 +987,9 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     {presetCollection.presets.map((preset) => (
                       <option key={preset.name} value={preset.name}>
                         {presetCollection.default_preset === preset.name
-                          ? t("settings.scanning.presets.optionDefault", { name: preset.name })
+                          ? t("settings.scanning.presets.optionDefault", {
+                              name: isolate(preset.name),
+                            })
                           : preset.name}
                       </option>
                     ))}
@@ -997,6 +1006,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                 <div className="flex gap-1.5">
                   <input
                     type="text"
+                    dir="auto"
                     value={presetNameDraft}
                     onChange={(event) =>
                       setPresetNameDraft(event.target.value.slice(0, PRESET_NAME_MAX_LENGTH))
@@ -1219,6 +1229,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                 </div>
                 <input
                   type="text"
+                  dir="ltr"
                   value={draft.user_agent}
                   onChange={(event) => updateSetting("user_agent", event.target.value)}
                   className={`${inputClass} w-56`}
@@ -1328,7 +1339,11 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     className="text-[11px] text-text-tertiary mt-0.5 truncate"
                     title={draft.screenshots_dir ?? t("settings.media.saveMediaTo.notSaved")}
                   >
-                    {draft.screenshots_dir ?? t("settings.media.saveMediaTo.notSaved")}
+                    {draft.screenshots_dir ? (
+                      <bdi dir="ltr">{draft.screenshots_dir}</bdi>
+                    ) : (
+                      t("settings.media.saveMediaTo.notSaved")
+                    )}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1364,7 +1379,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                         })
                       : t("settings.media.cache.unavailable")}
                     {cacheStats?.disk_space && (
-                      <span className="ml-1.5 text-text-tertiary/70">
+                      <span className="ms-1.5 text-text-tertiary/70">
                         ·{" "}
                         {t("settings.media.cache.free", {
                           size: formatBytes(cacheStats.disk_space.available_bytes),
@@ -1388,7 +1403,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   className="px-4 py-2 text-[11px] text-text-tertiary border-t border-border-subtle truncate"
                   title={cacheStats.cache_dir}
                 >
-                  {cacheStats.cache_dir}
+                  <bdi dir="ltr">{cacheStats.cache_dir}</bdi>
                 </p>
               )}
 
@@ -1448,7 +1463,11 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     className="text-[11px] text-text-tertiary mt-0.5 truncate"
                     title={draft.proxy_file ?? t("settings.network.proxyFile.none")}
                   >
-                    {draft.proxy_file ?? t("settings.network.proxyFile.none")}
+                    {draft.proxy_file ? (
+                      <bdi dir="ltr">{draft.proxy_file}</bdi>
+                    ) : (
+                      t("settings.network.proxyFile.none")
+                    )}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1532,7 +1551,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                 return (
                   <div key={signal} className={rowClass}>
                     <p className="text-[13px]">
-                      <span className="mr-2 text-text-tertiary tabular-nums">{position + 1}</span>
+                      <span className="me-2 text-text-tertiary tabular-nums">{position + 1}</span>
                       {signalLabel}
                     </p>
                     <div className="flex gap-1">

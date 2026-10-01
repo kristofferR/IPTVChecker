@@ -27,6 +27,8 @@ export const LOCALES = {
   tr: { name: "Türkçe", load: () => import("./translations/tr") },
   ru: { name: "Русский", load: () => import("./translations/ru") },
   uk: { name: "Українська", load: () => import("./translations/uk") },
+  ar: { name: "العربية", load: () => import("./translations/ar") },
+  fa: { name: "فارسی", load: () => import("./translations/fa") },
   "zh-CN": { name: "简体中文", load: () => import("./translations/zh-CN") },
 } as const satisfies Record<string, { name: string; load: () => Promise<TranslationModule> }>;
 
@@ -34,6 +36,13 @@ export type LocaleCode = keyof typeof LOCALES;
 
 export function isLocaleCode(value: string): value is LocaleCode {
   return Object.hasOwn(LOCALES, value);
+}
+
+const RTL_LANGUAGES = new Set(["ar", "fa"]);
+
+/** Writing direction for a locale; Arabic and Persian mirror the layout. */
+export function localeDirection(code: string): "rtl" | "ltr" {
+  return RTL_LANGUAGES.has(new Intl.Locale(code).language) ? "rtl" : "ltr";
 }
 
 function flatten(catalog: Catalog | LocaleTranslation, into: Map<string, Message>, prefix = "") {
@@ -80,6 +89,19 @@ function pickFormatLocale(code: LocaleCode, system: string | null): string {
 }
 
 /**
+ * Arabic and Persian keep Latin digits, which read better beside 1080p, H264
+ * and URLs. Arabic also keeps the Gregorian calendar (ar-SA defaults to Hijri).
+ */
+function withLatinDigits(tag: string): string {
+  const { language } = new Intl.Locale(tag);
+  if (!RTL_LANGUAGES.has(language)) return tag;
+  return new Intl.Locale(tag, {
+    numberingSystem: "latn",
+    ...(language === "ar" ? { calendar: "gregory" } : {}),
+  }).toString();
+}
+
+/**
  * Loads the launch locale. Call once before the first render; the language
  * stays fixed for the life of the window (changes apply after a restart).
  */
@@ -97,10 +119,25 @@ export async function initI18n({ locale: code, suggested, system }: UiLocale) {
   const { default: translation } = await LOCALES[code].load();
   messages = flatten(translation, new Map(english));
   locale = code;
-  formatLocale = pickFormatLocale(code, system);
+  formatLocale = withLatinDigits(pickFormatLocale(code, system));
   pluralRules = new Intl.PluralRules(code);
   countFormat = new Intl.NumberFormat(formatLocale);
   document.documentElement.lang = code;
+  document.documentElement.dir = localeDirection(code);
+}
+
+/**
+ * Wraps a value interpolated into running text so it keeps its own direction:
+ * `isolate` lets the value pick (names, playlist data), `isolateLtr` forces
+ * left to right (paths, URLs, regex). Use for plain strings such as `title`;
+ * in JSX prefer `<bdi>` or `dir`.
+ */
+export function isolate(value: string): string {
+  return `\u2068${value}\u2069`;
+}
+
+export function isolateLtr(value: string): string {
+  return `\u2066${value}\u2069`;
 }
 
 /** The UI language. */

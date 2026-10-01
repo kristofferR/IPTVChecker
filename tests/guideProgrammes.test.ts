@@ -3,7 +3,9 @@ import { resolveArchivePlayback } from "../src/lib/archive";
 import {
   guideProgrammesInWindow,
   indexGuideProgrammes,
+  inlineScrollOffset,
   programmePlaybackAvailability,
+  setInlineScrollOffset,
 } from "../src/lib/guideProgrammes";
 import type { EpgProgramme } from "../src/lib/types";
 
@@ -98,5 +100,23 @@ describe("guide programme windows", () => {
         programmes.filter((item) => !(item.stop < from || item.start > to)),
       );
     }
+  });
+});
+
+describe("guide inline scroll offset", () => {
+  it("reads RTL negative scrollLeft as distance from the inline start", () => {
+    expect(inlineScrollOffset({ scrollLeft: 0 }, true)).toBe(0);
+    expect(inlineScrollOffset({ scrollLeft: -240 }, true)).toBe(240);
+    expect(inlineScrollOffset({ scrollLeft: 240 }, false)).toBe(240);
+  });
+
+  it("writes offsets back in the scroller's own sign convention", () => {
+    const rtl = { scrollLeft: 0 };
+    setInlineScrollOffset(rtl, 480, true);
+    expect(rtl.scrollLeft).toBe(-480);
+    expect(inlineScrollOffset(rtl, true)).toBe(480);
+    const ltr = { scrollLeft: 0 };
+    setInlineScrollOffset(ltr, 480, false);
+    expect(ltr.scrollLeft).toBe(480);
   });
 });

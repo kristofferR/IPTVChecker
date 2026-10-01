@@ -184,6 +184,7 @@ export default function SavedPlaylistEditorDialog({
             </label>
             <input
               type="text"
+              dir="auto"
               value={form.display_name}
               onKeyDown={handleSelectAllShortcut}
               onChange={(event) =>
@@ -201,6 +202,7 @@ export default function SavedPlaylistEditorDialog({
               <div className="flex items-center gap-2">
                 <input
                   type="text"
+                  dir="ltr"
                   value={form.path}
                   onKeyDown={handleSelectAllShortcut}
                   onChange={(event) =>
@@ -225,6 +227,7 @@ export default function SavedPlaylistEditorDialog({
               <label className="text-[12px] font-medium text-text-secondary">URL</label>
               <input
                 type="text"
+                dir="ltr"
                 value={form.url}
                 onKeyDown={handleSelectAllShortcut}
                 onChange={(event) =>
@@ -244,6 +247,7 @@ export default function SavedPlaylistEditorDialog({
                   </label>
                   <input
                     type="text"
+                    dir="ltr"
                     value={form.username}
                     onKeyDown={handleSelectAllShortcut}
                     onChange={(event) =>
@@ -283,6 +287,7 @@ export default function SavedPlaylistEditorDialog({
                 </label>
                 <textarea
                   rows={5}
+                  dir="ltr"
                   value={form.servers.join("\n")}
                   placeholder={"http://server-1.example.com\nhttp://server-2.example.com"}
                   onKeyDown={handleSelectAllShortcut}
@@ -337,6 +342,7 @@ export default function SavedPlaylistEditorDialog({
                 <input
                   id="saved-playlist-dispatcharr-server"
                   type="text"
+                  dir="ltr"
                   value={form.server}
                   onKeyDown={handleSelectAllShortcut}
                   onChange={(event) => setForm({ ...form, server: event.target.value })}
@@ -370,6 +376,7 @@ export default function SavedPlaylistEditorDialog({
                   <input
                     id="saved-playlist-dispatcharr-username"
                     type="text"
+                    dir="ltr"
                     value={form.username ?? ""}
                     onKeyDown={handleSelectAllShortcut}
                     onChange={(event) => setForm({ ...form, username: event.target.value })}

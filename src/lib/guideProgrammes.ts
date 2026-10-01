@@ -53,3 +53,20 @@ export function guideProgrammesInWindow(
   }
   return visible;
 }
+
+type HorizontalScroller = Pick<Element, "scrollLeft">;
+
+/**
+ * Horizontal scroll distance from the scroller's inline start. Chromium and
+ * WebKit report RTL `scrollLeft` as 0 at the start and negative toward the
+ * end, so the guide's time math reads the same in both directions.
+ */
+export function inlineScrollOffset(el: HorizontalScroller, rtl: boolean): number {
+  // `0 -` rather than unary minus keeps the start at +0, not -0.
+  return rtl ? 0 - el.scrollLeft : el.scrollLeft;
+}
+
+/** Scroll to `offset` pixels from the inline start; the inverse of `inlineScrollOffset`. */
+export function setInlineScrollOffset(el: HorizontalScroller, offset: number, rtl: boolean): void {
+  el.scrollLeft = rtl ? 0 - offset : offset;
+}

@@ -14,7 +14,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { UseChromecastResult } from "../hooks/useChromecast";
 import { type ArchiveSession, MAX_PLAYBACK_RECOVERY_ATTEMPTS } from "../hooks/useStreamPlayer";
-import { formatCount, getFormatLocale, t } from "../i18n";
+import { formatCount, getFormatLocale, t, tRich } from "../i18n";
 import { isCastSessionActive } from "../lib/cast";
 import type { CastMediaRequest } from "../lib/types";
 import { CastMenu, type CastStartHandler } from "./CastMenu";
@@ -189,10 +189,14 @@ export function StreamPlayer({
       {/* Video element is appended here by ThumbnailPanel */}
 
       {archiveSession && playerState !== "error" && archiveCurrentEpochS != null && (
-        <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-1 rounded-md bg-violet-600/85 text-white text-[11px] font-medium shadow-md backdrop-blur-sm">
-          <History className="w-3 h-3" />
+        <div className="absolute top-2 start-2 flex items-center gap-1.5 px-2 py-1 rounded-md bg-violet-600/85 text-white text-[11px] font-medium shadow-md backdrop-blur-sm">
+          <History className="w-3 h-3 rtl:-scale-x-100" />
           <span className="truncate max-w-[200px]">
-            {archiveSession.title ?? formatArchiveClock(archiveCurrentEpochS)}
+            {archiveSession.title != null ? (
+              <bdi>{archiveSession.title}</bdi>
+            ) : (
+              formatArchiveClock(archiveCurrentEpochS)
+            )}
             {archiveSession.title
               ? ""
               : ` · ${formatBehindLive(Date.now() / 1000 - archiveCurrentEpochS)}`}
@@ -204,17 +208,17 @@ export function StreamPlayer({
         <button
           type="button"
           onClick={onGoLive}
-          className="absolute top-2 right-2 px-2 py-0.5 rounded border border-white/40 bg-black/45 text-[10px] font-semibold text-white hover:bg-black/70 transition-colors"
+          className="absolute top-2 end-2 px-2 py-0.5 rounded border border-white/40 bg-black/45 text-[10px] font-semibold text-white hover:bg-black/70 transition-colors"
         >
           {t("player.goLive")}
         </button>
       )}
 
       {showCastUi && isCasting && chromecast?.session && (
-        <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-1 rounded-md bg-blue-600/85 text-white text-[11px] font-medium shadow-md backdrop-blur-sm">
+        <div className="absolute top-2 start-2 flex items-center gap-1.5 px-2 py-1 rounded-md bg-blue-600/85 text-white text-[11px] font-medium shadow-md backdrop-blur-sm">
           <Cast className="w-3 h-3" />
           <span className="truncate max-w-[180px]">
-            {t("cast.castingTo", { device: chromecast.session.deviceName })}
+            {tRich("cast.castingTo", { device: <bdi>{chromecast.session.deviceName}</bdi> })}
           </span>
         </div>
       )}
@@ -279,8 +283,10 @@ export function StreamPlayer({
           }`}
         >
           {archiveSession && onSeekArchive && archiveCurrentEpochS != null && (
+            // Media timelines run left to right in every locale.
             <input
               type="range"
+              dir="ltr"
               min={archiveSession.windowStartEpochS}
               max={archiveSession.windowEndEpochS}
               step={10}
@@ -314,7 +320,7 @@ export function StreamPlayer({
               title={formatArchiveClock(archiveScrubEpochS ?? archiveCurrentEpochS)}
             />
           )}
-          <div className="flex items-center gap-2">
+          <div dir="ltr" className="flex items-center gap-2">
             <button
               type="button"
               onClick={onTogglePause}
@@ -334,13 +340,14 @@ export function StreamPlayer({
             <button
               type="button"
               onClick={onToggleMute}
-              className="p-1 text-white hover:text-white/80 transition-colors ml-auto"
+              className="p-1 text-white hover:text-white/80 transition-colors ms-auto"
               title={muted ? t("player.unmute") : t("player.mute")}
             >
               {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
             </button>
             <input
               type="range"
+              dir="ltr"
               min={0}
               max={1}
               step={0.01}
@@ -370,7 +377,7 @@ export function StreamPlayer({
               <button
                 type="button"
                 onClick={onPip}
-                className="p-1 text-white hover:text-white/80 transition-colors ml-1"
+                className="p-1 text-white hover:text-white/80 transition-colors ms-1"
                 title={t("player.pictureInPicture")}
               >
                 <PictureInPicture2 className="w-4 h-4" />
@@ -380,7 +387,7 @@ export function StreamPlayer({
               <button
                 type="button"
                 onClick={onFullscreen}
-                className="p-1 text-white hover:text-white/80 transition-colors ml-1"
+                className="p-1 text-white hover:text-white/80 transition-colors ms-1"
                 title={t("player.fullscreen")}
               >
                 <Maximize className="w-4 h-4" />

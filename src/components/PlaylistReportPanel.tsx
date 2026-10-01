@@ -422,8 +422,8 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
     <aside
       className={`relative h-full shrink-0 ${
         placement === "right"
-          ? "border-l report-panel-enter-right"
-          : "border-r report-panel-enter-left"
+          ? "border-s report-panel-enter-right"
+          : "border-e report-panel-enter-left"
       } border-border-app bg-panel/70 backdrop-blur-sm overflow-auto select-none`}
       style={{ width: `${widthPx}px` }}
     >
@@ -431,7 +431,9 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
         <div
           onMouseDown={onResizeStart}
           className={`absolute top-0 bottom-0 w-1 cursor-col-resize z-10 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors ${
-            placement === "right" ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2"
+            placement === "right"
+              ? "start-0 -translate-x-1/2 rtl:translate-x-1/2"
+              : "end-0 translate-x-1/2 rtl:-translate-x-1/2"
           }`}
         />
       )}
@@ -444,6 +446,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
             <div className="flex items-center gap-2 mt-1">
               <BarChart3 className="w-4 h-4 text-blue-300" />
               <p
+                dir="auto"
                 className="text-[14px] font-semibold text-text-primary truncate"
                 title={playlist.file_name}
               >
@@ -489,7 +492,11 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
             </p>
             <div className="flex items-center gap-3">
               <div className="relative w-24 h-24 shrink-0">
-                <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+                {/* Starts at 12 o'clock and fills toward the inline end. */}
+                <svg
+                  viewBox="0 0 100 100"
+                  className="w-full h-full -rotate-90 rtl:rotate-90 rtl:-scale-x-100"
+                >
                   <circle
                     cx="50"
                     cy="50"
@@ -592,7 +599,9 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                 {languageSummary.entries.map((entry, index) => (
                   <div key={entry.language}>
                     <div className="flex items-center justify-between text-[11px] mb-0.5">
-                      <span className="text-text-secondary">{entry.language}</span>
+                      <span dir="auto" className="text-text-secondary">
+                        {entry.language}
+                      </span>
                       <span className="text-text-tertiary">{formatPercent(entry.percentage)}</span>
                     </div>
                     <div className="h-1.5 rounded-full bg-input overflow-hidden">
@@ -661,12 +670,13 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
             {t("report.epg.title")}
           </p>
           <div className="flex items-center gap-3">
-            <div
-              className="w-20 h-20 rounded-full relative"
-              style={{
-                background: `conic-gradient(#10b981 ${(epgSummary.coveragePercent).toFixed(2)}%, rgba(148,163,184,0.2) 0)`,
-              }}
-            >
+            <div className="w-20 h-20 rounded-full relative">
+              <div
+                className="absolute inset-0 rounded-full rtl:-scale-x-100"
+                style={{
+                  background: `conic-gradient(#10b981 ${(epgSummary.coveragePercent).toFixed(2)}%, rgba(148,163,184,0.2) 0)`,
+                }}
+              />
               <div className="absolute inset-[14px] rounded-full bg-panel flex items-center justify-center text-[11px] text-text-primary">
                 {formatPercent(epgSummary.coveragePercent, 0)}
               </div>
@@ -787,7 +797,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                 </p>
                 {catchupStats.fakeReasons.map((reason) => (
                   <div key={reason.kind} className="mb-1 flex items-center gap-2 text-[10px]">
-                    <span className="w-14 shrink-0 text-right text-text-secondary">
+                    <span className="w-14 shrink-0 text-end text-text-secondary">
                       {t(`report.catchup.fakeReasons.${reason.kind}`)}
                     </span>
                     <div className="h-2 flex-1 overflow-hidden rounded-full bg-btn/40">
@@ -812,7 +822,7 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                   const maxCount = Math.max(1, ...catchupStats.buckets.map((b) => b.count));
                   return (
                     <div key={bucket.id} className="mb-1 flex items-center gap-2 text-[10px]">
-                      <span className="w-8 shrink-0 text-right text-text-secondary tabular-nums">
+                      <span className="w-8 shrink-0 text-end text-text-secondary tabular-nums">
                         {t(`report.catchup.depthBuckets.${bucket.id}`)}
                       </span>
                       <div className="h-2 flex-1 overflow-hidden rounded-full bg-btn/40">
@@ -960,7 +970,10 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                   key={codec}
                   className="flex items-center justify-between rounded-md bg-input/60 px-2 py-1"
                 >
-                  <span className="text-text-secondary truncate mr-2">
+                  <span
+                    dir={codec ? "ltr" : undefined}
+                    className="text-text-secondary truncate me-2"
+                  >
                     {codec || t("common.unknown")}
                   </span>
                   <span className="text-text-primary">{formatCount(count)}</span>

@@ -280,7 +280,7 @@ body {
 [data-platform="macos"] .toolbar-group .toolbar-btn:not(:first-child)::before {
   content: "";
   position: absolute;
-  left: -0.5px;
+  inset-inline-start: -0.5px;
   top: 16%;
   bottom: 16%;
   width: 1px;
@@ -644,4 +644,13 @@ body {
 
 .report-panel-enter-left {
   animation: report-panel-slide-in-left 360ms ease-out;
+}
+
+/* Placement is logical (start/end), so mirror the slide direction too. */
+[dir="rtl"] .report-panel-enter-right {
+  animation-name: report-panel-slide-in-left;
+}
+
+[dir="rtl"] .report-panel-enter-left {
+  animation-name: report-panel-slide-in-right;
 }

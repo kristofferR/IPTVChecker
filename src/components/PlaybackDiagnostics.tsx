@@ -260,11 +260,11 @@ export function PlaybackDiagnostics({ channelIndex }: { channelIndex: number }) 
           {s.mode === "archive" ? ` · ${t("player.diagnostics.archive")}` : ""}
         </span>
         <span
-          className={`ml-auto text-[9px] tabular-nums ${s.ended === "failed" ? "text-red-400" : s.phase === "reconnecting" && !s.ended ? "text-amber-500" : "text-text-secondary"}`}
+          className={`ms-auto text-[9px] tabular-nums ${s.ended === "failed" ? "text-red-400" : s.phase === "reconnecting" && !s.ended ? "text-amber-500" : "text-text-secondary"}`}
         >
           {state} · {clock(s.durationMs)}
         </span>
-        <ChevronRight className="h-3 w-3 shrink-0 group-open/diagnostics:rotate-90" />
+        <ChevronRight className="h-3 w-3 shrink-0 group-open/diagnostics:rotate-90 rtl:-scale-x-100 rtl:group-open/diagnostics:-rotate-90" />
       </summary>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2 p-2">
         <Metric
@@ -294,14 +294,14 @@ export function PlaybackDiagnostics({ channelIndex }: { channelIndex: number }) 
       >
         <summary className="flex min-h-8 cursor-pointer list-none items-center gap-2 px-2 text-[10px] [&::-webkit-details-marker]:hidden focus-visible:outline-2 focus-visible:outline-blue-500">
           <span>{t("player.diagnostics.sessionActivity")}</span>
-          <span className="ml-auto text-[9px] text-text-secondary">
+          <span className="ms-auto text-[9px] text-text-secondary">
             {s.ended === "failed"
               ? t("player.diagnostics.unrecovered")
               : count("reconnect_restored") || count("resync")
                 ? t("player.diagnostics.recoveryObserved")
                 : ""}
           </span>
-          <ChevronRight className="h-3 w-3 shrink-0 group-open/playback:rotate-90" />
+          <ChevronRight className="h-3 w-3 shrink-0 group-open/playback:rotate-90 rtl:-scale-x-100 rtl:group-open/playback:-rotate-90" />
         </summary>
         <div className="px-2 pb-2">
           {activityOpen && recent.length > 1 && (
@@ -312,7 +312,7 @@ export function PlaybackDiagnostics({ channelIndex }: { channelIndex: number }) 
               </div>
               <svg
                 viewBox="0 0 260 64"
-                className="h-16 w-full"
+                className="h-16 w-full rtl:-scale-x-100"
                 role="img"
                 aria-label={t("player.diagnostics.recentBufferDepth")}
               >
@@ -342,7 +342,7 @@ export function PlaybackDiagnostics({ channelIndex }: { channelIndex: number }) 
                   <p className="text-[10px] font-medium">{t(eventLabels[event.kind])}</p>
                   {(event.detail || event.seconds !== undefined) && (
                     <p className="break-words text-[9px] text-text-secondary">
-                      {event.detail}
+                      <span dir="ltr">{event.detail}</span>
                       {event.seconds !== undefined ? ` · ${secondsValue(event.seconds)}` : ""}
                     </p>
                   )}
@@ -358,7 +358,7 @@ export function PlaybackDiagnostics({ channelIndex }: { channelIndex: number }) 
           <details className="group/technical mt-2 border-t border-border-subtle">
             <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between gap-2 text-[10px] [&::-webkit-details-marker]:hidden">
               <span>{t("player.diagnostics.technicalCounters")}</span>
-              <ChevronRight className="h-3 w-3 group-open/technical:rotate-90" />
+              <ChevronRight className="h-3 w-3 group-open/technical:rotate-90 rtl:-scale-x-100 rtl:group-open/technical:-rotate-90" />
             </summary>
             <dl className="space-y-1">
               {technical.map(([label, value]) => (

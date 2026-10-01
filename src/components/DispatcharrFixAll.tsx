@@ -101,7 +101,7 @@ export function DispatcharrFixAll({
             : t("dispatcharr.fixAll.fixAll", { count })}
       </button>
       {open && (
-        <div className="macos-popover absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-border-app bg-dropdown p-3 text-[12px] text-text-secondary shadow-xl">
+        <div className="macos-popover absolute end-0 top-full z-50 mt-1 w-72 rounded-lg border border-border-app bg-dropdown p-3 text-[12px] text-text-secondary shadow-xl">
           <p className="mb-2 text-[13px] font-semibold text-text-primary">
             {t("dispatcharr.fixAll.confirmTitle", { count })}
           </p>

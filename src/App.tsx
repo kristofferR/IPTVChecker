@@ -41,7 +41,7 @@ import { useScan } from "./hooks/useScan";
 import { useSettings } from "./hooks/useSettings";
 import { type ArchivePlayOptions, useStreamPlayer } from "./hooks/useStreamPlayer";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
-import { getFormatLocale, getLanguageSuggestion, t } from "./i18n";
+import { getFormatLocale, getLanguageSuggestion, getLocale, localeDirection, t } from "./i18n";
 import { resolveArchivePlayback } from "./lib/archive";
 import { cancelArchiveProbes } from "./lib/archiveProbe";
 import { registerArchiveTimezoneResolver } from "./lib/archiveTimezone";
@@ -311,12 +311,12 @@ function SelectedChannelSidebar({
 
   return (
     <div
-      className="relative border-r border-border-app bg-panel-muted shrink-0"
+      className="relative border-e border-border-app bg-panel-muted shrink-0"
       style={{ width: `${sidebarWidth}px` }}
     >
       <div
         onMouseDown={onResizeStart}
-        className="absolute right-0 top-0 bottom-0 w-1 translate-x-1/2 cursor-col-resize z-10 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors"
+        className="absolute end-0 top-0 bottom-0 w-1 translate-x-1/2 rtl:-translate-x-1/2 cursor-col-resize z-10 hover:bg-blue-500/30 active:bg-blue-500/40 transition-colors"
       />
       <ThumbnailPanel
         result={liveSelectedChannel}
@@ -1221,10 +1221,12 @@ export default function App() {
     (e: React.MouseEvent) => {
       e.preventDefault();
       sidebarDragRef.current = { startX: e.clientX, startWidth: sidebarWidth };
+      // The sidebar sits at the inline start; in RTL that is the right edge.
+      const grow = localeDirection(getLocale()) === "rtl" ? -1 : 1;
 
       const onMouseMove = (ev: MouseEvent) => {
         if (!sidebarDragRef.current) return;
-        const delta = ev.clientX - sidebarDragRef.current.startX;
+        const delta = (ev.clientX - sidebarDragRef.current.startX) * grow;
         const newWidth = Math.max(100, Math.min(600, sidebarDragRef.current.startWidth + delta));
         getStore().setSidebarWidth(newWidth);
       };
@@ -1252,10 +1254,12 @@ export default function App() {
         startX: e.clientX,
         startWidth: reportSidebarWidth,
       };
+      // The report sits at the inline end; in RTL that is the left edge.
+      const grow = localeDirection(getLocale()) === "rtl" ? -1 : 1;
 
       const onMouseMove = (ev: MouseEvent) => {
         if (!reportSidebarDragRef.current) return;
-        const delta = reportSidebarDragRef.current.startX - ev.clientX;
+        const delta = (reportSidebarDragRef.current.startX - ev.clientX) * grow;
         const newWidth = Math.max(
           260,
           Math.min(700, reportSidebarDragRef.current.startWidth + delta),
@@ -1878,8 +1882,8 @@ export default function App() {
 
   const tableChromeStyle = isMac
     ? {
-        marginLeft: liveSelectedChannel && !sidebarHidden ? `${sidebarWidth}px` : undefined,
-        marginRight: playlist && showReportPanel ? `${reportSidebarWidth}px` : undefined,
+        marginInlineStart: liveSelectedChannel && !sidebarHidden ? `${sidebarWidth}px` : undefined,
+        marginInlineEnd: playlist && showReportPanel ? `${reportSidebarWidth}px` : undefined,
       }
     : undefined;
 

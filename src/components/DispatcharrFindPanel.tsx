@@ -208,7 +208,7 @@ export function DispatcharrFindPanel() {
 
   const frame = (body: React.ReactNode) => (
     <aside
-      className="flex h-full shrink-0 flex-col border-l border-border-app bg-panel/70 text-[12px] backdrop-blur-sm"
+      className="flex h-full shrink-0 flex-col border-s border-border-app bg-panel/70 text-[12px] backdrop-blur-sm"
       style={{ width: `${PANEL_WIDTH}px` }}
     >
       <header className="flex items-center gap-2 border-b border-border-app px-3 py-2.5">
@@ -216,7 +216,7 @@ export function DispatcharrFindPanel() {
           {t("dispatcharr.findStreams")}
         </h3>
         {find.queue && channel && stuck.length > 0 && (
-          <span className="ml-auto flex items-center gap-1 text-text-tertiary">
+          <span className="ms-auto flex items-center gap-1 text-text-tertiary">
             {t("dispatcharr.find.queueProgress", {
               position: formatCount(Math.max(1, stuck.indexOf(channel) + 1)),
               total: formatCount(stuck.length),
@@ -232,7 +232,7 @@ export function DispatcharrFindPanel() {
               }}
               className="rounded bg-btn p-0.5 text-text-primary hover:bg-btn-hover"
             >
-              <ChevronRight className="h-3.5 w-3.5" />
+              <ChevronRight className="h-3.5 w-3.5 rtl:-scale-x-100" />
             </button>
           </span>
         )}
@@ -240,7 +240,7 @@ export function DispatcharrFindPanel() {
           type="button"
           aria-label={t("dispatcharr.find.close")}
           onClick={close}
-          className={`${find.queue && channel && stuck.length > 0 ? "" : "ml-auto"} rounded p-0.5 text-text-secondary hover:text-text-primary`}
+          className={`${find.queue && channel && stuck.length > 0 ? "" : "ms-auto"} rounded p-0.5 text-text-secondary hover:text-text-primary`}
         >
           <X className="h-3.5 w-3.5" />
         </button>
@@ -347,7 +347,9 @@ export function DispatcharrFindPanel() {
   return frame(
     <>
       <div className="flex items-center gap-2 px-3 pt-2.5 pb-1.5 text-[13px]">
-        <span className="font-semibold text-text-primary">{channel.name}</span>
+        <span className="font-semibold text-text-primary" dir="auto">
+          {channel.name}
+        </span>
         {scanned > 0 && (
           <span className={alive > 0 ? "text-text-secondary" : "text-red-400"}>
             {t("dispatcharr.find.aliveOfScanned", {
@@ -373,10 +375,10 @@ export function DispatcharrFindPanel() {
             <i
               className={`h-1.5 w-1.5 rounded-full ${DOT[entry.result.status] ?? "bg-zinc-500"}`}
             />
-            <span className="text-text-primary">
+            <span className="text-text-primary" dir="auto">
               {entry.ref.account ?? t("dispatcharr.provider")}
             </span>
-            <span className="truncate text-text-tertiary">
+            <span className="truncate text-text-tertiary" dir="auto">
               {entry.ref.streamName ?? entry.result.name}
             </span>
           </li>
@@ -390,14 +392,14 @@ export function DispatcharrFindPanel() {
         }}
       >
         <label className="relative">
-          <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-tertiary" />
+          <Search className="absolute start-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-tertiary" />
           <input
             type="search"
             aria-label={t("dispatcharr.find.searchLabel")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             spellCheck={false}
-            className="native-field h-7 w-full rounded-md border border-border-app bg-input pl-7 pr-2 text-[12px] text-text-primary focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="native-field h-7 w-full rounded-md border border-border-app bg-input ps-7 pe-2 text-[12px] text-text-primary focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </label>
         <select
@@ -452,7 +454,7 @@ export function DispatcharrFindPanel() {
                       : [...current, entry.streamId],
                   )
                 }
-                className={`flex h-10 w-full items-center gap-2 border-b border-border-subtle px-3 text-left ${
+                className={`flex h-10 w-full items-center gap-2 border-b border-border-subtle px-3 text-start ${
                   isPicked ? "bg-blue-500/15" : canPick ? "hover:bg-btn" : ""
                 }`}
               >
@@ -473,8 +475,12 @@ export function DispatcharrFindPanel() {
                   }`}
                 />
                 <span className="flex min-w-0 flex-1 flex-col leading-tight">
-                  <span className="font-medium text-text-primary">{entry.account}</span>
-                  <span className="truncate text-[11.5px] text-text-tertiary">{entry.name}</span>
+                  <span className="font-medium text-text-primary" dir="auto">
+                    {entry.account}
+                  </span>
+                  <span className="truncate text-[11.5px] text-text-tertiary" dir="auto">
+                    {entry.name}
+                  </span>
                 </span>
                 {entry.otherCountry && (
                   <span
@@ -485,7 +491,7 @@ export function DispatcharrFindPanel() {
                   </span>
                 )}
                 <Tag tag={entry.tag} />
-                <span className="w-40 shrink-0 text-right text-[11.5px]">
+                <span className="w-40 shrink-0 text-end text-[11.5px]">
                   <Outcome result={entry.result} probing={probing} />
                 </span>
               </button>
@@ -512,7 +518,7 @@ export function DispatcharrFindPanel() {
                     : undefined
               }
               onClick={() => void probe()}
-              className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-2.5 py-1 font-medium text-white hover:bg-blue-500 disabled:opacity-40"
+              className="ms-auto inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-2.5 py-1 font-medium text-white hover:bg-blue-500 disabled:opacity-40"
             >
               <Radar className="h-3.5 w-3.5" />
               {probing
@@ -529,7 +535,7 @@ export function DispatcharrFindPanel() {
               aria-label={t("dispatcharr.find.whereToLink")}
               value={position}
               onChange={(event) => setPosition(event.target.value === "end" ? "end" : "primary")}
-              className="native-field ml-auto h-7 rounded-md border border-border-app bg-input px-2 text-[12px] text-text-primary"
+              className="native-field ms-auto h-7 rounded-md border border-border-app bg-input px-2 text-[12px] text-text-primary"
             >
               <option value="primary">{t("dispatcharr.find.asPrimary")}</option>
               <option value="end">{t("dispatcharr.find.atEnd")}</option>

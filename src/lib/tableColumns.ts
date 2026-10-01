@@ -10,40 +10,40 @@ export interface ColumnDefinition {
   labelKey: Extract<MessageKey, `table.columns.${string}`>;
   defaultWidth: number;
   minWidth: number;
-  align?: "left" | "center" | "right";
+  align?: "start" | "center" | "end";
 }
 
 export const COLUMN_DEFINITIONS: ColumnDefinition[] = [
-  { key: "index", labelKey: "table.columns.index", defaultWidth: 58, minWidth: 46, align: "left" },
+  { key: "index", labelKey: "table.columns.index", defaultWidth: 58, minWidth: 46, align: "start" },
   {
     key: "status",
     labelKey: "table.columns.status",
     defaultWidth: 40,
     minWidth: 32,
-    align: "left",
+    align: "start",
   },
   {
     key: "error",
     labelKey: "table.columns.error",
     defaultWidth: 240,
     minWidth: 140,
-    align: "left",
+    align: "start",
   },
   {
     key: "playlist",
     labelKey: "table.columns.playlist",
     defaultWidth: 190,
     minWidth: 130,
-    align: "left",
+    align: "start",
   },
-  { key: "name", labelKey: "table.columns.name", defaultWidth: 360, minWidth: 180, align: "left" },
-  { key: "url", labelKey: "table.columns.url", defaultWidth: 320, minWidth: 180, align: "left" },
+  { key: "name", labelKey: "table.columns.name", defaultWidth: 360, minWidth: 180, align: "start" },
+  { key: "url", labelKey: "table.columns.url", defaultWidth: 320, minWidth: 180, align: "start" },
   {
     key: "group",
     labelKey: "table.columns.group",
     defaultWidth: 220,
     minWidth: 120,
-    align: "left",
+    align: "start",
   },
   {
     key: "resolution",
@@ -65,7 +65,7 @@ export const COLUMN_DEFINITIONS: ColumnDefinition[] = [
     labelKey: "table.columns.bitrate",
     defaultWidth: 100,
     minWidth: 80,
-    align: "right",
+    align: "end",
   },
   { key: "hdr", labelKey: "table.columns.hdr", defaultWidth: 90, minWidth: 70, align: "center" },
   {
@@ -73,9 +73,9 @@ export const COLUMN_DEFINITIONS: ColumnDefinition[] = [
     labelKey: "table.columns.latency",
     defaultWidth: 76,
     minWidth: 62,
-    align: "right",
+    align: "end",
   },
-  { key: "audio", labelKey: "table.columns.audio", defaultWidth: 84, minWidth: 66, align: "right" },
+  { key: "audio", labelKey: "table.columns.audio", defaultWidth: 84, minWidth: 66, align: "end" },
   {
     key: "audio_codec",
     labelKey: "table.columns.audioCodec",

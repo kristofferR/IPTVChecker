@@ -457,7 +457,7 @@ export function AppBanners({ onInstallUpdate, onScanRows, onReloadSource }: AppB
           >
             {updateActionLabel(updateNotice, updatePhase)}
             {isManualInstall(updateNotice.installMode) ? (
-              <ExternalLink className="w-3.5 h-3.5" />
+              <ExternalLink className="w-3.5 h-3.5 rtl:-scale-x-100" />
             ) : (
               <Download className="w-3.5 h-3.5" />
             )}

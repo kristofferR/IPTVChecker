@@ -403,7 +403,7 @@ export function ExportMenu({
           ))}
       </button>
       {open && (
-        <div className="macos-popover absolute right-0 top-full mt-1 w-64 bg-dropdown backdrop-blur-xl border border-border-app rounded-lg shadow-xl z-50 py-1">
+        <div className="macos-popover absolute end-0 top-full mt-1 w-64 bg-dropdown backdrop-blur-xl border border-border-app rounded-lg shadow-xl z-50 py-1">
           {isPartial && (
             <div className="px-3 pt-2 pb-1.5 border-b border-border-subtle">
               <p className="text-[11px] text-yellow-400">{t("exportMenu.partialWarning")}</p>
@@ -420,7 +420,7 @@ export function ExportMenu({
                   type="button"
                   disabled={exporting}
                   onClick={() => setScope(value)}
-                  className={`rounded-md px-2 py-1 text-[11px] text-left transition-colors ${
+                  className={`rounded-md px-2 py-1 text-[11px] text-start transition-colors ${
                     scope === value
                       ? "bg-btn-hover text-text-primary"
                       : "text-text-secondary hover:bg-btn-hover/70"
@@ -437,28 +437,28 @@ export function ExportMenu({
           <button
             onClick={handleExportCsv}
             disabled={exporting}
-            className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
+            className="w-full text-start px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
           >
             {t("exportMenu.actions.csv")}
           </button>
           <button
             onClick={handleExportSplit}
             disabled={exporting}
-            className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
+            className="w-full text-start px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
           >
             {t("exportMenu.actions.split")}
           </button>
           <button
             onClick={handleExportRenamed}
             disabled={exporting}
-            className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
+            className="w-full text-start px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
           >
             {t("exportMenu.actions.renamed")}
           </button>
           <button
             onClick={handleExportM3u}
             disabled={exporting}
-            className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
+            className="w-full text-start px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
           >
             {t("exportMenu.actions.m3u")}
           </button>
@@ -467,7 +467,7 @@ export function ExportMenu({
               <button
                 onClick={() => void exportCatchupPlaylist("real")}
                 disabled={exporting}
-                className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
+                className="w-full text-start px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
                 title={t("exportMenu.actions.realCatchupHint")}
               >
                 {t("exportMenu.actions.realCatchup")}
@@ -475,7 +475,7 @@ export function ExportMenu({
               <button
                 onClick={() => void exportCatchupPlaylist("stripped")}
                 disabled={exporting}
-                className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
+                className="w-full text-start px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
                 title={t("exportMenu.actions.strippedCatchupHint")}
               >
                 {t("exportMenu.actions.strippedCatchup")}
@@ -485,7 +485,7 @@ export function ExportMenu({
           <button
             onClick={handleExportScanLog}
             disabled={exporting || scanState === "idle"}
-            className="w-full text-left px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
+            className="w-full text-start px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
             title={scanState === "idle" ? t("exportMenu.actions.scanLogNeedsScan") : undefined}
           >
             {t("exportMenu.actions.scanLog")}
@@ -493,7 +493,7 @@ export function ExportMenu({
         </div>
       )}
       {feedback && (
-        <div className="absolute right-0 top-full mt-1 z-50 w-80 rounded-lg border border-border-app bg-dropdown/95 backdrop-blur-xl shadow-xl p-2.5">
+        <div className="absolute end-0 top-full mt-1 z-50 w-80 rounded-lg border border-border-app bg-dropdown/95 backdrop-blur-xl shadow-xl p-2.5">
           <div className="flex items-start gap-2 text-[12px] leading-5">
             {feedback.kind === "success" ? (
               <CircleCheck className="w-4 h-4 text-green-400 mt-0.5 shrink-0" />

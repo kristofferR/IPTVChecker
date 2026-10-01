@@ -329,7 +329,7 @@ export const StatsPanel = memo(function StatsPanel() {
       )}
       {catchupCount > 0 && (
         <Pill
-          icon={<SFClockArrow className={iconSize} />}
+          icon={<SFClockArrow className={`${iconSize} rtl:-scale-x-100`} />}
           label={catchupLabel}
           color="violet"
           active={isCatchupStatusFilter(statusFilter)}
@@ -358,7 +358,7 @@ export const StatsPanel = memo(function StatsPanel() {
         </span>
       )}
       {showRightStatus && (
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ms-auto flex items-center gap-2">
           {showSelectionInfo && (
             <span className="text-[12px] text-text-tertiary tabular-nums">
               {t("stats.selected", { count: selectedChannelIndices.length })} ·{" "}

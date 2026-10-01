@@ -32,7 +32,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { formatCount, type MessageKey, t } from "../i18n";
+import { formatCount, getLocale, localeDirection, type MessageKey, t } from "../i18n";
 import { hasArchive } from "../lib/archive";
 import { type ArchiveVerifyMode, archiveVerdict } from "../lib/archiveVerification";
 import {
@@ -350,7 +350,14 @@ export const Toolbar = memo(function Toolbar({
       const rect = anchor.getBoundingClientRect();
       setVerifyPosition({
         top: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - popover.offsetHeight - 8)),
-        left: Math.max(8, Math.min(rect.left, window.innerWidth - popover.offsetWidth - 8)),
+        // Align the popover with the anchor's inline-start edge.
+        left: Math.max(
+          8,
+          Math.min(
+            localeDirection(getLocale()) === "rtl" ? rect.right - popover.offsetWidth : rect.left,
+            window.innerWidth - popover.offsetWidth - 8,
+          ),
+        ),
       });
     };
     update();
@@ -563,12 +570,14 @@ export const Toolbar = memo(function Toolbar({
       ? "pt-[var(--toolbar-pt)] pb-1"
       : "pt-[var(--toolbar-pt)] pb-1";
   const toolbarSurface = isMac ? "" : "bg-panel";
+  // macOS window buttons stay top-left whatever the UI direction, so their
+  // reserved space is physical.
   const toolbarHorizontalPadding = isMac
     ? "pl-[var(--toolbar-pl)] pr-[var(--toolbar-pr,0.75rem)]"
-    : "pl-[var(--toolbar-pl)] pr-3";
+    : "ps-[var(--toolbar-pl)] pe-3";
   const inlinePlaylistNameClass = isMac
     ? "absolute top-[6px] left-1/2 max-w-[40%] -translate-x-1/2 truncate text-[13px] text-text-tertiary pointer-events-none"
-    : "ml-1 max-w-64 truncate text-[13px] text-text-tertiary";
+    : "ms-1 max-w-64 truncate text-[13px] text-text-tertiary";
   const selectedGroupTitle = groupFilter === "all" ? t("toolbar.allGroups") : groupFilter;
 
   return (
@@ -585,7 +594,7 @@ export const Toolbar = memo(function Toolbar({
         <div
           className={
             isMac
-              ? "toolbar-group toolbar-group-prominent -ml-[calc(var(--toolbar-pl)-0.75rem)] mr-2"
+              ? "toolbar-group toolbar-group-prominent -ml-[calc(var(--toolbar-pl)-0.75rem)] rtl:ml-0 me-2"
               : "flex items-center gap-1.5"
           }
         >
@@ -668,7 +677,7 @@ export const Toolbar = memo(function Toolbar({
                     if (scanDisabledReason === null) setScanMenuVisible(true);
                   }}
                   disabled={scanDisabledReason !== null}
-                  className={`toolbar-scan-options absolute flex items-center justify-center rounded-sm hover:bg-white/10 disabled:opacity-40 disabled:pointer-events-none ${isMac ? "text-text-primary" : "text-white"} ${showButtonText ? "bottom-0.5 right-2 h-5 w-5" : "right-1.5 top-1/2 h-6 w-6 -translate-y-1/2"}`}
+                  className={`toolbar-scan-options absolute flex items-center justify-center rounded-sm hover:bg-white/10 disabled:opacity-40 disabled:pointer-events-none ${isMac ? "text-text-primary" : "text-white"} ${showButtonText ? "bottom-0.5 end-2 h-5 w-5" : "end-1.5 top-1/2 h-6 w-6 -translate-y-1/2"}`}
                   title={t("toolbar.scan.options")}
                   aria-label={t("toolbar.scan.options")}
                   aria-controls={scanMenuId}
@@ -682,7 +691,7 @@ export const Toolbar = memo(function Toolbar({
               {scanMenuVisible && (
                 <div
                   id={scanMenuId}
-                  className="absolute left-0 top-full z-50 mt-1 w-64 rounded-lg border border-border-app bg-dropdown py-1 shadow-2xl"
+                  className="absolute start-0 top-full z-50 mt-1 w-64 rounded-lg border border-border-app bg-dropdown py-1 shadow-2xl"
                 >
                   <button
                     type="button"
@@ -690,7 +699,7 @@ export const Toolbar = memo(function Toolbar({
                       setScanMenuVisible(false);
                       onStartScan(false);
                     }}
-                    className="w-full px-3 py-2 text-left text-[13px] hover:bg-btn-hover"
+                    className="w-full px-3 py-2 text-start text-[13px] hover:bg-btn-hover"
                   >
                     {t("toolbar.scan.scan")}
                   </button>
@@ -700,7 +709,7 @@ export const Toolbar = memo(function Toolbar({
                       setScanMenuVisible(false);
                       onStartScan(true);
                     }}
-                    className="w-full px-3 py-2 text-left text-[13px] hover:bg-btn-hover"
+                    className="w-full px-3 py-2 text-start text-[13px] hover:bg-btn-hover"
                   >
                     {t("toolbar.scan.scanAndVerify", { count: catchupChannelCount })}
                   </button>
@@ -728,7 +737,7 @@ export const Toolbar = memo(function Toolbar({
                 aria-haspopup="dialog"
                 aria-expanded={verifyMenuVisible}
               >
-                <IconVerify className="w-[22px] h-[22px]" />
+                <IconVerify className="w-[22px] h-[22px] rtl:-scale-x-100" />
                 {showButtonText && (
                   <span className="inline-flex items-center gap-1 leading-none">
                     <span>
@@ -769,7 +778,7 @@ export const Toolbar = memo(function Toolbar({
                           setVerifyMode(value);
                           storeArchiveVerifyMode(value);
                         }}
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-btn-hover"
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-start hover:bg-btn-hover"
                       >
                         <span
                           className={`h-3 w-3 rounded-full border ${
@@ -798,7 +807,7 @@ export const Toolbar = memo(function Toolbar({
                         aria-pressed={verifyScope === value}
                         onClick={() => setVerifyScope(value)}
                         disabled={verifyScopeCounts[value] === 0}
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-btn-hover disabled:opacity-40 disabled:pointer-events-none"
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-start hover:bg-btn-hover disabled:opacity-40 disabled:pointer-events-none"
                       >
                         <span
                           className={`h-3 w-3 rounded-full border ${
@@ -871,8 +880,8 @@ export const Toolbar = memo(function Toolbar({
               <div
                 className={
                   isMac
-                    ? "macos-popover absolute left-0 top-full mt-1 z-50 w-52 rounded-lg border border-border-app bg-dropdown py-1 shadow-xl backdrop-blur-xl"
-                    : "absolute left-0 top-full mt-1 z-50 w-52 rounded-lg border border-border-app bg-dropdown/95 p-1.5 shadow-xl backdrop-blur-xl"
+                    ? "macos-popover absolute start-0 top-full mt-1 z-50 w-52 rounded-lg border border-border-app bg-dropdown py-1 shadow-xl backdrop-blur-xl"
+                    : "absolute start-0 top-full mt-1 z-50 w-52 rounded-lg border border-border-app bg-dropdown/95 p-1.5 shadow-xl backdrop-blur-xl"
                 }
                 role="menu"
                 aria-label={t("toolbar.open.menuLabel")}
@@ -880,7 +889,7 @@ export const Toolbar = memo(function Toolbar({
                 <button
                   type="button"
                   onClick={() => handleOpenAction("file")}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[13px] text-text-primary transition-colors hover:bg-btn-hover"
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-start text-[13px] text-text-primary transition-colors hover:bg-btn-hover"
                   role="menuitem"
                 >
                   <IconOpen className="h-4 w-4 shrink-0" />
@@ -889,7 +898,7 @@ export const Toolbar = memo(function Toolbar({
                 <button
                   type="button"
                   onClick={() => handleOpenAction("folder")}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[13px] text-text-primary transition-colors hover:bg-btn-hover"
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-start text-[13px] text-text-primary transition-colors hover:bg-btn-hover"
                   role="menuitem"
                 >
                   <IconFolder className="h-4 w-4 shrink-0" />
@@ -898,7 +907,7 @@ export const Toolbar = memo(function Toolbar({
                 <button
                   type="button"
                   onClick={() => handleOpenAction("url")}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[13px] text-text-primary transition-colors hover:bg-btn-hover"
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-start text-[13px] text-text-primary transition-colors hover:bg-btn-hover"
                   role="menuitem"
                 >
                   <IconLink className="h-4 w-4 shrink-0" />
@@ -907,7 +916,7 @@ export const Toolbar = memo(function Toolbar({
                 <button
                   type="button"
                   onClick={() => handleOpenAction("xtream")}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[13px] text-text-primary transition-colors hover:bg-btn-hover"
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-start text-[13px] text-text-primary transition-colors hover:bg-btn-hover"
                   role="menuitem"
                 >
                   <KeyRound className="h-4 w-4 shrink-0" />
@@ -916,7 +925,7 @@ export const Toolbar = memo(function Toolbar({
                 <button
                   type="button"
                   onClick={() => handleOpenAction("dispatcharr")}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[13px] text-text-primary transition-colors hover:bg-btn-hover"
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-start text-[13px] text-text-primary transition-colors hover:bg-btn-hover"
                   role="menuitem"
                 >
                   <Network className="h-4 w-4 shrink-0" />
@@ -954,21 +963,26 @@ export const Toolbar = memo(function Toolbar({
 
         {/* macOS: playlist name centered in title bar area */}
         {playlistName && isMac && (
-          <span data-tauri-drag-region className={inlinePlaylistNameClass} title={playlistName}>
+          <span
+            data-tauri-drag-region
+            className={inlinePlaylistNameClass}
+            dir="auto"
+            title={playlistName}
+          >
             {playlistName}
           </span>
         )}
 
         {/* Non-macOS: playlist name inline */}
         {playlistName && !isMac && (
-          <span className={inlinePlaylistNameClass} title={playlistName}>
+          <span className={inlinePlaylistNameClass} dir="auto" title={playlistName}>
             {playlistName}
           </span>
         )}
 
         {/* Actions group: Export, History, Settings */}
         <div
-          className={`${isMac ? "toolbar-group" : "flex items-center gap-1.5"} ml-auto shrink-0`}
+          className={`${isMac ? "toolbar-group" : "flex items-center gap-1.5"} ms-auto shrink-0`}
         >
           <ExportMenu
             scopeCounts={exportScopeCounts}
@@ -1002,7 +1016,7 @@ export const Toolbar = memo(function Toolbar({
             title={t("toolbar.history")}
             aria-label={t("toolbar.history")}
           >
-            <IconHistory className="w-[22px] h-[22px]" />
+            <IconHistory className="w-[22px] h-[22px] rtl:-scale-x-100" />
             {showButtonText && t("toolbar.history")}
           </button>
 
@@ -1058,7 +1072,7 @@ export const Toolbar = memo(function Toolbar({
             value={groupFilter}
             title={selectedGroupTitle}
             onChange={(e) => handleGroupChange(e.target.value)}
-            className="toolbar-select native-field h-7 w-full min-w-0 pl-2.5 pr-7 bg-input border border-border-app rounded-md text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
+            className="toolbar-select native-field h-7 w-full min-w-0 ps-2.5 pe-7 bg-input border border-border-app rounded-md text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
           >
             <option value="all">{t("toolbar.allGroups")}</option>
             {groups.map((g) => (
@@ -1071,7 +1085,7 @@ export const Toolbar = memo(function Toolbar({
             aria-label={t("toolbar.statusFilterLabel")}
             value={statusFilter}
             onChange={(e) => handleStatusChange(e.target.value)}
-            className="toolbar-select native-field h-7 w-full min-w-0 pl-2.5 pr-7 bg-input border border-border-app rounded-md text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
+            className="toolbar-select native-field h-7 w-full min-w-0 ps-2.5 pe-7 bg-input border border-border-app rounded-md text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed"
           >
             <option value="all">{statusLabel("all", t("toolbar.status.all"))}</option>
             <option value="alive">{statusLabel("alive", t("toolbar.status.alive"))}</option>
@@ -1137,7 +1151,7 @@ export const Toolbar = memo(function Toolbar({
             <option value="pending">{statusLabel("pending", t("toolbar.status.pending"))}</option>
           </select>
           <div className="relative min-w-0">
-            <Search className="search-icon absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary" />
+            <Search className="search-icon absolute start-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary" />
             <input
               ref={searchInputRef}
               type="search"
@@ -1147,7 +1161,7 @@ export const Toolbar = memo(function Toolbar({
               placeholder={t("toolbar.searchPlaceholder")}
               value={search}
               onChange={(e) => handleSearchChange(e.target.value)}
-              className="native-field h-7 w-full min-w-0 pl-7 pr-2 text-[12px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:cursor-not-allowed"
+              className="native-field h-7 w-full min-w-0 ps-7 pe-2 text-[12px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:cursor-not-allowed"
             />
           </div>
           {dispatcharrView && dispatcharrConnected && (

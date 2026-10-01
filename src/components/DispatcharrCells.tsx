@@ -88,7 +88,7 @@ export function ChannelHealth({ channel }: { channel: DispatcharrChannelView }) 
           <i
             key={entry.ref.streamId}
             className={`rounded-[1px] ${entry.providerDown ? "bg-amber-500" : BAR_COLOR[entry.result.status]} ${
-              i === 0 ? "mr-[3px] w-[6px] shrink-0" : "min-w-px max-w-[4px] flex-1"
+              i === 0 ? "me-[3px] w-[6px] shrink-0" : "min-w-px max-w-[4px] flex-1"
             }`}
           />
         ))}
@@ -218,13 +218,16 @@ export function ChannelNameCell({
           stop(event);
           actions?.onToggleExpand(channel.channelId);
         }}
-        className="-ml-1 shrink-0 rounded p-0.5 text-text-tertiary hover:text-text-primary"
+        className="-ms-1 shrink-0 rounded p-0.5 text-text-tertiary hover:text-text-primary"
       >
-        <ChevronRight className={`h-3.5 w-3.5 ${expanded ? "rotate-90" : ""}`} />
+        {/* Collapsed points to the inline end; expanded points down either way. */}
+        <ChevronRight className={`h-3.5 w-3.5 ${expanded ? "rotate-90" : "rtl:-scale-x-100"}`} />
       </button>
       {logo}
-      <span className="min-w-24 truncate font-medium">{channel.name}</span>
-      <span className="ml-auto flex min-w-0 items-center gap-2 pl-2">
+      <span className="min-w-24 truncate font-medium" dir="auto">
+        {channel.name}
+      </span>
+      <span className="ms-auto flex min-w-0 items-center gap-2 ps-2">
         <ChannelRowStatus channel={channel} rowState={rowState} actions={actions} />
         {actions?.canWrite && canFix && !busy && rowState?.kind !== "failed" && (
           <button
@@ -292,16 +295,20 @@ export function StreamNameCell({
     actions?.onStreamAction(channel, position, action);
   };
   return (
-    <span className="flex min-w-0 flex-1 items-center gap-2 pl-8 pr-2">
-      <span className="shrink-0 text-text-primary">{entry.ref.account ?? t("common.unknown")}</span>
-      <span className="truncate text-text-tertiary">{dispatcharrStreamName(entry)}</span>
+    <span className="flex min-w-0 flex-1 items-center gap-2 ps-8 pe-2">
+      <span className="shrink-0 text-text-primary" dir="auto">
+        {entry.ref.account ?? t("common.unknown")}
+      </span>
+      <span className="truncate text-text-tertiary" dir="auto">
+        {dispatcharrStreamName(entry)}
+      </span>
       {position === 0 && (
         <span className="shrink-0 text-[10px] uppercase tracking-[0.06em] text-text-tertiary">
           {t("dispatcharr.cells.primary")}
         </span>
       )}
       {actions?.canWrite && (
-        <span className="ml-auto flex shrink-0 items-center gap-1 pl-2 sr-only group-hover:not-sr-only focus-within:not-sr-only">
+        <span className="ms-auto flex shrink-0 items-center gap-1 ps-2 sr-only group-hover:not-sr-only focus-within:not-sr-only">
           {position > 0 && (
             <button
               type="button"
