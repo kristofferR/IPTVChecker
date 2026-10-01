@@ -1,5 +1,11 @@
 import { type MessageKey, t } from "../i18n";
-import { type ArchiveProbes, filterResultsShared } from "./filters";
+import { hasArchive } from "./archive";
+import {
+  type ArchiveProbes,
+  CATCHUP_VERDICT_FILTERS,
+  filterResultsShared,
+  matchesStatusFilter,
+} from "./filters";
 import type {
   AppSettings,
   ChannelResult,
@@ -535,6 +541,34 @@ export function matchesDispatcharrStatus(
   }
 }
 
+/** The stream Dispatcharr plays a channel's catch-up from: the first in
+ *  failover order that advertises an archive. */
+export function channelArchiveStream(channel: DispatcharrChannelView): ChannelResult | null {
+  return channel.streams.find((entry) => hasArchive(entry.result))?.result ?? null;
+}
+
+/** Status filters judged per channel: the Dispatcharr ones, and catch-up. */
+export const DISPATCHARR_CHANNEL_FILTERS = [
+  ...(Object.keys(DISPATCHARR_STATUS_FILTERS) as DispatcharrStatusFilter[]),
+  "catchup",
+  ...Object.keys(CATCHUP_VERDICT_FILTERS),
+];
+
+/** Whether a channel passes one of `DISPATCHARR_CHANNEL_FILTERS`. Catch-up
+ *  matches when any stream does, since the primary often has no archive. */
+export function matchesDispatcharrChannel(
+  channel: DispatcharrChannelView,
+  statusFilter: string,
+  archiveProbes?: ArchiveProbes,
+): boolean {
+  if (isDispatcharrStatusFilter(statusFilter)) {
+    return matchesDispatcharrStatus(channel, statusFilter);
+  }
+  return channel.streams.some((entry) =>
+    matchesStatusFilter(entry.result, statusFilter, undefined, undefined, archiveProbes),
+  );
+}
+
 export type FixProposal =
   | { kind: "none" }
   | { kind: "all_dead" }
@@ -645,7 +679,7 @@ export function filterDispatcharrPrimaries(
   separatePlaceholder?: boolean,
   archiveProbes?: ArchiveProbes,
 ): ChannelResult[] {
-  if (!isDispatcharrStatusFilter(statusFilter)) {
+  if (!DISPATCHARR_CHANNEL_FILTERS.includes(statusFilter)) {
     return filterResultsShared(
       view.primaries,
       search,
@@ -666,7 +700,7 @@ export function filterDispatcharrPrimaries(
     archiveProbes,
   ).filter((primary) => {
     const channel = view.byPrimaryIndex.get(primary.index);
-    return channel != null && matchesDispatcharrStatus(channel, statusFilter);
+    return channel != null && matchesDispatcharrChannel(channel, statusFilter, archiveProbes);
   });
 }
 

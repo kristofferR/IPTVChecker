@@ -41,13 +41,13 @@ import {
   verifyArchives,
 } from "../lib/archiveVerifyRun";
 import {
-  DISPATCHARR_STATUS_FILTERS,
+  DISPATCHARR_CHANNEL_FILTERS,
   type DispatcharrStatusFilter,
   dispatcharrChannelRows,
   filterDispatcharrPrimaries,
   getDispatcharrView,
   isDispatcharrPreview,
-  matchesDispatcharrStatus,
+  matchesDispatcharrChannel,
 } from "../lib/dispatcharr";
 import type { ExportScope } from "../lib/exportScope";
 import {
@@ -262,9 +262,9 @@ export const Toolbar = memo(function Toolbar({
         separatePlaceholder,
         archiveProbes,
       ).flatMap((primary) => dispatcharrView.byPrimaryIndex.get(primary.index) ?? []);
-      for (const filter of Object.keys(DISPATCHARR_STATUS_FILTERS) as DispatcharrStatusFilter[]) {
+      for (const filter of DISPATCHARR_CHANNEL_FILTERS) {
         counts[filter] = channels.filter((channel) =>
-          matchesDispatcharrStatus(channel, filter),
+          matchesDispatcharrChannel(channel, filter, archiveProbes),
         ).length;
       }
     }

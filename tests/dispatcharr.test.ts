@@ -6,6 +6,7 @@ import {
   dispatcharrLinkedIndices,
   dispatcharrServerOfProxyPlaylist,
   failureCause,
+  filterDispatcharrPrimaries,
   fixPreferencesFrom,
   getDispatcharrView,
   isDispatcharrPlaceholder,
@@ -88,6 +89,7 @@ function channelRows(
     kbps?: number;
     latency?: number;
     audioKbps?: number;
+    catchup?: boolean;
   }>,
   firstIndex = 0,
 ): ChannelResult[] {
@@ -103,6 +105,7 @@ function channelRows(
         video_bitrate: stream.kbps == null ? null : `${stream.kbps} kbps`,
         latency_ms: stream.latency ?? null,
         audio_bitrate: stream.audioKbps == null ? null : `${stream.audioKbps}`,
+        catchup: stream.catchup ? "xc" : null,
       },
     );
   });
@@ -403,6 +406,20 @@ describe("dispatcharr helpers", () => {
     });
     // 95 and 96 kbps tie, so latency decides; no audio bitrate ranks last.
     expect(ids(proposeFixOrder(channel, audioFirst))).toEqual([2, 3, 1, 4]);
+  });
+
+  it("finds catch-up channels by any stream, not just the primary", () => {
+    const results = [
+      ...channelRows(10, "News One", [{ id: 1 }, { id: 2, catchup: true }]),
+      ...channelRows(20, "Sports", [{ id: 3 }], 2),
+    ];
+    const view = getDispatcharrView(results, {});
+    if (!view) throw new Error("missing view");
+    const names = (filter: string) =>
+      filterDispatcharrPrimaries(view, "", "all", filter).map((primary) => primary.name);
+    expect(names("catchup")).toEqual(["News One"]);
+    expect(names("catchup_untested")).toEqual(["News One"]);
+    expect(names("catchup_fake")).toEqual([]);
   });
 
   it("treats a provider whose streams all failed the same way as down, not dead", () => {

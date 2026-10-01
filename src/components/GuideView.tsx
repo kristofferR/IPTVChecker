@@ -22,6 +22,7 @@ import {
   verifyArchivePointResponse,
 } from "../lib/archiveProbe";
 import {
+  channelArchiveStream,
   expandDispatcharrSelection,
   filterDispatcharrPrimaries,
   getDispatcharrView,
@@ -234,12 +235,9 @@ const GuideRow = memo(function GuideRow({
             const state = useAppStore.getState();
             state.setSelectedChannel(result);
             // A Dispatcharr channel row stands for all of its streams.
-            state.setSelectedChannelIndices(
-              expandDispatcharrSelection(
-                getDispatcharrView(state.flatResults, state.dispatcharrOrders),
-                [result.index],
-              ),
-            );
+            const view = getDispatcharrView(state.flatResults, state.dispatcharrOrders);
+            const primary = view?.byStreamIndex.get(result.index)?.primary ?? result;
+            state.setSelectedChannelIndices(expandDispatcharrSelection(view, [primary.index]));
           }}
           onDoubleClick={() => onPlayLive(result)}
           onKeyDown={(event) => {
@@ -356,7 +354,8 @@ export function GuideView({
   }, []);
 
   // Every live channel that matches the toolbar filters; catch-up is not required.
-  // A Dispatcharr channel appears once, through its primary stream.
+  // A Dispatcharr channel appears once, through the stream Dispatcharr plays
+  // its catch-up from, else its primary.
   const channels = useMemo(() => {
     const dispatcharrView = getDispatcharrView(flatResults, dispatcharrOrders);
     const matching = dispatcharrView
@@ -378,7 +377,12 @@ export function GuideView({
           separatePlaceholder,
           archiveProbes,
         );
-    return matching.filter((result) => result.content_type === "live");
+    return matching
+      .filter((result) => result.content_type === "live")
+      .map((primary) => {
+        const channel = dispatcharrView?.byPrimaryIndex.get(primary.index);
+        return (channel && channelArchiveStream(channel)) || primary;
+      });
   }, [
     dispatcharrOrders,
     flatResults,
