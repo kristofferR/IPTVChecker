@@ -504,12 +504,16 @@ export function hlsHttpFailureMessage({ details, response }: HlsErrorPayload): s
   return httpFailureMessage(status);
 }
 
+export function isHttpFailure(reason: string | null | undefined): reason is string {
+  return /^HTTP \d{3}$/.test(reason ?? "");
+}
+
 /**
  * A 4xx is the channel URL's own answer. A 5xx can come from the local proxies
  * after a transient failure, so a later route may still succeed.
  */
 export function isFinalHttpFailure(reason: string | null | undefined): reason is string {
-  return /^HTTP 4\d\d$/.test(reason ?? "");
+  return isHttpFailure(reason) && reason.startsWith("HTTP 4");
 }
 
 /**

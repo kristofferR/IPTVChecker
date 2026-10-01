@@ -23,6 +23,7 @@ import {
   isFinalHttpFailure,
   isHlsManifestRejection,
   isHlsMediaRejection,
+  isHttpFailure,
   isUnsupportedAudioCodec,
   MAX_PLAYBACK_RECOVERY_ATTEMPTS,
   type PlaybackRecoveryIssue,
@@ -1108,6 +1109,8 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       lastErrorRef.current = null;
 
       let previousFailure: string | null = null;
+      // Fallback routes cannot explain an HTTP error from the channel's own URL.
+      let channelHttpFailure: string | null = null;
       const resetRouteError = () => {
         previousFailure = selectPlaybackFailure(previousFailure, lastErrorRef.current);
         lastErrorRef.current = null;
@@ -1118,7 +1121,9 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           return;
         }
         const reason =
-          selectPlaybackFailure(previousFailure, lastErrorRef.current) ?? fallbackReason;
+          channelHttpFailure ??
+          selectPlaybackFailure(previousFailure, lastErrorRef.current) ??
+          fallbackReason;
         if (startMode === "recovery") {
           attemptRecoveryOrFail(result, sessionId, "startup_failure", reason);
           return;
@@ -1126,13 +1131,13 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         finalizePlaybackFailure(result, reason, true);
       };
 
-      // A client error for the channel's own URL is final: every remaining
-      // route would request the same URL again.
+      // Records an HTTP error for the channel's own URL. A client error is
+      // final: every remaining route would request the same URL again.
       const failOnHttpError = (): boolean => {
         const reason = lastErrorRef.current;
+        if (!isHttpFailure(reason)) return false;
+        channelHttpFailure = reason;
         if (!isFinalHttpFailure(reason)) return false;
-        // Earlier route failures came from other URLs; the status is the answer.
-        previousFailure = null;
         clearLoadingTimer();
         failCurrentAttempt(reason);
         return true;

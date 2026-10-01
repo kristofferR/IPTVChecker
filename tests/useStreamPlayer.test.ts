@@ -15,6 +15,7 @@ import {
   hlsHttpFailureMessage,
   httpFailureMessage,
   isFinalHttpFailure,
+  isHttpFailure,
   isSingleConnectionPlaylist,
   isUnsupportedAudioCodec,
   PLAYBACK_RECOVERY_WINDOW_MS,
@@ -78,6 +79,7 @@ describe("useStreamPlayer helpers", () => {
     expect(httpFailureMessage(undefined)).toBeNull();
     expect(isFinalHttpFailure("HTTP 404")).toBe(true);
     expect(isFinalHttpFailure("HTTP 502")).toBe(false);
+    expect(isHttpFailure("HTTP 502")).toBe(true);
     expect(isFinalHttpFailure("networkError: manifestLoadError")).toBe(false);
     expect(selectPlaybackFailure("Format not supported", "HTTP 404")).toBe("HTTP 404");
   });
