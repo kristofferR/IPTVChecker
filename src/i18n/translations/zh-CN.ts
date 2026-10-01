@@ -813,13 +813,14 @@ export default {
         moveUp: "上移{signal}",
         moveDown: "下移{signal}",
         footnote:
-          "码率以 500 kbps 为一档、延迟以 250 ms 为一档进行比较，因此两次扫描之间的细微差异不会打乱频道顺序。",
+          "视频码率以 500 kbps 为一档、音频码率以 32 kbps 为一档、延迟以 250 ms 为一档进行比较，因此两次扫描之间的细微差异不会打乱频道顺序。",
       },
       rankSignals: {
         resolution: "分辨率",
         frameRate: "帧率",
-        bitrate: "码率",
+        bitrate: "视频码率",
         latency: "低延迟",
+        audioBitrate: "音频码率",
       },
       deadStreams: {
         label: "失效流",

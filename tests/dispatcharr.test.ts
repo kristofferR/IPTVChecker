@@ -87,6 +87,7 @@ function channelRows(
     fps?: number;
     kbps?: number;
     latency?: number;
+    audioKbps?: number;
   }>,
   firstIndex = 0,
 ): ChannelResult[] {
@@ -101,6 +102,7 @@ function channelRows(
         fps: stream.fps ?? null,
         video_bitrate: stream.kbps == null ? null : `${stream.kbps} kbps`,
         latency_ms: stream.latency ?? null,
+        audio_bitrate: stream.audioKbps == null ? null : `${stream.audioKbps}`,
       },
     );
   });
@@ -374,10 +376,33 @@ describe("dispatcharr helpers", () => {
       dispatcharr_rank_order: ["bitrate", "latency"],
       dispatcharr_dead_streams: "move_to_end",
     });
-    expect(bitrateFirst.rankOrder).toEqual(["bitrate", "latency", "resolution", "frame_rate"]);
+    expect(bitrateFirst.rankOrder).toEqual([
+      "bitrate",
+      "latency",
+      "resolution",
+      "frame_rate",
+      "audio_bitrate",
+    ]);
     expect(ids(proposeFixOrder(channel, bitrateFirst))).toEqual([3, 4, 2, 1]);
     // Defaults: resolution first, dead stream unlinked.
     expect(ids(proposeFixOrder(channel))).toEqual([4, 2, 3]);
+  });
+
+  it("ranks by audio bitrate to the nearest 32 kbps", () => {
+    const results = channelRows(10, "News One", [
+      { id: 1, height: 1080, audioKbps: 95 },
+      { id: 2, height: 1080, audioKbps: 192 },
+      { id: 3, height: 1080, audioKbps: 96, latency: 100 },
+      { id: 4, height: 1080 },
+    ]);
+    const channel = getDispatcharrView(results, {})?.byChannelId.get(10);
+    if (!channel) throw new Error("missing channel");
+    const audioFirst = fixPreferencesFrom({
+      dispatcharr_rank_order: ["audio_bitrate"],
+      dispatcharr_dead_streams: "unlink",
+    });
+    // 95 and 96 kbps tie, so latency decides; no audio bitrate ranks last.
+    expect(ids(proposeFixOrder(channel, audioFirst))).toEqual([2, 3, 1, 4]);
   });
 
   it("treats a provider whose streams all failed the same way as down, not dead", () => {

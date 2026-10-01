@@ -547,7 +547,13 @@ export interface FixPreferences {
   deadStreams: "unlink" | "move_to_end";
 }
 
-const RANK_SIGNALS: DispatcharrRankSignal[] = ["resolution", "frame_rate", "bitrate", "latency"];
+const RANK_SIGNALS: DispatcharrRankSignal[] = [
+  "resolution",
+  "frame_rate",
+  "bitrate",
+  "latency",
+  "audio_bitrate",
+];
 
 export const DEFAULT_FIX_PREFERENCES: FixPreferences = {
   rankOrder: RANK_SIGNALS,
@@ -567,19 +573,22 @@ export function fixPreferencesFrom(
   return { rankOrder, deadStreams: settings.dispatcharr_dead_streams ?? "unlink" };
 }
 
-function bitrateKbps(result: ChannelResult): number {
-  const kbps = Number.parseFloat(result.video_bitrate ?? "");
-  return Number.isFinite(kbps) ? kbps : 0;
+function kbps(bitrate: string | null): number {
+  const value = Number.parseFloat(bitrate ?? "");
+  return Number.isFinite(value) ? value : 0;
 }
 
-/** Higher is better for every signal. Bitrate and latency compare in steps
- *  (500 kbps, 250 ms) so scan-to-scan noise does not reshuffle channels. */
+/** Higher is better for every signal. Bitrates and latency compare in steps
+ *  (500 kbps, 32 kbps, 250 ms) so scan-to-scan noise does not reshuffle
+ *  channels. Audio rounds to the nearest step: common rates are multiples of
+ *  32 kbps, so a 95 kbps measurement still ties with 96. */
 const SIGNAL_SCORE: Record<DispatcharrRankSignal, (result: ChannelResult) => number> = {
   resolution: (result) => result.height ?? 0,
   frame_rate: (result) => result.fps ?? 0,
-  bitrate: (result) => Math.floor(bitrateKbps(result) / 500),
+  bitrate: (result) => Math.floor(kbps(result.video_bitrate) / 500),
   latency: (result) =>
     result.latency_ms == null ? -Number.MAX_SAFE_INTEGER : -Math.floor(result.latency_ms / 250),
+  audio_bitrate: (result) => Math.round(kbps(result.audio_bitrate) / 32),
 };
 
 /** Working streams first, ranked by the preferred signals (remaining ties

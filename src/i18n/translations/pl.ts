@@ -959,13 +959,14 @@ export default {
         moveUp: "Przenieś {signal} wyżej",
         moveDown: "Przenieś {signal} niżej",
         footnote:
-          "Bitrate jest porównywany co 500 kb/s, a opóźnienie co 250 ms, więc drobne różnice między skanami nie zmieniają kolejności kanałów.",
+          "Bitrate wideo jest porównywany co 500 kb/s, bitrate audio co 32 kb/s, a opóźnienie co 250 ms, więc drobne różnice między skanami nie zmieniają kolejności kanałów.",
       },
       rankSignals: {
         resolution: "Rozdzielczość",
         frameRate: "Liczba klatek",
-        bitrate: "Bitrate",
+        bitrate: "Bitrate wideo",
         latency: "Niskie opóźnienie",
+        audioBitrate: "Bitrate audio",
       },
       deadStreams: {
         label: "Niedziałające strumienie",

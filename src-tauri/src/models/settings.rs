@@ -50,6 +50,7 @@ pub enum DispatcharrRankSignal {
     FrameRate,
     Bitrate,
     Latency,
+    AudioBitrate,
 }
 
 /// What Fix order does with dead streams.
@@ -279,6 +280,7 @@ impl Default for AppSettings {
                 DispatcharrRankSignal::FrameRate,
                 DispatcharrRankSignal::Bitrate,
                 DispatcharrRankSignal::Latency,
+                DispatcharrRankSignal::AudioBitrate,
             ],
             dispatcharr_dead_streams: DispatcharrDeadStreams::Unlink,
             automatic_update_checks: true,

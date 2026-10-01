@@ -886,13 +886,14 @@ export default {
         moveUp: "{signal} nach oben",
         moveDown: "{signal} nach unten",
         footnote:
-          "Bitrate wird in 500-kbit/s-Schritten und Latenz in 250-ms-Schritten verglichen, damit kleine Unterschiede zwischen Scans die Sender nicht neu ordnen.",
+          "Video-Bitrate wird in 500-kbit/s-Schritten, Audio-Bitrate in 32-kbit/s-Schritten und Latenz in 250-ms-Schritten verglichen, damit kleine Unterschiede zwischen Scans die Sender nicht neu ordnen.",
       },
       rankSignals: {
         resolution: "Auflösung",
         frameRate: "Bildrate",
-        bitrate: "Bitrate",
+        bitrate: "Video-Bitrate",
         latency: "Niedrige Latenz",
+        audioBitrate: "Audio-Bitrate",
       },
       deadStreams: {
         label: "Offline-Streams",
