@@ -2415,6 +2415,7 @@ dependencies = [
  "chrono",
  "core-foundation 0.10.1",
  "csv",
+ "dirs",
  "fancy-regex",
  "flate2",
  "fs2",

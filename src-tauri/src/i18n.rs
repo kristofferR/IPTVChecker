@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use serde::Serialize;
-use tauri::Manager;
 
 /// Mirrors `LOCALES` in `src/i18n/index.ts`; each has `locales/<tag>.json`.
 pub const SUPPORTED: &[&str] = &[
@@ -83,7 +82,11 @@ pub fn init(app: &tauri::AppHandle) {
 
 fn persisted_language(app: &tauri::AppHandle) -> Option<String> {
     // tauri-plugin-store keeps `settings.json` in the app data directory.
-    let path = app.path().app_data_dir().ok()?.join("settings.json");
+    // `app.path()` isn't managed yet while the menu builds, so resolve it the
+    // way Tauri does.
+    let path = dirs::data_dir()?
+        .join(&app.config().identifier)
+        .join("settings.json");
     let value: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
     value
         .get("settings")?
