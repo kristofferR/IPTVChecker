@@ -31,7 +31,7 @@ export class ErrorBoundary extends Component<Props, State> {
         <div className="flex items-center justify-center h-screen bg-zinc-900 text-zinc-100">
           <div className="text-center p-8 max-w-md">
             <h1 className="text-lg font-semibold mb-2">{t("app.errorBoundary.title")}</h1>
-            <p className="text-sm text-zinc-400 mb-4">
+            <p dir="auto" className="text-sm text-zinc-400 mb-4">
               {this.state.error?.message ?? t("app.errorBoundary.fallback")}
             </p>
             <button

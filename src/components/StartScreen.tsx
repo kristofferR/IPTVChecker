@@ -139,7 +139,10 @@ export function StartScreen({
                 <p className="text-[15px] mb-4">
                   {tRich("start.openHint", {
                     shortcut: (
-                      <kbd className="px-2 py-0.5 bg-input rounded text-[13px] border border-border-app">
+                      <kbd
+                        dir="ltr"
+                        className="px-2 py-0.5 bg-input rounded text-[13px] border border-border-app"
+                      >
                         {modKey}+O
                       </kbd>
                     ),
@@ -211,7 +214,7 @@ export function StartScreen({
                         type="button"
                         title={savedPlaylistSecondaryLabel(entry)}
                       >
-                        <span className="text-[13px] text-text-primary block truncate">
+                        <span className="text-[13px] text-text-primary block truncate" dir="auto">
                           {entry.display_name}
                         </span>
                         <span className="text-[11px] text-text-tertiary block truncate mt-0.5">
@@ -248,7 +251,7 @@ export function StartScreen({
                         type="button"
                         title={recentTitle(entry)}
                       >
-                        <span className="text-[13px] text-text-primary block truncate">
+                        <span className="text-[13px] text-text-primary block truncate" dir="auto">
                           {entry.label}
                         </span>
                         <span className="text-[11px] text-text-tertiary block truncate mt-0.5">

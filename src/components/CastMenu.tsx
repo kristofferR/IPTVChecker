@@ -1,6 +1,6 @@
 import { Cast, ChevronDown, RefreshCw, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { t } from "../i18n";
+import { t, tRich } from "../i18n";
 import { isCastSessionActive } from "../lib/cast";
 import type { CastMediaRequest, CastSession, ChromecastDevice } from "../lib/types";
 
@@ -152,13 +152,15 @@ function CastMenuPopover({
               title={t("cast.refreshDevices")}
             >
               <RefreshCw
-                className={`w-3.5 h-3.5 ${chromecast.discovering ? "animate-spin" : ""}`}
+                className={`w-3.5 h-3.5 rtl:-scale-x-100 ${chromecast.discovering ? "animate-spin" : ""}`}
               />
             </button>
           </div>
           {isCasting && chromecast.session && (
             <div className="px-3 py-2 border-b border-white/10">
-              <div className="text-white/85">{chromecast.session.deviceName}</div>
+              <div dir="auto" className="text-white/85">
+                {chromecast.session.deviceName}
+              </div>
               <div className="text-[11px] text-white/55">
                 {t(`cast.state.${chromecast.session.state}`)}
               </div>
@@ -189,9 +191,13 @@ function CastMenuPopover({
                   >
                     <Cast className="w-3.5 h-3.5 shrink-0 text-white/70" />
                     <div className="flex-1 min-w-0">
-                      <div className="truncate">{device.friendlyName}</div>
+                      <div dir="auto" className="truncate">
+                        {device.friendlyName}
+                      </div>
                       {device.model && (
-                        <div className="text-[10px] text-white/45 truncate">{device.model}</div>
+                        <div dir="auto" className="text-[10px] text-white/45 truncate">
+                          {device.model}
+                        </div>
                       )}
                     </div>
                     {active && (
@@ -269,7 +275,7 @@ function CastMenuInline({ chromecast, castRequest, onCastStart }: Omit<CastMenuP
             <Cast className="h-3.5 w-3.5 shrink-0 text-blue-500" />
             <div className="flex-1 min-w-0">
               <div className="text-[12px] font-medium text-text-primary truncate">
-                {t("cast.castingTo", { device: chromecast.session.deviceName })}
+                {tRich("cast.castingTo", { device: <bdi>{chromecast.session.deviceName}</bdi> })}
               </div>
               <div className="text-[11px] text-text-tertiary">
                 {t(`cast.state.${chromecast.session.state}`)}
@@ -301,7 +307,7 @@ function CastMenuInline({ chromecast, castRequest, onCastStart }: Omit<CastMenuP
               {t("cast.castToADevice")}
             </span>
             {chromecast.discovering && (
-              <RefreshCw className="h-3 w-3 animate-spin text-text-tertiary" />
+              <RefreshCw className="h-3 w-3 animate-spin text-text-tertiary rtl:-scale-x-100" />
             )}
             <ChevronDown
               className={`h-3.5 w-3.5 text-text-tertiary transition-transform ${
@@ -321,7 +327,7 @@ function CastMenuInline({ chromecast, castRequest, onCastStart }: Omit<CastMenuP
                   title={t("cast.refreshDevices")}
                 >
                   <RefreshCw
-                    className={`h-3 w-3 ${chromecast.discovering ? "animate-spin" : ""}`}
+                    className={`h-3 w-3 rtl:-scale-x-100 ${chromecast.discovering ? "animate-spin" : ""}`}
                   />
                   {t("cast.refresh")}
                 </button>
@@ -342,11 +348,11 @@ function CastMenuInline({ chromecast, castRequest, onCastStart }: Omit<CastMenuP
                     >
                       <Cast className="h-3.5 w-3.5 shrink-0 text-text-secondary" />
                       <div className="flex-1 min-w-0">
-                        <div className="text-[12px] text-text-primary truncate">
+                        <div dir="auto" className="text-[12px] text-text-primary truncate">
                           {device.friendlyName}
                         </div>
                         {device.model && (
-                          <div className="text-[10px] text-text-tertiary truncate">
+                          <div dir="auto" className="text-[10px] text-text-tertiary truncate">
                             {device.model}
                           </div>
                         )}

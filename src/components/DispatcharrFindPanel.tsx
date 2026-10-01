@@ -232,7 +232,7 @@ export function DispatcharrFindPanel() {
               }}
               className="rounded bg-btn p-0.5 text-text-primary hover:bg-btn-hover"
             >
-              <ChevronRight className="h-3.5 w-3.5" />
+              <ChevronRight className="h-3.5 w-3.5 rtl:-scale-x-100" />
             </button>
           </span>
         )}
@@ -347,7 +347,9 @@ export function DispatcharrFindPanel() {
   return frame(
     <>
       <div className="flex items-center gap-2 px-3 pt-2.5 pb-1.5 text-[13px]">
-        <span className="font-semibold text-text-primary">{channel.name}</span>
+        <span className="font-semibold text-text-primary" dir="auto">
+          {channel.name}
+        </span>
         {scanned > 0 && (
           <span className={alive > 0 ? "text-text-secondary" : "text-red-400"}>
             {t("dispatcharr.find.aliveOfScanned", {
@@ -373,10 +375,10 @@ export function DispatcharrFindPanel() {
             <i
               className={`h-1.5 w-1.5 rounded-full ${DOT[entry.result.status] ?? "bg-zinc-500"}`}
             />
-            <span className="text-text-primary">
+            <span className="text-text-primary" dir="auto">
               {entry.ref.account ?? t("dispatcharr.provider")}
             </span>
-            <span className="truncate text-text-tertiary">
+            <span className="truncate text-text-tertiary" dir="auto">
               {entry.ref.streamName ?? entry.result.name}
             </span>
           </li>
@@ -473,8 +475,12 @@ export function DispatcharrFindPanel() {
                   }`}
                 />
                 <span className="flex min-w-0 flex-1 flex-col leading-tight">
-                  <span className="font-medium text-text-primary">{entry.account}</span>
-                  <span className="truncate text-[11.5px] text-text-tertiary">{entry.name}</span>
+                  <span className="font-medium text-text-primary" dir="auto">
+                    {entry.account}
+                  </span>
+                  <span className="truncate text-[11.5px] text-text-tertiary" dir="auto">
+                    {entry.name}
+                  </span>
                 </span>
                 {entry.otherCountry && (
                   <span

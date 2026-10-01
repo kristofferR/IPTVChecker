@@ -364,6 +364,8 @@ export function LogWindowContent() {
         ref={toolbarRef}
         data-tauri-drag-region
         className="shrink-0 border-b border-border-app bg-panel-subtle"
+        // Physical left on purpose: --toolbar-pl clears the macOS traffic
+        // lights, which stay on the left in right-to-left layouts.
         style={{
           paddingTop: "var(--toolbar-pt)",
           paddingLeft: "var(--toolbar-pl)",
@@ -483,7 +485,9 @@ export function LogWindowContent() {
                 <span className={`${meta.color} font-semibold shrink-0 w-[5ch] text-end`}>
                   {t(meta.label)}
                 </span>
-                <span className="text-text-primary break-all select-all">{entry.message}</span>
+                <span dir="auto" className="text-text-primary break-all select-all">
+                  {entry.message}
+                </span>
               </div>
             );
           })}

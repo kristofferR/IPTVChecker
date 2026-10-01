@@ -329,7 +329,7 @@ export const StatsPanel = memo(function StatsPanel() {
       )}
       {catchupCount > 0 && (
         <Pill
-          icon={<SFClockArrow className={iconSize} />}
+          icon={<SFClockArrow className={`${iconSize} rtl:-scale-x-100`} />}
           label={catchupLabel}
           color="violet"
           active={isCatchupStatusFilter(statusFilter)}

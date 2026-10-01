@@ -305,7 +305,9 @@ export function ThumbnailPanel({
       <div className="flex shrink-0 flex-col gap-3">
         <div className="flex items-center gap-2">
           <StatusBadge status={result.status} />
-          <h3 className="text-[14px] font-semibold truncate">{result.name}</h3>
+          <h3 dir="auto" className="text-[14px] font-semibold truncate">
+            {result.name}
+          </h3>
         </div>
 
         {/* Hidden sidebar container keeps the ref alive for FLIP handoff from lightbox */}
@@ -466,7 +468,7 @@ export function ThumbnailPanel({
                 className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-btn hover:bg-btn-hover text-text-primary border border-border-app shadow-sm transition-colors"
                 title={t("player.panel.openInExternalPlayer")}
               >
-                <ExternalLink className="w-3.5 h-3.5" />
+                <ExternalLink className="w-3.5 h-3.5 rtl:-scale-x-100" />
               </button>
             )}
             {onScanChannel && (
@@ -483,7 +485,7 @@ export function ThumbnailPanel({
                       : t("player.panel.rescanChannel")
                 }
               >
-                <RotateCw className="w-3.5 h-3.5" />
+                <RotateCw className="w-3.5 h-3.5 rtl:-scale-x-100" />
                 {result.status === "pending" || result.status === "checking"
                   ? t("player.panel.scan")
                   : t("player.panel.rescan")}
@@ -529,7 +531,9 @@ export function ThumbnailPanel({
           </div>
           <div>
             <span className="text-text-tertiary">{t("player.panel.group")}</span>
-            <p className="font-medium text-[12px]">{result.group}</p>
+            <p className="font-medium text-[12px]">
+              <bdi>{result.group}</bdi>
+            </p>
           </div>
           {(result.status === "alive" || result.resolution || result.codec) && (
             <>
@@ -654,7 +658,9 @@ export function ThumbnailPanel({
                 {resolvedUrlCopied ? t("common.copied") : t("common.copy")}
               </button>
             </div>
-            <p className="text-[11px] text-text-secondary mt-1 break-all">{resolvedUrl}</p>
+            <p dir="ltr" className="text-[11px] text-text-secondary mt-1 break-all">
+              {resolvedUrl}
+            </p>
           </div>
         )}
       </div>
@@ -692,7 +698,10 @@ export function ThumbnailPanel({
               onMouseDown={(event) => event.stopPropagation()}
             >
               {!theaterMode && (
-                <h2 className="text-white text-[15px] font-semibold truncate max-w-[88vw] text-center drop-shadow-lg">
+                <h2
+                  dir="auto"
+                  className="text-white text-[15px] font-semibold truncate max-w-[88vw] text-center drop-shadow-lg"
+                >
                   {result.name}
                 </h2>
               )}
@@ -825,7 +834,7 @@ export function ThumbnailPanel({
                       onClick={() => onScanChannel([result.index])}
                       className="flex items-center gap-2 px-4 py-2 text-[13px] font-medium rounded-lg bg-white/10 hover:bg-white/20 text-white backdrop-blur-sm transition-colors disabled:opacity-40 disabled:pointer-events-none"
                     >
-                      <RotateCw className="w-4 h-4" />
+                      <RotateCw className="w-4 h-4 rtl:-scale-x-100" />
                       {result.status === "pending" || result.status === "checking"
                         ? t("player.panel.scan")
                         : t("player.panel.rescan")}
@@ -839,7 +848,10 @@ export function ThumbnailPanel({
                 {result.status === "alive" && (
                   <>
                     {result.resolution && result.resolution !== "Unknown" && (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">
+                      <span
+                        dir="ltr"
+                        className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm"
+                      >
                         {result.width}x{result.height}
                       </span>
                     )}
@@ -851,12 +863,18 @@ export function ThumbnailPanel({
                     {result.video_bitrate &&
                       result.video_bitrate !== "Unknown" &&
                       result.video_bitrate !== "N/A" && (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">
+                        <span
+                          dir="ltr"
+                          className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm"
+                        >
                           {result.video_bitrate}
                         </span>
                       )}
                     {result.hdr_format && (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">
+                      <span
+                        dir="ltr"
+                        className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm"
+                      >
                         {result.hdr_format}
                       </span>
                     )}

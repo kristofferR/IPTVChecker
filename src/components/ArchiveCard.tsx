@@ -221,6 +221,7 @@ function ArchivePicker({
         </select>
         <input
           type="time"
+          dir="ltr"
           value={time}
           onChange={(e) => setTime(e.target.value)}
           className="native-field h-7 w-[5.5rem] rounded-md border border-border-app bg-input px-1.5 text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -329,13 +330,13 @@ export function ArchiveCard({
         <span className="min-w-0" title={archiveTitle(result) ?? undefined}>
           {t("archive.card.heading")}
           <span className="ms-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-violet-300/80">
-            {result.catchup ?? "default"}
+            <bdi>{result.catchup ?? "default"}</bdi>
             {result.catchup_days != null
               ? ` · ${t("archive.card.depthDays", { days: formatCount(result.catchup_days) })}`
               : ""}
           </span>
         </span>
-        <ChevronRight className="ms-auto h-3.5 w-3.5 shrink-0 group-open/archive:rotate-90" />
+        <ChevronRight className="ms-auto h-3.5 w-3.5 shrink-0 group-open/archive:rotate-90 rtl:-scale-x-100 rtl:group-open/archive:-rotate-90" />
       </summary>
       <div className="px-2 pb-2">
         {programmes === null ? (
@@ -375,7 +376,9 @@ export function ArchiveCard({
                       <span className="shrink-0 tabular-nums text-text-tertiary">
                         {timeLabel(programme.start)}
                       </span>
-                      <span className="min-w-0 flex-1 truncate">{programme.title}</span>
+                      <span className="min-w-0 flex-1 truncate" dir="auto">
+                        {programme.title}
+                      </span>
                       <Play className="h-2.5 w-2.5 shrink-0 opacity-60" />
                     </button>
                   );

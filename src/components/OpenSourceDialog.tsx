@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { Cpu, KeyRound, Link2, Loader2, Network, Server, X } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { t } from "../i18n";
+import { t, tRich } from "../i18n";
 import { normalizeDispatcharrServer } from "../lib/dispatcharr";
 import { testXtreamServers } from "../lib/tauri";
 import type {
@@ -154,6 +154,7 @@ export function ServerTestModal({
             <textarea
               id="server-test-urls"
               rows={6}
+              dir="ltr"
               autoFocus
               value={testServers}
               onChange={(e) => setTestServers(e.target.value)}
@@ -174,7 +175,7 @@ export function ServerTestModal({
             </button>
 
             {testRunning && (
-              <span className="text-[12px] text-text-tertiary">
+              <span dir="auto" className="text-[12px] text-text-tertiary">
                 {testProgress || t("sources.serverTest.starting")}
               </span>
             )}
@@ -259,11 +260,17 @@ export function ServerTestModal({
                                 {t("sources.serverTest.best")}
                               </span>
                             )}
-                            <span className="text-[14px] font-semibold text-text-primary truncate">
+                            <span
+                              dir="ltr"
+                              className="text-[14px] font-semibold text-text-primary truncate"
+                            >
                               {hostLabel}
                             </span>
                             {result.resolved_host && result.resolved_host !== hostLabel && (
-                              <span className="text-[11px] text-text-muted font-mono truncate">
+                              <span
+                                dir="ltr"
+                                className="text-[11px] text-text-muted font-mono truncate"
+                              >
                                 {result.resolved_host}
                               </span>
                             )}
@@ -271,7 +278,11 @@ export function ServerTestModal({
                         </div>
 
                         {result.error ? (
-                          <span className="text-[12px] text-red-400" title={result.error}>
+                          <span
+                            dir="auto"
+                            className="text-[12px] text-red-400"
+                            title={result.error}
+                          >
                             {result.error}
                           </span>
                         ) : (
@@ -681,6 +692,7 @@ export default function OpenSourceDialog({
                 </label>
                 <input
                   id="open-source-url"
+                  dir="ltr"
                   type="text"
                   autoFocus
                   value={url}
@@ -700,6 +712,7 @@ export default function OpenSourceDialog({
                   </label>
                   <input
                     id="open-source-xtream-server"
+                    dir="ltr"
                     type="text"
                     autoFocus
                     value={xtreamServer}
@@ -717,6 +730,7 @@ export default function OpenSourceDialog({
                   </label>
                   <input
                     id="open-source-xtream-username"
+                    dir="ltr"
                     type="text"
                     value={xtreamUsername}
                     onChange={(event) => setXtreamUsername(event.target.value)}
@@ -770,6 +784,7 @@ export default function OpenSourceDialog({
                   </label>
                   <input
                     id="open-source-dispatcharr-server"
+                    dir="ltr"
                     type="text"
                     autoFocus
                     value={dispatcharrServer}
@@ -833,6 +848,7 @@ export default function OpenSourceDialog({
                       </label>
                       <input
                         id="open-source-dispatcharr-username"
+                        dir="ltr"
                         type="text"
                         value={dispatcharrUsername}
                         onChange={(event) => setDispatcharrUsername(event.target.value)}
@@ -857,7 +873,9 @@ export default function OpenSourceDialog({
                 )}
                 {convertSaved ? (
                   <p className="text-[12px] text-text-secondary">
-                    {t("sources.replacesSavedPlaylist", { name: convertSaved.name })}
+                    {tRich("sources.replacesSavedPlaylist", {
+                      name: <bdi>{convertSaved.name}</bdi>,
+                    })}
                   </p>
                 ) : (
                   <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -884,6 +902,7 @@ export default function OpenSourceDialog({
                   </label>
                   <input
                     id="open-source-stalker-portal"
+                    dir="ltr"
                     type="text"
                     autoFocus
                     value={stalkerPortal}
@@ -901,6 +920,7 @@ export default function OpenSourceDialog({
                   </label>
                   <input
                     id="open-source-stalker-mac"
+                    dir="ltr"
                     type="text"
                     value={stalkerMac}
                     onChange={(event) => setStalkerMac(event.target.value)}

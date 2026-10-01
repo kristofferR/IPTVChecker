@@ -1,6 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import {
+  type CSSProperties,
   type RefObject,
   useCallback,
   useDeferredValue,
@@ -13,7 +14,7 @@ import {
 import { createPortal } from "react-dom";
 import { useFixPreferences } from "../hooks/useFixPreferences";
 import { resultAtIndex } from "../hooks/useScan.helpers";
-import { t } from "../i18n";
+import { getLocale, localeDirection, t } from "../i18n";
 import { translateReason } from "../i18n/reasons";
 import { hasArchive } from "../lib/archive";
 import { createArchiveProbeSequenceGuard, probeChannelArchive } from "../lib/archiveProbe";
@@ -134,6 +135,18 @@ function columnWidthsMatchDefaults(widths: Record<ColumnKey, number>): boolean {
   return DEFAULT_COLUMN_ORDER.every((key) => widths[key] === DEFAULT_COLUMN_WIDTHS[key]);
 }
 
+const isRtl = () => localeDirection(getLocale()) === "rtl";
+
+/**
+ * Menus open from the cursor toward the inline end: rightward in LTR,
+ * leftward in RTL, where `x` is the menu's right edge.
+ */
+function menuPosition(x: number, y: number): CSSProperties {
+  return isRtl()
+    ? { top: `${y}px`, right: `${document.documentElement.clientWidth - x}px` }
+    : { top: `${y}px`, left: `${x}px` };
+}
+
 function keepMenuInViewport(
   x: number,
   y: number,
@@ -141,10 +154,15 @@ function keepMenuInViewport(
   menuHeight: number,
 ): { x: number; y: number } {
   const padding = 8;
-  const maxX = Math.max(padding, window.innerWidth - menuWidth - padding);
+  const viewportWidth = document.documentElement.clientWidth;
+  const rtl = isRtl();
+  // Clamp the distance from the viewport edge the menu opens away from.
+  const inline = rtl ? viewportWidth - x : x;
+  const maxInline = Math.max(padding, viewportWidth - menuWidth - padding);
+  const clamped = Math.min(Math.max(inline, padding), maxInline);
   const maxY = Math.max(padding, window.innerHeight - menuHeight - padding);
   return {
-    x: Math.min(Math.max(x, padding), maxX),
+    x: rtl ? viewportWidth - clamped : clamped,
     y: Math.min(Math.max(y, padding), maxY),
   };
 }
@@ -1045,7 +1063,9 @@ export function ChannelTable({
         const meta = row === null ? undefined : rowMetaRef.current?.[row];
         if (!meta) return;
         const expanded = meta.kind === "stream" || meta.expanded;
-        if (expanded !== (event.key === "ArrowRight")) {
+        // The inline-end arrow expands: ArrowRight in LTR, ArrowLeft in RTL.
+        const expandKey = isRtl() ? "ArrowLeft" : "ArrowRight";
+        if (expanded !== (event.key === expandKey)) {
           event.preventDefault();
           toggleChannelExpanded(meta.channel.channelId);
         }
@@ -1443,9 +1463,11 @@ export function ChannelTable({
       const startX = event.clientX;
       const startWidth = columnWidths[key];
       const minWidth = COLUMN_DEFINITION_MAP[key].minWidth;
+      // The handle sits on the column's inline end, which is its left in RTL.
+      const grow = isRtl() ? -1 : 1;
 
       const onMouseMove = (moveEvent: MouseEvent) => {
-        const deltaX = moveEvent.clientX - startX;
+        const deltaX = (moveEvent.clientX - startX) * grow;
         setColumnWidths((prev) => ({
           ...prev,
           [key]: Math.max(minWidth, Math.round(startWidth + deltaX)),
@@ -1621,7 +1643,7 @@ export function ChannelTable({
             style={{
               position: "absolute",
               top: `${rowTop}px`,
-              left: 0,
+              insetInlineStart: 0,
               width: `${tableWidth}px`,
               height: `${virtualRow.size}px`,
             }}
@@ -1710,7 +1732,7 @@ export function ChannelTable({
         {columns.map((column) => {
           const label = t(column.labelKey);
           const alignClass =
-            column.align === "right"
+            column.align === "end"
               ? "justify-end"
               : column.align === "center"
                 ? "justify-center"
@@ -1789,7 +1811,8 @@ export function ChannelTable({
               width: `${tableWidth}px`,
               minWidth: `${tableWidth}px`,
               height: "100%",
-              transform: `translateX(-${revealScrollState.scrollLeft}px)`,
+              // scrollLeft is negative in RTL, so negate rather than prefix "-".
+              transform: `translateX(${-revealScrollState.scrollLeft}px)`,
             }}
           >
             {renderVirtualRows(revealVirtualItems, "reveal")}
@@ -1856,10 +1879,7 @@ export function ChannelTable({
           ref={contextMenuRef}
           data-no-window-drag
           className="fixed z-50 w-56 rounded-lg border border-border-app bg-dropdown shadow-2xl py-1"
-          style={{
-            top: `${contextMenuState.y}px`,
-            left: `${contextMenuState.x}px`,
-          }}
+          style={menuPosition(contextMenuState.x, contextMenuState.y)}
         >
           <button
             onClick={handleScanSelected}
@@ -1983,10 +2003,7 @@ export function ChannelTable({
           ref={columnMenuRef}
           data-no-window-drag
           className="fixed z-50 w-56 rounded-lg border border-border-app bg-dropdown shadow-2xl py-1"
-          style={{
-            top: `${columnMenuState.y}px`,
-            left: `${columnMenuState.x}px`,
-          }}
+          style={menuPosition(columnMenuState.x, columnMenuState.y)}
         >
           <p className="px-3 py-2 text-[11px] uppercase tracking-[0.06em] text-text-tertiary">
             {t("table.visibleColumns")}

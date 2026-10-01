@@ -32,7 +32,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { formatCount, type MessageKey, t } from "../i18n";
+import { formatCount, getLocale, localeDirection, type MessageKey, t } from "../i18n";
 import { hasArchive } from "../lib/archive";
 import { type ArchiveVerifyMode, archiveVerdict } from "../lib/archiveVerification";
 import {
@@ -350,7 +350,14 @@ export const Toolbar = memo(function Toolbar({
       const rect = anchor.getBoundingClientRect();
       setVerifyPosition({
         top: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - popover.offsetHeight - 8)),
-        left: Math.max(8, Math.min(rect.left, window.innerWidth - popover.offsetWidth - 8)),
+        // Align the popover with the anchor's inline-start edge.
+        left: Math.max(
+          8,
+          Math.min(
+            localeDirection(getLocale()) === "rtl" ? rect.right - popover.offsetWidth : rect.left,
+            window.innerWidth - popover.offsetWidth - 8,
+          ),
+        ),
       });
     };
     update();
@@ -563,8 +570,10 @@ export const Toolbar = memo(function Toolbar({
       ? "pt-[var(--toolbar-pt)] pb-1"
       : "pt-[var(--toolbar-pt)] pb-1";
   const toolbarSurface = isMac ? "" : "bg-panel";
+  // macOS window buttons stay top-left whatever the UI direction, so their
+  // reserved space is physical.
   const toolbarHorizontalPadding = isMac
-    ? "ps-[var(--toolbar-pl)] pe-[var(--toolbar-pr,0.75rem)]"
+    ? "pl-[var(--toolbar-pl)] pr-[var(--toolbar-pr,0.75rem)]"
     : "ps-[var(--toolbar-pl)] pe-3";
   const inlinePlaylistNameClass = isMac
     ? "absolute top-[6px] left-1/2 max-w-[40%] -translate-x-1/2 truncate text-[13px] text-text-tertiary pointer-events-none"
@@ -585,7 +594,7 @@ export const Toolbar = memo(function Toolbar({
         <div
           className={
             isMac
-              ? "toolbar-group toolbar-group-prominent -ms-[calc(var(--toolbar-pl)-0.75rem)] me-2"
+              ? "toolbar-group toolbar-group-prominent -ml-[calc(var(--toolbar-pl)-0.75rem)] rtl:ml-0 me-2"
               : "flex items-center gap-1.5"
           }
         >
@@ -728,7 +737,7 @@ export const Toolbar = memo(function Toolbar({
                 aria-haspopup="dialog"
                 aria-expanded={verifyMenuVisible}
               >
-                <IconVerify className="w-[22px] h-[22px]" />
+                <IconVerify className="w-[22px] h-[22px] rtl:-scale-x-100" />
                 {showButtonText && (
                   <span className="inline-flex items-center gap-1 leading-none">
                     <span>
@@ -954,14 +963,19 @@ export const Toolbar = memo(function Toolbar({
 
         {/* macOS: playlist name centered in title bar area */}
         {playlistName && isMac && (
-          <span data-tauri-drag-region className={inlinePlaylistNameClass} title={playlistName}>
+          <span
+            data-tauri-drag-region
+            className={inlinePlaylistNameClass}
+            dir="auto"
+            title={playlistName}
+          >
             {playlistName}
           </span>
         )}
 
         {/* Non-macOS: playlist name inline */}
         {playlistName && !isMac && (
-          <span className={inlinePlaylistNameClass} title={playlistName}>
+          <span className={inlinePlaylistNameClass} dir="auto" title={playlistName}>
             {playlistName}
           </span>
         )}
@@ -1002,7 +1016,7 @@ export const Toolbar = memo(function Toolbar({
             title={t("toolbar.history")}
             aria-label={t("toolbar.history")}
           >
-            <IconHistory className="w-[22px] h-[22px]" />
+            <IconHistory className="w-[22px] h-[22px] rtl:-scale-x-100" />
             {showButtonText && t("toolbar.history")}
           </button>
 

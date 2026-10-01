@@ -12,7 +12,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { ArchivePlayOptions } from "../hooks/useStreamPlayer";
-import { formatCount, t } from "../i18n";
+import { formatCount, getLocale, localeDirection, t } from "../i18n";
 import { translateReason } from "../i18n/reasons";
 import { archiveBadgeText, hasArchive, resolveArchivePlayback } from "../lib/archive";
 import { isArchiveDownloadRunning, startArchiveDownload } from "../lib/archiveDownload";
@@ -31,7 +31,9 @@ import { filterResultsShared } from "../lib/filters";
 import {
   guideProgrammesInWindow,
   indexGuideProgrammes,
+  inlineScrollOffset,
   programmePlaybackAvailability,
+  setInlineScrollOffset,
 } from "../lib/guideProgrammes";
 import { isSingleConnectionPlaylist } from "../lib/playback";
 import { isScanActive } from "../lib/scanState";
@@ -42,8 +44,10 @@ import { useAppStore } from "../store";
 import { ChannelLogo } from "./ChannelLogo";
 
 // The guide is one continuous canvas: trackpad scrolling moves through time
-// horizontally (left = into the past) and through channels vertically. The
-// channel column and the time axis stay pinned with position: sticky.
+// horizontally (toward the channel column = into the past) and through channels
+// vertically. The channel column and the time axis stay pinned with position:
+// sticky. Horizontal offsets are inline-start relative, so Arabic and Persian
+// mirror the timeline: channels on the right, time flowing leftward.
 const ROW_HEIGHT_PX = 32;
 const AXIS_HEIGHT_PX = 22;
 const CHANNEL_COL_PX = 180;
@@ -126,8 +130,8 @@ const GuideProgramme = memo(function GuideProgramme({
   onActivate,
   onContextMenu,
 }: GuideProgrammeProps) {
-  const left = ((Math.max(programme.start, spanFrom) - spanFrom) / 3600) * PX_PER_HOUR;
-  const width = ((Math.min(programme.stop, spanTo) - spanFrom) / 3600) * PX_PER_HOUR - left;
+  const offset = ((Math.max(programme.start, spanFrom) - spanFrom) / 3600) * PX_PER_HOUR;
+  const width = ((Math.min(programme.stop, spanTo) - spanFrom) / 3600) * PX_PER_HOUR - offset;
   if (width < 2) return null;
   const selection: GuideSelection = { result, programme };
   const playable = isProgrammePlayable(selection, nowEpochS);
@@ -161,8 +165,7 @@ const GuideProgramme = memo(function GuideProgramme({
             ? "bg-violet-500/12 text-text-primary ring-1 ring-violet-500/20 hover:bg-violet-500/25"
             : "bg-panel-subtle text-text-tertiary ring-1 ring-border-subtle"
       }`}
-      style={{ left: `${left}px`, width: `${width - 1}px` }}
-      dir="ltr"
+      style={{ insetInlineStart: `${offset}px`, width: `${width - 1}px` }}
     >
       <span className="shrink-0 text-[9px] tabular-nums opacity-70">
         {timeLabel(programme.start)}
@@ -248,7 +251,11 @@ const GuideRow = memo(function GuideRow({
           title={t("guide.channelTooltip", { name: result.name })}
         >
           <ChannelLogo result={result} size={20} />
-          <span className="min-w-0 flex-1 truncate text-[11px] font-semibold" title={result.name}>
+          <span
+            className="min-w-0 flex-1 truncate text-[11px] font-semibold"
+            title={result.name}
+            dir="auto"
+          >
             {result.name}
           </span>
           {hasArchive(result) && (
@@ -262,14 +269,14 @@ const GuideRow = memo(function GuideRow({
         {programmes === null ? (
           <div
             className="sticky flex h-full w-max items-center px-2 text-[10px] text-text-tertiary"
-            style={{ left: `${CHANNEL_COL_PX}px` }}
+            style={{ insetInlineStart: `${CHANNEL_COL_PX}px` }}
           >
             <LoaderCircle className="me-1.5 h-3 w-3 animate-spin" /> {t("guide.loading")}
           </div>
         ) : programmes.length === 0 ? (
           <div
             className="sticky flex h-full w-max items-center px-2 text-[10px] text-text-tertiary"
-            style={{ left: `${CHANNEL_COL_PX}px` }}
+            style={{ insetInlineStart: `${CHANNEL_COL_PX}px` }}
           >
             {result.tvg_id ? t("guide.noProgrammeData") : t("guide.noEpgId")}
           </div>
@@ -496,21 +503,24 @@ export function GuideView({
   });
   const [activeDay, setActiveDay] = useState(() => startOfDayEpochS(0));
   const activeDayButtonRef = useRef<HTMLButtonElement | null>(null);
+  // The UI language is fixed for the life of the window.
+  const rtl = localeDirection(getLocale()) === "rtl";
   const lastScrollLeft = useRef<number | null>(null);
   const updateRenderRange = useCallback(() => {
     const el = parentRef.current;
     if (!el) return;
     lastScrollLeft.current = el.scrollLeft;
+    const scrolled = inlineScrollOffset(el, rtl);
     // The pinned channel column covers the canvas prefix. The first visible
-    // programme time is therefore scrollLeft pixels beyond spanFrom.
-    const firstVisibleTime = spanFrom + (el.scrollLeft / PX_PER_HOUR) * 3600;
+    // programme time is therefore `scrolled` pixels beyond spanFrom.
+    const firstVisibleTime = spanFrom + (scrolled / PX_PER_HOUR) * 3600;
     setActiveDay(startOfDayEpochS(0, new Date(firstVisibleTime * 1000)));
-    const fromS = spanFrom + ((el.scrollLeft - CHANNEL_COL_PX) / PX_PER_HOUR) * 3600;
-    const toS = spanFrom + ((el.scrollLeft + el.clientWidth - CHANNEL_COL_PX) / PX_PER_HOUR) * 3600;
+    const fromS = spanFrom + ((scrolled - CHANNEL_COL_PX) / PX_PER_HOUR) * 3600;
+    const toS = spanFrom + ((scrolled + el.clientWidth - CHANNEL_COL_PX) / PX_PER_HOUR) * 3600;
     const from = Math.floor((fromS - RENDER_BUFFER_S) / RENDER_STEP_S) * RENDER_STEP_S;
     const to = Math.ceil((toS + RENDER_BUFFER_S) / RENDER_STEP_S) * RENDER_STEP_S;
     setRenderRange((prev) => (prev.from === from && prev.to === to ? prev : { from, to }));
-  }, [spanFrom]);
+  }, [spanFrom, rtl]);
 
   const scrollFrameRef = useRef<number | null>(null);
   const handleScroll = useCallback(() => {
@@ -535,13 +545,17 @@ export function GuideView({
       const el = parentRef.current;
       if (!el) return;
       const viewport = Math.max(0, el.clientWidth - CHANNEL_COL_PX);
-      el.scrollLeft = Math.max(0, xOf(epochS) - CHANNEL_COL_PX - viewport * fraction);
+      setInlineScrollOffset(
+        el,
+        Math.max(0, xOf(epochS) - CHANNEL_COL_PX - viewport * fraction),
+        rtl,
+      );
       updateRenderRange();
     },
-    [xOf, updateRenderRange],
+    [xOf, updateRenderRange, rtl],
   );
 
-  // First paint: put "now" toward the right edge so the recent past fills the view.
+  // First paint: put "now" toward the far edge so the recent past fills the view.
   useLayoutEffect(() => {
     if (!scrollEl || initialScrollDone.current) return;
     initialScrollDone.current = true;
@@ -553,9 +567,13 @@ export function GuideView({
     previousSpanFrom.current = spanFrom;
     if (delta === 0 || !scrollEl) return;
     // Keep the same wall-clock time visible when the canvas start moves.
-    scrollEl.scrollLeft += (delta / 3600) * PX_PER_HOUR;
+    setInlineScrollOffset(
+      scrollEl,
+      inlineScrollOffset(scrollEl, rtl) + (delta / 3600) * PX_PER_HOUR,
+      rtl,
+    );
     updateRenderRange();
-  }, [spanFrom, scrollEl, updateRenderRange]);
+  }, [spanFrom, scrollEl, updateRenderRange, rtl]);
   useEffect(() => {
     if (!scrollEl) return;
     const observer = new ResizeObserver(updateRenderRange);
@@ -821,8 +839,8 @@ export function GuideView({
         {selection && (
           <>
             <span className="min-w-0 truncate text-[11px] text-text-secondary">
-              <span className="font-medium text-violet-300">{selection.programme.title}</span> ·{" "}
-              {selection.result.name} · {dayLabel(selection.programme.start)}{" "}
+              <bdi className="font-medium text-violet-300">{selection.programme.title}</bdi> ·{" "}
+              <bdi>{selection.result.name}</bdi> · {dayLabel(selection.programme.start)}{" "}
               {timeLabel(selection.programme.start)}
             </span>
             <button
@@ -890,7 +908,7 @@ export function GuideView({
                     <span
                       key={hour}
                       className="absolute top-0 flex h-full items-end border-s border-border-subtle/50 px-1 pb-0.5 tabular-nums"
-                      style={{ left: `${xOf(hour) - CHANNEL_COL_PX}px` }}
+                      style={{ insetInlineStart: `${xOf(hour) - CHANNEL_COL_PX}px` }}
                     >
                       {axis.dayStarts.has(hour) ? "" : timeLabel(hour)}
                     </span>
@@ -900,7 +918,7 @@ export function GuideView({
                   <span
                     key={day}
                     className="absolute top-0 flex h-full items-end border-s border-border-app px-1 pb-0.5 text-[9px] font-semibold text-text-secondary"
-                    style={{ left: `${xOf(day) - CHANNEL_COL_PX}px` }}
+                    style={{ insetInlineStart: `${xOf(day) - CHANNEL_COL_PX}px` }}
                   >
                     {dayLabel(day + 43_200)} 00:00
                   </span>
@@ -915,7 +933,7 @@ export function GuideView({
                 <div
                   aria-hidden="true"
                   className="pointer-events-none absolute inset-y-0 z-[5] w-px bg-violet-400/80"
-                  style={{ left: `${xOf(nowEpochS)}px` }}
+                  style={{ insetInlineStart: `${xOf(nowEpochS)}px` }}
                 />
               )}
               {virtualizer.getVirtualItems().map((virtualRow) => {
@@ -959,11 +977,13 @@ export function GuideView({
           className="fixed z-50 w-56 rounded-lg border border-border-app bg-dropdown py-1 shadow-2xl"
           style={{
             top: `${Math.max(0, Math.min(menu.y, window.innerHeight - (menuHasBothRoutes ? 240 : 200)))}px`,
-            left: `${Math.min(menu.x, window.innerWidth - 232)}px`,
+            // w-56 (224px) plus a margin; RTL opens leftward from the cursor.
+            left: `${rtl ? Math.max(8, menu.x - 224) : Math.min(menu.x, window.innerWidth - 232)}px`,
           }}
         >
           <div className="truncate px-3 pb-1 pt-1.5 text-[11px] text-text-tertiary">
-            {menu.selection.programme.title} · {timeLabel(menu.selection.programme.start)}
+            <bdi>{menu.selection.programme.title}</bdi> ·{" "}
+            {timeLabel(menu.selection.programme.start)}
           </div>
           <button
             type="button"

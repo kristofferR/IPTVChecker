@@ -25,14 +25,16 @@ export default function PasswordField({
   const inputId = id ?? generatedId;
   const toggleLabel = revealed ? t("settings.password.hide") : t("settings.password.show");
 
+  // Secrets read left to right in every locale. The wrapper carries the
+  // direction so the toggle's end-0 and the input's padding agree.
   return (
-    <div className={joinClassNames("relative", wrapperClassName)}>
+    <div dir="ltr" className={joinClassNames("relative", wrapperClassName)}>
       <input
         {...props}
         id={inputId}
         type={revealed ? "text" : "password"}
         disabled={disabled}
-        style={{ ...style, paddingRight: "2.5rem" }}
+        style={{ ...style, paddingInlineEnd: "2.5rem" }}
         className={className}
       />
       <button

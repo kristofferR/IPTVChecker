@@ -1,4 +1,4 @@
-import { t } from "../i18n";
+import { isolateLtr, t } from "../i18n";
 import type { DispatcharrOpenRequest, RecentPlaylistEntry, XtreamRecentSource } from "./types";
 
 /** Helpers for encoding/labeling recent-playlist entries (Xtream and
@@ -64,24 +64,28 @@ export function parseDispatcharrRecent(value: string): DispatcharrOpenRequest | 
   }
 }
 
+/** Paths, URLs and logins are isolated so they read left to right in any UI. */
 export function recentValueLabel(entry: RecentPlaylistEntry): string {
   if (entry.kind === "file") {
-    return t("app.recent.path", { value: entry.value });
+    return t("app.recent.path", { value: isolateLtr(entry.value) });
   }
   if (entry.kind === "url") {
-    return t("app.recent.url", { value: entry.value });
+    return t("app.recent.url", { value: isolateLtr(entry.value) });
   }
   if (entry.kind === "dispatcharr") {
     const source = parseDispatcharrRecent(entry.value);
     return source
-      ? t("app.recent.dispatcharr", { server: source.server })
+      ? t("app.recent.dispatcharr", { server: isolateLtr(source.server) })
       : t("app.recent.dispatcharrInvalid");
   }
   const source = parseXtreamRecent(entry.value);
   if (!source) {
     return t("app.recent.xtreamInvalid");
   }
-  return t("app.recent.xtream", { server: source.server, username: source.username });
+  return t("app.recent.xtream", {
+    server: isolateLtr(source.server),
+    username: isolateLtr(source.username),
+  });
 }
 
 export function recentTitle(entry: RecentPlaylistEntry): string {

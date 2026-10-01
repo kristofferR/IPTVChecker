@@ -74,7 +74,7 @@ export default function SavedPlaylistsDialog({
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
-                      <p className="text-[15px] font-medium text-text-primary truncate">
+                      <p dir="auto" className="text-[15px] font-medium text-text-primary truncate">
                         {entry.display_name}
                       </p>
                       <p

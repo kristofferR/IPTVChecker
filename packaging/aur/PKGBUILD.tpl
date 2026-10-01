@@ -17,6 +17,8 @@ license=('MIT')
 # no H.264/AAC decoding for the streams this app exists to play.
 depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'ffmpeg' 'hicolor-icon-theme'
          'gst-plugins-good' 'gst-plugins-bad' 'gst-libav')
+optdepends=('noto-fonts: Arabic and Persian interface text'
+            'noto-fonts-cjk: Simplified Chinese interface text')
 # The unrelated freearhey CLI package also installs /usr/bin/iptv-checker.
 conflicts=('iptv-checker')
 options=('!strip' '!debug')

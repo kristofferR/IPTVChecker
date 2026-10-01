@@ -126,6 +126,20 @@ export async function initI18n({ locale: code, suggested, system }: UiLocale) {
   document.documentElement.dir = localeDirection(code);
 }
 
+/**
+ * Wraps a value interpolated into running text so it keeps its own direction:
+ * `isolate` lets the value pick (names, playlist data), `isolateLtr` forces
+ * left to right (paths, URLs, regex). Use for plain strings such as `title`;
+ * in JSX prefer `<bdi>` or `dir`.
+ */
+export function isolate(value: string): string {
+  return `\u2068${value}\u2069`;
+}
+
+export function isolateLtr(value: string): string {
+  return `\u2066${value}\u2069`;
+}
+
 /** The UI language. */
 export function getLocale(): LocaleCode {
   return locale;

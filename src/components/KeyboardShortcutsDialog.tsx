@@ -122,7 +122,11 @@ export default function KeyboardShortcutsDialog({
                     className="flex items-center justify-between gap-3 text-[13px]"
                   >
                     <span className="text-text-primary">{entry.action}</span>
-                    <kbd className="px-2 py-0.5 rounded border border-border-app bg-panel text-text-secondary text-[11px] whitespace-nowrap">
+                    {/* Key combos keep their order; translated gestures read in their own direction. */}
+                    <kbd
+                      dir="auto"
+                      className="px-2 py-0.5 rounded border border-border-app bg-panel text-text-secondary text-[11px] whitespace-nowrap"
+                    >
                       {entry.keys}
                     </kbd>
                   </li>

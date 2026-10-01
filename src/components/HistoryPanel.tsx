@@ -1,6 +1,6 @@
 import { Clock3, RefreshCw, Trash2, X } from "lucide-react";
 import { useMemo } from "react";
-import { getFormatLocale, t } from "../i18n";
+import { getFormatLocale, isolate, isolateLtr, t } from "../i18n";
 import type { ScanHistoryItem } from "../lib/types";
 
 interface HistoryPanelProps {
@@ -17,10 +17,11 @@ interface HistoryPanelProps {
 function formatScope(entry: ScanHistoryItem): string {
   const parts: string[] = [];
   if (entry.group_filter) {
-    parts.push(t("history.scope.group", { group: entry.group_filter }));
+    // Isolate user text so it keeps its own direction inside the sentence.
+    parts.push(t("history.scope.group", { group: isolate(entry.group_filter) }));
   }
   if (entry.channel_search) {
-    parts.push(t("history.scope.regex", { regex: entry.channel_search }));
+    parts.push(t("history.scope.regex", { regex: isolateLtr(entry.channel_search) }));
   }
   if (entry.selected_count > 0) {
     parts.push(t("history.scope.selected", { count: entry.selected_count }));
@@ -59,7 +60,7 @@ export default function HistoryPanel({
               {t("history.title")}
             </p>
             <h2 className="text-[17px] font-semibold">
-              {playlistName || t("history.currentPlaylist")}
+              {playlistName ? <bdi>{playlistName}</bdi> : t("history.currentPlaylist")}
             </h2>
             <p className="text-[12px] text-text-secondary mt-1">{t("history.description")}</p>
           </div>
@@ -85,7 +86,7 @@ export default function HistoryPanel({
               type="button"
             >
               <span className="inline-flex items-center gap-1.5">
-                <RefreshCw className="w-3.5 h-3.5" />
+                <RefreshCw className="w-3.5 h-3.5 rtl:-scale-x-100" />
                 {t("history.refresh")}
               </span>
             </button>

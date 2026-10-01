@@ -14,7 +14,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { UseChromecastResult } from "../hooks/useChromecast";
 import { type ArchiveSession, MAX_PLAYBACK_RECOVERY_ATTEMPTS } from "../hooks/useStreamPlayer";
-import { formatCount, getFormatLocale, t } from "../i18n";
+import { formatCount, getFormatLocale, t, tRich } from "../i18n";
 import { isCastSessionActive } from "../lib/cast";
 import type { CastMediaRequest } from "../lib/types";
 import { CastMenu, type CastStartHandler } from "./CastMenu";
@@ -190,9 +190,13 @@ export function StreamPlayer({
 
       {archiveSession && playerState !== "error" && archiveCurrentEpochS != null && (
         <div className="absolute top-2 start-2 flex items-center gap-1.5 px-2 py-1 rounded-md bg-violet-600/85 text-white text-[11px] font-medium shadow-md backdrop-blur-sm">
-          <History className="w-3 h-3" />
+          <History className="w-3 h-3 rtl:-scale-x-100" />
           <span className="truncate max-w-[200px]">
-            {archiveSession.title ?? formatArchiveClock(archiveCurrentEpochS)}
+            {archiveSession.title != null ? (
+              <bdi>{archiveSession.title}</bdi>
+            ) : (
+              formatArchiveClock(archiveCurrentEpochS)
+            )}
             {archiveSession.title
               ? ""
               : ` · ${formatBehindLive(Date.now() / 1000 - archiveCurrentEpochS)}`}
@@ -214,7 +218,7 @@ export function StreamPlayer({
         <div className="absolute top-2 start-2 flex items-center gap-1.5 px-2 py-1 rounded-md bg-blue-600/85 text-white text-[11px] font-medium shadow-md backdrop-blur-sm">
           <Cast className="w-3 h-3" />
           <span className="truncate max-w-[180px]">
-            {t("cast.castingTo", { device: chromecast.session.deviceName })}
+            {tRich("cast.castingTo", { device: <bdi>{chromecast.session.deviceName}</bdi> })}
           </span>
         </div>
       )}
@@ -279,8 +283,10 @@ export function StreamPlayer({
           }`}
         >
           {archiveSession && onSeekArchive && archiveCurrentEpochS != null && (
+            // Media timelines run left to right in every locale.
             <input
               type="range"
+              dir="ltr"
               min={archiveSession.windowStartEpochS}
               max={archiveSession.windowEndEpochS}
               step={10}
@@ -341,6 +347,7 @@ export function StreamPlayer({
             </button>
             <input
               type="range"
+              dir="ltr"
               min={0}
               max={1}
               step={0.01}

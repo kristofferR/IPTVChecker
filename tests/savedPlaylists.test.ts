@@ -54,13 +54,15 @@ describe("saved playlist helpers", () => {
     expect(normalizeXtreamServer("https://alpha.example.com?x=1")).toBeNull();
   });
 
-  it("builds readable secondary labels", () => {
-    expect(savedPlaylistSecondaryLabel(savedPlaylists[0]!)).toBe("Path - /tmp/demo.m3u");
+  it("builds readable secondary labels with left-to-right isolated values", () => {
+    expect(savedPlaylistSecondaryLabel(savedPlaylists[0]!)).toBe(
+      "Path - \u2066/tmp/demo.m3u\u2069",
+    );
     expect(savedPlaylistSecondaryLabel(savedPlaylists[1]!)).toBe(
-      "URL - https://example.com/playlist.m3u#fragment",
+      "URL - \u2066https://example.com/playlist.m3u#fragment\u2069",
     );
     expect(savedPlaylistSecondaryLabel(savedPlaylists[2]!)).toBe(
-      "Xtream - https://beta.example.com (alice)",
+      "Xtream - \u2066https://beta.example.com\u2069 (\u2066alice\u2069)",
     );
   });
 

@@ -70,6 +70,7 @@ export function FilterBar({ onApply, variant = "content" }: FilterBarProps) {
           <Filter className="search-icon absolute start-3 top-1/2 -translate-y-1/2 w-[15px] h-[15px] text-text-tertiary" />
           <input
             type="text"
+            dir="ltr"
             placeholder={t("filters.sourceFilterPlaceholder")}
             value={channelSearch}
             onChange={(e) => setChannelSearch(e.target.value)}
@@ -80,7 +81,8 @@ export function FilterBar({ onApply, variant = "content" }: FilterBarProps) {
               }
             }}
             disabled={isScanning}
-            className={`native-field w-full min-h-9 ps-9 pe-[8.75rem] py-1.5 text-[13px] bg-input border rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 ${
+            // Regex reads left to right; padding follows the icon and buttons, which mirror.
+            className={`native-field w-full min-h-9 pl-9 pr-[8.75rem] rtl:pl-[8.75rem] rtl:pr-9 rtl:placeholder:text-right py-1.5 text-[13px] bg-input border rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50 ${
               channelSearchError ? "border-red-500" : "border-border-app"
             }`}
           />
