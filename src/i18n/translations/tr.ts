@@ -919,6 +919,11 @@ export default {
         unlink: "Bağlantıyı kaldır",
         moveToEnd: "Sona taşı",
       },
+      lowQualityAsDead: {
+        label: "Düşük kaliteli yayınları çalışmıyor say",
+        description:
+          "Düşük bit hızı veya donmuş görüntü ile işaretlenen yayınlar, başka bir yayın çalışmadığı durumlar dışında çalışmayan yayınlar gibi kaldırılır veya taşınır.",
+      },
       writeStats: {
         label: "Analiz sonuçlarını Dispatcharr'a yaz",
         description:
@@ -1653,16 +1658,15 @@ export default {
       reordered: "Yeniden sıralandı",
       deadMovedToEnd: "Çalışmayan yayınlar sona taşındı",
       deadRemoved: "Çalışmayan yayınlar kaldırıldı",
+      lowQualityMovedToEnd: "Düşük kaliteli yayınlar sona taşındı",
+      lowQualityRemoved: "Düşük kaliteli yayınlar kaldırıldı",
       skippedAllDead: "Atlandı, tüm yayınlar çalışmıyor",
       writesNow: "Değişiklikler hemen Dispatcharr'a yazılır. Geri al, önceki sırayı geri yükler.",
       confirm: { one: "{count} kanalı düzelt", other: "{count} kanalı düzelt" },
     },
     toast: {
       fixed: { one: "{count} kanal düzeltildi", other: "{count} kanal düzeltildi" },
-      deadRemoved: {
-        one: "{count} çalışmayan yayın kaldırıldı",
-        other: "{count} çalışmayan yayın kaldırıldı",
-      },
+      streamsRemoved: { one: "{count} yayın kaldırıldı", other: "{count} yayın kaldırıldı" },
       failed: { one: "{count} başarısız", other: "{count} başarısız" },
       undoing: "Geri alınıyor...",
       undoAll: "Tümünü geri al",

@@ -858,6 +858,11 @@ export default {
         unlink: "Hủy liên kết",
         moveToEnd: "Chuyển xuống cuối",
       },
+      lowQualityAsDead: {
+        label: "Coi luồng chất lượng thấp là luồng hỏng",
+        description:
+          "Luồng bị đánh dấu bitrate thấp hoặc hình bị đứng sẽ bị gỡ hoặc chuyển như luồng hỏng, trừ khi không còn luồng nào khác hoạt động.",
+      },
       writeStats: {
         label: "Ghi kết quả dò vào Dispatcharr",
         description:
@@ -1570,13 +1575,15 @@ export default {
       reordered: "Đã sắp xếp lại",
       deadMovedToEnd: "Đã chuyển luồng hỏng xuống cuối",
       deadRemoved: "Đã gỡ luồng hỏng",
+      lowQualityMovedToEnd: "Đã chuyển luồng chất lượng thấp xuống cuối",
+      lowQualityRemoved: "Đã gỡ luồng chất lượng thấp",
       skippedAllDead: "Bỏ qua, tất cả luồng đều hỏng",
       writesNow: "Ghi vào Dispatcharr ngay. Hoàn tác sẽ khôi phục thứ tự trước đó.",
       confirm: { other: "Sửa {count} kênh" },
     },
     toast: {
       fixed: { other: "Đã sửa {count} kênh" },
-      deadRemoved: { other: "Đã gỡ {count} luồng hỏng" },
+      streamsRemoved: { other: "Đã gỡ {count} luồng" },
       failed: { other: "{count} thất bại" },
       undoing: "Đang hoàn tác...",
       undoAll: "Hoàn tác tất cả",

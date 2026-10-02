@@ -38,6 +38,7 @@ export function DispatcharrFixAll({
     [view, visiblePrimaries, preferences],
   );
   const count = plan.changes.length;
+  const moveToEnd = preferences.deadStreams === "move_to_end";
   // Why the button is unavailable. Disabled buttons do not reliably show a
   // tooltip, so the wrapper carries it.
   const unavailableReason = useMemo(() => {
@@ -112,15 +113,26 @@ export function DispatcharrFixAll({
                 {t("common.channels", { count: plan.reordered })}
               </dd>
             </div>
-            {preferences.deadStreams === "move_to_end" ? (
+            <div className="flex justify-between">
+              <dt>
+                {moveToEnd
+                  ? t("dispatcharr.fixAll.deadMovedToEnd")
+                  : t("dispatcharr.fixAll.deadRemoved")}
+              </dt>
+              <dd className={`tabular-nums ${moveToEnd ? "text-text-primary" : "text-red-400"}`}>
+                {formatCount(plan.dead)}
+              </dd>
+            </div>
+            {preferences.lowQualityAsDead && (
               <div className="flex justify-between">
-                <dt>{t("dispatcharr.fixAll.deadMovedToEnd")}</dt>
-                <dd className="text-text-primary tabular-nums">{formatCount(plan.movedDead)}</dd>
-              </div>
-            ) : (
-              <div className="flex justify-between">
-                <dt>{t("dispatcharr.fixAll.deadRemoved")}</dt>
-                <dd className="text-red-400 tabular-nums">{formatCount(plan.removed)}</dd>
+                <dt>
+                  {moveToEnd
+                    ? t("dispatcharr.fixAll.lowQualityMovedToEnd")
+                    : t("dispatcharr.fixAll.lowQualityRemoved")}
+                </dt>
+                <dd className={`tabular-nums ${moveToEnd ? "text-text-primary" : "text-red-400"}`}>
+                  {formatCount(plan.lowQuality)}
+                </dd>
               </div>
             )}
             {plan.skippedAllDead > 0 && (

@@ -1642,6 +1642,23 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                   }
                 />
               </div>
+              <div className={rowClass}>
+                <div>
+                  <p className="text-[13px] font-medium">
+                    {t("settings.dispatcharr.lowQualityAsDead.label")}
+                  </p>
+                  <p className="text-[11px] text-text-tertiary mt-0.5">
+                    {t("settings.dispatcharr.lowQualityAsDead.description")}
+                  </p>
+                </div>
+                <Switch
+                  checked={draft.dispatcharr_low_quality_as_dead}
+                  onChange={(checked) =>
+                    updateSetting("dispatcharr_low_quality_as_dead", checked, { immediate: true })
+                  }
+                  ariaLabel={t("settings.dispatcharr.lowQualityAsDead.label")}
+                />
+              </div>
             </section>
 
             <section className={blockClass}>

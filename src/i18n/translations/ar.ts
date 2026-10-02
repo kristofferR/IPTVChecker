@@ -1014,6 +1014,11 @@ export default {
         unlink: "فصل",
         moveToEnd: "نقل إلى النهاية",
       },
+      lowQualityAsDead: {
+        label: "معاملة البثوث منخفضة الجودة كأنها لا تعمل",
+        description:
+          "تُلغى البثوث المعلَّمة بمعدل بت منخفض أو صورة متجمدة أو تُنقل مثل البثوث التي لا تعمل، ما لم يكن لا يعمل أي بث آخر.",
+      },
       writeStats: {
         label: "كتابة نتائج الفحص في Dispatcharr",
         description:
@@ -2007,6 +2012,8 @@ export default {
       reordered: "أُعيد ترتيبها",
       deadMovedToEnd: "نُقلت البثوث التي لا تعمل إلى النهاية",
       deadRemoved: "أُزيلت البثوث التي لا تعمل",
+      lowQualityMovedToEnd: "نُقلت البثوث منخفضة الجودة إلى النهاية",
+      lowQualityRemoved: "أُزيلت البثوث منخفضة الجودة",
       skippedAllDead: "تم التخطي، كل البثوث لا تعمل",
       writesNow: "يكتب في Dispatcharr الآن. يستعيد «تراجع» الترتيب السابق.",
       confirm: {
@@ -2027,13 +2034,13 @@ export default {
         many: "تم إصلاح {count} قناة",
         other: "تم إصلاح {count} قناة",
       },
-      deadRemoved: {
-        zero: "لم يُزل أي بث لا يعمل",
-        one: "أُزيل بث واحد لا يعمل",
-        two: "أُزيل بثان لا يعملان",
-        few: "أُزيلت {count} بثوث لا تعمل",
-        many: "أُزيل {count} بثًا لا يعمل",
-        other: "أُزيل {count} بث لا يعمل",
+      streamsRemoved: {
+        zero: "لم يُزل أي بث",
+        one: "أُزيل بث واحد",
+        two: "أُزيل بثان",
+        few: "أُزيلت {count} بثوث",
+        many: "أُزيل {count} بثًا",
+        other: "أُزيل {count} بث",
       },
       failed: {
         zero: "فشل: {count}",

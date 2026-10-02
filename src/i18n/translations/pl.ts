@@ -984,6 +984,11 @@ export default {
         unlink: "Odłącz",
         moveToEnd: "Przenieś na koniec",
       },
+      lowQualityAsDead: {
+        label: "Traktuj strumienie niskiej jakości jak niedziałające",
+        description:
+          "Strumienie oznaczone jako niski bitrate lub zamrożony obraz są odłączane lub przenoszone jak niedziałające, chyba że żaden inny strumień nie działa.",
+      },
       writeStats: {
         label: "Zapisuj wyniki testów w Dispatcharr",
         description:
@@ -1899,6 +1904,8 @@ export default {
       reordered: "Zmieniono kolejność",
       deadMovedToEnd: "Niedziałające strumienie przeniesiono na koniec",
       deadRemoved: "Usunięto niedziałające strumienie",
+      lowQualityMovedToEnd: "Strumienie niskiej jakości przeniesiono na koniec",
+      lowQualityRemoved: "Usunięto strumienie niskiej jakości",
       skippedAllDead: "Pominięto, żaden strumień nie działa",
       writesNow: "Zapisuje od razu w Dispatcharr. Cofnij przywraca poprzednią kolejność.",
       confirm: {
@@ -1915,11 +1922,11 @@ export default {
         many: "Poprawiono {count} kanałów",
         other: "Poprawiono {count} kanału",
       },
-      deadRemoved: {
-        one: "Usunięto {count} niedziałający strumień",
-        few: "Usunięto {count} niedziałające strumienie",
-        many: "Usunięto {count} niedziałających strumieni",
-        other: "Usunięto {count} niedziałającego strumienia",
+      streamsRemoved: {
+        one: "Usunięto {count} strumień",
+        few: "Usunięto {count} strumienie",
+        many: "Usunięto {count} strumieni",
+        other: "Usunięto {count} strumienia",
       },
       failed: {
         one: "nieudane: {count}",

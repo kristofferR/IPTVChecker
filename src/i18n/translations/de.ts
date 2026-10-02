@@ -912,6 +912,11 @@ export default {
         unlink: "Trennen",
         moveToEnd: "Ans Ende",
       },
+      lowQualityAsDead: {
+        label: "Streams mit schlechter Qualität wie Offline-Streams behandeln",
+        description:
+          "Streams mit niedriger Bitrate oder eingefrorenem Bild werden wie Offline-Streams entfernt oder verschoben, außer wenn kein anderer Stream funktioniert.",
+      },
       writeStats: {
         label: "Prüfergebnisse in Dispatcharr schreiben",
         description:
@@ -1654,6 +1659,8 @@ export default {
       reordered: "Neu geordnet",
       deadMovedToEnd: "Offline-Streams ans Ende verschoben",
       deadRemoved: "Offline-Streams entfernt",
+      lowQualityMovedToEnd: "Streams mit schlechter Qualität ans Ende verschoben",
+      lowQualityRemoved: "Streams mit schlechter Qualität entfernt",
       skippedAllDead: "Übersprungen, alle Streams offline",
       writesNow:
         "Schreibt sofort in Dispatcharr. „Rückgängig“ stellt die vorherige Reihenfolge wieder her.",
@@ -1661,10 +1668,7 @@ export default {
     },
     toast: {
       fixed: { one: "{count} Sender korrigiert", other: "{count} Sender korrigiert" },
-      deadRemoved: {
-        one: "{count} Offline-Stream entfernt",
-        other: "{count} Offline-Streams entfernt",
-      },
+      streamsRemoved: { one: "{count} Stream entfernt", other: "{count} Streams entfernt" },
       failed: { one: "{count} fehlgeschlagen", other: "{count} fehlgeschlagen" },
       undoing: "Mache rückgängig…",
       undoAll: "Alle rückgängig",

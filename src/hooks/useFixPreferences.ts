@@ -6,12 +6,14 @@ import { useAppStore } from "../store";
 export function useFixPreferences(): FixPreferences {
   const rankOrder = useAppStore((s) => s.settings.dispatcharr_rank_order);
   const deadStreams = useAppStore((s) => s.settings.dispatcharr_dead_streams);
+  const lowQualityAsDead = useAppStore((s) => s.settings.dispatcharr_low_quality_as_dead);
   return useMemo(
     () =>
       fixPreferencesFrom({
         dispatcharr_rank_order: rankOrder,
         dispatcharr_dead_streams: deadStreams,
+        dispatcharr_low_quality_as_dead: lowQualityAsDead,
       }),
-    [rankOrder, deadStreams],
+    [rankOrder, deadStreams, lowQualityAsDead],
   );
 }

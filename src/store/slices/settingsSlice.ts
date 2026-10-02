@@ -46,6 +46,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   dispatcharr_write_stats: true,
   dispatcharr_rank_order: ["resolution", "frame_rate", "bitrate", "latency", "audio_bitrate"],
   dispatcharr_dead_streams: "unlink",
+  dispatcharr_low_quality_as_dead: false,
   automatic_update_checks: true,
 };
 

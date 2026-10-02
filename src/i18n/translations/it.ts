@@ -955,6 +955,11 @@ export default {
         unlink: "Scollega",
         moveToEnd: "Sposta in fondo",
       },
+      lowQualityAsDead: {
+        label: "Tratta gli stream di bassa qualità come offline",
+        description:
+          "Gli stream segnalati per bitrate basso o video bloccato vengono rimossi o spostati come quelli offline, a meno che nessun altro stream funzioni.",
+      },
       writeStats: {
         label: "Scrivi i risultati dell'analisi in Dispatcharr",
         description:
@@ -1777,6 +1782,8 @@ export default {
       reordered: "Riordinato",
       deadMovedToEnd: "Stream offline spostati in fondo",
       deadRemoved: "Stream offline rimossi",
+      lowQualityMovedToEnd: "Stream di bassa qualità spostati in fondo",
+      lowQualityRemoved: "Stream di bassa qualità rimossi",
       skippedAllDead: "Saltato, tutti gli stream offline",
       writesNow: "Scrive subito in Dispatcharr. Annulla ripristina l'ordine precedente.",
       confirm: {
@@ -1791,10 +1798,10 @@ export default {
         many: "{count} canali corretti",
         other: "{count} canali corretti",
       },
-      deadRemoved: {
-        one: "{count} stream offline rimosso",
-        many: "{count} stream offline rimossi",
-        other: "{count} stream offline rimossi",
+      streamsRemoved: {
+        one: "{count} stream rimosso",
+        many: "{count} stream rimossi",
+        other: "{count} stream rimossi",
       },
       failed: {
         one: "{count} non riuscito",

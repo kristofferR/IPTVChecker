@@ -961,6 +961,11 @@ export default {
         unlink: "Desvincular",
         moveToEnd: "Mover al final",
       },
+      lowQualityAsDead: {
+        label: "Tratar los streams de baja calidad como caídos",
+        description:
+          "Los streams marcados con bitrate bajo o vídeo congelado se quitan o se mueven como los caídos, salvo que ningún otro stream funcione.",
+      },
       writeStats: {
         label: "Escribir los resultados del análisis en Dispatcharr",
         description:
@@ -1786,6 +1791,8 @@ export default {
       reordered: "Reordenado",
       deadMovedToEnd: "Streams caídos movidos al final",
       deadRemoved: "Streams caídos quitados",
+      lowQualityMovedToEnd: "Streams de baja calidad movidos al final",
+      lowQualityRemoved: "Streams de baja calidad quitados",
       skippedAllDead: "Omitido, todos los streams caídos",
       writesNow: "Escribe en Dispatcharr ahora. Deshacer restaura el orden anterior.",
       confirm: {
@@ -1800,10 +1807,10 @@ export default {
         many: "{count} canales corregidos",
         other: "{count} canales corregidos",
       },
-      deadRemoved: {
-        one: "{count} stream caído quitado",
-        many: "{count} streams caídos quitados",
-        other: "{count} streams caídos quitados",
+      streamsRemoved: {
+        one: "{count} stream quitado",
+        many: "{count} streams quitados",
+        other: "{count} streams quitados",
       },
       failed: { one: "{count} con error", many: "{count} con error", other: "{count} con error" },
       undoing: "Deshaciendo...",

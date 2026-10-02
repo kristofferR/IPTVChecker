@@ -231,6 +231,11 @@ export default {
       unlink: "Unlink",
       moveToEnd: "Move to end",
     },
+    lowQualityAsDead: {
+      label: "Treat low-quality streams as dead",
+      description:
+        "Streams flagged low bitrate or frozen video are unlinked or moved like dead ones, unless no other stream works.",
+    },
     writeStats: {
       label: "Write probe results to Dispatcharr",
       description:

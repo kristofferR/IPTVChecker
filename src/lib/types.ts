@@ -443,6 +443,8 @@ export interface AppSettings {
   dispatcharr_write_stats: boolean;
   dispatcharr_rank_order: DispatcharrRankSignal[];
   dispatcharr_dead_streams: "unlink" | "move_to_end";
+  /** Fix order handles streams flagged low bitrate or frozen like dead ones. */
+  dispatcharr_low_quality_as_dead: boolean;
   automatic_update_checks: boolean;
 }
 
