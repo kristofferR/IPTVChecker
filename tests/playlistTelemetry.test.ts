@@ -1,19 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { PlaybackRecorder, playbackTelemetry } from "../src/lib/playbackTelemetry";
 import type { PlaylistPreview } from "../src/lib/types";
-
-Object.defineProperty(globalThis, "localStorage", {
-  configurable: true,
-  value: {
-    length: 0,
-    clear() {},
-    getItem: () => null,
-    key: () => null,
-    removeItem() {},
-    setItem() {},
-  } satisfies Storage,
-});
-const { useAppStore } = await import("../src/store");
+import { useAppStore } from "../src/store";
 
 const preview: PlaylistPreview = {
   file_path: "/cache/provider.m3u8",
