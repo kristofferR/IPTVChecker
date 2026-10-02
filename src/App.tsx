@@ -243,7 +243,6 @@ function SelectedChannelSidebar({
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
   const [screenshotLoading, setScreenshotLoading] = useState(false);
   const [screenshotLoadError, setScreenshotLoadError] = useState(false);
-  const screenshotPathRef = useRef<string | null>(null);
   // LRU-capped: entries are 50-200 KB base64 data URLs, and a long browsing
   // session would otherwise retain every screenshot ever viewed.
   const SCREENSHOT_CACHE_LIMIT = 50;
@@ -255,8 +254,6 @@ function SelectedChannelSidebar({
 
   useEffect(() => {
     const path = liveSelectedChannel?.screenshot_path?.trim() || null;
-    if (path === screenshotPathRef.current) return;
-    screenshotPathRef.current = path;
 
     if (!path) {
       setScreenshotUrl(null);
