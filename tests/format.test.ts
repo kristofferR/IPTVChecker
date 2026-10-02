@@ -72,7 +72,7 @@ describe("format helpers", () => {
           video_bitrate: "5000 kbps",
         }),
       ),
-    ).toBe("1080p60 h264 HDR10 (5000 kbps)");
+    ).toBe("\u20661080p60 h264 HDR10 (5000 kbps)\u2069");
   });
 
   it("formats audio info from any known bitrate, codec, or layout metadata", () => {

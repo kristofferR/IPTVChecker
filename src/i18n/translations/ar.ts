@@ -837,7 +837,7 @@ export default {
       minVideoBitrate: {
         label: "الحد الأدنى لمعدل بت الفيديو",
         description:
-          "تُعلَّم البثوث المقيسة التي يقل معدل بتها عن هذا العدد من kbps. اتركه فارغًا لإيقافه.",
+          "تُعلَّم البثوث المقيسة التي يقل معدل بتها عن هذا العدد من ك.ب/ث. اتركه فارغًا لإيقافه.",
         placeholder: "معطّل",
       },
       sourceFilterBar: {
@@ -1717,12 +1717,12 @@ export default {
       audio: "الصوت",
       resolution: "الدقة",
       frameRate: "معدل الإطارات",
-      fps: "{fps} fps",
+      fps: "{fps} إطار/ث",
       drmDetection: "اكتشاف DRM",
       drmSystem: "النظام: {system}",
       encryptedStream: "بث مشفّر",
       labelMismatch: "عدم تطابق الوسم",
-      lowFramerate: "معدل إطارات منخفض: {fps} fps",
+      lowFramerate: "معدل إطارات منخفض: {fps} إطار/ث",
       lowBitrate: "معدل بت منخفض: {bitrate}",
       diagnostics: "التشخيص",
       retriesUsed: "المحاولات المستخدمة: {count}",

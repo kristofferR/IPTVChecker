@@ -739,7 +739,7 @@ export default {
       minVideoBitrate: {
         label: "Mindest-Video-Bitrate",
         description:
-          "Gemessene Streams unter so vielen kbps markieren. Leer lassen zum Deaktivieren.",
+          "Gemessene Streams unter so vielen kbit/s markieren. Leer lassen zum Deaktivieren.",
         placeholder: "Aus",
       },
       sourceFilterBar: {

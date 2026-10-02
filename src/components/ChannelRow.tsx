@@ -14,7 +14,7 @@ import {
 import { channelLogoPixels, channelRowHeightPixels } from "../lib/channelLogoSize";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { channelArchiveStream } from "../lib/dispatcharr";
-import { formatLatency } from "../lib/format";
+import { formatLatency, formatVideoBitrate } from "../lib/format";
 import { detectChannelProtocol } from "../lib/streamProtocol";
 import type { ColumnDefinition } from "../lib/tableColumns";
 import type { ChannelLogoSize, ChannelResult } from "../lib/types";
@@ -233,21 +233,21 @@ function ChannelRowImpl({
       }
       case "bitrate":
         return (
-          <span
-            className="inline-flex items-center gap-1 text-text-secondary tabular-nums"
-            dir="ltr"
-          >
+          <span className="inline-flex items-center gap-1 text-text-secondary tabular-nums">
             {result.frozen_video && (
               <span role="img" title={t("table.frozenVideo")} aria-label={t("table.frozenVideo")}>
-                <Snowflake className="h-3 w-3 text-sky-400" aria-hidden="true" />
+                <Snowflake className="h-3 w-3 text-sky-400 light:text-sky-600" aria-hidden="true" />
               </span>
             )}
             {result.low_bitrate && (
               <span role="img" title={t("table.lowBitrate")} aria-label={t("table.lowBitrate")}>
-                <Gauge className="h-3 w-3 text-orange-400" aria-hidden="true" />
+                <Gauge
+                  className="h-3 w-3 text-orange-400 light:text-orange-600"
+                  aria-hidden="true"
+                />
               </span>
             )}
-            {result.video_bitrate ? result.video_bitrate : "—"}
+            {result.video_bitrate ? formatVideoBitrate(result.video_bitrate) : "—"}
           </span>
         );
       case "audio":

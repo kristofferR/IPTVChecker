@@ -24,7 +24,7 @@ import {
   isDispatcharrPlaceholder,
   selectedArchiveStream,
 } from "../lib/dispatcharr";
-import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
+import { formatAudioInfo, formatVideoBitrate, formatVideoInfo, statusLabel } from "../lib/format";
 import { isScanActive, type ScanState } from "../lib/scanState";
 import { getThumbnailDisplayState } from "../lib/thumbnailState";
 import type { ChannelResult } from "../lib/types";
@@ -455,14 +455,14 @@ export function ThumbnailPanel({
         ) : null}
 
         {(onPlayChannel || onScanChannel) && (
-          <div className="flex items-center justify-center gap-2">
+          <div className="flex flex-wrap items-center justify-center gap-2">
             {onPlayChannel &&
               playable &&
               (isPlaying ? (
                 <button
                   type="button"
                   onClick={onStopPlayer}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-red-600 hover:bg-red-500 text-white shadow-sm transition-colors"
+                  className="flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-[12px] font-medium rounded-md bg-red-600 hover:bg-red-500 text-white shadow-sm transition-colors"
                   title={t("player.panel.stopPlayback")}
                 >
                   <Square className="w-3.5 h-3.5" />
@@ -472,7 +472,7 @@ export function ThumbnailPanel({
                 <button
                   type="button"
                   onClick={() => onPlayChannel(result)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition-colors"
+                  className="flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-[12px] font-medium rounded-md bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition-colors"
                   title={t("player.panel.previewInApp")}
                 >
                   <Play className="w-3.5 h-3.5" />
@@ -494,7 +494,7 @@ export function ThumbnailPanel({
                 type="button"
                 disabled={scanActive}
                 onClick={() => onScanChannel([result.index])}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-medium rounded-md bg-btn hover:bg-btn-hover text-text-primary border border-border-app shadow-sm transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                className="flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-[12px] font-medium rounded-md bg-btn hover:bg-btn-hover text-text-primary border border-border-app shadow-sm transition-colors disabled:opacity-40 disabled:pointer-events-none"
                 title={
                   scanActive
                     ? t("player.panel.scanInProgress")
@@ -607,10 +607,10 @@ export function ThumbnailPanel({
 
         {result.status === "drm" && (
           <div className="p-2 rounded bg-cyan-500/10 border border-cyan-500/20">
-            <p className="text-[12px] font-medium text-cyan-300">
+            <p className="text-[12px] font-medium text-cyan-300 light:text-cyan-800">
               {t("player.panel.drmDetection")}
             </p>
-            <p className="text-[11px] text-cyan-200/90 mt-1">
+            <p className="text-[11px] text-cyan-200/90 light:text-cyan-700 mt-1">
               {t("player.panel.drmSystem", {
                 system: result.drm_system
                   ? translateReason(result.drm_system)
@@ -622,12 +622,12 @@ export function ThumbnailPanel({
 
         {result.label_mismatches.length > 0 && (
           <div className="p-2 rounded bg-orange-500/10 border border-orange-500/20">
-            <p className="text-[12px] font-medium text-orange-400">
+            <p className="text-[12px] font-medium text-orange-400 light:text-orange-700">
               {t("player.panel.labelMismatch")}
             </p>
             {result.label_mismatches.map((m, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: plain-text list; mismatch strings can repeat, so index is the only stable key.
-              <p key={i} className="text-[11px] text-orange-300">
+              <p key={i} className="text-[11px] text-orange-300 light:text-orange-700">
                 {translateReason(m)}
               </p>
             ))}
@@ -636,7 +636,7 @@ export function ThumbnailPanel({
 
         {result.low_framerate && (
           <div className="p-2 rounded bg-orange-500/10 border border-orange-500/20">
-            <p className="text-[11px] text-orange-400">
+            <p className="text-[11px] text-orange-400 light:text-orange-700">
               {t("player.panel.lowFramerate", {
                 fps: result.fps == null ? "" : formatCount(result.fps),
               })}
@@ -646,14 +646,16 @@ export function ThumbnailPanel({
 
         {result.frozen_video && (
           <div className="p-2 rounded bg-sky-500/10 border border-sky-500/20">
-            <p className="text-[11px] text-sky-300">{t("table.frozenVideo")}</p>
+            <p className="text-[11px] text-sky-300 light:text-sky-700">{t("table.frozenVideo")}</p>
           </div>
         )}
 
         {result.low_bitrate && (
           <div className="p-2 rounded bg-orange-500/10 border border-orange-500/20">
-            <p className="text-[11px] text-orange-400">
-              {t("player.panel.lowBitrate", { bitrate: result.video_bitrate ?? "" })}
+            <p className="text-[11px] text-orange-400 light:text-orange-700">
+              {t("player.panel.lowBitrate", {
+                bitrate: result.video_bitrate ? formatVideoBitrate(result.video_bitrate) : "",
+              })}
             </p>
           </div>
         )}
@@ -895,11 +897,8 @@ export function ThumbnailPanel({
                     {result.video_bitrate &&
                       result.video_bitrate !== "Unknown" &&
                       result.video_bitrate !== "N/A" && (
-                        <span
-                          dir="ltr"
-                          className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm"
-                        >
-                          {result.video_bitrate}
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] text-white/80 bg-white/10 backdrop-blur-sm">
+                          {formatVideoBitrate(result.video_bitrate)}
                         </span>
                       )}
                     {result.hdr_format && (

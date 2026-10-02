@@ -35,7 +35,7 @@ import {
 import { applyOrderChanges, planFix, undoChannels } from "../lib/dispatcharrEdits";
 import type { SortDirection, SortField } from "../lib/filters";
 import { filterResultsShared, sortResults } from "../lib/filters";
-import { statusLabel } from "../lib/format";
+import { formatVideoBitrate, statusLabel } from "../lib/format";
 import { measureUiPerf } from "../lib/perf";
 import { isSingleConnectionPlaylist } from "../lib/playback";
 import { isScanActive } from "../lib/scanState";
@@ -116,7 +116,9 @@ function buildChannelMetadataSummary(channel: ChannelResult): string {
     t("table.metadata.codec", { value: channel.codec ?? unknown }),
     t("table.metadata.hdr", { value: channel.hdr_format ?? unknown }),
     t("table.metadata.resolution", { value: channel.resolution ?? unknown }),
-    t("table.metadata.videoBitrate", { value: channel.video_bitrate ?? unknown }),
+    t("table.metadata.videoBitrate", {
+      value: channel.video_bitrate ? formatVideoBitrate(channel.video_bitrate) : unknown,
+    }),
     t("table.metadata.audio", { bitrate: audioBitrate, codec: channel.audio_codec ?? unknown }),
     t("table.metadata.audioLayout", { value: channel.audio_channel_layout ?? unknown }),
   ];
