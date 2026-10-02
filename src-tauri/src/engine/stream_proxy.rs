@@ -1,14 +1,14 @@
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use reqwest::header::{HeaderValue, CONTENT_TYPE, LOCATION, RANGE, USER_AGENT};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use reqwest::header::{CONTENT_TYPE, HeaderValue, LOCATION, RANGE, USER_AGENT};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, LazyLock};
 use tauri::{Emitter, Manager};
 use url::{Host, Url};
 
 use crate::engine::ffmpeg::{
-    configure_background_process, graceful_kill, resolve_binary, sanitize_ffmpeg_stderr_line,
-    GRACEFUL_KILL_TIMEOUT,
+    GRACEFUL_KILL_TIMEOUT, configure_background_process, graceful_kill, resolve_binary,
+    sanitize_ffmpeg_stderr_line,
 };
 use crate::state::AppState;
 
@@ -510,7 +510,11 @@ pub async fn handle_proxy_request(
         log::info!(
             "Stream proxy: playlist URL {} answered with media ({}); leaving it to the MPEG-TS route",
             redact_url(&original_url),
-            if content_type.is_empty() { "no content-type" } else { content_type.as_str() }
+            if content_type.is_empty() {
+                "no content-type"
+            } else {
+                content_type.as_str()
+            }
         );
         drop(upstream_response);
         let mut response = error_response(409, "Playlist URL served a media stream");
@@ -631,10 +635,10 @@ async fn get_or_create_proxy_client(
     accept_invalid_certs: bool,
 ) -> reqwest::Client {
     let mut guard = state.proxy_client.lock().await;
-    if let Some((client, cached_accept_invalid)) = guard.as_ref() {
-        if *cached_accept_invalid == accept_invalid_certs {
-            return client.clone();
-        }
+    if let Some((client, cached_accept_invalid)) = guard.as_ref()
+        && *cached_accept_invalid == accept_invalid_certs
+    {
+        return client.clone();
     }
 
     let client = build_proxy_client(
@@ -694,11 +698,11 @@ impl PlaybackTransport {
                 let Some(pending) = weak.upgrade() else {
                     break;
                 };
-                if let Ok(pending) = pending.lock() {
-                    if pending.counters != previous {
-                        let _ = emitter.emit("playback://transport", &*pending);
-                        previous = pending.counters.clone();
-                    }
+                if let Ok(pending) = pending.lock()
+                    && pending.counters != previous
+                {
+                    let _ = emitter.emit("playback://transport", &*pending);
+                    previous = pending.counters.clone();
                 };
             }
         });
@@ -1005,7 +1009,7 @@ where
                     }
                 }
                 Ok(Err(_)) => {
-                    return StreamForwardOutcome::UpstreamReadError("ffmpeg stdout failed")
+                    return StreamForwardOutcome::UpstreamReadError("ffmpeg stdout failed");
                 }
             }
         }
@@ -1102,12 +1106,11 @@ fn latest_transport_stream_pcr(data: &[u8], preferred_pid: Option<u16>) -> Optio
     let mut offset = sync_offset;
     while offset + MPEG_TS_PACKET_SIZE <= data.len() {
         let packet = &data[offset..offset + MPEG_TS_PACKET_SIZE];
-        if let Some(pid) = transport_stream_packet_pid(packet) {
-            if preferred_pid.is_none_or(|preferred| preferred == pid) {
-                if let Some(pcr) = transport_stream_packet_pcr(packet) {
-                    latest = Some((pid, pcr));
-                }
-            }
+        if let Some(pid) = transport_stream_packet_pid(packet)
+            && preferred_pid.is_none_or(|preferred| preferred == pid)
+            && let Some(pcr) = transport_stream_packet_pcr(packet)
+        {
+            latest = Some((pid, pcr));
         }
         offset += MPEG_TS_PACKET_SIZE;
     }
@@ -1495,11 +1498,11 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                 };
 
                 let status = response.status();
-                if !status.is_success() {
-                    if let Some(telemetry) = &telemetry {
-                        telemetry.record("upstream_error");
-                        telemetry.flush();
-                    }
+                if !status.is_success()
+                    && let Some(telemetry) = &telemetry
+                {
+                    telemetry.record("upstream_error");
+                    telemetry.flush();
                 }
                 let content_type = response
                     .headers()
@@ -1532,10 +1535,10 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                 if !reconnect || !status.is_success() {
                     let forward =
                         forward_response_as_chunked_stream(&mut socket, response, None).await;
-                    if let Some(telemetry) = &telemetry {
-                        if status.is_success() {
-                            telemetry.outcome(forward.outcome);
-                        }
+                    if let Some(telemetry) = &telemetry
+                        && status.is_success()
+                    {
+                        telemetry.outcome(forward.outcome);
                     }
                     let _ = finish_chunked_stream(&mut socket).await;
                     return;
@@ -2165,8 +2168,7 @@ segment.ts
 
     #[test]
     fn parse_stream_request_decodes_percent_encoded_utf8() {
-        let request =
-            "GET /stream?url=https%3A%2F%2Fexample.com%2Fstr%C3%B8m%3Ftoken%3Dabc%2B123 HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let request = "GET /stream?url=https%3A%2F%2Fexample.com%2Fstr%C3%B8m%3Ftoken%3Dabc%2B123 HTTP/1.1\r\nHost: localhost\r\n\r\n";
         assert_eq!(
             parse_stream_request(request, "k"),
             Some(StreamRequest {
@@ -2191,10 +2193,12 @@ segment.ts
         ] {
             let request =
                 format!("GET /stream?url=https%3A%2F%2Fexample.com%2Flive.ts&{suffix} HTTP/1.1");
-            assert!(parse_stream_request(&request, "k")
-                .unwrap()
-                .telemetry
-                .is_none());
+            assert!(
+                parse_stream_request(&request, "k")
+                    .unwrap()
+                    .telemetry
+                    .is_none()
+            );
         }
     }
 
@@ -2510,9 +2514,11 @@ segment.ts
         );
         for step in 362..=380 {
             let milliseconds = step * 250;
-            assert!(!pacer
-                .delay_for_payload(&make_payload(&[milliseconds, milliseconds, milliseconds,]))
-                .is_zero());
+            assert!(
+                !pacer
+                    .delay_for_payload(&make_payload(&[milliseconds, milliseconds, milliseconds,]))
+                    .is_zero()
+            );
         }
         assert_eq!(
             pacer.delay_for_payload(&make_payload(&[95_250, 95_250, 95_250])),

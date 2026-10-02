@@ -15,6 +15,7 @@ pub const SUPPORTED: &[&str] = &[
 ];
 
 /// Languages written right to left.
+#[cfg(target_os = "linux")]
 const RTL: &[&str] = &["ar", "fa"];
 
 fn catalog_source(locale: &str) -> Option<&'static str> {
@@ -86,11 +87,11 @@ fn start(preference: Option<String>) -> Launch {
 /// built, before plugins (including the settings store) are initialized.
 pub fn init(app: &tauri::AppHandle) {
     let preference = persisted_language(app);
-    let launch = LAUNCH.get_or_init(|| start(preference));
+    LAUNCH.get_or_init(|| start(preference));
     // GTK lays out its native menu bar from the system locale; mirror it for
     // a right-to-left UI language. macOS and Windows menus keep the OS direction.
     #[cfg(target_os = "linux")]
-    if RTL.contains(&launch.ui.locale) {
+    if RTL.contains(&launch().ui.locale) {
         gtk::Widget::set_default_direction(gtk::TextDirection::Rtl);
     }
 }
@@ -152,7 +153,7 @@ fn match_tag(tag: &str) -> Option<&'static str> {
     let wanted = match language {
         // Traditional Chinese readers are better served by the next preference.
         "zh" if tag.contains("hant") || parts.any(|part| matches!(part, "tw" | "hk" | "mo")) => {
-            return None
+            return None;
         }
         "zh" => "zh-cn",
         "pt" => "pt-br",

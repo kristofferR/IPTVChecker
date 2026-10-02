@@ -59,7 +59,7 @@ pub fn cap_diagnostics_output(output: String) -> String {
 
 #[cfg(test)]
 mod cap_tests {
-    use super::{cap_diagnostics_output, MAX_DIAGNOSTICS_OUTPUT_BYTES};
+    use super::{MAX_DIAGNOSTICS_OUTPUT_BYTES, cap_diagnostics_output};
 
     #[test]
     fn cap_diagnostics_output_never_exceeds_cap() {

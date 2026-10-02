@@ -8,17 +8,17 @@
 //! 0.19+ against real devices.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use cast_sender::namespace::media::{IdleReason, Media, PlayerState};
 use cast_sender::namespace::{Custom, NamespaceUrn};
 use cast_sender::{App as CastApp, AppId, Payload, Receiver};
 use mdns_sd::{ServiceDaemon, ServiceEvent};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::error::AppError;

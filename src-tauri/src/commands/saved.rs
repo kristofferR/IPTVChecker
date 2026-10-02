@@ -159,7 +159,7 @@ pub(crate) fn source_identity_for_dispatcharr(
     api_key: Option<&str>,
 ) -> Result<String, AppError> {
     use crate::engine::dispatcharr::{
-        dispatcharr_source_key, login_identity_label, normalize_dispatcharr_server, DispatcharrAuth,
+        DispatcharrAuth, dispatcharr_source_key, login_identity_label, normalize_dispatcharr_server,
     };
     let base = normalize_dispatcharr_server(server)?;
     fn clean(value: Option<&str>) -> Option<&str> {
@@ -519,16 +519,16 @@ fn apply_saved_menu_update(app: &tauri::AppHandle, entries: &[SavedPlaylistEntry
         inserted_any = true;
     }
 
-    if !inserted_any {
-        if let Ok(empty_item) = MenuItem::with_id(
+    if !inserted_any
+        && let Ok(empty_item) = MenuItem::with_id(
             app,
             "menu.file.saved.empty",
             crate::i18n::text("menu.file.saved.empty"),
             false,
             None::<&str>,
-        ) {
-            let _ = saved_submenu.insert(&empty_item, 0);
-        }
+        )
+    {
+        let _ = saved_submenu.insert(&empty_item, 0);
     }
 }
 
@@ -830,8 +830,8 @@ pub async fn open_saved_playlist(
 #[cfg(test)]
 mod tests {
     use super::{
-        default_display_name, path_source_identity, sanitize_saved_playlist_entry,
-        sanitize_saved_playlists, SavedPlaylistEntry, SavedPlaylistSource,
+        SavedPlaylistEntry, SavedPlaylistSource, default_display_name, path_source_identity,
+        sanitize_saved_playlist_entry, sanitize_saved_playlists,
     };
 
     /// A tightened validation rule must never delete playlists the user saved:

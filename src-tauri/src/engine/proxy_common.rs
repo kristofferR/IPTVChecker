@@ -42,10 +42,10 @@ pub fn is_m3u8_response(content_type: &str, url: &str) -> bool {
     if ct.contains("mpegurl") {
         return true;
     }
-    if let Ok(parsed) = Url::parse(url) {
-        if parsed.path().to_lowercase().ends_with(".m3u8") {
-            return true;
-        }
+    if let Ok(parsed) = Url::parse(url)
+        && parsed.path().to_lowercase().ends_with(".m3u8")
+    {
+        return true;
     }
     false
 }

@@ -4,9 +4,9 @@
 //! aborts the rest.
 
 use crate::engine::dispatcharr::{
+    CandidateMatch, DispatcharrAuth, DispatcharrChannel, DispatcharrClient,
     build_dispatcharr_source_key, build_m3u, dispatcharr_ids_from_extinf, get_session, keyed_lock,
     normalize_dispatcharr_server, register_session, stats_stuck, stream_stats_from_result,
-    CandidateMatch, DispatcharrAuth, DispatcharrChannel, DispatcharrClient,
 };
 use crate::error::AppError;
 use crate::models::channel::{Channel, ChannelResult, ChannelStatus};
@@ -34,36 +34,35 @@ async fn resolve_session(
     if let Some(client) = get_session(connection) {
         return Ok(client);
     }
-    if let Some(saved_id) = source_identity.strip_prefix("saved:") {
-        if let Some(SavedPlaylistSource::Dispatcharr {
+    if let Some(saved_id) = source_identity.strip_prefix("saved:")
+        && let Some(SavedPlaylistSource::Dispatcharr {
             server,
             username,
             password,
             api_key,
         }) = crate::commands::saved::saved_playlist_by_id(app, saved_id)?.map(|e| e.source)
-        {
-            let base = normalize_dispatcharr_server(&server)?;
-            let auth = DispatcharrAuth::from_parts(
-                username.as_deref(),
-                password.as_deref(),
-                api_key.as_deref(),
-            )?;
-            if build_dispatcharr_source_key(&base, &auth) != connection {
-                return Err(AppError::State(
-                    "This saved Dispatcharr source now points elsewhere. Reload it to sync."
-                        .to_string(),
-                ));
-            }
-            let accept_invalid_certs = app
-                .state::<Arc<AppState>>()
-                .settings
-                .lock()
-                .await
-                .accept_invalid_certs;
-            let client = Arc::new(DispatcharrClient::new(base, auth, accept_invalid_certs)?);
-            register_session(connection, Arc::clone(&client));
-            return Ok(client);
+    {
+        let base = normalize_dispatcharr_server(&server)?;
+        let auth = DispatcharrAuth::from_parts(
+            username.as_deref(),
+            password.as_deref(),
+            api_key.as_deref(),
+        )?;
+        if build_dispatcharr_source_key(&base, &auth) != connection {
+            return Err(AppError::State(
+                "This saved Dispatcharr source now points elsewhere. Reload it to sync."
+                    .to_string(),
+            ));
         }
+        let accept_invalid_certs = app
+            .state::<Arc<AppState>>()
+            .settings
+            .lock()
+            .await
+            .accept_invalid_certs;
+        let client = Arc::new(DispatcharrClient::new(base, auth, accept_invalid_certs)?);
+        register_session(connection, Arc::clone(&client));
+        return Ok(client);
     }
     Err(AppError::State(
         "Not connected to Dispatcharr. Reload the source to sync.".to_string(),

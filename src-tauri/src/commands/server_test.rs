@@ -9,11 +9,11 @@ use crate::engine::ffmpeg;
 use crate::engine::remote_cache::{
     PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT, PLAYLIST_DOWNLOAD_USER_AGENT,
 };
-use crate::engine::stream_proxy::{fetch_with_hop_validation, SafeFetchError};
+use crate::engine::stream_proxy::{SafeFetchError, fetch_with_hop_validation};
 use crate::engine::xtream::{
-    build_xtream_player_api_action_url, build_xtream_player_api_url, build_xtream_stream_url,
-    extract_xtream_account_info, normalize_xtream_server, XTREAM_JSON_API_TIMEOUT,
-    XTREAM_PLAYER_API_TIMEOUT,
+    XTREAM_JSON_API_TIMEOUT, XTREAM_PLAYER_API_TIMEOUT, build_xtream_player_api_action_url,
+    build_xtream_player_api_url, build_xtream_stream_url, extract_xtream_account_info,
+    normalize_xtream_server,
 };
 use crate::error::AppError;
 use crate::state::AppState;
@@ -446,10 +446,10 @@ fn extract_host_from_url(url_str: &str) -> Option<String> {
 fn most_common_resolved_host(probes: &[XtreamChannelProbe]) -> Option<String> {
     let mut counts = HashMap::<String, usize>::new();
     for probe in probes {
-        if let Some(ref resolved) = probe.resolved_url {
-            if let Some(host) = extract_host_from_url(resolved) {
-                *counts.entry(host).or_insert(0) += 1;
-            }
+        if let Some(ref resolved) = probe.resolved_url
+            && let Some(host) = extract_host_from_url(resolved)
+        {
+            *counts.entry(host).or_insert(0) += 1;
         }
     }
     counts
@@ -462,10 +462,10 @@ fn detect_same_cdn(results: &[XtreamServerTestResult]) -> bool {
     let mut all_hosts = HashSet::new();
     for result in results {
         for probe in &result.channel_probes {
-            if let Some(ref resolved) = probe.resolved_url {
-                if let Some(host) = extract_host_from_url(resolved) {
-                    all_hosts.insert(host);
-                }
+            if let Some(ref resolved) = probe.resolved_url
+                && let Some(host) = extract_host_from_url(resolved)
+            {
+                all_hosts.insert(host);
             }
         }
     }
@@ -747,8 +747,8 @@ async fn test_xtream_servers_inner(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_server_test_client, server_test_get, stream_probe_succeeded, XtreamChannelProbe,
-        SERVER_TEST_STREAM_TIMEOUT,
+        SERVER_TEST_STREAM_TIMEOUT, XtreamChannelProbe, build_server_test_client, server_test_get,
+        stream_probe_succeeded,
     };
 
     fn empty_probe() -> XtreamChannelProbe {

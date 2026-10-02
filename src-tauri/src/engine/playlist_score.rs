@@ -38,10 +38,11 @@ fn median_u64(values: &[u64]) -> Option<f64> {
 }
 
 fn is_hd_or_uhd(result: &ChannelResult) -> bool {
-    if let (Some(width), Some(height)) = (result.width, result.height) {
-        if width >= 1280 && height >= 720 {
-            return true;
-        }
+    if let (Some(width), Some(height)) = (result.width, result.height)
+        && width >= 1280
+        && height >= 720
+    {
+        return true;
     }
     if let Some(resolution) = result.resolution.as_ref() {
         let normalized = resolution.to_ascii_lowercase();

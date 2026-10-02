@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 use crate::models::channel::ChannelResult;
-use crate::models::settings::{validate_sample_clip_duration, MIN_SAMPLE_CLIP_DURATION_SECS};
+use crate::models::settings::{MIN_SAMPLE_CLIP_DURATION_SECS, validate_sample_clip_duration};
 
 pub const MIN_TIMEOUT_SECS: f64 = 0.5;
 pub const MAX_TIMEOUT_SECS: f64 = 300.0;
@@ -82,15 +82,14 @@ impl ScanConfig {
             )));
         }
 
-        if let Some(ext) = self.extended_timeout {
-            if !ext.is_finite()
-                || !(MIN_EXTENDED_TIMEOUT_SECS..=MAX_EXTENDED_TIMEOUT_SECS).contains(&ext)
-            {
-                return Err(AppError::Validation(format!(
-                    "Invalid extended timeout: must be between {} and {} seconds",
-                    MIN_EXTENDED_TIMEOUT_SECS, MAX_EXTENDED_TIMEOUT_SECS
-                )));
-            }
+        if let Some(ext) = self.extended_timeout
+            && (!ext.is_finite()
+                || !(MIN_EXTENDED_TIMEOUT_SECS..=MAX_EXTENDED_TIMEOUT_SECS).contains(&ext))
+        {
+            return Err(AppError::Validation(format!(
+                "Invalid extended timeout: must be between {} and {} seconds",
+                MIN_EXTENDED_TIMEOUT_SECS, MAX_EXTENDED_TIMEOUT_SECS
+            )));
         }
 
         if self.concurrency < MIN_CONCURRENCY || self.concurrency > MAX_CONCURRENCY {

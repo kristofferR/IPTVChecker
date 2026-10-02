@@ -6,7 +6,7 @@
 //! timeout) and the http(s) URL validator live here because every remote
 //! source (plain URL, Xtream, Stalker, server tester) uses them.
 
-use crate::commands::playlist::{emit_load_progress, PlaylistLoadProgress, PROGRESS_THROTTLE};
+use crate::commands::playlist::{PROGRESS_THROTTLE, PlaylistLoadProgress, emit_load_progress};
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

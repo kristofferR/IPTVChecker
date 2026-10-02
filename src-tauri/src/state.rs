@@ -276,14 +276,14 @@ impl AppState {
         }
 
         let mut cache = self.playlist_preview_cache.lock().await;
-        if cache.len() >= PLAYLIST_PREVIEW_CACHE_LIMIT && !cache.contains_key(&cache_key) {
-            if let Some(stale_key) = cache
+        if cache.len() >= PLAYLIST_PREVIEW_CACHE_LIMIT
+            && !cache.contains_key(&cache_key)
+            && let Some(stale_key) = cache
                 .iter()
                 .min_by_key(|(_, value)| value.cached_at_epoch_ms)
                 .map(|(key, _)| key.clone())
-            {
-                cache.remove(&stale_key);
-            }
+        {
+            cache.remove(&stale_key);
         }
         cache.insert(
             cache_key,
@@ -304,15 +304,14 @@ impl AppState {
                 notify: Arc::new(Notify::new()),
             },
         );
-        if enrichments.len() > PLAYLIST_PREVIEW_CACHE_LIMIT {
-            if let Some(stale_key) = enrichments
+        if enrichments.len() > PLAYLIST_PREVIEW_CACHE_LIMIT
+            && let Some(stale_key) = enrichments
                 .iter()
                 .filter(|(key, _)| key.as_str() != source_identity)
                 .min_by_key(|(_, enrichment)| enrichment.generation)
                 .map(|(key, _)| key.clone())
-            {
-                enrichments.remove(&stale_key);
-            }
+        {
+            enrichments.remove(&stale_key);
         }
         drop(enrichments);
         if let Some(previous) = previous {
@@ -468,10 +467,12 @@ mod tests {
                 )
                 .await
         );
-        assert!(state
-            .get_cached_playlist_preview("cache-key", None)
-            .await
-            .is_some_and(|preview| preview.channels[0].catchup.is_none()));
+        assert!(
+            state
+                .get_cached_playlist_preview("cache-key", None)
+                .await
+                .is_some_and(|preview| preview.channels[0].catchup.is_none())
+        );
 
         assert!(
             state

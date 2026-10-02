@@ -1,8 +1,8 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
@@ -364,13 +364,13 @@ pub fn get_streaming_proxy_key() -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
+    use super::{APPIMAGE_RUNTIME_ENV_VARS, sanitize_appimage_environment};
     use super::{
         build_custom_player_command, build_unique_temp_playlist_path,
         cleanup_stale_temp_playlists_in_dir, is_temp_playlist_file, spawn_temp_playlist_cleanup,
         write_unique_temp_playlist_in_dir,
     };
-    #[cfg(target_os = "linux")]
-    use super::{sanitize_appimage_environment, APPIMAGE_RUNTIME_ENV_VARS};
     #[cfg(target_os = "macos")]
     use std::ffi::OsStr;
     use std::time::{Duration, SystemTime};
@@ -390,11 +390,13 @@ mod tests {
         let second = build_unique_temp_playlist_path(&root);
 
         assert_ne!(first, second);
-        assert!(first
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .starts_with("iptv-checker-single-channel-"));
+        assert!(
+            first
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .starts_with("iptv-checker-single-channel-")
+        );
         assert_eq!(first.extension().and_then(|ext| ext.to_str()), Some("m3u8"));
     }
 
@@ -461,9 +463,11 @@ mod tests {
         sanitize_appimage_environment(&mut command, true);
 
         for name in APPIMAGE_RUNTIME_ENV_VARS {
-            assert!(command
-                .get_envs()
-                .any(|(key, value)| key == std::ffi::OsStr::new(name) && value.is_none()));
+            assert!(
+                command
+                    .get_envs()
+                    .any(|(key, value)| key == std::ffi::OsStr::new(name) && value.is_none())
+            );
         }
     }
 

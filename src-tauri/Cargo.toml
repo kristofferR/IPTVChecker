@@ -3,7 +3,7 @@ name = "iptv-checker"
 version = "2.1.0"
 description = "Cross-platform IPTV Stream Checker"
 authors = []
-edition = "2021"
+edition = "2024"
 default-run = "iptv-checker"
 
 [lib]

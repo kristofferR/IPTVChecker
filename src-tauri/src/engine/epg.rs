@@ -406,22 +406,22 @@ pub fn parse_xmltv_into_with_source<R: Read>(
                 let closes_root = element_depth == 1 && element.name().as_ref() == "tv";
                 match element.name().as_ref() {
                     "programme" => {
-                        if let Some((channel, start, stop)) = current.take() {
-                            if stop.is_none_or(|stop| stop > start) {
-                                index
-                                    .programmes
-                                    .entry((source_identity.to_string(), channel))
-                                    .or_default()
-                                    .push(EpgProgramme {
-                                        start,
-                                        // `start` is an internal sentinel for an omitted stop time;
-                                        // finalize replaces it with the following programme or fallback.
-                                        stop: stop.unwrap_or(start),
-                                        title: current_title
-                                            .take()
-                                            .unwrap_or_else(|| "Untitled".to_string()),
-                                    });
-                            }
+                        if let Some((channel, start, stop)) = current.take()
+                            && stop.is_none_or(|stop| stop > start)
+                        {
+                            index
+                                .programmes
+                                .entry((source_identity.to_string(), channel))
+                                .or_default()
+                                .push(EpgProgramme {
+                                    start,
+                                    // `start` is an internal sentinel for an omitted stop time;
+                                    // finalize replaces it with the following programme or fallback.
+                                    stop: stop.unwrap_or(start),
+                                    title: current_title
+                                        .take()
+                                        .unwrap_or_else(|| "Untitled".to_string()),
+                                });
                         }
                         title_text = None;
                     }
@@ -537,13 +537,11 @@ fn remove_stale_partial_downloads(cache_dir: &Path) {
             .ok()
             .and_then(|modified| modified.elapsed().ok())
             .is_some_and(|age| age >= EPG_DOWNLOAD_TIMEOUT);
-        if is_stale {
-            if let Err(error) = std::fs::remove_file(&path) {
-                log::warn!(
-                    "Failed to remove stale partial EPG download {}: {error}",
-                    path.display()
-                );
-            }
+        if is_stale && let Err(error) = std::fs::remove_file(&path) {
+            log::warn!(
+                "Failed to remove stale partial EPG download {}: {error}",
+                path.display()
+            );
         }
     }
 }
@@ -922,9 +920,11 @@ mod tests {
         assert!(refreshed
             .programmes_for_sources(std::slice::from_ref(&replaced_source), "news", 0, i64::MAX,)
             .is_empty());
-        assert!(refreshed
-            .programmes_for_sources(std::slice::from_ref(&retained_source), "old", 0, i64::MAX,)
-            .is_empty());
+        assert!(
+            refreshed
+                .programmes_for_sources(std::slice::from_ref(&retained_source), "old", 0, i64::MAX,)
+                .is_empty()
+        );
     }
 
     #[test]

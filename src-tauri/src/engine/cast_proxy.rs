@@ -29,9 +29,9 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use reqwest::header::{HeaderValue, CONTENT_TYPE, USER_AGENT};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use reqwest::header::{CONTENT_TYPE, HeaderValue, USER_AGENT};
 use tauri::{AppHandle, Manager};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
@@ -40,9 +40,9 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use crate::engine::ffmpeg::{
-    configure_background_process, graceful_kill, resolve_binary, GRACEFUL_KILL_TIMEOUT,
+    GRACEFUL_KILL_TIMEOUT, configure_background_process, graceful_kill, resolve_binary,
 };
-use crate::engine::proxy_common::{parse_byte_range, read_capped, ReadCappedError};
+use crate::engine::proxy_common::{ReadCappedError, parse_byte_range, read_capped};
 use crate::engine::stream_proxy::redact_url;
 use crate::error::AppError;
 use crate::models::chromecast::CastStreamKind;
@@ -87,10 +87,10 @@ impl Drop for CastProxyHandle {
         // the remux directory. The tokio task spawned in `start_remux` has its
         // own cleanup hook tied to the cancel token, which handles the killing
         // of ffmpeg and tempdir removal in the async context.
-        if let Ok(mut guard) = self.remux.try_lock() {
-            if let Some(state) = guard.take() {
-                state.cleanup_blocking();
-            }
+        if let Ok(mut guard) = self.remux.try_lock()
+            && let Some(state) = guard.take()
+        {
+            state.cleanup_blocking();
         }
     }
 }
@@ -140,10 +140,12 @@ pub fn detect_lan_ip() -> Option<IpAddr> {
     match local_ip_address::list_afinet_netifas() {
         Ok(list) => {
             for (_, ip) in list {
-                if let IpAddr::V4(v4) = ip {
-                    if !v4.is_loopback() && !v4.is_unspecified() && !v4.is_link_local() {
-                        return Some(IpAddr::V4(v4));
-                    }
+                if let IpAddr::V4(v4) = ip
+                    && !v4.is_loopback()
+                    && !v4.is_unspecified()
+                    && !v4.is_link_local()
+                {
+                    return Some(IpAddr::V4(v4));
                 }
             }
             log::warn!("[CastProxy] No usable IPv4 interface found");
@@ -600,17 +602,15 @@ async fn start_remux(
     // the cast, and -fflags +genpts+discardcorrupt smooths over the inevitable
     // PTS resets between upstream connections instead of treating each as a
     // fresh demux session.
-    if is_hevc {
-        if let Some(stdin) = child.stdin.take() {
-            spawn_upstream_pump(
-                upstream_url.clone(),
-                user_agent.clone(),
-                client.clone(),
-                stdin,
-                cancel.clone(),
-                is_finite,
-            );
-        }
+    if is_hevc && let Some(stdin) = child.stdin.take() {
+        spawn_upstream_pump(
+            upstream_url.clone(),
+            user_agent.clone(),
+            client.clone(),
+            stdin,
+            cancel.clone(),
+            is_finite,
+        );
     }
 
     // Drain stderr so the pipe doesn't fill and stall ffmpeg. Each line is
@@ -996,11 +996,7 @@ async fn probe_codecs(
                 .next()
                 .unwrap_or("")
                 .to_ascii_lowercase();
-            if codec.is_empty() {
-                None
-            } else {
-                Some(codec)
-            }
+            if codec.is_empty() { None } else { Some(codec) }
         }
     };
 
@@ -1314,10 +1310,10 @@ async fn serve_upstream(
         HeaderValue::from_str(&user_agent)
             .unwrap_or_else(|_| HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")),
     );
-    if let Some(range) = range_header {
-        if let Ok(value) = HeaderValue::from_str(range) {
-            request_builder = request_builder.header(reqwest::header::RANGE, value);
-        }
+    if let Some(range) = range_header
+        && let Ok(value) = HeaderValue::from_str(range)
+    {
+        request_builder = request_builder.header(reqwest::header::RANGE, value);
     }
 
     let response = match tokio::time::timeout(MANIFEST_FETCH_TIMEOUT, request_builder.send()).await
@@ -1362,13 +1358,13 @@ async fn serve_upstream(
         // otherwise stream-and-cap the body so a misclassified or malicious
         // upstream (e.g. URL ends in .m3u8 but actually returns a live MPEG-TS)
         // can't buffer unbounded data.
-        if let Some(len) = response.content_length() {
-            if len > MAX_MANIFEST_BYTES {
-                log::warn!(
-                    "[CastProxy] Manifest content-length {len} exceeds cap; refusing to rewrite"
-                );
-                return write_simple(socket, 502, "text/plain", b"Manifest too large").await;
-            }
+        if let Some(len) = response.content_length()
+            && len > MAX_MANIFEST_BYTES
+        {
+            log::warn!(
+                "[CastProxy] Manifest content-length {len} exceeds cap; refusing to rewrite"
+            );
+            return write_simple(socket, 502, "text/plain", b"Manifest too large").await;
         }
         let body = match read_capped(response, MAX_MANIFEST_BYTES).await {
             Ok(bytes) => bytes,
@@ -1729,9 +1725,11 @@ mod tests {
     fn token_is_url_safe_and_long() {
         let token = generate_token();
         assert!(token.len() >= 40, "token too short: {token}");
-        assert!(token
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert!(
+            token
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        );
     }
 
     #[test]

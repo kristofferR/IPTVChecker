@@ -6,7 +6,7 @@ use url::Url;
 
 use crate::error::AppError;
 use crate::models::channel::ChannelStatus;
-use crate::models::scan::{RetryBackoff, MAX_RETRIES, MIN_RETRIES};
+use crate::models::scan::{MAX_RETRIES, MIN_RETRIES, RetryBackoff};
 use crate::models::scan_log::{ChannelAttemptDebugLog, ChannelDebugLog};
 
 /// Minimum data threshold for direct streams (500KB).
@@ -404,13 +404,13 @@ fn parse_variant_score(stream_inf_line: &str) -> (u64, u64, u64) {
 
         match key.as_str() {
             "RESOLUTION" => {
-                if let Some((raw_width, raw_height)) = value.split_once('x') {
-                    if let (Ok(width), Ok(height)) = (
+                if let Some((raw_width, raw_height)) = value.split_once('x')
+                    && let (Ok(width), Ok(height)) = (
                         raw_width.trim().parse::<u64>(),
                         raw_height.trim().parse::<u64>(),
-                    ) {
-                        resolution_pixels = width.saturating_mul(height);
-                    }
+                    )
+                {
+                    resolution_pixels = width.saturating_mul(height);
                 }
             }
             "AVERAGE-BANDWIDTH" => {
@@ -866,26 +866,26 @@ where
 {
     let mut final_outcome = attempt_check(timeout, 0).await?;
 
-    if final_outcome.status == ChannelStatus::Dead {
-        if let Some(ext_timeout) = extended_timeout {
-            let second = attempt_check(ext_timeout, final_outcome.attempts.len() as u32).await?;
-            let mut combined_attempts = final_outcome.attempts;
-            combined_attempts.extend(second.attempts);
+    if final_outcome.status == ChannelStatus::Dead
+        && let Some(ext_timeout) = extended_timeout
+    {
+        let second = attempt_check(ext_timeout, final_outcome.attempts.len() as u32).await?;
+        let mut combined_attempts = final_outcome.attempts;
+        combined_attempts.extend(second.attempts);
 
-            final_outcome = AttemptOutcome {
-                status: second.status,
-                stream_url: second.stream_url,
-                latency_ms: second.latency_ms,
-                retries_used: final_outcome
-                    .retries_used
-                    .saturating_add(second.retries_used),
-                last_error_reason: second.last_error_reason.or(final_outcome.last_error_reason),
-                drm_system: second.drm_system.or(final_outcome.drm_system),
-                successful_attempt: second.successful_attempt,
-                attempts: combined_attempts,
-                ffprobe_output: second.ffprobe_output.or(final_outcome.ffprobe_output),
-            };
-        }
+        final_outcome = AttemptOutcome {
+            status: second.status,
+            stream_url: second.stream_url,
+            latency_ms: second.latency_ms,
+            retries_used: final_outcome
+                .retries_used
+                .saturating_add(second.retries_used),
+            last_error_reason: second.last_error_reason.or(final_outcome.last_error_reason),
+            drm_system: second.drm_system.or(final_outcome.drm_system),
+            successful_attempt: second.successful_attempt,
+            attempts: combined_attempts,
+            ffprobe_output: second.ffprobe_output.or(final_outcome.ffprobe_output),
+        };
     }
 
     Ok(final_outcome)
@@ -906,12 +906,12 @@ pub async fn check_channel_status_with_ffprobe_debug(
             "Invalid timeout: must be greater than 0 seconds".to_string(),
         ));
     }
-    if let Some(ext) = extended_timeout {
-        if !ext.is_finite() || ext <= 0.0 {
-            return Err(AppError::Other(
-                "Invalid extended timeout: must be greater than 0 seconds".to_string(),
-            ));
-        }
+    if let Some(ext) = extended_timeout
+        && (!ext.is_finite() || ext <= 0.0)
+    {
+        return Err(AppError::Other(
+            "Invalid extended timeout: must be greater than 0 seconds".to_string(),
+        ));
     }
 
     if !uses_ffprobe_liveness(url) {
@@ -1157,12 +1157,12 @@ pub async fn check_channel_status_with_debug(
             "Invalid timeout: must be greater than 0 seconds".to_string(),
         ));
     }
-    if let Some(ext) = extended_timeout {
-        if !ext.is_finite() || ext <= 0.0 {
-            return Err(AppError::Other(
-                "Invalid extended timeout: must be greater than 0 seconds".to_string(),
-            ));
-        }
+    if let Some(ext) = extended_timeout
+        && (!ext.is_finite() || ext <= 0.0)
+    {
+        return Err(AppError::Other(
+            "Invalid extended timeout: must be greater than 0 seconds".to_string(),
+        ));
     }
 
     let retries = retries.clamp(MIN_RETRIES, MAX_RETRIES);
@@ -1924,11 +1924,13 @@ encrypted.ts
         .expect("checker request should succeed");
 
         assert_eq!(outcome.status, ChannelStatus::Dead);
-        assert!(outcome
-            .last_error_reason
-            .as_deref()
-            .unwrap_or_default()
-            .contains("Unexpected text content type"));
+        assert!(
+            outcome
+                .last_error_reason
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Unexpected text content type")
+        );
         server_handle.abort();
     }
 

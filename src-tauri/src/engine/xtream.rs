@@ -4,7 +4,7 @@
 //! and a JSON-API fallback that builds an M3U playlist when /get.php fails.
 
 use crate::engine::remote_cache::{
-    parse_http_url, PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT, PLAYLIST_DOWNLOAD_USER_AGENT,
+    PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT, PLAYLIST_DOWNLOAD_USER_AGENT, parse_http_url,
 };
 use crate::error::AppError;
 use crate::models::channel::{Channel, ChannelResult, ContentType};
