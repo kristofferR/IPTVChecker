@@ -957,6 +957,11 @@ export default {
         unlink: "Dissocier",
         moveToEnd: "Placer à la fin",
       },
+      lowQualityAsDead: {
+        label: "Traiter les flux de faible qualité comme hors ligne",
+        description:
+          "Les flux signalés pour un débit faible ou une image figée sont retirés ou déplacés comme les flux hors ligne, sauf si aucun autre flux ne fonctionne.",
+      },
       writeStats: {
         label: "Écrire les résultats d'analyse dans Dispatcharr",
         description:
@@ -1784,6 +1789,8 @@ export default {
       reordered: "Réordonnée",
       deadMovedToEnd: "Flux hors ligne placés à la fin",
       deadRemoved: "Flux hors ligne retirés",
+      lowQualityMovedToEnd: "Flux de faible qualité placés à la fin",
+      lowQualityRemoved: "Flux de faible qualité retirés",
       skippedAllDead: "Ignorée, tous les flux sont hors ligne",
       writesNow: "Écrit immédiatement dans Dispatcharr. Annuler rétablit l'ordre précédent.",
       confirm: {
@@ -1798,10 +1805,10 @@ export default {
         many: "{count} chaînes corrigées",
         other: "{count} chaînes corrigées",
       },
-      deadRemoved: {
-        one: "{count} flux hors ligne retiré",
-        many: "{count} flux hors ligne retirés",
-        other: "{count} flux hors ligne retirés",
+      streamsRemoved: {
+        one: "{count} flux retiré",
+        many: "{count} flux retirés",
+        other: "{count} flux retirés",
       },
       failed: { one: "{count} échec", many: "{count} échecs", other: "{count} échecs" },
       undoing: "Annulation...",

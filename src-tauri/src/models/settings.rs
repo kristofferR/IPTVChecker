@@ -146,6 +146,8 @@ pub struct AppSettings {
     /// a tie on one falls through to the next.
     pub dispatcharr_rank_order: Vec<DispatcharrRankSignal>,
     pub dispatcharr_dead_streams: DispatcharrDeadStreams,
+    /// Fix order handles streams flagged low bitrate or frozen like dead ones.
+    pub dispatcharr_low_quality_as_dead: bool,
     /// Look for a signed update on launch and every six hours. Discovery only
     /// ever surfaces a notice; installing always needs explicit confirmation.
     pub automatic_update_checks: bool,
@@ -288,6 +290,7 @@ impl Default for AppSettings {
                 DispatcharrRankSignal::AudioBitrate,
             ],
             dispatcharr_dead_streams: DispatcharrDeadStreams::Unlink,
+            dispatcharr_low_quality_as_dead: false,
             automatic_update_checks: true,
         }
     }

@@ -93,6 +93,8 @@ function channelRows(
     latency?: number;
     audioKbps?: number;
     catchup?: boolean;
+    lowBitrate?: boolean;
+    frozen?: boolean;
   }>,
   firstIndex = 0,
 ): ChannelResult[] {
@@ -109,6 +111,8 @@ function channelRows(
         latency_ms: stream.latency ?? null,
         audio_bitrate: stream.audioKbps == null ? null : `${stream.audioKbps}`,
         catchup: stream.catchup ? "xc" : null,
+        low_bitrate: stream.lowBitrate ?? false,
+        frozen_video: stream.frozen ?? false,
       },
     );
   });
@@ -234,7 +238,7 @@ describe("dispatcharr helpers", () => {
       [10, [1]],
       [20, [4, 3]],
     ]);
-    expect([plan.reordered, plan.removed, plan.skippedAllDead]).toEqual([1, 1, 1]);
+    expect([plan.reordered, plan.dead, plan.skippedAllDead]).toEqual([1, 1, 1]);
   });
 
   it("reduces pasted Dispatcharr links to the server, keeping a path prefix", () => {
@@ -381,6 +385,7 @@ describe("dispatcharr helpers", () => {
     const bitrateFirst = fixPreferencesFrom({
       dispatcharr_rank_order: ["bitrate", "latency"],
       dispatcharr_dead_streams: "move_to_end",
+      dispatcharr_low_quality_as_dead: false,
     });
     expect(bitrateFirst.rankOrder).toEqual([
       "bitrate",
@@ -392,6 +397,52 @@ describe("dispatcharr helpers", () => {
     expect(ids(proposeFixOrder(channel, bitrateFirst))).toEqual([3, 4, 2, 1]);
     // Defaults: resolution first, dead stream unlinked.
     expect(ids(proposeFixOrder(channel))).toEqual([4, 2, 3]);
+  });
+
+  it("can handle low-quality streams like dead ones, keeping a channel's only working stream", () => {
+    const view = getDispatcharrView(
+      [
+        ...channelRows(10, "News One", [
+          { id: 1, height: 1080, frozen: true },
+          { id: 2, height: 720 },
+          { id: 3, height: 1080, lowBitrate: true },
+          { id: 4, status: "dead" },
+        ]),
+        ...channelRows(
+          20,
+          "Sports 2",
+          [
+            { id: 5, status: "dead" },
+            { id: 6, lowBitrate: true },
+          ],
+          4,
+        ),
+      ],
+      {},
+    );
+    if (!view) throw new Error("missing view");
+    const [news, sports] = view.channels;
+    const unlink = fixPreferencesFrom({
+      dispatcharr_rank_order: [],
+      dispatcharr_dead_streams: "unlink",
+      dispatcharr_low_quality_as_dead: true,
+    });
+    const moveToEnd = { ...unlink, deadStreams: "move_to_end" as const };
+    expect(proposeFixOrder(news, unlink)).toEqual({
+      kind: "change",
+      order: [2],
+      dead: 1,
+      lowQuality: 2,
+    });
+    expect(ids(proposeFixOrder(news, moveToEnd))).toEqual([2, 1, 3, 4]);
+    // Off by default: flagged streams rank as working ones.
+    expect(ids(proposeFixOrder(news))).toEqual([1, 3, 2]);
+    expect(proposeFixOrder(sports, unlink)).toEqual({
+      kind: "change",
+      order: [6],
+      dead: 1,
+      lowQuality: 0,
+    });
   });
 
   it("ranks by audio bitrate to the nearest 32 kbps", () => {
@@ -406,6 +457,7 @@ describe("dispatcharr helpers", () => {
     const audioFirst = fixPreferencesFrom({
       dispatcharr_rank_order: ["audio_bitrate"],
       dispatcharr_dead_streams: "unlink",
+      dispatcharr_low_quality_as_dead: false,
     });
     // 95 and 96 kbps tie, so latency decides; no audio bitrate ranks last.
     expect(ids(proposeFixOrder(channel, audioFirst))).toEqual([2, 3, 1, 4]);

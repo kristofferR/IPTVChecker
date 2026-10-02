@@ -46,7 +46,8 @@ export function DispatcharrToast() {
     >
       <span>
         {t("dispatcharr.toast.fixed", { count: toast.fixed })}
-        {toast.removed > 0 && ` · ${t("dispatcharr.toast.deadRemoved", { count: toast.removed })}`}
+        {toast.removed > 0 &&
+          ` · ${t("dispatcharr.toast.streamsRemoved", { count: toast.removed })}`}
       </span>
       {toast.failed > 0 && (
         <span className="text-red-400">

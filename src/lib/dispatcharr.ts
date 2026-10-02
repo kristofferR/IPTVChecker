@@ -591,13 +591,16 @@ export function matchesDispatcharrChannel(
 export type FixProposal =
   | { kind: "none" }
   | { kind: "all_dead" }
-  | { kind: "change"; order: number[]; removed: number };
+  /** `dead` and `lowQuality` count the streams unlinked or moved to the end. */
+  | { kind: "change"; order: number[]; dead: number; lowQuality: number };
 
 /** How Fix order ranks streams (Settings > Dispatcharr). */
 export interface FixPreferences {
   /** Signals compared in order; a tie on one falls through to the next. */
   rankOrder: DispatcharrRankSignal[];
   deadStreams: "unlink" | "move_to_end";
+  /** Streams flagged low bitrate or frozen follow the dead-streams policy. */
+  lowQualityAsDead: boolean;
 }
 
 const RANK_SIGNALS: DispatcharrRankSignal[] = [
@@ -611,19 +614,27 @@ const RANK_SIGNALS: DispatcharrRankSignal[] = [
 export const DEFAULT_FIX_PREFERENCES: FixPreferences = {
   rankOrder: RANK_SIGNALS,
   deadStreams: "unlink",
+  lowQualityAsDead: false,
 };
 
 /** Preferences from settings, with the rank order deduplicated and any
  *  missing signal appended, so an old or edited settings file still ranks
  *  on every signal. */
 export function fixPreferencesFrom(
-  settings: Pick<AppSettings, "dispatcharr_rank_order" | "dispatcharr_dead_streams">,
+  settings: Pick<
+    AppSettings,
+    "dispatcharr_rank_order" | "dispatcharr_dead_streams" | "dispatcharr_low_quality_as_dead"
+  >,
 ): FixPreferences {
   const chosen = (settings.dispatcharr_rank_order ?? []).filter((signal) =>
     RANK_SIGNALS.includes(signal),
   );
   const rankOrder = [...new Set([...chosen, ...RANK_SIGNALS])];
-  return { rankOrder, deadStreams: settings.dispatcharr_dead_streams ?? "unlink" };
+  return {
+    rankOrder,
+    deadStreams: settings.dispatcharr_dead_streams ?? "unlink",
+    lowQualityAsDead: settings.dispatcharr_low_quality_as_dead ?? false,
+  };
 }
 
 function kbps(bitrate: string | null): number {
@@ -646,7 +657,8 @@ const SIGNAL_SCORE: Record<DispatcharrRankSignal, (result: ChannelResult) => num
 
 /** Working streams first, ranked by the preferred signals (remaining ties
  *  keep their order), then untested ones, then geoblocked, DRM, and
- *  placeholder. Dead streams leave the channel or move to the end. A channel
+ *  placeholder. Dead streams leave the channel or move to the end, and so do
+ *  low-quality ones when preferred, unless no other stream works. A channel
  *  whose streams are all dead is left alone. */
 export function proposeFixOrder(
   channel: DispatcharrChannelView,
@@ -656,14 +668,23 @@ export function proposeFixOrder(
   const alive: DispatcharrStreamEntry[] = [];
   const untested: DispatcharrStreamEntry[] = [];
   const other: DispatcharrStreamEntry[] = [];
+  const lowQuality: DispatcharrStreamEntry[] = [];
   const dead: DispatcharrStreamEntry[] = [];
   for (const entry of channel.streams) {
-    const { status } = entry.result;
-    if (status === "alive") alive.push(entry);
-    else if (isUntestedStatus(status) || entry.providerDown) untested.push(entry);
-    else if (isDeadStatus(status)) dead.push(entry);
-    else other.push(entry);
+    const { status, low_bitrate, frozen_video } = entry.result;
+    if (status === "alive") {
+      const demote = preferences.lowQualityAsDead && (low_bitrate || frozen_video);
+      (demote ? lowQuality : alive).push(entry);
+    } else if (isUntestedStatus(status) || entry.providerDown) {
+      untested.push(entry);
+    } else if (isDeadStatus(status)) {
+      dead.push(entry);
+    } else {
+      other.push(entry);
+    }
   }
+  // A channel keeps its only working streams, however poor.
+  if (alive.length === 0) alive.push(...lowQuality.splice(0));
   alive.sort((a, b) => {
     for (const signal of preferences.rankOrder) {
       const score = SIGNAL_SCORE[signal];
@@ -672,7 +693,8 @@ export function proposeFixOrder(
     }
     return 0;
   });
-  const kept = preferences.deadStreams === "move_to_end" ? [...other, ...dead] : other;
+  const kept =
+    preferences.deadStreams === "move_to_end" ? [...other, ...lowQuality, ...dead] : other;
   const order = [...alive, ...untested, ...kept].map((entry) => entry.ref.streamId);
   // Compared with hidden streams in place: one ahead of the working streams
   // is what Dispatcharr actually plays first.
@@ -683,7 +705,7 @@ export function proposeFixOrder(
   ) {
     return { kind: "none" };
   }
-  return { kind: "change", order, removed: channel.streams.length - order.length };
+  return { kind: "change", order, dead: dead.length, lowQuality: lowQuality.length };
 }
 
 /** The visible channels' primary results under the table filters. Standard

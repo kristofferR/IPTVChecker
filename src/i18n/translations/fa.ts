@@ -902,6 +902,11 @@ export default {
         unlink: "جدا کردن",
         moveToEnd: "انتقال به انتها",
       },
+      lowQualityAsDead: {
+        label: "استریم‌های کم‌کیفیت را قطع در نظر بگیر",
+        description:
+          "استریم‌هایی که با نرخ بیت پایین یا تصویر ثابت علامت خورده‌اند مانند استریم‌های قطع حذف یا جابه‌جا می‌شوند، مگر اینکه هیچ استریم دیگری کار نکند.",
+      },
       writeStats: {
         label: "نوشتن نتایج بررسی در Dispatcharr",
         description:
@@ -1631,13 +1636,15 @@ export default {
       reordered: "ترتیب تغییر کرد",
       deadMovedToEnd: "استریم‌های قطع به انتها منتقل شدند",
       deadRemoved: "استریم‌های قطع حذف شدند",
+      lowQualityMovedToEnd: "استریم‌های کم‌کیفیت به انتها منتقل شدند",
+      lowQualityRemoved: "استریم‌های کم‌کیفیت حذف شدند",
       skippedAllDead: "رد شد؛ همه استریم‌ها قطع‌اند",
       writesNow: "اکنون در Dispatcharr نوشته می‌شود. «واگرد» ترتیب قبلی را بازمی‌گرداند.",
       confirm: { one: "اصلاح {count} کانال", other: "اصلاح {count} کانال" },
     },
     toast: {
       fixed: { one: "{count} کانال اصلاح شد", other: "{count} کانال اصلاح شد" },
-      deadRemoved: { one: "{count} استریم قطع حذف شد", other: "{count} استریم قطع حذف شد" },
+      streamsRemoved: { one: "{count} استریم حذف شد", other: "{count} استریم حذف شد" },
       failed: { one: "{count} ناموفق", other: "{count} ناموفق" },
       undoing: "در حال واگرد…",
       undoAll: "واگرد همه",

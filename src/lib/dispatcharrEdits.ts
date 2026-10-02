@@ -271,9 +271,10 @@ export async function linkStreams(
 export interface FixPlan {
   changes: OrderChange[];
   reordered: number;
-  removed: number;
-  /** Dead streams moved to the end instead (when preferred). */
-  movedDead: number;
+  /** Dead streams unlinked, or moved to the end when preferred. */
+  dead: number;
+  /** Low-quality streams handled like dead ones (when preferred). */
+  lowQuality: number;
   skippedAllDead: number;
 }
 
@@ -286,8 +287,8 @@ export function planFix(
   const plan: FixPlan = {
     changes: [],
     reordered: 0,
-    removed: 0,
-    movedDead: 0,
+    dead: 0,
+    lowQuality: 0,
     skippedAllDead: 0,
   };
   for (const channelId of channelIds) {
@@ -303,10 +304,8 @@ export function planFix(
         from: channel.order,
         to: withHiddenStreams(channel, proposal.order),
       });
-      plan.removed += proposal.removed;
-      if (preferences.deadStreams === "move_to_end") {
-        plan.movedDead += channel.streams.filter((entry) => entry.result.status === "dead").length;
-      }
+      plan.dead += proposal.dead;
+      plan.lowQuality += proposal.lowQuality;
       // Reordered when the streams that stay change their relative order.
       const kept = visible.filter((id) => proposal.order.includes(id));
       if (!sameOrder(kept, proposal.order)) plan.reordered += 1;

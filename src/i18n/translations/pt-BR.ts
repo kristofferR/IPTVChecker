@@ -954,6 +954,11 @@ export default {
         unlink: "Desvincular",
         moveToEnd: "Mover para o fim",
       },
+      lowQualityAsDead: {
+        label: "Tratar streams de baixa qualidade como fora do ar",
+        description:
+          "Streams marcados com bitrate baixo ou vídeo congelado são desvinculados ou movidos como os fora do ar, a menos que nenhum outro stream funcione.",
+      },
       writeStats: {
         label: "Gravar resultados da análise no Dispatcharr",
         description:
@@ -1763,6 +1768,8 @@ export default {
       reordered: "Reordenado",
       deadMovedToEnd: "Streams fora do ar movidos para o fim",
       deadRemoved: "Streams fora do ar removidos",
+      lowQualityMovedToEnd: "Streams de baixa qualidade movidos para o fim",
+      lowQualityRemoved: "Streams de baixa qualidade removidos",
       skippedAllDead: "Ignorado, todos os streams fora do ar",
       writesNow: "Grava no Dispatcharr agora. Desfazer restaura a ordem anterior.",
       confirm: {
@@ -1777,10 +1784,10 @@ export default {
         many: "{count} canais corrigidos",
         other: "{count} canais corrigidos",
       },
-      deadRemoved: {
-        one: "{count} stream fora do ar removido",
-        many: "{count} streams fora do ar removidos",
-        other: "{count} streams fora do ar removidos",
+      streamsRemoved: {
+        one: "{count} stream removido",
+        many: "{count} streams removidos",
+        other: "{count} streams removidos",
       },
       failed: { one: "{count} falhou", many: "{count} falharam", other: "{count} falharam" },
       undoing: "Desfazendo...",

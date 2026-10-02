@@ -837,6 +837,11 @@ export default {
         unlink: "取消关联",
         moveToEnd: "移到末尾",
       },
+      lowQualityAsDead: {
+        label: "将低质量流视为失效",
+        description:
+          "标记为低码率或画面冻结的流会像失效流一样被取消关联或移到末尾，除非没有其他可用的流。",
+      },
       writeStats: {
         label: "将探测结果写入 Dispatcharr",
         description: "扫描 Dispatcharr 来源后，将每个流的编码、分辨率和码率存入 Dispatcharr。",
@@ -1540,13 +1545,15 @@ export default {
       reordered: "已重新排序",
       deadMovedToEnd: "失效流已移到末尾",
       deadRemoved: "失效流已移除",
+      lowQualityMovedToEnd: "低质量流已移到末尾",
+      lowQualityRemoved: "低质量流已移除",
       skippedAllDead: "已跳过，所有流均失效",
       writesNow: "将立即写入 Dispatcharr。撤销可恢复之前的顺序。",
       confirm: { other: "修正 {count} 个频道" },
     },
     toast: {
       fixed: { other: "已修正 {count} 个频道" },
-      deadRemoved: { other: "已移除 {count} 个失效流" },
+      streamsRemoved: { other: "已移除 {count} 个流" },
       failed: { other: "{count} 个失败" },
       undoing: "正在撤销…",
       undoAll: "全部撤销",

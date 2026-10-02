@@ -874,6 +874,11 @@ export default {
         unlink: "Lepas tautan",
         moveToEnd: "Pindahkan ke akhir",
       },
+      lowQualityAsDead: {
+        label: "Anggap stream berkualitas rendah sebagai mati",
+        description:
+          "Stream yang ditandai bitrate rendah atau video beku dilepas atau dipindah seperti stream mati, kecuali tidak ada stream lain yang berfungsi.",
+      },
       writeStats: {
         label: "Tulis hasil analisis ke Dispatcharr",
         description:
@@ -1586,13 +1591,15 @@ export default {
       reordered: "Diurutkan ulang",
       deadMovedToEnd: "Stream mati dipindah ke akhir",
       deadRemoved: "Stream mati dihapus",
+      lowQualityMovedToEnd: "Stream berkualitas rendah dipindah ke akhir",
+      lowQualityRemoved: "Stream berkualitas rendah dihapus",
       skippedAllDead: "Dilewati, semua stream mati",
       writesNow: "Langsung menulis ke Dispatcharr. Urungkan memulihkan urutan sebelumnya.",
       confirm: { other: "Perbaiki {count} saluran" },
     },
     toast: {
       fixed: { other: "{count} saluran diperbaiki" },
-      deadRemoved: { other: "{count} stream mati dihapus" },
+      streamsRemoved: { other: "{count} stream dihapus" },
       failed: { other: "{count} gagal" },
       undoing: "Mengurungkan...",
       undoAll: "Urungkan semua",
