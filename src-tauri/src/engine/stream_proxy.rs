@@ -551,10 +551,13 @@ pub async fn handle_proxy_request(
         is_m3u8_response(&content_type, &final_url) || body.starts_with(b"#EXTM3U");
     let body = if looks_like_m3u8 {
         let manifest = String::from_utf8_lossy(&body);
+        // Judge the host that served the manifest: a LAN URL may redirect
+        // to a public CDN, whose URIs must not inherit private access.
+        let private_manifest = allow_private && allows_private_hosts(&final_url, true).await;
         rewrite_m3u8_manifest(
             &manifest,
             &final_url,
-            allow_private.then_some(STREAM_KEY.as_str()),
+            private_manifest.then_some(STREAM_KEY.as_str()),
         )
         .into_bytes()
     } else {
