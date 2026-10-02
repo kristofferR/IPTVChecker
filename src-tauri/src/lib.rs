@@ -1119,7 +1119,7 @@ pub fn run() {
             commands::dispatcharr::dispatcharr_find_streams,
             commands::scan::dispatcharr_probe_streams,
             commands::player::open_channel_in_player,
-            commands::player::get_streaming_proxy_port,
+            commands::player::get_streaming_proxy,
             commands::playback::start_local_playback,
             commands::playback::stop_local_playback,
             commands::chromecast::discover_chromecasts,

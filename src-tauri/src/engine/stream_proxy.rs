@@ -2,7 +2,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use reqwest::header::{HeaderValue, CONTENT_TYPE, LOCATION, RANGE, USER_AGENT};
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use tauri::{Emitter, Manager};
 use url::{Host, Url};
 
@@ -83,9 +83,31 @@ pub fn decode_proxy_url(encoded: &str) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
+/// Per-launch secret for `/stream` URLs the app builds itself. Any local
+/// process can reach the proxy port, so only requests carrying it may target
+/// a private or local host, such as an IPTV server on the user's LAN.
+static STREAM_KEY: LazyLock<String> = LazyLock::new(crate::engine::cast_proxy::generate_token);
+
+/// The streaming proxy's port and key, for building `/stream` URLs.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StreamingProxy {
+    pub port: u16,
+    pub key: &'static str,
+}
+
+pub fn streaming_proxy(port: u16) -> StreamingProxy {
+    StreamingProxy {
+        port,
+        key: STREAM_KEY.as_str(),
+    }
+}
+
 pub fn build_streaming_proxy_url(port: u16, original: &str) -> String {
     let encoded: String = url::form_urlencoded::byte_serialize(original.as_bytes()).collect();
-    format!("http://127.0.0.1:{port}/stream?url={encoded}")
+    format!(
+        "http://127.0.0.1:{port}/stream?key={}&url={encoded}",
+        *STREAM_KEY
+    )
 }
 
 async fn streaming_proxy_port_is_alive(port: u16) -> bool {
@@ -340,16 +362,22 @@ impl SafeFetchError {
 /// reqwest's built-in redirect policy only lets us validate the first URL.
 /// `build_request` receives each hop's URL and must produce the request
 /// (method, headers, timeout) using a client built with Policy::none().
+///
+/// `trusted` marks a request the app built itself rather than any local
+/// caller: when its URL is on a private or local host, that host and its
+/// redirects are allowed. A public URL still may not redirect into one.
 pub(crate) async fn fetch_with_hop_validation<F>(
     url: &str,
+    trusted: bool,
     build_request: F,
 ) -> Result<reqwest::Response, SafeFetchError>
 where
     F: Fn(&str) -> reqwest::RequestBuilder,
 {
+    let private_target = trusted && !is_safe_upstream_url(url).await;
     let mut current = url.to_string();
     for _ in 0..=MAX_REDIRECT_HOPS {
-        if !is_safe_upstream_url(&current).await {
+        if !private_target && !is_safe_upstream_url(&current).await {
             return Err(SafeFetchError::Blocked);
         }
         let response = build_request(&current)
@@ -400,7 +428,8 @@ pub async fn handle_proxy_request(
     let client = get_or_create_proxy_client(state.inner(), accept_invalid_certs).await;
 
     let range = request.headers().get(RANGE).cloned();
-    let upstream_response = match fetch_with_hop_validation(&original_url, |target| {
+    // Only the app's own webview can request streamproxy:// URLs.
+    let upstream_response = match fetch_with_hop_validation(&original_url, true, |target| {
         let mut req_builder = client
             .get(target)
             .header(
@@ -1272,7 +1301,7 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                 }
 
                 // Parse GET /stream?url=ENCODED_URL HTTP/1.1
-                let request = match parse_stream_request(&request_str) {
+                let request = match parse_stream_request(&request_str, &STREAM_KEY) {
                     Some(request) => request,
                     None => {
                         let response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
@@ -1285,8 +1314,9 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     .map(|id| PlaybackTransport::new(app_handle.clone(), id));
                 let url = request.url;
                 let reconnect = request.reconnect;
+                let trusted = request.trusted;
 
-                if !is_safe_upstream_url(&url).await {
+                if !trusted && !is_safe_upstream_url(&url).await {
                     log::warn!("[StreamProxy] Blocked request to private/local target");
                     let response = "HTTP/1.1 403 Forbidden\r\nContent-Length: 22\r\n\r\nTarget URL not allowed";
                     let _ = socket.write_all(response.as_bytes()).await;
@@ -1384,7 +1414,7 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     return;
                 }
 
-                let response = match fetch_with_hop_validation(&url, |target| {
+                let response = match fetch_with_hop_validation(&url, trusted, |target| {
                     client.get(target).header(USER_AGENT, user_agent.clone())
                 })
                 .await
@@ -1541,7 +1571,7 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                             telemetry.record("proxy_reconnect");
                             telemetry.flush();
                         }
-                        match fetch_with_hop_validation(&url, |target| {
+                        match fetch_with_hop_validation(&url, trusted, |target| {
                             client.get(target).header(USER_AGENT, user_agent.clone())
                         })
                         .await
@@ -1601,12 +1631,14 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
 struct StreamRequest {
     telemetry: Option<PlaybackTransportId>,
     url: String,
+    /// Carries the app's key, so it was built by the app itself.
+    trusted: bool,
     reconnect: bool,
     remux: bool,
     transcode_audio: bool,
 }
 
-fn parse_stream_request(request: &str) -> Option<StreamRequest> {
+fn parse_stream_request(request: &str, key: &str) -> Option<StreamRequest> {
     let first_line = request.lines().next()?;
     // GET /stream?url=ENCODED HTTP/1.1
     let path = first_line.split_whitespace().nth(1)?;
@@ -1617,8 +1649,9 @@ fn parse_stream_request(request: &str) -> Option<StreamRequest> {
     let mut transcode_audio = false;
     let mut session_id = None;
     let mut attempt = None;
-    for (key, value) in url.query_pairs() {
-        match key.as_ref() {
+    let mut trusted = false;
+    for (name, value) in url.query_pairs() {
+        match name.as_ref() {
             "session"
                 if value.len() <= 64
                     && !value.is_empty()
@@ -1629,6 +1662,7 @@ fn parse_stream_request(request: &str) -> Option<StreamRequest> {
                 session_id = Some(value.into_owned())
             }
             "attempt" => attempt = value.parse::<u32>().ok(),
+            "key" => trusted = value == key,
             "url" => upstream_url = Some(value.into_owned()),
             "reconnect" => reconnect = value == "1" || value.eq_ignore_ascii_case("true"),
             "remux" => remux = value == "1" || value.eq_ignore_ascii_case("true"),
@@ -1646,6 +1680,7 @@ fn parse_stream_request(request: &str) -> Option<StreamRequest> {
                 attempt,
             }),
         url,
+        trusted,
         reconnect,
         remux,
         transcode_audio,
@@ -1936,7 +1971,10 @@ mod tests {
                 61234,
                 "http://example.com/live/123.ts?token=a+b&name=V SPORT"
             ),
-            "http://127.0.0.1:61234/stream?url=http%3A%2F%2Fexample.com%2Flive%2F123.ts%3Ftoken%3Da%2Bb%26name%3DV+SPORT"
+            format!(
+                "http://127.0.0.1:61234/stream?key={}&url=http%3A%2F%2Fexample.com%2Flive%2F123.ts%3Ftoken%3Da%2Bb%26name%3DV+SPORT",
+                *STREAM_KEY
+            )
         );
     }
 
@@ -2098,10 +2136,11 @@ segment.ts
         let request =
             "GET /stream?url=https%3A%2F%2Fexample.com%2Fstr%C3%B8m%3Ftoken%3Dabc%2B123 HTTP/1.1\r\nHost: localhost\r\n\r\n";
         assert_eq!(
-            parse_stream_request(request),
+            parse_stream_request(request, "k"),
             Some(StreamRequest {
                 telemetry: None,
                 url: "https://example.com/strøm?token=abc+123".to_string(),
+                trusted: false,
                 reconnect: false,
                 remux: false,
                 transcode_audio: false,
@@ -2111,7 +2150,7 @@ segment.ts
 
     #[test]
     fn playback_transport_correlation_accepts_only_bounded_safe_ids() {
-        let valid = parse_stream_request("GET /stream?url=https%3A%2F%2Fexample.com%2Flive.ts&session=session-1&attempt=2 HTTP/1.1").unwrap();
+        let valid = parse_stream_request("GET /stream?url=https%3A%2F%2Fexample.com%2Flive.ts&session=session-1&attempt=2 HTTP/1.1", "k").unwrap();
         assert_eq!(valid.telemetry.unwrap().attempt, 2);
         for suffix in [
             "session=https%3A%2F%2Fuser%3Asecret%40host&attempt=2",
@@ -2120,7 +2159,10 @@ segment.ts
         ] {
             let request =
                 format!("GET /stream?url=https%3A%2F%2Fexample.com%2Flive.ts&{suffix} HTTP/1.1");
-            assert!(parse_stream_request(&request).unwrap().telemetry.is_none());
+            assert!(parse_stream_request(&request, "k")
+                .unwrap()
+                .telemetry
+                .is_none());
         }
     }
 
@@ -2128,10 +2170,11 @@ segment.ts
     fn parse_stream_request_enables_opt_in_reconnect() {
         let request = "GET /stream?url=https%3A%2F%2Fexample.com%2Flive.ts&reconnect=1 HTTP/1.1\r\nHost: localhost\r\n\r\n";
         assert_eq!(
-            parse_stream_request(request),
+            parse_stream_request(request, "k"),
             Some(StreamRequest {
                 telemetry: None,
                 url: "https://example.com/live.ts".to_string(),
+                trusted: false,
                 reconnect: true,
                 remux: false,
                 transcode_audio: false,
@@ -2143,10 +2186,11 @@ segment.ts
     fn parse_stream_request_enables_opt_in_remux() {
         let request = "GET /stream?url=https%3A%2F%2Fexample.com%2Flive.ts&reconnect=1&remux=true&transcode_audio=1 HTTP/1.1\r\nHost: localhost\r\n\r\n";
         assert_eq!(
-            parse_stream_request(request),
+            parse_stream_request(request, "k"),
             Some(StreamRequest {
                 telemetry: None,
                 url: "https://example.com/live.ts".to_string(),
+                trusted: false,
                 reconnect: true,
                 remux: true,
                 transcode_audio: true,
@@ -2451,6 +2495,44 @@ segment.ts
         let resumed_delay = pacer.delay_for_payload(&make_payload(&[95_500, 95_500, 95_500]));
         assert!(resumed_delay > Duration::from_millis(200));
         assert!(resumed_delay <= STREAM_PACER_MAX_DELAY);
+    }
+
+    #[test]
+    fn parse_stream_request_trusts_only_the_app_key() {
+        let trusted = |query: &str| {
+            parse_stream_request(
+                &format!("GET /stream?url=http%3A%2F%2F192.168.1.5%2Flive.ts{query} HTTP/1.1"),
+                "app-key",
+            )
+            .unwrap()
+            .trusted
+        };
+        assert!(trusted("&key=app-key"));
+        assert!(!trusted("&key=other"));
+        assert!(!trusted(""));
+    }
+
+    #[tokio::test]
+    async fn hop_validation_allows_private_targets_only_when_trusted() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/live.ts", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let _ = socket.read(&mut [0u8; 1024]).await;
+            let _ = socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await;
+        });
+        let client = reqwest::Client::new();
+
+        let untrusted = fetch_with_hop_validation(&url, false, |target| client.get(target)).await;
+        assert!(matches!(untrusted, Err(SafeFetchError::Blocked)));
+
+        let trusted = fetch_with_hop_validation(&url, true, |target| client.get(target)).await;
+        assert_eq!(
+            trusted.ok().map(|response| response.status().as_u16()),
+            Some(200)
+        );
     }
 
     #[tokio::test]

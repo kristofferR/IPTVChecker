@@ -3,7 +3,7 @@
 // recovery-window math, and live-buffer resync/rate policy. Keep this module
 // free of React and player-instance side effects so it stays unit-testable.
 import { formatCount, type MessageKey, t } from "../i18n";
-import type { ContentType, PlaylistPreview } from "./types";
+import type { ContentType, PlaylistPreview, StreamingProxy } from "./types";
 
 export type PlayerState = "idle" | "loading" | "playing" | "error";
 export type StreamType = "hls" | "mpegts" | "unknown";
@@ -191,7 +191,7 @@ export function tryConvertToXtreamHls(url: string): string | null {
 
 function toStreamingProxyUrl(
   url: string,
-  port: number,
+  { port, key }: StreamingProxy,
   reconnect: boolean,
   remux: boolean,
   transcodeAudio = false,
@@ -199,16 +199,16 @@ function toStreamingProxyUrl(
   const reconnectParam = reconnect ? "&reconnect=1" : "";
   const remuxParam = remux ? "&remux=1" : "";
   const audioParam = transcodeAudio ? "&transcode_audio=1" : "";
-  return `http://127.0.0.1:${port}/stream?url=${encodeURIComponent(url)}${reconnectParam}${remuxParam}${audioParam}`;
+  return `http://127.0.0.1:${port}/stream?key=${key}&url=${encodeURIComponent(url)}${reconnectParam}${remuxParam}${audioParam}`;
 }
 
 /** Convert only after the WebView reports that it cannot use the source audio. */
 export function getAudioTranscodeRoute(
   url: string,
-  proxyPort: number,
+  proxy: StreamingProxy | null,
   isLive: boolean,
 ): string | null {
-  return proxyPort > 0 ? toStreamingProxyUrl(url, proxyPort, isLive, true, true) : null;
+  return proxy ? toStreamingProxyUrl(url, proxy, isLive, true, true) : null;
 }
 
 export function isUnsupportedAudioCodec(reason: string | null | undefined): boolean {
@@ -238,17 +238,17 @@ export interface MpegtsPlaybackRoute {
 
 export function getMpegtsPlaybackRoutes(
   url: string,
-  proxyPort: number,
+  proxy: StreamingProxy | null,
   isLive: boolean,
   preferRemux: boolean,
 ): MpegtsPlaybackRoute[] {
-  if (proxyPort <= 0) {
+  if (!proxy) {
     return [{ kind: "direct", url }];
   }
 
   const direct = {
     kind: "direct",
-    url: toStreamingProxyUrl(url, proxyPort, isLive, false),
+    url: toStreamingProxyUrl(url, proxy, isLive, false),
   } satisfies MpegtsPlaybackRoute;
   if (!isLive) {
     return [direct];
@@ -256,7 +256,7 @@ export function getMpegtsPlaybackRoutes(
 
   const remux = {
     kind: "remux",
-    url: toStreamingProxyUrl(url, proxyPort, true, true),
+    url: toStreamingProxyUrl(url, proxy, true, true),
   } satisfies MpegtsPlaybackRoute;
   return preferRemux ? [remux, direct] : [direct, remux];
 }
@@ -600,17 +600,20 @@ export function xtreamTimeshiftTsVariant(url: string): string | null {
  * timeshift stream through mpegts.js (which demuxes HEVC), then an ffmpeg
  * remux of the original playlist through the streaming proxy.
  */
-export function getArchiveFallbackRoutes(url: string, proxyPort: number): MpegtsPlaybackRoute[] {
+export function getArchiveFallbackRoutes(
+  url: string,
+  proxy: StreamingProxy | null,
+): MpegtsPlaybackRoute[] {
   const routes: MpegtsPlaybackRoute[] = [];
   const tsVariant = xtreamTimeshiftTsVariant(url);
   if (tsVariant) {
     routes.push({
       kind: "direct",
-      url: proxyPort > 0 ? toStreamingProxyUrl(tsVariant, proxyPort, false, false) : tsVariant,
+      url: proxy ? toStreamingProxyUrl(tsVariant, proxy, false, false) : tsVariant,
     });
   }
-  if (proxyPort > 0) {
-    routes.push({ kind: "remux", url: toStreamingProxyUrl(url, proxyPort, false, true) });
+  if (proxy) {
+    routes.push({ kind: "remux", url: toStreamingProxyUrl(url, proxy, false, true) });
   }
   return routes;
 }

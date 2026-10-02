@@ -564,6 +564,12 @@ export interface UiLocale {
 /** Linux only: "auto" hides the title bar on tiling window managers. */
 export type TitleBarPreference = "auto" | "show" | "hide";
 
+/** The localhost streaming proxy. Its key lets `/stream` URLs reach LAN hosts. */
+export interface StreamingProxy {
+  port: number;
+  key: string;
+}
+
 export interface ChromecastDevice {
   id: string;
   friendlyName: string;

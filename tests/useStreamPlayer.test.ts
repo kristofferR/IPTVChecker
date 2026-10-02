@@ -32,6 +32,9 @@ import {
   supportsNativeHlsPlayback,
   tryConvertToXtreamHls,
 } from "../src/lib/playback";
+import type { StreamingProxy } from "../src/lib/types";
+
+const PROXY: StreamingProxy = { port: 3210, key: "test-key" };
 
 function canPlayTypes(
   supportByMime: Record<string, "" | "maybe" | "probably">,
@@ -161,10 +164,11 @@ describe("useStreamPlayer helpers", () => {
   });
 
   it("uses the compatible direct route before remux for initial live playback", () => {
-    const routes = getMpegtsPlaybackRoutes("https://example.com/live.ts", 3210, true, false);
+    const routes = getMpegtsPlaybackRoutes("https://example.com/live.ts", PROXY, true, false);
 
     expect(routes).toHaveLength(2);
     expect(routes[0]?.kind).toBe("direct");
+    expect(routes[0]?.url).toMatch(/^http:\/\/127\.0\.0\.1:3210\/stream\?key=test-key&url=/);
     expect(routes[0]?.url).toContain("reconnect=1");
     expect(routes[0]?.url).not.toContain("remux=1");
     expect(routes[1]?.kind).toBe("remux");
@@ -172,17 +176,17 @@ describe("useStreamPlayer helpers", () => {
   });
 
   it("prefers timestamp-normalizing remux when recovering live playback", () => {
-    const routes = getMpegtsPlaybackRoutes("https://example.com/live.ts", 3210, true, true);
+    const routes = getMpegtsPlaybackRoutes("https://example.com/live.ts", PROXY, true, true);
 
     expect(routes.map((route) => route.kind)).toEqual(["remux", "direct"]);
   });
 
   it("uses one non-remux URL for VOD and direct playback without a proxy", () => {
-    const vodRoutes = getMpegtsPlaybackRoutes("https://example.com/movie.ts", 3210, false, false);
+    const vodRoutes = getMpegtsPlaybackRoutes("https://example.com/movie.ts", PROXY, false, false);
 
     expect(vodRoutes).toHaveLength(1);
     expect(vodRoutes[0]?.url).not.toContain("remux=1");
-    expect(getMpegtsPlaybackRoutes("https://example.com/live.ts", 0, true, false)).toEqual([
+    expect(getMpegtsPlaybackRoutes("https://example.com/live.ts", null, true, false)).toEqual([
       { kind: "direct", url: "https://example.com/live.ts" },
     ]);
   });
@@ -205,10 +209,10 @@ describe("useStreamPlayer helpers", () => {
       expect(shouldTranscodeAudioCodec(codec, () => false)).toBe(false);
     }
     expect(shouldTranscodeAudioCodec("ec-3", () => true)).toBe(false);
-    const route = getAudioTranscodeRoute("https://example.com/live.ts", 3210, true);
+    const route = getAudioTranscodeRoute("https://example.com/live.ts", PROXY, true);
     expect(route).toContain("remux=1&transcode_audio=1");
     expect(route).toContain("reconnect=1");
-    expect(getAudioTranscodeRoute("https://example.com/live.ts", 0, true)).toBeNull();
+    expect(getAudioTranscodeRoute("https://example.com/live.ts", null, true)).toBeNull();
   });
 
   it("suspends playback watchdog recovery while the app is hidden", () => {
@@ -369,11 +373,11 @@ describe("archive fallback routes", () => {
       "http://panel:8080/timeshift/u/p/60/2026-09-04:10-00/162121.ts",
     );
     expect(xtreamTimeshiftTsVariant("http://host/archive.m3u8?utc=1")).toBeNull();
-    const routes = getArchiveFallbackRoutes(m3u8, 4321);
+    const routes = getArchiveFallbackRoutes(m3u8, PROXY);
     expect(routes.map((route) => route.kind)).toEqual(["direct", "remux"]);
     expect(routes[0].url).toContain("162121.ts");
     expect(
-      getArchiveFallbackRoutes("http://host/archive.m3u8?utc=1", 4321).map((r) => r.kind),
+      getArchiveFallbackRoutes("http://host/archive.m3u8?utc=1", PROXY).map((r) => r.kind),
     ).toEqual(["remux"]);
   });
 });

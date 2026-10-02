@@ -28,6 +28,7 @@ import type {
   ScanPresetConfig,
   ScreenshotCacheStats,
   StalkerOpenRequest,
+  StreamingProxy,
   UiLocale,
   UpdateCheckResult,
   UpdateInstallMode,
@@ -482,8 +483,8 @@ export async function openChannelInPlayer(channel: {
   return invoke("open_channel_in_player", { channel });
 }
 
-export async function getStreamingProxyPort(): Promise<number> {
-  return invoke("get_streaming_proxy_port");
+export async function getStreamingProxy(): Promise<StreamingProxy | null> {
+  return invoke("get_streaming_proxy");
 }
 
 export async function discoverChromecasts(): Promise<ChromecastDevice[]> {

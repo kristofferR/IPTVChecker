@@ -53,8 +53,8 @@ import {
 } from "../lib/playbackTelemetry";
 import { toProxyUrl } from "../lib/proxyUrl";
 import { createRuntimeMonitor, type MpegtsPlayer } from "../lib/runtimeMonitor";
-import { getStreamingProxyPort, startLocalPlayback, stopLocalPlayback } from "../lib/tauri";
-import type { ChannelResult } from "../lib/types";
+import { getStreamingProxy, startLocalPlayback, stopLocalPlayback } from "../lib/tauri";
+import type { ChannelResult, StreamingProxy } from "../lib/types";
 import { canUseBlobWorkers } from "../lib/workerSupport";
 import { useAppStore } from "../store";
 
@@ -1315,13 +1315,13 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           );
         }
         if (unsupportedHlsAudio) {
-          let proxyPort = 0;
+          let proxy: StreamingProxy | null = null;
           try {
-            proxyPort = await getStreamingProxyPort();
+            proxy = await getStreamingProxy();
           } catch {
-            logger.warn("[Player] Could not get streaming proxy port");
+            logger.warn("[Player] Could not get streaming proxy");
           }
-          const transcoded = getAudioTranscodeRoute(url, proxyPort, result.content_type === "live");
+          const transcoded = getAudioTranscodeRoute(url, proxy, result.content_type === "live");
           if (transcoded) {
             logger.info("[Player] Trying AAC audio conversion for", result.name);
             resetRouteError();
@@ -1337,14 +1337,14 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         if (result.content_type !== "live" && (hlsManifestRejected || hlsMediaRejected)) {
           // HLS VOD and catch-up media can still play through the raw
           // transport-stream route or an ffmpeg remux.
-          let proxyPort = 0;
+          let proxy: StreamingProxy | null = null;
           try {
-            proxyPort = await getStreamingProxyPort();
+            proxy = await getStreamingProxy();
           } catch {
-            logger.warn("[Player] Could not get streaming proxy port");
+            logger.warn("[Player] Could not get streaming proxy");
           }
           let unsupportedAudioSource: string | null = null;
-          for (const route of getArchiveFallbackRoutes(url, proxyPort)) {
+          for (const route of getArchiveFallbackRoutes(url, proxy)) {
             logger.info(
               route.kind === "remux"
                 ? "[Player] Trying ffmpeg remux of the archive playlist for"
@@ -1371,7 +1371,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             if (unsupportedAudioSource) break;
           }
           if (unsupportedAudioSource) {
-            const transcoded = getAudioTranscodeRoute(unsupportedAudioSource, proxyPort, false);
+            const transcoded = getAudioTranscodeRoute(unsupportedAudioSource, proxy, false);
             resetRouteError();
             if (
               transcoded &&
@@ -1400,15 +1400,15 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
         (streamType === "hls" && result.content_type !== "live" && hlsMediaRejected)
       ) {
         const isLive = result.content_type === "live";
-        let proxyPort = 0;
+        let proxy: StreamingProxy | null = null;
         try {
-          proxyPort = await getStreamingProxyPort();
+          proxy = await getStreamingProxy();
         } catch {
-          logger.warn("[Player] Could not get streaming proxy port");
+          logger.warn("[Player] Could not get streaming proxy");
         }
         const playbackRoutes = getMpegtsPlaybackRoutes(
           url,
-          proxyPort,
+          proxy,
           isLive,
           startMode === "recovery",
         );
@@ -1417,7 +1417,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           logger.info(
             route.kind === "remux"
               ? "[Player] Trying normalized MPEG-TS remux for"
-              : proxyPort > 0
+              : proxy
                 ? "[Player] Trying mpegts.js via streaming proxy for"
                 : "[Player] Trying mpegts.js (raw URL) for",
             result.name,
@@ -1444,7 +1444,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           if (unsupportedAudio) break;
         }
         if (unsupportedAudio) {
-          const transcoded = getAudioTranscodeRoute(url, proxyPort, isLive);
+          const transcoded = getAudioTranscodeRoute(url, proxy, isLive);
           if (transcoded) {
             logger.info("[Player] Trying AAC audio conversion for", result.name);
             resetRouteError();
