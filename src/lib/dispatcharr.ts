@@ -1,5 +1,11 @@
 import { type MessageKey, t } from "../i18n";
-import { type ArchiveProbes, filterResultsShared } from "./filters";
+import { hasArchive } from "./archive";
+import {
+  type ArchiveProbes,
+  CATCHUP_VERDICT_FILTERS,
+  filterResultsShared,
+  matchesStatusFilter,
+} from "./filters";
 import type {
   AppSettings,
   ChannelResult,
@@ -535,6 +541,53 @@ export function matchesDispatcharrStatus(
   }
 }
 
+/** The stream Dispatcharr plays a channel's catch-up from: the first in
+ *  failover order that advertises an archive. */
+export function channelArchiveStream(channel: DispatcharrChannelView): ChannelResult | null {
+  return channel.streams.find((entry) => hasArchive(entry.result))?.result ?? null;
+}
+
+/** What a selection's catch-up acts on. A whole selected channel (its primary
+ *  with every stream selected) uses its catch-up stream; a stream is itself. */
+export function selectedArchiveStream(
+  result: ChannelResult,
+  view: DispatcharrView | null,
+  selectedIndices: number[],
+): ChannelResult {
+  const channel = view?.byPrimaryIndex.get(result.index);
+  const archive = channel && channelArchiveStream(channel);
+  return archive && selectedIndices.includes(archive.index) ? archive : result;
+}
+
+/** A stream's channel primary: what selecting the channel selects. */
+export function channelPrimary(view: DispatcharrView | null, result: ChannelResult): ChannelResult {
+  return view?.byStreamIndex.get(result.index)?.primary ?? result;
+}
+
+/** Status filters judged per channel: the Dispatcharr ones, and catch-up. */
+export const DISPATCHARR_CHANNEL_FILTERS = [
+  ...(Object.keys(DISPATCHARR_STATUS_FILTERS) as DispatcharrStatusFilter[]),
+  "catchup",
+  ...Object.keys(CATCHUP_VERDICT_FILTERS),
+];
+
+/** Whether a channel passes one of `DISPATCHARR_CHANNEL_FILTERS`. Catch-up
+ *  is judged on the channel's catch-up stream, the one its badge shows. */
+export function matchesDispatcharrChannel(
+  channel: DispatcharrChannelView,
+  statusFilter: string,
+  archiveProbes?: ArchiveProbes,
+): boolean {
+  if (isDispatcharrStatusFilter(statusFilter)) {
+    return matchesDispatcharrStatus(channel, statusFilter);
+  }
+  const archive = channelArchiveStream(channel);
+  return (
+    archive != null &&
+    matchesStatusFilter(archive, statusFilter, undefined, undefined, archiveProbes)
+  );
+}
+
 export type FixProposal =
   | { kind: "none" }
   | { kind: "all_dead" }
@@ -547,7 +600,13 @@ export interface FixPreferences {
   deadStreams: "unlink" | "move_to_end";
 }
 
-const RANK_SIGNALS: DispatcharrRankSignal[] = ["resolution", "frame_rate", "bitrate", "latency"];
+const RANK_SIGNALS: DispatcharrRankSignal[] = [
+  "resolution",
+  "frame_rate",
+  "bitrate",
+  "latency",
+  "audio_bitrate",
+];
 
 export const DEFAULT_FIX_PREFERENCES: FixPreferences = {
   rankOrder: RANK_SIGNALS,
@@ -567,19 +626,22 @@ export function fixPreferencesFrom(
   return { rankOrder, deadStreams: settings.dispatcharr_dead_streams ?? "unlink" };
 }
 
-function bitrateKbps(result: ChannelResult): number {
-  const kbps = Number.parseFloat(result.video_bitrate ?? "");
-  return Number.isFinite(kbps) ? kbps : 0;
+function kbps(bitrate: string | null): number {
+  const value = Number.parseFloat(bitrate ?? "");
+  return Number.isFinite(value) ? value : 0;
 }
 
-/** Higher is better for every signal. Bitrate and latency compare in steps
- *  (500 kbps, 250 ms) so scan-to-scan noise does not reshuffle channels. */
+/** Higher is better for every signal. Bitrates and latency compare in steps
+ *  (500 kbps, 32 kbps, 250 ms) so scan-to-scan noise does not reshuffle
+ *  channels. Audio rounds to the nearest step: common rates are multiples of
+ *  32 kbps, so a 95 kbps measurement still ties with 96. */
 const SIGNAL_SCORE: Record<DispatcharrRankSignal, (result: ChannelResult) => number> = {
   resolution: (result) => result.height ?? 0,
   frame_rate: (result) => result.fps ?? 0,
-  bitrate: (result) => Math.floor(bitrateKbps(result) / 500),
+  bitrate: (result) => Math.floor(kbps(result.video_bitrate) / 500),
   latency: (result) =>
     result.latency_ms == null ? -Number.MAX_SAFE_INTEGER : -Math.floor(result.latency_ms / 250),
+  audio_bitrate: (result) => Math.round(kbps(result.audio_bitrate) / 32),
 };
 
 /** Working streams first, ranked by the preferred signals (remaining ties
@@ -636,7 +698,7 @@ export function filterDispatcharrPrimaries(
   separatePlaceholder?: boolean,
   archiveProbes?: ArchiveProbes,
 ): ChannelResult[] {
-  if (!isDispatcharrStatusFilter(statusFilter)) {
+  if (!DISPATCHARR_CHANNEL_FILTERS.includes(statusFilter)) {
     return filterResultsShared(
       view.primaries,
       search,
@@ -657,7 +719,7 @@ export function filterDispatcharrPrimaries(
     archiveProbes,
   ).filter((primary) => {
     const channel = view.byPrimaryIndex.get(primary.index);
-    return channel != null && matchesDispatcharrStatus(channel, statusFilter);
+    return channel != null && matchesDispatcharrChannel(channel, statusFilter, archiveProbes);
   });
 }
 

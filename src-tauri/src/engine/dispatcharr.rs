@@ -52,6 +52,9 @@ pub(crate) const ATTR_CHANNEL_STREAMS: &str = "x-dispatcharr-channel-streams";
 /// Marks the one row of a channel that has no playable stream, so the
 /// channel still shows (and can be given streams). Never probed.
 pub(crate) const ATTR_EMPTY: &str = "x-dispatcharr-empty";
+/// The provider panel's timezone. Xtream panels read timeshift start times
+/// in their own local time, and one Dispatcharr can carry several panels.
+pub(crate) const ATTR_TIMEZONE: &str = "x-dispatcharr-timezone";
 
 /// A channel's no-streams placeholder row (see `ATTR_EMPTY`).
 pub(crate) fn is_empty_channel_row(extinf_line: &str) -> bool {
@@ -279,6 +282,10 @@ pub(crate) struct DispatcharrStream {
     pub is_custom: bool,
     pub is_stale: bool,
     pub stream_stats: Option<Value>,
+    /// Provider advertises catch-up (Xtream `tv_archive`).
+    pub is_catchup: bool,
+    /// Advertised archive depth (`tv_archive_duration`); 0 when unknown.
+    pub catchup_days: u32,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -306,6 +313,9 @@ pub(crate) struct DispatcharrM3uProfile {
     pub id: i64,
     pub max_streams: u32,
     pub is_active: bool,
+    pub is_default: bool,
+    /// Holds the Xtream `server_info` Dispatcharr saved at login.
+    pub custom_properties: Option<Value>,
 }
 
 impl DispatcharrM3uAccount {
@@ -325,6 +335,22 @@ impl DispatcharrM3uAccount {
             return 0;
         }
         active.iter().map(|profile| profile.max_streams).sum()
+    }
+
+    /// The panel's timezone from the default profile's Xtream login, as
+    /// Dispatcharr's own catch-up uses it, falling back to any profile's.
+    pub(crate) fn timezone(&self) -> Option<&str> {
+        let defaults_first = self.profiles.iter().filter(|profile| profile.is_default);
+        let others = self.profiles.iter().filter(|profile| !profile.is_default);
+        defaults_first.chain(others).find_map(|profile| {
+            profile
+                .custom_properties
+                .as_ref()?
+                .pointer("/server_info/timezone")?
+                .as_str()
+                .map(str::trim)
+                .filter(|zone| !zone.is_empty())
+        })
     }
 }
 
@@ -1380,6 +1406,16 @@ pub(crate) fn build_m3u(
                 (None, None) if stream.is_custom => attr(ATTR_ACCOUNT, "Custom"),
                 (None, None) => {}
             }
+            // Dispatcharr's catch-up flags come from Xtream `tv_archive`.
+            if stream.is_catchup {
+                attr("catchup", "xc");
+                if stream.catchup_days > 0 {
+                    attr("catchup-days", &stream.catchup_days.to_string());
+                }
+                if let Some(timezone) = account.and_then(DispatcharrM3uAccount::timezone) {
+                    attr(ATTR_TIMEZONE, timezone);
+                }
+            }
             m3u.push(',');
             m3u.push_str(&flatten_extinf_title(title));
             m3u.push('\n');
@@ -1837,6 +1873,7 @@ mod tests {
             id,
             max_streams,
             is_active,
+            ..Default::default()
         };
         let account = |profiles| DispatcharrM3uAccount {
             max_streams: 1,
@@ -2059,6 +2096,52 @@ mod tests {
             .map(|s| (s.id, s))
             .collect();
         (channels, streams)
+    }
+
+    #[test]
+    fn catchup_streams_carry_archive_attrs_and_panel_timezone() {
+        let channels = [DispatcharrChannel {
+            id: 1,
+            name: "Replay".into(),
+            streams: vec![1, 2],
+            ..Default::default()
+        }];
+        let stream = |id: i64, is_catchup: bool| DispatcharrStream {
+            id,
+            url: Some(format!("http://panel.example/live/u/p/{}.ts", id)),
+            m3u_account: Some(7),
+            is_catchup,
+            catchup_days: 7,
+            ..Default::default()
+        };
+        let streams = HashMap::from([(1, stream(1, true)), (2, stream(2, false))]);
+        let profile = |is_default: bool, timezone: &str| DispatcharrM3uProfile {
+            is_active: true,
+            is_default,
+            custom_properties: Some(json!({ "server_info": { "timezone": timezone } })),
+            ..Default::default()
+        };
+        let accounts = HashMap::from([(
+            7,
+            DispatcharrM3uAccount {
+                id: 7,
+                profiles: vec![profile(false, "Asia/Dubai"), profile(true, "Europe/Berlin")],
+                ..Default::default()
+            },
+        )]);
+        let base = Url::parse("http://dvr.example:9191/").unwrap();
+        let m3u = build_m3u(&base, &channels, &streams, &HashMap::new(), &accounts);
+        let preview = crate::engine::parser::parse_m3u(m3u.as_bytes(), "t", &None, &None).unwrap();
+
+        let archived = &preview.channels[0];
+        assert_eq!(archived.catchup.as_deref(), Some("xc"));
+        assert_eq!(archived.catchup_days, Some(7));
+        assert!(archived
+            .extinf_line
+            .contains(r#"x-dispatcharr-timezone="Europe/Berlin""#));
+        let live_only = &preview.channels[1];
+        assert_eq!(live_only.catchup, None);
+        assert!(!live_only.extinf_line.contains(ATTR_TIMEZONE));
     }
 
     #[test]

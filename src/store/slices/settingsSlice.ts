@@ -43,7 +43,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   external_player_path: null,
   persistent_xtream_connection_notice: false,
   dispatcharr_write_stats: true,
-  dispatcharr_rank_order: ["resolution", "frame_rate", "bitrate", "latency"],
+  dispatcharr_rank_order: ["resolution", "frame_rate", "bitrate", "latency", "audio_bitrate"],
   dispatcharr_dead_streams: "unlink",
   automatic_update_checks: true,
 };

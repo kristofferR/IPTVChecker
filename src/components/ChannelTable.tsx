@@ -22,6 +22,8 @@ import { channelRowHeightPixels } from "../lib/channelLogoSize";
 import { getChannelErrorReason } from "../lib/channelResults";
 import { getChannelTableLayout } from "../lib/channelTableLayout";
 import {
+  channelArchiveStream,
+  channelPrimary,
   type DispatcharrChannelView,
   type DispatcharrView,
   expandDispatcharrSelection,
@@ -217,6 +219,16 @@ export function ChannelTable({
   );
   const dispatcharrViewRef = useRef(dispatcharrView);
   dispatcharrViewRef.current = dispatcharrView;
+
+  // A Dispatcharr channel row's catch-up actions go through the stream
+  // Dispatcharr plays its catch-up from; play and copy keep the primary.
+  const archiveTarget = useCallback(
+    (key: number, result: ChannelResult): ChannelResult => {
+      const channel = key >= 0 ? dispatcharrView?.byPrimaryIndex.get(key) : undefined;
+      return (channel && channelArchiveStream(channel)) || result;
+    },
+    [dispatcharrView],
+  );
   const [expandedChannels, setExpandedChannels] = useState<ReadonlySet<number>>(() => new Set());
   const rawSearch = useAppStore((s) => s.search);
   const search = useDeferredValue(rawSearch);
@@ -239,6 +251,8 @@ export function ChannelTable({
     x: number;
     y: number;
     channel: ChannelResult;
+    /** What catch-up actions use: a channel row's catch-up stream. */
+    archive: ChannelResult;
   } | null>(null);
   const [copiedAction, setCopiedAction] = useState<CopyAction | null>(null);
   const [columnMenuState, setColumnMenuState] = useState<{
@@ -439,13 +453,25 @@ export function ChannelTable({
 
   // Probe updates leave ordinary filters unchanged. Keep their sorted array
   // stable too, so the virtualizer does not rebuild its measurements.
+  // Dispatcharr channels sort on the catch-up their row shows: their catch-up
+  // stream's, not the primary's.
+  const sortRows = useCallback(
+    (rows: ChannelResult[]) => {
+      if (!dispatcharrView || sortField !== "catchup") return sortResults(rows, sortField, sortDir);
+      const archives = rows.map((primary) => archiveTarget(primary.index, primary));
+      return sortResults(archives, sortField, sortDir).map((row) =>
+        channelPrimary(dispatcharrView, row),
+      );
+    },
+    [dispatcharrView, sortField, sortDir, archiveTarget],
+  );
   const sortedResults = useMemo(
     () =>
-      measureUiPerf("table.sort", () => sortResults(unsortedResults, sortField, sortDir), {
+      measureUiPerf("table.sort", () => sortRows(unsortedResults), {
         rows: unsortedResults.length,
         sort: `${sortField}:${sortDir}`,
       }),
-    [unsortedResults, sortField, sortDir],
+    [unsortedResults, sortRows],
   );
 
   // Dispatcharr sources show one row per channel (its primary stream), with
@@ -1172,9 +1198,10 @@ export function ChannelTable({
         x: event.clientX,
         y: event.clientY,
         channel: result,
+        archive: archiveTarget(rowKey(rowIndex, result), result),
       });
     },
-    [selectSingle],
+    [selectSingle, archiveTarget, rowKey],
   );
 
   const getRowFromEvent = useCallback(
@@ -1256,8 +1283,24 @@ export function ChannelTable({
     return completedResults.filter((r) => indexSet.has(r.index)).sort((a, b) => a.index - b.index);
   }, [selectedIndices, contextMenuState, completedResults]);
 
+  const getSelectedArchives = useCallback((): ChannelResult[] => {
+    if (selectedIndices.size <= 1 && contextMenuState) {
+      return [contextMenuState.archive];
+    }
+    const byIndex = new Map(completedResults.map((result) => [result.index, result]));
+    // Keyed by index: a channel and its own catch-up stream can both be selected.
+    const archives = new Map<number, ChannelResult>();
+    for (const key of selectedIndices) {
+      const result = byIndex.get(key < 0 ? -key - 1 : key);
+      if (!result) continue;
+      const archive = archiveTarget(key, result);
+      archives.set(archive.index, archive);
+    }
+    return Array.from(archives.values()).sort((a, b) => a.index - b.index);
+  }, [selectedIndices, contextMenuState, completedResults, archiveTarget]);
+
   const handleBrowseCatchup = useCallback(() => {
-    const channel = contextMenuState?.channel;
+    const channel = contextMenuState?.archive;
     setContextMenuState(null);
     if (!channel || !hasArchive(channel)) {
       return;
@@ -1288,7 +1331,7 @@ export function ChannelTable({
       return;
     }
     initialState.setExternalPlaybackActive(false);
-    const targets = getSelectedChannels().filter(hasArchive);
+    const targets = getSelectedArchives().filter(hasArchive);
     const playlist = initialState.playlist;
     setContextMenuState(null);
     if (targets.length === 0) {
@@ -1327,7 +1370,7 @@ export function ChannelTable({
         );
       }
     })();
-  }, [getSelectedChannels]);
+  }, [getSelectedArchives]);
 
   const handleCopyChannelName = useCallback(async () => {
     if (!contextMenuState) return;
@@ -1902,7 +1945,7 @@ export function ChannelTable({
             )}
           </button>
           {(() => {
-            const archiveCount = getSelectedChannels().filter(hasArchive).length;
+            const archiveCount = getSelectedArchives().filter(hasArchive).length;
             if (archiveCount === 0) return null;
             return (
               <>
@@ -1924,7 +1967,7 @@ export function ChannelTable({
                 >
                   {t("table.contextMenu.testCatchup", { count: archiveCount })}
                 </button>
-                {hasArchive(contextMenuState.channel) && (
+                {hasArchive(contextMenuState.archive) && (
                   <button
                     onClick={handleBrowseCatchup}
                     className="w-full text-start px-3 py-2 text-[13px] hover:bg-btn-hover"

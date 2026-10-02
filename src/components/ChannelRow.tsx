@@ -12,6 +12,7 @@ import {
 } from "../lib/archiveVerification";
 import { channelLogoPixels, channelRowHeightPixels } from "../lib/channelLogoSize";
 import { getChannelErrorReason } from "../lib/channelResults";
+import { channelArchiveStream } from "../lib/dispatcharr";
 import { formatLatency } from "../lib/format";
 import { detectChannelProtocol } from "../lib/streamProtocol";
 import type { ColumnDefinition } from "../lib/tableColumns";
@@ -88,7 +89,10 @@ function ChannelRowImpl({
     ? t("table.drmSystem", { system: translateReason(result.drm_system) })
     : t("table.drmProtected");
   const streamProtocol = useMemo(() => detectChannelProtocol(result), [result]);
-  const probeEntry = useAppStore((s) => s.archiveProbes[result.index]);
+  // A channel row shows the archive Dispatcharr would play, not the primary's.
+  const archiveResult =
+    (dispatcharr?.kind === "channel" && channelArchiveStream(dispatcharr.channel)) || result;
+  const probeEntry = useAppStore((s) => s.archiveProbes[archiveResult.index]);
 
   const renderDispatcharrCell = (column: ColumnDefinition, meta: DispatcharrRowMeta) => {
     const isChannel = meta.kind === "channel";
@@ -251,11 +255,11 @@ function ChannelRowImpl({
           </span>
         );
       case "catchup": {
-        const badge = archiveBadgeText(result);
+        const badge = archiveBadgeText(archiveResult);
         if (!badge) {
           return <span className="text-text-secondary tabular-nums">—</span>;
         }
-        const verdict = archiveVerdict(result, probeEntry);
+        const verdict = archiveVerdict(archiveResult, probeEntry);
         const failure = verdict === "fake" ? archiveFailure(probeEntry) : null;
         const chipClass = {
           advertised: "bg-violet-500/15 text-violet-300 ring-violet-500/30",
@@ -265,7 +269,8 @@ function ChannelRowImpl({
         }[verdict];
         const measured = verdict === "shallower" ? measuredDepthDays(probeEntry) : null;
         const measuredText = measured == null ? "?" : formatCount(measured);
-        const days = result.catchup_days == null ? "?" : formatCount(result.catchup_days);
+        const days =
+          archiveResult.catchup_days == null ? "?" : formatCount(archiveResult.catchup_days);
         const chipText =
           verdict === "verified"
             ? `✓ ${badge}`
@@ -294,7 +299,9 @@ function ChannelRowImpl({
         return (
           <span
             className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] ring-1 tabular-nums ${chipClass}`}
-            title={[archiveTitle(result), verdictTitle].filter(Boolean).join(" · ") || undefined}
+            title={
+              [archiveTitle(archiveResult), verdictTitle].filter(Boolean).join(" · ") || undefined
+            }
           >
             {chipText}
           </span>

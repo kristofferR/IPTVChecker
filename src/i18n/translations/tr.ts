@@ -894,13 +894,14 @@ export default {
         moveUp: "Yukarı taşı: {signal}",
         moveDown: "Aşağı taşı: {signal}",
         footnote:
-          "Bit hızı 500 kbps, gecikme 250 ms adımlarla karşılaştırılır; böylece taramalar arasındaki küçük farklar kanalların sırasını değiştirmez.",
+          "Video bit hızı 500 kbps, ses bit hızı 32 kbps, gecikme 250 ms adımlarla karşılaştırılır; böylece taramalar arasındaki küçük farklar kanalların sırasını değiştirmez.",
       },
       rankSignals: {
         resolution: "Çözünürlük",
         frameRate: "Kare hızı",
-        bitrate: "Bit hızı",
+        bitrate: "Video bit hızı",
         latency: "Düşük gecikme",
+        audioBitrate: "Ses bit hızı",
       },
       deadStreams: {
         label: "Çalışmayan yayınlar",

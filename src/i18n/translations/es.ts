@@ -935,13 +935,14 @@ export default {
         moveUp: "Subir {signal}",
         moveDown: "Bajar {signal}",
         footnote:
-          "El bitrate se compara en pasos de 500 kbps y la latencia en pasos de 250 ms, para que las pequeñas diferencias entre escaneos no reordenen los canales.",
+          "El bitrate de vídeo se compara en pasos de 500 kbps, el de audio en pasos de 32 kbps y la latencia en pasos de 250 ms, para que las pequeñas diferencias entre escaneos no reordenen los canales.",
       },
       rankSignals: {
         resolution: "Resolución",
         frameRate: "Tasa de fotogramas",
-        bitrate: "Bitrate",
+        bitrate: "Bitrate de vídeo",
         latency: "Baja latencia",
+        audioBitrate: "Bitrate de audio",
       },
       deadStreams: {
         label: "Streams caídos",

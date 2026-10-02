@@ -834,13 +834,14 @@ export default {
         moveUp: "Chuyển {signal} lên",
         moveDown: "Chuyển {signal} xuống",
         footnote:
-          "Bitrate được so sánh theo bước 500 kbps và độ trễ theo bước 250 ms, nên chênh lệch nhỏ giữa các lượt quét không làm xáo trộn kênh.",
+          "Bitrate video được so sánh theo bước 500 kbps, bitrate âm thanh theo bước 32 kbps và độ trễ theo bước 250 ms, nên chênh lệch nhỏ giữa các lượt quét không làm xáo trộn kênh.",
       },
       rankSignals: {
         resolution: "Độ phân giải",
         frameRate: "Tốc độ khung hình",
-        bitrate: "Bitrate",
+        bitrate: "Bitrate video",
         latency: "Độ trễ thấp",
+        audioBitrate: "Bitrate âm thanh",
       },
       deadStreams: {
         label: "Luồng hỏng",

@@ -210,13 +210,14 @@ export default {
       moveUp: "Move {signal} up",
       moveDown: "Move {signal} down",
       footnote:
-        "Bitrate compares in 500 kbps steps and latency in 250 ms steps, so small differences between scans do not reshuffle channels.",
+        "Video bitrate compares in 500 kbps steps, audio bitrate in 32 kbps steps and latency in 250 ms steps, so small differences between scans do not reshuffle channels.",
     },
     rankSignals: {
       resolution: "Resolution",
       frameRate: "Frame rate",
-      bitrate: "Bitrate",
+      bitrate: "Video bitrate",
       latency: "Low latency",
+      audioBitrate: "Audio bitrate",
     },
     deadStreams: {
       label: "Dead streams",

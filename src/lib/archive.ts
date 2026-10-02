@@ -60,8 +60,8 @@ export interface ArchiveWindow {
   nowEpochS: number;
   /**
    * IANA zone the provider interprets wall-clock starts in (Xtream panels use
-   * their own local time). Defaults to the current playlist's panel timezone,
-   * then UTC.
+   * their own local time). Defaults to the row's or current playlist's panel
+   * timezone, then UTC.
    */
   timezone?: string | null;
 }
@@ -77,7 +77,8 @@ export interface ResolvedArchivePlayback {
   windowEndEpochS: number;
 }
 
-type ArchiveUrlFields = Pick<ChannelResult, "url" | "catchup" | "catchup_days" | "catchup_source">;
+type ArchiveUrlFields = Pick<ChannelResult, "url" | "catchup" | "catchup_days" | "catchup_source"> &
+  Partial<Pick<ChannelResult, "extinf_line">>;
 
 /**
  * Fill catch-up placeholder variables. Both `${var}` and `{var}` forms occur
@@ -188,7 +189,7 @@ export function buildArchiveUrl(channel: ArchiveUrlFields, window: ArchiveWindow
       const durationMinutes = Math.max(1, Math.ceil(window.durationS / 60));
       return `${base}${prefix}/timeshift/${user}/${pass}/${durationMinutes}/${formatXtreamStart(
         window.startEpochS,
-        window.timezone === undefined ? currentArchiveTimezone() : window.timezone,
+        window.timezone === undefined ? currentArchiveTimezone(channel) : window.timezone,
       )}/${id}.m3u8${suffix}`;
     }
     case "flussonic": {

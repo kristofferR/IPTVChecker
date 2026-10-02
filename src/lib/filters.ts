@@ -175,7 +175,7 @@ function matchesBaseFilters(
   return true;
 }
 
-function matchesStatusFilter(
+export function matchesStatusFilter(
   result: ChannelResult,
   statusFilter: string,
   duplicateIndices?: Set<number>,

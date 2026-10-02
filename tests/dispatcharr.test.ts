@@ -6,12 +6,14 @@ import {
   dispatcharrLinkedIndices,
   dispatcharrServerOfProxyPlaylist,
   failureCause,
+  filterDispatcharrPrimaries,
   fixPreferencesFrom,
   getDispatcharrView,
   isDispatcharrPlaceholder,
   normalizeDispatcharrServer,
   parseDispatcharrIds,
   proposeFixOrder,
+  selectedArchiveStream,
   unlinkedStreams,
 } from "../src/lib/dispatcharr";
 import { planFix } from "../src/lib/dispatcharrEdits";
@@ -87,6 +89,8 @@ function channelRows(
     fps?: number;
     kbps?: number;
     latency?: number;
+    audioKbps?: number;
+    catchup?: boolean;
   }>,
   firstIndex = 0,
 ): ChannelResult[] {
@@ -101,6 +105,8 @@ function channelRows(
         fps: stream.fps ?? null,
         video_bitrate: stream.kbps == null ? null : `${stream.kbps} kbps`,
         latency_ms: stream.latency ?? null,
+        audio_bitrate: stream.audioKbps == null ? null : `${stream.audioKbps}`,
+        catchup: stream.catchup ? "xc" : null,
       },
     );
   });
@@ -374,10 +380,81 @@ describe("dispatcharr helpers", () => {
       dispatcharr_rank_order: ["bitrate", "latency"],
       dispatcharr_dead_streams: "move_to_end",
     });
-    expect(bitrateFirst.rankOrder).toEqual(["bitrate", "latency", "resolution", "frame_rate"]);
+    expect(bitrateFirst.rankOrder).toEqual([
+      "bitrate",
+      "latency",
+      "resolution",
+      "frame_rate",
+      "audio_bitrate",
+    ]);
     expect(ids(proposeFixOrder(channel, bitrateFirst))).toEqual([3, 4, 2, 1]);
     // Defaults: resolution first, dead stream unlinked.
     expect(ids(proposeFixOrder(channel))).toEqual([4, 2, 3]);
+  });
+
+  it("ranks by audio bitrate to the nearest 32 kbps", () => {
+    const results = channelRows(10, "News One", [
+      { id: 1, height: 1080, audioKbps: 95 },
+      { id: 2, height: 1080, audioKbps: 192 },
+      { id: 3, height: 1080, audioKbps: 96, latency: 100 },
+      { id: 4, height: 1080 },
+    ]);
+    const channel = getDispatcharrView(results, {})?.byChannelId.get(10);
+    if (!channel) throw new Error("missing channel");
+    const audioFirst = fixPreferencesFrom({
+      dispatcharr_rank_order: ["audio_bitrate"],
+      dispatcharr_dead_streams: "unlink",
+    });
+    // 95 and 96 kbps tie, so latency decides; no audio bitrate ranks last.
+    expect(ids(proposeFixOrder(channel, audioFirst))).toEqual([2, 3, 1, 4]);
+  });
+
+  it("finds catch-up channels by any stream, not just the primary", () => {
+    const results = [
+      ...channelRows(10, "News One", [{ id: 1 }, { id: 2, catchup: true }]),
+      ...channelRows(20, "Sports", [{ id: 3 }], 2),
+    ];
+    const view = getDispatcharrView(results, {});
+    if (!view) throw new Error("missing view");
+    const names = (filter: string) =>
+      filterDispatcharrPrimaries(view, "", "all", filter).map((primary) => primary.name);
+    expect(names("catchup")).toEqual(["News One"]);
+    expect(names("catchup_untested")).toEqual(["News One"]);
+    expect(names("catchup_fake")).toEqual([]);
+
+    // Verdicts are judged on the catch-up stream the channel row shows.
+    const fakeFirst = channelRows(30, "Replay", [
+      { id: 5 },
+      { id: 6, catchup: true },
+      { id: 7, catchup: true },
+    ]);
+    const replay = getDispatcharrView(fakeFirst, {});
+    if (!replay) throw new Error("missing view");
+    const failed = {
+      label: "Archive -1 h",
+      daysBack: 0,
+      ok: false,
+      depthVerified: false,
+      depthUnknown: false,
+      requestedStartEpochS: 0,
+      requestUrl: "http://panel.example/timeshift",
+      responseUrl: null,
+      latencyMs: 10,
+      error: "HTTP 404",
+    };
+    const probes = { [fakeFirst[1].index]: { running: false, checkedAt: 1, outcomes: [failed] } };
+    const replayNames = (filter: string) =>
+      filterDispatcharrPrimaries(replay, "", "all", filter, undefined, false, probes).map(
+        (primary) => primary.name,
+      );
+    expect(replayNames("catchup_fake")).toEqual(["Replay"]);
+    expect(replayNames("catchup_untested")).toEqual([]);
+
+    // A whole selected channel acts through its catch-up stream; the primary
+    // stream selected alone stays itself.
+    const [primary, archive] = results;
+    expect(selectedArchiveStream(primary, view, [0, 1])).toBe(archive);
+    expect(selectedArchiveStream(primary, view, [0])).toBe(primary);
   });
 
   it("treats a provider whose streams all failed the same way as down, not dead", () => {

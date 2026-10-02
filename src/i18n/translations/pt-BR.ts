@@ -928,13 +928,14 @@ export default {
         moveUp: "Mover {signal} para cima",
         moveDown: "Mover {signal} para baixo",
         footnote:
-          "O bitrate é comparado em passos de 500 kbps e a latência em passos de 250 ms, para que pequenas diferenças entre varreduras não reordenem os canais.",
+          "O bitrate de vídeo é comparado em passos de 500 kbps, o de áudio em passos de 32 kbps e a latência em passos de 250 ms, para que pequenas diferenças entre varreduras não reordenem os canais.",
       },
       rankSignals: {
         resolution: "Resolução",
         frameRate: "Taxa de quadros",
-        bitrate: "Bitrate",
+        bitrate: "Bitrate de vídeo",
         latency: "Baixa latência",
+        audioBitrate: "Bitrate de áudio",
       },
       deadStreams: {
         label: "Streams fora do ar",

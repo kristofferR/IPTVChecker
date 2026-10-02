@@ -932,13 +932,14 @@ export default {
         moveUp: "Monter {signal}",
         moveDown: "Descendre {signal}",
         footnote:
-          "Le débit est comparé par paliers de 500 kbit/s et la latence par paliers de 250 ms, pour que de petits écarts entre analyses ne réordonnent pas les chaînes.",
+          "Le débit vidéo est comparé par paliers de 500 kbit/s, le débit audio par paliers de 32 kbit/s et la latence par paliers de 250 ms, pour que de petits écarts entre analyses ne réordonnent pas les chaînes.",
       },
       rankSignals: {
         resolution: "Résolution",
         frameRate: "Fréquence d'images",
-        bitrate: "Débit",
+        bitrate: "Débit vidéo",
         latency: "Faible latence",
+        audioBitrate: "Débit audio",
       },
       deadStreams: {
         label: "Flux hors ligne",

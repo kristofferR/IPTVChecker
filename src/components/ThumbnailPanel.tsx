@@ -19,11 +19,16 @@ import { formatCount, t } from "../i18n";
 import { translateReason } from "../i18n/reasons";
 import { buildCastRequest, isCastSessionActive } from "../lib/cast";
 import { getChannelErrorReason } from "../lib/channelResults";
-import { isDispatcharrPlaceholder } from "../lib/dispatcharr";
+import {
+  getDispatcharrView,
+  isDispatcharrPlaceholder,
+  selectedArchiveStream,
+} from "../lib/dispatcharr";
 import { formatAudioInfo, formatVideoInfo, statusLabel } from "../lib/format";
 import { isScanActive, type ScanState } from "../lib/scanState";
 import { getThumbnailDisplayState } from "../lib/thumbnailState";
 import type { ChannelResult } from "../lib/types";
+import { useAppStore } from "../store";
 import { ArchiveCard } from "./ArchiveCard";
 import { CastMenu, type CastStartHandler } from "./CastMenu";
 import { PlaybackDiagnostics } from "./PlaybackDiagnostics";
@@ -227,8 +232,21 @@ export function ThumbnailPanel({
   // return lives after them — bailing out first would change the hook count
   // between renders as soon as a channel is selected.
   const resolvedUrl = result?.stream_url?.trim() || null;
+  const archiveResult = useAppStore((s) =>
+    result
+      ? selectedArchiveStream(
+          result,
+          getDispatcharrView(s.flatResults, s.dispatcharrOrders),
+          s.selectedChannelIndices,
+        )
+      : null,
+  );
   const activeArchiveSession =
-    archiveSession && archiveSession.baseResult.index === result?.index ? archiveSession : null;
+    archiveSession &&
+    (archiveSession.baseResult.index === result?.index ||
+      archiveSession.baseResult.index === archiveResult?.index)
+      ? archiveSession
+      : null;
 
   // Memoized so the prop identity is stable across renders — without this, any
   // useEffect downstream of `castRequest` would tear down and re-fire on every
@@ -579,8 +597,8 @@ export function ThumbnailPanel({
 
         {onPlayArchive && (
           <ArchiveCard
-            key={result.index}
-            result={result}
+            key={archiveResult?.index ?? result.index}
+            result={archiveResult ?? result}
             archiveSession={activeArchiveSession}
             isCasting={isCastSessionActive(chromecast.session)}
             onPlayArchive={onPlayArchive}

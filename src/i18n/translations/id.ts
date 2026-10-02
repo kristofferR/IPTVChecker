@@ -849,13 +849,14 @@ export default {
         moveUp: "Naikkan {signal}",
         moveDown: "Turunkan {signal}",
         footnote:
-          "Bitrate dibandingkan per kelipatan 500 kbps dan latensi per 250 ms, sehingga perbedaan kecil antar-pemindaian tidak mengacak urutan saluran.",
+          "Bitrate video dibandingkan per kelipatan 500 kbps, bitrate audio per 32 kbps, dan latensi per 250 ms, sehingga perbedaan kecil antar-pemindaian tidak mengacak urutan saluran.",
       },
       rankSignals: {
         resolution: "Resolusi",
         frameRate: "Frame rate",
-        bitrate: "Bitrate",
+        bitrate: "Bitrate video",
         latency: "Latensi rendah",
+        audioBitrate: "Bitrate audio",
       },
       deadStreams: {
         label: "Stream mati",

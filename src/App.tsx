@@ -48,6 +48,7 @@ import { registerArchiveTimezoneResolver } from "./lib/archiveTimezone";
 import { isArchiveVerificationBlockingPlayback, verifyAllArchives } from "./lib/archiveVerifyRun";
 import { buildCastRequest, isCastSessionActive } from "./lib/cast";
 import {
+  channelPrimary,
   dispatcharrLinkedIndices,
   expandDispatcharrSelection,
   getDispatcharrView,
@@ -1514,13 +1515,11 @@ export default function App() {
   // Guide playback also selects the channel so the sidebar player shows it.
   const handleGuidePlayArchive = useCallback(
     (result: ChannelResult, options: ArchivePlayOptions) => {
-      getStore().setSelectedChannel(result);
-      getStore().setSelectedChannelIndices(
-        expandDispatcharrSelection(
-          getDispatcharrView(getStore().flatResults, getStore().dispatcharrOrders),
-          [result.index],
-        ),
-      );
+      // The result may be a channel's catch-up stream; select the whole channel.
+      const view = getDispatcharrView(getStore().flatResults, getStore().dispatcharrOrders);
+      const primary = channelPrimary(view, result);
+      getStore().setSelectedChannel(primary);
+      getStore().setSelectedChannelIndices(expandDispatcharrSelection(view, [primary.index]));
       getStore().setSidebarHidden(false);
       const state = getStore();
       const singleConnection = isSingleConnectionPlaylist(state.playlist);

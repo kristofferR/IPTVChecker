@@ -154,7 +154,12 @@ export interface XtreamOpenRequest {
 }
 
 /** Scan signals Fix order ranks working Dispatcharr streams by. */
-export type DispatcharrRankSignal = "resolution" | "frame_rate" | "bitrate" | "latency";
+export type DispatcharrRankSignal =
+  | "resolution"
+  | "frame_rate"
+  | "bitrate"
+  | "latency"
+  | "audio_bitrate";
 
 /** API key wins when both are set. */
 export interface DispatcharrOpenRequest {

@@ -930,13 +930,14 @@ export default {
         moveUp: "Sposta {signal} su",
         moveDown: "Sposta {signal} giù",
         footnote:
-          "Il bitrate viene confrontato a passi di 500 kbps e la latenza a passi di 250 ms, così piccole differenze tra scansioni non riordinano i canali.",
+          "Il bitrate video viene confrontato a passi di 500 kbps, quello audio a passi di 32 kbps e la latenza a passi di 250 ms, così piccole differenze tra scansioni non riordinano i canali.",
       },
       rankSignals: {
         resolution: "Risoluzione",
         frameRate: "Frame rate",
-        bitrate: "Bitrate",
+        bitrate: "Bitrate video",
         latency: "Bassa latenza",
+        audioBitrate: "Bitrate audio",
       },
       deadStreams: {
         label: "Stream offline",

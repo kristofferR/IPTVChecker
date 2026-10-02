@@ -22,6 +22,8 @@ import {
   verifyArchivePointResponse,
 } from "../lib/archiveProbe";
 import {
+  channelArchiveStream,
+  channelPrimary,
   expandDispatcharrSelection,
   filterDispatcharrPrimaries,
   getDispatcharrView,
@@ -232,14 +234,12 @@ const GuideRow = memo(function GuideRow({
           className="guide-channel-button flex h-full w-full items-center gap-1.5 px-2 text-start"
           onClick={() => {
             const state = useAppStore.getState();
-            state.setSelectedChannel(result);
-            // A Dispatcharr channel row stands for all of its streams.
-            state.setSelectedChannelIndices(
-              expandDispatcharrSelection(
-                getDispatcharrView(state.flatResults, state.dispatcharrOrders),
-                [result.index],
-              ),
-            );
+            // A Dispatcharr channel row stands for all of its streams, and
+            // selects its primary even when the row shows its catch-up stream.
+            const view = getDispatcharrView(state.flatResults, state.dispatcharrOrders);
+            const primary = channelPrimary(view, result);
+            state.setSelectedChannel(primary);
+            state.setSelectedChannelIndices(expandDispatcharrSelection(view, [primary.index]));
           }}
           onDoubleClick={() => onPlayLive(result)}
           onKeyDown={(event) => {
@@ -309,7 +309,7 @@ interface ProgrammeMenuState {
 
 export function GuideView({
   onPlayArchive,
-  onPlayLive,
+  onPlayLive: playResultLive,
   headerPortalRef,
 }: {
   onPlayArchive: (result: ChannelResult, options: ArchivePlayOptions) => void;
@@ -325,6 +325,13 @@ export function GuideView({
 }) {
   const flatResults = useAppStore((s) => s.flatResults);
   const dispatcharrOrders = useAppStore((s) => s.dispatcharrOrders);
+  // A Dispatcharr channel's guide row is its catch-up stream; live plays the
+  // primary, as in the table.
+  const onPlayLive = useCallback(
+    (result: ChannelResult) =>
+      playResultLive(channelPrimary(getDispatcharrView(flatResults, dispatcharrOrders), result)),
+    [playResultLive, flatResults, dispatcharrOrders],
+  );
   const playlist = useAppStore((s) => s.playlist);
   const search = useAppStore((s) => s.search);
   const groupFilter = useAppStore((s) => s.groupFilter);
@@ -356,7 +363,8 @@ export function GuideView({
   }, []);
 
   // Every live channel that matches the toolbar filters; catch-up is not required.
-  // A Dispatcharr channel appears once, through its primary stream.
+  // A Dispatcharr channel appears once, through the stream Dispatcharr plays
+  // its catch-up from, else its primary.
   const channels = useMemo(() => {
     const dispatcharrView = getDispatcharrView(flatResults, dispatcharrOrders);
     const matching = dispatcharrView
@@ -378,7 +386,12 @@ export function GuideView({
           separatePlaceholder,
           archiveProbes,
         );
-    return matching.filter((result) => result.content_type === "live");
+    return matching
+      .filter((result) => result.content_type === "live")
+      .map((primary) => {
+        const channel = dispatcharrView?.byPrimaryIndex.get(primary.index);
+        return (channel && channelArchiveStream(channel)) || primary;
+      });
   }, [
     dispatcharrOrders,
     flatResults,
@@ -420,11 +433,13 @@ export function GuideView({
   // a Dispatcharr channel resolves to its current primary, which an edit can
   // change.
   const currentResult = useCallback(
-    (selected: ChannelResult) =>
-      getDispatcharrView(flatResults, dispatcharrOrders)?.byStreamIndex.get(selected.index)
-        ?.primary ??
-      flatResults.find((result) => result.index === selected.index) ??
-      selected,
+    (selected: ChannelResult) => {
+      const channel = getDispatcharrView(flatResults, dispatcharrOrders)?.byStreamIndex.get(
+        selected.index,
+      );
+      if (channel) return channelArchiveStream(channel) ?? channel.primary;
+      return flatResults.find((result) => result.index === selected.index) ?? selected;
+    },
     [flatResults, dispatcharrOrders],
   );
   const selection = useMemo(

@@ -3,7 +3,12 @@ import { formatCount, getFormatLocale, t } from "../i18n";
 import { hasArchive } from "../lib/archive";
 import { archiveVerdict } from "../lib/archiveVerification";
 import { computeCatchupScore, withCatchupScore } from "../lib/catchupScore";
-import { getDispatcharrView, isUntestedStatus } from "../lib/dispatcharr";
+import {
+  filterDispatcharrPrimaries,
+  getDispatcharrView,
+  isUntestedStatus,
+  matchesDispatcharrChannel,
+} from "../lib/dispatcharr";
 import { filterResultsShared, isCatchupStatusFilter } from "../lib/filters";
 import type { Channel } from "../lib/types";
 import { useAppStore } from "../store";
@@ -112,9 +117,13 @@ export const StatsPanel = memo(function StatsPanel() {
   const separatePlaceholder = useAppStore((s) => s.settings.separate_placeholder_status);
   const stats = summary ?? progress;
   const dispatcharrOrders = useAppStore((s) => s.dispatcharrOrders);
+  const dispatcharrView = useMemo(
+    () => getDispatcharrView(results, dispatcharrOrders),
+    [results, dispatcharrOrders],
+  );
   // Dispatcharr sources count channels rather than streams.
   const channelStats = useMemo(() => {
-    const view = getDispatcharrView(results, dispatcharrOrders);
+    const view = dispatcharrView;
     if (!view) return null;
     const tally = { alive: 0, primaryDead: 0, hasDead: 0, allDead: 0, checked: 0, streams: 0 };
     for (const channel of view.channels) {
@@ -128,7 +137,7 @@ export const StatsPanel = memo(function StatsPanel() {
       ).length;
     }
     return { channels: view.channels.length, ...tally };
-  }, [results, dispatcharrOrders]);
+  }, [dispatcharrView]);
   const effectiveLowFpsCount = summary?.low_framerate ?? lowFpsCount;
   const effectiveMislabeledCount = summary?.mislabeled ?? mislabeledCount;
   const displayScore = useMemo(() => {
@@ -136,19 +145,34 @@ export const StatsPanel = memo(function StatsPanel() {
     return withCatchupScore(summary.playlist_score, computeCatchupScore(results, archiveProbes));
   }, [summary?.playlist_score, results, archiveProbes]);
 
-  const catchupCount = useMemo(() => channels.filter(hasArchive).length, [channels]);
-  const visibleCatchupCount = useMemo(
+  // Dispatcharr channels count once, matching the status filter's counts.
+  const catchupChannels = useMemo(
     () =>
-      filterResultsShared(
-        completedResults,
+      dispatcharrView?.channels.filter((channel) =>
+        matchesDispatcharrChannel(channel, "catchup", archiveProbes),
+      ) ?? null,
+    [dispatcharrView, archiveProbes],
+  );
+  const catchupCount = useMemo(
+    () => catchupChannels?.length ?? channels.filter(hasArchive).length,
+    [catchupChannels, channels],
+  );
+  const visibleCatchupCount = useMemo(() => {
+    if (dispatcharrView) {
+      return filterDispatcharrPrimaries(
+        dispatcharrView,
         search,
         groupFilter,
         statusFilter,
         duplicateIndices,
         separatePlaceholder,
         archiveProbes,
-      ).filter(hasArchive).length,
-    [
+      ).filter((primary) => {
+        const channel = dispatcharrView.byPrimaryIndex.get(primary.index);
+        return channel != null && matchesDispatcharrChannel(channel, "catchup", archiveProbes);
+      }).length;
+    }
+    return filterResultsShared(
       completedResults,
       search,
       groupFilter,
@@ -156,9 +180,29 @@ export const StatsPanel = memo(function StatsPanel() {
       duplicateIndices,
       separatePlaceholder,
       archiveProbes,
-    ],
-  );
+    ).filter(hasArchive).length;
+  }, [
+    dispatcharrView,
+    completedResults,
+    search,
+    groupFilter,
+    statusFilter,
+    duplicateIndices,
+    separatePlaceholder,
+    archiveProbes,
+  ]);
   const verdictTally = useMemo(() => {
+    if (catchupChannels) {
+      const count = (filter: string) =>
+        catchupChannels.filter((channel) =>
+          matchesDispatcharrChannel(channel, filter, archiveProbes),
+        ).length;
+      const real = count("catchup_real");
+      const shallower = count("catchup_shallower");
+      const fake = count("catchup_fake");
+      const untested = count("catchup_untested");
+      return { real, shallower, fake, untested, tested: real + shallower + fake };
+    }
     let real = 0;
     let shallower = 0;
     let fake = 0;
@@ -172,7 +216,7 @@ export const StatsPanel = memo(function StatsPanel() {
       else untested += 1;
     }
     return { real, shallower, fake, untested, tested: real + shallower + fake };
-  }, [channels, archiveProbes]);
+  }, [catchupChannels, channels, archiveProbes]);
 
   const selectedCatchupCount = useMemo(() => {
     if (selectedChannelIndices.length < 2) return 0;

@@ -321,6 +321,16 @@ describe("xtream timeshift start timezone", () => {
     ).toBe("http://host/timeshift/alice/secret/60/2026-08-28:22-00/42.m3u8");
   });
 
+  it("uses a Dispatcharr row's own panel timezone", () => {
+    const row = {
+      ...urlFields("http://host/live/alice/secret/42.ts", "xc"),
+      extinf_line: '#EXTINF:-1 catchup="xc" x-dispatcharr-timezone="Europe/Ljubljana",Ch',
+    };
+    expect(buildArchiveUrl(row, WINDOW)).toBe(
+      "http://host/timeshift/alice/secret/60/2026-08-28:22-00/42.m3u8",
+    );
+  });
+
   it("falls back to UTC for unknown zones and when none is registered", () => {
     expect(
       buildArchiveUrl(urlFields("http://host/live/alice/secret/42.ts", "xc"), {

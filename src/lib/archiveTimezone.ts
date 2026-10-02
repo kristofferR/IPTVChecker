@@ -7,8 +7,12 @@ export function registerArchiveTimezoneResolver(next: () => string | null): void
   resolver = next;
 }
 
-/** Timezone an Xtream panel expects timeshift start times in, if known. */
-export function currentArchiveTimezone(): string | null {
+/** Timezone an Xtream panel expects timeshift start times in, if known.
+ *  Dispatcharr rows name their own panel's zone, since one Dispatcharr can
+ *  carry several panels. */
+export function currentArchiveTimezone(channel?: { extinf_line?: string }): string | null {
+  const own = channel?.extinf_line?.match(/\sx-dispatcharr-timezone="([^"]+)"/)?.[1];
+  if (own) return own;
   try {
     return resolver() || null;
   } catch {
