@@ -487,6 +487,10 @@ export async function getStreamingProxy(): Promise<StreamingProxy | null> {
   return invoke("get_streaming_proxy");
 }
 
+export async function getStreamingProxyKey(): Promise<string> {
+  return invoke("get_streaming_proxy_key");
+}
+
 export async function discoverChromecasts(): Promise<ChromecastDevice[]> {
   return invoke("discover_chromecasts");
 }

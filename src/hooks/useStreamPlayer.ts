@@ -53,7 +53,12 @@ import {
 } from "../lib/playbackTelemetry";
 import { toProxyUrl } from "../lib/proxyUrl";
 import { createRuntimeMonitor, type MpegtsPlayer } from "../lib/runtimeMonitor";
-import { getStreamingProxy, startLocalPlayback, stopLocalPlayback } from "../lib/tauri";
+import {
+  getStreamingProxy,
+  getStreamingProxyKey,
+  startLocalPlayback,
+  stopLocalPlayback,
+} from "../lib/tauri";
 import type { ChannelResult, StreamingProxy } from "../lib/types";
 import { canUseBlobWorkers } from "../lib/workerSupport";
 import { useAppStore } from "../store";
@@ -807,6 +812,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
       telemetryObserverRef.current?.route("hls.js");
       try {
         const { default: Hls } = await import("hls.js");
+        const proxyKey = await getStreamingProxyKey().catch(() => null);
         if (signal.aborted) return false;
         if (!Hls.isSupported()) {
           lastErrorRef.current = "hls.js is not supported by this WebView";
@@ -894,7 +900,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             videoElement.addEventListener("error", onVideoError, { once: true });
             signal.addEventListener("abort", onAbort, { once: true });
             hls.on(Hls.Events.ERROR, onHlsError);
-            hls.loadSource(toProxyUrl(url));
+            hls.loadSource(toProxyUrl(url, proxyKey));
             hls.attachMedia(videoElement);
             applyVolume();
           } catch (error) {

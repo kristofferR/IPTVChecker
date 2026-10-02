@@ -98,8 +98,13 @@ pub struct StreamingProxy {
 pub fn streaming_proxy(port: u16) -> StreamingProxy {
     StreamingProxy {
         port,
-        key: STREAM_KEY.as_str(),
+        key: streaming_proxy_key(),
     }
+}
+
+/// Prefix for `streamproxy://localhost/<key>/<url>` and `/stream?key=` URLs.
+pub fn streaming_proxy_key() -> &'static str {
+    STREAM_KEY.as_str()
 }
 
 pub fn build_streaming_proxy_url(port: u16, original: &str) -> String {
@@ -193,10 +198,13 @@ fn manifest_request_served_media(requested_url: &str, content_type: &str, final_
 }
 
 /// Rewrite URIs in an HLS manifest so they go through the stream proxy.
-fn rewrite_m3u8_manifest(body: &str, base_url: &str) -> String {
+/// `key` passes private-host access on to the manifest's URIs; give it only
+/// for a manifest that came from a private host itself.
+fn rewrite_m3u8_manifest(body: &str, base_url: &str, key: Option<&str>) -> String {
+    let prefix = key.map(|key| format!("{key}/")).unwrap_or_default();
     crate::engine::proxy_common::rewrite_hls_manifest(body, base_url, &|resolved| {
         Some(format!(
-            "streamproxy://localhost/{}",
+            "streamproxy://localhost/{prefix}{}",
             encode_proxy_url(resolved.as_str())
         ))
     })
@@ -301,8 +309,9 @@ fn is_blocked_ip(ip: std::net::IpAddr) -> bool {
     }
 }
 
-/// Reject URLs targeting localhost, private networks, or metadata endpoints.
-async fn is_safe_upstream_url(url: &str) -> bool {
+/// Reject non-HTTP URLs and, unless `allow_private`, URLs targeting
+/// localhost, private networks, or metadata endpoints.
+async fn is_safe_upstream_url(url: &str, allow_private: bool) -> bool {
     let parsed = match Url::parse(url) {
         Ok(u) => u,
         Err(_) => return false,
@@ -317,6 +326,9 @@ async fn is_safe_upstream_url(url: &str) -> bool {
         Some(h) => h,
         None => return false,
     };
+    if allow_private {
+        return true;
+    }
 
     match host {
         Host::Domain(domain) => {
@@ -334,6 +346,14 @@ async fn is_safe_upstream_url(url: &str) -> bool {
         Host::Ipv4(ip) => !is_blocked_ip(std::net::IpAddr::V4(ip)),
         Host::Ipv6(ip) => !is_blocked_ip(std::net::IpAddr::V6(ip)),
     }
+}
+
+/// A request the app built itself (`trusted`, never any local caller) may
+/// reach private or local hosts, and follow redirects among them, when its own
+/// URL is on one, such as an IPTV server on the user's LAN. A public URL still
+/// may not redirect into one.
+async fn allows_private_hosts(url: &str, trusted: bool) -> bool {
+    trusted && !is_safe_upstream_url(url, false).await
 }
 
 /// Hard cap on manually-followed redirect hops per upstream fetch.
@@ -362,22 +382,18 @@ impl SafeFetchError {
 /// reqwest's built-in redirect policy only lets us validate the first URL.
 /// `build_request` receives each hop's URL and must produce the request
 /// (method, headers, timeout) using a client built with Policy::none().
-///
-/// `trusted` marks a request the app built itself rather than any local
-/// caller: when its URL is on a private or local host, that host and its
-/// redirects are allowed. A public URL still may not redirect into one.
+/// `allow_private` comes from [`allows_private_hosts`].
 pub(crate) async fn fetch_with_hop_validation<F>(
     url: &str,
-    trusted: bool,
+    allow_private: bool,
     build_request: F,
 ) -> Result<reqwest::Response, SafeFetchError>
 where
     F: Fn(&str) -> reqwest::RequestBuilder,
 {
-    let private_target = trusted && !is_safe_upstream_url(url).await;
     let mut current = url.to_string();
     for _ in 0..=MAX_REDIRECT_HOPS {
-        if !private_target && !is_safe_upstream_url(&current).await {
+        if !is_safe_upstream_url(&current, allow_private).await {
             return Err(SafeFetchError::Blocked);
         }
         let response = build_request(&current)
@@ -407,7 +423,13 @@ pub async fn handle_proxy_request(
     request: tauri::http::Request<Vec<u8>>,
 ) -> tauri::http::Response<Vec<u8>> {
     let path = request.uri().path();
-    let encoded = path.strip_prefix('/').unwrap_or(path);
+    let path = path.strip_prefix('/').unwrap_or(path);
+    // `/<key>/<url>` comes from the app or a private host's manifest;
+    // `/<url>` from a public manifest, so it gets no private access.
+    let (trusted, encoded) = match path.split_once('/') {
+        Some((key, encoded)) => (key == STREAM_KEY.as_str(), encoded),
+        None => (false, path),
+    };
 
     let original_url = match decode_proxy_url(encoded) {
         Some(url) => url,
@@ -428,49 +450,51 @@ pub async fn handle_proxy_request(
     let client = get_or_create_proxy_client(state.inner(), accept_invalid_certs).await;
 
     let range = request.headers().get(RANGE).cloned();
-    // Only the app's own webview can request streamproxy:// URLs.
-    let upstream_response = match fetch_with_hop_validation(&original_url, true, |target| {
-        let mut req_builder = client
-            .get(target)
-            .header(
-                USER_AGENT,
-                HeaderValue::from_str(&user_agent)
-                    .unwrap_or_else(|_| HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")),
-            )
-            .timeout(PROXY_BUFFERED_RESPONSE_TIMEOUT);
+    let allow_private = allows_private_hosts(&original_url, trusted).await;
+    let upstream_response =
+        match fetch_with_hop_validation(&original_url, allow_private, |target| {
+            let mut req_builder = client
+                .get(target)
+                .header(
+                    USER_AGENT,
+                    HeaderValue::from_str(&user_agent).unwrap_or_else(|_| {
+                        HeaderValue::from_static("TiviMate/5.1.6 (Android 12)")
+                    }),
+                )
+                .timeout(PROXY_BUFFERED_RESPONSE_TIMEOUT);
 
-        // Forward Range header for partial content requests
-        if let Some(range) = &range {
-            req_builder = req_builder.header(RANGE, range.clone());
-        }
-        req_builder
-    })
-    .await
-    {
-        Ok(resp) => resp,
-        Err(SafeFetchError::Blocked) => {
-            log::warn!("Stream proxy: blocked request to private/local target");
-            return error_response(403, "Target URL not allowed");
-        }
-        Err(SafeFetchError::TooManyRedirects) => {
-            log::warn!(
-                "Stream proxy: too many redirects for {}",
-                redact_url(&original_url)
-            );
-            return error_response(502, "Too many upstream redirects");
-        }
-        Err(SafeFetchError::Request(err)) => {
-            log::warn!(
-                "Stream proxy: upstream request failed for {} ({})",
-                redact_url(&original_url),
-                reqwest_error_kind(&err)
-            );
-            if err.is_timeout() {
-                return error_response(504, "Upstream request timed out");
+            // Forward Range header for partial content requests
+            if let Some(range) = &range {
+                req_builder = req_builder.header(RANGE, range.clone());
             }
-            return error_response(502, "Upstream request failed");
-        }
-    };
+            req_builder
+        })
+        .await
+        {
+            Ok(resp) => resp,
+            Err(SafeFetchError::Blocked) => {
+                log::warn!("Stream proxy: blocked request to private/local target");
+                return error_response(403, "Target URL not allowed");
+            }
+            Err(SafeFetchError::TooManyRedirects) => {
+                log::warn!(
+                    "Stream proxy: too many redirects for {}",
+                    redact_url(&original_url)
+                );
+                return error_response(502, "Too many upstream redirects");
+            }
+            Err(SafeFetchError::Request(err)) => {
+                log::warn!(
+                    "Stream proxy: upstream request failed for {} ({})",
+                    redact_url(&original_url),
+                    reqwest_error_kind(&err)
+                );
+                if err.is_timeout() {
+                    return error_response(504, "Upstream request timed out");
+                }
+                return error_response(502, "Upstream request failed");
+            }
+        };
 
     let status = upstream_response.status().as_u16();
     let response_headers = upstream_response.headers().clone();
@@ -527,7 +551,12 @@ pub async fn handle_proxy_request(
         is_m3u8_response(&content_type, &final_url) || body.starts_with(b"#EXTM3U");
     let body = if looks_like_m3u8 {
         let manifest = String::from_utf8_lossy(&body);
-        rewrite_m3u8_manifest(&manifest, &final_url).into_bytes()
+        rewrite_m3u8_manifest(
+            &manifest,
+            &final_url,
+            allow_private.then_some(STREAM_KEY.as_str()),
+        )
+        .into_bytes()
     } else {
         body
     };
@@ -1314,9 +1343,9 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     .map(|id| PlaybackTransport::new(app_handle.clone(), id));
                 let url = request.url;
                 let reconnect = request.reconnect;
-                let trusted = request.trusted;
+                let allow_private = allows_private_hosts(&url, request.trusted).await;
 
-                if !trusted && !is_safe_upstream_url(&url).await {
+                if !is_safe_upstream_url(&url, allow_private).await {
                     log::warn!("[StreamProxy] Blocked request to private/local target");
                     let response = "HTTP/1.1 403 Forbidden\r\nContent-Length: 22\r\n\r\nTarget URL not allowed";
                     let _ = socket.write_all(response.as_bytes()).await;
@@ -1414,7 +1443,7 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     return;
                 }
 
-                let response = match fetch_with_hop_validation(&url, trusted, |target| {
+                let response = match fetch_with_hop_validation(&url, allow_private, |target| {
                     client.get(target).header(USER_AGENT, user_agent.clone())
                 })
                 .await
@@ -1571,7 +1600,7 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                             telemetry.record("proxy_reconnect");
                             telemetry.flush();
                         }
-                        match fetch_with_hop_validation(&url, trusted, |target| {
+                        match fetch_with_hop_validation(&url, allow_private, |target| {
                             client.get(target).header(USER_AGENT, user_agent.clone())
                         })
                         .await
@@ -1989,7 +2018,7 @@ segment-001.ts
 segment-002.ts
 ";
         let base = "http://iptv.example.com/live/720p/index.m3u8";
-        let result = rewrite_m3u8_manifest(manifest, base);
+        let result = rewrite_m3u8_manifest(manifest, base, None);
 
         // Segments should be resolved and encoded
         let expected_seg1 = format!(
@@ -2023,7 +2052,7 @@ https://cdn.example.com/hls/1080p/index.m3u8
 https://cdn.example.com/hls/720p/index.m3u8
 ";
         let base = "https://origin.example.com/master.m3u8";
-        let result = rewrite_m3u8_manifest(manifest, base);
+        let result = rewrite_m3u8_manifest(manifest, base, None);
 
         let expected_1080 = format!(
             "streamproxy://localhost/{}",
@@ -2044,7 +2073,7 @@ https://cdn.example.com/hls/720p/index.m3u8
 segment-001.ts
 ";
         let base = "http://example.com/live/index.m3u8";
-        let result = rewrite_m3u8_manifest(manifest, base);
+        let result = rewrite_m3u8_manifest(manifest, base, None);
 
         let expected_key = format!(
             "streamproxy://localhost/{}",
@@ -2065,7 +2094,7 @@ segment-001.ts
 segment-001.m4s
 ";
         let base = "http://example.com/hls/index.m3u8";
-        let result = rewrite_m3u8_manifest(manifest, base);
+        let result = rewrite_m3u8_manifest(manifest, base, None);
 
         let expected_map = format!(
             "streamproxy://localhost/{}",
@@ -2093,7 +2122,7 @@ segment-001.m4s
 segment.ts
 ";
         let base = "http://example.com/index.m3u8";
-        let result = rewrite_m3u8_manifest(manifest, base);
+        let result = rewrite_m3u8_manifest(manifest, base, None);
 
         assert!(result.contains("# This is a comment"));
         assert!(result.contains("#EXT-X-VERSION:3"));
@@ -2525,30 +2554,55 @@ segment.ts
         });
         let client = reqwest::Client::new();
 
-        let untrusted = fetch_with_hop_validation(&url, false, |target| client.get(target)).await;
-        assert!(matches!(untrusted, Err(SafeFetchError::Blocked)));
+        let untrusted = allows_private_hosts(&url, false).await;
+        let blocked = fetch_with_hop_validation(&url, untrusted, |target| client.get(target)).await;
+        assert!(matches!(blocked, Err(SafeFetchError::Blocked)));
 
-        let trusted = fetch_with_hop_validation(&url, true, |target| client.get(target)).await;
+        let trusted = allows_private_hosts(&url, true).await;
+        let fetched = fetch_with_hop_validation(&url, trusted, |target| client.get(target)).await;
         assert_eq!(
-            trusted.ok().map(|response| response.status().as_u16()),
+            fetched.ok().map(|response| response.status().as_u16()),
             Some(200)
         );
     }
 
     #[tokio::test]
+    async fn trusted_requests_stay_public_for_public_urls_and_http_only() {
+        // A public URL keeps every hop checked, so it cannot redirect inward.
+        assert!(!allows_private_hosts("http://8.8.8.8/live.ts", true).await);
+        // Private access never extends to other schemes.
+        let file = "file:///etc/passwd";
+        assert!(!is_safe_upstream_url(file, allows_private_hosts(file, true).await).await);
+    }
+
+    #[test]
+    fn rewrite_m3u8_passes_the_key_only_when_given() {
+        let manifest = "#EXTM3U\n#EXTINF:6,\nhttp://192.168.1.5/seg.ts\n";
+        let segment = encode_proxy_url("http://192.168.1.5/seg.ts");
+        assert!(
+            rewrite_m3u8_manifest(manifest, "http://192.168.1.5/live.m3u8", Some("k"))
+                .contains(&format!("streamproxy://localhost/k/{segment}"))
+        );
+        assert!(
+            rewrite_m3u8_manifest(manifest, "http://example.com/live.m3u8", None)
+                .contains(&format!("streamproxy://localhost/{segment}"))
+        );
+    }
+
+    #[tokio::test]
     async fn is_safe_upstream_blocks_private_ranges_and_ipv6() {
-        assert!(!is_safe_upstream_url("http://localhost/").await);
-        assert!(!is_safe_upstream_url("http://127.0.0.1/").await);
-        assert!(!is_safe_upstream_url("http://10.0.0.1/").await);
-        assert!(!is_safe_upstream_url("http://172.16.0.1/").await);
-        assert!(!is_safe_upstream_url("http://192.168.1.1/").await);
-        assert!(!is_safe_upstream_url("http://169.254.169.254/").await);
-        assert!(!is_safe_upstream_url("http://[::1]/").await);
-        assert!(!is_safe_upstream_url("http://[fe80::1]/").await);
-        assert!(!is_safe_upstream_url("http://[fc00::1]/").await);
-        assert!(!is_safe_upstream_url("http://[::ffff:127.0.0.1]/").await);
-        assert!(!is_safe_upstream_url("http://[::ffff:10.0.0.1]/").await);
-        assert!(is_safe_upstream_url("http://8.8.8.8/").await);
-        assert!(is_safe_upstream_url("http://[2606:4700:4700::1111]/").await);
+        assert!(!is_safe_upstream_url("http://localhost/", false).await);
+        assert!(!is_safe_upstream_url("http://127.0.0.1/", false).await);
+        assert!(!is_safe_upstream_url("http://10.0.0.1/", false).await);
+        assert!(!is_safe_upstream_url("http://172.16.0.1/", false).await);
+        assert!(!is_safe_upstream_url("http://192.168.1.1/", false).await);
+        assert!(!is_safe_upstream_url("http://169.254.169.254/", false).await);
+        assert!(!is_safe_upstream_url("http://[::1]/", false).await);
+        assert!(!is_safe_upstream_url("http://[fe80::1]/", false).await);
+        assert!(!is_safe_upstream_url("http://[fc00::1]/", false).await);
+        assert!(!is_safe_upstream_url("http://[::ffff:127.0.0.1]/", false).await);
+        assert!(!is_safe_upstream_url("http://[::ffff:10.0.0.1]/", false).await);
+        assert!(is_safe_upstream_url("http://8.8.8.8/", false).await);
+        assert!(is_safe_upstream_url("http://[2606:4700:4700::1111]/", false).await);
     }
 }

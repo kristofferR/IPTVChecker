@@ -357,6 +357,11 @@ pub async fn get_streaming_proxy(
     (port > 0).then(|| crate::engine::stream_proxy::streaming_proxy(port))
 }
 
+#[tauri::command]
+pub fn get_streaming_proxy_key() -> &'static str {
+    crate::engine::stream_proxy::streaming_proxy_key()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

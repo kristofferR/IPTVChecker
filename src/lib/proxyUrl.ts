@@ -4,32 +4,14 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-function base64ToBytes(base64: string): Uint8Array {
-  const binary = atob(base64);
-  return Uint8Array.from(binary, (ch) => ch.charCodeAt(0));
-}
-
-/** Convert an original stream URL to a proxy URL that goes through the Tauri backend. */
-export function toProxyUrl(originalUrl: string): string {
+/**
+ * Convert an original stream URL to a proxy URL that goes through the Tauri
+ * backend. The proxy key lets a stream on a private host (a LAN server) load.
+ */
+export function toProxyUrl(originalUrl: string, key: string | null): string {
   const encoded = bytesToBase64(new TextEncoder().encode(originalUrl))
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
-  return `streamproxy://localhost/${encoded}`;
-}
-
-/** Decode a proxy URL back to the original stream URL, or null if invalid. */
-export function fromProxyUrl(proxyUrl: string): string | null {
-  const prefix = "streamproxy://localhost/";
-  if (!proxyUrl.startsWith(prefix)) return null;
-  const encoded = proxyUrl.slice(prefix.length);
-  try {
-    const base64 = encoded
-      .replace(/-/g, "+")
-      .replace(/_/g, "/")
-      .padEnd(Math.ceil(encoded.length / 4) * 4, "=");
-    return new TextDecoder().decode(base64ToBytes(base64));
-  } catch {
-    return null;
-  }
+  return `streamproxy://localhost/${key ? `${key}/` : ""}${encoded}`;
 }
