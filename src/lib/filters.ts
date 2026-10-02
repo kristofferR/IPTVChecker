@@ -51,6 +51,7 @@ export interface StatusOptionCounts {
   geoblocked: number;
   mislabeled: number;
   audio_only: number;
+  frozen_video: number;
   duplicates: number;
   pending: number;
   catchup: number;
@@ -190,6 +191,9 @@ export function matchesStatusFilter(
   }
   if (statusFilter === "audio_only") {
     return result.audio_only;
+  }
+  if (statusFilter === "frozen_video") {
+    return result.frozen_video;
   }
   if (statusFilter === "catchup") {
     return hasArchive(result);
@@ -447,6 +451,7 @@ export function countStatusOptions(
     geoblocked: 0,
     mislabeled: 0,
     audio_only: 0,
+    frozen_video: 0,
     duplicates: 0,
     pending: 0,
     catchup: 0,
@@ -501,6 +506,10 @@ export function countStatusOptions(
 
     if (result.audio_only) {
       counts.audio_only += 1;
+    }
+
+    if (result.frozen_video) {
+      counts.frozen_video += 1;
     }
 
     if (hasArchive(result)) {

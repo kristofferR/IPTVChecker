@@ -77,6 +77,7 @@ export default {
     catchupUntested: "Untested",
     mislabeled: "Mislabeled",
     audioOnly: "Audio Only",
+    frozenVideo: "Frozen Video",
     duplicates: "Duplicates",
     pending: "Pending",
   },

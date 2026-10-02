@@ -400,6 +400,7 @@ export default {
     drmProtected: "Stream protegido por DRM",
     logoAlt: "Logotipo de {name}",
     audioOnlyStream: "Stream somente de áudio",
+    frozenVideo: "Vídeo congelado: a imagem não mudou durante a amostra de taxa de bits",
     videoStream: "Stream de vídeo",
     catchup: {
       shallowerChip: "⚠ {measured}/{days}d",
@@ -505,6 +506,7 @@ export default {
       catchupUntested: "Não testado",
       mislabeled: "Rótulo incorreto",
       audioOnly: "Somente áudio",
+      frozenVideo: "Vídeo congelado",
       duplicates: "Duplicados",
       pending: "Pendente",
     },

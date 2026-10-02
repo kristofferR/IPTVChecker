@@ -1145,6 +1145,11 @@ export const Toolbar = memo(function Toolbar({
             <option value="audio_only">
               {statusLabel("audio_only", t("toolbar.status.audioOnly"))}
             </option>
+            {((statusOptionCounts.frozen_video ?? 0) > 0 || statusFilter === "frozen_video") && (
+              <option value="frozen_video">
+                {statusLabel("frozen_video", t("toolbar.status.frozenVideo"))}
+              </option>
+            )}
             <option value="duplicates">
               {statusLabel("duplicates", t("toolbar.status.duplicates"))}
             </option>

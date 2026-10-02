@@ -380,6 +380,7 @@ export default {
     drmProtected: "DRM-geschützter Stream",
     logoAlt: "Logo von {name}",
     audioOnlyStream: "Reiner Audiostream",
+    frozenVideo: "Standbild: Das Bild hat sich während der Bitraten-Messung nicht verändert",
     videoStream: "Videostream",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} T",
@@ -485,6 +486,7 @@ export default {
       catchupUntested: "Ungetestet",
       mislabeled: "Falsch gekennzeichnet",
       audioOnly: "Nur Audio",
+      frozenVideo: "Standbild",
       duplicates: "Duplikate",
       pending: "Ausstehend",
     },

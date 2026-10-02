@@ -22,6 +22,7 @@ function pendingScanFields() {
     sample_clip_format: null,
     label_mismatches: [],
     low_framerate: false,
+    frozen_video: false,
     error_message: null,
     stream_url: null,
     retry_count: null,

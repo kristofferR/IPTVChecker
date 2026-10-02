@@ -410,6 +410,7 @@ export default {
     drmProtected: "Потік із захистом DRM",
     logoAlt: "Логотип {name}",
     audioOnlyStream: "Лише аудіо",
+    frozenVideo: "Застигле відео: зображення не змінювалося під час заміру бітрейту",
     videoStream: "Відеопотік",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} д",
@@ -515,6 +516,7 @@ export default {
       catchupUntested: "Не перевірено",
       mislabeled: "Хибна позначка",
       audioOnly: "Лише аудіо",
+      frozenVideo: "Застигле відео",
       duplicates: "Дублікати",
       pending: "Очікують",
     },

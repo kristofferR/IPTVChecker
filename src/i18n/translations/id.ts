@@ -371,6 +371,7 @@ export default {
     drmProtected: "Stream dilindungi DRM",
     logoAlt: "Logo {name}",
     audioOnlyStream: "Stream audio saja",
+    frozenVideo: "Video beku: gambar tidak berubah selama sampel bitrate",
     videoStream: "Stream video",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} h",
@@ -476,6 +477,7 @@ export default {
       catchupUntested: "Belum diuji",
       mislabeled: "Label salah",
       audioOnly: "Audio Saja",
+      frozenVideo: "Video Beku",
       duplicates: "Duplikat",
       pending: "Menunggu",
     },

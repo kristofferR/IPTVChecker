@@ -367,6 +367,7 @@ export default {
     drmProtected: "Luồng được bảo vệ bằng DRM",
     logoAlt: "Logo {name}",
     audioOnlyStream: "Luồng chỉ có âm thanh",
+    frozenVideo: "Video bị đứng hình: hình ảnh không thay đổi trong suốt mẫu đo bitrate",
     videoStream: "Luồng video",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} ngày",
@@ -472,6 +473,7 @@ export default {
       catchupUntested: "Chưa kiểm tra",
       mislabeled: "Sai nhãn",
       audioOnly: "Chỉ âm thanh",
+      frozenVideo: "Video bị đứng hình",
       duplicates: "Trùng lặp",
       pending: "Đang chờ",
     },

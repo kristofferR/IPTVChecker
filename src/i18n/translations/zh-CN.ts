@@ -356,6 +356,7 @@ export default {
     drmProtected: "受 DRM 保护的流",
     logoAlt: "{name} 台标",
     audioOnlyStream: "纯音频流",
+    frozenVideo: "画面冻结：码率采样期间画面没有变化",
     videoStream: "视频流",
     catchup: {
       shallowerChip: "⚠ {measured}/{days}天",
@@ -460,6 +461,7 @@ export default {
       catchupUntested: "未测试",
       mislabeled: "标注不符",
       audioOnly: "纯音频",
+      frozenVideo: "画面冻结",
       duplicates: "重复项",
       pending: "待检测",
     },

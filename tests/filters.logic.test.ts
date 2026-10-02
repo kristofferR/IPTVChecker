@@ -10,6 +10,7 @@ function makeResult(
     group: string;
     status: ChannelStatus;
     audioOnly?: boolean;
+    frozenVideo?: boolean;
     labelMismatches?: string[];
     catchup?: string;
     catchupDays?: number;
@@ -47,6 +48,7 @@ function makeResult(
     screenshot_error_reason: null,
     label_mismatches: options.labelMismatches ?? [],
     low_framerate: false,
+    frozen_video: options.frozenVideo ?? false,
     error_message: null,
     channel_id: `id-${index}`,
     extinf_line: "#EXTINF:-1,Channel",
@@ -103,6 +105,21 @@ describe("filterResults", () => {
     expect(filterResults(results, "", "all", "audio_only").map((r) => r.index)).toEqual([2]);
   });
 
+  it("filters and counts frozen video", () => {
+    const withFrozen = [
+      ...results,
+      makeResult(3, {
+        name: "Slate",
+        playlist: "Primary",
+        group: "News",
+        status: "alive",
+        frozenVideo: true,
+      }),
+    ];
+    expect(filterResults(withFrozen, "", "all", "frozen_video").map((r) => r.index)).toEqual([3]);
+    expect(countStatusOptions(withFrozen, "", "all").frozen_video).toBe(1);
+  });
+
   it("supports mislabeled status filter", () => {
     const resultsWithMislabeled = [
       ...results,
@@ -144,6 +161,7 @@ describe("filterResults", () => {
       geoblocked: 1,
       mislabeled: 1,
       audio_only: 2,
+      frozen_video: 0,
       duplicates: 2,
       pending: 1,
       catchup: 0,

@@ -56,6 +56,7 @@ struct SharedUrlResult {
     screenshot_error_reason: Option<String>,
     sample_clip: Option<ffmpeg::SampleClip>,
     low_framerate: bool,
+    frozen_video: bool,
     stream_url: Option<String>,
     retry_count: Option<u32>,
     error_reason: Option<String>,
@@ -89,6 +90,7 @@ impl SharedUrlResult {
             screenshot_error_reason: None,
             sample_clip: None,
             low_framerate: false,
+            frozen_video: false,
             stream_url,
             retry_count,
             error_reason,
@@ -389,6 +391,7 @@ async fn compute_shared_url_result(
                 screenshot_error_reason: None,
                 sample_clip: None,
                 low_framerate: false,
+                frozen_video: false,
                 stream_url,
                 retry_count: (retry_count > 0).then_some(retry_count),
                 error_reason,
@@ -419,6 +422,7 @@ async fn compute_shared_url_result(
         screenshot_error_reason: None,
         sample_clip: None,
         low_framerate: false,
+        frozen_video: false,
         stream_url,
         retry_count: (retry_count > 0).then_some(retry_count),
         error_reason,
@@ -555,6 +559,7 @@ async fn compute_shared_url_result(
                 if let Some(kbps) = diag.profiled_bitrate_kbps {
                     shared.video_bitrate = Some(format!("{kbps} kbps"));
                 }
+                shared.frozen_video = diag.frozen_video && !shared.audio_only;
                 format_bitrate_kbps = diag.format_bitrate_kbps;
                 shared.sample_clip = diag.sample_clip;
                 shared.channel_log.diagnostics_output = Some(
@@ -761,8 +766,13 @@ async fn compute_shared_url_result(
             )
             .await
             {
-                Ok(bitrate) => {
-                    shared.video_bitrate = Some(bitrate);
+                Ok(profile) => {
+                    shared.video_bitrate = Some(
+                        profile
+                            .bitrate_kbps
+                            .map_or_else(|| "N/A".to_string(), |kbps| format!("{kbps} kbps")),
+                    );
+                    shared.frozen_video = profile.frozen_video && !shared.audio_only;
                 }
                 Err(AppError::Cancelled) => {}
                 Err(err) => {
@@ -2317,6 +2327,7 @@ fn build_channel_result(channel: &Channel, shared: &SharedUrlResult) -> ChannelR
         sample_clip_format: shared.sample_clip.as_ref().map(|clip| clip.format),
         label_mismatches: Vec::new(),
         low_framerate: shared.low_framerate,
+        frozen_video: shared.frozen_video,
         error_message: None,
         channel_id: parser::get_channel_id(&channel.url),
         extinf_line: channel.extinf_line.clone(),
@@ -3821,6 +3832,7 @@ mod tests {
                 Vec::new()
             },
             low_framerate,
+            frozen_video: false,
             error_message: None,
             channel_id: "id".to_string(),
             extinf_line: "#EXTINF:-1,Test".to_string(),
@@ -3873,6 +3885,7 @@ mod tests {
             screenshot_error_reason: None,
             sample_clip: None,
             low_framerate: false,
+            frozen_video: false,
             stream_url: Some("https://example.com/live.m3u8".to_string()),
             retry_count: None,
             error_reason: None,

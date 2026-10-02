@@ -383,6 +383,7 @@ export default {
     drmProtected: "DRM korumalı yayın",
     logoAlt: "{name} logosu",
     audioOnlyStream: "Yalnızca ses yayını",
+    frozenVideo: "Donmuş video: bit hızı örneği boyunca görüntü değişmedi",
     videoStream: "Video yayını",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} g",
@@ -489,6 +490,7 @@ export default {
       catchupUntested: "Test edilmedi",
       mislabeled: "Yanlış etiketli",
       audioOnly: "Yalnızca Ses",
+      frozenVideo: "Donmuş Video",
       duplicates: "Yinelenenler",
       pending: "Bekliyor",
     },

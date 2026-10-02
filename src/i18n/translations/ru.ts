@@ -409,6 +409,7 @@ export default {
     drmProtected: "Поток с защитой DRM",
     logoAlt: "Логотип {name}",
     audioOnlyStream: "Только аудио",
+    frozenVideo: "Застывшее видео: изображение не менялось во время замера битрейта",
     videoStream: "Видеопоток",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} д",
@@ -514,6 +515,7 @@ export default {
       catchupUntested: "Не проверен",
       mislabeled: "Неверная метка",
       audioOnly: "Только аудио",
+      frozenVideo: "Застывшее видео",
       duplicates: "Дубликаты",
       pending: "Ожидают",
     },
