@@ -53,7 +53,7 @@ async fn server_test_get(
     client: &reqwest::Client,
     url: &str,
 ) -> Result<reqwest::Response, SafeFetchError> {
-    fetch_with_hop_validation(url, |target| client.get(target)).await
+    fetch_with_hop_validation(url, false, |target| client.get(target)).await
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -60,7 +60,7 @@ interface PersistOptions {
 
 const SAVE_DEBOUNCE_MS = 280;
 const inputClass =
-  "native-field w-full min-h-9 px-3 py-1.5 text-[13px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500";
+  "native-field min-h-9 px-3 py-1.5 text-[13px] bg-input border border-border-app rounded-md text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-blue-500";
 const blockClass = "rounded-2xl border border-border-app/70 bg-panel-subtle";
 const rowClass =
   "flex items-center justify-between gap-3 px-4 py-3 border-b border-border-subtle last:border-b-0";
@@ -1121,7 +1121,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     }}
                     step="0.5"
                     min="0.5"
-                    className={inputClass}
+                    className={`${inputClass} w-full`}
                   />
                 </div>
 
@@ -1146,7 +1146,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     placeholder={t("settings.scanning.extendedTimeoutPlaceholder")}
                     step="1"
                     min="1"
-                    className={inputClass}
+                    className={`${inputClass} w-full`}
                   />
                 </div>
 
@@ -1172,7 +1172,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     }}
                     min="0"
                     max="20"
-                    className={inputClass}
+                    className={`${inputClass} w-full`}
                   />
                   <p className="text-[11px] text-text-quaternary mt-1">
                     {t("settings.scanning.concurrencyHint")}
@@ -1199,7 +1199,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     }}
                     min="0"
                     max="10"
-                    className={inputClass}
+                    className={`${inputClass} w-full`}
                   />
                 </div>
 
@@ -1456,7 +1456,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     }}
                     min="0"
                     max="100"
-                    className={inputClass}
+                    className={`${inputClass} w-full`}
                   />
                 </div>
 
@@ -1477,7 +1477,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     step="0.5"
                     min="1"
                     max="50"
-                    className={inputClass}
+                    className={`${inputClass} w-full`}
                   />
                 </div>
               </div>
@@ -1718,7 +1718,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     onChange={(event) =>
                       updateSetting("log_level", event.target.value, { immediate: true })
                     }
-                    className={inputClass}
+                    className={`${inputClass} w-full`}
                   >
                     <option value="error">{t("settings.advanced.logLevel.error")}</option>
                     <option value="warn">{t("settings.advanced.logLevel.warn")}</option>
@@ -1744,7 +1744,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     }}
                     min="1"
                     max="200"
-                    className={inputClass}
+                    className={`${inputClass} w-full`}
                   />
                 </div>
               </div>
@@ -1770,7 +1770,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     step="1"
                     min="1"
                     max="300"
-                    className={inputClass}
+                    className={`${inputClass} w-full`}
                   />
                 </div>
 
@@ -1791,7 +1791,7 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     step="1"
                     min="5"
                     max="300"
-                    className={inputClass}
+                    className={`${inputClass} w-full`}
                   />
                 </div>
               </div>

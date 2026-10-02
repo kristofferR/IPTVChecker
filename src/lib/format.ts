@@ -1,4 +1,4 @@
-import { getFormatLocale, type MessageKey, t } from "../i18n";
+import { getFormatLocale, isolateLtr, type MessageKey, t } from "../i18n";
 import type { ChannelResult, ChannelStatus } from "./types";
 
 const STATUS_METADATA: Record<
@@ -92,6 +92,12 @@ export function statusIcon(status: ChannelStatus): string {
   return STATUS_METADATA[status].icon;
 }
 
+/** Shows the backend's fixed English "N kbps" video bitrate in the UI's unit. */
+export function formatVideoBitrate(value: string): string {
+  const kbps = /^(\d+(?:\.\d+)?) kbps$/.exec(value);
+  return kbps ? t("format.kbps", { value: kbps[1] }) : value;
+}
+
 export function formatVideoInfo(result: ChannelResult): string {
   const parts: string[] = [];
   if (result.resolution && result.resolution !== "Unknown") {
@@ -110,7 +116,8 @@ export function formatVideoInfo(result: ChannelResult): string {
     result.video_bitrate !== "Unknown" &&
     result.video_bitrate !== "N/A"
   ) {
-    return `${base} (${result.video_bitrate})`;
+    // One left-to-right technical value, even with a right-to-left bitrate unit.
+    return isolateLtr(`${base} (${formatVideoBitrate(result.video_bitrate)})`);
   }
   return base;
 }

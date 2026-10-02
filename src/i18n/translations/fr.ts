@@ -778,7 +778,7 @@ export default {
       minVideoBitrate: {
         label: "Débit vidéo minimal",
         description:
-          "Signale les flux mesurés sous ce nombre de kbps. Laissez vide pour désactiver.",
+          "Signale les flux mesurés sous ce nombre de kbit/s. Laissez vide pour désactiver.",
         placeholder: "Désactivé",
       },
       sourceFilterBar: {
