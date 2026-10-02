@@ -66,6 +66,8 @@ export interface ChannelResult {
   low_framerate: boolean;
   /** The picture stayed still through the bitrate profiling sample. */
   frozen_video: boolean;
+  /** Bitrate profiling measured the video below the minimum bitrate setting. */
+  low_bitrate: boolean;
   error_message: string | null;
   channel_id: string;
   extinf_line: string;
@@ -418,6 +420,8 @@ export interface AppSettings {
   scan_history_limit: number;
   scan_notifications: boolean;
   low_fps_threshold: number;
+  /** Profiled streams below this video bitrate are flagged; null is off. */
+  min_video_bitrate_kbps: number | null;
   theme: ThemePreference;
   /** UI language tag; null until chosen (English). Applies after a restart. */
   language: string | null;
@@ -458,6 +462,7 @@ export interface ScanPresetConfig {
   test_geoblock: boolean;
   screenshots_dir: string | null;
   low_fps_threshold: number;
+  min_video_bitrate_kbps: number | null;
   screenshot_format: ScreenshotFormat;
   auto_capture_sample_clips: boolean;
   sample_clip_duration_secs: number;

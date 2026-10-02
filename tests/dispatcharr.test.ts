@@ -67,6 +67,7 @@ function makeResult(
     label_mismatches: [],
     low_framerate: false,
     frozen_video: false,
+    low_bitrate: false,
     error_message: null,
     channel_id: String(index),
     extinf_line: extinfLine,

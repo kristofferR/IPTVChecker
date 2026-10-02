@@ -221,6 +221,9 @@ pub struct ChannelResult {
     /// The picture stayed still through the bitrate profiling sample.
     #[serde(default)]
     pub frozen_video: bool,
+    /// Bitrate profiling measured the video below the minimum bitrate setting.
+    #[serde(default)]
+    pub low_bitrate: bool,
     pub error_message: Option<String>,
     pub channel_id: String,
     pub extinf_line: String,
@@ -274,6 +277,7 @@ mod tests {
             label_mismatches: Vec::new(),
             low_framerate: false,
             frozen_video: false,
+            low_bitrate: false,
             error_message: None,
             channel_id: "id-0".to_string(),
             extinf_line: "#EXTINF:-1,Channel".to_string(),

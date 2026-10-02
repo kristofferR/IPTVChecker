@@ -2480,6 +2480,15 @@ fn normalize_superscript(s: &str) -> String {
 }
 
 /// Check label mismatch between channel name and actual resolution.
+/// Leading number of a "4500 kbps" style bitrate string.
+pub(crate) fn parse_kbps(value: Option<&str>) -> Option<f64> {
+    let number = value?
+        .trim()
+        .split(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .next()?;
+    number.parse::<f64>().ok().filter(|kbps| *kbps > 0.0)
+}
+
 pub fn check_label_mismatch(channel_name: &str, resolution: &str) -> Vec<String> {
     let name_lower = normalize_superscript(channel_name).to_lowercase();
     let mut mismatches = Vec::new();

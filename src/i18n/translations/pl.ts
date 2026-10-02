@@ -412,6 +412,7 @@ export default {
     logoAlt: "Logo {name}",
     audioOnlyStream: "Strumień tylko audio",
     frozenVideo: "Zamrożony obraz: obraz nie zmienił się podczas próbki przepływności",
+    lowBitrate: "Niski bitrate: poniżej minimalnego bitrate'u wideo",
     videoStream: "Strumień wideo",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} d",
@@ -518,6 +519,7 @@ export default {
       mislabeled: "Błędna etykieta",
       audioOnly: "Tylko audio",
       frozenVideo: "Zamrożony obraz",
+      lowBitrate: "Niski bitrate",
       duplicates: "Duplikaty",
       pending: "Oczekuje",
     },
@@ -799,6 +801,12 @@ export default {
         description:
           "Nagrywa 10 s każdego strumienia, aby dokładnie zmierzyć bitrate wideo. Znacznie wolniej.",
         ariaLabel: "Mierz bitrate",
+      },
+      minVideoBitrate: {
+        label: "Minimalny bitrate wideo",
+        description:
+          "Oznacza zmierzone strumienie poniżej tylu kb/s. Pozostaw puste, aby wyłączyć.",
+        placeholder: "Wyłączony",
       },
       sourceFilterBar: {
         label: "Pokaż pasek filtra źródła",
@@ -1616,6 +1624,7 @@ export default {
       encryptedStream: "Strumień zaszyfrowany",
       labelMismatch: "Niezgodna etykieta",
       lowFramerate: "Niska liczba klatek: {fps} kl./s",
+      lowBitrate: "Niski bitrate: {bitrate}",
       diagnostics: "Diagnostyka",
       retriesUsed: "Wykorzystane ponowienia: {count}",
       lastError: "Ostatni błąd: {reason}",

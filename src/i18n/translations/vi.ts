@@ -368,6 +368,7 @@ export default {
     logoAlt: "Logo {name}",
     audioOnlyStream: "Luồng chỉ có âm thanh",
     frozenVideo: "Video bị đứng hình: hình ảnh không thay đổi trong suốt mẫu đo bitrate",
+    lowBitrate: "Bitrate thấp: dưới bitrate video tối thiểu",
     videoStream: "Luồng video",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} ngày",
@@ -474,6 +475,7 @@ export default {
       mislabeled: "Sai nhãn",
       audioOnly: "Chỉ âm thanh",
       frozenVideo: "Video bị đứng hình",
+      lowBitrate: "Bitrate thấp",
       duplicates: "Trùng lặp",
       pending: "Đang chờ",
     },
@@ -680,6 +682,11 @@ export default {
         description:
           "Ghi 10 giây của mỗi luồng để có giá trị bitrate video chính xác. Chậm hơn nhiều.",
         ariaLabel: "Đo bitrate",
+      },
+      minVideoBitrate: {
+        label: "Bitrate video tối thiểu",
+        description: "Đánh dấu các luồng đã đo có bitrate dưới số kbps này. Để trống để tắt.",
+        placeholder: "Tắt",
       },
       sourceFilterBar: {
         label: "Hiện thanh bộ lọc nguồn",
@@ -1317,6 +1324,7 @@ export default {
       encryptedStream: "Luồng mã hóa",
       labelMismatch: "Nhãn không khớp",
       lowFramerate: "Tốc độ khung hình thấp: {fps} fps",
+      lowBitrate: "Bitrate thấp: {bitrate}",
       diagnostics: "Chẩn đoán",
       retriesUsed: "Số lần thử lại: {count}",
       lastError: "Lỗi gần nhất: {reason}",

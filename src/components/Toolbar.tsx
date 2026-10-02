@@ -1150,6 +1150,11 @@ export const Toolbar = memo(function Toolbar({
                 {statusLabel("frozen_video", t("toolbar.status.frozenVideo"))}
               </option>
             )}
+            {(statusOptionCounts.low_bitrate > 0 || statusFilter === "low_bitrate") && (
+              <option value="low_bitrate">
+                {statusLabel("low_bitrate", t("toolbar.status.lowBitrate"))}
+              </option>
+            )}
             <option value="duplicates">
               {statusLabel("duplicates", t("toolbar.status.duplicates"))}
             </option>

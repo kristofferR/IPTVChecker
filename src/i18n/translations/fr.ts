@@ -401,6 +401,7 @@ export default {
     logoAlt: "Logo de {name}",
     audioOnlyStream: "Flux audio uniquement",
     frozenVideo: "Vidéo figée : l'image n'a pas changé pendant l'échantillon de débit",
+    lowBitrate: "Débit faible : sous le débit vidéo minimal",
     videoStream: "Flux vidéo",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} j",
@@ -507,6 +508,7 @@ export default {
       mislabeled: "Mal étiqueté",
       audioOnly: "Audio uniquement",
       frozenVideo: "Vidéo figée",
+      lowBitrate: "Débit faible",
       duplicates: "Doublons",
       pending: "En attente",
     },
@@ -772,6 +774,12 @@ export default {
         description:
           "Enregistre 10 s de chaque flux pour obtenir un débit vidéo précis. Beaucoup plus lent.",
         ariaLabel: "Mesurer le débit",
+      },
+      minVideoBitrate: {
+        label: "Débit vidéo minimal",
+        description:
+          "Signale les flux mesurés sous ce nombre de kbps. Laissez vide pour désactiver.",
+        placeholder: "Désactivé",
       },
       sourceFilterBar: {
         label: "Afficher la barre de filtre de source",
@@ -1502,6 +1510,7 @@ export default {
       encryptedStream: "Flux chiffré",
       labelMismatch: "Étiquette incorrecte",
       lowFramerate: "Fréquence d'images faible : {fps} i/s",
+      lowBitrate: "Débit faible : {bitrate}",
       diagnostics: "Diagnostic",
       retriesUsed: "Tentatives utilisées : {count}",
       lastError: "Dernière erreur : {reason}",

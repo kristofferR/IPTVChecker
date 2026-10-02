@@ -650,6 +650,14 @@ export function ThumbnailPanel({
           </div>
         )}
 
+        {result.low_bitrate && (
+          <div className="p-2 rounded bg-orange-500/10 border border-orange-500/20">
+            <p className="text-[11px] text-orange-400">
+              {t("player.panel.lowBitrate", { bitrate: result.video_bitrate ?? "" })}
+            </p>
+          </div>
+        )}
+
         {(retryCount > 0 || lastErrorReason) && (
           <div className="p-2 rounded bg-panel-subtle border border-border-subtle">
             <p className="text-[12px] font-medium text-text-primary">

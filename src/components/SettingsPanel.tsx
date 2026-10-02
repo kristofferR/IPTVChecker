@@ -83,6 +83,7 @@ function buildScanPresetConfig(settings: AppSettings): ScanPresetConfig {
     test_geoblock: settings.test_geoblock,
     screenshots_dir: settings.screenshots_dir,
     low_fps_threshold: settings.low_fps_threshold,
+    min_video_bitrate_kbps: settings.min_video_bitrate_kbps,
     screenshot_format: settings.screenshot_format,
     auto_capture_sample_clips: settings.auto_capture_sample_clips,
     sample_clip_duration_secs: settings.sample_clip_duration_secs,
@@ -107,6 +108,7 @@ function applyScanPresetConfig(base: AppSettings, config: ScanPresetConfig): App
     test_geoblock: config.test_geoblock,
     screenshots_dir: config.screenshots_dir,
     low_fps_threshold: config.low_fps_threshold,
+    min_video_bitrate_kbps: config.min_video_bitrate_kbps,
     screenshot_format: config.screenshot_format,
     auto_capture_sample_clips: config.auto_capture_sample_clips,
     sample_clip_duration_secs: config.sample_clip_duration_secs,
@@ -780,6 +782,35 @@ export function SettingsPanel({ settings, onSave }: SettingsPanelProps) {
                     updateSetting("profile_bitrate", checked, { immediate: true })
                   }
                   ariaLabel={t("settings.general.profileBitrate.ariaLabel")}
+                />
+              </div>
+              <div className={rowClass}>
+                <div>
+                  <label htmlFor="min-video-bitrate" className="block text-[13px] font-medium">
+                    {t("settings.general.minVideoBitrate.label")}
+                  </label>
+                  <p className="text-[11px] text-text-tertiary mt-0.5">
+                    {t("settings.general.minVideoBitrate.description")}
+                  </p>
+                </div>
+                <input
+                  id="min-video-bitrate"
+                  type="number"
+                  dir="ltr"
+                  value={draft.min_video_bitrate_kbps ?? ""}
+                  disabled={!draft.profile_bitrate}
+                  onChange={(event) => {
+                    const value = Math.round(parseFloat(event.target.value));
+                    updateSetting(
+                      "min_video_bitrate_kbps",
+                      Number.isNaN(value) || value < 1 ? null : Math.min(100_000, value),
+                    );
+                  }}
+                  placeholder={t("settings.general.minVideoBitrate.placeholder")}
+                  step="100"
+                  min="1"
+                  max="100000"
+                  className={`${inputClass} w-24 disabled:opacity-50`}
                 />
               </div>
             </section>

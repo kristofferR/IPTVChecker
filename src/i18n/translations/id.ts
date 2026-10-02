@@ -372,6 +372,7 @@ export default {
     logoAlt: "Logo {name}",
     audioOnlyStream: "Stream audio saja",
     frozenVideo: "Video beku: gambar tidak berubah selama sampel bitrate",
+    lowBitrate: "Bitrate rendah: di bawah bitrate video minimum",
     videoStream: "Stream video",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} h",
@@ -478,6 +479,7 @@ export default {
       mislabeled: "Label salah",
       audioOnly: "Audio Saja",
       frozenVideo: "Video Beku",
+      lowBitrate: "Bitrate Rendah",
       duplicates: "Duplikat",
       pending: "Menunggu",
     },
@@ -696,6 +698,11 @@ export default {
         description:
           "Merekam 10 dtk dari setiap stream untuk nilai bitrate video yang akurat. Jauh lebih lambat.",
         ariaLabel: "Ukur bitrate",
+      },
+      minVideoBitrate: {
+        label: "Bitrate video minimum",
+        description: "Tandai stream terukur yang di bawah kbps ini. Kosongkan untuk menonaktifkan.",
+        placeholder: "Nonaktif",
       },
       sourceFilterBar: {
         label: "Tampilkan bilah filter sumber",
@@ -1336,6 +1343,7 @@ export default {
       encryptedStream: "Stream terenkripsi",
       labelMismatch: "Label Tidak Sesuai",
       lowFramerate: "Frame rate rendah: {fps} fps",
+      lowBitrate: "Bitrate rendah: {bitrate}",
       diagnostics: "Diagnostik",
       retriesUsed: "Percobaan ulang terpakai: {count}",
       lastError: "Kesalahan terakhir: {reason}",

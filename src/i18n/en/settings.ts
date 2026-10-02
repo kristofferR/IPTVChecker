@@ -57,6 +57,12 @@ export default {
       description: "Captures 10s of each stream for accurate video bitrate values. Much slower.",
       ariaLabel: "Profile bitrate",
     },
+    minVideoBitrate: {
+      label: "Minimum video bitrate",
+      description:
+        "Flag profiled streams that measure below this many kbps. Leave empty to turn off.",
+      placeholder: "Off",
+    },
     sourceFilterBar: {
       label: "Show source filter bar",
       description: "Display the regex source filter bar above the table.",

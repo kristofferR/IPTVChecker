@@ -384,6 +384,7 @@ export default {
     logoAlt: "{name} logosu",
     audioOnlyStream: "Yalnızca ses yayını",
     frozenVideo: "Donmuş video: bit hızı örneği boyunca görüntü değişmedi",
+    lowBitrate: "Düşük bit hızı: minimum video bit hızının altında",
     videoStream: "Video yayını",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} g",
@@ -491,6 +492,7 @@ export default {
       mislabeled: "Yanlış etiketli",
       audioOnly: "Yalnızca Ses",
       frozenVideo: "Donmuş Video",
+      lowBitrate: "Düşük Bit Hızı",
       duplicates: "Yinelenenler",
       pending: "Bekliyor",
     },
@@ -741,6 +743,12 @@ export default {
         description:
           "Doğru video bit hızı değerleri için her yayından 10 sn kaydeder. Çok daha yavaştır.",
         ariaLabel: "Bit hızını ölç",
+      },
+      minVideoBitrate: {
+        label: "Minimum video bit hızı",
+        description:
+          "Bu kbps değerinin altında ölçülen yayınları işaretler. Kapatmak için boş bırakın.",
+        placeholder: "Kapalı",
       },
       sourceFilterBar: {
         label: "Kaynak filtresi çubuğunu göster",
@@ -1394,6 +1402,7 @@ export default {
       encryptedStream: "Şifreli yayın",
       labelMismatch: "Etiket Uyuşmazlığı",
       lowFramerate: "Düşük kare hızı: {fps} fps",
+      lowBitrate: "Düşük bit hızı: {bitrate}",
       diagnostics: "Tanılama",
       retriesUsed: "Kullanılan yeniden deneme: {count}",
       lastError: "Son hata: {reason}",

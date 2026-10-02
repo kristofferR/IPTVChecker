@@ -68,6 +68,7 @@ export default {
   logoAlt: "{name} logo",
   audioOnlyStream: "Audio-only stream",
   frozenVideo: "Frozen video: the picture did not change during the bitrate sample",
+  lowBitrate: "Low bitrate: below the minimum video bitrate",
   videoStream: "Video stream",
   catchup: {
     shallowerChip: "⚠ {measured}/{days}d",

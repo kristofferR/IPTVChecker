@@ -57,6 +57,7 @@ struct SharedUrlResult {
     sample_clip: Option<ffmpeg::SampleClip>,
     low_framerate: bool,
     frozen_video: bool,
+    low_bitrate: bool,
     stream_url: Option<String>,
     retry_count: Option<u32>,
     error_reason: Option<String>,
@@ -91,6 +92,7 @@ impl SharedUrlResult {
             sample_clip: None,
             low_framerate: false,
             frozen_video: false,
+            low_bitrate: false,
             stream_url,
             retry_count,
             error_reason,
@@ -180,6 +182,18 @@ fn apply_combined_screenshot_outcome(
 
 use crate::urlnorm::canonicalize_stream_url;
 
+/// An alive video stream measured below `min_kbps`. A stream without a
+/// measured bitrate is never flagged.
+fn is_low_bitrate(shared: &SharedUrlResult, min_kbps: Option<u32>) -> bool {
+    let (Some(min), Some(kbps)) = (
+        min_kbps,
+        ffmpeg::parse_kbps(shared.video_bitrate.as_deref()),
+    ) else {
+        return false;
+    };
+    shared.status == ChannelStatus::Alive && !shared.audio_only && kbps < f64::from(min)
+}
+
 /// Hand ffmpeg the manifest URL, not the resolved leaf segment: for HLS,
 /// verify() descends to a media segment that may have rolled off the live
 /// window (404) or lack init context (invalid data). The original channel
@@ -211,6 +225,7 @@ struct SharedCheckContext<'a> {
     ffprobe_timeout_secs: f64,
     ffmpeg_bitrate_timeout_secs: f64,
     low_fps_threshold: f64,
+    min_video_bitrate_kbps: Option<u32>,
     screenshot_format: ScreenshotFormat,
     diagnostics_semaphore: &'a Arc<Semaphore>,
     single_connection_mode: bool,
@@ -248,6 +263,7 @@ async fn compute_shared_url_result(
         ffprobe_timeout_secs,
         ffmpeg_bitrate_timeout_secs,
         low_fps_threshold,
+        min_video_bitrate_kbps,
         screenshot_format,
         diagnostics_semaphore,
         single_connection_mode,
@@ -392,6 +408,7 @@ async fn compute_shared_url_result(
                 sample_clip: None,
                 low_framerate: false,
                 frozen_video: false,
+                low_bitrate: false,
                 stream_url,
                 retry_count: (retry_count > 0).then_some(retry_count),
                 error_reason,
@@ -423,6 +440,7 @@ async fn compute_shared_url_result(
         sample_clip: None,
         low_framerate: false,
         frozen_video: false,
+        low_bitrate: false,
         stream_url,
         retry_count: (retry_count > 0).then_some(retry_count),
         error_reason,
@@ -800,6 +818,7 @@ async fn compute_shared_url_result(
             }
         }
     }
+    shared.low_bitrate = profile_bitrate_flag && is_low_bitrate(&shared, min_video_bitrate_kbps);
     // Captures swallow cancellation into a missing artifact. A cancelled
     // channel must stay unscanned so resume re-checks it.
     if cancel.is_cancelled() {
@@ -2328,6 +2347,7 @@ fn build_channel_result(channel: &Channel, shared: &SharedUrlResult) -> ChannelR
         label_mismatches: Vec::new(),
         low_framerate: shared.low_framerate,
         frozen_video: shared.frozen_video,
+        low_bitrate: shared.low_bitrate,
         error_message: None,
         channel_id: parser::get_channel_id(&channel.url),
         extinf_line: channel.extinf_line.clone(),
@@ -2631,9 +2651,13 @@ async fn execute_scan_run(
         usize::max(1, usize::min(config.concurrency as usize, 4))
     };
     let diagnostics_semaphore = Arc::new(Semaphore::new(diagnostics_limit));
-    let (low_fps_threshold_setting, screenshot_format_setting) = {
+    let (low_fps_threshold_setting, min_video_bitrate_kbps, screenshot_format_setting) = {
         let settings = state.settings.lock().await;
-        (settings.low_fps_threshold, settings.screenshot_format)
+        (
+            settings.low_fps_threshold,
+            settings.min_video_bitrate_kbps,
+            settings.screenshot_format,
+        )
     };
     let (tx, rx) = tokio::sync::mpsc::channel::<WorkerOutput>(256);
     let (checkpoint_tx, checkpoint_rx) =
@@ -2862,6 +2886,7 @@ async fn execute_scan_run(
                 ffprobe_timeout_secs,
                 ffmpeg_bitrate_timeout_secs,
                 low_fps_threshold,
+                min_video_bitrate_kbps,
                 screenshot_format,
                 diagnostics_semaphore: &diagnostics_semaphore,
                 single_connection_mode,
@@ -3643,6 +3668,7 @@ pub async fn dispatcharr_probe_streams(
                         ffprobe_timeout_secs: settings.ffprobe_timeout_secs,
                         ffmpeg_bitrate_timeout_secs: settings.ffmpeg_bitrate_timeout_secs,
                         low_fps_threshold: settings.low_fps_threshold,
+                        min_video_bitrate_kbps: settings.min_video_bitrate_kbps,
                         screenshot_format: settings.screenshot_format,
                         diagnostics_semaphore,
                         single_connection_mode: limit.is_some(),
@@ -3833,6 +3859,7 @@ mod tests {
             },
             low_framerate,
             frozen_video: false,
+            low_bitrate: false,
             error_message: None,
             channel_id: "id".to_string(),
             extinf_line: "#EXTINF:-1,Test".to_string(),
@@ -3886,11 +3913,39 @@ mod tests {
             sample_clip: None,
             low_framerate: false,
             frozen_video: false,
+            low_bitrate: false,
             stream_url: Some("https://example.com/live.m3u8".to_string()),
             retry_count: None,
             error_reason: None,
             channel_log: ChannelDebugLog::default(),
         }
+    }
+
+    #[test]
+    fn low_bitrate_flags_only_measured_alive_video_below_minimum() {
+        let with_bitrate = |bitrate: &str| SharedUrlResult {
+            video_bitrate: Some(bitrate.to_string()),
+            ..make_shared_result()
+        };
+        assert!(is_low_bitrate(&with_bitrate("300 kbps"), Some(500)));
+        assert!(!is_low_bitrate(&with_bitrate("500 kbps"), Some(500)));
+        assert!(!is_low_bitrate(&with_bitrate("300 kbps"), None));
+        assert!(!is_low_bitrate(&with_bitrate("N/A"), Some(500)));
+        assert!(!is_low_bitrate(&make_shared_result(), Some(500)));
+        assert!(!is_low_bitrate(
+            &SharedUrlResult {
+                audio_only: true,
+                ..with_bitrate("64 kbps")
+            },
+            Some(500)
+        ));
+        assert!(!is_low_bitrate(
+            &SharedUrlResult {
+                status: ChannelStatus::Dead,
+                ..with_bitrate("300 kbps")
+            },
+            Some(500)
+        ));
     }
 
     #[test]
