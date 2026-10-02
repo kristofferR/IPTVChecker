@@ -112,6 +112,9 @@ pub struct AppSettings {
     pub scan_history_limit: u32,
     pub scan_notifications: bool,
     pub low_fps_threshold: f64,
+    /// Profiled streams measuring below this video bitrate are flagged as low
+    /// bitrate. `None` turns the check off.
+    pub min_video_bitrate_kbps: Option<u32>,
     pub theme: ThemePreference,
     /// UI language tag; `None` until chosen (English, with a first-start offer
     /// of the system language). Applies after a restart.
@@ -201,6 +204,7 @@ scan_preset_fields! {
     test_geoblock: bool,
     screenshots_dir: Option<String>,
     low_fps_threshold: f64,
+    min_video_bitrate_kbps: Option<u32>,
     screenshot_format: ScreenshotFormat,
     auto_capture_sample_clips: bool,
     sample_clip_duration_secs: u32,
@@ -257,6 +261,7 @@ impl Default for AppSettings {
             scan_history_limit: 20,
             scan_notifications: true,
             low_fps_threshold: 23.0,
+            min_video_bitrate_kbps: None,
             theme: ThemePreference::System,
             language: None,
             title_bar: TitleBarPreference::Auto,

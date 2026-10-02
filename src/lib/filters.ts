@@ -52,6 +52,7 @@ export interface StatusOptionCounts {
   mislabeled: number;
   audio_only: number;
   frozen_video: number;
+  low_bitrate: number;
   duplicates: number;
   pending: number;
   catchup: number;
@@ -194,6 +195,9 @@ export function matchesStatusFilter(
   }
   if (statusFilter === "frozen_video") {
     return result.frozen_video;
+  }
+  if (statusFilter === "low_bitrate") {
+    return result.low_bitrate;
   }
   if (statusFilter === "catchup") {
     return hasArchive(result);
@@ -452,6 +456,7 @@ export function countStatusOptions(
     mislabeled: 0,
     audio_only: 0,
     frozen_video: 0,
+    low_bitrate: 0,
     duplicates: 0,
     pending: 0,
     catchup: 0,
@@ -510,6 +515,10 @@ export function countStatusOptions(
 
     if (result.frozen_video) {
       counts.frozen_video += 1;
+    }
+
+    if (result.low_bitrate) {
+      counts.low_bitrate += 1;
     }
 
     if (hasArchive(result)) {

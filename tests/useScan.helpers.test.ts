@@ -38,6 +38,7 @@ function buildResult(index: number, overrides: Partial<ChannelResult> = {}): Cha
     label_mismatches: [],
     low_framerate: false,
     frozen_video: false,
+    low_bitrate: false,
     error_message: null,
     channel_id: `channel-${index}`,
     extinf_line: `#EXTINF:-1,Channel ${index}`,

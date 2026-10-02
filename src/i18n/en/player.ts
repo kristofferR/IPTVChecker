@@ -89,6 +89,7 @@ export default {
     encryptedStream: "Encrypted stream",
     labelMismatch: "Label Mismatch",
     lowFramerate: "Low framerate: {fps} fps",
+    lowBitrate: "Low bitrate: {bitrate}",
     diagnostics: "Diagnostics",
     retriesUsed: "Retries used: {count}",
     lastError: "Last error: {reason}",

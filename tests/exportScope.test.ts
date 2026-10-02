@@ -38,6 +38,7 @@ function makeResult(index: number): ChannelResult {
     label_mismatches: [],
     low_framerate: false,
     frozen_video: false,
+    low_bitrate: false,
     error_message: null,
     channel_id: `id-${index}`,
     extinf_line: "#EXTINF:-1,Channel",

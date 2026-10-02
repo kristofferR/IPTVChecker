@@ -1049,6 +1049,7 @@ mod tests {
             label_mismatches: Vec::new(),
             low_framerate: false,
             frozen_video: false,
+            low_bitrate: false,
             error_message: None,
             channel_id: "42".to_string(),
             extinf_line: "#EXTINF:-1,News".to_string(),

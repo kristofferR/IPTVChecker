@@ -420,6 +420,7 @@ export default {
     logoAlt: "شعار {name}",
     audioOnlyStream: "بث صوتي فقط",
     frozenVideo: "فيديو متجمد: لم تتغير الصورة خلال عينة معدل البت",
+    lowBitrate: "معدل بت منخفض: أقل من الحد الأدنى لمعدل بت الفيديو",
     videoStream: "بث فيديو",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} ي",
@@ -525,6 +526,7 @@ export default {
       mislabeled: "وسم خاطئ",
       audioOnly: "صوت فقط",
       frozenVideo: "فيديو متجمد",
+      lowBitrate: "معدل بت منخفض",
       duplicates: "المكررات",
       pending: "قيد الانتظار",
     },
@@ -831,6 +833,12 @@ export default {
         label: "قياس معدل بت الفيديو",
         description: "يلتقط 10 ثوانٍ من كل بث للحصول على قيم دقيقة لمعدل بت الفيديو. أبطأ بكثير.",
         ariaLabel: "قياس معدل البت",
+      },
+      minVideoBitrate: {
+        label: "الحد الأدنى لمعدل بت الفيديو",
+        description:
+          "تُعلَّم البثوث المقيسة التي يقل معدل بتها عن هذا العدد من kbps. اتركه فارغًا لإيقافه.",
+        placeholder: "معطّل",
       },
       sourceFilterBar: {
         label: "إظهار شريط تصفية المصدر",
@@ -1710,6 +1718,7 @@ export default {
       encryptedStream: "بث مشفّر",
       labelMismatch: "عدم تطابق الوسم",
       lowFramerate: "معدل إطارات منخفض: {fps} fps",
+      lowBitrate: "معدل بت منخفض: {bitrate}",
       diagnostics: "التشخيص",
       retriesUsed: "المحاولات المستخدمة: {count}",
       lastError: "آخر خطأ: {reason}",

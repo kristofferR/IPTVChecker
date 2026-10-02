@@ -7,6 +7,7 @@
 //! cache, and scan pipeline unchanged. The write-back helpers (stats, stream
 //! order, deletes) key off those IDs.
 
+use crate::engine::ffmpeg::parse_kbps;
 use crate::engine::parser::{escape_extinf_value, flatten_extinf_title, parse_extinf_attributes};
 use crate::engine::remote_cache::{
     parse_http_url, PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT, PLAYLIST_DOWNLOAD_USER_AGENT,
@@ -1476,15 +1477,6 @@ pub(crate) fn build_m3u(
 }
 
 // ── Stats ───────────────────────────────────────────────────────────────────
-
-/// Leading number of a "4500 kbps" style bitrate string.
-fn parse_kbps(value: Option<&str>) -> Option<f64> {
-    let number = value?
-        .trim()
-        .split(|c: char| !(c.is_ascii_digit() || c == '.'))
-        .next()?;
-    number.parse::<f64>().ok().filter(|kbps| *kbps > 0.0)
-}
 
 /// Probe stats in Dispatcharr's own `stream_stats` keys, so its UI renders
 /// them. Unknown values are omitted rather than written as null.

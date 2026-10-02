@@ -404,6 +404,7 @@ export default {
     logoAlt: "Logotipo de {name}",
     audioOnlyStream: "Stream solo de audio",
     frozenVideo: "Vídeo congelado: la imagen no cambió durante la muestra de tasa de bits",
+    lowBitrate: "Bitrate bajo: por debajo del bitrate de vídeo mínimo",
     videoStream: "Stream de vídeo",
     catchup: {
       shallowerChip: "⚠ {measured}/{days}d",
@@ -510,6 +511,7 @@ export default {
       mislabeled: "Mal etiquetado",
       audioOnly: "Solo audio",
       frozenVideo: "Vídeo congelado",
+      lowBitrate: "Bitrate bajo",
       duplicates: "Duplicados",
       pending: "Pendiente",
     },
@@ -775,6 +777,12 @@ export default {
         description:
           "Captura 10 s de cada stream para obtener un bitrate de vídeo preciso. Mucho más lento.",
         ariaLabel: "Medir bitrate",
+      },
+      minVideoBitrate: {
+        label: "Bitrate de vídeo mínimo",
+        description:
+          "Marca los streams medidos por debajo de estos kbps. Déjalo vacío para desactivarlo.",
+        placeholder: "Desactivado",
       },
       sourceFilterBar: {
         label: "Mostrar la barra de filtro de origen",
@@ -1507,6 +1515,7 @@ export default {
       encryptedStream: "Stream cifrado",
       labelMismatch: "Etiqueta incorrecta",
       lowFramerate: "Tasa de fotogramas baja: {fps} fps",
+      lowBitrate: "Bitrate bajo: {bitrate}",
       diagnostics: "Diagnóstico",
       retriesUsed: "Reintentos usados: {count}",
       lastError: "Último error: {reason}",

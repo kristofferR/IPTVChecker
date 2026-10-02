@@ -78,6 +78,7 @@ export default {
     mislabeled: "Mislabeled",
     audioOnly: "Audio Only",
     frozenVideo: "Frozen Video",
+    lowBitrate: "Low Bitrate",
     duplicates: "Duplicates",
     pending: "Pending",
   },

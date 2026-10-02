@@ -357,6 +357,7 @@ export default {
     logoAlt: "{name} 台标",
     audioOnlyStream: "纯音频流",
     frozenVideo: "画面冻结：码率采样期间画面没有变化",
+    lowBitrate: "低码率：低于最低视频码率",
     videoStream: "视频流",
     catchup: {
       shallowerChip: "⚠ {measured}/{days}天",
@@ -462,6 +463,7 @@ export default {
       mislabeled: "标注不符",
       audioOnly: "纯音频",
       frozenVideo: "画面冻结",
+      lowBitrate: "低码率",
       duplicates: "重复项",
       pending: "待检测",
     },
@@ -667,6 +669,11 @@ export default {
         label: "分析视频码率",
         description: "录制每个流 10 秒以获取准确的视频码率，速度会慢很多。",
         ariaLabel: "分析码率",
+      },
+      minVideoBitrate: {
+        label: "最低视频码率",
+        description: "分析后低于此 kbps 的流会被标记。留空则关闭。",
+        placeholder: "关闭",
       },
       sourceFilterBar: {
         label: "显示来源筛选栏",
@@ -1290,6 +1297,7 @@ export default {
       encryptedStream: "加密流",
       labelMismatch: "标注不符",
       lowFramerate: "低帧率：{fps} fps",
+      lowBitrate: "低码率：{bitrate}",
       diagnostics: "诊断",
       retriesUsed: "已重试次数：{count}",
       lastError: "最近错误：{reason}",

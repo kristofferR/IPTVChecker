@@ -374,6 +374,7 @@ export default {
     logoAlt: "لوگوی {name}",
     audioOnlyStream: "استریم فقط صوتی",
     frozenVideo: "ویدیوی ثابت: تصویر در طول نمونه‌برداری نرخ بیت تغییر نکرد",
+    lowBitrate: "نرخ بیت پایین: کمتر از حداقل نرخ بیت ویدیو",
     videoStream: "استریم ویدیویی",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} روز",
@@ -480,6 +481,7 @@ export default {
       mislabeled: "برچسب نادرست",
       audioOnly: "فقط صدا",
       frozenVideo: "ویدیوی ثابت",
+      lowBitrate: "نرخ بیت پایین",
       duplicates: "تکراری‌ها",
       pending: "در انتظار",
     },
@@ -723,6 +725,12 @@ export default {
         label: "اندازه‌گیری نرخ بیت ویدیو",
         description: "از هر استریم 10 ثانیه ضبط می‌کند تا نرخ بیت ویدیو دقیق باشد. بسیار کندتر است.",
         ariaLabel: "اندازه‌گیری نرخ بیت",
+      },
+      minVideoBitrate: {
+        label: "حداقل نرخ بیت ویدیو",
+        description:
+          "استریم‌های اندازه‌گیری‌شده زیر این مقدار kbps علامت‌گذاری می‌شوند. برای خاموش کردن خالی بگذارید.",
+        placeholder: "خاموش",
       },
       sourceFilterBar: {
         label: "نمایش نوار فیلتر منبع",
@@ -1372,6 +1380,7 @@ export default {
       encryptedStream: "استریم رمزگذاری‌شده",
       labelMismatch: "عدم تطابق برچسب",
       lowFramerate: "نرخ فریم پایین: {fps} fps",
+      lowBitrate: "نرخ بیت پایین: {bitrate}",
       diagnostics: "عیب‌یابی",
       retriesUsed: "تلاش‌های دوباره: {count}",
       lastError: "آخرین خطا: {reason}",

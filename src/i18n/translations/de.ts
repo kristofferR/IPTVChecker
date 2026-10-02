@@ -381,6 +381,7 @@ export default {
     logoAlt: "Logo von {name}",
     audioOnlyStream: "Reiner Audiostream",
     frozenVideo: "Standbild: Das Bild hat sich während der Bitraten-Messung nicht verändert",
+    lowBitrate: "Niedrige Bitrate: unter der Mindest-Video-Bitrate",
     videoStream: "Videostream",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} T",
@@ -487,6 +488,7 @@ export default {
       mislabeled: "Falsch gekennzeichnet",
       audioOnly: "Nur Audio",
       frozenVideo: "Standbild",
+      lowBitrate: "Niedrige Bitrate",
       duplicates: "Duplikate",
       pending: "Ausstehend",
     },
@@ -733,6 +735,12 @@ export default {
         description:
           "Nimmt 10 s jedes Streams auf, um die Video-Bitrate genau zu bestimmen. Deutlich langsamer.",
         ariaLabel: "Bitrate messen",
+      },
+      minVideoBitrate: {
+        label: "Mindest-Video-Bitrate",
+        description:
+          "Gemessene Streams unter so vielen kbps markieren. Leer lassen zum Deaktivieren.",
+        placeholder: "Aus",
       },
       sourceFilterBar: {
         label: "Quellfilterleiste anzeigen",
@@ -1393,6 +1401,7 @@ export default {
       encryptedStream: "Verschlüsselter Stream",
       labelMismatch: "Falsche Kennzeichnung",
       lowFramerate: "Niedrige Bildrate: {fps} fps",
+      lowBitrate: "Niedrige Bitrate: {bitrate}",
       diagnostics: "Diagnose",
       retriesUsed: "Wiederholungen: {count}",
       lastError: "Letzter Fehler: {reason}",

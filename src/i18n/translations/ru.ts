@@ -410,6 +410,7 @@ export default {
     logoAlt: "Логотип {name}",
     audioOnlyStream: "Только аудио",
     frozenVideo: "Застывшее видео: изображение не менялось во время замера битрейта",
+    lowBitrate: "Низкий битрейт: ниже минимального битрейта видео",
     videoStream: "Видеопоток",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} д",
@@ -516,6 +517,7 @@ export default {
       mislabeled: "Неверная метка",
       audioOnly: "Только аудио",
       frozenVideo: "Застывшее видео",
+      lowBitrate: "Низкий битрейт",
       duplicates: "Дубликаты",
       pending: "Ожидают",
     },
@@ -795,6 +797,12 @@ export default {
         description:
           "Записывает 10 с каждого потока для точного значения битрейта видео. Значительно медленнее.",
         ariaLabel: "Измерять битрейт",
+      },
+      minVideoBitrate: {
+        label: "Минимальный битрейт видео",
+        description:
+          "Отмечать измеренные потоки ниже этого значения в кбит/с. Оставьте пустым, чтобы отключить.",
+        placeholder: "Выкл.",
       },
       sourceFilterBar: {
         label: "Показывать панель фильтра источника",
@@ -1611,6 +1619,7 @@ export default {
       encryptedStream: "Зашифрованный поток",
       labelMismatch: "Несоответствие метки",
       lowFramerate: "Низкая частота кадров: {fps} к/с",
+      lowBitrate: "Низкий битрейт: {bitrate}",
       diagnostics: "Диагностика",
       retriesUsed: "Использовано повторов: {count}",
       lastError: "Последняя ошибка: {reason}",

@@ -411,6 +411,7 @@ export default {
     logoAlt: "Логотип {name}",
     audioOnlyStream: "Лише аудіо",
     frozenVideo: "Застигле відео: зображення не змінювалося під час заміру бітрейту",
+    lowBitrate: "Низький бітрейт: нижче мінімального бітрейту відео",
     videoStream: "Відеопотік",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} д",
@@ -517,6 +518,7 @@ export default {
       mislabeled: "Хибна позначка",
       audioOnly: "Лише аудіо",
       frozenVideo: "Застигле відео",
+      lowBitrate: "Низький бітрейт",
       duplicates: "Дублікати",
       pending: "Очікують",
     },
@@ -794,6 +796,12 @@ export default {
         description:
           "Записує 10 с кожного потоку для точного значення бітрейту відео. Значно повільніше.",
         ariaLabel: "Вимірювати бітрейт",
+      },
+      minVideoBitrate: {
+        label: "Мінімальний бітрейт відео",
+        description:
+          "Позначати виміряні потоки нижче цього значення в кбіт/с. Залиште порожнім, щоб вимкнути.",
+        placeholder: "Вимк.",
       },
       sourceFilterBar: {
         label: "Показувати панель фільтра джерела",
@@ -1610,6 +1618,7 @@ export default {
       encryptedStream: "Зашифрований потік",
       labelMismatch: "Невідповідність позначки",
       lowFramerate: "Низька частота кадрів: {fps} к/с",
+      lowBitrate: "Низький бітрейт: {bitrate}",
       diagnostics: "Діагностика",
       retriesUsed: "Використано повторів: {count}",
       lastError: "Остання помилка: {reason}",

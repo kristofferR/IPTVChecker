@@ -11,6 +11,7 @@ function makeResult(
     status: ChannelStatus;
     audioOnly?: boolean;
     frozenVideo?: boolean;
+    lowBitrate?: boolean;
     labelMismatches?: string[];
     catchup?: string;
     catchupDays?: number;
@@ -49,6 +50,7 @@ function makeResult(
     label_mismatches: options.labelMismatches ?? [],
     low_framerate: false,
     frozen_video: options.frozenVideo ?? false,
+    low_bitrate: options.lowBitrate ?? false,
     error_message: null,
     channel_id: `id-${index}`,
     extinf_line: "#EXTINF:-1,Channel",
@@ -120,6 +122,23 @@ describe("filterResults", () => {
     expect(countStatusOptions(withFrozen, "", "all").frozen_video).toBe(1);
   });
 
+  it("filters and counts low bitrate", () => {
+    const withLowBitrate = [
+      ...results,
+      makeResult(3, {
+        name: "Slide",
+        playlist: "Primary",
+        group: "News",
+        status: "alive",
+        lowBitrate: true,
+      }),
+    ];
+    expect(filterResults(withLowBitrate, "", "all", "low_bitrate").map((r) => r.index)).toEqual([
+      3,
+    ]);
+    expect(countStatusOptions(withLowBitrate, "", "all").low_bitrate).toBe(1);
+  });
+
   it("supports mislabeled status filter", () => {
     const resultsWithMislabeled = [
       ...results,
@@ -162,6 +181,7 @@ describe("filterResults", () => {
       mislabeled: 1,
       audio_only: 2,
       frozen_video: 0,
+      low_bitrate: 0,
       duplicates: 2,
       pending: 1,
       catchup: 0,

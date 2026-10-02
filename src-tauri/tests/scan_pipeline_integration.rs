@@ -135,6 +135,7 @@ fn make_result(
         label_mismatches: Vec::new(),
         low_framerate: false,
         frozen_video: false,
+        low_bitrate: false,
         error_message: None,
         channel_id: format!("id-{}", index),
         extinf_line: format!("#EXTINF:-1,Channel {}", index),

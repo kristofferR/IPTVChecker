@@ -25,6 +25,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   scan_history_limit: 20,
   scan_notifications: true,
   low_fps_threshold: 23.0,
+  min_video_bitrate_kbps: null,
   theme: "system",
   language: null,
   title_bar: "auto",
@@ -66,6 +67,7 @@ function applyPresetConfig(base: AppSettings, config: ScanPresetConfig): AppSett
     test_geoblock: config.test_geoblock,
     screenshots_dir: config.screenshots_dir,
     low_fps_threshold: config.low_fps_threshold,
+    min_video_bitrate_kbps: config.min_video_bitrate_kbps,
     screenshot_format: config.screenshot_format,
     auto_capture_sample_clips: config.auto_capture_sample_clips,
     sample_clip_duration_secs: config.sample_clip_duration_secs,
@@ -89,6 +91,7 @@ function sameScanConfig(value: AppSettings, config: ScanPresetConfig): boolean {
     value.test_geoblock === config.test_geoblock &&
     value.screenshots_dir === config.screenshots_dir &&
     value.low_fps_threshold === config.low_fps_threshold &&
+    value.min_video_bitrate_kbps === config.min_video_bitrate_kbps &&
     value.screenshot_format === config.screenshot_format &&
     value.auto_capture_sample_clips === config.auto_capture_sample_clips &&
     value.sample_clip_duration_secs === config.sample_clip_duration_secs

@@ -19,6 +19,7 @@ const MIN_SCAN_HISTORY_LIMIT: u32 = 1;
 const MAX_SCAN_HISTORY_LIMIT: u32 = 200;
 const MIN_LOW_FPS_THRESHOLD: f64 = 0.0;
 const MAX_LOW_FPS_THRESHOLD: f64 = 240.0;
+const MAX_MIN_VIDEO_BITRATE_KBPS: u32 = 100_000;
 const MIN_RETENTION_COUNT: u32 = 0;
 const MAX_RETENTION_COUNT: u32 = 100;
 const MIN_LOW_SPACE_THRESHOLD_GB: f64 = 1.0;
@@ -845,6 +846,15 @@ pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Re
         return Err(AppError::Validation(format!(
             "Invalid low FPS threshold: must be between {} and {}",
             MIN_LOW_FPS_THRESHOLD, MAX_LOW_FPS_THRESHOLD
+        )));
+    }
+    if settings
+        .min_video_bitrate_kbps
+        .is_some_and(|kbps| kbps == 0 || kbps > MAX_MIN_VIDEO_BITRATE_KBPS)
+    {
+        return Err(AppError::Validation(format!(
+            "Invalid minimum video bitrate: must be between 1 and {} kbps",
+            MAX_MIN_VIDEO_BITRATE_KBPS
         )));
     }
     if !settings.ffprobe_timeout_secs.is_finite()
