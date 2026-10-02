@@ -288,6 +288,26 @@ pub(crate) struct DispatcharrStream {
     pub catchup_days: u32,
 }
 
+/// Name of the stream the Could Not Dispatch plugin appends to every channel.
+/// It serves a "channel unavailable" card from a loopback URL inside the
+/// Dispatcharr container, so it can't be checked from here.
+const FALLBACK_STREAM_NAME: &str = "Could Not Dispatch";
+
+impl DispatcharrStream {
+    /// The URL to check, or None for a stream that gets no row: one without
+    /// a URL, or a plugin fallback (identified as the plugin does, by name).
+    /// Writes keep rowless streams in place at the end of the order.
+    fn checkable_url(&self) -> Option<&str> {
+        if self.is_custom && self.name == FALLBACK_STREAM_NAME {
+            return None;
+        }
+        self.url
+            .as_deref()
+            .map(str::trim)
+            .filter(|url| !url.is_empty())
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub(crate) struct DispatcharrGroup {
@@ -722,12 +742,7 @@ impl DispatcharrClient {
         let mut candidates = found
             .into_values()
             .filter(|stream| !channel.streams.contains(&stream.id))
-            .filter(|stream| {
-                stream
-                    .url
-                    .as_deref()
-                    .is_some_and(|url| !url.trim().is_empty())
-            })
+            .filter(|stream| stream.checkable_url().is_some())
             .map(|stream| {
                 let matched = CandidateMatch {
                     epg: epg_id.is_some_and(|epg_id| {
@@ -1350,12 +1365,7 @@ pub(crate) fn build_m3u(
             let Some(stream) = streams.get(stream_id) else {
                 continue;
             };
-            let Some(url) = stream
-                .url
-                .as_deref()
-                .map(str::trim)
-                .filter(|url| !url.is_empty())
-            else {
+            let Some(url) = stream.checkable_url() else {
                 continue;
             };
             let account = stream.m3u_account.and_then(|id| accounts.get(&id));
@@ -2214,6 +2224,47 @@ mod tests {
         assert!(multi
             .extinf_line
             .contains("x-dispatcharr-channel-streams=\"102,101,999\""));
+    }
+
+    #[test]
+    fn plugin_fallback_streams_get_no_row() {
+        let channels = [
+            DispatcharrChannel {
+                id: 1,
+                name: "Covered".into(),
+                streams: vec![11, 12],
+                ..Default::default()
+            },
+            DispatcharrChannel {
+                id: 2,
+                name: "Only fallback".into(),
+                streams: vec![13],
+                ..Default::default()
+            },
+        ];
+        let stream = |id: i64, name: &str, is_custom: bool| DispatcharrStream {
+            id,
+            name: name.into(),
+            url: Some(format!("http://127.0.0.1:9721/{}.ts", id)),
+            is_custom,
+            ..Default::default()
+        };
+        let streams = HashMap::from([
+            (11, stream(11, "Feed", false)),
+            (12, stream(12, FALLBACK_STREAM_NAME, true)),
+            (13, stream(13, FALLBACK_STREAM_NAME, true)),
+        ]);
+        let base = Url::parse("http://dvr.example:9191/").unwrap();
+        let m3u = build_m3u(&base, &channels, &streams, &HashMap::new(), &HashMap::new());
+        let rows = m3u
+            .lines()
+            .filter(|line| line.starts_with("#EXTINF"))
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 2);
+        assert!(rows[0].contains("x-dispatcharr-stream-id=\"11\""));
+        // Writes compare against the full order, fallback included.
+        assert!(rows[0].contains("x-dispatcharr-channel-streams=\"11,12\""));
+        assert!(is_empty_channel_row(rows[1]));
     }
 
     #[test]

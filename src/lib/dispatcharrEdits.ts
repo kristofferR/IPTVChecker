@@ -222,8 +222,15 @@ export async function linkStreams(
     return ref && ref.channelId === channel.channelId ? [ref.streamId] : [];
   });
   if (ids.length === 0) return false;
-  const rest = channel.order.filter((id) => !ids.includes(id));
-  const to = position === "primary" ? [...ids, ...rest] : [...rest, ...ids];
+  const shown = channel.streams
+    .map((entry) => entry.ref.streamId)
+    .filter((id) => !ids.includes(id));
+  // "Last" is last of the shown streams: rowless ones, such as a plugin
+  // fallback that has to stay at the very end, keep their place after them.
+  const to =
+    position === "primary"
+      ? [...ids, ...channel.order.filter((id) => !ids.includes(id))]
+      : withHiddenStreams(channel, [...shown, ...ids]);
   const { applied } = await writeOrders(
     [{ channelId: channel.channelId, from: channel.order, to }],
     false,
