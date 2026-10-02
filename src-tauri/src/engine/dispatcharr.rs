@@ -10,7 +10,7 @@
 use crate::engine::ffmpeg::parse_kbps;
 use crate::engine::parser::{escape_extinf_value, flatten_extinf_title, parse_extinf_attributes};
 use crate::engine::remote_cache::{
-    parse_http_url, PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT, PLAYLIST_DOWNLOAD_USER_AGENT,
+    PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT, PLAYLIST_DOWNLOAD_USER_AGENT, parse_http_url,
 };
 use crate::error::AppError;
 use crate::models::channel::ChannelResult;
@@ -18,7 +18,7 @@ use futures::stream::{self, StreamExt};
 use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -507,10 +507,10 @@ impl DispatcharrClient {
         if force_login {
             *tokens = None;
         }
-        if let Some(current) = tokens.as_ref() {
-            if Instant::now() < current.expires_at {
-                return Ok(format!("Bearer {}", current.access));
-            }
+        if let Some(current) = tokens.as_ref()
+            && Instant::now() < current.expires_at
+        {
+            return Ok(format!("Bearer {}", current.access));
         }
         let refresh = tokens.as_ref().and_then(|current| current.refresh.clone());
         let refreshed = match refresh {
@@ -1101,11 +1101,12 @@ const NAME_NOISE: &[&str] = &[
 pub(crate) fn normalize_stream_name(name: &str) -> String {
     let mut rest = name.trim();
     for separator in ["|", ":", " - "] {
-        if let Some((prefix, tail)) = rest.split_once(separator) {
-            if prefix.trim().chars().count() <= 5 && !tail.trim().is_empty() {
-                rest = tail;
-                break;
-            }
+        if let Some((prefix, tail)) = rest.split_once(separator)
+            && prefix.trim().chars().count() <= 5
+            && !tail.trim().is_empty()
+        {
+            rest = tail;
+            break;
         }
     }
     let mut cleaned = String::with_capacity(rest.len());
@@ -2138,9 +2139,11 @@ mod tests {
         let archived = &preview.channels[0];
         assert_eq!(archived.catchup.as_deref(), Some("xc"));
         assert_eq!(archived.catchup_days, Some(7));
-        assert!(archived
-            .extinf_line
-            .contains(r#"x-dispatcharr-timezone="Europe/Berlin""#));
+        assert!(
+            archived
+                .extinf_line
+                .contains(r#"x-dispatcharr-timezone="Europe/Berlin""#)
+        );
         let live_only = &preview.channels[1];
         assert_eq!(live_only.catchup, None);
         assert!(!live_only.extinf_line.contains(ATTR_TIMEZONE));
@@ -2194,9 +2197,11 @@ mod tests {
 
         let multi = &preview.channels[1];
         assert_eq!(multi.name, "Sports \"2\"");
-        assert!(multi
-            .extinf_line
-            .contains("x-dispatcharr-stream-name=\"Feed B\""));
+        assert!(
+            multi
+                .extinf_line
+                .contains("x-dispatcharr-stream-name=\"Feed B\"")
+        );
         assert_eq!(multi.group, "Sports");
         assert_eq!(multi.tvg_chno.as_deref(), Some("2"));
         assert_eq!(multi.tvg_id.as_deref(), Some("2"));
@@ -2204,18 +2209,22 @@ mod tests {
             multi.tvg_logo.as_deref(),
             Some("http://dvr.example:9191/api/channels/logos/4/cache/")
         );
-        assert!(preview.channels[2]
-            .extinf_line
-            .contains("x-dispatcharr-account=\"Provider A\""));
+        assert!(
+            preview.channels[2]
+                .extinf_line
+                .contains("x-dispatcharr-account=\"Provider A\"")
+        );
         assert_eq!(
             dispatcharr_connection_limit(&preview.channels[2].extinf_line),
             Some((7, 2))
         );
         // Stream 102 has no M3U account, so no provider limit.
         assert_eq!(dispatcharr_connection_limit(&multi.extinf_line), None);
-        assert!(multi
-            .extinf_line
-            .contains("x-dispatcharr-channel-streams=\"102,101,999\""));
+        assert!(
+            multi
+                .extinf_line
+                .contains("x-dispatcharr-channel-streams=\"102,101,999\"")
+        );
     }
 
     #[test]

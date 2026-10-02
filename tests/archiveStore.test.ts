@@ -2,24 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import type { ArchiveProbeEntry } from "../src/lib/archiveProbe";
 import { toPendingChannelResult } from "../src/lib/channelResults";
 import type { Channel } from "../src/lib/types";
-
-Object.defineProperty(globalThis, "localStorage", {
-  configurable: true,
-  value: {
-    clear() {},
-    getItem() {
-      return null;
-    },
-    key() {
-      return null;
-    },
-    length: 0,
-    removeItem() {},
-    setItem() {},
-  } satisfies Storage,
-});
-
-const { useAppStore } = await import("../src/store");
+import { useAppStore } from "../src/store";
 
 function result(url: string) {
   const channel: Channel = {

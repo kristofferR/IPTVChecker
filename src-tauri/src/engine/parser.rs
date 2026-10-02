@@ -196,12 +196,12 @@ pub fn parse_extinf_attributes(extinf_line: &str) -> Vec<(String, String)> {
 
 /// Extract channel name from #EXTINF line (text after the last comma).
 pub fn get_channel_name(extinf_line: &str) -> String {
-    if extinf_line.starts_with("#EXTINF") {
-        if let Some(pos) = find_unquoted_comma(extinf_line) {
-            let name = extinf_line[pos + 1..].trim();
-            if !name.is_empty() {
-                return name.to_string();
-            }
+    if extinf_line.starts_with("#EXTINF")
+        && let Some(pos) = find_unquoted_comma(extinf_line)
+    {
+        let name = extinf_line[pos + 1..].trim();
+        if !name.is_empty() {
+            return name.to_string();
         }
     }
     "Unknown Channel".to_string()
@@ -378,15 +378,15 @@ fn extract_prefixed_language(text: &str) -> Option<String> {
         return None;
     }
 
-    if let Some(rest) = trimmed.strip_prefix('[') {
-        if let Some((token, _)) = rest.split_once(']') {
-            return normalize_language_candidate(token);
-        }
+    if let Some(rest) = trimmed.strip_prefix('[')
+        && let Some((token, _)) = rest.split_once(']')
+    {
+        return normalize_language_candidate(token);
     }
-    if let Some(rest) = trimmed.strip_prefix('(') {
-        if let Some((token, _)) = rest.split_once(')') {
-            return normalize_language_candidate(token);
-        }
+    if let Some(rest) = trimmed.strip_prefix('(')
+        && let Some((token, _)) = rest.split_once(')')
+    {
+        return normalize_language_candidate(token);
     }
 
     let mut token = String::new();
@@ -429,10 +429,9 @@ fn language_from_attrs(attrs: &[(String, String)], group: &str, name: &str) -> O
         if matches!(
             key.as_str(),
             "tvg-language" | "tvg-lang" | "language" | "lang" | "tvg-country"
-        ) {
-            if let Some(language) = normalize_language_candidate(value) {
-                return Some(language);
-            }
+        ) && let Some(language) = normalize_language_candidate(value)
+        {
+            return Some(language);
         }
     }
 
@@ -465,12 +464,12 @@ fn is_line_needed(
     if !line.starts_with("#EXTINF") {
         return Ok(false);
     }
-    if let Some(ref group) = group_filter {
-        if group_name.trim().to_lowercase() != group.trim().to_lowercase() {
-            return Ok(false);
-        }
+    if let Some(group) = group_filter
+        && group_name.trim().to_lowercase() != group.trim().to_lowercase()
+    {
+        return Ok(false);
     }
-    if let Some(ref pat) = pattern {
+    if let Some(pat) = pattern {
         let channel_name = get_channel_name(line);
         if !pat.is_match(&channel_name)? {
             return Ok(false);
@@ -530,10 +529,10 @@ pub fn filter_playlist_preview(
             continue;
         }
 
-        if let Some(pattern) = &pattern {
-            if !pattern.is_match(&channel.name)? {
-                continue;
-            }
+        if let Some(pattern) = &pattern
+            && !pattern.is_match(&channel.name)?
+        {
+            continue;
         }
         channels.push(channel.clone());
     }
@@ -872,7 +871,7 @@ fn parse_playlist_directory(
             groups.insert(channel.group.clone());
             groups.insert(playlist_group.clone());
 
-            let include_group = if let Some(ref selected_group) = group_filter {
+            let include_group = if let Some(selected_group) = group_filter {
                 let selected = selected_group.trim().to_lowercase();
                 channel.group.trim().to_lowercase() == selected
                     || playlist_group.trim().to_lowercase() == selected
@@ -1057,8 +1056,7 @@ mod tests {
 
     #[test]
     fn test_extract_tvg_metadata_reads_extinf_attributes() {
-        let extinf =
-            "#EXTINF:-1 tvg-id=\"epg-1\" tvg-name=\"Channel Name\" tvg-logo=\"http://img/logo.png\" tvg-chno=\"101\",Channel Name";
+        let extinf = "#EXTINF:-1 tvg-id=\"epg-1\" tvg-name=\"Channel Name\" tvg-logo=\"http://img/logo.png\" tvg-chno=\"101\",Channel Name";
         let (tvg_id, tvg_name, tvg_logo, tvg_chno) = extract_tvg_metadata(extinf);
         assert_eq!(tvg_id.as_deref(), Some("epg-1"));
         assert_eq!(tvg_name.as_deref(), Some("Channel Name"));
@@ -1373,9 +1371,11 @@ http://example.com/beta.m3u8
         assert!(preview.groups.contains(&"Sports".to_string()));
         assert!(preview.groups.contains(&"News".to_string()));
         assert!(preview.groups.contains(&"Playlist: live.m3u8".to_string()));
-        assert!(preview
-            .groups
-            .contains(&"Playlist: nested/live.m3u8".to_string()));
+        assert!(
+            preview
+                .groups
+                .contains(&"Playlist: nested/live.m3u8".to_string())
+        );
         assert_eq!(
             preview.epg_sources_by_playlist.get("live.m3u8"),
             Some(&vec!["http://provider-a.example/epg.xml".to_string()])
@@ -1622,9 +1622,11 @@ http://example.com/series/one.mkv
 
         let error = find_playlists_in_dir(&root.to_string_lossy())
             .expect_err("depth guard should reject deeply nested directories");
-        assert!(error
-            .to_string()
-            .contains("Directory nesting exceeds maximum depth"));
+        assert!(
+            error
+                .to_string()
+                .contains("Directory nesting exceeds maximum depth")
+        );
 
         std::fs::remove_dir_all(root).expect("fixture directory should be removable");
     }

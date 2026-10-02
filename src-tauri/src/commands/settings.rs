@@ -186,10 +186,10 @@ pub(crate) async fn allowed_artifact_roots(app: &tauri::AppHandle) -> Vec<std::p
     );
 
     let settings = state.settings.lock().await;
-    if let Some(custom_dir) = settings.screenshots_dir.as_deref() {
-        if let Some(path) = canonicalize_root_if_exists(Path::new(custom_dir)) {
-            roots.insert(path);
-        }
+    if let Some(custom_dir) = settings.screenshots_dir.as_deref()
+        && let Some(path) = canonicalize_root_if_exists(Path::new(custom_dir))
+    {
+        roots.insert(path);
     }
 
     roots.into_iter().collect()
@@ -298,7 +298,7 @@ fn set_default_m3u8_handler(app: &tauri::AppHandle) -> Result<String, AppError> 
     const K_LS_ROLES_ALL: LSRolesMask = 0xFFFF_FFFF;
 
     #[link(name = "CoreServices", kind = "framework")]
-    extern "C" {
+    unsafe extern "C" {
         static kUTTagClassFilenameExtension: CFStringRef;
         fn UTTypeCreatePreferredIdentifierForTag(
             in_tag_class: CFStringRef,
@@ -509,8 +509,8 @@ fn set_default_m3u8_handler(app: &tauri::AppHandle) -> Result<String, AppError> 
 
 #[cfg(target_os = "windows")]
 fn set_default_m3u8_handler(_app: &tauri::AppHandle) -> Result<String, AppError> {
-    use winreg::enums::HKEY_CURRENT_USER;
     use winreg::RegKey;
+    use winreg::enums::HKEY_CURRENT_USER;
 
     fn register_windows_extension(
         classes_root: &RegKey,
@@ -630,10 +630,10 @@ pub fn get_ui_locale() -> crate::i18n::UiLocale {
 pub fn restart_app(app: tauri::AppHandle) {
     // The store writes to disk on a debounce; flush it so a just-saved
     // language survives the restart.
-    if let Ok(store) = app.store("settings.json") {
-        if let Err(error) = store.save() {
-            log::warn!("Failed to save settings before restart: {error}");
-        }
+    if let Ok(store) = app.store("settings.json")
+        && let Err(error) = store.save()
+    {
+        log::warn!("Failed to save settings before restart: {error}");
     }
     app.restart();
 }
@@ -756,12 +756,12 @@ pub async fn rename_scan_preset(
         return Err(AppError::Other("Preset not found".to_string()));
     };
 
-    if let Some(existing_index) = preset_index_by_name(&collection.presets, &new_name) {
-        if existing_index != current_index {
-            return Err(AppError::Other(
-                "A preset with that name already exists".to_string(),
-            ));
-        }
+    if let Some(existing_index) = preset_index_by_name(&collection.presets, &new_name)
+        && existing_index != current_index
+    {
+        return Err(AppError::Other(
+            "A preset with that name already exists".to_string(),
+        ));
     }
 
     let previous_name = collection.presets[current_index].name.clone();
@@ -818,10 +818,10 @@ pub async fn set_default_scan_preset(
         None => None,
     };
 
-    if let Some(ref requested) = normalized_name {
-        if preset_index_by_name(&collection.presets, requested).is_none() {
-            return Err(AppError::Other("Preset not found".to_string()));
-        }
+    if let Some(ref requested) = normalized_name
+        && preset_index_by_name(&collection.presets, requested).is_none()
+    {
+        return Err(AppError::Other("Preset not found".to_string()));
     }
 
     collection.default_preset = normalized_name;
@@ -912,10 +912,10 @@ pub async fn update_settings(app: tauri::AppHandle, settings: AppSettings) -> Re
     }
 
     // Persist to store
-    if let Ok(store) = app.store("settings.json") {
-        if let Ok(value) = serde_json::to_value(&settings) {
-            store.set("settings", value);
-        }
+    if let Ok(store) = app.store("settings.json")
+        && let Ok(value) = serde_json::to_value(&settings)
+    {
+        store.set("settings", value);
     }
 
     if let Err(error) = apply_theme_preference(&app, settings.theme) {
@@ -1104,11 +1104,11 @@ pub fn evict_old_screenshot_dirs(
 
     // Always delete dirs without metadata (legacy)
     for dir in &dirs_without_meta {
-        if let Ok((bytes, _)) = collect_dir_stats(dir) {
-            if fs::remove_dir_all(dir).is_ok() {
-                bytes_freed += bytes;
-                log::info!("Evicted legacy screenshot dir: {}", dir.display());
-            }
+        if let Ok((bytes, _)) = collect_dir_stats(dir)
+            && fs::remove_dir_all(dir).is_ok()
+        {
+            bytes_freed += bytes;
+            log::info!("Evicted legacy screenshot dir: {}", dir.display());
         }
     }
 
@@ -1127,11 +1127,11 @@ pub fn evict_old_screenshot_dirs(
         dirs.sort_by_key(|entry| std::cmp::Reverse(entry.1));
         // Keep `retention_count`, evict the rest
         for (path, _ts) in dirs.into_iter().skip(retention_count as usize) {
-            if let Ok((bytes, _)) = collect_dir_stats(&path) {
-                if fs::remove_dir_all(&path).is_ok() {
-                    bytes_freed += bytes;
-                    log::info!("Evicted screenshot dir (retention): {}", path.display());
-                }
+            if let Ok((bytes, _)) = collect_dir_stats(&path)
+                && fs::remove_dir_all(&path).is_ok()
+            {
+                bytes_freed += bytes;
+                log::info!("Evicted screenshot dir (retention): {}", path.display());
             }
         }
     }
@@ -1216,8 +1216,8 @@ pub fn evict_for_disk_space(
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_dir_stats, normalize_preset_name, preset_index_by_name, sort_scan_presets,
-        validate_artifact_path, validate_external_player_path, ArtifactKind,
+        ArtifactKind, collect_dir_stats, normalize_preset_name, preset_index_by_name,
+        sort_scan_presets, validate_artifact_path, validate_external_player_path,
     };
     use crate::models::settings::{ScanPresetConfig, ScanSettingsPreset};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1269,9 +1269,11 @@ mod tests {
         std::fs::write(&outside, vec![0u8; 16]).expect("outside fixture should be writable");
 
         let traversal = safe_dir.join("../outside.png");
-        let allowed = vec![safe_dir
-            .canonicalize()
-            .expect("safe dir should canonicalize")];
+        let allowed = vec![
+            safe_dir
+                .canonicalize()
+                .expect("safe dir should canonicalize"),
+        ];
         let error = validate_artifact_path(&traversal, &allowed, &[ArtifactKind::Screenshot])
             .expect_err("path should be rejected");
 
@@ -1299,9 +1301,11 @@ mod tests {
         std::os::windows::fs::symlink_file(&outside, &symlink_path)
             .expect("symlink should be created");
 
-        let allowed = vec![safe_dir
-            .canonicalize()
-            .expect("safe dir should canonicalize")];
+        let allowed = vec![
+            safe_dir
+                .canonicalize()
+                .expect("safe dir should canonicalize"),
+        ];
         let error = validate_artifact_path(&symlink_path, &allowed, &[ArtifactKind::Screenshot])
             .expect_err("symlink escape should be rejected");
 

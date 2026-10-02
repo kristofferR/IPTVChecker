@@ -13,8 +13,8 @@ use tokio_util::sync::CancellationToken;
 use crate::commands::player::open_local_media;
 use crate::commands::scan::ffmpeg_target_url;
 use crate::commands::settings::{
-    allowed_artifact_roots, media_cache_root, register_media_root, validate_artifact_path,
-    ArtifactKind,
+    ArtifactKind, allowed_artifact_roots, media_cache_root, register_media_root,
+    validate_artifact_path,
 };
 use crate::engine::proxy_common::parse_byte_range;
 use crate::engine::{cast_proxy, checker, disk, ffmpeg, stream_proxy};
@@ -200,10 +200,11 @@ pub(crate) fn sweep_unreferenced_clips(dir: &Path, referenced: &HashSet<PathBuf>
             .extension()
             .and_then(|ext| ext.to_str())
             .is_some_and(|ext| matches!(ext, "mp4" | "ts"));
-        if is_clip && !referenced.contains(&path) {
-            if let Err(error) = std::fs::remove_file(&path) {
-                log::debug!("Failed to remove unreferenced sample clip: {}", error);
-            }
+        if is_clip
+            && !referenced.contains(&path)
+            && let Err(error) = std::fs::remove_file(&path)
+        {
+            log::debug!("Failed to remove unreferenced sample clip: {}", error);
         }
     }
 }
@@ -224,10 +225,12 @@ pub(crate) fn remove_other_channel_clips(dir: &Path, stem: &str, keep: &Path) {
             .file_stem()
             .and_then(|name| name.to_str())
             .is_some_and(|name| ffmpeg::is_output_name_for_stem(name, stem));
-        if is_clip && same_channel && path != keep {
-            if let Err(error) = std::fs::remove_file(&path) {
-                log::debug!("Failed to remove superseded sample clip: {}", error);
-            }
+        if is_clip
+            && same_channel
+            && path != keep
+            && let Err(error) = std::fs::remove_file(&path)
+        {
+            log::debug!("Failed to remove superseded sample clip: {}", error);
         }
     }
 }
@@ -424,8 +427,8 @@ pub async fn try_serve_preview_request(
 #[cfg(test)]
 mod tests {
     use super::{
-        artifact_byte_span, ensure_capture_url, parse_preview_request, remove_other_channel_clips,
-        source_key, PreviewRequest,
+        PreviewRequest, artifact_byte_span, ensure_capture_url, parse_preview_request,
+        remove_other_channel_clips, source_key,
     };
 
     #[test]

@@ -6,7 +6,7 @@
 //! timeout) and the http(s) URL validator live here because every remote
 //! source (plain URL, Xtream, Stalker, server tester) uses them.
 
-use crate::commands::playlist::{emit_load_progress, PlaylistLoadProgress, PROGRESS_THROTTLE};
+use crate::commands::playlist::{PROGRESS_THROTTLE, PlaylistLoadProgress, emit_load_progress};
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -55,7 +55,11 @@ pub(crate) fn parse_http_url(value: &str, invalid_message: &str) -> Result<Url, 
 fn hash_source_key(source_key: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(source_key.as_bytes());
-    format!("{:x}", hasher.finalize())
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn source_cache_file_name(source_key: &str) -> String {

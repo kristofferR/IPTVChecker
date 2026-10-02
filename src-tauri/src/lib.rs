@@ -137,26 +137,26 @@ fn schedule_macos_system_appearance_patch(app: tauri::AppHandle, window_label: S
                     let count: usize = msg_send![subviews, count];
                     for i in 0..count {
                         let subview: ObjcId = msg_send![subviews, objectAtIndex: i];
-                        if let Some(wv) = find_webview(subview, wkwebview_class) {
+                        if let Some(wv) = unsafe { find_webview(subview, wkwebview_class) } {
                             return Some(wv);
                         }
                     }
                     None
                 }
 
-                if let Some(window) = handle.get_webview_window(&target_label) {
-                    if let Ok(ns_window) = window.ns_window() {
-                        unsafe {
-                            let ns_window = ns_window as ObjcId;
-                            let content_view: ObjcId = msg_send![ns_window, contentView];
-                            if let Some(wkwebview_class) = AnyClass::get(c"WKWebView") {
-                                if let Some(webview) = find_webview(content_view, wkwebview_class) {
-                                    let config: ObjcId = msg_send![webview, configuration];
-                                    let prefs: ObjcId = msg_send![config, preferences];
-                                    let _: () = msg_send![prefs, _setUseSystemAppearance: true];
-                                    patched_on_main.store(true, Ordering::Relaxed);
-                                }
-                            }
+                if let Some(window) = handle.get_webview_window(&target_label)
+                    && let Ok(ns_window) = window.ns_window()
+                {
+                    unsafe {
+                        let ns_window = ns_window as ObjcId;
+                        let content_view: ObjcId = msg_send![ns_window, contentView];
+                        if let Some(wkwebview_class) = AnyClass::get(c"WKWebView")
+                            && let Some(webview) = find_webview(content_view, wkwebview_class)
+                        {
+                            let config: ObjcId = msg_send![webview, configuration];
+                            let prefs: ObjcId = msg_send![config, preferences];
+                            let _: () = msg_send![prefs, _setUseSystemAppearance: true];
+                            patched_on_main.store(true, Ordering::Relaxed);
                         }
                     }
                 }
@@ -213,8 +213,8 @@ fn create_window_from_main_config(app: &tauri::AppHandle, label: String) {
             }
             let theme_preference = {
                 let state = app.state::<Arc<AppState>>();
-                let theme = state.settings.blocking_lock().theme;
-                theme
+
+                state.settings.blocking_lock().theme
             };
             if let Err(error) = commands::settings::apply_theme_preference(app, theme_preference) {
                 log::warn!(
@@ -418,14 +418,21 @@ fn clear_menu_window_state(window_label: &str) {
     }
 }
 
+/// Stable equivalent of the `unstable`-gated `Manager::get_focused_window`.
+fn focused_window_label(app: &tauri::AppHandle) -> Option<String> {
+    app.webview_windows()
+        .into_iter()
+        .find(|(_, window)| window.is_focused().unwrap_or(false))
+        .map(|(label, _)| label)
+}
+
 /// Main windows select every table row (or a text field's content, which
 /// the frontend handles). Other windows (log, settings) get the webview's
 /// ordinary select-all.
 fn select_all_in_focused_window(app: &tauri::AppHandle) {
-    let Some(window) = app.get_focused_window() else {
+    let Some(label) = focused_window_label(app) else {
         return;
     };
-    let label = window.label().to_string();
     // Queued until the window's listeners are ready, like other menu events.
     if label.starts_with("main") {
         let _ = emit_menu_event_to_window(app, &label, "menu://select-all", "focused window");
@@ -435,8 +442,7 @@ fn select_all_in_focused_window(app: &tauri::AppHandle) {
 }
 
 fn emit_menu_event_to_focused_window(app: &tauri::AppHandle, event_name: &str) {
-    if let Some(window) = app.get_focused_window() {
-        let window_label = window.label().to_string();
+    if let Some(window_label) = focused_window_label(app) {
         let _ = emit_menu_event_to_window(app, &window_label, event_name, "focused window");
         return;
     }
@@ -527,8 +533,7 @@ fn emit_open_paths_to_focused_window(app: &tauri::AppHandle, paths: &[String]) {
         return;
     }
 
-    if let Some(window) = app.get_focused_window() {
-        let window_label = window.label().to_string();
+    if let Some(window_label) = focused_window_label(app) {
         let _ = emit_open_paths_to_window(app, &window_label, paths, "focused window");
         return;
     }
@@ -565,7 +570,8 @@ pub fn run() {
         if std::env::var("WAYLAND_DISPLAY").is_ok()
             && std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").is_err()
         {
-            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+            // SAFETY: `main` calls `run` first, before any other thread exists.
+            unsafe { std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1") };
         }
     }
 
@@ -609,7 +615,7 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     let builder = builder.plugin(tauri_plugin_liquid_glass::init());
 
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, feature = "mcp"))]
     let builder = builder.plugin(tauri_plugin_mcp::init_with_config(
         tauri_plugin_mcp::PluginConfig::new("iptv-checker".to_string())
             .start_socket_server(true)
@@ -931,17 +937,14 @@ pub fn run() {
             });
 
             // Load persisted settings
-            if let Ok(store) = app.store("settings.json") {
-                if let Some(value) = store.get("settings") {
-                    if let Ok(persisted) =
-                        serde_json::from_value::<models::settings::AppSettings>(value)
-                    {
-                        let state = app.state::<Arc<AppState>>();
-                        STDOUT_LOG_LEVEL
-                            .store(persisted.level_filter() as usize, Ordering::Relaxed);
-                        *state.settings.blocking_lock() = persisted;
-                    }
-                }
+            if let Ok(store) = app.store("settings.json")
+                && let Some(value) = store.get("settings")
+                && let Ok(persisted) =
+                    serde_json::from_value::<models::settings::AppSettings>(value)
+            {
+                let state = app.state::<Arc<AppState>>();
+                STDOUT_LOG_LEVEL.store(persisted.level_filter() as usize, Ordering::Relaxed);
+                *state.settings.blocking_lock() = persisted;
             }
 
             let (theme_preference, show_prescan_filter, show_header_button_text) = {
@@ -1068,12 +1071,12 @@ pub fn run() {
                     })
                     .on_tray_icon_event(|tray, event| {
                         // Left-click on tray icon shows/focuses the main window
-                        if matches!(event, tauri::tray::TrayIconEvent::Click { .. }) {
-                            if let Some(window) = tray.app_handle().get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.unminimize();
-                                let _ = window.set_focus();
-                            }
+                        if matches!(event, tauri::tray::TrayIconEvent::Click { .. })
+                            && let Some(window) = tray.app_handle().get_webview_window("main")
+                        {
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
                         }
                     });
 
@@ -1212,23 +1215,22 @@ pub fn run() {
             }
 
             #[cfg(target_os = "macos")]
-            if let tauri::WindowEvent::CloseRequested { .. } = _event {
-                if !APP_IS_QUITTING.load(Ordering::Relaxed) {
-                    if let Some(target_window) =
-                        _window.app_handle().get_webview_window(_window.label())
-                    {
-                        if let Err(error) = _window.app_handle().liquid_glass().set_effect(
-                            &target_window,
-                            LiquidGlassConfig {
-                                enabled: false,
-                                ..Default::default()
-                            },
-                        ) {
-                            log::debug!("Failed to remove liquid glass before close: {}", error);
-                        }
-                    }
-                    WINDOW_CLOSED_BY_USER.store(true, Ordering::Relaxed);
+            if let tauri::WindowEvent::CloseRequested { .. } = _event
+                && !APP_IS_QUITTING.load(Ordering::Relaxed)
+            {
+                if let Some(target_window) =
+                    _window.app_handle().get_webview_window(_window.label())
+                    && let Err(error) = _window.app_handle().liquid_glass().set_effect(
+                        &target_window,
+                        LiquidGlassConfig {
+                            enabled: false,
+                            ..Default::default()
+                        },
+                    )
+                {
+                    log::debug!("Failed to remove liquid glass before close: {}", error);
                 }
+                WINDOW_CLOSED_BY_USER.store(true, Ordering::Relaxed);
             }
         })
         .register_asynchronous_uri_scheme_protocol("streamproxy", |ctx, request, responder| {

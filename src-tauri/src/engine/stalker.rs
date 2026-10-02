@@ -132,10 +132,10 @@ fn value_to_non_empty_string(value: &serde_json::Value) -> Option<String> {
 
 fn value_field_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
     for key in keys {
-        if let Some(field) = value.get(*key) {
-            if let Some(parsed) = value_to_non_empty_string(field) {
-                return Some(parsed);
-            }
+        if let Some(field) = value.get(*key)
+            && let Some(parsed) = value_to_non_empty_string(field)
+        {
+            return Some(parsed);
         }
     }
     None
@@ -967,10 +967,12 @@ mod tests {
         assert_eq!(preview.channels[0].name, "News HD");
         assert_eq!(preview.channels[0].group, "News");
         assert_eq!(preview.channels[0].index, 0);
-        assert!(preview
-            .source_identity
-            .expect("source identity should exist")
-            .starts_with("stalker:"));
+        assert!(
+            preview
+                .source_identity
+                .expect("source identity should exist")
+                .starts_with("stalker:")
+        );
     }
 
     #[test]

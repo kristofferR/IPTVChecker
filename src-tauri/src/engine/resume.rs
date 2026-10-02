@@ -646,17 +646,21 @@ mod tests {
             .expect("channel log should persist");
         assert_eq!(loaded_log.channel_index, 8);
         assert!(loaded_log.channel_url.contains("token=REDACTED"));
-        assert!(loaded_log
-            .diagnostics_output
-            .as_deref()
-            .unwrap_or_default()
-            .contains("token=REDACTED"));
-        assert!(loaded_log
-            .attempts
-            .first()
-            .and_then(|attempt| attempt.reason.as_deref())
-            .unwrap_or_default()
-            .contains("token=REDACTED"));
+        assert!(
+            loaded_log
+                .diagnostics_output
+                .as_deref()
+                .unwrap_or_default()
+                .contains("token=REDACTED")
+        );
+        assert!(
+            loaded_log
+                .attempts
+                .first()
+                .and_then(|attempt| attempt.reason.as_deref())
+                .unwrap_or_default()
+                .contains("token=REDACTED")
+        );
 
         let _ = std::fs::remove_file(&log_file);
         let _ = std::fs::remove_file(&checkpoint_file);

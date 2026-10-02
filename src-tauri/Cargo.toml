@@ -3,12 +3,15 @@ name = "iptv-checker"
 version = "2.1.0"
 description = "Cross-platform IPTV Stream Checker"
 authors = []
-edition = "2021"
+edition = "2024"
 default-run = "iptv-checker"
 
 [lib]
 name = "iptv_checker_lib"
 crate-type = ["lib"]
+
+[features]
+mcp = ["dep:tauri-plugin-mcp"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -24,7 +27,7 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.13", features = ["stream", "socks", "cookies"] }
 url = "2"
 regex = "1"
-fancy-regex = "0.17"
+fancy-regex = "0.19"
 csv = "1"
 futures = "0.3"
 thiserror = "2"
@@ -34,17 +37,15 @@ log = "0.4"
 tauri-plugin-log = "2"
 tauri-plugin-os = "2"
 sys-locale = "0.3"
-dirs = "6"
-base64 = "0.22.1"
-sha2 = "0.10"
-quick-xml = { version = "0.37", features = ["encoding"] }
+dirs = "7"
+base64 = "0.23"
+sha2 = "0.11"
+quick-xml = { version = "0.42", features = ["encoding"] }
 flate2 = "1"
 tauri-plugin-notification = "2"
 tauri-plugin-updater = "2"
-# rev-pinned: the fuzz crate resolves this git dep independently of the main
-# Cargo.lock, and upstream's newer revisions pull xcap 0.9+ (pipewire system
-# libs), which broke the fuzz CI job. Bump the rev deliberately, not implicitly.
-tauri-plugin-mcp = { git = "https://github.com/P3GLEG/tauri-plugin-mcp", rev = "ac709a71d30ac2f167dd79c4f803500a236262f6", features = ["devtools"] }
+# Dev-only agent control; `bun tauri dev` enables the `mcp` feature.
+tauri-plugin-mcp = { git = "https://github.com/P3GLEG/tauri-plugin-mcp", features = ["devtools"], optional = true }
 fs2 = "0.4.3"
 tauri-plugin-window-state = "2"
 # cast-sender uses async-native-tls (system TLS: SChannel on Windows,
@@ -54,8 +55,8 @@ tauri-plugin-window-state = "2"
 # verifier runs, which makes rust_cast 0.19+ unusable against real devices.
 cast-sender = "0.3"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-mdns-sd = "0.19.1"
-local-ip-address = "0.6.12"
+mdns-sd = "0.21"
+local-ip-address = "0.6"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -70,7 +71,7 @@ core-foundation = "0.10"
 gtk = "0.18"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-winreg = "0.55"
+winreg = "0.56"
 
 [profile.release]
 lto = true

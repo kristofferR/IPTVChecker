@@ -135,19 +135,18 @@ fn resolve_bundled_binary(app: &AppHandle, candidates: &[String]) -> Option<Stri
 
     // Check the executable's own directory next (macOS bundles externalBin
     // into Contents/MacOS/, alongside the main binary).
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            if let Some(path) = resolve_binary_from_dir(dir, candidates) {
-                return Some(path);
-            }
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+        && let Some(path) = resolve_binary_from_dir(dir, candidates)
+    {
+        return Some(path);
     }
 
     // Also check the Tauri resource directory.
-    if let Ok(dir) = app.path().resource_dir() {
-        if let Some(path) = resolve_binary_from_dir(&dir, candidates) {
-            return Some(path);
-        }
+    if let Ok(dir) = app.path().resource_dir()
+        && let Some(path) = resolve_binary_from_dir(&dir, candidates)
+    {
+        return Some(path);
     }
 
     None
@@ -219,12 +218,12 @@ fn exit_code_label(exit_code: Option<i32>) -> String {
 
 fn strip_ffmpeg_log_prefix(line: &str) -> &str {
     let trimmed = line.trim();
-    if trimmed.starts_with('[') {
-        if let Some(end) = trimmed.find(']') {
-            let remainder = trimmed[end + 1..].trim_start();
-            if !remainder.is_empty() {
-                return remainder;
-            }
+    if trimmed.starts_with('[')
+        && let Some(end) = trimmed.find(']')
+    {
+        let remainder = trimmed[end + 1..].trim_start();
+        if !remainder.is_empty() {
+            return remainder;
         }
     }
     trimmed
@@ -361,10 +360,10 @@ pub(crate) fn stderr_excerpt(stderr: &str) -> String {
 pub(crate) fn sanitize_ffmpeg_stderr_line(line: &str) -> String {
     let trimmed = strip_ffmpeg_log_prefix(line);
     if trimmed.contains("Input #") {
-        if let Some((prefix, remainder)) = trimmed.split_once(" from '") {
-            if let Some((url, suffix)) = remainder.split_once('\'') {
-                return format!("{prefix} from '{}'{suffix}", redact_url(url));
-            }
+        if let Some((prefix, remainder)) = trimmed.split_once(" from '")
+            && let Some((url, suffix)) = remainder.split_once('\'')
+        {
+            return format!("{prefix} from '{}'{suffix}", redact_url(url));
         }
         return "Input #<REDACTED> from '<REDACTED_URL>'".to_string();
     }
@@ -1084,21 +1083,19 @@ fn normalize_audio_channel_layout(raw: &str, channels: Option<u32>) -> Option<St
         _ => {}
     }
 
-    if !lower.is_empty() {
-        if let Some(captures) = AUDIO_LAYOUT_VALUE_RE.captures(&lower) {
-            if let Some(value) = captures.get(1) {
-                if let Some(score) = audio_layout_score(value.as_str()) {
-                    if score > 2.0 {
-                        return Some(value.as_str().to_string());
-                    }
-                    if (score - 2.0).abs() < f64::EPSILON {
-                        return Some("Stereo".to_string());
-                    }
-                    if (score - 1.0).abs() < f64::EPSILON {
-                        return Some("Mono".to_string());
-                    }
-                }
-            }
+    if !lower.is_empty()
+        && let Some(captures) = AUDIO_LAYOUT_VALUE_RE.captures(&lower)
+        && let Some(value) = captures.get(1)
+        && let Some(score) = audio_layout_score(value.as_str())
+    {
+        if score > 2.0 {
+            return Some(value.as_str().to_string());
+        }
+        if (score - 2.0).abs() < f64::EPSILON {
+            return Some("Stereo".to_string());
+        }
+        if (score - 1.0).abs() < f64::EPSILON {
+            return Some("Mono".to_string());
         }
     }
 
@@ -1251,11 +1248,7 @@ fn parse_ffprobe_fps(raw: &str) -> Option<u32> {
 
     raw.parse::<f64>().ok().and_then(|fps| {
         let rounded = fps.round() as u32;
-        if rounded > 0 {
-            Some(rounded)
-        } else {
-            None
-        }
+        if rounded > 0 { Some(rounded) } else { None }
     })
 }
 
@@ -1899,14 +1892,19 @@ pub async fn profile_bitrate(
             .collect::<Vec<_>>()
             .join(" | ");
         if timed_out {
-            log::warn!("Bitrate profiling timed out after {:.0}s with no Statistics line. stderr tail: {tail}", timeout_duration.as_secs_f64());
+            log::warn!(
+                "Bitrate profiling timed out after {:.0}s with no Statistics line. stderr tail: {tail}",
+                timeout_duration.as_secs_f64()
+            );
             return Err(AppError::Other(format!(
                 "ffmpeg bitrate profiling timed out after {:.0}s (binary: {})",
                 timeout_duration.as_secs_f64(),
                 resolved_bin,
             )));
         }
-        log::warn!("Bitrate profiling completed but no bytes-read data found in stderr. stderr tail: {tail}");
+        log::warn!(
+            "Bitrate profiling completed but no bytes-read data found in stderr. stderr tail: {tail}"
+        );
         return Ok(BitrateProfile {
             bitrate_kbps: None,
             frozen_video,
@@ -2054,14 +2052,13 @@ fn parse_bytes_read(stderr: &str, sample_secs: u64) -> Option<u64> {
 
     // Primary: look for "Statistics: N bytes read" lines
     for line in stderr.lines() {
-        if line.contains("Statistics:") && line.contains("bytes read") {
-            if let Some(parts) = line.split("bytes read").next() {
-                if let Some(size_str) = parts.split_whitespace().last() {
-                    if let Ok(bytes) = size_str.parse::<u64>() {
-                        total_bytes = total_bytes.saturating_add(bytes);
-                    }
-                }
-            }
+        if line.contains("Statistics:")
+            && line.contains("bytes read")
+            && let Some(parts) = line.split("bytes read").next()
+            && let Some(size_str) = parts.split_whitespace().last()
+            && let Ok(bytes) = size_str.parse::<u64>()
+        {
+            total_bytes = total_bytes.saturating_add(bytes);
         }
     }
 
@@ -2313,13 +2310,13 @@ async fn run_combined_diagnostics_using_binary(
         if path.exists() {
             match validate_captured_screenshot(path, screenshot_format) {
                 Ok(()) => {
-                    if let Some(code) = exit_code {
-                        if code != 0 {
-                            log::warn!(
-                                "Combined diagnostics captured screenshot despite ffmpeg exiting {}",
-                                code
-                            );
-                        }
+                    if let Some(code) = exit_code
+                        && code != 0
+                    {
+                        log::warn!(
+                            "Combined diagnostics captured screenshot despite ffmpeg exiting {}",
+                            code
+                        );
                     }
                     (Some(path.to_string_lossy().to_string()), None)
                 }
@@ -2518,7 +2515,8 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        append_screenshot_output_args, binary_candidate_names, build_screenshot_file_name,
+        MAX_SCREENSHOT_STEM_LEN, ScreenshotFormat, TARGET_TRIPLE, append_screenshot_output_args,
+        binary_candidate_names, build_screenshot_file_name,
         capture_screenshot_with_format_using_binary, check_label_mismatch, contains_word,
         format_ffmpeg_exit_reason, is_output_name_for_stem, normalize_superscript,
         parse_bytes_read, parse_ffmpeg_stderr, parse_ffprobe_fps, parse_frozen_video,
@@ -2527,11 +2525,10 @@ mod tests {
         sanitize_screenshot_stem, screenshot_header_is_valid, should_retry_screenshot_as_png,
         should_route_tool_through_stream_proxy, should_route_tool_through_stream_proxy_with_hint,
         stderr_excerpt, unique_screenshot_output_path, validate_captured_screenshot,
-        ScreenshotFormat, MAX_SCREENSHOT_STEM_LEN, TARGET_TRIPLE,
     };
     #[cfg(unix)]
     use super::{
-        capture_sample_clip_using_binary, run_combined_diagnostics_using_binary, SampleClipFormat,
+        SampleClipFormat, capture_sample_clip_using_binary, run_combined_diagnostics_using_binary,
     };
     use crate::error::AppError;
     use tokio_util::sync::CancellationToken;

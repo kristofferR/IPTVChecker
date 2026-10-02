@@ -8,14 +8,14 @@
 
 use crate::engine::parser;
 use crate::engine::remote_cache::{
+    PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT, PLAYLIST_DOWNLOAD_USER_AGENT,
     download_playlist_to_cache_in_data_dir, parse_http_url,
     remote_playlist_cache_path_from_data_dir, write_bytes_to_cache,
-    PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT, PLAYLIST_DOWNLOAD_USER_AGENT,
 };
 use crate::engine::stalker::{
-    build_stalker_endpoint_candidates, build_stalker_preview, fetch_stalker_channels,
-    fetch_stalker_genres, fetch_stalker_token, normalize_stalker_mac, normalize_stalker_portal,
-    STALKER_API_TIMEOUT,
+    STALKER_API_TIMEOUT, build_stalker_endpoint_candidates, build_stalker_preview,
+    fetch_stalker_channels, fetch_stalker_genres, fetch_stalker_token, normalize_stalker_mac,
+    normalize_stalker_portal,
 };
 use crate::engine::xtream::{
     apply_xtream_archive_flags, build_xtream_download_url, build_xtream_xmltv_url,
@@ -477,31 +477,30 @@ async fn populate_server_metadata(app: Option<&AppHandle>, preview: &mut Playlis
     preview.single_provider = one_host && !all_dispatcharr_rows(&preview.channels);
 
     // server_location — only look up when ≥90% of channels share the same host
-    if one_host {
-        if let Some(host) = dominant_host_from_counts(&counts) {
-            if !host.eq_ignore_ascii_case("localhost") {
-                if let Ok(cache) = server_location_cache().lock() {
-                    if let Some(cached) = cache.get(&host) {
-                        preview.server_location = cached.clone();
-                        return;
-                    }
-                }
-                emit_load_progress(
-                    app,
-                    PlaylistLoadProgress::Processing {
-                        detail: "Looking up server location",
-                    },
-                );
-                let location = match resolve_host_ip(&host).await {
-                    Some(ip) => lookup_ip_location(ip).await,
-                    None => None,
-                };
-                if let Ok(mut cache) = server_location_cache().lock() {
-                    cache.insert(host, location.clone());
-                }
-                preview.server_location = location;
-            }
+    if one_host
+        && let Some(host) = dominant_host_from_counts(&counts)
+        && !host.eq_ignore_ascii_case("localhost")
+    {
+        if let Ok(cache) = server_location_cache().lock()
+            && let Some(cached) = cache.get(&host)
+        {
+            preview.server_location = cached.clone();
+            return;
         }
+        emit_load_progress(
+            app,
+            PlaylistLoadProgress::Processing {
+                detail: "Looking up server location",
+            },
+        );
+        let location = match resolve_host_ip(&host).await {
+            Some(ip) => lookup_ip_location(ip).await,
+            None => None,
+        };
+        if let Ok(mut cache) = server_location_cache().lock() {
+            cache.insert(host, location.clone());
+        }
+        preview.server_location = location;
     }
 }
 
@@ -509,14 +508,13 @@ async fn populate_server_metadata(app: Option<&AppHandle>, preview: &mut Playlis
 /// Prefers the filename from the path (e.g. "news.m3u"), falling back to the
 /// hostname (e.g. "iptv-org.github.io").
 pub(crate) fn friendly_name_from_url(url: &Url) -> String {
-    if let Some(mut segments) = url.path_segments() {
-        if let Some(last) = segments.rfind(|s| !s.is_empty()) {
-            // Use the segment if it looks like a real name (has extension,
-            // is short, or isn't a pure hex hash).
-            if last.contains('.') || last.len() < 40 || !last.chars().all(|c| c.is_ascii_hexdigit())
-            {
-                return last.to_string();
-            }
+    if let Some(mut segments) = url.path_segments()
+        && let Some(last) = segments.rfind(|s| !s.is_empty())
+    {
+        // Use the segment if it looks like a real name (has extension,
+        // is short, or isn't a pure hex hash).
+        if last.contains('.') || last.len() < 40 || !last.chars().all(|c| c.is_ascii_hexdigit()) {
+            return last.to_string();
         }
     }
     url.host_str().unwrap_or("Playlist").to_string()

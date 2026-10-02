@@ -555,19 +555,19 @@ async fn compute_shared_url_result(
                     shared.channel_log.final_reason = Some(reason);
                 }
                 shared.audio_only = diag.track_presence.has_audio && !diag.track_presence.has_video;
-                if let Some(info) = diag.video_info {
-                    if !shared.audio_only {
-                        shared.codec = Some(info.codec);
-                        shared.resolution = Some(info.resolution.clone());
-                        shared.width = info.width;
-                        shared.height = info.height;
-                        shared.fps = info.fps;
-                        shared.hdr_format = info.hdr_format;
-                        shared.low_framerate = info
-                            .fps
-                            .map(|fps| (fps as f64) <= low_fps_threshold)
-                            .unwrap_or(false);
-                    }
+                if let Some(info) = diag.video_info
+                    && !shared.audio_only
+                {
+                    shared.codec = Some(info.codec);
+                    shared.resolution = Some(info.resolution.clone());
+                    shared.width = info.width;
+                    shared.height = info.height;
+                    shared.fps = info.fps;
+                    shared.hdr_format = info.hdr_format;
+                    shared.low_framerate = info
+                        .fps
+                        .map(|fps| (fps as f64) <= low_fps_threshold)
+                        .unwrap_or(false);
                 }
                 if let Some(audio) = diag.audio_info {
                     shared.audio_codec = Some(audio.codec);
@@ -621,28 +621,27 @@ async fn compute_shared_url_result(
                 // included. The stream opened, so record the clip on its own.
                 // Dispatcharr is skipped: a second connection right after the
                 // first hits its channel teardown.
-                if let (Some(secs), Some(dir)) = (sample_clip_secs, screenshots_dir) {
-                    if shared.sample_clip.is_none()
-                        && has_tracks
-                        && want_screenshot
-                        && !dispatcharr_single_pass
-                        && !cancel.is_cancelled()
-                    {
-                        let _clip_guard = clip_write_lock.lock().await;
-                        if has_space_for_clip(dir) {
-                            shared.sample_clip = ffmpeg::capture_sample_clip(
-                                app,
-                                &target_url,
-                                Some(channel_url),
-                                dir,
-                                screenshot_file_name,
-                                user_agent,
-                                secs,
-                                cancel,
-                            )
-                            .await
-                            .ok();
-                        }
+                if let (Some(secs), Some(dir)) = (sample_clip_secs, screenshots_dir)
+                    && shared.sample_clip.is_none()
+                    && has_tracks
+                    && want_screenshot
+                    && !dispatcharr_single_pass
+                    && !cancel.is_cancelled()
+                {
+                    let _clip_guard = clip_write_lock.lock().await;
+                    if has_space_for_clip(dir) {
+                        shared.sample_clip = ffmpeg::capture_sample_clip(
+                            app,
+                            &target_url,
+                            Some(channel_url),
+                            dir,
+                            screenshot_file_name,
+                            user_agent,
+                            secs,
+                            cancel,
+                        )
+                        .await
+                        .ok();
                     }
                 }
             }
@@ -740,21 +739,21 @@ async fn compute_shared_url_result(
         if let Some(snapshot) = probe_result {
             shared.audio_only =
                 snapshot.track_presence.has_audio && !snapshot.track_presence.has_video;
-            if let Some(info) = snapshot.video_info {
-                if !shared.audio_only {
-                    shared.codec = Some(info.codec);
-                    shared.resolution = Some(info.resolution.clone());
-                    shared.width = info.width;
-                    shared.height = info.height;
-                    shared.fps = info.fps;
-                    shared.hdr_format = info.hdr_format;
-                    shared.low_framerate = info
-                        .fps
-                        .map(|fps| (fps as f64) <= low_fps_threshold)
-                        .unwrap_or(false);
-                    if let Some(kbps) = info.bitrate_kbps {
-                        shared.video_bitrate = Some(format!("{kbps} kbps"));
-                    }
+            if let Some(info) = snapshot.video_info
+                && !shared.audio_only
+            {
+                shared.codec = Some(info.codec);
+                shared.resolution = Some(info.resolution.clone());
+                shared.width = info.width;
+                shared.height = info.height;
+                shared.fps = info.fps;
+                shared.hdr_format = info.hdr_format;
+                shared.low_framerate = info
+                    .fps
+                    .map(|fps| (fps as f64) <= low_fps_threshold)
+                    .unwrap_or(false);
+                if let Some(kbps) = info.bitrate_kbps {
+                    shared.video_bitrate = Some(format!("{kbps} kbps"));
                 }
             }
             if let Some(audio) = snapshot.audio_info {
@@ -805,17 +804,18 @@ async fn compute_shared_url_result(
     }
 
     // Fallback: use format-level bitrate when video_bitrate is missing or N/A.
-    if profile_bitrate_flag && matches!(shared.video_bitrate.as_deref(), None | Some("N/A")) {
-        if let Some(fmt_kbps) = format_bitrate_kbps {
-            let audio_kbps = shared
-                .audio_bitrate
-                .as_deref()
-                .and_then(|v| v.parse::<u32>().ok())
-                .unwrap_or(0);
-            let video_kbps = fmt_kbps.saturating_sub(audio_kbps);
-            if video_kbps > 0 {
-                shared.video_bitrate = Some(format!("{video_kbps} kbps"));
-            }
+    if profile_bitrate_flag
+        && matches!(shared.video_bitrate.as_deref(), None | Some("N/A"))
+        && let Some(fmt_kbps) = format_bitrate_kbps
+    {
+        let audio_kbps = shared
+            .audio_bitrate
+            .as_deref()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(0);
+        let video_kbps = fmt_kbps.saturating_sub(audio_kbps);
+        if video_kbps > 0 {
+            shared.video_bitrate = Some(format!("{video_kbps} kbps"));
         }
     }
     shared.low_bitrate = profile_bitrate_flag && is_low_bitrate(&shared, min_video_bitrate_kbps);
@@ -829,10 +829,10 @@ async fn compute_shared_url_result(
     }
     // Diagnostics can still demote a channel (Dispatcharr single pass); only
     // alive channels keep a sample clip.
-    if shared.status != ChannelStatus::Alive {
-        if let Some(clip) = shared.sample_clip.take() {
-            let _ = std::fs::remove_file(&clip.path);
-        }
+    if shared.status != ChannelStatus::Alive
+        && let Some(clip) = shared.sample_clip.take()
+    {
+        let _ = std::fs::remove_file(&clip.path);
     }
     if let (Some(clip), Some(dir), true) =
         (&shared.sample_clip, screenshots_dir, prune_superseded_clips)
@@ -2358,10 +2358,10 @@ fn build_channel_result(channel: &Channel, shared: &SharedUrlResult) -> ChannelR
         drm_system: shared.drm_system.clone(),
     };
 
-    if result.status == ChannelStatus::Alive {
-        if let Some(ref resolution) = result.resolution {
-            result.label_mismatches = ffmpeg::check_label_mismatch(&channel.name, resolution);
-        }
+    if result.status == ChannelStatus::Alive
+        && let Some(ref resolution) = result.resolution
+    {
+        result.label_mismatches = ffmpeg::check_label_mismatch(&channel.name, resolution);
     }
 
     result
@@ -3125,37 +3125,39 @@ async fn execute_scan_run(
     // A completed full-scope scan saw every channel of this cache folder, so
     // clips none of its results reference (removed, renamed, now dead, or
     // failed recapture) can never be reached again.
-    if !cancel_token.is_cancelled() && full_scope_scan && !using_custom_screenshots_dir {
-        if let Some(dir) = screenshots_dir.clone() {
-            let referenced: HashSet<std::path::PathBuf> = completed_scan
-                .results
-                .iter()
-                .filter_map(|result| result.sample_clip_path.as_deref())
-                .map(std::path::PathBuf::from)
-                .collect();
-            let _ = tokio::task::spawn_blocking(move || {
-                crate::commands::media::sweep_unreferenced_clips(
-                    std::path::Path::new(&dir),
-                    &referenced,
-                )
-            })
-            .await;
-        }
+    if !cancel_token.is_cancelled()
+        && full_scope_scan
+        && !using_custom_screenshots_dir
+        && let Some(dir) = screenshots_dir.clone()
+    {
+        let referenced: HashSet<std::path::PathBuf> = completed_scan
+            .results
+            .iter()
+            .filter_map(|result| result.sample_clip_path.as_deref())
+            .map(std::path::PathBuf::from)
+            .collect();
+        let _ = tokio::task::spawn_blocking(move || {
+            crate::commands::media::sweep_unreferenced_clips(
+                std::path::Path::new(&dir),
+                &referenced,
+            )
+        })
+        .await;
     }
 
-    if !cancel_token.is_cancelled() {
-        if let Some(source_identity) = config.source_identity.as_deref() {
-            let archive_flags = tokio::select! {
-                flags = state.wait_for_xtream_archive_flags(source_identity) => flags,
-                _ = cancel_token.cancelled() => None,
-                _ = tokio::time::sleep(XTREAM_ARCHIVE_SCAN_COMPLETION_TIMEOUT) => None,
-            };
-            if let Some(archive_flags) = archive_flags {
-                apply_xtream_archive_flags_to_results(
-                    &mut completed_scan.results,
-                    archive_flags.as_ref(),
-                );
-            }
+    if !cancel_token.is_cancelled()
+        && let Some(source_identity) = config.source_identity.as_deref()
+    {
+        let archive_flags = tokio::select! {
+            flags = state.wait_for_xtream_archive_flags(source_identity) => flags,
+            _ = cancel_token.cancelled() => None,
+            _ = tokio::time::sleep(XTREAM_ARCHIVE_SCAN_COMPLETION_TIMEOUT) => None,
+        };
+        if let Some(archive_flags) = archive_flags {
+            apply_xtream_archive_flags_to_results(
+                &mut completed_scan.results,
+                archive_flags.as_ref(),
+            );
         }
     }
 
@@ -3623,10 +3625,10 @@ pub async fn dispatcharr_probe_streams(
                 let result = async {
                     let _permit = match limit {
                         Some((account_id, limit)) => {
-                            if let Some(viewers) = &viewers {
-                                if viewers.on_account(account_id, false).await >= limit {
-                                    return Ok(busy(&channel));
-                                }
+                            if let Some(viewers) = &viewers
+                                && viewers.on_account(account_id, false).await >= limit
+                            {
+                                return Ok(busy(&channel));
                             }
                             let slots = crate::engine::dispatcharr::account_connection_slots(
                                 &channel.extinf_line,

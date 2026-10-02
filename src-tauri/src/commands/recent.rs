@@ -552,10 +552,10 @@ fn apply_recent_menu_update(app: &tauri::AppHandle, entries: &[RecentPlaylistEnt
         let _ = recent_submenu.insert(&empty_item, 0);
     }
 
-    if let Some(clear_item_kind) = recent_submenu.get("menu.file.recent.clear") {
-        if let Some(clear_item) = clear_item_kind.as_menuitem() {
-            let _ = clear_item.set_enabled(inserted_any);
-        }
+    if let Some(clear_item_kind) = recent_submenu.get("menu.file.recent.clear")
+        && let Some(clear_item) = clear_item_kind.as_menuitem()
+    {
+        let _ = clear_item.set_enabled(inserted_any);
     }
 }
 
@@ -645,10 +645,10 @@ pub async fn add_recent_playlist(
         if entry.kind != recent.kind {
             return true;
         }
-        if let Some(ref key) = credential_key {
-            if let Some(existing) = credential_dedup_key(&entry.kind, &entry.value) {
-                return &existing != key;
-            }
+        if let Some(ref key) = credential_key
+            && let Some(existing) = credential_dedup_key(&entry.kind, &entry.value)
+        {
+            return &existing != key;
         }
         entry.value != value
     });
@@ -684,10 +684,9 @@ pub async fn clear_recent_playlists(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_label, default_recent_playlists, parse_xtream_recent_value,
-        sanitize_recent_playlists_for_tests, RecentPlaylistEntry, RecentPlaylistKind,
         DEFAULT_PLAYLIST_LABEL, DEFAULT_PLAYLIST_URL, LEGACY_DEFAULT_PLAYLIST_LABEL,
-        LEGACY_DEFAULT_PLAYLIST_URL,
+        LEGACY_DEFAULT_PLAYLIST_URL, RecentPlaylistEntry, RecentPlaylistKind, build_label,
+        default_recent_playlists, parse_xtream_recent_value, sanitize_recent_playlists_for_tests,
     };
 
     #[test]
@@ -716,18 +715,24 @@ mod tests {
 
     #[test]
     fn parse_xtream_recent_value_requires_valid_shape() {
-        assert!(parse_xtream_recent_value(
-            "{\"server\":\"https://demo.example.com\",\"username\":\"user\"}"
-        )
-        .is_some());
-        assert!(parse_xtream_recent_value(
-            "{\"server\":\"ftp://demo.example.com\",\"username\":\"user\"}"
-        )
-        .is_none());
-        assert!(parse_xtream_recent_value(
-            "{\"server\":\"https://demo.example.com\",\"username\":\"\"}"
-        )
-        .is_none());
+        assert!(
+            parse_xtream_recent_value(
+                "{\"server\":\"https://demo.example.com\",\"username\":\"user\"}"
+            )
+            .is_some()
+        );
+        assert!(
+            parse_xtream_recent_value(
+                "{\"server\":\"ftp://demo.example.com\",\"username\":\"user\"}"
+            )
+            .is_none()
+        );
+        assert!(
+            parse_xtream_recent_value(
+                "{\"server\":\"https://demo.example.com\",\"username\":\"\"}"
+            )
+            .is_none()
+        );
     }
 
     #[test]

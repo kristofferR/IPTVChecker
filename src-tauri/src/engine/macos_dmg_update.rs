@@ -195,7 +195,10 @@ fn install_with_admin_privileges(source_app: &Path, destination_app: &Path) -> R
         ),
         source = applescript_string(&source_app.display().to_string()),
         destination = applescript_string(&destination_app.display().to_string()),
-        backup = applescript_string(&format!("{}.iptv-checker-backup", destination_app.display())),
+        backup = applescript_string(&format!(
+            "{}.iptv-checker-backup",
+            destination_app.display()
+        )),
     );
     let mut command = Command::new("osascript");
     command.arg("-e").arg(script);

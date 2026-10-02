@@ -260,20 +260,26 @@ mod tests {
             duration_s: 60,
         };
         assert!(validate(&base).is_ok());
-        assert!(validate(&ArchiveDownloadRequest {
-            url: "rtsp://host/a".into(),
-            ..base.clone()
-        })
-        .is_err());
-        assert!(validate(&ArchiveDownloadRequest {
-            duration_s: 0,
-            ..base.clone()
-        })
-        .is_err());
-        assert!(validate(&ArchiveDownloadRequest {
-            path: " ".into(),
-            ..base
-        })
-        .is_err());
+        assert!(
+            validate(&ArchiveDownloadRequest {
+                url: "rtsp://host/a".into(),
+                ..base.clone()
+            })
+            .is_err()
+        );
+        assert!(
+            validate(&ArchiveDownloadRequest {
+                duration_s: 0,
+                ..base.clone()
+            })
+            .is_err()
+        );
+        assert!(
+            validate(&ArchiveDownloadRequest {
+                path: " ".into(),
+                ..base
+            })
+            .is_err()
+        );
     }
 }

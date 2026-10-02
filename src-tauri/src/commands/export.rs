@@ -413,20 +413,20 @@ fn write_m3u_file(path: &Path, entries: &[String]) -> Result<(), AppError> {
 
 fn format_video_info(r: &ChannelResult) -> String {
     let mut parts = Vec::new();
-    if let Some(ref res) = r.resolution {
-        if res != "Unknown" {
-            let res_display = if let Some(fps) = r.fps {
-                format!("{}{}", res, fps)
-            } else {
-                res.clone()
-            };
-            parts.push(res_display);
-        }
+    if let Some(ref res) = r.resolution
+        && res != "Unknown"
+    {
+        let res_display = if let Some(fps) = r.fps {
+            format!("{}{}", res, fps)
+        } else {
+            res.clone()
+        };
+        parts.push(res_display);
     }
-    if let Some(ref codec) = r.codec {
-        if codec != "Unknown" {
-            parts.push(codec.clone());
-        }
+    if let Some(ref codec) = r.codec
+        && codec != "Unknown"
+    {
+        parts.push(codec.clone());
     }
     if let Some(ref hdr_format) = r.hdr_format {
         parts.push(hdr_format.clone());
@@ -436,10 +436,11 @@ fn format_video_info(r: &ChannelResult) -> String {
     } else {
         parts.join(" ")
     };
-    if let Some(ref bitrate) = r.video_bitrate {
-        if bitrate != "Unknown" && bitrate != "N/A" {
-            return format!("{} ({})", base, bitrate);
-        }
+    if let Some(ref bitrate) = r.video_bitrate
+        && bitrate != "Unknown"
+        && bitrate != "N/A"
+    {
+        return format!("{} ({})", base, bitrate);
     }
     base
 }
@@ -449,10 +450,10 @@ fn format_audio_info(r: &ChannelResult) -> String {
     if let Some(ref bitrate) = r.audio_bitrate {
         parts.push(format!("{bitrate} kbps"));
     }
-    if let Some(ref codec) = r.audio_codec {
-        if codec != "Unknown" {
-            parts.push(codec.clone());
-        }
+    if let Some(ref codec) = r.audio_codec
+        && codec != "Unknown"
+    {
+        parts.push(codec.clone());
     }
     if let Some(ref layout) = r.audio_channel_layout {
         parts.push(layout.clone());
@@ -791,10 +792,12 @@ mod tests {
             value.get("version").and_then(|field| field.as_u64()),
             Some(EXPORT_FORMAT_VERSION as u64)
         );
-        assert!(value
-            .get("exported_at_epoch_ms")
-            .and_then(|field| field.as_u64())
-            .is_some());
+        assert!(
+            value
+                .get("exported_at_epoch_ms")
+                .and_then(|field| field.as_u64())
+                .is_some()
+        );
         assert_eq!(
             value.get("run_id").and_then(|field| field.as_str()),
             Some("run-1")

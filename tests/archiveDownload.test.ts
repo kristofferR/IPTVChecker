@@ -1,22 +1,5 @@
 import { describe, expect, test } from "bun:test";
-
-Object.defineProperty(globalThis, "localStorage", {
-  configurable: true,
-  value: {
-    clear() {},
-    getItem() {
-      return null;
-    },
-    key() {
-      return null;
-    },
-    length: 0,
-    removeItem() {},
-    setItem() {},
-  } satisfies Storage,
-});
-
-const { recordingFileStem } = await import("../src/lib/archiveDownload");
+import { recordingFileStem } from "../src/lib/archiveDownload";
 
 describe("recordingFileStem", () => {
   test("joins channel, title and local start time without filesystem-hostile characters", () => {

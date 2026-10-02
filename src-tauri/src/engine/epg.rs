@@ -8,8 +8,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use quick_xml::encoding::DecodingReader;
+use quick_xml::escape::resolve_predefined_entity;
 use quick_xml::events::Event;
-use quick_xml::Reader;
+use quick_xml::{Reader, XmlVersion};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
@@ -299,13 +301,16 @@ pub fn parse_xmltv_into_with_source<R: Read>(
     source_identity: &str,
     index: &mut EpgIndex,
 ) -> Result<(), AppError> {
-    let mut reader = Reader::from_reader(BufReader::new(source));
-    reader.config_mut().trim_text(true);
+    // DecodingReader transcodes non-UTF-8 guides (e.g. windows-1252) to UTF-8.
+    let mut reader = Reader::from_reader(DecodingReader::new(BufReader::new(source)));
+    // Provider guides often contain a bare `&` ("Tom & Jerry"); keep it as text.
+    reader.config_mut().allow_dangling_amp = true;
 
     let mut buffer = Vec::new();
     let mut current: Option<(String, i64, Option<i64>)> = None;
     let mut current_title: Option<String> = None;
-    let mut in_title = false;
+    // Text, CDATA and entity references of the title being read, if any.
+    let mut title_text: Option<String> = None;
     let mut saw_xmltv_root = false;
     let mut closed_xmltv_root = false;
     let mut element_depth = 0usize;
@@ -313,9 +318,15 @@ pub fn parse_xmltv_into_with_source<R: Read>(
     loop {
         buffer.clear();
         match reader.read_event_into(&mut buffer) {
+            Ok(Event::Decl(declaration)) => {
+                // Unknown encoding names keep the UTF-8 default.
+                if let Some(encoding) = declaration.encoder() {
+                    reader.get_mut().set_encoding(encoding);
+                }
+            }
             Ok(Event::Start(element)) => {
                 if !saw_xmltv_root {
-                    if element.name().as_ref() != b"tv" {
+                    if element.name().as_ref() != "tv" {
                         return Err(AppError::Other(
                             "Failed to parse XMLTV: document root is not <tv>".to_string(),
                         ));
@@ -325,18 +336,18 @@ pub fn parse_xmltv_into_with_source<R: Read>(
                 element_depth += 1;
 
                 match element.name().as_ref() {
-                    b"programme" => {
+                    "programme" => {
                         let mut channel = None;
                         let mut start = None;
                         let mut stop = None;
                         for attribute in element.attributes().flatten() {
                             let value = attribute
-                                .decode_and_unescape_value(reader.decoder())
+                                .normalized_value(XmlVersion::Implicit1_0)
                                 .unwrap_or_default();
                             match attribute.key.as_ref() {
-                                b"channel" => channel = Some(value.into_owned()),
-                                b"start" => start = parse_xmltv_time(&value),
-                                b"stop" => stop = parse_xmltv_time(&value),
+                                "channel" => channel = Some(value.into_owned()),
+                                "start" => start = parse_xmltv_time(&value),
+                                "stop" => stop = parse_xmltv_time(&value),
                                 _ => {}
                             }
                         }
@@ -350,15 +361,15 @@ pub fn parse_xmltv_into_with_source<R: Read>(
                         };
                         current_title = None;
                     }
-                    b"title" if current.is_some() && current_title.is_none() => {
-                        in_title = true;
+                    "title" if current.is_some() && current_title.is_none() => {
+                        title_text = Some(String::new());
                     }
                     _ => {}
                 }
             }
             Ok(Event::Empty(element)) => {
                 if !saw_xmltv_root {
-                    if element.name().as_ref() != b"tv" {
+                    if element.name().as_ref() != "tv" {
                         return Err(AppError::Other(
                             "Failed to parse XMLTV: document root is not <tv>".to_string(),
                         ));
@@ -368,47 +379,60 @@ pub fn parse_xmltv_into_with_source<R: Read>(
                 }
             }
             Ok(Event::Text(text)) => {
-                if in_title {
-                    let value = text.unescape().unwrap_or_default().into_owned();
-                    if !value.trim().is_empty() {
-                        current_title = Some(value.trim().to_string());
-                    }
-                    in_title = false;
+                if let Some(title) = title_text.as_mut() {
+                    title.push_str(&text.xml10_content());
                 }
             }
             Ok(Event::CData(text)) => {
-                if in_title {
-                    let value = text.decode().unwrap_or_default().into_owned();
-                    if !value.trim().is_empty() {
-                        current_title = Some(value.trim().to_string());
+                if let Some(title) = title_text.as_mut() {
+                    title.push_str(&text.xml10_content());
+                }
+            }
+            Ok(Event::GeneralRef(entity)) => {
+                if let Some(title) = title_text.as_mut() {
+                    if let Ok(Some(ch)) = entity.resolve_char_ref() {
+                        title.push(ch);
+                    } else if let Some(value) = resolve_predefined_entity(&entity) {
+                        title.push_str(value);
+                    } else {
+                        // Undeclared entities (e.g. HTML's `&nbsp;`) stay literal.
+                        title.push('&');
+                        title.push_str(&entity);
+                        title.push(';');
                     }
-                    in_title = false;
                 }
             }
             Ok(Event::End(element)) => {
-                let closes_root = element_depth == 1 && element.name().as_ref() == b"tv";
+                let closes_root = element_depth == 1 && element.name().as_ref() == "tv";
                 match element.name().as_ref() {
-                    b"programme" => {
-                        if let Some((channel, start, stop)) = current.take() {
-                            if stop.is_none_or(|stop| stop > start) {
-                                index
-                                    .programmes
-                                    .entry((source_identity.to_string(), channel))
-                                    .or_default()
-                                    .push(EpgProgramme {
-                                        start,
-                                        // `start` is an internal sentinel for an omitted stop time;
-                                        // finalize replaces it with the following programme or fallback.
-                                        stop: stop.unwrap_or(start),
-                                        title: current_title
-                                            .take()
-                                            .unwrap_or_else(|| "Untitled".to_string()),
-                                    });
+                    "programme" => {
+                        if let Some((channel, start, stop)) = current.take()
+                            && stop.is_none_or(|stop| stop > start)
+                        {
+                            index
+                                .programmes
+                                .entry((source_identity.to_string(), channel))
+                                .or_default()
+                                .push(EpgProgramme {
+                                    start,
+                                    // `start` is an internal sentinel for an omitted stop time;
+                                    // finalize replaces it with the following programme or fallback.
+                                    stop: stop.unwrap_or(start),
+                                    title: current_title
+                                        .take()
+                                        .unwrap_or_else(|| "Untitled".to_string()),
+                                });
+                        }
+                        title_text = None;
+                    }
+                    "title" => {
+                        if let Some(title) = title_text.take() {
+                            let title = title.trim();
+                            if !title.is_empty() {
+                                current_title = Some(title.to_string());
                             }
                         }
-                        in_title = false;
                     }
-                    b"title" => in_title = false,
                     _ => {}
                 }
                 if closes_root {
@@ -513,13 +537,11 @@ fn remove_stale_partial_downloads(cache_dir: &Path) {
             .ok()
             .and_then(|modified| modified.elapsed().ok())
             .is_some_and(|age| age >= EPG_DOWNLOAD_TIMEOUT);
-        if is_stale {
-            if let Err(error) = std::fs::remove_file(&path) {
-                log::warn!(
-                    "Failed to remove stale partial EPG download {}: {error}",
-                    path.display()
-                );
-            }
+        if is_stale && let Err(error) = std::fs::remove_file(&path) {
+            log::warn!(
+                "Failed to remove stale partial EPG download {}: {error}",
+                path.display()
+            );
         }
     }
 }
@@ -800,6 +822,27 @@ mod tests {
     }
 
     #[test]
+    fn keeps_entities_and_bare_ampersands_in_titles() {
+        let xml = r#"<tv>
+<programme start="20260828200000" stop="20260828210000" channel="news"><title> Tom &amp; Jerry &#8211; Part&#x20;2 </title></programme>
+<programme start="20260828210000" stop="20260828220000" channel="news"><title>Fish & Chips&nbsp;Live</title></programme>
+</tv>"#;
+        let mut index = EpgIndex::default();
+
+        parse_xmltv_into(xml.as_bytes(), &HashSet::new(), &mut index).expect("xmltv should parse");
+
+        let titles: Vec<_> = index
+            .programmes_for("news", 0, i64::MAX)
+            .into_iter()
+            .map(|programme| programme.title)
+            .collect();
+        assert_eq!(
+            titles,
+            ["Tom & Jerry \u{2013} Part 2", "Fish & Chips&nbsp;Live"]
+        );
+    }
+
+    #[test]
     fn parses_windows_1252_channel_ids_and_titles() {
         let xml = b"<?xml version=\"1.0\" encoding=\"windows-1252\"?><tv><programme start=\"20260828200000\" stop=\"20260828210000\" channel=\"caf\xe9\"><title>Caf\xe9 News</title></programme></tv>";
         let wanted = HashSet::from(["café".to_string()]);
@@ -877,9 +920,11 @@ mod tests {
         assert!(refreshed
             .programmes_for_sources(std::slice::from_ref(&replaced_source), "news", 0, i64::MAX,)
             .is_empty());
-        assert!(refreshed
-            .programmes_for_sources(std::slice::from_ref(&retained_source), "old", 0, i64::MAX,)
-            .is_empty());
+        assert!(
+            refreshed
+                .programmes_for_sources(std::slice::from_ref(&retained_source), "old", 0, i64::MAX,)
+                .is_empty()
+        );
     }
 
     #[test]

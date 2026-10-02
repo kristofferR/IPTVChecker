@@ -1,12 +1,12 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use iptv_checker_lib::commands::export::{export_csv, export_m3u};
 use iptv_checker_lib::engine::checker::check_channel_status_with_debug;
 use iptv_checker_lib::engine::parser::parse_m3u;
 use iptv_checker_lib::engine::proxy::{confirm_geoblock, test_with_proxy};
 use iptv_checker_lib::engine::resume::{
-    load_checkpoint_results, load_processed_channels, write_entries, CheckpointWriteEntry,
+    CheckpointWriteEntry, load_checkpoint_results, load_processed_channels, write_entries,
 };
 use iptv_checker_lib::models::channel::{ChannelResult, ChannelStatus, ContentType};
 use iptv_checker_lib::models::scan::RetryBackoff;
@@ -308,11 +308,13 @@ fn checkpoint_batch_roundtrip_keeps_latest_results_and_redacts_secrets() {
     assert_eq!(loaded[1].index, 2);
     assert_eq!(loaded[1].status, ChannelStatus::Drm);
     assert!(loaded[0].url.contains("token=REDACTED"));
-    assert!(loaded[0]
-        .stream_url
-        .as_deref()
-        .unwrap_or_default()
-        .contains("auth=REDACTED"));
+    assert!(
+        loaded[0]
+            .stream_url
+            .as_deref()
+            .unwrap_or_default()
+            .contains("auth=REDACTED")
+    );
 
     let (processed, last_index) = load_processed_channels(&log_file);
     assert_eq!(last_index, 2);
