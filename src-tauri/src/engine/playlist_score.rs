@@ -215,6 +215,7 @@ mod tests {
             sample_clip_format: None,
             label_mismatches: Vec::new(),
             low_framerate: false,
+            frozen_video: false,
             error_message: None,
             channel_id: "id".to_string(),
             extinf_line: "#EXTINF:-1,Test".to_string(),

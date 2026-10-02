@@ -1762,7 +1762,43 @@ fn spawn_stderr_tail_reader(
     })
 }
 
-/// Profile approximate video bitrate by sampling the stream for 10 seconds.
+/// Video filter for the bitrate profiling output that reports freezes.
+/// Downscaling first smooths out compression noise, which would otherwise
+/// break up the freeze on a re-encoded still image.
+fn freeze_detect_filter(sample_secs: u64) -> String {
+    // Most of the sample must be still; leaves a few seconds for startup.
+    let min_frozen_secs = sample_secs.saturating_sub(3).max(2);
+    format!("scale=320:-2,freezedetect=n=-50dB:d={min_frozen_secs}")
+}
+
+/// True when freezedetect's last event is a freeze that had not ended when
+/// the sample did. freezedetect only reports a freeze once it has lasted the
+/// filter's minimum duration, and never closes one at end of input.
+fn parse_frozen_video(stderr: &str) -> bool {
+    stderr
+        .lines()
+        .rev()
+        .find_map(|line| {
+            if line.contains("lavfi.freezedetect.freeze_end") {
+                Some(false)
+            } else if line.contains("lavfi.freezedetect.freeze_start") {
+                Some(true)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(false)
+}
+
+/// Outcome of the standalone bitrate profiling pass.
+#[derive(Debug, Clone)]
+pub struct BitrateProfile {
+    pub bitrate_kbps: Option<u64>,
+    pub frozen_video: bool,
+}
+
+/// Profile approximate video bitrate by sampling the stream for 10 seconds,
+/// and check whether the picture stayed frozen throughout.
 ///
 /// This spawns ffmpeg directly instead of using `run_tool_command` because:
 /// - ffmpeg with `-t 10` on live streams normally exits non-zero (the stream is
@@ -1776,7 +1812,7 @@ pub async fn profile_bitrate(
     user_agent: &str,
     timeout_secs: f64,
     cancel: &CancellationToken,
-) -> Result<String, AppError> {
+) -> Result<BitrateProfile, AppError> {
     if cancel.is_cancelled() {
         return Err(AppError::Cancelled);
     }
@@ -1794,6 +1830,7 @@ pub async fn profile_bitrate(
     // setup and graceful shutdown. Minimum streaming duration is 3s.
     let sample_secs = (timeout_duration.as_secs().saturating_sub(15)).clamp(3, 10);
     let sample_secs_str = sample_secs.to_string();
+    let freeze_filter = freeze_detect_filter(sample_secs);
 
     let mut command = tokio::process::Command::new(&resolved_bin);
     configure_background_process(&mut command);
@@ -1808,6 +1845,8 @@ pub async fn profile_bitrate(
             &input_url,
             "-t",
             &sample_secs_str,
+            "-vf",
+            &freeze_filter,
             "-f",
             "null",
             "-",
@@ -1843,6 +1882,7 @@ pub async fn profile_bitrate(
 
     let stderr_buf = stderr_reader.await.unwrap_or_default();
     let stderr = String::from_utf8_lossy(&stderr_buf);
+    let frozen_video = parse_frozen_video(&stderr);
 
     // Parse Statistics lines regardless of exit code (HLS opens many HTTP
     // connections, each printing its own "Statistics: N bytes read" line;
@@ -1867,10 +1907,16 @@ pub async fn profile_bitrate(
             )));
         }
         log::warn!("Bitrate profiling completed but no bytes-read data found in stderr. stderr tail: {tail}");
-        return Ok("N/A".to_string());
+        return Ok(BitrateProfile {
+            bitrate_kbps: None,
+            frozen_video,
+        });
     };
 
-    Ok(format!("{} kbps", bitrate_kbps))
+    Ok(BitrateProfile {
+        bitrate_kbps: Some(bitrate_kbps),
+        frozen_video,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1888,6 +1934,8 @@ pub struct CombinedDiagnostics {
     pub screenshot_error_reason: Option<String>,
     pub sample_clip: Option<SampleClip>,
     pub profiled_bitrate_kbps: Option<u64>,
+    /// The picture stayed still through the profiling sample.
+    pub frozen_video: bool,
     pub diagnostics_output: String,
     pub input_error_reason: Option<String>,
 }
@@ -2101,6 +2149,7 @@ async fn run_combined_diagnostics_using_binary(
         0
     };
     let sample_secs_str = sample_secs.to_string();
+    let freeze_filter = freeze_detect_filter(sample_secs);
     let clip_secs_str = sample_clip_secs.map(|secs| secs.to_string());
     if let Some(secs) = sample_clip_secs {
         timeout_duration = timeout_duration
@@ -2150,7 +2199,15 @@ async fn run_combined_diagnostics_using_binary(
 
     // Output 3: null sink for bitrate profiling (or just metadata-only decode)
     if profile_bitrate {
-        args.extend_from_slice(&["-t", &sample_secs_str, "-f", "null", "-"]);
+        args.extend_from_slice(&[
+            "-t",
+            &sample_secs_str,
+            "-vf",
+            &freeze_filter,
+            "-f",
+            "null",
+            "-",
+        ]);
     } else if screenshot_str.is_none() && sample_clip_str.is_none() {
         // No artifacts, no profiling — just decode 1 frame for metadata
         args.extend_from_slice(&["-frames:v", "1", "-f", "null", "-"]);
@@ -2249,6 +2306,7 @@ async fn run_combined_diagnostics_using_binary(
     } else {
         None
     };
+    let frozen_video = profile_bitrate && parse_frozen_video(&stderr);
 
     // Validate screenshot
     let (validated_screenshot, screenshot_error_reason) = if let Some(ref path) = screenshot_path {
@@ -2339,6 +2397,7 @@ async fn run_combined_diagnostics_using_binary(
         screenshot_error_reason,
         sample_clip,
         profiled_bitrate_kbps,
+        frozen_video,
         diagnostics_output,
         input_error_reason,
     })
@@ -2453,10 +2512,10 @@ mod tests {
         append_screenshot_output_args, binary_candidate_names, build_screenshot_file_name,
         capture_screenshot_with_format_using_binary, check_label_mismatch, contains_word,
         format_ffmpeg_exit_reason, is_output_name_for_stem, normalize_superscript,
-        parse_bytes_read, parse_ffmpeg_stderr, parse_ffprobe_fps, parse_probe_snapshot,
-        parse_stream_track_presence, proxy_upstream_source_url, resolution_label,
-        resolve_binary_from_dir, sanitize_ffmpeg_stderr_line, sanitize_screenshot_stem,
-        screenshot_header_is_valid, should_retry_screenshot_as_png,
+        parse_bytes_read, parse_ffmpeg_stderr, parse_ffprobe_fps, parse_frozen_video,
+        parse_probe_snapshot, parse_stream_track_presence, proxy_upstream_source_url,
+        resolution_label, resolve_binary_from_dir, sanitize_ffmpeg_stderr_line,
+        sanitize_screenshot_stem, screenshot_header_is_valid, should_retry_screenshot_as_png,
         should_route_tool_through_stream_proxy, should_route_tool_through_stream_proxy_with_hint,
         stderr_excerpt, unique_screenshot_output_path, validate_captured_screenshot,
         ScreenshotFormat, MAX_SCREENSHOT_STEM_LEN, TARGET_TRIPLE,
@@ -3187,6 +3246,19 @@ Input #0, mp3, from 'http://example.com/radio':
     fn parse_bytes_read_returns_none_when_no_data() {
         let stderr = "Error opening input: Server returned 5XX\n";
         assert_eq!(parse_bytes_read(stderr, 10), None);
+    }
+
+    #[test]
+    fn parse_frozen_video_needs_a_freeze_still_open_at_the_end() {
+        let start = "[Parsed_freezedetect_1 @ 0x1] lavfi.freezedetect.freeze_start: 0.0232\n";
+        let end = "[Parsed_freezedetect_1 @ 0x1] lavfi.freezedetect.freeze_duration: 7.5\n\
+                   [Parsed_freezedetect_1 @ 0x1] lavfi.freezedetect.freeze_end: 7.52\n";
+        let stats = "[AVIOContext @ 0x2] Statistics: 507540 bytes read, 2 seeks\n";
+
+        assert!(parse_frozen_video(&format!("{start}{stats}")));
+        assert!(!parse_frozen_video(&format!("{start}{end}{stats}")));
+        assert!(parse_frozen_video(&format!("{start}{end}{start}{stats}")));
+        assert!(!parse_frozen_video(stats));
     }
 
     #[test]

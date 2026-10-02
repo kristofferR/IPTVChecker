@@ -400,6 +400,7 @@ export default {
     drmProtected: "Flux protégé par DRM",
     logoAlt: "Logo de {name}",
     audioOnlyStream: "Flux audio uniquement",
+    frozenVideo: "Vidéo figée : l'image n'a pas changé pendant l'échantillon de débit",
     videoStream: "Flux vidéo",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} j",
@@ -505,6 +506,7 @@ export default {
       catchupUntested: "Non testé",
       mislabeled: "Mal étiqueté",
       audioOnly: "Audio uniquement",
+      frozenVideo: "Vidéo figée",
       duplicates: "Doublons",
       pending: "En attente",
     },

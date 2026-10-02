@@ -64,6 +64,8 @@ export interface ChannelResult {
   sample_clip_format?: SampleClipFormat | null;
   label_mismatches: string[];
   low_framerate: boolean;
+  /** The picture stayed still through the bitrate profiling sample. */
+  frozen_video: boolean;
   error_message: string | null;
   channel_id: string;
   extinf_line: string;

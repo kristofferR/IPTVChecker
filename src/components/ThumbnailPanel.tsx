@@ -644,6 +644,12 @@ export function ThumbnailPanel({
           </div>
         )}
 
+        {result.frozen_video && (
+          <div className="p-2 rounded bg-sky-500/10 border border-sky-500/20">
+            <p className="text-[11px] text-sky-300">{t("table.frozenVideo")}</p>
+          </div>
+        )}
+
         {(retryCount > 0 || lastErrorReason) && (
           <div className="p-2 rounded bg-panel-subtle border border-border-subtle">
             <p className="text-[12px] font-medium text-text-primary">

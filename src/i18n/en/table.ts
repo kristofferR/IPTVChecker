@@ -67,6 +67,7 @@ export default {
   drmProtected: "DRM-protected stream",
   logoAlt: "{name} logo",
   audioOnlyStream: "Audio-only stream",
+  frozenVideo: "Frozen video: the picture did not change during the bitrate sample",
   videoStream: "Video stream",
   catchup: {
     shallowerChip: "⚠ {measured}/{days}d",

@@ -373,6 +373,7 @@ export default {
     drmProtected: "استریم محافظت‌شده با DRM",
     logoAlt: "لوگوی {name}",
     audioOnlyStream: "استریم فقط صوتی",
+    frozenVideo: "ویدیوی ثابت: تصویر در طول نمونه‌برداری نرخ بیت تغییر نکرد",
     videoStream: "استریم ویدیویی",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} روز",
@@ -478,6 +479,7 @@ export default {
       catchupUntested: "آزمایش‌نشده",
       mislabeled: "برچسب نادرست",
       audioOnly: "فقط صدا",
+      frozenVideo: "ویدیوی ثابت",
       duplicates: "تکراری‌ها",
       pending: "در انتظار",
     },

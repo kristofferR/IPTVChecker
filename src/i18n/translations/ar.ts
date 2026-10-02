@@ -419,6 +419,7 @@ export default {
     drmProtected: "بث محمي بـ DRM",
     logoAlt: "شعار {name}",
     audioOnlyStream: "بث صوتي فقط",
+    frozenVideo: "فيديو متجمد: لم تتغير الصورة خلال عينة معدل البت",
     videoStream: "بث فيديو",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} ي",
@@ -523,6 +524,7 @@ export default {
       catchupUntested: "غير مختبرة",
       mislabeled: "وسم خاطئ",
       audioOnly: "صوت فقط",
+      frozenVideo: "فيديو متجمد",
       duplicates: "المكررات",
       pending: "قيد الانتظار",
     },

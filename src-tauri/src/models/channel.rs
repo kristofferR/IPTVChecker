@@ -218,6 +218,9 @@ pub struct ChannelResult {
     pub sample_clip_format: Option<SampleClipFormat>,
     pub label_mismatches: Vec<String>,
     pub low_framerate: bool,
+    /// The picture stayed still through the bitrate profiling sample.
+    #[serde(default)]
+    pub frozen_video: bool,
     pub error_message: Option<String>,
     pub channel_id: String,
     pub extinf_line: String,
@@ -270,6 +273,7 @@ mod tests {
             sample_clip_format: None,
             label_mismatches: Vec::new(),
             low_framerate: false,
+            frozen_video: false,
             error_message: None,
             channel_id: "id-0".to_string(),
             extinf_line: "#EXTINF:-1,Channel".to_string(),

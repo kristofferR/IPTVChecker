@@ -1,3 +1,4 @@
+import { Snowflake } from "lucide-react";
 import { memo, useMemo } from "react";
 import { formatCount, t } from "../i18n";
 import { translateReason } from "../i18n/reasons";
@@ -232,7 +233,15 @@ function ChannelRowImpl({
       }
       case "bitrate":
         return (
-          <span className="text-text-secondary tabular-nums" dir="ltr">
+          <span
+            className="inline-flex items-center gap-1 text-text-secondary tabular-nums"
+            dir="ltr"
+          >
+            {result.frozen_video && (
+              <span role="img" title={t("table.frozenVideo")} aria-label={t("table.frozenVideo")}>
+                <Snowflake className="h-3 w-3 text-sky-400" aria-hidden="true" />
+              </span>
+            )}
             {result.video_bitrate ? result.video_bitrate : "—"}
           </span>
         );

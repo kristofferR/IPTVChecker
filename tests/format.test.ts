@@ -39,6 +39,7 @@ function makeResult(overrides: Partial<ChannelResult> = {}): ChannelResult {
     screenshot_error_reason: null,
     label_mismatches: [],
     low_framerate: false,
+    frozen_video: false,
     error_message: null,
     channel_id: "0",
     extinf_line: "#EXTINF:-1,Channel",
