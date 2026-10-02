@@ -1,0 +1,36 @@
+name: Clean release verification markers
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-verification-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      # Run from the default branch so releases built from older tags also
+      # get cleaned up. Drafts still need their markers for recovery checks.
+      - name: Remove verification markers from published releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/releases" --paginate --jq '
+            .[] | select(.draft == false) | .tag_name as $tag |
+            .assets[] |
+            select(.name | test("^verified-(aarch64|x86_64)-(apple-darwin|unknown-linux-gnu|pc-windows-msvc)\\.json$")) |
+            [$tag, .name] | @tsv
+          ' > "$RUNNER_TEMP/release-verification-markers.tsv"
+          while IFS=$'\t' read -r tag marker; do
+            gh release delete-asset "$tag" "$marker" --yes
+          done < "$RUNNER_TEMP/release-verification-markers.tsv"
