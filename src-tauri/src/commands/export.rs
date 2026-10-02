@@ -198,6 +198,7 @@ pub async fn export_split(results: Vec<ChannelResult>, base_path: String) -> Res
         #[derive(Default)]
         struct SplitBuckets {
             working: Vec<String>,
+            low_quality: Vec<String>,
             dead: Vec<String>,
             geoblocked: Vec<String>,
             drm: Vec<String>,
@@ -210,6 +211,10 @@ pub async fn export_split(results: Vec<ChannelResult>, base_path: String) -> Res
             let buckets = playlists.entry(playlist_key).or_default();
             let entry = build_m3u_entry(r);
             match r.status {
+                // Same rule as Dispatcharr Fix all's low-quality policy.
+                ChannelStatus::Alive if r.low_bitrate || r.frozen_video => {
+                    buckets.low_quality.push(entry)
+                }
                 ChannelStatus::Alive => buckets.working.push(entry),
                 ChannelStatus::Dead | ChannelStatus::Placeholder => buckets.dead.push(entry),
                 ChannelStatus::Drm => buckets.drm.push(entry),
@@ -223,41 +228,22 @@ pub async fn export_split(results: Vec<ChannelResult>, base_path: String) -> Res
         let split_by_playlist = playlists.len() > 1;
 
         for (playlist, buckets) in playlists {
-            if !buckets.working.is_empty() {
+            for (bucket, entries) in [
+                ("working", buckets.working),
+                ("low_quality", buckets.low_quality),
+                ("dead", buckets.dead),
+                ("geoblocked", buckets.geoblocked),
+                ("drm", buckets.drm),
+            ] {
+                if entries.is_empty() {
+                    continue;
+                }
                 let suffix = if split_by_playlist {
-                    format!("{}_working", playlist)
+                    format!("{playlist}_{bucket}")
                 } else {
-                    "working".to_string()
+                    bucket.to_string()
                 };
-                let path = export_target_path(&base_path, &suffix);
-                write_m3u_file(&path, &buckets.working)?;
-            }
-            if !buckets.dead.is_empty() {
-                let suffix = if split_by_playlist {
-                    format!("{}_dead", playlist)
-                } else {
-                    "dead".to_string()
-                };
-                let path = export_target_path(&base_path, &suffix);
-                write_m3u_file(&path, &buckets.dead)?;
-            }
-            if !buckets.geoblocked.is_empty() {
-                let suffix = if split_by_playlist {
-                    format!("{}_geoblocked", playlist)
-                } else {
-                    "geoblocked".to_string()
-                };
-                let path = export_target_path(&base_path, &suffix);
-                write_m3u_file(&path, &buckets.geoblocked)?;
-            }
-            if !buckets.drm.is_empty() {
-                let suffix = if split_by_playlist {
-                    format!("{}_drm", playlist)
-                } else {
-                    "drm".to_string()
-                };
-                let path = export_target_path(&base_path, &suffix);
-                write_m3u_file(&path, &buckets.drm)?;
+                write_m3u_file(&export_target_path(&base_path, &suffix), &entries)?;
             }
         }
 
@@ -737,6 +723,41 @@ mod tests {
         assert_eq!(exported, expected);
 
         std::fs::remove_file(path).expect("temporary m3u should be removable");
+    }
+
+    #[tokio::test]
+    async fn export_split_writes_low_quality_streams_to_their_own_file() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be monotonic")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("iptv-export-split-{unique}"));
+        std::fs::create_dir(&dir).expect("temporary dir should be creatable");
+        let base_path = dir.join("source.m3u8").to_string_lossy().to_string();
+
+        let mut good = sample_result("Good", "News", "good");
+        good.url = "http://example.com/good.ts".to_string();
+        let mut slow = sample_result("Slow", "News", "slow");
+        slow.url = "http://example.com/slow.ts".to_string();
+        slow.low_bitrate = true;
+        let mut still = sample_result("Still", "News", "still");
+        still.url = "http://example.com/still.ts".to_string();
+        still.frozen_video = true;
+
+        export_split(vec![good, slow, still], base_path)
+            .await
+            .expect("split export should succeed");
+
+        let working = std::fs::read_to_string(dir.join("source_working.m3u8"))
+            .expect("working file should exist");
+        let low_quality = std::fs::read_to_string(dir.join("source_low_quality.m3u8"))
+            .expect("low_quality file should exist");
+        assert!(working.contains("good.ts"));
+        assert!(!working.contains("slow.ts") && !working.contains("still.ts"));
+        assert!(low_quality.contains("slow.ts") && low_quality.contains("still.ts"));
+        assert!(!low_quality.contains("good.ts"));
+
+        std::fs::remove_dir_all(dir).expect("temporary dir should be removable");
     }
 
     #[test]
