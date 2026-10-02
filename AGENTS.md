@@ -78,7 +78,7 @@ lib/        — Types, Tauri invoke wrappers, formatting helpers, sort/filter lo
 - `cd src-tauri && cargo test` — run Rust tests
 - `bun run typecheck` — TypeScript type checking via tsc
 
-**IMPORTANT:** Before launching `bun tauri dev` after Rust code changes, always run `cargo clean -p iptv-checker && cargo build` in `src-tauri/` first to ensure a fresh binary. The dev server's file watcher does not always trigger a rebuild, leading to stale cached binaries.
+**IMPORTANT:** Before launching `bun tauri dev` after Rust code changes, always run `cargo clean -p iptv-checker && cargo build --features mcp` in `src-tauri/` first to ensure a fresh binary. The dev server's file watcher does not always trigger a rebuild, leading to stale cached binaries.
 
 ## Releases
 
@@ -135,7 +135,7 @@ This is safe — it just rebuilds on next `bun tauri dev` or `bun tauri build`. 
 
 ## MCP Tools (tauri-plugin-mcp)
 
-Debug-only Tauri plugin that exposes the app's webview to Claude Code via MCP tools (`mcp__tauri-mcp__*`). Requires `bun tauri dev` to be running (creates IPC socket at `/tmp/tauri-mcp-iptv-checker.sock`).
+Debug-only Tauri plugin that exposes the app's webview to Claude Code via MCP tools (`mcp__tauri-mcp__*`). It sits behind the `mcp` Cargo feature, which `bun tauri dev` enables; release builds, `cargo test` and the fuzz crate leave it out. Requires `bun tauri dev` to be running (creates IPC socket at `/tmp/tauri-mcp-iptv-checker.sock`).
 
 ### Available tools and usage patterns
 

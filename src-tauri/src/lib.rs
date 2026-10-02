@@ -418,14 +418,21 @@ fn clear_menu_window_state(window_label: &str) {
     }
 }
 
+/// Stable equivalent of the `unstable`-gated `Manager::get_focused_window`.
+fn focused_window_label(app: &tauri::AppHandle) -> Option<String> {
+    app.webview_windows()
+        .into_iter()
+        .find(|(_, window)| window.is_focused().unwrap_or(false))
+        .map(|(label, _)| label)
+}
+
 /// Main windows select every table row (or a text field's content, which
 /// the frontend handles). Other windows (log, settings) get the webview's
 /// ordinary select-all.
 fn select_all_in_focused_window(app: &tauri::AppHandle) {
-    let Some(window) = app.get_focused_window() else {
+    let Some(label) = focused_window_label(app) else {
         return;
     };
-    let label = window.label().to_string();
     // Queued until the window's listeners are ready, like other menu events.
     if label.starts_with("main") {
         let _ = emit_menu_event_to_window(app, &label, "menu://select-all", "focused window");
@@ -435,8 +442,7 @@ fn select_all_in_focused_window(app: &tauri::AppHandle) {
 }
 
 fn emit_menu_event_to_focused_window(app: &tauri::AppHandle, event_name: &str) {
-    if let Some(window) = app.get_focused_window() {
-        let window_label = window.label().to_string();
+    if let Some(window_label) = focused_window_label(app) {
         let _ = emit_menu_event_to_window(app, &window_label, event_name, "focused window");
         return;
     }
@@ -527,8 +533,7 @@ fn emit_open_paths_to_focused_window(app: &tauri::AppHandle, paths: &[String]) {
         return;
     }
 
-    if let Some(window) = app.get_focused_window() {
-        let window_label = window.label().to_string();
+    if let Some(window_label) = focused_window_label(app) {
         let _ = emit_open_paths_to_window(app, &window_label, paths, "focused window");
         return;
     }
@@ -609,7 +614,7 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     let builder = builder.plugin(tauri_plugin_liquid_glass::init());
 
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, feature = "mcp"))]
     let builder = builder.plugin(tauri_plugin_mcp::init_with_config(
         tauri_plugin_mcp::PluginConfig::new("iptv-checker".to_string())
             .start_socket_server(true)

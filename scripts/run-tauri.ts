@@ -9,7 +9,11 @@ if (process.platform === "linux") {
   environment.NO_STRIP ??= "1";
 }
 
-const tauri = Bun.spawn([process.execPath, tauriCli, ...Bun.argv.slice(2)], {
+const args = Bun.argv.slice(2);
+// The MCP agent-control plugin is a dev-only Cargo feature.
+if (args[0] === "dev") args.splice(1, 0, "--features", "mcp");
+
+const tauri = Bun.spawn([process.execPath, tauriCli, ...args], {
   env: environment,
   stdin: "inherit",
   stdout: "inherit",
