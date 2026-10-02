@@ -135,7 +135,7 @@ This is safe — it just rebuilds on next `bun tauri dev` or `bun tauri build`. 
 
 ## MCP Tools (tauri-plugin-mcp)
 
-Debug-only Tauri plugin that exposes the app's webview to Claude Code via MCP tools (`mcp__tauri-mcp__*`). It sits behind the `mcp` Cargo feature, which `bun tauri dev` enables; release builds, `cargo test` and the fuzz crate leave it out. Requires `bun tauri dev` to be running (creates IPC socket at `/tmp/tauri-mcp-iptv-checker.sock`).
+Debug-only Tauri plugin that exposes the app's webview to Claude Code via MCP tools (`mcp__tauri-mcp__*`). It sits behind the `mcp` Cargo feature, which `bun tauri dev` enables (on Linux only when the PipeWire development files are installed); release builds, `cargo test` and the fuzz crate leave it out. Requires `bun tauri dev` to be running (creates IPC socket at `/tmp/tauri-mcp-iptv-checker.sock`).
 
 ### Available tools and usage patterns
 
