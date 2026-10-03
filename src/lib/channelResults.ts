@@ -99,6 +99,11 @@ export function mergeSuccessfulPlaybackResult(
   let changed = result.status !== "alive";
   const updated: ChannelResult = changed ? { ...result, status: "alive" } : { ...result };
 
+  if (result.probe_error_reason != null) {
+    updated.probe_error_reason = null;
+    changed = true;
+  }
+
   if (!metadata) return changed ? updated : result;
 
   const mergeMissing = <Key extends keyof ChannelResult>(

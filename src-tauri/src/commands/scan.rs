@@ -682,8 +682,8 @@ async fn compute_shared_url_result(
         }
         drop(diagnostics_permit);
     } else {
-        // Mixed-provider or no ffmpeg: parallel ffprobe + screenshot, then bitrate.
-        // Faster when there are no connection limits.
+        // Mixed-provider playlists can still contain single-connection servers.
+        // Finish the probe and its retries before media capture takes a slot.
         // Yields the last snapshot and, when no attempt found a track, why.
         let ffprobe_fut = async {
             if !ffprobe_ok {
@@ -743,8 +743,7 @@ async fn compute_shared_url_result(
             .map(Some)
         };
 
-        // The clip follows the screenshot rather than running beside it, so a
-        // channel never holds more than the two connections it used before.
+        // The clip follows the screenshot, keeping media captures sequential.
         let media_fut = async {
             let screenshot_result = screenshot_fut.await;
             let sample_clip = match (sample_clip_secs, screenshots_dir) {
@@ -772,8 +771,8 @@ async fn compute_shared_url_result(
             (screenshot_result, sample_clip)
         };
 
-        let ((probe_result, probe_failure), (screenshot_result, sample_clip)) =
-            tokio::join!(ffprobe_fut, media_fut);
+        let (probe_result, probe_failure) = ffprobe_fut.await;
+        let (screenshot_result, sample_clip) = media_fut.await;
         shared.sample_clip = sample_clip;
         shared.probe_error_reason = probe_failure;
 
