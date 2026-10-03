@@ -421,6 +421,7 @@ export default {
     audioOnlyStream: "بث صوتي فقط",
     frozenVideo: "فيديو متجمد: لم تتغير الصورة خلال عينة معدل البت",
     lowBitrate: "معدل بت منخفض: أقل من الحد الأدنى لمعدل بت الفيديو",
+    probeFailed: "معلومات البث غير متاحة: {reason}. أعد الفحص للمحاولة مرة أخرى.",
     videoStream: "بث فيديو",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} ي",

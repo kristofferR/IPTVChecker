@@ -412,6 +412,8 @@ export default {
     audioOnlyStream: "Лише аудіо",
     frozenVideo: "Застигле відео: зображення не змінювалося під час заміру бітрейту",
     lowBitrate: "Низький бітрейт: нижче мінімального бітрейту відео",
+    probeFailed:
+      "Відомості про потік недоступні: {reason}. Повторіть сканування, щоб спробувати знову.",
     videoStream: "Відеопотік",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} д",

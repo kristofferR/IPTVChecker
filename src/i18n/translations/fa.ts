@@ -375,6 +375,7 @@ export default {
     audioOnlyStream: "استریم فقط صوتی",
     frozenVideo: "ویدیوی ثابت: تصویر در طول نمونه‌برداری نرخ بیت تغییر نکرد",
     lowBitrate: "نرخ بیت پایین: کمتر از حداقل نرخ بیت ویدیو",
+    probeFailed: "اطلاعات استریم در دسترس نیست: {reason}. برای تلاش دوباره، دوباره اسکن کنید.",
     videoStream: "استریم ویدیویی",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} روز",

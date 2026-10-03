@@ -405,6 +405,8 @@ export default {
     audioOnlyStream: "Stream solo de audio",
     frozenVideo: "Vídeo congelado: la imagen no cambió durante la muestra de tasa de bits",
     lowBitrate: "Bitrate bajo: por debajo del bitrate de vídeo mínimo",
+    probeFailed:
+      "Información del stream no disponible: {reason}. Vuelve a escanear para intentarlo de nuevo.",
     videoStream: "Stream de vídeo",
     catchup: {
       shallowerChip: "⚠ {measured}/{days}d",

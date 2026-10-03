@@ -60,6 +60,7 @@ export interface ChannelResult {
   audio_only: boolean;
   screenshot_path: string | null;
   screenshot_error_reason?: string | null;
+  probe_error_reason?: string | null;
   sample_clip_path?: string | null;
   sample_clip_format?: SampleClipFormat | null;
   label_mismatches: string[];

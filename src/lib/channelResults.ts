@@ -18,6 +18,7 @@ function pendingScanFields() {
     audio_only: false,
     screenshot_path: null,
     screenshot_error_reason: null,
+    probe_error_reason: null,
     sample_clip_path: null,
     sample_clip_format: null,
     label_mismatches: [],
@@ -97,6 +98,11 @@ export function mergeSuccessfulPlaybackResult(
 ): ChannelResult {
   let changed = result.status !== "alive";
   const updated: ChannelResult = changed ? { ...result, status: "alive" } : { ...result };
+
+  if (result.probe_error_reason != null) {
+    updated.probe_error_reason = null;
+    changed = true;
+  }
 
   if (!metadata) return changed ? updated : result;
 

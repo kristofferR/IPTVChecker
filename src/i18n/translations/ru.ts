@@ -411,6 +411,8 @@ export default {
     audioOnlyStream: "Только аудио",
     frozenVideo: "Застывшее видео: изображение не менялось во время замера битрейта",
     lowBitrate: "Низкий битрейт: ниже минимального битрейта видео",
+    probeFailed:
+      "Сведения о потоке недоступны: {reason}. Повторите сканирование, чтобы попробовать снова.",
     videoStream: "Видеопоток",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} д",

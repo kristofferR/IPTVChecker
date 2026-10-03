@@ -947,6 +947,7 @@ pub async fn check_channel_status_with_ffprobe_debug(
                 final_verdict: "Dead".to_string(),
                 final_reason: Some(reason.clone()),
                 screenshot_error_reason: None,
+                probe_error_reason: None,
                 diagnostics_output: None,
                 attempts: vec![ChannelAttemptDebugLog {
                     attempt: 1,
@@ -1131,6 +1132,7 @@ pub async fn check_channel_status_with_ffprobe_debug(
             final_verdict: final_outcome.status.to_string(),
             final_reason: final_outcome.last_error_reason,
             screenshot_error_reason: None,
+            probe_error_reason: None,
             diagnostics_output: final_outcome
                 .ffprobe_output
                 .map(crate::models::scan_log::cap_diagnostics_output),
@@ -1404,6 +1406,7 @@ pub async fn check_channel_status_with_debug(
             final_verdict: final_outcome.status.to_string(),
             final_reason: final_outcome.last_error_reason,
             screenshot_error_reason: None,
+            probe_error_reason: None,
             diagnostics_output: None,
             attempts: final_outcome.attempts,
         },

@@ -118,8 +118,23 @@ describe("channelResults helpers", () => {
     expect(mergeSuccessfulPlaybackResult(pending, null, 23).status).toBe("alive");
   });
 
-  it("retains audio-only information discovered during playback", () => {
-    const pending = toPendingChannelResult(makeChannel("https://example.com/live/radio.ts"));
+  it("clears a failed probe warning after successful playback without metadata", () => {
+    const scanned = {
+      ...toPendingChannelResult(makeChannel("https://example.com/live/radio.ts")),
+      status: "alive" as const,
+      probe_error_reason: "No decodable audio/video tracks reported by ffprobe",
+    };
+
+    expect(mergeSuccessfulPlaybackResult(scanned, null, 23).probe_error_reason).toBeNull();
+    expect(scanned.probe_error_reason).toBe("No decodable audio/video tracks reported by ffprobe");
+  });
+
+  it("retains audio-only playback metadata and clears a failed probe warning", () => {
+    const scanned = {
+      ...toPendingChannelResult(makeChannel("https://example.com/live/radio.ts")),
+      status: "alive" as const,
+      probe_error_reason: "No decodable audio/video tracks reported by ffprobe",
+    };
     const metadata: StreamMetadata = {
       width: null,
       height: null,
@@ -135,13 +150,15 @@ describe("channelResults helpers", () => {
       audioOnly: true,
     };
 
-    expect(mergeSuccessfulPlaybackResult(pending, metadata, 23)).toMatchObject({
+    expect(mergeSuccessfulPlaybackResult(scanned, metadata, 23)).toMatchObject({
       status: "alive",
       latency_ms: 420,
       audio_codec: "AAC",
       audio_bitrate: "128",
       audio_channel_layout: "Stereo",
       audio_only: true,
+      resolution: null,
+      probe_error_reason: null,
     });
   });
 

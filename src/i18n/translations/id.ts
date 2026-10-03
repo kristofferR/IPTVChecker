@@ -373,6 +373,7 @@ export default {
     audioOnlyStream: "Stream audio saja",
     frozenVideo: "Video beku: gambar tidak berubah selama sampel bitrate",
     lowBitrate: "Bitrate rendah: di bawah bitrate video minimum",
+    probeFailed: "Info stream tidak tersedia: {reason}. Pindai ulang untuk mencoba lagi.",
     videoStream: "Stream video",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} h",
