@@ -717,10 +717,15 @@ async fn compute_shared_url_result(
                     return (snapshot, Some(failure));
                 }
                 retries_used += 1;
+                drop(diagnostics_permit.take());
                 tokio::select! {
                     _ = cancel.cancelled() => return (None, None),
                     _ = tokio::time::sleep(probe_retry_delay(retry_backoff, retries_used)) => {}
                 }
+                diagnostics_permit = tokio::select! {
+                    _ = cancel.cancelled() => return (None, None),
+                    permit = diagnostics_semaphore.clone().acquire_owned() => permit.ok(),
+                };
             }
         };
 
