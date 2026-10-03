@@ -682,50 +682,32 @@ async fn compute_shared_url_result(
         }
         drop(diagnostics_permit);
     } else {
-        // Mixed-provider playlists can still contain single-connection servers.
-        // Finish the probe and its retries before media capture takes a slot.
-        // Yields the last snapshot and, when no attempt found a track, why.
-        let ffprobe_fut = async {
+        // One probe: its snapshot and, when it found no track, why. None
+        // when cancelled.
+        let probe_once = || async {
             if !ffprobe_ok {
-                return (None, None);
+                return Some((None, None));
             }
-            let mut retries_used = 0u32;
-            loop {
-                let (snapshot, failure) = match ffmpeg::collect_probe_snapshot_with_timeout(
-                    app,
-                    &target_url,
-                    Some(channel_url),
-                    cancel,
-                    Some(ffprobe_timeout_duration),
-                )
-                .await
+            match ffmpeg::collect_probe_snapshot_with_timeout(
+                app,
+                &target_url,
+                Some(channel_url),
+                cancel,
+                Some(ffprobe_timeout_duration),
+            )
+            .await
+            {
+                Err(AppError::Cancelled) => None,
+                Err(error) => Some((None, Some(error.to_string()))),
+                Ok(snapshot)
+                    if snapshot.track_presence.has_audio || snapshot.track_presence.has_video =>
                 {
-                    Err(AppError::Cancelled) => return (None, None),
-                    Err(error) => (None, error.to_string()),
-                    Ok(snapshot)
-                        if snapshot.track_presence.has_audio
-                            || snapshot.track_presence.has_video =>
-                    {
-                        return (Some(snapshot), None);
-                    }
-                    Ok(snapshot) => (
-                        Some(snapshot),
-                        "No decodable audio/video tracks reported by ffprobe".to_string(),
-                    ),
-                };
-                if retries_used >= retries {
-                    return (snapshot, Some(failure));
+                    Some((Some(snapshot), None))
                 }
-                retries_used += 1;
-                drop(diagnostics_permit.take());
-                tokio::select! {
-                    _ = cancel.cancelled() => return (None, None),
-                    _ = tokio::time::sleep(probe_retry_delay(retry_backoff, retries_used)) => {}
-                }
-                diagnostics_permit = tokio::select! {
-                    _ = cancel.cancelled() => return (None, None),
-                    permit = diagnostics_semaphore.clone().acquire_owned() => permit.ok(),
-                };
+                Ok(snapshot) => Some((
+                    Some(snapshot),
+                    Some("No decodable audio/video tracks reported by ffprobe".to_string()),
+                )),
             }
         };
 
@@ -748,7 +730,8 @@ async fn compute_shared_url_result(
             .map(Some)
         };
 
-        // The clip follows the screenshot, keeping media captures sequential.
+        // The clip follows the screenshot rather than running beside it, so a
+        // channel never holds more than the two connections it used before.
         let media_fut = async {
             let screenshot_result = screenshot_fut.await;
             let sample_clip = match (sample_clip_secs, screenshots_dir) {
@@ -776,8 +759,29 @@ async fn compute_shared_url_result(
             (screenshot_result, sample_clip)
         };
 
-        let (probe_result, probe_failure) = ffprobe_fut.await;
-        let (screenshot_result, sample_clip) = media_fut.await;
+        // The first probe runs beside the media capture, which keeps scans of
+        // unlimited servers fast. Retries wait until the capture is done, so a
+        // single-connection server in a mixed playlist is not asked for two
+        // streams at once.
+        let (first_probe, (screenshot_result, sample_clip)) = tokio::join!(probe_once(), media_fut);
+        let (mut probe_result, mut probe_failure) = first_probe.unwrap_or((None, None));
+        let mut probe_retries_used = 0u32;
+        while probe_failure.is_some() && probe_retries_used < retries && !cancel.is_cancelled() {
+            probe_retries_used += 1;
+            drop(diagnostics_permit.take());
+            tokio::select! {
+                _ = cancel.cancelled() => break,
+                _ = tokio::time::sleep(probe_retry_delay(retry_backoff, probe_retries_used)) => {}
+            }
+            diagnostics_permit = tokio::select! {
+                _ = cancel.cancelled() => break,
+                permit = diagnostics_semaphore.clone().acquire_owned() => permit.ok(),
+            };
+            let Some(next) = probe_once().await else {
+                break;
+            };
+            (probe_result, probe_failure) = next;
+        }
         shared.sample_clip = sample_clip;
         shared.probe_error_reason = probe_failure;
 
