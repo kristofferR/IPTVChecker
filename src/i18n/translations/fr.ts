@@ -402,6 +402,7 @@ export default {
     audioOnlyStream: "Flux audio uniquement",
     frozenVideo: "Vidéo figée : l'image n'a pas changé pendant l'échantillon de débit",
     lowBitrate: "Débit faible : sous le débit vidéo minimal",
+    probeFailed: "Infos du flux indisponibles : {reason}. Relancez l'analyse pour réessayer.",
     videoStream: "Flux vidéo",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} j",

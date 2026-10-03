@@ -234,6 +234,10 @@ fn sanitize_channel_log_for_persistence(channel_log: &ChannelDebugLog) -> Channe
         .screenshot_error_reason
         .as_deref()
         .map(sanitize_embedded_urls);
+    sanitized.probe_error_reason = sanitized
+        .probe_error_reason
+        .as_deref()
+        .map(sanitize_embedded_urls);
     sanitized.diagnostics_output = sanitized
         .diagnostics_output
         .as_deref()
@@ -334,6 +338,7 @@ fn build_resumed_channel_log(result: &ChannelResult) -> ChannelDebugLog {
         final_verdict: result.status.to_string(),
         final_reason: result.error_reason.clone(),
         screenshot_error_reason: result.screenshot_error_reason.clone(),
+        probe_error_reason: result.probe_error_reason.clone(),
         ..ChannelDebugLog::default()
     }
 }
@@ -533,6 +538,7 @@ mod tests {
             audio_only: false,
             screenshot_path: None,
             screenshot_error_reason: None,
+            probe_error_reason: None,
             sample_clip_path: None,
             sample_clip_format: None,
             label_mismatches: Vec::new(),
@@ -559,6 +565,7 @@ mod tests {
             final_verdict: "Alive".to_string(),
             final_reason: Some(format!("Failure for {url}?token=reason")),
             screenshot_error_reason: Some(format!("Capture failed for {url}?token=screenshot")),
+            probe_error_reason: Some(format!("Probe failed for {url}?token=probe")),
             diagnostics_output: Some(format!("ffprobe input {url}?token=diag")),
             attempts: vec![ChannelAttemptDebugLog {
                 attempt: 1,

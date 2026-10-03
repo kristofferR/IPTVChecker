@@ -358,6 +358,7 @@ export default {
     audioOnlyStream: "纯音频流",
     frozenVideo: "画面冻结：码率采样期间画面没有变化",
     lowBitrate: "低码率：低于最低视频码率",
+    probeFailed: "无法获取流信息：{reason}。请重新扫描再试一次。",
     videoStream: "视频流",
     catchup: {
       shallowerChip: "⚠ {measured}/{days}天",

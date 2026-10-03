@@ -1,4 +1,4 @@
-import { Gauge, Snowflake } from "lucide-react";
+import { CircleHelp, Gauge, Snowflake } from "lucide-react";
 import { memo, useMemo } from "react";
 import { formatCount, t } from "../i18n";
 import { translateReason } from "../i18n/reasons";
@@ -86,6 +86,11 @@ function ChannelRowImpl({
   const rowHeightPx = useMemo(() => channelRowHeightPixels(channelLogoSize), [channelLogoSize]);
   const rawErrorReason = getChannelErrorReason(result);
   const errorReason = rawErrorReason ? translateReason(rawErrorReason) : null;
+  // Alive, but the media probe never read a track.
+  const probeFailedTitle =
+    isAlive && result.probe_error_reason
+      ? t("table.probeFailed", { reason: translateReason(result.probe_error_reason) })
+      : null;
   const drmStatusTitle = result.drm_system
     ? t("table.drmSystem", { system: translateReason(result.drm_system) })
     : t("table.drmProtected");
@@ -200,6 +205,16 @@ function ChannelRowImpl({
           </span>
         );
       case "resolution":
+        if (probeFailedTitle && !result.resolution) {
+          return (
+            <span role="img" title={probeFailedTitle} aria-label={probeFailedTitle}>
+              <CircleHelp
+                className="h-3.5 w-3.5 text-amber-400 light:text-amber-600"
+                aria-hidden="true"
+              />
+            </span>
+          );
+        }
         return (
           <span className="text-text-secondary tabular-nums" dir="ltr">
             {result.resolution ?? "—"}

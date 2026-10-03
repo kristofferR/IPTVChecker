@@ -382,6 +382,8 @@ export default {
     audioOnlyStream: "Reiner Audiostream",
     frozenVideo: "Standbild: Das Bild hat sich während der Bitraten-Messung nicht verändert",
     lowBitrate: "Niedrige Bitrate: unter der Mindest-Video-Bitrate",
+    probeFailed:
+      "Stream-Infos nicht verfügbar: {reason}. Erneut prüfen, um es noch einmal zu versuchen.",
     videoStream: "Videostream",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} T",

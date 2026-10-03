@@ -212,6 +212,10 @@ pub struct ChannelResult {
     pub screenshot_path: Option<String>,
     #[serde(default)]
     pub screenshot_error_reason: Option<String>,
+    /// Why the media probe found no tracks on a stream that passed the
+    /// liveness check, leaving its codec, resolution and audio unknown.
+    #[serde(default)]
+    pub probe_error_reason: Option<String>,
     #[serde(default)]
     pub sample_clip_path: Option<String>,
     #[serde(default)]
@@ -272,6 +276,7 @@ mod tests {
             audio_only: false,
             screenshot_path: None,
             screenshot_error_reason: None,
+            probe_error_reason: None,
             sample_clip_path: None,
             sample_clip_format: None,
             label_mismatches: Vec::new(),

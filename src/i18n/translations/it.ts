@@ -398,6 +398,7 @@ export default {
     audioOnlyStream: "Stream solo audio",
     frozenVideo: "Video bloccato: l'immagine non è cambiata durante il campione di bitrate",
     lowBitrate: "Bitrate basso: sotto il bitrate video minimo",
+    probeFailed: "Info dello stream non disponibili: {reason}. Ripeti la scansione per riprovare.",
     videoStream: "Stream video",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} g",

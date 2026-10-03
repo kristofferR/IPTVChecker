@@ -69,6 +69,7 @@ export default {
   audioOnlyStream: "Audio-only stream",
   frozenVideo: "Frozen video: the picture did not change during the bitrate sample",
   lowBitrate: "Low bitrate: below the minimum video bitrate",
+  probeFailed: "Stream info unavailable: {reason}. Rescan to try again.",
   videoStream: "Video stream",
   catchup: {
     shallowerChip: "⚠ {measured}/{days}d",

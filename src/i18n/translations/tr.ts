@@ -385,6 +385,7 @@ export default {
     audioOnlyStream: "Yalnızca ses yayını",
     frozenVideo: "Donmuş video: bit hızı örneği boyunca görüntü değişmedi",
     lowBitrate: "Düşük bit hızı: minimum video bit hızının altında",
+    probeFailed: "Yayın bilgisi alınamadı: {reason}. Yeniden denemek için tekrar tarayın.",
     videoStream: "Video yayını",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} g",

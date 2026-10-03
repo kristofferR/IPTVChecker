@@ -54,6 +54,7 @@ struct SharedUrlResult {
     audio_only: bool,
     screenshot_path: Option<String>,
     screenshot_error_reason: Option<String>,
+    probe_error_reason: Option<String>,
     sample_clip: Option<ffmpeg::SampleClip>,
     low_framerate: bool,
     frozen_video: bool,
@@ -89,6 +90,7 @@ impl SharedUrlResult {
             audio_only: false,
             screenshot_path: None,
             screenshot_error_reason: None,
+            probe_error_reason: None,
             sample_clip: None,
             low_framerate: false,
             frozen_video: false,
@@ -203,6 +205,19 @@ pub(crate) fn ffmpeg_target_url(channel_url: &str, stream_url: Option<&str>) -> 
         Some(resolved) if checker::is_manifest_url(resolved) => resolved.to_string(),
         _ => channel_url.to_string(),
     }
+}
+
+/// Pause before probing a stream again: the scan's backoff, but at least a
+/// second. A provider may still hold the connection of the previous attempt
+/// or the liveness check, and Dispatcharr answers `Retry-After: 1` while a
+/// channel is stopping (ffmpeg does not expose that header).
+fn probe_retry_delay(retry_backoff: RetryBackoff, retries_used: u32) -> Duration {
+    let secs = match retry_backoff {
+        RetryBackoff::None => 1,
+        RetryBackoff::Linear => u64::from(retries_used.min(10)),
+        RetryBackoff::Exponential => (1u64 << retries_used.saturating_sub(1).min(5)).min(30),
+    };
+    Duration::from_secs(secs.max(1))
 }
 
 /// Per-run configuration and shared handles for checking a single stream URL.
@@ -405,6 +420,7 @@ async fn compute_shared_url_result(
                 audio_only: false,
                 screenshot_path: None,
                 screenshot_error_reason: None,
+                probe_error_reason: None,
                 sample_clip: None,
                 low_framerate: false,
                 frozen_video: false,
@@ -437,6 +453,7 @@ async fn compute_shared_url_result(
         audio_only: false,
         screenshot_path: None,
         screenshot_error_reason: None,
+        probe_error_reason: None,
         sample_clip: None,
         low_framerate: false,
         frozen_video: false,
@@ -507,29 +524,19 @@ async fn compute_shared_url_result(
                 &result,
                 Ok(diag) if !(diag.track_presence.has_audio || diag.track_presence.has_video)
             );
-            if !dispatcharr_single_pass || !no_tracks_yet || combined_retries_used >= retries {
+            if !no_tracks_yet || combined_retries_used >= retries {
                 break (result, attempt_elapsed);
             }
 
             combined_retries_used = combined_retries_used.saturating_add(1);
             // The semaphore limits active diagnostics, not channels waiting for
-            // Dispatcharr's teardown window. Release it during the backoff.
+            // a provider to free a connection. Release it during the backoff.
             drop(diagnostics_permit.take());
-            // Dispatcharr explicitly returns Retry-After: 1 while a channel is
-            // stopping. ffmpeg does not expose that header, so honor the same
-            // minimum here and retain the configured backoff behavior.
-            let delay_secs = match retry_backoff {
-                RetryBackoff::None => 1,
-                RetryBackoff::Linear => u64::from(combined_retries_used.min(10)),
-                RetryBackoff::Exponential => {
-                    (1u64 << combined_retries_used.saturating_sub(1).min(5)).min(30)
-                }
-            };
             tokio::select! {
                 _ = cancel.cancelled() => {
                     return Err(AppError::Cancelled);
                 }
-                _ = tokio::time::sleep(std::time::Duration::from_secs(delay_secs.max(1))) => {}
+                _ = tokio::time::sleep(probe_retry_delay(retry_backoff, combined_retries_used)) => {}
             }
             diagnostics_permit = tokio::select! {
                 _ = cancel.cancelled() => return Err(AppError::Cancelled),
@@ -545,14 +552,19 @@ async fn compute_shared_url_result(
         match combined_result {
             Ok(diag) => {
                 let has_tracks = diag.track_presence.has_audio || diag.track_presence.has_video;
-                if dispatcharr_single_pass && !has_tracks {
+                if !has_tracks {
                     let reason = diag.input_error_reason.clone().unwrap_or_else(|| {
                         "No decodable audio/video tracks reported by ffmpeg".to_string()
                     });
-                    shared.status = ChannelStatus::Dead;
-                    shared.error_reason = Some(reason.clone());
-                    shared.channel_log.final_verdict = "Dead".to_string();
-                    shared.channel_log.final_reason = Some(reason);
+                    // The Dispatcharr pass is also the liveness check.
+                    if dispatcharr_single_pass {
+                        shared.status = ChannelStatus::Dead;
+                        shared.error_reason = Some(reason.clone());
+                        shared.channel_log.final_verdict = "Dead".to_string();
+                        shared.channel_log.final_reason = Some(reason);
+                    } else {
+                        shared.probe_error_reason = Some(reason);
+                    }
                 }
                 shared.audio_only = diag.track_presence.has_audio && !diag.track_presence.has_video;
                 if let Some(info) = diag.video_info
@@ -663,6 +675,8 @@ async fn compute_shared_url_result(
                     shared.error_reason = Some(err.to_string());
                     shared.channel_log.final_verdict = "Dead".to_string();
                     shared.channel_log.final_reason = Some(err.to_string());
+                } else {
+                    shared.probe_error_reason = Some(err.to_string());
                 }
             }
         }
@@ -670,19 +684,44 @@ async fn compute_shared_url_result(
     } else {
         // Mixed-provider or no ffmpeg: parallel ffprobe + screenshot, then bitrate.
         // Faster when there are no connection limits.
+        // Yields the last snapshot and, when no attempt found a track, why.
         let ffprobe_fut = async {
             if !ffprobe_ok {
-                return None;
+                return (None, None);
             }
-            ffmpeg::collect_probe_snapshot_with_timeout(
-                app,
-                &target_url,
-                Some(channel_url),
-                cancel,
-                Some(ffprobe_timeout_duration),
-            )
-            .await
-            .ok()
+            let mut retries_used = 0u32;
+            loop {
+                let (snapshot, failure) = match ffmpeg::collect_probe_snapshot_with_timeout(
+                    app,
+                    &target_url,
+                    Some(channel_url),
+                    cancel,
+                    Some(ffprobe_timeout_duration),
+                )
+                .await
+                {
+                    Err(AppError::Cancelled) => return (None, None),
+                    Err(error) => (None, error.to_string()),
+                    Ok(snapshot)
+                        if snapshot.track_presence.has_audio
+                            || snapshot.track_presence.has_video =>
+                    {
+                        return (Some(snapshot), None);
+                    }
+                    Ok(snapshot) => (
+                        Some(snapshot),
+                        "No decodable audio/video tracks reported by ffprobe".to_string(),
+                    ),
+                };
+                if retries_used >= retries {
+                    return (snapshot, Some(failure));
+                }
+                retries_used += 1;
+                tokio::select! {
+                    _ = cancel.cancelled() => return (None, None),
+                    _ = tokio::time::sleep(probe_retry_delay(retry_backoff, retries_used)) => {}
+                }
+            }
         };
 
         let screenshot_fut = async {
@@ -733,8 +772,10 @@ async fn compute_shared_url_result(
             (screenshot_result, sample_clip)
         };
 
-        let (probe_result, (screenshot_result, sample_clip)) = tokio::join!(ffprobe_fut, media_fut);
+        let ((probe_result, probe_failure), (screenshot_result, sample_clip)) =
+            tokio::join!(ffprobe_fut, media_fut);
         shared.sample_clip = sample_clip;
+        shared.probe_error_reason = probe_failure;
 
         if let Some(snapshot) = probe_result {
             shared.audio_only =
@@ -843,6 +884,7 @@ async fn compute_shared_url_result(
             std::path::Path::new(&clip.path),
         );
     }
+    shared.channel_log.probe_error_reason = shared.probe_error_reason.clone();
     timing.diagnostics_ms = diagnostics_started_at.elapsed().as_secs_f64() * 1000.0;
 
     Ok((shared, timing))
@@ -2342,6 +2384,7 @@ fn build_channel_result(channel: &Channel, shared: &SharedUrlResult) -> ChannelR
         audio_only: shared.audio_only,
         screenshot_path: shared.screenshot_path.clone(),
         screenshot_error_reason: shared.screenshot_error_reason.clone(),
+        probe_error_reason: shared.probe_error_reason.clone(),
         sample_clip_path: shared.sample_clip.as_ref().map(|clip| clip.path.clone()),
         sample_clip_format: shared.sample_clip.as_ref().map(|clip| clip.format),
         label_mismatches: Vec::new(),
@@ -2418,6 +2461,9 @@ fn redact_channel_debug_log(mut channel_log: ChannelDebugLog) -> ChannelDebugLog
         .map(|text| redact_urls_in_text(&text));
     channel_log.screenshot_error_reason = channel_log
         .screenshot_error_reason
+        .map(|text| redact_urls_in_text(&text));
+    channel_log.probe_error_reason = channel_log
+        .probe_error_reason
         .map(|text| redact_urls_in_text(&text));
     channel_log
 }
@@ -3852,6 +3898,7 @@ mod tests {
             audio_only: false,
             screenshot_path: None,
             screenshot_error_reason: None,
+            probe_error_reason: None,
             sample_clip_path: None,
             sample_clip_format: None,
             label_mismatches: if mismatched {
@@ -3912,6 +3959,7 @@ mod tests {
             audio_only: false,
             screenshot_path: None,
             screenshot_error_reason: None,
+            probe_error_reason: None,
             sample_clip: None,
             low_framerate: false,
             frozen_video: false,
@@ -3959,6 +4007,7 @@ mod tests {
             diagnostics_output: Some(format!(r#"{{"filename":"{sensitive_url}"}}"#)),
             final_reason: Some(format!("Probe failed for {sensitive_url}")),
             screenshot_error_reason: Some(format!("Screenshot failed for {sensitive_url}")),
+            probe_error_reason: Some(format!("ffprobe failed for {sensitive_url}")),
             attempts: vec![crate::models::scan_log::ChannelAttemptDebugLog {
                 redirect_chain: vec![sensitive_url.to_string()],
                 ..Default::default()
@@ -3989,6 +4038,10 @@ mod tests {
         assert_eq!(
             redacted.screenshot_error_reason.as_deref(),
             Some("Screenshot failed for http://provider.example/live/***/***/42.ts?***")
+        );
+        assert_eq!(
+            redacted.probe_error_reason.as_deref(),
+            Some("ffprobe failed for http://provider.example/live/***/***/42.ts?***")
         );
     }
 

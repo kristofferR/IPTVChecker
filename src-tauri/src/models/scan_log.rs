@@ -30,6 +30,8 @@ pub struct ChannelDebugLog {
     pub final_reason: Option<String>,
     #[serde(default)]
     pub screenshot_error_reason: Option<String>,
+    #[serde(default)]
+    pub probe_error_reason: Option<String>,
     #[serde(alias = "ffprobe_output")]
     pub diagnostics_output: Option<String>,
     pub attempts: Vec<ChannelAttemptDebugLog>,

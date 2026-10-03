@@ -369,6 +369,7 @@ export default {
     audioOnlyStream: "Luồng chỉ có âm thanh",
     frozenVideo: "Video bị đứng hình: hình ảnh không thay đổi trong suốt mẫu đo bitrate",
     lowBitrate: "Bitrate thấp: dưới bitrate video tối thiểu",
+    probeFailed: "Không có thông tin luồng: {reason}. Quét lại để thử lại.",
     videoStream: "Luồng video",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} ngày",

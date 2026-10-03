@@ -413,6 +413,8 @@ export default {
     audioOnlyStream: "Strumień tylko audio",
     frozenVideo: "Zamrożony obraz: obraz nie zmienił się podczas próbki przepływności",
     lowBitrate: "Niski bitrate: poniżej minimalnego bitrate'u wideo",
+    probeFailed:
+      "Informacje o strumieniu niedostępne: {reason}. Przeskanuj ponownie, aby spróbować jeszcze raz.",
     videoStream: "Strumień wideo",
     catchup: {
       shallowerChip: "⚠ {measured}/{days} d",
