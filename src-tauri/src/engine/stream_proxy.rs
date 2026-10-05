@@ -59,6 +59,11 @@ const STREAM_PACER_MAX_DELAY: std::time::Duration = std::time::Duration::from_se
 const STREAM_PROXY_READ_AHEAD_BYTES: usize = 64 * 1024 * 1024;
 const STREAM_PROXY_READ_AHEAD_CHUNKS: usize = 4_096;
 const REMUX_PACER_MAX_LEAD: std::time::Duration = std::time::Duration::from_secs(12);
+/// ffmpeg reconnects dropped upstream connections itself, and bursty providers
+/// can pause for 7-9 seconds, longer once video is re-encoded. Ending the pipe at
+/// the direct-stream timeout would kill a healthy remux while the player is still
+/// draining up to `REMUX_PACER_MAX_LEAD` of buffered media.
+const REMUX_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 /// Rebuild a monotonic packet clock from each encoded stream's packet
 /// durations while preserving known composition offsets (PTS-DTS) for B-frames.
 /// Never do arithmetic on AV_NOPTS_VALUE. When an offset is unknown, use the
@@ -1010,7 +1015,7 @@ where
         loop {
             let mut chunk = vec![0u8; 64 * 1024];
             let read_timeout = if received_data {
-                PROXY_READ_TIMEOUT
+                REMUX_READ_TIMEOUT
             } else {
                 PROXY_STARTUP_READ_TIMEOUT
             };
