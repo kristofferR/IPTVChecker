@@ -59,6 +59,11 @@ const STREAM_PACER_MAX_DELAY: std::time::Duration = std::time::Duration::from_se
 const STREAM_PROXY_READ_AHEAD_BYTES: usize = 64 * 1024 * 1024;
 const STREAM_PROXY_READ_AHEAD_CHUNKS: usize = 4_096;
 const REMUX_PACER_MAX_LEAD: std::time::Duration = std::time::Duration::from_secs(12);
+/// ffmpeg reconnects dropped upstream connections itself, and bursty providers
+/// can pause for 7-9 seconds, longer once video is re-encoded. Ending the pipe at
+/// the direct-stream timeout would kill a healthy remux while the player is still
+/// draining up to `REMUX_PACER_MAX_LEAD` of buffered media.
+const REMUX_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 /// Rebuild a monotonic packet clock from each encoded stream's packet
 /// durations while preserving known composition offsets (PTS-DTS) for B-frames.
 /// Never do arithmetic on AV_NOPTS_VALUE. When an offset is unknown, use the
@@ -858,6 +863,7 @@ fn spawn_playback_remux(
     accept_invalid_certs: bool,
     reconnect_at_eof: bool,
     transcode_audio: bool,
+    transcode_video: bool,
 ) -> std::io::Result<tokio::process::Child> {
     let ffmpeg = resolve_binary(app, "ffmpeg");
     let mut command = tokio::process::Command::new(&ffmpeg);
@@ -903,7 +909,7 @@ fn spawn_playback_remux(
         .arg("-sn")
         .arg("-dn")
         .arg("-c:v")
-        .arg("copy")
+        .arg(if transcode_video { "libx264" } else { "copy" })
         .arg("-c:a")
         .arg(if transcode_audio { "aac" } else { "copy" })
         // Some providers reconnect in short finite bursts whose timestamps
@@ -912,6 +918,26 @@ fn spawn_playback_remux(
         // repairs the packet clock without the CPU/quality cost of transcoding.
         .arg("-bsf:v")
         .arg(CONTIGUOUS_VIDEO_TIMESTAMPS);
+
+    if transcode_video {
+        // Last resort for video the WebView decoder rejects, such as
+        // field-coded (PAFF) 1080i H.264. Deinterlace only interlaced frames
+        // and favour encoder speed: this runs for the whole session.
+        command.args([
+            "-vf",
+            "bwdif=mode=send_frame:deint=interlaced",
+            "-preset",
+            "superfast",
+            "-tune",
+            "zerolatency",
+            "-crf",
+            "21",
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            "50",
+        ]);
+    }
 
     if transcode_audio {
         command.args(["-b:a", "192k", "-ac", "2", "-af", "aresample=async=1000"]);
@@ -989,7 +1015,7 @@ where
         loop {
             let mut chunk = vec![0u8; 64 * 1024];
             let read_timeout = if received_data {
-                PROXY_READ_TIMEOUT
+                REMUX_READ_TIMEOUT
             } else {
                 PROXY_STARTUP_READ_TIMEOUT
             };
@@ -1390,6 +1416,8 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                         accept_invalid_certs,
                         reconnect,
                         request.transcode_audio,
+                        // Encoding costs real CPU, so only the app may ask.
+                        request.transcode_video && request.trusted,
                     ) {
                         Ok(child) => child,
                         Err(error) => {
@@ -1429,8 +1457,9 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     }
 
                     log::info!(
-                        "[StreamProxy/remux] Normalizing MPEG-TS timestamps (AAC audio: {}) for {}",
+                        "[StreamProxy/remux] Normalizing MPEG-TS timestamps (AAC audio: {}, H.264 video: {}) for {}",
                         request.transcode_audio,
+                        request.transcode_video && request.trusted,
                         redact_url(&url)
                     );
                     let forward = forward_playback_remux_as_chunked_stream(
@@ -1671,6 +1700,7 @@ struct StreamRequest {
     reconnect: bool,
     remux: bool,
     transcode_audio: bool,
+    transcode_video: bool,
 }
 
 fn parse_stream_request(request: &str, key: &str) -> Option<StreamRequest> {
@@ -1682,6 +1712,7 @@ fn parse_stream_request(request: &str, key: &str) -> Option<StreamRequest> {
     let mut reconnect = false;
     let mut remux = false;
     let mut transcode_audio = false;
+    let mut transcode_video = false;
     let mut session_id = None;
     let mut attempt = None;
     let mut trusted = false;
@@ -1704,6 +1735,9 @@ fn parse_stream_request(request: &str, key: &str) -> Option<StreamRequest> {
             "transcode_audio" => {
                 transcode_audio = value == "1" || value.eq_ignore_ascii_case("true")
             }
+            "transcode_video" => {
+                transcode_video = value == "1" || value.eq_ignore_ascii_case("true")
+            }
             _ => {}
         }
     }
@@ -1719,6 +1753,7 @@ fn parse_stream_request(request: &str, key: &str) -> Option<StreamRequest> {
         reconnect,
         remux,
         transcode_audio,
+        transcode_video,
     })
 }
 
@@ -2178,6 +2213,7 @@ segment.ts
                 reconnect: false,
                 remux: false,
                 transcode_audio: false,
+                transcode_video: false,
             })
         );
     }
@@ -2214,13 +2250,14 @@ segment.ts
                 reconnect: true,
                 remux: false,
                 transcode_audio: false,
+                transcode_video: false,
             })
         );
     }
 
     #[test]
     fn parse_stream_request_enables_opt_in_remux() {
-        let request = "GET /stream?url=https%3A%2F%2Fexample.com%2Flive.ts&reconnect=1&remux=true&transcode_audio=1 HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        let request = "GET /stream?url=https%3A%2F%2Fexample.com%2Flive.ts&reconnect=1&remux=true&transcode_audio=1&transcode_video=true HTTP/1.1\r\nHost: localhost\r\n\r\n";
         assert_eq!(
             parse_stream_request(request, "k"),
             Some(StreamRequest {
@@ -2230,6 +2267,7 @@ segment.ts
                 reconnect: true,
                 remux: true,
                 transcode_audio: true,
+                transcode_video: true,
             })
         );
     }

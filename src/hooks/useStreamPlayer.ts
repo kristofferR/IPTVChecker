@@ -17,10 +17,12 @@ import {
   getArchiveFallbackRoutes,
   getAudioTranscodeRoute,
   getMpegtsPlaybackRoutes,
+  getVideoConversionRoute,
   type HlsErrorPayload,
   hasPresentedVideoFrame,
   hlsHttpFailureMessage,
   httpFailureMessage,
+  isDecodeFailure,
   isFinalHttpFailure,
   isHlsManifestRejection,
   isHlsMediaRejection,
@@ -158,6 +160,8 @@ const ARCHIVE_NATIVE_TIMEOUT_MS = 3_000;
 const MPEGTS_PLAYBACK_ROUTE_TIMEOUT_MS = 25_000;
 const LOADING_TIMEOUT_MS = 90_000;
 const PLAYBACK_RECOVERY_DELAY_MS = 900;
+/** Stream URLs that only played after video conversion during this session. */
+const videoConversionUrls = new Set<string>();
 
 type StartPlaybackAttempt = (
   result: ChannelResult,
@@ -1040,7 +1044,13 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
               "code" in info
                 ? httpFailureMessage(info.code)
                 : null;
-            fail(httpFailure ?? (segments.join(": ") || "mpegts.js error"));
+            // A failed decode surfaces here as a generic MSE append error;
+            // keep the decoder's reason so routing can react to it.
+            fail(
+              httpFailure ??
+                readMediaErrorMessage(videoElement.error) ??
+                (segments.join(": ") || "mpegts.js error"),
+            );
           };
           player.on?.("media_info", () => {
             const audioCodec = player.mediaInfo?.audioCodec;
@@ -1419,6 +1429,29 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           startMode === "recovery",
         );
         let unsupportedAudio = false;
+        let decodeFailed = false;
+        let videoConversionTried = false;
+        const tryVideoConversion = async (): Promise<boolean> => {
+          const converted = getVideoConversionRoute(url, proxy, isLive);
+          if (!converted || videoConversionTried) return false;
+          videoConversionTried = true;
+          logger.info("[Player] Trying video conversion for", result.name);
+          resetRouteError();
+          const convertedOk = await tryMpegtsPlayback(converted, abortController.signal, isLive);
+          if (!isCurrentPlayback()) return false;
+          if (convertedOk && (await handleSuccessfulStart())) {
+            videoConversionUrls.add(url);
+            logger.info("[Player] Playing via video conversion:", result.name);
+            return true;
+          }
+          videoConversionUrls.delete(url);
+          return false;
+        };
+        // Reconnects and reopened channels skip the routes that already failed.
+        if (videoConversionUrls.has(url)) {
+          if (await tryVideoConversion()) return;
+          if (!isCurrentPlayback()) return;
+        }
         for (const route of playbackRoutes) {
           logger.info(
             route.kind === "remux"
@@ -1447,6 +1480,7 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
           if (route.kind === "direct" && failOnHttpError()) {
             return;
           }
+          if (isDecodeFailure(lastErrorRef.current)) decodeFailed = true;
           if (unsupportedAudio) break;
         }
         if (unsupportedAudio) {
@@ -1457,7 +1491,12 @@ export function useStreamPlayer(options?: UseStreamPlayerOptions): UseStreamPlay
             const convertedOk = await tryMpegtsPlayback(transcoded, abortController.signal, isLive);
             if (!isCurrentPlayback()) return;
             if (convertedOk && (await handleSuccessfulStart())) return;
+            if (isDecodeFailure(lastErrorRef.current)) decodeFailed = true;
           }
+        }
+        if (decodeFailed) {
+          if (await tryVideoConversion()) return;
+          if (!isCurrentPlayback()) return;
         }
       }
 

@@ -11,9 +11,11 @@ import {
   getHlsFatalRecoveryAction,
   getMpegtsPlaybackRoutes,
   getNextPlaybackRecoveryAttempt,
+  getVideoConversionRoute,
   hasPresentedVideoFrame,
   hlsHttpFailureMessage,
   httpFailureMessage,
+  isDecodeFailure,
   isFinalHttpFailure,
   isHttpFailure,
   isSingleConnectionPlaylist,
@@ -213,6 +215,15 @@ describe("useStreamPlayer helpers", () => {
     expect(route).toContain("remux=1&transcode_audio=1");
     expect(route).toContain("reconnect=1");
     expect(getAudioTranscodeRoute("https://example.com/live.ts", null, true)).toBeNull();
+  });
+
+  it("converts video only after the WebView fails to decode it", () => {
+    expect(isDecodeFailure("Decode error")).toBe(true);
+    expect(isDecodeFailure("Format not supported")).toBe(false);
+    expect(isDecodeFailure("MediaError: MediaMSEError")).toBe(false);
+    const route = getVideoConversionRoute("https://example.com/live.ts", PROXY, true);
+    expect(route).toContain("remux=1&transcode_audio=1&transcode_video=1");
+    expect(getVideoConversionRoute("https://example.com/live.ts", null, true)).toBeNull();
   });
 
   it("suspends playback watchdog recovery while the app is hidden", () => {
