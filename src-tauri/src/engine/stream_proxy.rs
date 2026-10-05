@@ -921,21 +921,25 @@ fn spawn_playback_remux(
 
     if transcode_video {
         // Last resort for video the WebView decoder rejects, such as
-        // field-coded (PAFF) 1080i H.264. Deinterlace only interlaced frames
-        // and favour encoder speed: this runs for the whole session.
+        // field-coded (PAFF) 1080i H.264. Deinterlace only interlaced frames,
+        // one output frame per field so 1080i50 keeps its 50 fps motion, and
+        // favour encoder speed: this runs for the whole session. The output
+        // never leaves loopback, so spend bitrate instead: CRF 15 keeps even
+        // the worst frames close to the source.
         command.args([
             "-vf",
-            "bwdif=mode=send_frame:deint=interlaced",
+            "bwdif=mode=send_field:deint=interlaced",
             "-preset",
             "superfast",
             "-tune",
             "zerolatency",
             "-crf",
-            "21",
+            "15",
             "-pix_fmt",
             "yuv420p",
+            // Two-second GOPs at 50 fps.
             "-g",
-            "50",
+            "100",
         ]);
     }
 
