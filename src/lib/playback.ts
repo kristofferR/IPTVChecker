@@ -195,11 +195,13 @@ function toStreamingProxyUrl(
   reconnect: boolean,
   remux: boolean,
   transcodeAudio = false,
+  transcodeVideo = false,
 ): string {
   const reconnectParam = reconnect ? "&reconnect=1" : "";
   const remuxParam = remux ? "&remux=1" : "";
   const audioParam = transcodeAudio ? "&transcode_audio=1" : "";
-  return `http://127.0.0.1:${port}/stream?key=${key}&url=${encodeURIComponent(url)}${reconnectParam}${remuxParam}${audioParam}`;
+  const videoParam = transcodeVideo ? "&transcode_video=1" : "";
+  return `http://127.0.0.1:${port}/stream?key=${key}&url=${encodeURIComponent(url)}${reconnectParam}${remuxParam}${audioParam}${videoParam}`;
 }
 
 /** Convert only after the WebView reports that it cannot use the source audio. */
@@ -209,6 +211,21 @@ export function getAudioTranscodeRoute(
   isLive: boolean,
 ): string | null {
   return proxy ? toStreamingProxyUrl(url, proxy, isLive, true, true) : null;
+}
+
+/** Last resort after the WebView fails to decode the source, for example
+ * field-coded (PAFF) interlaced H.264. Re-encodes video and audio. */
+export function getVideoConversionRoute(
+  url: string,
+  proxy: StreamingProxy | null,
+  isLive: boolean,
+): string | null {
+  return proxy ? toStreamingProxyUrl(url, proxy, isLive, true, true, true) : null;
+}
+
+/** The WebView accepted the stream but its decoder rejected the media. */
+export function isDecodeFailure(reason: string | null | undefined): boolean {
+  return reason === "Decode error";
 }
 
 export function isUnsupportedAudioCodec(reason: string | null | undefined): boolean {
