@@ -5,7 +5,7 @@
       "command": "bun",
       "args": [
         "run",
-        "/Users/kristoffer/.bun/install/global/node_modules/tauri-plugin-mcp-server/build/index.js"
+        "${HOME}/.bun/install/global/node_modules/tauri-plugin-mcp-server/build/index.js"
       ],
       "env": {
         "TAURI_MCP_IPC_PATH": "/tmp/tauri-mcp-iptv-checker.sock"
