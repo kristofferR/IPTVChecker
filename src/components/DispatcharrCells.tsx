@@ -383,13 +383,9 @@ export function StreamNameCell({
         {streamName}
       </span>
       {findings.length > 0 && (
-        // Shrinks before overflowing the cell, and steps aside for the
-        // hover actions, which need the room.
-        <span
-          className={`flex min-w-0 items-center gap-1 ${
-            actions?.canWrite ? "group-hover:hidden group-focus-within:hidden" : ""
-          }`}
-        >
+        // Shrinks (and clips) rather than overflow the cell when the hover
+        // actions take their room, so the chips' tooltips stay reachable.
+        <span className="flex min-w-0 items-center gap-1 overflow-hidden p-px">
           {findings.map((finding) => (
             <span
               key={finding.key}
