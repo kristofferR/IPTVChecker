@@ -833,7 +833,7 @@ pub(crate) async fn open_playlist_xtream_inner(
             fetch_xtream_live_streams(&server, &username, &password, accept_invalid_certs).await
         })
     };
-    let (xtream_account_info, m3u_result) = tokio::join!(
+    let (account_result, m3u_result) = tokio::join!(
         fetch_xtream_account_info(&server, &username, &password, accept_invalid_certs),
         download_playlist_to_cache_in_data_dir(
             Some(app),
@@ -844,6 +844,8 @@ pub(crate) async fn open_playlist_xtream_inner(
             accept_invalid_certs,
         ),
     );
+    let api_unreachable = matches!(account_result, Err(AppError::Unreachable(_)));
+    let xtream_account_info = account_result.ok().flatten();
 
     // A provider that refuses an expired or disabled account usually fails
     // the playlist download too; name the account problem, not the symptom.
@@ -858,9 +860,9 @@ pub(crate) async fn open_playlist_xtream_inner(
     let (cached_path, archive_task) = match m3u_result {
         Ok(path) => (path, Some(live_streams_task)),
         Err(get_php_error) => {
-            // No account info means player_api didn't answer either, so the
-            // JSON fallback on the same host could only fail the same way.
-            if xtream_account_info.is_none() && matches!(get_php_error, AppError::Unreachable(_)) {
+            // Skip the fallback only when both account endpoints failed to
+            // connect. Missing optional metadata does not imply an outage.
+            if api_unreachable && matches!(get_php_error, AppError::Unreachable(_)) {
                 live_streams_task.abort();
                 archive_enrichment.complete(HashMap::new()).await;
                 return Err(get_php_error);
