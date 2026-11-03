@@ -270,18 +270,18 @@ export default {
     },
     providerDown: {
       allFailed: {
-        one: "Jedyny strumień z {account} zawiódł ({cause}). Dostawca może mieć awarię; „Popraw kolejność” zachowa jego strumienie.",
-        few: "Wszystkie strumienie z {account} ({count}) zawiodły ({cause}). Dostawca może mieć awarię; „Popraw kolejność” zachowa jego strumienie.",
-        many: "Wszystkie strumienie z {account} ({count}) zawiodły ({cause}). Dostawca może mieć awarię; „Popraw kolejność” zachowa jego strumienie.",
+        one: "Jedyny strumień z {account} zawiódł ({cause}). Dostawca lub adres URL jego serwera może mieć awarię; „Popraw kolejność” zachowa jego strumienie.",
+        few: "Wszystkie strumienie z {account} ({count}) zawiodły ({cause}). Dostawca lub adres URL jego serwera może mieć awarię; „Popraw kolejność” zachowa jego strumienie.",
+        many: "Wszystkie strumienie z {account} ({count}) zawiodły ({cause}). Dostawca lub adres URL jego serwera może mieć awarię; „Popraw kolejność” zachowa jego strumienie.",
         other:
-          "Wszystkie strumienie z {account} ({count}) zawiodły ({cause}). Dostawca może mieć awarię; „Popraw kolejność” zachowa jego strumienie.",
+          "Wszystkie strumienie z {account} ({count}) zawiodły ({cause}). Dostawca lub adres URL jego serwera może mieć awarię; „Popraw kolejność” zachowa jego strumienie.",
       },
       someFailed: {
-        one: "Nieudane strumienie z {account}: {failed} z {count} ({cause}). Dostawca może mieć awarię; „Popraw kolejność” zachowa jego strumienie.",
-        few: "Nieudane strumienie z {account}: {failed} z {count} ({cause}). Dostawca może mieć awarię; „Popraw kolejność” zachowa jego strumienie.",
-        many: "Nieudane strumienie z {account}: {failed} z {count} ({cause}). Dostawca może mieć awarię; „Popraw kolejność” zachowa jego strumienie.",
+        one: "Nieudane strumienie z {account}: {failed} z {count} ({cause}). Dostawca lub adres URL jego serwera może mieć awarię; „Popraw kolejność” zachowa jego strumienie.",
+        few: "Nieudane strumienie z {account}: {failed} z {count} ({cause}). Dostawca lub adres URL jego serwera może mieć awarię; „Popraw kolejność” zachowa jego strumienie.",
+        many: "Nieudane strumienie z {account}: {failed} z {count} ({cause}). Dostawca lub adres URL jego serwera może mieć awarię; „Popraw kolejność” zachowa jego strumienie.",
         other:
-          "Nieudane strumienie z {account}: {failed} z {count} ({cause}). Dostawca może mieć awarię; „Popraw kolejność” zachowa jego strumienie.",
+          "Nieudane strumienie z {account}: {failed} z {count} ({cause}). Dostawca lub adres URL jego serwera może mieć awarię; „Popraw kolejność” zachowa jego strumienie.",
       },
       causes: {
         timeouts: "przekroczenia limitu czasu",
@@ -290,6 +290,12 @@ export default {
       refreshing:
         "Dispatcharr go odświeża; po zakończeniu wczytaj ponownie, aby pobrać nowe adresy URL strumieni.",
       refreshFailed: "Odświeżanie nie powiodło się: {error}",
+      testServers: "Testuj serwery",
+      confirmSwitch:
+        "Przełączyć {account} na {server} w Dispatcharr? Dispatcharr odświeży potem konto, aby odbudować adresy URL strumieni. Kanały zachowają swoje strumienie.",
+      switched:
+        "Przełączono na {server}. Dispatcharr odświeża konto; po zakończeniu wczytaj ponownie, aby pobrać nowe adresy URL strumieni.",
+      switchFailed: "Nie udało się zmienić serwera: {error}",
       refresh: "Odśwież w Dispatcharr",
       reload: "Wczytaj ponownie",
       rescan: "Skanuj ponownie",
@@ -1379,6 +1385,8 @@ export default {
       channelScreenshotAlt: "Kanał {id}",
       noImage: "Brak obrazu",
       selectHint: "Kliknij serwer, aby go wybrać i wrócić do formularza logowania.",
+      current: "Bieżący",
+      switchHint: "Kliknij serwer, aby przełączyć na niego {account} w Dispatcharr.",
     },
   },
   saved: {

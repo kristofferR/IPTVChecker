@@ -849,3 +849,33 @@ export function dispatcharrChannelRows(channel: DispatcharrChannelView): Channel
     return { ...result, name, extinf_line: extinfLine };
   });
 }
+
+const ACCOUNT_SERVERS_KEY = "dispatcharr-account-servers";
+
+function readAllAccountServers(): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(ACCOUNT_SERVERS_KEY) ?? "{}");
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? { ...parsed }
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Servers last tested for a provider account, so the next test starts
+ *  from them. */
+export function readAccountServers(target: DispatcharrTarget, accountId: number): string[] {
+  const list = readAllAccountServers()[`${target.connection}#${accountId}`];
+  return Array.isArray(list) ? list.filter((value) => typeof value === "string") : [];
+}
+
+export function saveAccountServers(
+  target: DispatcharrTarget,
+  accountId: number,
+  servers: string[],
+): void {
+  const all = readAllAccountServers();
+  all[`${target.connection}#${accountId}`] = servers;
+  localStorage.setItem(ACCOUNT_SERVERS_KEY, JSON.stringify(all));
+}
