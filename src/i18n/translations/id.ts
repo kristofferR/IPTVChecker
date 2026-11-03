@@ -128,6 +128,12 @@ export default {
       expectedHd: "Diharapkan 720p atau 1080p, didapat {actual}",
       unlabeled4k: "Saluran 4K tidak diberi label 4K",
     },
+    xtream: {
+      rejected: "Server Xtream menolak nama pengguna atau kata sandi",
+      expired: "Langganan Xtream sudah kedaluwarsa",
+      expiredOn: "Langganan Xtream kedaluwarsa pada {date}",
+      disabled: "Status akun Xtream: {status}",
+    },
     progress: {
       analyzingUrls: "Menganalisis URL saluran",
       lookingUpServer: "Mencari lokasi server",
@@ -274,6 +280,23 @@ export default {
       reload: "Muat ulang",
       rescan: "Pindai ulang",
       dismiss: "Tutup pemberitahuan tentang {account}",
+    },
+    xtreamAccount: {
+      expired:
+        "Langganan Xtream Anda kedaluwarsa pada {date}. Perpanjang di penyedia Anda untuk menonton saluran ini.",
+      expiredUndated:
+        "Langganan Xtream Anda sudah kedaluwarsa. Perpanjang di penyedia Anda untuk menonton saluran ini.",
+      expiringSoon:
+        "Langganan Xtream Anda kedaluwarsa pada {date}. Perpanjang agar tetap bisa menonton.",
+      disabled:
+        "Penyedia Anda melaporkan akun Xtream ini berstatus {status}. Salurannya tidak bisa diputar sampai penyedia mengaktifkannya kembali.",
+      rejected:
+        "Server Xtream menolak nama pengguna dan kata sandi ini. Periksa kembali, atau tanyakan kepada penyedia Anda apakah akunnya masih ada.",
+      refused: {
+        other:
+          "Kemungkinan karena itulah server menolak {refused} dari {count} saluran yang diperiksa.",
+      },
+      dismiss: "Tutup pemberitahuan langganan",
     },
     recording: {
       progress: "Merekam {title}",
@@ -996,6 +1019,7 @@ export default {
       mostlySecure: "Sebagian besar aman",
       mixed: "Campuran",
       insecure: "Tidak aman",
+      xtreamStatus: "Status Xtream",
       xtreamExpiration: "Kedaluwarsa Xtream",
       totalContent: "Total konten",
       statusLabel: "Aktif / Mati / Geo",
@@ -1118,6 +1142,8 @@ export default {
       stream: "Stream",
       channelScreenshotAlt: "Saluran {id}",
       noImage: "Tidak ada gambar",
+      accountStatus: "Akun: {status}",
+      accountExpires: "Kedaluwarsa {date}",
       selectHint: "Klik server untuk memilihnya dan kembali ke formulir masuk.",
     },
   },

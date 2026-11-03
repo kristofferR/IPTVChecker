@@ -78,6 +78,13 @@ export default {
     expectedHd: "Expected 720p or 1080p, got {actual}",
     unlabeled4k: "4K channel not labeled as such",
   },
+  /** The Xtream panel refused the account (engine/xtream.rs). */
+  xtream: {
+    rejected: "Xtream server rejected the username or password",
+    expired: "Xtream subscription expired",
+    expiredOn: "Xtream subscription expired on {date}",
+    disabled: "Xtream account is {status}",
+  },
   /** Playlist loading progress details (commands/playlist.rs, engine/remote_cache.rs). */
   progress: {
     analyzingUrls: "Analyzing channel URLs",

@@ -53,5 +53,7 @@ export default {
     channelScreenshotAlt: "Channel {id}",
     noImage: "No image",
     selectHint: "Click a server to select it and return to the login form.",
+    accountStatus: "Account: {status}",
+    accountExpires: "Expires {date}",
   },
 } as const;

@@ -130,6 +130,12 @@ export default {
       expectedHd: "Beklenen 720p veya 1080p, gelen {actual}",
       unlabeled4k: "4K kanal 4K olarak etiketlenmemiş",
     },
+    xtream: {
+      rejected: "Xtream sunucusu kullanıcı adını veya parolayı reddetti",
+      expired: "Xtream aboneliğinin süresi doldu",
+      expiredOn: "Xtream aboneliğinin süresi {date} tarihinde doldu",
+      disabled: "Xtream hesabının durumu: {status}",
+    },
     progress: {
       analyzingUrls: "Kanal URL'leri analiz ediliyor",
       lookingUpServer: "Sunucu konumu aranıyor",
@@ -280,6 +286,24 @@ export default {
       reload: "Yeniden yükle",
       rescan: "Yeniden tara",
       dismiss: "Şu hesapla ilgili bildirimi kapat: {account}",
+    },
+    xtreamAccount: {
+      expired:
+        "Xtream aboneliğinizin süresi {date} tarihinde doldu. Bu kanalları izlemek için aboneliğinizi sağlayıcınızdan yenileyin.",
+      expiredUndated:
+        "Xtream aboneliğinizin süresi doldu. Bu kanalları izlemek için aboneliğinizi sağlayıcınızdan yenileyin.",
+      expiringSoon:
+        "Xtream aboneliğinizin süresi {date} tarihinde doluyor. İzlemeye devam etmek için yenileyin.",
+      disabled:
+        "Sağlayıcınız bu Xtream hesabının durumunu {status} olarak bildiriyor. Sağlayıcı hesabı yeniden etkinleştirene kadar kanalları oynatılmaz.",
+      rejected:
+        "Xtream sunucusu bu kullanıcı adını ve parolayı reddetti. Bilgileri kontrol edin veya hesabın hâlâ var olup olmadığını sağlayıcınıza sorun.",
+      refused: {
+        one: "Sunucunun kontrol edilen {count} kanaldan {refused} tanesini reddetmesinin nedeni muhtemelen budur.",
+        other:
+          "Sunucunun kontrol edilen {count} kanaldan {refused} tanesini reddetmesinin nedeni muhtemelen budur.",
+      },
+      dismiss: "Abonelik bildirimini kapat",
     },
     recording: {
       progress: "Kaydediliyor: {title}",
@@ -1039,6 +1063,7 @@ export default {
       mostlySecure: "Çoğunlukla güvenli",
       mixed: "Karışık",
       insecure: "Güvensiz",
+      xtreamStatus: "Xtream Durumu",
       xtreamExpiration: "Xtream Bitiş Tarihi",
       totalContent: "Toplam içerik",
       statusLabel: "Çalışan / Çalışmayan / Bölge",
@@ -1170,6 +1195,8 @@ export default {
       stream: "Yayın",
       channelScreenshotAlt: "Kanal {id}",
       noImage: "Görüntü yok",
+      accountStatus: "Hesap: {status}",
+      accountExpires: "Bitiş: {date}",
       selectHint: "Seçmek ve giriş formuna dönmek için bir sunucuya tıklayın.",
     },
   },

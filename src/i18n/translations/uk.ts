@@ -136,6 +136,12 @@ export default {
       expectedHd: "Очікувалося 720p або 1080p, отримано {actual}",
       unlabeled4k: "4K-канал не позначено як 4K",
     },
+    xtream: {
+      rejected: "Сервер Xtream відхилив ім'я користувача або пароль",
+      expired: "Підписка Xtream закінчилася",
+      expiredOn: "Підписка Xtream закінчилася {date}",
+      disabled: "Статус облікового запису Xtream: {status}",
+    },
     progress: {
       analyzingUrls: "Аналіз URL каналів",
       lookingUpServer: "Визначення розташування сервера",
@@ -293,6 +299,24 @@ export default {
       reload: "Перезавантажити",
       rescan: "Пересканувати",
       dismiss: "Сховати сповіщення про {account}",
+    },
+    xtreamAccount: {
+      expired:
+        "Ваша підписка Xtream закінчилася {date}. Поновіть її в провайдера, щоб дивитися ці канали.",
+      expiredUndated:
+        "Ваша підписка Xtream закінчилася. Поновіть її в провайдера, щоб дивитися ці канали.",
+      expiringSoon: "Ваша підписка Xtream закінчується {date}. Поновіть її, щоб і далі дивитися.",
+      disabled:
+        "Провайдер повідомляє, що цей обліковий запис Xtream має статус {status}. Його канали не працюватимуть, доки провайдер знову його не ввімкне.",
+      rejected:
+        "Сервер Xtream відхилив це ім'я користувача й пароль. Перевірте їх або запитайте провайдера, чи обліковий запис ще існує.",
+      refused: {
+        one: "Імовірно, тому сервер відхилив {refused} з {count} перевіреного каналу.",
+        few: "Імовірно, тому сервер відхилив {refused} з {count} перевірених каналів.",
+        many: "Імовірно, тому сервер відхилив {refused} з {count} перевірених каналів.",
+        other: "Імовірно, тому сервер відхилив {refused} з {count} перевіреного каналу.",
+      },
+      dismiss: "Сховати сповіщення про підписку",
     },
     recording: {
       progress: "Запис «{title}»",
@@ -1105,6 +1129,7 @@ export default {
       mostlySecure: "Переважно безпечно",
       mixed: "Змішано",
       insecure: "Небезпечно",
+      xtreamStatus: "Статус Xtream",
       xtreamExpiration: "Термін дії Xtream",
       totalContent: "Усього контенту",
       statusLabel: "Роб. / Нероб. / Гео",
@@ -1372,6 +1397,8 @@ export default {
       stream: "Потік",
       channelScreenshotAlt: "Канал {id}",
       noImage: "Немає зображення",
+      accountStatus: "Обліковий запис: {status}",
+      accountExpires: "Закінчується {date}",
       selectHint: "Натисніть на сервер, щоб вибрати його й повернутися до форми входу.",
     },
   },

@@ -142,7 +142,12 @@ export interface XtreamArchiveEnrichment {
   channels: XtreamArchiveChannelUpdate[];
 }
 
+/** Mirrors `XtreamAccountState` in `models/playlist.rs`, judged at fetch time. */
+export type XtreamAccountState = "ok" | "expiring_soon" | "expired" | "disabled" | "rejected";
+
 export interface XtreamAccountInfo {
+  state: XtreamAccountState;
+  auth: boolean | null;
   status: string | null;
   expires_at_epoch: number | null;
   created_at_epoch: number | null;
@@ -540,7 +545,6 @@ export interface XtreamServerTestResult {
   resolved_host: string | null;
   channel_probes: XtreamChannelProbe[];
   error: string | null;
-  account_status: string | null;
   max_connections: number | null;
 }
 
@@ -548,6 +552,7 @@ export interface XtreamServerTestReport {
   results: XtreamServerTestResult[];
   same_cdn: boolean;
   channels_probed: number;
+  account: XtreamAccountInfo | null;
 }
 
 export type RetryBackoff = "none" | "linear" | "exponential";

@@ -37,6 +37,22 @@ export default {
     rescan: "Rescan",
     dismiss: "Dismiss the notice about {account}",
   },
+  xtreamAccount: {
+    expired:
+      "Your Xtream subscription expired on {date}. Renew it with your provider to watch these channels.",
+    expiredUndated:
+      "Your Xtream subscription has expired. Renew it with your provider to watch these channels.",
+    expiringSoon: "Your Xtream subscription expires on {date}. Renew it to keep watching.",
+    disabled:
+      "Your provider reports this Xtream account as {status}. Its channels won't play until the provider re-enables it.",
+    rejected:
+      "The Xtream server rejected this username and password. Check them, or ask your provider whether the account still exists.",
+    refused: {
+      one: "That is likely why the server refused {refused} of {count} checked channel.",
+      other: "That is likely why the server refused {refused} of {count} checked channels.",
+    },
+    dismiss: "Dismiss subscription notice",
+  },
   recording: {
     progress: "Recording {title}",
     saved: "Saved {title} to {path}",

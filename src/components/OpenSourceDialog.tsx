@@ -2,15 +2,19 @@ import { listen } from "@tauri-apps/api/event";
 import { Cpu, KeyRound, Link2, Loader2, Network, Server, X } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { t, tRich } from "../i18n";
+import { translateReason } from "../i18n/reasons";
 import { normalizeDispatcharrServer } from "../lib/dispatcharr";
+import { errorToString } from "../lib/errors";
 import { testXtreamServers } from "../lib/tauri";
 import type {
   DispatcharrOpenRequest,
   StalkerOpenRequest,
+  XtreamAccountInfo,
   XtreamOpenRequest,
   XtreamRecentSource,
   XtreamServerTestReport,
 } from "../lib/types";
+import { formatAccountDate, isUnusableAccount } from "../lib/xtreamAccount";
 import PasswordField from "./PasswordField";
 
 type OpenSourceMode = "url" | "xtream" | "stalker" | "dispatcharr";
@@ -112,7 +116,7 @@ export function ServerTestModal({
       const report = await testXtreamServers(lines, username, password);
       setTestReport(report);
     } catch (error: unknown) {
-      setTestError(error instanceof Error ? error.message : String(error));
+      setTestError(translateReason(errorToString(error)));
     } finally {
       setTestRunning(false);
       testRunningRef.current = false;
@@ -196,6 +200,7 @@ export function ServerTestModal({
                     count: testReport.channels_probed,
                   })}
                 </span>
+                {testReport.account && <AccountSummary account={testReport.account} />}
               </div>
 
               <div className="space-y-3">
@@ -339,6 +344,26 @@ export function ServerTestModal({
         </div>
       </div>
     </div>
+  );
+}
+
+/** The shared account's status and end date, colored by how usable it is. */
+function AccountSummary({ account }: { account: XtreamAccountInfo }) {
+  const parts = [
+    account.status && t("sources.serverTest.accountStatus", { status: account.status }),
+    account.expires_at_epoch &&
+      t("sources.serverTest.accountExpires", { date: formatAccountDate(account.expires_at_epoch) }),
+  ].filter(Boolean);
+  if (parts.length === 0) return null;
+  const tone = isUnusableAccount(account.state)
+    ? "text-red-400"
+    : account.state === "expiring_soon"
+      ? "text-amber-400"
+      : "";
+  return (
+    <span dir="auto" className={tone}>
+      {parts.join(" · ")}
+    </span>
   );
 }
 

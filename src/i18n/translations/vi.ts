@@ -130,6 +130,12 @@ export default {
       expectedHd: "Mong đợi 720p hoặc 1080p, thực tế {actual}",
       unlabeled4k: "Kênh 4K không được gắn nhãn 4K",
     },
+    xtream: {
+      rejected: "Máy chủ Xtream đã từ chối tên người dùng hoặc mật khẩu",
+      expired: "Gói đăng ký Xtream đã hết hạn",
+      expiredOn: "Gói đăng ký Xtream đã hết hạn vào {date}",
+      disabled: "Tài khoản Xtream đang ở trạng thái {status}",
+    },
     progress: {
       analyzingUrls: "Đang phân tích URL kênh",
       lookingUpServer: "Đang tra cứu vị trí máy chủ",
@@ -271,6 +277,22 @@ export default {
       reload: "Tải lại",
       rescan: "Quét lại",
       dismiss: "Bỏ qua thông báo về {account}",
+    },
+    xtreamAccount: {
+      expired:
+        "Gói đăng ký Xtream của bạn đã hết hạn vào {date}. Hãy gia hạn với nhà cung cấp để xem các kênh này.",
+      expiredUndated:
+        "Gói đăng ký Xtream của bạn đã hết hạn. Hãy gia hạn với nhà cung cấp để xem các kênh này.",
+      expiringSoon:
+        "Gói đăng ký Xtream của bạn sẽ hết hạn vào {date}. Hãy gia hạn để tiếp tục xem.",
+      disabled:
+        "Nhà cung cấp báo tài khoản Xtream này đang ở trạng thái {status}. Các kênh sẽ không phát được cho đến khi nhà cung cấp kích hoạt lại.",
+      rejected:
+        "Máy chủ Xtream đã từ chối tên người dùng và mật khẩu này. Hãy kiểm tra lại hoặc hỏi nhà cung cấp xem tài khoản còn tồn tại không.",
+      refused: {
+        other: "Có lẽ đó là lý do máy chủ từ chối {refused} trên {count} kênh đã kiểm tra.",
+      },
+      dismiss: "Bỏ qua thông báo gói đăng ký",
     },
     recording: {
       progress: "Đang ghi {title}",
@@ -977,6 +999,7 @@ export default {
       mostlySecure: "Phần lớn an toàn",
       mixed: "Hỗn hợp",
       insecure: "Không an toàn",
+      xtreamStatus: "Trạng thái Xtream",
       xtreamExpiration: "Hạn dùng Xtream",
       totalContent: "Tổng nội dung",
       statusLabel: "Hoạt động / Hỏng / Chặn vùng",
@@ -1100,6 +1123,8 @@ export default {
       stream: "Luồng",
       channelScreenshotAlt: "Kênh {id}",
       noImage: "Không có ảnh",
+      accountStatus: "Tài khoản: {status}",
+      accountExpires: "Hết hạn {date}",
       selectHint: "Nhấp vào một máy chủ để chọn và quay lại biểu mẫu đăng nhập.",
     },
   },

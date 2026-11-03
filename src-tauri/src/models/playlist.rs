@@ -4,8 +4,31 @@ use serde::{Deserialize, Serialize};
 
 use super::channel::Channel;
 
+/// Whether an Xtream account can still be used, as judged when its account
+/// info was fetched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum XtreamAccountState {
+    /// Nothing in the account info points to a problem.
+    #[default]
+    Ok,
+    /// Still active, but the subscription ends within a week.
+    ExpiringSoon,
+    /// The panel reports the subscription as expired, or its end date passed.
+    Expired,
+    /// The panel reports the account as banned or disabled.
+    Disabled,
+    /// The panel rejected the username and password (`auth: 0`).
+    Rejected,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct XtreamAccountInfo {
+    #[serde(default)]
+    pub state: XtreamAccountState,
+    /// `user_info.auth`; panels answer `false` for unknown or deleted logins.
+    #[serde(default)]
+    pub auth: Option<bool>,
     #[serde(default)]
     pub status: Option<String>,
     #[serde(default)]

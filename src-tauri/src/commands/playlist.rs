@@ -20,7 +20,7 @@ use crate::engine::stalker::{
 use crate::engine::xtream::{
     apply_xtream_archive_flags, build_xtream_download_url, build_xtream_xmltv_url,
     fetch_xtream_account_info, fetch_xtream_live_streams, fetch_xtream_playlist_via_json_api,
-    xtream_archive_flags,
+    xtream_account_error, xtream_archive_flags,
 };
 use crate::error::AppError;
 use crate::models::channel::{Channel, ContentType};
@@ -845,6 +845,15 @@ pub(crate) async fn open_playlist_xtream_inner(
         ),
     );
 
+    // A provider that refuses an expired or disabled account usually fails
+    // the playlist download too; name the account problem, not the symptom.
+    let account_error = |error: AppError| {
+        xtream_account_info
+            .as_ref()
+            .and_then(xtream_account_error)
+            .unwrap_or(error)
+    };
+
     // If /get.php failed, fall back to the JSON API.
     let (cached_path, archive_task) = match m3u_result {
         Ok(path) => (path, Some(live_streams_task)),
@@ -866,7 +875,7 @@ pub(crate) async fn open_playlist_xtream_inner(
                 Ok(bytes) => bytes,
                 Err(error) => {
                     archive_enrichment.complete(HashMap::new()).await;
-                    return Err(error);
+                    return Err(account_error(error));
                 }
             };
             // Same rule as the normal download path: a potentially large
@@ -902,7 +911,7 @@ pub(crate) async fn open_playlist_xtream_inner(
                 task.abort();
             }
             archive_enrichment.complete(HashMap::new()).await;
-            return Err(error);
+            return Err(account_error(error));
         }
     };
     let (archive_flags, pending_archive_task) = if let Some(mut task) = archive_task {

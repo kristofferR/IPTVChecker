@@ -13,9 +13,10 @@ use crate::engine::stream_proxy::{SafeFetchError, fetch_with_hop_validation};
 use crate::engine::xtream::{
     XTREAM_JSON_API_TIMEOUT, XTREAM_PLAYER_API_TIMEOUT, build_xtream_player_api_action_url,
     build_xtream_player_api_url, build_xtream_stream_url, extract_xtream_account_info,
-    normalize_xtream_server,
+    normalize_xtream_server, unix_now_secs, xtream_account_error,
 };
 use crate::error::AppError;
+use crate::models::playlist::XtreamAccountInfo;
 use crate::state::AppState;
 use futures::stream::{self, StreamExt};
 use rand::seq::SliceRandom;
@@ -76,7 +77,6 @@ pub struct XtreamServerTestResult {
     pub resolved_host: Option<String>,
     pub channel_probes: Vec<XtreamChannelProbe>,
     pub error: Option<String>,
-    pub account_status: Option<String>,
     pub max_connections: Option<u32>,
 }
 
@@ -85,6 +85,8 @@ pub struct XtreamServerTestReport {
     pub results: Vec<XtreamServerTestResult>,
     pub same_cdn: bool,
     pub channels_probed: u32,
+    /// The shared account, as the first server that described it reported.
+    pub account: Option<XtreamAccountInfo>,
 }
 
 fn stream_probe_succeeded(probe: &XtreamChannelProbe) -> bool {
@@ -395,13 +397,13 @@ async fn test_single_server_api(
     username: &str,
     password: &str,
     accept_invalid_certs: bool,
-) -> (Option<u64>, Option<String>, Option<u32>, Option<String>) {
+) -> (Option<u64>, Option<XtreamAccountInfo>, Option<String>) {
     let api_url = build_xtream_player_api_url(server, username, password);
     let client = build_server_test_client(XTREAM_PLAYER_API_TIMEOUT, accept_invalid_certs);
 
     let client = match client {
         Ok(c) => c,
-        Err(e) => return (None, None, None, Some(e.to_string())),
+        Err(e) => return (None, None, Some(e.to_string())),
     };
 
     let started = Instant::now();
@@ -411,12 +413,7 @@ async fn test_single_server_api(
         Ok(resp) => {
             let latency = started.elapsed().as_millis() as u64;
             if !resp.status().is_success() {
-                return (
-                    Some(latency),
-                    None,
-                    None,
-                    Some(format!("HTTP {}", resp.status())),
-                );
+                return (Some(latency), None, Some(format!("HTTP {}", resp.status())));
             }
             let bytes = crate::engine::proxy_common::read_capped(
                 resp,
@@ -424,16 +421,12 @@ async fn test_single_server_api(
             )
             .await
             .ok();
-            let (status, max_conn) = bytes
+            let account = bytes
                 .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-                .and_then(|payload| {
-                    extract_xtream_account_info(&payload)
-                        .map(|info| (info.status.clone(), info.max_connections))
-                })
-                .unwrap_or((None, None));
-            (Some(latency), status, max_conn, None)
+                .and_then(|payload| extract_xtream_account_info(&payload, unix_now_secs()));
+            (Some(latency), account, None)
         }
-        Err(error) => (None, None, None, Some(error.into_message())),
+        Err(error) => (None, None, Some(error.into_message())),
     }
 }
 
@@ -526,18 +519,21 @@ async fn test_xtream_servers_inner(
         let u = username.clone();
         let p = password.clone();
         async move {
-            let (api_latency, status, max_conn, error) =
+            let (api_latency, account, error) =
                 test_single_server_api(&url, &u, &p, accept_invalid_certs).await;
-            (raw, url, api_latency, status, max_conn, error)
+            (raw, url, api_latency, account, error)
         }
     }))
     .buffered(SERVER_TEST_MAX_CONCURRENT_SERVERS)
     .collect::<Vec<_>>()
     .await;
 
+    let account = api_results
+        .iter()
+        .find_map(|(_, _, _, account, _)| account.clone());
     let successful_count = api_results
         .iter()
-        .filter(|(_, _, _, _, _, error)| error.is_none())
+        .filter(|(_, _, _, _, error)| error.is_none())
         .count();
 
     emit_server_test_progress(
@@ -553,7 +549,7 @@ async fn test_xtream_servers_inner(
     // Some servers pass the basic API check but fail on the larger get_live_streams request.
     let successful_servers: Vec<Url> = api_results
         .iter()
-        .filter(|(_, _, _, _, _, error)| error.is_none())
+        .filter(|(_, _, _, _, error)| error.is_none())
         .map(|(_, url, ..)| url.clone())
         .collect();
 
@@ -561,7 +557,7 @@ async fn test_xtream_servers_inner(
         let results: Vec<XtreamServerTestResult> = api_results
             .into_iter()
             .map(
-                |(raw, _, api_latency, status, max_conn, error)| XtreamServerTestResult {
+                |(raw, _, api_latency, account, error)| XtreamServerTestResult {
                     server: raw,
                     success: false,
                     api_latency_ms: api_latency,
@@ -569,8 +565,7 @@ async fn test_xtream_servers_inner(
                     resolved_host: None,
                     channel_probes: Vec::new(),
                     error,
-                    account_status: status,
-                    max_connections: max_conn,
+                    max_connections: account.and_then(|account| account.max_connections),
                 },
             )
             .collect();
@@ -579,6 +574,7 @@ async fn test_xtream_servers_inner(
             results,
             same_cdn: false,
             channels_probed: 0,
+            account,
         });
     }
 
@@ -604,9 +600,14 @@ async fn test_xtream_servers_inner(
     let working_channels = match working_channels {
         Some(channels) => channels,
         None => {
-            return Err(AppError::Other(
-                "Could not discover working channels from any server".to_string(),
-            ));
+            // An expired or disabled account answers the API but serves no
+            // streams; say so rather than blaming the servers.
+            let discovery_error =
+                AppError::Other("Could not discover working channels from any server".to_string());
+            return Err(account
+                .as_ref()
+                .and_then(xtream_account_error)
+                .unwrap_or(discovery_error));
         }
     };
     let channels_probed = working_channels.len() as u32;
@@ -631,7 +632,7 @@ async fn test_xtream_servers_inner(
     );
 
     let mut results = stream::iter(api_results.into_iter().map(
-        |(raw, url, api_latency, status, max_conn, api_error)| {
+        |(raw, url, api_latency, account, api_error)| {
             let app = app.clone();
             let u = username.clone();
             let p = password.clone();
@@ -651,8 +652,7 @@ async fn test_xtream_servers_inner(
                         resolved_host: None,
                         channel_probes: Vec::new(),
                         error: api_error,
-                        account_status: status,
-                        max_connections: max_conn,
+                        max_connections: account.and_then(|account| account.max_connections),
                     };
                 }
 
@@ -686,8 +686,7 @@ async fn test_xtream_servers_inner(
                         "The API responded, but none of the sampled streams could be reached"
                             .to_string()
                     }),
-                    account_status: status,
-                    max_connections: max_conn,
+                    max_connections: account.and_then(|account| account.max_connections),
                 }
             }
         },
@@ -741,6 +740,7 @@ async fn test_xtream_servers_inner(
         results,
         same_cdn,
         channels_probed,
+        account,
     })
 }
 

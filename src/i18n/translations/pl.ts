@@ -136,6 +136,12 @@ export default {
       expectedHd: "Oczekiwano 720p lub 1080p, jest {actual}",
       unlabeled4k: "Kanał 4K nie jest oznaczony jako 4K",
     },
+    xtream: {
+      rejected: "Serwer Xtream odrzucił nazwę użytkownika lub hasło",
+      expired: "Subskrypcja Xtream wygasła",
+      expiredOn: "Subskrypcja Xtream wygasła {date}",
+      disabled: "Konto Xtream ma status {status}",
+    },
     progress: {
       analyzingUrls: "Analiza adresów URL kanałów",
       lookingUpServer: "Ustalanie lokalizacji serwera",
@@ -294,6 +300,24 @@ export default {
       reload: "Wczytaj ponownie",
       rescan: "Skanuj ponownie",
       dismiss: "Odrzuć komunikat o {account}",
+    },
+    xtreamAccount: {
+      expired:
+        "Twoja subskrypcja Xtream wygasła {date}. Odnów ją u dostawcy, aby oglądać te kanały.",
+      expiredUndated:
+        "Twoja subskrypcja Xtream wygasła. Odnów ją u dostawcy, aby oglądać te kanały.",
+      expiringSoon: "Twoja subskrypcja Xtream wygasa {date}. Odnów ją, aby dalej oglądać.",
+      disabled:
+        "Dostawca zgłasza to konto Xtream jako {status}. Jego kanały nie będą działać, dopóki dostawca go nie odblokuje.",
+      rejected:
+        "Serwer Xtream odrzucił tę nazwę użytkownika i hasło. Sprawdź je lub zapytaj dostawcę, czy konto nadal istnieje.",
+      refused: {
+        one: "Prawdopodobnie dlatego serwer odrzucił {refused} z {count} sprawdzonego kanału.",
+        few: "Prawdopodobnie dlatego serwer odrzucił {refused} z {count} sprawdzonych kanałów.",
+        many: "Prawdopodobnie dlatego serwer odrzucił {refused} z {count} sprawdzonych kanałów.",
+        other: "Prawdopodobnie dlatego serwer odrzucił {refused} z {count} sprawdzonego kanału.",
+      },
+      dismiss: "Odrzuć powiadomienie o subskrypcji",
     },
     recording: {
       progress: "Nagrywanie: {title}",
@@ -1111,6 +1135,7 @@ export default {
       mostlySecure: "Przeważnie bezpieczne",
       mixed: "Mieszane",
       insecure: "Niebezpieczne",
+      xtreamStatus: "Status Xtream",
       xtreamExpiration: "Wygaśnięcie Xtream",
       totalContent: "Łącznie pozycji",
       statusLabel: "Działa / Nie działa / Geo",
@@ -1378,6 +1403,8 @@ export default {
       stream: "Strumień",
       channelScreenshotAlt: "Kanał {id}",
       noImage: "Brak obrazu",
+      accountStatus: "Konto: {status}",
+      accountExpires: "Wygasa {date}",
       selectHint: "Kliknij serwer, aby go wybrać i wrócić do formularza logowania.",
     },
   },

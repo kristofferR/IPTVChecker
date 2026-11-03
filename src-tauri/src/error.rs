@@ -29,6 +29,12 @@ pub enum AppError {
     #[error("{0}")]
     State(String),
 
+    /// The Xtream panel reports the account itself as unusable (expired,
+    /// disabled, or rejected login). Every mirror server shares the account,
+    /// so callers stop trying others.
+    #[error("{0}")]
+    XtreamAccount(String),
+
     #[error("{0}")]
     Other(String),
 }

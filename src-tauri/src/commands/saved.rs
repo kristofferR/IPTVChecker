@@ -738,6 +738,8 @@ pub async fn open_saved_playlist(
                         preview = Some(result);
                         break;
                     }
+                    // Every mirror shares the account, so the others fail too.
+                    Err(error @ AppError::XtreamAccount(_)) => return Err(error),
                     Err(error) => {
                         errors.push(format!("{}: {}", server, error));
                     }

@@ -1,6 +1,7 @@
 /** Shared error-formatting helpers for user-facing messages. */
 
 import { t } from "../i18n";
+import { translateReason } from "../i18n/reasons";
 
 export function errorToString(err: unknown): string {
   if (typeof err === "string") {
@@ -49,7 +50,7 @@ function formatUserFacingError(
   if (!normalized || normalized === "[object Object]") {
     return fallback;
   }
-  return existingPrefix.test(normalized) ? normalized : frame(normalized);
+  return existingPrefix.test(normalized) ? normalized : frame(translateReason(normalized));
 }
 
 export function formatPlaylistOpenError(err: unknown): string {

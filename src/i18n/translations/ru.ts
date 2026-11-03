@@ -136,6 +136,12 @@ export default {
       expectedHd: "Ожидалось 720p или 1080p, получено {actual}",
       unlabeled4k: "4K-канал не помечен как 4K",
     },
+    xtream: {
+      rejected: "Сервер Xtream отклонил имя пользователя или пароль",
+      expired: "Подписка Xtream истекла",
+      expiredOn: "Подписка Xtream истекла {date}",
+      disabled: "Статус аккаунта Xtream: {status}",
+    },
     progress: {
       analyzingUrls: "Анализ URL каналов",
       lookingUpServer: "Определение расположения сервера",
@@ -292,6 +298,24 @@ export default {
       reload: "Перезагрузить",
       rescan: "Пересканировать",
       dismiss: "Скрыть уведомление о {account}",
+    },
+    xtreamAccount: {
+      expired:
+        "Ваша подписка Xtream истекла {date}. Продлите её у провайдера, чтобы смотреть эти каналы.",
+      expiredUndated:
+        "Ваша подписка Xtream истекла. Продлите её у провайдера, чтобы смотреть эти каналы.",
+      expiringSoon: "Ваша подписка Xtream истекает {date}. Продлите её, чтобы продолжить просмотр.",
+      disabled:
+        "Провайдер сообщает, что у этого аккаунта Xtream статус {status}. Его каналы не будут работать, пока провайдер снова не включит аккаунт.",
+      rejected:
+        "Сервер Xtream отклонил это имя пользователя и пароль. Проверьте их или уточните у провайдера, существует ли ещё аккаунт.",
+      refused: {
+        one: "Вероятно, поэтому сервер отклонил {refused} из {count} проверенного канала.",
+        few: "Вероятно, поэтому сервер отклонил {refused} из {count} проверенных каналов.",
+        many: "Вероятно, поэтому сервер отклонил {refused} из {count} проверенных каналов.",
+        other: "Вероятно, поэтому сервер отклонил {refused} из {count} проверенного канала.",
+      },
+      dismiss: "Скрыть уведомление о подписке",
     },
     recording: {
       progress: "Запись «{title}»",
@@ -1106,6 +1130,7 @@ export default {
       mostlySecure: "В основном безопасно",
       mixed: "Смешанно",
       insecure: "Небезопасно",
+      xtreamStatus: "Статус Xtream",
       xtreamExpiration: "Срок действия Xtream",
       totalContent: "Всего контента",
       statusLabel: "Раб. / Нераб. / Гео",
@@ -1373,6 +1398,8 @@ export default {
       stream: "Поток",
       channelScreenshotAlt: "Канал {id}",
       noImage: "Нет изображения",
+      accountStatus: "Аккаунт: {status}",
+      accountExpires: "Истекает {date}",
       selectHint: "Нажмите на сервер, чтобы выбрать его и вернуться к форме входа.",
     },
   },

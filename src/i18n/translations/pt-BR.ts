@@ -131,6 +131,12 @@ export default {
       expectedHd: "Esperado 720p ou 1080p, obtido {actual}",
       unlabeled4k: "Canal 4K não identificado como tal",
     },
+    xtream: {
+      rejected: "O servidor Xtream recusou o usuário ou a senha",
+      expired: "A assinatura do Xtream venceu",
+      expiredOn: "A assinatura do Xtream venceu em {date}",
+      disabled: "A conta do Xtream está com status {status}",
+    },
     progress: {
       analyzingUrls: "Analisando as URLs dos canais",
       lookingUpServer: "Localizando o servidor",
@@ -286,6 +292,24 @@ export default {
       reload: "Recarregar",
       rescan: "Escanear novamente",
       dismiss: "Dispensar o aviso sobre {account}",
+    },
+    xtreamAccount: {
+      expired:
+        "Sua assinatura do Xtream venceu em {date}. Renove com seu provedor para assistir a estes canais.",
+      expiredUndated:
+        "Sua assinatura do Xtream venceu. Renove com seu provedor para assistir a estes canais.",
+      expiringSoon: "Sua assinatura do Xtream vence em {date}. Renove para continuar assistindo.",
+      disabled:
+        "Seu provedor informa que esta conta do Xtream está com status {status}. Os canais dela não vão reproduzir até o provedor reativá-la.",
+      rejected:
+        "O servidor Xtream recusou este usuário e esta senha. Confira os dados ou pergunte ao seu provedor se a conta ainda existe.",
+      refused: {
+        one: "Provavelmente é por isso que o servidor recusou {refused} de {count} canal verificado.",
+        many: "Provavelmente é por isso que o servidor recusou {refused} de {count} canais verificados.",
+        other:
+          "Provavelmente é por isso que o servidor recusou {refused} de {count} canais verificados.",
+      },
+      dismiss: "Dispensar aviso de assinatura",
     },
     recording: {
       progress: "Gravando {title}",
@@ -1079,6 +1103,7 @@ export default {
       mostlySecure: "Majoritariamente seguro",
       mixed: "Misto",
       insecure: "Inseguro",
+      xtreamStatus: "Status do Xtream",
       xtreamExpiration: "Vencimento do Xtream",
       totalContent: "Conteúdo total",
       statusLabel: "No ar / Fora do ar / Geo",
@@ -1260,6 +1285,8 @@ export default {
       stream: "Stream",
       channelScreenshotAlt: "Canal {id}",
       noImage: "Sem imagem",
+      accountStatus: "Conta: {status}",
+      accountExpires: "Vence em {date}",
       selectHint: "Clique em um servidor para selecioná-lo e voltar ao formulário de login.",
     },
   },

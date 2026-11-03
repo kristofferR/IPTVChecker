@@ -131,6 +131,12 @@ export default {
       expectedHd: "Previsto 720p o 1080p, rilevato {actual}",
       unlabeled4k: "Canale 4K non indicato come tale",
     },
+    xtream: {
+      rejected: "Il server Xtream ha rifiutato nome utente o password",
+      expired: "Abbonamento Xtream scaduto",
+      expiredOn: "Abbonamento Xtream scaduto il {date}",
+      disabled: "L'account Xtream è nello stato {status}",
+    },
     progress: {
       analyzingUrls: "Analisi degli URL dei canali",
       lookingUpServer: "Individuazione della posizione del server",
@@ -287,6 +293,25 @@ export default {
       reload: "Ricarica",
       rescan: "Riscansiona",
       dismiss: "Ignora l'avviso su {account}",
+    },
+    xtreamAccount: {
+      expired:
+        "Il tuo abbonamento Xtream è scaduto il {date}. Rinnovalo con il tuo provider per guardare questi canali.",
+      expiredUndated:
+        "Il tuo abbonamento Xtream è scaduto. Rinnovalo con il tuo provider per guardare questi canali.",
+      expiringSoon:
+        "Il tuo abbonamento Xtream scade il {date}. Rinnovalo per continuare a guardare.",
+      disabled:
+        "Il tuo provider segnala questo account Xtream come {status}. I suoi canali non funzioneranno finché il provider non lo riattiva.",
+      rejected:
+        "Il server Xtream ha rifiutato questo nome utente e questa password. Controllali o chiedi al tuo provider se l'account esiste ancora.",
+      refused: {
+        one: "Probabilmente è per questo che il server ha rifiutato {refused} canale controllato su {count}.",
+        many: "Probabilmente è per questo che il server ha rifiutato {refused} dei {count} canali controllati.",
+        other:
+          "Probabilmente è per questo che il server ha rifiutato {refused} dei {count} canali controllati.",
+      },
+      dismiss: "Ignora l'avviso sull'abbonamento",
     },
     recording: {
       progress: "Registrazione di {title}",
@@ -1081,6 +1106,7 @@ export default {
       mostlySecure: "Prevalentemente sicuro",
       mixed: "Misto",
       insecure: "Non sicuro",
+      xtreamStatus: "Stato Xtream",
       xtreamExpiration: "Scadenza Xtream",
       totalContent: "Contenuti totali",
       statusLabel: "Online / Offline / Geo",
@@ -1267,6 +1293,8 @@ export default {
       stream: "Stream",
       channelScreenshotAlt: "Canale {id}",
       noImage: "Nessuna immagine",
+      accountStatus: "Account: {status}",
+      accountExpires: "Scade il {date}",
       selectHint: "Fai clic su un server per selezionarlo e tornare al modulo di accesso.",
     },
   },

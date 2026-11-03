@@ -23,7 +23,8 @@ import {
 } from "../lib/playlistReportVisibility";
 import { isScanActive } from "../lib/scanState";
 import { exportM3u } from "../lib/tauri";
-import type { ChannelResult, PlaylistScore } from "../lib/types";
+import type { ChannelResult, PlaylistScore, XtreamAccountInfo } from "../lib/types";
+import { formatAccountDate, isUnusableAccount } from "../lib/xtreamAccount";
 import { useAppStore } from "../store";
 import { PlaybackReportSummary } from "./PlaybackDiagnostics";
 
@@ -207,14 +208,12 @@ function computeLiveScore(results: ChannelResult[], total: number): PlaylistScor
 }
 
 function formatEpoch(epoch: number | null | undefined): string {
-  if (!epoch) return t("report.notAvailable");
-  const date = new Date(epoch * 1000);
-  if (Number.isNaN(date.getTime())) return t("report.notAvailable");
-  return date.toLocaleDateString(getFormatLocale(), {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return epoch ? formatAccountDate(epoch) : t("report.notAvailable");
+}
+
+function accountToneClass(account: XtreamAccountInfo | null): string {
+  if (!account || account.state === "ok") return "text-text-primary";
+  return isUnusableAccount(account.state) ? "text-red-400" : "text-amber-400";
 }
 
 export const PlaylistReportPanel = memo(function PlaylistReportPanel({
@@ -417,6 +416,8 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
   const aliveOrDrm = (statusSnapshot?.alive ?? 0) + (statusSnapshot?.drm ?? 0);
   const statusLabel = aliveOrDrm > 0 ? t("report.status.active") : t("report.status.inactive");
   const statusClass = aliveOrDrm > 0 ? "text-emerald-300" : "text-red-300";
+  const xtreamAccount = playlist.xtream_account_info;
+  const accountTone = accountToneClass(xtreamAccount);
 
   return (
     <aside
@@ -920,12 +921,18 @@ export const PlaylistReportPanel = memo(function PlaylistReportPanel({
                     : t("report.technical.insecure")}
               </span>
             </div>
-            {playlist.xtream_account_info && (
+            {xtreamAccount?.status && (
+              <div className="flex items-center justify-between">
+                <span className="text-text-tertiary">{t("report.technical.xtreamStatus")}</span>
+                <span dir="auto" className={accountTone}>
+                  {xtreamAccount.status}
+                </span>
+              </div>
+            )}
+            {xtreamAccount && (
               <div className="flex items-center justify-between">
                 <span className="text-text-tertiary">{t("report.technical.xtreamExpiration")}</span>
-                <span className="text-text-primary">
-                  {formatEpoch(playlist.xtream_account_info.expires_at_epoch)}
-                </span>
+                <span className={accountTone}>{formatEpoch(xtreamAccount.expires_at_epoch)}</span>
               </div>
             )}
             <div className="flex items-center justify-between">

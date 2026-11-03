@@ -1,4 +1,4 @@
-import { Download, ExternalLink, Info, X } from "lucide-react";
+import { CircleAlert, Download, ExternalLink, Info, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { dismissUpdateNotice } from "../hooks/useUpdateCheck";
 import { formatCount, getFormatLocale, t } from "../i18n";
@@ -14,13 +14,14 @@ import { formatBytes } from "../lib/format";
 import { isScanActive } from "../lib/scanState";
 import { validateSourceFilterPattern } from "../lib/sourceFilter";
 import { dispatcharrRefreshAccount } from "../lib/tauri";
-import type { ChannelResult } from "../lib/types";
+import type { ChannelResult, XtreamAccountInfo } from "../lib/types";
 import {
   isManualInstall,
   updateActionLabel,
   updateBannerMessage,
   updateConfirmMessage,
 } from "../lib/updateState";
+import { countRefusedChannels, formatAccountDate, isUnusableAccount } from "../lib/xtreamAccount";
 import { useAppStore } from "../store";
 
 // Non-reactive store access for writes inside callbacks/effects.
@@ -83,6 +84,71 @@ function DispatcharrConvertBanner() {
         className="p-1 hover:bg-blue-500/20 rounded transition-colors"
         type="button"
         aria-label={t("banners.dispatcharrConvert.dismiss")}
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
+function xtreamAccountMessage(account: XtreamAccountInfo): string | null {
+  const expires = account.expires_at_epoch;
+  switch (account.state) {
+    case "ok":
+      return null;
+    case "expiring_soon":
+      return expires
+        ? t("banners.xtreamAccount.expiringSoon", { date: formatAccountDate(expires) })
+        : null;
+    case "expired":
+      return expires
+        ? t("banners.xtreamAccount.expired", { date: formatAccountDate(expires) })
+        : t("banners.xtreamAccount.expiredUndated");
+    case "disabled":
+      return t("banners.xtreamAccount.disabled", { status: account.status ?? "" });
+    case "rejected":
+      return t("banners.xtreamAccount.rejected");
+  }
+}
+
+/** Warns when the open playlist's Xtream account has expired, been disabled
+ *  or rejected, or expires within a week. After a scan it also says when the
+ *  account explains why most channels were refused. Dismissal lasts until
+ *  the source is opened again. */
+function XtreamAccountBanner() {
+  const account = useAppStore((s) => s.playlist?.xtream_account_info ?? null);
+  const flatResults = useAppStore((s) => s.flatResults);
+  const scanning = useAppStore((s) => isScanActive(s.scanState));
+  const [dismissed, setDismissed] = useState<XtreamAccountInfo | null>(null);
+  const unusable = account != null && isUnusableAccount(account.state);
+  const refusals = useMemo(
+    () => (unusable && !scanning ? countRefusedChannels(flatResults) : null),
+    [unusable, scanning, flatResults],
+  );
+  const message = account && dismissed !== account ? xtreamAccountMessage(account) : null;
+  if (!account || !message) return null;
+
+  const explainsScan =
+    refusals != null && refusals.refused > 0 && refusals.refused * 2 >= refusals.checked;
+  const tone = unusable
+    ? "bg-red-500/10 border-red-500/20 text-red-400"
+    : "bg-amber-500/10 border-amber-500/20 text-amber-400";
+  return (
+    <div className={`flex items-center gap-2 px-4 py-2.5 border-b text-[13px] ${tone}`}>
+      <CircleAlert className="w-4 h-4 shrink-0" />
+      <span className="flex-1 min-w-0">
+        {message}
+        {explainsScan &&
+          ` ${t("banners.xtreamAccount.refused", {
+            refused: formatCount(refusals.refused),
+            count: refusals.checked,
+          })}`}
+      </span>
+      <button
+        onClick={() => setDismissed(account)}
+        className="p-1 hover:bg-white/10 rounded transition-colors"
+        type="button"
+        aria-label={t("banners.xtreamAccount.dismiss")}
       >
         <X className="w-4 h-4" />
       </button>
@@ -425,6 +491,7 @@ export function AppBanners({ onInstallUpdate, onScanRows, onReloadSource }: AppB
         </div>
       )}
 
+      <XtreamAccountBanner />
       <DispatcharrConvertBanner />
       <DispatcharrProviderDownBanners onRescan={onScanRows} onReload={onReloadSource} />
 

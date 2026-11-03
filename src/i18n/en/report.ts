@@ -87,6 +87,7 @@ export default {
     mostlySecure: "Mostly secure",
     mixed: "Mixed",
     insecure: "Insecure",
+    xtreamStatus: "Xtream Status",
     xtreamExpiration: "Xtream Expiration",
     totalContent: "Total content",
     statusLabel: "Alive / Dead / Geo",
