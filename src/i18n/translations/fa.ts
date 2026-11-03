@@ -1630,6 +1630,13 @@ export default {
       moveDown: "انتقال به پایین",
       removeFromChannel: "حذف از کانال",
     },
+    findings: {
+      mislabeled: "{actual}، نه {expected}",
+      unlabeled4k: "4K بدون برچسب",
+      lowBitrate: "نرخ بیت پایین",
+      frozen: "ثابت",
+      noMediaInfo: "بدون اطلاعات رسانه",
+    },
     find: {
       queueProgress: "بدون استریم سالم · {position} از {total}",
       nextChannel: "کانال بعدی بدون استریم سالم",

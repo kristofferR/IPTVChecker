@@ -1420,6 +1420,17 @@ pub(crate) fn account_label(extinf_line: &str) -> String {
         .unwrap_or_else(|| "Provider".to_string())
 }
 
+/// A row's provider stream name. Its title is the Dispatcharr channel's name,
+/// so quality labels such as "4K" live here.
+pub(crate) fn stream_name(extinf_line: &str) -> Option<String> {
+    if !extinf_line.contains(ATTR_STREAM_NAME) {
+        return None;
+    }
+    parse_extinf_attributes(extinf_line)
+        .into_iter()
+        .find_map(|(key, value)| (key == ATTR_STREAM_NAME && !value.is_empty()).then_some(value))
+}
+
 /// The provider account a row streams from and how many concurrent streams
 /// it allows, when Dispatcharr reports a limit.
 pub(crate) fn dispatcharr_connection_limit(extinf_line: &str) -> Option<(i64, usize)> {

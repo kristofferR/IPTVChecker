@@ -1776,6 +1776,13 @@ export default {
       moveDown: "Bajar",
       removeFromChannel: "Quitar del canal",
     },
+    findings: {
+      mislabeled: "{actual}, no {expected}",
+      unlabeled4k: "4K sin etiquetar",
+      lowBitrate: "Bitrate bajo",
+      frozen: "Congelado",
+      noMediaInfo: "Sin info multimedia",
+    },
     find: {
       queueProgress: "Sin stream operativo · {position} de {total}",
       nextChannel: "Siguiente canal sin stream operativo",

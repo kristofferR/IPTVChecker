@@ -2,6 +2,8 @@ import { ArrowDown, ArrowUp, ChevronRight, TextSearch, X } from "lucide-react";
 import { useMemo } from "react";
 import { useFixPreferences } from "../hooks/useFixPreferences";
 import { t } from "../i18n";
+import { translateReason } from "../i18n/reasons";
+import { getChannelErrorReason, labelClaim } from "../lib/channelResults";
 import {
   type DispatcharrChannelView,
   type DispatcharrStreamEntry,
@@ -9,7 +11,7 @@ import {
   dispatcharrStreamName,
   proposeFixOrder,
 } from "../lib/dispatcharr";
-import type { ChannelStatus } from "../lib/types";
+import type { ChannelResult, ChannelStatus } from "../lib/types";
 import type { DispatcharrRowState } from "../store/types";
 
 export type StreamAction = "primary" | "up" | "down" | "remove";
@@ -278,6 +280,79 @@ export function ChannelNameCell({
   );
 }
 
+type FindingTone = "warning" | "info" | "error";
+
+interface StreamFinding {
+  key: string;
+  text: string;
+  title: string;
+  tone: FindingTone;
+}
+
+const CHIP_TONE: Record<FindingTone, string> = {
+  warning: "bg-amber-500/15 text-amber-300 ring-amber-500/30 light:text-amber-700",
+  info: "bg-sky-500/15 text-sky-300 ring-sky-500/30 light:text-sky-700",
+  error: "bg-red-500/15 text-red-300 ring-red-500/30 light:text-red-700",
+};
+
+/** What a scan found wrong with a stream, as short chip texts. */
+function streamFindings(result: ChannelResult, streamName: string): StreamFinding[] {
+  const findings: StreamFinding[] = [];
+  if (result.status === "dead") {
+    const reason = getChannelErrorReason(result);
+    if (reason) {
+      const text = translateReason(reason);
+      findings.push({ key: "dead", text, title: text, tone: "error" });
+    }
+    return findings;
+  }
+  if (result.label_mismatches.length > 0) {
+    const claim = labelClaim(streamName);
+    findings.push({
+      key: "label",
+      text:
+        claim && result.resolution
+          ? t("dispatcharr.findings.mislabeled", { actual: result.resolution, expected: claim })
+          : t("dispatcharr.findings.unlabeled4k"),
+      title: result.label_mismatches.map(translateReason).join("\n"),
+      tone: "warning",
+    });
+  }
+  if (result.status === "alive" && result.probe_error_reason && !result.resolution) {
+    findings.push({
+      key: "probe",
+      text: t("dispatcharr.findings.noMediaInfo"),
+      title: t("table.probeFailed", { reason: translateReason(result.probe_error_reason) }),
+      tone: "warning",
+    });
+  }
+  if (result.low_framerate && result.fps) {
+    findings.push({
+      key: "fps",
+      text: t("player.panel.fps", { fps: result.fps }),
+      title: t("player.panel.lowFramerate", { fps: result.fps }),
+      tone: "warning",
+    });
+  }
+  if (result.low_bitrate) {
+    findings.push({
+      key: "bitrate",
+      text: t("dispatcharr.findings.lowBitrate"),
+      title: t("table.lowBitrate"),
+      tone: "warning",
+    });
+  }
+  if (result.frozen_video) {
+    findings.push({
+      key: "frozen",
+      text: t("dispatcharr.findings.frozen"),
+      title: t("table.frozenVideo"),
+      tone: "info",
+    });
+  }
+  return findings;
+}
+
 export function StreamNameCell({
   channel,
   entry,
@@ -294,14 +369,34 @@ export function StreamNameCell({
     stop(event);
     actions?.onStreamAction(channel, position, action);
   };
+  const streamName = dispatcharrStreamName(entry);
+  const findings = useMemo(
+    () => streamFindings(entry.result, streamName),
+    [entry.result, streamName],
+  );
   return (
     <span className="flex min-w-0 flex-1 items-center gap-2 ps-8 pe-2">
       <span className="shrink-0 text-text-primary" dir="auto">
         {entry.ref.account ?? t("common.unknown")}
       </span>
       <span className="truncate text-text-tertiary" dir="auto">
-        {dispatcharrStreamName(entry)}
+        {streamName}
       </span>
+      {findings.length > 0 && (
+        // Shrinks (and clips) rather than overflow the cell when the hover
+        // actions take their room, so the chips' tooltips stay reachable.
+        <span className="flex min-w-0 items-center gap-1 overflow-hidden p-px">
+          {findings.map((finding) => (
+            <span
+              key={finding.key}
+              title={finding.title}
+              className={`min-w-0 max-w-48 truncate rounded px-1.5 py-px text-[11px] font-medium ring-1 ${CHIP_TONE[finding.tone]}`}
+            >
+              {finding.text}
+            </span>
+          ))}
+        </span>
+      )}
       {position === 0 && (
         <span className="shrink-0 text-[10px] uppercase tracking-[0.06em] text-text-tertiary">
           {t("dispatcharr.cells.primary")}

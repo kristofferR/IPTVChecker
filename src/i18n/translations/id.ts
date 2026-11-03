@@ -1587,6 +1587,13 @@ export default {
       moveDown: "Turunkan",
       removeFromChannel: "Hapus dari saluran",
     },
+    findings: {
+      mislabeled: "{actual}, bukan {expected}",
+      unlabeled4k: "4K tanpa label",
+      lowBitrate: "Bitrate rendah",
+      frozen: "Beku",
+      noMediaInfo: "Tanpa info media",
+    },
     find: {
       queueProgress: "Tidak ada stream yang berfungsi · {position} dari {total}",
       nextChannel: "Saluran berikutnya tanpa stream yang berfungsi",

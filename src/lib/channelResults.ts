@@ -1,3 +1,4 @@
+import { getExtinfAttribute } from "./extinf";
 import type { StreamMetadata } from "./playback";
 import type { Channel, ChannelResult } from "./types";
 
@@ -72,21 +73,34 @@ export function toPendingChannelResult(channel: Channel): ChannelResult {
   };
 }
 
-export function getLabelMismatches(channelName: string, resolution: string): string[] {
-  const normalizedName = channelName.normalize("NFKC").toLowerCase();
+/** The quality a name claims, mirroring the backend's `check_label_mismatch`. */
+export function labelClaim(name: string): "4K" | "1080p" | "HD" | null {
+  const normalizedName = name.normalize("NFKC").toLowerCase();
+  if (normalizedName.includes("4k") || normalizedName.includes("uhd")) return "4K";
+  if (normalizedName.includes("1080p") || normalizedName.includes("fhd")) return "1080p";
+  if (/(^|[^a-z0-9])hd([^a-z0-9]|$)/.test(normalizedName)) return "HD";
+  return null;
+}
 
-  if (normalizedName.includes("4k") || normalizedName.includes("uhd")) {
-    return resolution === "4K" ? [] : [`Expected 4K, got ${resolution}`];
+/** The name a row's quality label is read from: a Dispatcharr row's title is
+ *  its channel's name, so the provider stream name carries the label. */
+export function labelSourceName(result: Pick<ChannelResult, "name" | "extinf_line">): string {
+  return getExtinfAttribute(result.extinf_line, "x-dispatcharr-stream-name") ?? result.name;
+}
+
+export function getLabelMismatches(channelName: string, resolution: string): string[] {
+  switch (labelClaim(channelName)) {
+    case "4K":
+      return resolution === "4K" ? [] : [`Expected 4K, got ${resolution}`];
+    case "1080p":
+      return resolution === "1080p" ? [] : [`Expected 1080p, got ${resolution}`];
+    case "HD":
+      return resolution === "1080p" || resolution === "720p"
+        ? []
+        : [`Expected 720p or 1080p, got ${resolution}`];
+    case null:
+      return resolution === "4K" ? ["4K channel not labeled as such"] : [];
   }
-  if (normalizedName.includes("1080p") || normalizedName.includes("fhd")) {
-    return resolution === "1080p" ? [] : [`Expected 1080p, got ${resolution}`];
-  }
-  if (/(^|[^a-z0-9])hd([^a-z0-9]|$)/.test(normalizedName)) {
-    return resolution === "1080p" || resolution === "720p"
-      ? []
-      : [`Expected 720p or 1080p, got ${resolution}`];
-  }
-  return resolution === "4K" ? ["4K channel not labeled as such"] : [];
 }
 
 /** Apply facts established by successful in-app playback without replacing
@@ -137,7 +151,7 @@ export function mergeSuccessfulPlaybackResult(
     updated.low_framerate = metadata.fps <= lowFpsThreshold;
   }
   if (result.resolution == null && metadata.resolution && result.label_mismatches.length === 0) {
-    const labelMismatches = getLabelMismatches(result.name, metadata.resolution);
+    const labelMismatches = getLabelMismatches(labelSourceName(result), metadata.resolution);
     if (labelMismatches.length > 0) {
       updated.label_mismatches = labelMismatches;
     }

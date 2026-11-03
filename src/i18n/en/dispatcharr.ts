@@ -47,6 +47,14 @@ export default {
     moveDown: "Move down",
     removeFromChannel: "Remove from channel",
   },
+  /** Short finding chips on a stream row. */
+  findings: {
+    mislabeled: "{actual}, not {expected}",
+    unlabeled4k: "Unlabeled 4K",
+    lowBitrate: "Low bitrate",
+    frozen: "Frozen",
+    noMediaInfo: "No media info",
+  },
   find: {
     queueProgress: "No working stream · {position} of {total}",
     nextChannel: "Next channel with no working stream",

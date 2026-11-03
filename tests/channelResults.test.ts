@@ -188,6 +188,36 @@ describe("channelResults helpers", () => {
     expect(getLabelMismatches("Movie ᵁᴴᴰ ³⁸⁴⁰ᴾ", "1080p")).toEqual(["Expected 4K, got 1080p"]);
   });
 
+  it("reads a Dispatcharr row's quality label from its stream name", () => {
+    const scanned = {
+      ...toPendingChannelResult({
+        ...makeChannel("https://example.com/live/news.ts"),
+        name: "Demo News",
+        extinf_line:
+          '#EXTINF:-1 x-dispatcharr-stream-id="7" x-dispatcharr-stream-name="US: DEMO NEWS 4K",Demo News',
+      }),
+      status: "alive" as const,
+    };
+    const metadata: StreamMetadata = {
+      width: 1280,
+      height: 720,
+      resolution: "720p",
+      codec: null,
+      fps: null,
+      latencyMs: null,
+      hdrFormat: null,
+      videoBitrate: null,
+      audioCodec: null,
+      audioBitrate: null,
+      audioChannelLayout: null,
+      audioOnly: false,
+    };
+
+    expect(mergeSuccessfulPlaybackResult(scanned, metadata, 23).label_mismatches).toEqual([
+      "Expected 4K, got 720p",
+    ]);
+  });
+
   it("resets scanned results back to a clean pending state", () => {
     const reset = resetChannelResultForRescan(makeResult());
 
