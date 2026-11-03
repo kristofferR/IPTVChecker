@@ -134,6 +134,33 @@ fn save_cache_metadata(
     std::fs::write(path, bytes).map_err(AppError::Io)
 }
 
+/// Why a request never reached a server, as the scan checker words it. The
+/// cause sits in the error chain: reqwest's `Display` leaves it out. A server
+/// that accepted the connection was reached, even if it answered too slowly.
+pub(crate) fn unreachable_reason(error: &reqwest::Error) -> Option<&'static str> {
+    if !error.is_connect() {
+        return None;
+    }
+    if error.is_timeout() {
+        return Some("Timeout");
+    }
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        if cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::ConnectionRefused)
+        {
+            return Some("Connection refused");
+        }
+        // hyper-util's connector names a failed lookup "dns error".
+        if cause.to_string() == "dns error" {
+            return Some("DNS failure");
+        }
+        source = cause.source();
+    }
+    None
+}
+
 fn map_download_error(
     error: reqwest::Error,
     error_label: &str,
@@ -207,7 +234,10 @@ async fn download_playlist_to_file(
     let response = request
         .send()
         .await
-        .map_err(|error| map_download_error(error, error_label, timeout, "request"))?;
+        .map_err(|error| match unreachable_reason(&error) {
+            Some(reason) => AppError::Unreachable(reason),
+            None => map_download_error(error, error_label, timeout, "request"),
+        })?;
 
     let status = response.status();
     if status == reqwest::StatusCode::NOT_MODIFIED {
@@ -428,12 +458,58 @@ pub(crate) fn write_bytes_to_cache(
 mod tests {
     use super::{
         build_cache_tmp_path, cleanup_stale_cache_temp_files, download_playlist_to_file,
-        source_cache_file_name,
+        source_cache_file_name, unreachable_reason,
     };
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
     use url::Url;
+
+    #[tokio::test]
+    async fn unreachable_reason_reads_the_error_chain() {
+        let client = reqwest::Client::new();
+        // A port that was just released refuses the connection.
+        let port = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener should bind")
+            .local_addr()
+            .expect("test listener should have an address")
+            .port();
+        let refused = client
+            .get(format!("http://127.0.0.1:{port}/get.php"))
+            .send()
+            .await
+            .expect_err("closed port should refuse");
+        assert_eq!(unreachable_reason(&refused), Some("Connection refused"));
+
+        // `.invalid` never resolves (RFC 2606).
+        let unresolved = client
+            .get("http://provider.invalid/get.php")
+            .send()
+            .await
+            .expect_err("reserved name should not resolve");
+        assert_eq!(unreachable_reason(&unresolved), Some("DNS failure"));
+
+        // Accepting the connection but never answering is slow, not unreachable.
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("test listener should have an address");
+        tokio::spawn(async move {
+            let (_socket, _) = listener.accept().await.expect("test server should accept");
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        });
+        let slow = client
+            .get(format!("http://{address}/get.php"))
+            .timeout(Duration::from_millis(200))
+            .send()
+            .await
+            .expect_err("silent server should time out");
+        assert!(slow.is_timeout());
+        assert_eq!(unreachable_reason(&slow), None);
+    }
 
     #[test]
     fn source_cache_file_name_is_deterministic() {

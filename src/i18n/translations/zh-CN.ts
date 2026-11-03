@@ -128,6 +128,18 @@ export default {
       expectedHd: "应为 720p 或 1080p，实际为 {actual}",
       unlabeled4k: "4K 频道未标注为 4K",
     },
+    unreachable: {
+      one: "无法连接到服务器（{reason}）",
+      mirrors: {
+        other: "“{name}”的 {count} 个服务器均无法连接（{reasons}）",
+      },
+    },
+    xtream: {
+      rejected: "Xtream 服务器拒绝了用户名或密码",
+      expired: "Xtream 订阅已到期",
+      expiredOn: "Xtream 订阅已于 {date} 到期",
+      disabled: "Xtream 账户状态为 {status}",
+    },
     progress: {
       analyzingUrls: "正在分析频道 URL",
       lookingUpServer: "正在查询服务器位置",
@@ -268,6 +280,17 @@ export default {
       reload: "重新加载",
       rescan: "重新扫描",
       dismiss: "关闭关于 {account} 的提示",
+    },
+    xtreamAccount: {
+      expired: "你的 Xtream 订阅已于 {date} 到期。请向服务商续订后再观看这些频道。",
+      expiredUndated: "你的 Xtream 订阅已到期。请向服务商续订后再观看这些频道。",
+      expiringSoon: "你的 Xtream 订阅将于 {date} 到期。续订后即可继续观看。",
+      disabled: "服务商报告此 Xtream 账户的状态为 {status}。在服务商重新启用之前，其频道无法播放。",
+      rejected: "Xtream 服务器拒绝了此用户名和密码。请检查它们，或向服务商确认该账户是否仍然存在。",
+      refused: {
+        other: "服务器拒绝了已检查的 {count} 个频道中的 {refused} 个，很可能就是这个原因。",
+      },
+      dismiss: "关闭订阅提醒",
     },
     recording: {
       progress: "正在录制 {title}",
@@ -960,6 +983,7 @@ export default {
       mostlySecure: "大部分安全",
       mixed: "混合",
       insecure: "不安全",
+      xtreamStatus: "Xtream 状态",
       xtreamExpiration: "Xtream 到期时间",
       totalContent: "内容总数",
       statusLabel: "可用 / 失效 / 地区限制",
@@ -1083,6 +1107,8 @@ export default {
       stream: "流",
       channelScreenshotAlt: "频道 {id}",
       noImage: "无图像",
+      accountStatus: "账户：{status}",
+      accountExpires: "{date} 到期",
       selectHint: "点击服务器以选择它并返回登录表单。",
       current: "当前",
       switchHint: "点击服务器，在 Dispatcharr 中将 {account} 切换到该服务器。",

@@ -132,6 +132,20 @@ export default {
       expectedHd: "Se esperaba 720p o 1080p, se obtuvo {actual}",
       unlabeled4k: "Canal 4K no etiquetado como tal",
     },
+    unreachable: {
+      one: "No se pudo conectar con el servidor ({reason})",
+      mirrors: {
+        one: 'No se pudo conectar con el servidor de "{name}" ({reasons})',
+        many: 'No se pudo conectar con ninguno de los {count} servidores de "{name}" ({reasons})',
+        other: 'No se pudo conectar con ninguno de los {count} servidores de "{name}" ({reasons})',
+      },
+    },
+    xtream: {
+      rejected: "El servidor Xtream rechazó el usuario o la contraseña",
+      expired: "La suscripción de Xtream caducó",
+      expiredOn: "La suscripción de Xtream caducó el {date}",
+      disabled: "La cuenta de Xtream está en estado {status}",
+    },
     progress: {
       analyzingUrls: "Analizando las URL de los canales",
       lookingUpServer: "Buscando la ubicación del servidor",
@@ -295,6 +309,24 @@ export default {
       reload: "Recargar",
       rescan: "Reescanear",
       dismiss: "Descartar el aviso sobre {account}",
+    },
+    xtreamAccount: {
+      expired:
+        "Tu suscripción de Xtream caducó el {date}. Renuévala con tu proveedor para ver estos canales.",
+      expiredUndated:
+        "Tu suscripción de Xtream ha caducado. Renuévala con tu proveedor para ver estos canales.",
+      expiringSoon: "Tu suscripción de Xtream caduca el {date}. Renuévala para seguir viendo.",
+      disabled:
+        "Tu proveedor indica que esta cuenta de Xtream está en estado {status}. Sus canales no se reproducirán hasta que el proveedor la reactive.",
+      rejected:
+        "El servidor Xtream rechazó este usuario y esta contraseña. Revísalos o pregunta a tu proveedor si la cuenta sigue existiendo.",
+      refused: {
+        one: "Probablemente por eso el servidor rechazó {refused} de {count} canal comprobado.",
+        many: "Probablemente por eso el servidor rechazó {refused} de {count} canales comprobados.",
+        other:
+          "Probablemente por eso el servidor rechazó {refused} de {count} canales comprobados.",
+      },
+      dismiss: "Descartar aviso de suscripción",
     },
     recording: {
       progress: "Grabando {title}",
@@ -1094,6 +1126,7 @@ export default {
       mostlySecure: "Mayormente seguro",
       mixed: "Mixto",
       insecure: "Inseguro",
+      xtreamStatus: "Estado de Xtream",
       xtreamExpiration: "Caducidad de Xtream",
       totalContent: "Contenido total",
       statusLabel: "Activos / Caídos / Geo",
@@ -1284,6 +1317,8 @@ export default {
       stream: "Stream",
       channelScreenshotAlt: "Canal {id}",
       noImage: "Sin imagen",
+      accountStatus: "Cuenta: {status}",
+      accountExpires: "Caduca el {date}",
       selectHint:
         "Haz clic en un servidor para seleccionarlo y volver al formulario de inicio de sesión.",
       current: "Actual",

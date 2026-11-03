@@ -2,9 +2,11 @@ import { listen } from "@tauri-apps/api/event";
 import { Loader2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
+import { translateReason } from "../i18n/reasons";
 import { errorToString } from "../lib/errors";
 import { normalizeXtreamServer } from "../lib/savedPlaylists";
-import type { XtreamServerTestReport } from "../lib/types";
+import type { XtreamAccountInfo, XtreamServerTestReport } from "../lib/types";
+import { formatAccountDate, isUnusableAccount } from "../lib/xtreamAccount";
 
 interface ServerTestModalProps {
   /** Shown above the title: the source kind, or the account under test. */
@@ -18,6 +20,26 @@ interface ServerTestModalProps {
   /** A working server was clicked; the caller closes the dialog. */
   onSelectServer: (server: string) => void;
   onClose: () => void;
+}
+
+/** The shared account's status and end date, colored by how usable it is. */
+function AccountSummary({ account }: { account: XtreamAccountInfo }) {
+  const parts = [
+    account.status && t("sources.serverTest.accountStatus", { status: account.status }),
+    account.expires_at_epoch &&
+      t("sources.serverTest.accountExpires", { date: formatAccountDate(account.expires_at_epoch) }),
+  ].filter(Boolean);
+  if (parts.length === 0) return null;
+  const tone = isUnusableAccount(account.state)
+    ? "text-red-400"
+    : account.state === "expiring_soon"
+      ? "text-amber-400"
+      : "";
+  return (
+    <span dir="auto" className={tone}>
+      {parts.join(" · ")}
+    </span>
+  );
 }
 
 /** Ranks candidate Xtream servers of one account by quality and latency. */
@@ -83,7 +105,7 @@ export default function ServerTestModal({
     try {
       setTestReport(await runTest(lines));
     } catch (error: unknown) {
-      setTestError(errorToString(error));
+      setTestError(translateReason(errorToString(error)));
     } finally {
       setTestRunning(false);
       testRunningRef.current = false;
@@ -170,6 +192,7 @@ export default function ServerTestModal({
                     count: testReport.channels_probed,
                   })}
                 </span>
+                {testReport.account && <AccountSummary account={testReport.account} />}
               </div>
 
               <div className="space-y-3">

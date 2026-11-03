@@ -1,4 +1,4 @@
-import { type EnglishCatalog, formatCount, getFormatLocale, type MessageKey, t } from ".";
+import { type EnglishCatalog, formatCount, getFormatLocale, isolate, type MessageKey, t } from ".";
 import type { MessageAt, ParamArgs } from "./types";
 
 /** Keys of `reasons.*` messages that take no params. */
@@ -52,6 +52,8 @@ export const EXACT_REASONS = {
   "HLS Encrypted": "reasons.drm.hlsEncrypted",
   "DASH Encrypted": "reasons.drm.dashEncrypted",
   "4K channel not labeled as such": "reasons.label.unlabeled4k",
+  "Xtream server rejected the username or password": "reasons.xtream.rejected",
+  "Xtream subscription expired": "reasons.xtream.expired",
   "Analyzing channel URLs": "reasons.progress.analyzingUrls",
   "Looking up server location": "reasons.progress.lookingUpServer",
   "Fetching Dispatcharr channels": "reasons.progress.fetchingDispatcharrChannels",
@@ -165,6 +167,37 @@ const PATTERNS: ReadonlyArray<readonly [RegExp, (match: string[]) => string]> = 
   [
     /^Detected DRM system: (.+)$/s,
     ([, system]) => t("reasons.drm.detected", { system: translateReason(system) }),
+  ],
+  [
+    /^Xtream subscription expired on (\S+)$/,
+    ([, at]) => {
+      const date = new Date(at);
+      return Number.isNaN(date.getTime())
+        ? t("reasons.xtream.expired")
+        : t("reasons.xtream.expiredOn", {
+            date: date.toLocaleDateString(getFormatLocale(), {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+            }),
+          });
+    },
+  ],
+  [/^Xtream account is (.+)$/, ([, status]) => t("reasons.xtream.disabled", { status })],
+  [
+    /^Could not reach the server \((.+)\)$/,
+    ([, reason]) => t("reasons.unreachable.one", { reason: translateReason(reason) }),
+  ],
+  [
+    /^Could not reach any of the (\d+) servers for "(.*)" \((.+)\)$/s,
+    ([, count, name, reasons]) =>
+      t("reasons.unreachable.mirrors", {
+        count: Number(count),
+        name: isolate(name),
+        reasons: new Intl.ListFormat(getFormatLocale(), { type: "unit" }).format(
+          reasons.split(", ").map(translateReason),
+        ),
+      }),
   ],
 ];
 

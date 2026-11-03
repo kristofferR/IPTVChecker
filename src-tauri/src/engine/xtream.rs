@@ -5,10 +5,11 @@
 
 use crate::engine::remote_cache::{
     PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT, PLAYLIST_DOWNLOAD_USER_AGENT, parse_http_url,
+    unreachable_reason,
 };
 use crate::error::AppError;
 use crate::models::channel::{Channel, ChannelResult, ContentType};
-use crate::models::playlist::XtreamAccountInfo;
+use crate::models::playlist::{XtreamAccountInfo, XtreamAccountState};
 use regex::Regex;
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -226,11 +227,72 @@ fn parse_optional_string(value: Option<&serde_json::Value>) -> Option<String> {
         .map(ToString::to_string)
 }
 
+/// How long before the end date an account counts as expiring soon.
+const XTREAM_EXPIRY_WARNING_SECS: u64 = 7 * 24 * 60 * 60;
+
+pub(crate) fn unix_now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or_default()
+}
+
+/// Judge the account from what the panel reported. Unknown status words
+/// never raise an alarm on their own; only the ones Xtream panels use for
+/// unusable accounts do.
+fn classify_xtream_account(info: &XtreamAccountInfo, now_epoch: u64) -> XtreamAccountState {
+    if info.auth == Some(false) {
+        return XtreamAccountState::Rejected;
+    }
+    let status = info.status.as_deref().map(str::to_ascii_lowercase);
+    match status.as_deref() {
+        Some("expired") => return XtreamAccountState::Expired,
+        Some("banned" | "disabled") => return XtreamAccountState::Disabled,
+        _ => {}
+    }
+    match info.expires_at_epoch {
+        Some(expires) if expires <= now_epoch => XtreamAccountState::Expired,
+        Some(expires) if expires - now_epoch <= XTREAM_EXPIRY_WARNING_SECS => {
+            XtreamAccountState::ExpiringSoon
+        }
+        _ => XtreamAccountState::Ok,
+    }
+}
+
+/// The error to report when an Xtream account can't be used. Its messages
+/// are fixed English that `src/i18n/reasons.ts` translates.
+pub(crate) fn xtream_account_error(info: &XtreamAccountInfo) -> Option<AppError> {
+    let message = match info.state {
+        XtreamAccountState::Ok | XtreamAccountState::ExpiringSoon => return None,
+        XtreamAccountState::Rejected => {
+            "Xtream server rejected the username or password".to_string()
+        }
+        XtreamAccountState::Expired => match info
+            .expires_at_epoch
+            .and_then(|epoch| chrono::DateTime::from_timestamp(i64::try_from(epoch).ok()?, 0))
+        {
+            Some(expired_at) => format!(
+                "Xtream subscription expired on {}",
+                expired_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+            ),
+            None => "Xtream subscription expired".to_string(),
+        },
+        XtreamAccountState::Disabled => format!(
+            "Xtream account is {}",
+            info.status.as_deref().unwrap_or("disabled")
+        ),
+    };
+    Some(AppError::XtreamAccount(message))
+}
+
 pub(crate) fn extract_xtream_account_info(
     payload: &serde_json::Value,
+    now_epoch: u64,
 ) -> Option<XtreamAccountInfo> {
     let user = payload.get("user_info").unwrap_or(payload);
-    let info = XtreamAccountInfo {
+    let mut info = XtreamAccountInfo {
+        state: XtreamAccountState::Ok,
+        auth: user.get("auth").and_then(parse_bool_like),
         status: parse_optional_string(user.get("status")),
         expires_at_epoch: user
             .get("exp_date")
@@ -249,19 +311,21 @@ pub(crate) fn extract_xtream_account_info(
             .and_then(|server| parse_optional_string(server.get("timezone"))),
     };
 
-    let has_any = info.status.is_some()
+    let has_any = info.auth.is_some()
+        || info.status.is_some()
         || info.timezone.is_some()
         || info.expires_at_epoch.is_some()
         || info.created_at_epoch.is_some()
         || info.is_trial.is_some()
         || info.active_connections.is_some()
         || info.max_connections.is_some();
+    info.state = classify_xtream_account(&info, now_epoch);
     has_any.then_some(info)
 }
 
 #[cfg(test)]
 fn extract_xtream_max_connections(payload: &serde_json::Value) -> Option<u32> {
-    extract_xtream_account_info(payload)
+    extract_xtream_account_info(payload, 0)
         .and_then(|account| account.max_connections)
         .or_else(|| {
             payload
@@ -785,7 +849,7 @@ pub(crate) async fn fetch_xtream_account_info(
     username: &str,
     password: &str,
     accept_invalid_certs: bool,
-) -> Option<XtreamAccountInfo> {
+) -> Result<Option<XtreamAccountInfo>, AppError> {
     let api_url = build_xtream_player_api_url(server, username, password);
     let account_info_url =
         build_xtream_player_api_action_url(server, username, password, "get_account_info");
@@ -795,10 +859,14 @@ pub(crate) async fn fetch_xtream_account_info(
         .timeout(XTREAM_PLAYER_API_TIMEOUT)
         .danger_accept_invalid_certs(accept_invalid_certs)
         .build()
-        .ok()?;
+        .map_err(|err| AppError::Other(format!("Failed to build HTTP client: {err}")))?;
 
     // Errors on one endpoint must not abort the loop — the plain player_api.php
     // fallback exists precisely for servers where get_account_info misbehaves.
+    // A rejected login is kept only until the other endpoint has had its say.
+    let mut rejected = None;
+    let mut all_unreachable = true;
+    let mut connection_error = None;
     for endpoint in [account_info_url, api_url.clone()] {
         // Never log the raw endpoint — player_api URLs carry the username and
         // password as query parameters.
@@ -811,6 +879,11 @@ pub(crate) async fn fetch_xtream_account_info(
         {
             Ok(response) => response,
             Err(err) => {
+                if let Some(reason) = unreachable_reason(&err) {
+                    connection_error = Some(reason);
+                } else {
+                    all_unreachable = false;
+                }
                 log::debug!(
                     "Xtream player_api request failed for {safe_endpoint}: {}",
                     err.without_url()
@@ -818,6 +891,7 @@ pub(crate) async fn fetch_xtream_account_info(
                 continue;
             }
         };
+        all_unreachable = false;
 
         if !response.status().is_success() {
             log::debug!(
@@ -849,12 +923,17 @@ pub(crate) async fn fetch_xtream_account_info(
                 continue;
             }
         };
-        if let Some(info) = extract_xtream_account_info(&payload) {
-            return Some(info);
+        match extract_xtream_account_info(&payload, unix_now_secs()) {
+            Some(info) if info.state == XtreamAccountState::Rejected => rejected = Some(info),
+            Some(info) => return Ok(Some(info)),
+            None => {}
         }
     }
 
-    None
+    if all_unreachable && let Some(reason) = connection_error {
+        return Err(AppError::Unreachable(reason));
+    }
+    Ok(rejected)
 }
 
 #[cfg(test)]
@@ -864,10 +943,55 @@ mod tests {
         apply_xtream_archive_flags_to_results, build_xtream_download_url,
         build_xtream_player_api_action_url, build_xtream_player_api_url, build_xtream_source_key,
         build_xtream_xmltv_url, extract_xtream_account_info, extract_xtream_max_connections,
-        normalize_xtream_server,
+        fetch_xtream_account_info, normalize_xtream_server, xtream_account_error,
     };
+    use crate::error::AppError;
+    use crate::models::playlist::XtreamAccountState;
     use std::collections::HashMap;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
     use url::Url;
+
+    #[tokio::test]
+    async fn account_metadata_failures_do_not_imply_unreachable_api() {
+        for (status, body) in [
+            ("404 Not Found", "unsupported"),
+            ("200 OK", "not json"),
+            ("200 OK", "{}"),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let server = Url::parse(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
+            let task = tokio::spawn(async move {
+                for _ in 0..2 {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let mut request = [0u8; 4096];
+                    let _ = socket.read(&mut request).await.unwrap();
+                    let response = format!(
+                        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    socket.write_all(response.as_bytes()).await.unwrap();
+                }
+            });
+            assert!(matches!(
+                fetch_xtream_account_info(&server, "test", "test", false).await,
+                Ok(None)
+            ));
+            task.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn account_endpoints_report_connection_failure() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let server = Url::parse(&format!("http://{}", listener.local_addr().unwrap())).unwrap();
+        drop(listener);
+        assert!(matches!(
+            fetch_xtream_account_info(&server, "test", "test", false).await,
+            Err(AppError::Unreachable("Connection refused"))
+        ));
+    }
+
     #[test]
     fn epg_url_targets_xmltv_endpoint_with_credentials() {
         let server = Url::parse("https://provider.example.com/panel").expect("url");
@@ -1276,7 +1400,9 @@ mod tests {
                 "timezone": "Europe/Ljubljana"
             }
         });
-        let info = extract_xtream_account_info(&payload).expect("account info should parse");
+        let info = extract_xtream_account_info(&payload, 1_704_067_200)
+            .expect("account info should parse");
+        assert_eq!(info.state, XtreamAccountState::Ok);
         assert_eq!(info.timezone.as_deref(), Some("Europe/Ljubljana"));
         assert_eq!(info.status.as_deref(), Some("Active"));
         assert_eq!(info.expires_at_epoch, Some(1_735_689_600));
@@ -1284,5 +1410,78 @@ mod tests {
         assert_eq!(info.is_trial, Some(true));
         assert_eq!(info.active_connections, Some(2));
         assert_eq!(info.max_connections, Some(4));
+    }
+
+    #[test]
+    fn xtream_account_state_flags_unusable_and_expiring_accounts() {
+        const NOW: u64 = 1_735_689_600;
+        const DAY: u64 = 24 * 60 * 60;
+        let cases = [
+            (
+                serde_json::json!({ "auth": 0 }),
+                XtreamAccountState::Rejected,
+            ),
+            (
+                serde_json::json!({ "auth": 1, "status": "Expired" }),
+                XtreamAccountState::Expired,
+            ),
+            (
+                serde_json::json!({ "status": "Active", "exp_date": (NOW - 1).to_string() }),
+                XtreamAccountState::Expired,
+            ),
+            (
+                serde_json::json!({ "status": "Banned", "exp_date": NOW + 90 * DAY }),
+                XtreamAccountState::Disabled,
+            ),
+            (
+                serde_json::json!({ "status": "Active", "exp_date": NOW + 3 * DAY }),
+                XtreamAccountState::ExpiringSoon,
+            ),
+            (
+                serde_json::json!({ "status": "Active", "exp_date": NOW + 30 * DAY }),
+                XtreamAccountState::Ok,
+            ),
+            // No end date means an unlimited subscription; unknown words stay quiet.
+            (
+                serde_json::json!({ "status": "Active", "exp_date": null }),
+                XtreamAccountState::Ok,
+            ),
+            (
+                serde_json::json!({ "status": "Paused" }),
+                XtreamAccountState::Ok,
+            ),
+        ];
+        for (user_info, expected) in cases {
+            let payload = serde_json::json!({ "user_info": user_info });
+            let info = extract_xtream_account_info(&payload, NOW).expect("account info");
+            assert_eq!(info.state, expected, "{user_info}");
+        }
+    }
+
+    #[test]
+    fn xtream_account_error_names_the_problem() {
+        let message = |user_info: serde_json::Value| {
+            let payload = serde_json::json!({ "user_info": user_info });
+            let info = extract_xtream_account_info(&payload, 1_735_689_600).expect("account info");
+            xtream_account_error(&info).map(|error| error.to_string())
+        };
+        assert_eq!(
+            message(serde_json::json!({ "status": "Expired", "exp_date": "1733011200" }))
+                .as_deref(),
+            Some("Xtream subscription expired on 2024-12-01T00:00:00Z")
+        );
+        assert_eq!(
+            message(serde_json::json!({ "status": "Expired" })).as_deref(),
+            Some("Xtream subscription expired")
+        );
+        assert_eq!(
+            message(serde_json::json!({ "status": "Banned" })).as_deref(),
+            Some("Xtream account is Banned")
+        );
+        assert_eq!(
+            message(serde_json::json!({ "auth": "0" })).as_deref(),
+            Some("Xtream server rejected the username or password")
+        );
+        assert_eq!(message(serde_json::json!({ "status": "Active" })), None);
     }
 }

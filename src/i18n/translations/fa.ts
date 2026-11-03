@@ -129,6 +129,19 @@ export default {
       expectedHd: "انتظار می‌رفت 720p یا 1080p باشد، اما {actual} است",
       unlabeled4k: "کانال 4K برچسب 4K ندارد",
     },
+    unreachable: {
+      one: "اتصال به سرور ممکن نشد ({reason})",
+      mirrors: {
+        one: "به هیچ‌یک از {count} سرورِ «{name}» نمی‌توان متصل شد ({reasons})",
+        other: "به هیچ‌یک از {count} سرورِ «{name}» نمی‌توان متصل شد ({reasons})",
+      },
+    },
+    xtream: {
+      rejected: "سرور Xtream نام کاربری یا گذرواژه را رد کرد",
+      expired: "اشتراک Xtream منقضی شده است",
+      expiredOn: "اشتراک Xtream در {date} منقضی شد",
+      disabled: "وضعیت حساب Xtream: {status}",
+    },
     progress: {
       analyzingUrls: "در حال تحلیل URL کانال‌ها",
       lookingUpServer: "در حال یافتن موقعیت سرور",
@@ -281,6 +294,22 @@ export default {
       reload: "بارگذاری دوباره",
       rescan: "اسکن دوباره",
       dismiss: "بستن اعلان مربوط به {account}",
+    },
+    xtreamAccount: {
+      expired:
+        "اشتراک Xtream شما در {date} منقضی شد. برای تماشای این کانال‌ها، آن را نزد ارائه‌دهنده تمدید کنید.",
+      expiredUndated:
+        "اشتراک Xtream شما منقضی شده است. برای تماشای این کانال‌ها، آن را نزد ارائه‌دهنده تمدید کنید.",
+      expiringSoon: "اشتراک Xtream شما در {date} منقضی می‌شود. برای ادامهٔ تماشا آن را تمدید کنید.",
+      disabled:
+        "ارائه‌دهنده وضعیت این حساب Xtream را {status} اعلام کرده است. تا وقتی ارائه‌دهنده آن را دوباره فعال نکند، کانال‌هایش پخش نمی‌شوند.",
+      rejected:
+        "سرور Xtream این نام کاربری و گذرواژه را رد کرد. آن‌ها را بررسی کنید یا از ارائه‌دهنده بپرسید که آیا حساب هنوز وجود دارد.",
+      refused: {
+        one: "احتمالاً به همین دلیل سرور {refused} از {count} کانالِ بررسی‌شده را رد کرد.",
+        other: "احتمالاً به همین دلیل سرور {refused} از {count} کانالِ بررسی‌شده را رد کرد.",
+      },
+      dismiss: "بستن اعلان اشتراک",
     },
     recording: {
       progress: "در حال ضبط {title}",
@@ -1030,6 +1059,7 @@ export default {
       mostlySecure: "عمدتاً امن",
       mixed: "ترکیبی",
       insecure: "ناامن",
+      xtreamStatus: "وضعیت Xtream",
       xtreamExpiration: "انقضای Xtream",
       totalContent: "کل محتوا",
       statusLabel: "فعال / قطع / جغرافیایی",
@@ -1160,6 +1190,8 @@ export default {
       stream: "استریم",
       channelScreenshotAlt: "کانال {id}",
       noImage: "بدون تصویر",
+      accountStatus: "حساب: {status}",
+      accountExpires: "انقضا: {date}",
       selectHint: "روی یک سرور کلیک کنید تا انتخاب شود و به فرم ورود برگردید.",
       current: "فعلی",
       switchHint: "روی یک سرور کلیک کنید تا {account} در Dispatcharr به آن منتقل شود.",

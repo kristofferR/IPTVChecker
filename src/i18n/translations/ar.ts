@@ -140,6 +140,23 @@ export default {
       expectedHd: "المتوقع 720p أو 1080p، والفعلي {actual}",
       unlabeled4k: "قناة 4K غير موسومة بذلك",
     },
+    unreachable: {
+      one: "تعذّر الوصول إلى الخادم ({reason})",
+      mirrors: {
+        zero: "تعذّر الوصول إلى أيٍّ من خوادم «{name}» البالغ عددها {count} ({reasons})",
+        one: "تعذّر الوصول إلى أيٍّ من خوادم «{name}» البالغ عددها {count} ({reasons})",
+        two: "تعذّر الوصول إلى أيٍّ من خوادم «{name}» البالغ عددها {count} ({reasons})",
+        few: "تعذّر الوصول إلى أيٍّ من خوادم «{name}» البالغ عددها {count} ({reasons})",
+        many: "تعذّر الوصول إلى أيٍّ من خوادم «{name}» البالغ عددها {count} ({reasons})",
+        other: "تعذّر الوصول إلى أيٍّ من خوادم «{name}» البالغ عددها {count} ({reasons})",
+      },
+    },
+    xtream: {
+      rejected: "رفض خادم Xtream اسم المستخدم أو كلمة المرور",
+      expired: "انتهى اشتراك Xtream",
+      expiredOn: "انتهى اشتراك Xtream في {date}",
+      disabled: "حالة حساب Xtream: {status}",
+    },
     progress: {
       analyzingUrls: "جارٍ تحليل عناوين URL للقنوات",
       lookingUpServer: "جارٍ تحديد موقع الخادم",
@@ -302,6 +319,24 @@ export default {
       reload: "إعادة التحميل",
       rescan: "إعادة الفحص",
       dismiss: "تجاهل الإشعار الخاص بـ {account}",
+    },
+    xtreamAccount: {
+      expired: "انتهى اشتراكك في Xtream في {date}. جدّده لدى مزود الخدمة لمشاهدة هذه القنوات.",
+      expiredUndated: "انتهى اشتراكك في Xtream. جدّده لدى مزود الخدمة لمشاهدة هذه القنوات.",
+      expiringSoon: "ينتهي اشتراكك في Xtream في {date}. جدّده لمواصلة المشاهدة.",
+      disabled:
+        "يفيد مزود الخدمة بأن حالة حساب Xtream هذا هي {status}. لن تعمل قنواته حتى يعيد المزود تفعيله.",
+      rejected:
+        "رفض خادم Xtream اسم المستخدم وكلمة المرور هذين. تحقق منهما، أو اسأل مزود الخدمة إن كان الحساب لا يزال موجودًا.",
+      refused: {
+        zero: "ربما لهذا السبب رفض الخادم {refused} من أصل {count} قناة تم فحصها.",
+        one: "ربما لهذا السبب رفض الخادم {refused} من أصل {count} قناة تم فحصها.",
+        two: "ربما لهذا السبب رفض الخادم {refused} من أصل {count} قناة تم فحصها.",
+        few: "ربما لهذا السبب رفض الخادم {refused} من أصل {count} قنوات تم فحصها.",
+        many: "ربما لهذا السبب رفض الخادم {refused} من أصل {count} قناةً تم فحصها.",
+        other: "ربما لهذا السبب رفض الخادم {refused} من أصل {count} قناة تم فحصها.",
+      },
+      dismiss: "تجاهل إشعار الاشتراك",
     },
     recording: {
       progress: "جارٍ تسجيل {title}",
@@ -1146,6 +1181,7 @@ export default {
       mostlySecure: "آمن في الغالب",
       mixed: "مختلط",
       insecure: "غير آمن",
+      xtreamStatus: "حالة Xtream",
       xtreamExpiration: "انتهاء صلاحية Xtream",
       totalContent: "إجمالي المحتوى",
       statusLabel: "يعمل / لا يعمل / محظور",
@@ -1470,6 +1506,8 @@ export default {
       stream: "البث",
       channelScreenshotAlt: "القناة {id}",
       noImage: "لا توجد صورة",
+      accountStatus: "الحساب: {status}",
+      accountExpires: "ينتهي في {date}",
       selectHint: "انقر خادمًا لتحديده والعودة إلى نموذج تسجيل الدخول.",
       current: "الحالي",
       switchHint: "انقر خادمًا لتحويل {account} إليه في Dispatcharr.",

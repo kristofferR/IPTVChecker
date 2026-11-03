@@ -53,6 +53,8 @@ export default {
     channelScreenshotAlt: "Channel {id}",
     noImage: "No image",
     selectHint: "Click a server to select it and return to the login form.",
+    accountStatus: "Account: {status}",
+    accountExpires: "Expires {date}",
     current: "Current",
     switchHint: "Click a server to switch {account} to it in Dispatcharr.",
   },

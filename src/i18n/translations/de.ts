@@ -129,6 +129,19 @@ export default {
       expectedHd: "Erwartet 720p oder 1080p, erhalten {actual}",
       unlabeled4k: "4K-Sender nicht als 4K gekennzeichnet",
     },
+    unreachable: {
+      one: "Server nicht erreichbar ({reason})",
+      mirrors: {
+        one: "Der {count} Server für „{name}“ ist nicht erreichbar ({reasons})",
+        other: "Keiner der {count} Server für „{name}“ ist erreichbar ({reasons})",
+      },
+    },
+    xtream: {
+      rejected: "Xtream-Server hat Benutzername oder Passwort abgelehnt",
+      expired: "Xtream-Abo abgelaufen",
+      expiredOn: "Xtream-Abo am {date} abgelaufen",
+      disabled: "Xtream-Konto hat den Status {status}",
+    },
     progress: {
       analyzingUrls: "Sender-URLs werden analysiert",
       lookingUpServer: "Serverstandort wird ermittelt",
@@ -284,6 +297,23 @@ export default {
       reload: "Neu laden",
       rescan: "Erneut scannen",
       dismiss: "Hinweis zu {account} ausblenden",
+    },
+    xtreamAccount: {
+      expired:
+        "Dein Xtream-Abo ist am {date} abgelaufen. Verlängere es bei deinem Anbieter, um diese Sender zu sehen.",
+      expiredUndated:
+        "Dein Xtream-Abo ist abgelaufen. Verlängere es bei deinem Anbieter, um diese Sender zu sehen.",
+      expiringSoon: "Dein Xtream-Abo läuft am {date} ab. Verlängere es, um weiterzuschauen.",
+      disabled:
+        "Dein Anbieter meldet dieses Xtream-Konto als {status}. Seine Sender laufen erst wieder, wenn der Anbieter es freischaltet.",
+      rejected:
+        "Der Xtream-Server hat diesen Benutzernamen und dieses Passwort abgelehnt. Prüfe sie oder frag deinen Anbieter, ob das Konto noch existiert.",
+      refused: {
+        one: "Deshalb hat der Server wahrscheinlich {refused} von {count} geprüften Sender abgelehnt.",
+        other:
+          "Deshalb hat der Server wahrscheinlich {refused} von {count} geprüften Sendern abgelehnt.",
+      },
+      dismiss: "Abo-Hinweis ausblenden",
     },
     recording: {
       progress: "Nehme {title} auf",
@@ -1043,6 +1073,7 @@ export default {
       mostlySecure: "Überwiegend sicher",
       mixed: "Gemischt",
       insecure: "Unsicher",
+      xtreamStatus: "Xtream-Status",
       xtreamExpiration: "Xtream-Ablauf",
       totalContent: "Inhalte gesamt",
       statusLabel: "Online / Offline / Geo",
@@ -1177,6 +1208,8 @@ export default {
       stream: "Stream",
       channelScreenshotAlt: "Sender {id}",
       noImage: "Kein Bild",
+      accountStatus: "Konto: {status}",
+      accountExpires: "Läuft am {date} ab",
       selectHint: "Klicke auf einen Server, um ihn auszuwählen und zur Anmeldung zurückzukehren.",
       current: "Aktuell",
       switchHint: "Klicke auf einen Server, um {account} in Dispatcharr darauf umzustellen.",

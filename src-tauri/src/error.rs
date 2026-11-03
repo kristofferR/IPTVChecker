@@ -29,6 +29,17 @@ pub enum AppError {
     #[error("{0}")]
     State(String),
 
+    /// The Xtream panel reports the account itself as unusable (expired,
+    /// disabled, or rejected login). A saved playlist reports it over other
+    /// mirrors' errors when none of them opens.
+    #[error("{0}")]
+    XtreamAccount(String),
+
+    /// The server never answered. The reason is one of the scan checker's
+    /// fixed strings: "Timeout", "DNS failure" or "Connection refused".
+    #[error("Could not reach the server ({0})")]
+    Unreachable(&'static str),
+
     #[error("{0}")]
     Other(String),
 }

@@ -43,6 +43,27 @@ describe("translateReason", () => {
     );
   });
 
+  it("renders Xtream account errors from engine/xtream.rs", () => {
+    expect(translateReason("Xtream account is Banned")).toBe("Xtream account is Banned");
+    // The timestamp becomes a local date; noon UTC keeps it on the same day.
+    expect(translateReason("Xtream subscription expired on 2024-12-01T12:00:00Z")).toBe(
+      "Xtream subscription expired on Dec 1, 2024",
+    );
+  });
+
+  it("renders unreachable-server errors from error.rs and commands/saved.rs", () => {
+    expect(translateReason("Could not reach the server (Timeout)")).toBe(
+      "Could not reach the server (Timeout)",
+    );
+    expect(
+      translateReason(
+        'Could not reach any of the 6 servers for "Test Provider" (DNS failure, Timeout)',
+      ),
+    ).toBe(
+      'Could not reach any of the 6 servers for "\u2068Test Provider\u2069" (DNS failure, Timeout)',
+    );
+  });
+
   it("passes unknown text through unchanged", () => {
     expect(translateReason("Connection reset by peer (os error 104)")).toBe(
       "Connection reset by peer (os error 104)",

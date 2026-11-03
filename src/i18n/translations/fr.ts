@@ -131,6 +131,20 @@ export default {
       expectedHd: "720p ou 1080p attendu, {actual} obtenu",
       unlabeled4k: "Chaîne 4K non signalée comme telle",
     },
+    unreachable: {
+      one: "Impossible de joindre le serveur ({reason})",
+      mirrors: {
+        one: "Impossible de joindre le serveur de « {name} » ({reasons})",
+        many: "Aucun des {count} serveurs de « {name} » n'est joignable ({reasons})",
+        other: "Aucun des {count} serveurs de « {name} » n'est joignable ({reasons})",
+      },
+    },
+    xtream: {
+      rejected: "Le serveur Xtream a refusé le nom d'utilisateur ou le mot de passe",
+      expired: "Abonnement Xtream expiré",
+      expiredOn: "Abonnement Xtream expiré le {date}",
+      disabled: "Le compte Xtream a le statut {status}",
+    },
     progress: {
       analyzingUrls: "Analyse des URL des chaînes",
       lookingUpServer: "Localisation du serveur",
@@ -292,6 +306,25 @@ export default {
       reload: "Recharger",
       rescan: "Réanalyser",
       dismiss: "Ignorer l'avis concernant {account}",
+    },
+    xtreamAccount: {
+      expired:
+        "Votre abonnement Xtream a expiré le {date}. Renouvelez-le auprès de votre fournisseur pour regarder ces chaînes.",
+      expiredUndated:
+        "Votre abonnement Xtream a expiré. Renouvelez-le auprès de votre fournisseur pour regarder ces chaînes.",
+      expiringSoon:
+        "Votre abonnement Xtream expire le {date}. Renouvelez-le pour continuer à regarder.",
+      disabled:
+        "Votre fournisseur indique que ce compte Xtream a le statut {status}. Ses chaînes ne seront pas lues tant que le fournisseur ne l'aura pas réactivé.",
+      rejected:
+        "Le serveur Xtream a refusé ce nom d'utilisateur et ce mot de passe. Vérifiez-les ou demandez à votre fournisseur si le compte existe toujours.",
+      refused: {
+        one: "C'est sans doute pourquoi le serveur a refusé {refused} chaîne vérifiée sur {count}.",
+        many: "C'est sans doute pourquoi le serveur a refusé {refused} des {count} chaînes vérifiées.",
+        other:
+          "C'est sans doute pourquoi le serveur a refusé {refused} des {count} chaînes vérifiées.",
+      },
+      dismiss: "Ignorer l'avis d'abonnement",
     },
     recording: {
       progress: "Enregistrement de {title}",
@@ -1089,6 +1122,7 @@ export default {
       mostlySecure: "Plutôt sécurisé",
       mixed: "Mixte",
       insecure: "Non sécurisé",
+      xtreamStatus: "Statut Xtream",
       xtreamExpiration: "Expiration Xtream",
       totalContent: "Contenu total",
       statusLabel: "En ligne / Hors ligne / Géo",
@@ -1276,6 +1310,8 @@ export default {
       stream: "Flux",
       channelScreenshotAlt: "Chaîne {id}",
       noImage: "Aucune image",
+      accountStatus: "Compte : {status}",
+      accountExpires: "Expire le {date}",
       selectHint: "Cliquez sur un serveur pour le choisir et revenir au formulaire de connexion.",
       current: "Actuel",
       switchHint: "Cliquez sur un serveur pour y basculer {account} dans Dispatcharr.",
