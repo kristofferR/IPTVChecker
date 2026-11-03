@@ -269,11 +269,11 @@ export default {
     providerDown: {
       allFailed: {
         other:
-          "Semua {count} stream dari {account} gagal karena {cause}. Penyedia mungkin sedang bermasalah; Perbaiki urutan tetap mempertahankan stream-nya.",
+          "Semua {count} stream dari {account} gagal karena {cause}. Penyedia atau URL servernya mungkin sedang bermasalah; Perbaiki urutan tetap mempertahankan stream-nya.",
       },
       someFailed: {
         other:
-          "{failed} dari {count} stream dari {account} gagal karena {cause}. Penyedia mungkin sedang bermasalah; Perbaiki urutan tetap mempertahankan stream-nya.",
+          "{failed} dari {count} stream dari {account} gagal karena {cause}. Penyedia atau URL servernya mungkin sedang bermasalah; Perbaiki urutan tetap mempertahankan stream-nya.",
       },
       causes: {
         timeouts: "waktu habis",
@@ -282,6 +282,12 @@ export default {
       refreshing:
         "Dispatcharr sedang menyegarkannya; muat ulang setelah selesai untuk mendapatkan URL stream baru.",
       refreshFailed: "Penyegaran gagal: {error}",
+      testServers: "Uji server",
+      confirmSwitch:
+        "Pindahkan {account} ke {server} di Dispatcharr? Dispatcharr lalu menyegarkan akun untuk membangun ulang URL stream-nya. Saluran tetap mempertahankan stream-nya.",
+      switched:
+        "Dipindahkan ke {server}. Dispatcharr sedang menyegarkan akun; muat ulang setelah selesai untuk mendapatkan URL stream baru.",
+      switchFailed: "Gagal mengganti server: {error}",
       refresh: "Segarkan di Dispatcharr",
       reload: "Muat ulang",
       rescan: "Pindai ulang",
@@ -1151,6 +1157,8 @@ export default {
       accountStatus: "Akun: {status}",
       accountExpires: "Kedaluwarsa {date}",
       selectHint: "Klik server untuk memilihnya dan kembali ke formulir masuk.",
+      current: "Saat ini",
+      switchHint: "Klik server untuk memindahkan {account} ke server itu di Dispatcharr.",
     },
   },
   saved: {

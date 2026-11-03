@@ -279,16 +279,16 @@ export default {
     },
     providerDown: {
       allFailed: {
-        one: "L'unico stream di {account} ({count}) non funziona: {cause}. Il provider potrebbe essere fuori servizio; Correggi ordine mantiene i suoi stream.",
-        many: "Tutti i {count} stream di {account} non funzionano: {cause}. Il provider potrebbe essere fuori servizio; Correggi ordine mantiene i suoi stream.",
+        one: "L'unico stream di {account} ({count}) non funziona: {cause}. Il provider o l'URL del suo server potrebbe essere fuori servizio; Correggi ordine mantiene i suoi stream.",
+        many: "Tutti i {count} stream di {account} non funzionano: {cause}. Il provider o l'URL del suo server potrebbe essere fuori servizio; Correggi ordine mantiene i suoi stream.",
         other:
-          "Tutti i {count} stream di {account} non funzionano: {cause}. Il provider potrebbe essere fuori servizio; Correggi ordine mantiene i suoi stream.",
+          "Tutti i {count} stream di {account} non funzionano: {cause}. Il provider o l'URL del suo server potrebbe essere fuori servizio; Correggi ordine mantiene i suoi stream.",
       },
       someFailed: {
-        one: "{failed} stream su {count} di {account} non funzionanti: {cause}. Il provider potrebbe essere fuori servizio; Correggi ordine mantiene i suoi stream.",
-        many: "{failed} stream su {count} di {account} non funzionanti: {cause}. Il provider potrebbe essere fuori servizio; Correggi ordine mantiene i suoi stream.",
+        one: "{failed} stream su {count} di {account} non funzionanti: {cause}. Il provider o l'URL del suo server potrebbe essere fuori servizio; Correggi ordine mantiene i suoi stream.",
+        many: "{failed} stream su {count} di {account} non funzionanti: {cause}. Il provider o l'URL del suo server potrebbe essere fuori servizio; Correggi ordine mantiene i suoi stream.",
         other:
-          "{failed} stream su {count} di {account} non funzionanti: {cause}. Il provider potrebbe essere fuori servizio; Correggi ordine mantiene i suoi stream.",
+          "{failed} stream su {count} di {account} non funzionanti: {cause}. Il provider o l'URL del suo server potrebbe essere fuori servizio; Correggi ordine mantiene i suoi stream.",
       },
       causes: {
         timeouts: "timeout",
@@ -297,6 +297,12 @@ export default {
       refreshing:
         "Dispatcharr lo sta aggiornando; ricarica al termine per ottenere i nuovi URL degli stream.",
       refreshFailed: "Aggiornamento non riuscito: {error}",
+      testServers: "Testa server",
+      confirmSwitch:
+        "Passare {account} a {server} in Dispatcharr? Dispatcharr aggiorna poi l'account per ricostruire gli URL dei suoi stream. I canali mantengono i loro stream.",
+      switched:
+        "Passato a {server}. Dispatcharr sta aggiornando l'account; ricarica al termine per ottenere i nuovi URL degli stream.",
+      switchFailed: "Cambio di server non riuscito: {error}",
       refresh: "Aggiorna in Dispatcharr",
       reload: "Ricarica",
       rescan: "Riscansiona",
@@ -1304,6 +1310,8 @@ export default {
       accountStatus: "Account: {status}",
       accountExpires: "Scade il {date}",
       selectHint: "Fai clic su un server per selezionarlo e tornare al modulo di accesso.",
+      current: "Attuale",
+      switchHint: "Fai clic su un server per passarvi {account} in Dispatcharr.",
     },
   },
   saved: {

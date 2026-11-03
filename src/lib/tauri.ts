@@ -182,6 +182,35 @@ export async function dispatcharrRefreshAccount(
   return invoke("dispatcharr_refresh_account", { ...target, accountId });
 }
 
+/** The server an Xtream Codes account streams from, or null for an account
+ *  whose server can't be switched. */
+export async function dispatcharrAccountServer(
+  target: DispatcharrTarget,
+  accountId: number,
+): Promise<string | null> {
+  return invoke("dispatcharr_account_server", { ...target, accountId });
+}
+
+/** The server test, run with the account's own Xtream login. */
+export async function dispatcharrTestAccountServers(
+  target: DispatcharrTarget,
+  accountId: number,
+  servers: string[],
+): Promise<XtreamServerTestReport> {
+  return invoke("dispatcharr_test_account_servers", { ...target, accountId, servers });
+}
+
+/** Switch an account to `server` and refresh it in Dispatcharr. Refused when
+ *  the account no longer uses `expected`. Resolves to the server in use. */
+export async function dispatcharrSetAccountServer(
+  target: DispatcharrTarget,
+  accountId: number,
+  server: string,
+  expected: string,
+): Promise<string> {
+  return invoke("dispatcharr_set_account_server", { ...target, accountId, server, expected });
+}
+
 export async function startScan(config: ScanConfig): Promise<string> {
   return invoke("start_scan", { config });
 }

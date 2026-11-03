@@ -278,16 +278,16 @@ export default {
     },
     providerDown: {
       allFailed: {
-        one: "Le flux de {account} ({count}) est en échec : {cause}. Le fournisseur est peut-être en panne ; Corriger l'ordre conserve ses flux.",
-        many: "Tous les flux de {account} ({count}) sont en échec : {cause}. Le fournisseur est peut-être en panne ; Corriger l'ordre conserve ses flux.",
+        one: "Le flux de {account} ({count}) est en échec : {cause}. Le fournisseur ou l'URL de son serveur est peut-être en panne ; Corriger l'ordre conserve ses flux.",
+        many: "Tous les flux de {account} ({count}) sont en échec : {cause}. Le fournisseur ou l'URL de son serveur est peut-être en panne ; Corriger l'ordre conserve ses flux.",
         other:
-          "Tous les flux de {account} ({count}) sont en échec : {cause}. Le fournisseur est peut-être en panne ; Corriger l'ordre conserve ses flux.",
+          "Tous les flux de {account} ({count}) sont en échec : {cause}. Le fournisseur ou l'URL de son serveur est peut-être en panne ; Corriger l'ordre conserve ses flux.",
       },
       someFailed: {
-        one: "{failed} flux sur {count} de {account} en échec : {cause}. Le fournisseur est peut-être en panne ; Corriger l'ordre conserve ses flux.",
-        many: "{failed} flux sur {count} de {account} en échec : {cause}. Le fournisseur est peut-être en panne ; Corriger l'ordre conserve ses flux.",
+        one: "{failed} flux sur {count} de {account} en échec : {cause}. Le fournisseur ou l'URL de son serveur est peut-être en panne ; Corriger l'ordre conserve ses flux.",
+        many: "{failed} flux sur {count} de {account} en échec : {cause}. Le fournisseur ou l'URL de son serveur est peut-être en panne ; Corriger l'ordre conserve ses flux.",
         other:
-          "{failed} flux sur {count} de {account} en échec : {cause}. Le fournisseur est peut-être en panne ; Corriger l'ordre conserve ses flux.",
+          "{failed} flux sur {count} de {account} en échec : {cause}. Le fournisseur ou l'URL de son serveur est peut-être en panne ; Corriger l'ordre conserve ses flux.",
       },
       causes: {
         timeouts: "délais dépassés",
@@ -296,6 +296,12 @@ export default {
       refreshing:
         "Dispatcharr l'actualise ; rechargez une fois l'opération terminée pour obtenir les nouvelles URL de flux.",
       refreshFailed: "Échec de l'actualisation : {error}",
+      testServers: "Tester les serveurs",
+      confirmSwitch:
+        "Basculer {account} vers {server} dans Dispatcharr ? Dispatcharr actualise ensuite le compte pour reconstruire les URL de ses flux. Les chaînes conservent leurs flux.",
+      switched:
+        "Basculé vers {server}. Dispatcharr actualise le compte ; rechargez une fois l'opération terminée pour obtenir les nouvelles URL de flux.",
+      switchFailed: "Échec du changement de serveur : {error}",
       refresh: "Actualiser dans Dispatcharr",
       reload: "Recharger",
       rescan: "Réanalyser",
@@ -1307,6 +1313,8 @@ export default {
       accountStatus: "Compte : {status}",
       accountExpires: "Expire le {date}",
       selectHint: "Cliquez sur un serveur pour le choisir et revenir au formulaire de connexion.",
+      current: "Actuel",
+      switchHint: "Cliquez sur un serveur pour y basculer {account} dans Dispatcharr.",
     },
   },
   saved: {

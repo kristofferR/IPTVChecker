@@ -1,19 +1,28 @@
 import { CircleAlert, Download, ExternalLink, Info, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { dismissUpdateNotice } from "../hooks/useUpdateCheck";
-import { formatCount, getFormatLocale, t } from "../i18n";
+import { formatCount, getFormatLocale, isolateLtr, t } from "../i18n";
 import { type ArchiveDownload, cancelArchiveDownload } from "../lib/archiveDownload";
 import {
   type DownAccount,
   dispatcharrServerOfProxyPlaylist,
   dispatcharrTarget,
   getDispatcharrView,
+  readAccountServers,
+  saveAccountServers,
 } from "../lib/dispatcharr";
 import { errorToString } from "../lib/errors";
 import { formatBytes } from "../lib/format";
+import { logger } from "../lib/logger";
+import { normalizeXtreamServer } from "../lib/savedPlaylists";
 import { isScanActive } from "../lib/scanState";
 import { validateSourceFilterPattern } from "../lib/sourceFilter";
-import { dispatcharrRefreshAccount } from "../lib/tauri";
+import {
+  dispatcharrAccountServer,
+  dispatcharrRefreshAccount,
+  dispatcharrSetAccountServer,
+  dispatcharrTestAccountServers,
+} from "../lib/tauri";
 import type { ChannelResult, XtreamAccountInfo } from "../lib/types";
 import {
   isManualInstall,
@@ -26,6 +35,17 @@ import { useAppStore } from "../store";
 
 // Non-reactive store access for writes inside callbacks/effects.
 const getStore = () => useAppStore.getState();
+
+const ServerTestModal = lazy(() => import("./ServerTestModal"));
+
+/** "host:port" of a server URL, or the text itself when it doesn't parse. */
+function serverHost(server: string): string {
+  try {
+    return new URL(server).host || server;
+  } catch {
+    return server;
+  }
+}
 
 const CONVERT_DISMISSED_KEY = "dispatcharr-convert-dismissed";
 
@@ -156,14 +176,17 @@ function XtreamAccountBanner() {
   );
 }
 
-/** Names a provider account whose scanned streams nearly all failed the same
- *  way, and offers to refresh it in Dispatcharr and scan it again. */
-type RefreshState =
+/** A Dispatcharr write from the banner; `note` follows its message. */
+type ActionState =
   | { kind: "idle" }
   | { kind: "sending" }
-  | { kind: "sent" }
-  | { kind: "failed"; error: string };
+  | { kind: "sent"; note: string }
+  | { kind: "failed"; note: string };
 
+/** Names a provider account whose scanned streams nearly all failed the same
+ *  way. A dead server URL is the likely cause, so an Xtream Codes account
+ *  can test other servers and switch to one. Also offers to refresh the
+ *  account in Dispatcharr and to scan it again. */
 function DispatcharrProviderDownBanner({
   account,
   onRescan,
@@ -175,7 +198,28 @@ function DispatcharrProviderDownBanner({
   onReload: () => void;
   onDismiss: () => void;
 }) {
-  const [refresh, setRefresh] = useState<RefreshState>({ kind: "idle" });
+  const playlist = useAppStore((s) => s.playlist);
+  const target = useMemo(() => dispatcharrTarget(playlist), [playlist]);
+  const [action, setAction] = useState<ActionState>({ kind: "idle" });
+  // The Xtream server the account uses; null when it can't be switched.
+  const [server, setServer] = useState<string | null>(null);
+  // Servers the open server test starts from; null while closed.
+  const [testing, setTesting] = useState<string | null>(null);
+  useEffect(() => {
+    setServer(null);
+    if (!target) return;
+    let cancelled = false;
+    dispatcharrAccountServer(target, account.accountId)
+      .then((current) => {
+        if (!cancelled) setServer(current);
+      })
+      .catch((error: unknown) => {
+        logger.warn(`[dispatcharr] account server read failed: ${errorToString(error)}`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [target, account.accountId]);
   const cause =
     account.error === "timeouts"
       ? t("banners.providerDown.causes.timeouts")
@@ -196,15 +240,59 @@ function DispatcharrProviderDownBanner({
           cause,
         });
   const handleRefresh = async () => {
-    const target = dispatcharrTarget(getStore().playlist);
     if (!target) return;
-    setRefresh({ kind: "sending" });
+    setAction({ kind: "sending" });
     try {
       await dispatcharrRefreshAccount(target, account.accountId);
-      setRefresh({ kind: "sent" });
+      setAction({ kind: "sent", note: t("banners.providerDown.refreshing") });
     } catch (error) {
-      setRefresh({ kind: "failed", error: errorToString(error) });
+      setAction({
+        kind: "failed",
+        note: t("banners.providerDown.refreshFailed", { error: errorToString(error) }),
+      });
     }
+  };
+  const switchServer = async (current: string, next: string) => {
+    if (!target) return;
+    setAction({ kind: "sending" });
+    try {
+      const stored = await dispatcharrSetAccountServer(target, account.accountId, next, current);
+      setServer(stored);
+      setAction({
+        kind: "sent",
+        note: t("banners.providerDown.switched", { server: isolateLtr(serverHost(stored)) }),
+      });
+    } catch (error) {
+      setAction({
+        kind: "failed",
+        note: t("banners.providerDown.switchFailed", { error: errorToString(error) }),
+      });
+    }
+  };
+  const handleSelectServer = (next: string) => {
+    if (!server || normalizeXtreamServer(next) === normalizeXtreamServer(server)) {
+      setTesting(null);
+      return;
+    }
+    const confirmed = window.confirm(
+      t("banners.providerDown.confirmSwitch", {
+        account: account.account,
+        server: isolateLtr(serverHost(next)),
+      }),
+    );
+    if (!confirmed) return;
+    setTesting(null);
+    void switchServer(server, next);
+  };
+  /** Opens the test with the account's server first, then the others tested
+   *  before. */
+  const openServerTest = () => {
+    if (!target || !server) return;
+    const key = normalizeXtreamServer(server);
+    const others = readAccountServers(target, account.accountId).filter(
+      (entry) => normalizeXtreamServer(entry) !== key,
+    );
+    setTesting([server, ...others].join("\n"));
   };
   const handleRescan = () => {
     const { flatResults, dispatcharrOrders } = getStore();
@@ -217,25 +305,29 @@ function DispatcharrProviderDownBanner({
       ) ?? [];
     if (indices.length > 0) onRescan(indices);
   };
+  const busy = action.kind === "sending" || action.kind === "sent";
   const buttonClass =
     "inline-flex shrink-0 items-center px-2.5 py-1 rounded-md border border-amber-400/30 hover:bg-amber-500/15 transition-colors disabled:opacity-50";
   return (
     <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-[13px]">
       <span className="flex-1 min-w-0">
         {message}
-        {refresh.kind === "sent" && ` ${t("banners.providerDown.refreshing")}`}
-        {refresh.kind === "failed" &&
-          ` ${t("banners.providerDown.refreshFailed", { error: refresh.error })}`}
+        {(action.kind === "sent" || action.kind === "failed") && ` ${action.note}`}
       </span>
+      {server && (
+        <button type="button" disabled={busy} onClick={openServerTest} className={buttonClass}>
+          {t("banners.providerDown.testServers")}
+        </button>
+      )}
       <button
         type="button"
-        disabled={refresh.kind === "sending" || refresh.kind === "sent"}
+        disabled={busy}
         onClick={() => void handleRefresh()}
         className={buttonClass}
       >
         {t("banners.providerDown.refresh")}
       </button>
-      {refresh.kind === "sent" ? (
+      {action.kind === "sent" ? (
         <button type="button" onClick={onReload} className={buttonClass}>
           {t("banners.providerDown.reload")}
         </button>
@@ -252,6 +344,22 @@ function DispatcharrProviderDownBanner({
       >
         <X className="w-4 h-4" />
       </button>
+      {testing !== null && server && target && (
+        <Suspense fallback={null}>
+          <ServerTestModal
+            eyebrow={account.account}
+            initialServersText={testing}
+            currentServer={server}
+            runTest={(servers) => {
+              saveAccountServers(target, account.accountId, servers);
+              return dispatcharrTestAccountServers(target, account.accountId, servers);
+            }}
+            selectHint={t("sources.serverTest.switchHint", { account: account.account })}
+            onSelectServer={handleSelectServer}
+            onClose={() => setTesting(null)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

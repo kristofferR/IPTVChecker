@@ -278,16 +278,16 @@ export default {
     },
     providerDown: {
       allFailed: {
-        one: "O único stream de {account} falhou com {cause}. O provedor pode estar fora do ar; Corrigir ordem mantém os streams dele.",
-        many: "Todos os {count} streams de {account} falharam com {cause}. O provedor pode estar fora do ar; Corrigir ordem mantém os streams dele.",
+        one: "O único stream de {account} falhou com {cause}. O provedor ou a URL do servidor dele pode estar fora do ar; Corrigir ordem mantém os streams dele.",
+        many: "Todos os {count} streams de {account} falharam com {cause}. O provedor ou a URL do servidor dele pode estar fora do ar; Corrigir ordem mantém os streams dele.",
         other:
-          "Todos os {count} streams de {account} falharam com {cause}. O provedor pode estar fora do ar; Corrigir ordem mantém os streams dele.",
+          "Todos os {count} streams de {account} falharam com {cause}. O provedor ou a URL do servidor dele pode estar fora do ar; Corrigir ordem mantém os streams dele.",
       },
       someFailed: {
-        one: "{failed} de {count} stream de {account} falhou com {cause}. O provedor pode estar fora do ar; Corrigir ordem mantém os streams dele.",
-        many: "{failed} de {count} streams de {account} falharam com {cause}. O provedor pode estar fora do ar; Corrigir ordem mantém os streams dele.",
+        one: "{failed} de {count} stream de {account} falhou com {cause}. O provedor ou a URL do servidor dele pode estar fora do ar; Corrigir ordem mantém os streams dele.",
+        many: "{failed} de {count} streams de {account} falharam com {cause}. O provedor ou a URL do servidor dele pode estar fora do ar; Corrigir ordem mantém os streams dele.",
         other:
-          "{failed} de {count} streams de {account} falharam com {cause}. O provedor pode estar fora do ar; Corrigir ordem mantém os streams dele.",
+          "{failed} de {count} streams de {account} falharam com {cause}. O provedor ou a URL do servidor dele pode estar fora do ar; Corrigir ordem mantém os streams dele.",
       },
       causes: {
         timeouts: "tempo esgotado",
@@ -296,6 +296,12 @@ export default {
       refreshing:
         "O Dispatcharr está atualizando; recarregue quando terminar para obter as novas URLs dos streams.",
       refreshFailed: "Falha ao atualizar: {error}",
+      testServers: "Testar servidores",
+      confirmSwitch:
+        "Mudar {account} para {server} no Dispatcharr? Em seguida, o Dispatcharr atualiza a conta para recriar as URLs dos streams. Os canais mantêm seus streams.",
+      switched:
+        "Mudado para {server}. O Dispatcharr está atualizando a conta; recarregue quando terminar para obter as novas URLs dos streams.",
+      switchFailed: "Falha ao trocar de servidor: {error}",
       refresh: "Atualizar no Dispatcharr",
       reload: "Recarregar",
       rescan: "Escanear novamente",
@@ -1296,6 +1302,8 @@ export default {
       accountStatus: "Conta: {status}",
       accountExpires: "Vence em {date}",
       selectHint: "Clique em um servidor para selecioná-lo e voltar ao formulário de login.",
+      current: "Atual",
+      switchHint: "Clique em um servidor para mudar {account} para ele no Dispatcharr.",
     },
   },
   saved: {

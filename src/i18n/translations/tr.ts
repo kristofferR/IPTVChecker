@@ -273,14 +273,14 @@ export default {
     },
     providerDown: {
       allFailed: {
-        one: "{account} hesabındaki {count} yayının tümü başarısız oldu ({cause}). Sağlayıcı çökmüş olabilir; Sırayı düzelt bu yayınları korur.",
+        one: "{account} hesabındaki {count} yayının tümü başarısız oldu ({cause}). Sağlayıcı veya sunucu URL'si çökmüş olabilir; Sırayı düzelt bu yayınları korur.",
         other:
-          "{account} hesabındaki {count} yayının tümü başarısız oldu ({cause}). Sağlayıcı çökmüş olabilir; Sırayı düzelt bu yayınları korur.",
+          "{account} hesabındaki {count} yayının tümü başarısız oldu ({cause}). Sağlayıcı veya sunucu URL'si çökmüş olabilir; Sırayı düzelt bu yayınları korur.",
       },
       someFailed: {
-        one: "{account} hesabındaki {count} yayından {failed} tanesi başarısız oldu ({cause}). Sağlayıcı çökmüş olabilir; Sırayı düzelt bu yayınları korur.",
+        one: "{account} hesabındaki {count} yayından {failed} tanesi başarısız oldu ({cause}). Sağlayıcı veya sunucu URL'si çökmüş olabilir; Sırayı düzelt bu yayınları korur.",
         other:
-          "{account} hesabındaki {count} yayından {failed} tanesi başarısız oldu ({cause}). Sağlayıcı çökmüş olabilir; Sırayı düzelt bu yayınları korur.",
+          "{account} hesabındaki {count} yayından {failed} tanesi başarısız oldu ({cause}). Sağlayıcı veya sunucu URL'si çökmüş olabilir; Sırayı düzelt bu yayınları korur.",
       },
       causes: {
         timeouts: "zaman aşımı",
@@ -289,6 +289,12 @@ export default {
       refreshing:
         "Dispatcharr bunu yeniliyor; yeni yayın URL'lerini almak için işlem bitince yeniden yükleyin.",
       refreshFailed: "Yenileme başarısız: {error}",
+      testServers: "Sunucuları test et",
+      confirmSwitch:
+        "{account}, Dispatcharr'da {server} sunucusuna geçirilsin mi? Dispatcharr ardından yayın URL'lerini yeniden oluşturmak için hesabı yeniler. Kanallar yayınlarını korur.",
+      switched:
+        "{server} sunucusuna geçildi. Dispatcharr hesabı yeniliyor; yeni yayın URL'lerini almak için işlem bitince yeniden yükleyin.",
+      switchFailed: "Sunucu değiştirilemedi: {error}",
       refresh: "Dispatcharr'da yenile",
       reload: "Yeniden yükle",
       rescan: "Yeniden tara",
@@ -1205,6 +1211,9 @@ export default {
       accountStatus: "Hesap: {status}",
       accountExpires: "Bitiş: {date}",
       selectHint: "Seçmek ve giriş formuna dönmek için bir sunucuya tıklayın.",
+      current: "Geçerli",
+      switchHint:
+        "{account} hesabını Dispatcharr'da bir sunucuya geçirmek için o sunucuya tıklayın.",
     },
   },
   saved: {

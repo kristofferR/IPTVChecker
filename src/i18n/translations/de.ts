@@ -271,14 +271,14 @@ export default {
     },
     providerDown: {
       allFailed: {
-        one: "Der einzige Stream von {account} ist mit {cause} fehlgeschlagen. Der Anbieter ist eventuell ausgefallen; „Reihenfolge korrigieren“ behält seine Streams.",
+        one: "Der einzige Stream von {account} ist mit {cause} fehlgeschlagen. Der Anbieter oder seine Server-URL ist eventuell ausgefallen; „Reihenfolge korrigieren“ behält seine Streams.",
         other:
-          "Alle {count} Streams von {account} sind mit {cause} fehlgeschlagen. Der Anbieter ist eventuell ausgefallen; „Reihenfolge korrigieren“ behält seine Streams.",
+          "Alle {count} Streams von {account} sind mit {cause} fehlgeschlagen. Der Anbieter oder seine Server-URL ist eventuell ausgefallen; „Reihenfolge korrigieren“ behält seine Streams.",
       },
       someFailed: {
-        one: "{failed} von {count} Stream von {account} ist mit {cause} fehlgeschlagen. Der Anbieter ist eventuell ausgefallen; „Reihenfolge korrigieren“ behält seine Streams.",
+        one: "{failed} von {count} Stream von {account} ist mit {cause} fehlgeschlagen. Der Anbieter oder seine Server-URL ist eventuell ausgefallen; „Reihenfolge korrigieren“ behält seine Streams.",
         other:
-          "{failed} von {count} Streams von {account} sind mit {cause} fehlgeschlagen. Der Anbieter ist eventuell ausgefallen; „Reihenfolge korrigieren“ behält seine Streams.",
+          "{failed} von {count} Streams von {account} sind mit {cause} fehlgeschlagen. Der Anbieter oder seine Server-URL ist eventuell ausgefallen; „Reihenfolge korrigieren“ behält seine Streams.",
       },
       causes: {
         timeouts: "Zeitüberschreitungen",
@@ -287,6 +287,12 @@ export default {
       refreshing:
         "Dispatcharr aktualisiert ihn gerade; lade danach neu, um die neuen Stream-URLs zu erhalten.",
       refreshFailed: "Aktualisierung fehlgeschlagen: {error}",
+      testServers: "Server testen",
+      confirmSwitch:
+        "{account} in Dispatcharr auf {server} umstellen? Dispatcharr aktualisiert das Konto danach, um die Stream-URLs neu aufzubauen. Kanäle behalten ihre Streams.",
+      switched:
+        "Auf {server} umgestellt. Dispatcharr aktualisiert das Konto; lade danach neu, um die neuen Stream-URLs zu erhalten.",
+      switchFailed: "Serverwechsel fehlgeschlagen: {error}",
       refresh: "In Dispatcharr aktualisieren",
       reload: "Neu laden",
       rescan: "Erneut scannen",
@@ -1205,6 +1211,8 @@ export default {
       accountStatus: "Konto: {status}",
       accountExpires: "Läuft am {date} ab",
       selectHint: "Klicke auf einen Server, um ihn auszuwählen und zur Anmeldung zurückzukehren.",
+      current: "Aktuell",
+      switchHint: "Klicke auf einen Server, um {account} in Dispatcharr darauf umzustellen.",
     },
   },
   saved: {

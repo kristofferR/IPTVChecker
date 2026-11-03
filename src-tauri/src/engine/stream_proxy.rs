@@ -315,42 +315,50 @@ fn is_blocked_ip(ip: std::net::IpAddr) -> bool {
 }
 
 /// Reject non-HTTP URLs and, unless `allow_private`, URLs targeting
-/// localhost, private networks, or metadata endpoints.
-async fn is_safe_upstream_url(url: &str, allow_private: bool) -> bool {
-    let parsed = match Url::parse(url) {
-        Ok(u) => u,
-        Err(_) => return false,
-    };
+/// localhost, private networks, or metadata endpoints. A host that doesn't
+/// resolve is refused too, as `Unresolved`, since its target can't be checked.
+async fn check_upstream_url(url: &str, allow_private: bool) -> Result<(), SafeFetchError> {
+    let parsed = Url::parse(url).map_err(|_| SafeFetchError::Blocked)?;
 
     let scheme = parsed.scheme().to_lowercase();
     if scheme != "http" && scheme != "https" {
-        return false;
+        return Err(SafeFetchError::Blocked);
     }
 
-    let host = match parsed.host() {
-        Some(h) => h,
-        None => return false,
-    };
+    let host = parsed.host().ok_or(SafeFetchError::Blocked)?;
     if allow_private {
-        return true;
+        return Ok(());
     }
 
-    match host {
+    let allowed = match host {
         Host::Domain(domain) => {
             if domain.eq_ignore_ascii_case("localhost") {
-                return false;
+                return Err(SafeFetchError::Blocked);
             }
 
             let port = parsed.port_or_known_default().unwrap_or(80);
-            let Ok(socket_addrs) = tokio::net::lookup_host((domain, port)).await else {
-                return false;
-            };
-            let resolved_ips = socket_addrs.map(|addr| addr.ip()).collect::<Vec<_>>();
-            !resolved_ips.is_empty() && resolved_ips.into_iter().all(|ip| !is_blocked_ip(ip))
+            let resolved_ips = tokio::net::lookup_host((domain, port))
+                .await
+                .map_err(|_| SafeFetchError::Unresolved)?
+                .map(|addr| addr.ip())
+                .collect::<Vec<_>>();
+            if resolved_ips.is_empty() {
+                return Err(SafeFetchError::Unresolved);
+            }
+            resolved_ips.into_iter().all(|ip| !is_blocked_ip(ip))
         }
         Host::Ipv4(ip) => !is_blocked_ip(std::net::IpAddr::V4(ip)),
         Host::Ipv6(ip) => !is_blocked_ip(std::net::IpAddr::V6(ip)),
+    };
+    if allowed {
+        Ok(())
+    } else {
+        Err(SafeFetchError::Blocked)
     }
+}
+
+async fn is_safe_upstream_url(url: &str, allow_private: bool) -> bool {
+    check_upstream_url(url, allow_private).await.is_ok()
 }
 
 /// A request the app built itself (`trusted`, never any local caller) may
@@ -367,6 +375,8 @@ const MAX_REDIRECT_HOPS: usize = 10;
 pub(crate) enum SafeFetchError {
     /// A hop targeted localhost/private networks/metadata endpoints.
     Blocked,
+    /// A hop's host did not resolve.
+    Unresolved,
     TooManyRedirects,
     Request(reqwest::Error),
 }
@@ -375,6 +385,7 @@ impl SafeFetchError {
     pub(crate) fn into_message(self) -> String {
         match self {
             Self::Blocked => "request targeted a private or local network address".to_string(),
+            Self::Unresolved => "DNS failure".to_string(),
             Self::TooManyRedirects => "request exceeded the redirect limit".to_string(),
             Self::Request(error) => error.without_url().to_string(),
         }
@@ -398,9 +409,7 @@ where
 {
     let mut current = url.to_string();
     for _ in 0..=MAX_REDIRECT_HOPS {
-        if !is_safe_upstream_url(&current, allow_private).await {
-            return Err(SafeFetchError::Blocked);
-        }
+        check_upstream_url(&current, allow_private).await?;
         let response = build_request(&current)
             .send()
             .await
@@ -487,6 +496,13 @@ pub async fn handle_proxy_request(
                     redact_url(&original_url)
                 );
                 return error_response(502, "Too many upstream redirects");
+            }
+            Err(SafeFetchError::Unresolved) => {
+                log::warn!(
+                    "Stream proxy: upstream host did not resolve for {}",
+                    redact_url(&original_url)
+                );
+                return error_response(502, "Upstream host not found");
             }
             Err(SafeFetchError::Request(err)) => {
                 log::warn!(
@@ -1381,11 +1397,23 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                 let reconnect = request.reconnect;
                 let allow_private = allows_private_hosts(&url, request.trusted).await;
 
-                if !is_safe_upstream_url(&url, allow_private).await {
-                    log::warn!("[StreamProxy] Blocked request to private/local target");
-                    let response = "HTTP/1.1 403 Forbidden\r\nContent-Length: 22\r\n\r\nTarget URL not allowed";
-                    let _ = socket.write_all(response.as_bytes()).await;
-                    return;
+                match check_upstream_url(&url, allow_private).await {
+                    Ok(()) => {}
+                    Err(SafeFetchError::Unresolved) => {
+                        log::warn!(
+                            "[StreamProxy] Upstream host did not resolve for {}",
+                            redact_url(&url)
+                        );
+                        let response = "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 23\r\n\r\nUpstream host not found";
+                        let _ = socket.write_all(response.as_bytes()).await;
+                        return;
+                    }
+                    Err(_) => {
+                        log::warn!("[StreamProxy] Blocked request to private/local target");
+                        let response = "HTTP/1.1 403 Forbidden\r\nContent-Length: 22\r\n\r\nTarget URL not allowed";
+                        let _ = socket.write_all(response.as_bytes()).await;
+                        return;
+                    }
                 }
 
                 log::info!("[StreamProxy] Streaming {}", redact_url(&url));
@@ -1503,6 +1531,13 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                                     redact_url(&url)
                                 );
                                 ("HTTP/1.1 502 Bad Gateway", "Too many upstream redirects")
+                            }
+                            SafeFetchError::Unresolved => {
+                                log::warn!(
+                                    "[StreamProxy] Upstream host did not resolve for {}",
+                                    redact_url(&url)
+                                );
+                                ("HTTP/1.1 502 Bad Gateway", "Upstream host not found")
                             }
                             SafeFetchError::Request(err) => {
                                 log::warn!(
@@ -1673,6 +1708,7 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                                     consecutive_empty_attempts.saturating_add(1);
                                 let kind = match &err {
                                     SafeFetchError::Blocked => "blocked target".to_string(),
+                                    SafeFetchError::Unresolved => "DNS failure".to_string(),
                                     SafeFetchError::TooManyRedirects => {
                                         "too many redirects".to_string()
                                     }
@@ -2615,6 +2651,19 @@ segment.ts
             fetched.ok().map(|response| response.status().as_u16()),
             Some(200)
         );
+    }
+
+    #[tokio::test]
+    async fn unresolvable_hosts_report_dns_failure_not_a_private_target() {
+        let client = reqwest::Client::new();
+        // `.invalid` never resolves (RFC 2606).
+        let error = fetch_with_hop_validation("http://missing.invalid/live.ts", false, |target| {
+            client.get(target)
+        })
+        .await
+        .expect_err("an unresolvable host must not be fetched");
+        assert!(matches!(error, SafeFetchError::Unresolved));
+        assert_eq!(error.into_message(), "DNS failure");
     }
 
     #[tokio::test]

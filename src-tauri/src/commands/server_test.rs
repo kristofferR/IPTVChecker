@@ -98,6 +98,20 @@ fn stream_probe_succeeded(probe: &XtreamChannelProbe) -> bool {
         || probe.screenshot.is_some()
 }
 
+/// Servers to probe at once. The servers share one account and every probe
+/// holds one of its connections, so stay within the fewest any server
+/// reported; more would fail on the provider's limit, not the server.
+fn probe_concurrency(max_connections: impl IntoIterator<Item = Option<u32>>) -> usize {
+    max_connections
+        .into_iter()
+        .flatten()
+        .filter(|&limit| limit > 0)
+        .min()
+        .map_or(SERVER_TEST_MAX_CONCURRENT_SERVERS, |limit| {
+            (limit as usize).min(SERVER_TEST_MAX_CONCURRENT_SERVERS)
+        })
+}
+
 fn emit_server_test_progress(app: &tauri::AppHandle, message: &str) {
     let _ = app.emit("scan://server-test-progress", message.to_string());
 }
@@ -631,6 +645,11 @@ async fn test_xtream_servers_inner(
         ),
     );
 
+    let probe_concurrency = probe_concurrency(
+        api_results
+            .iter()
+            .map(|(_, _, _, account, _)| account.as_ref().and_then(|a| a.max_connections)),
+    );
     let mut results = stream::iter(api_results.into_iter().map(
         |(raw, url, api_latency, account, api_error)| {
             let app = app.clone();
@@ -691,7 +710,7 @@ async fn test_xtream_servers_inner(
             }
         },
     ))
-    .buffered(SERVER_TEST_MAX_CONCURRENT_SERVERS)
+    .buffered(probe_concurrency)
     .collect::<Vec<_>>()
     .await;
 
@@ -747,8 +766,8 @@ async fn test_xtream_servers_inner(
 #[cfg(test)]
 mod tests {
     use super::{
-        SERVER_TEST_STREAM_TIMEOUT, XtreamChannelProbe, build_server_test_client, server_test_get,
-        stream_probe_succeeded,
+        SERVER_TEST_MAX_CONCURRENT_SERVERS, SERVER_TEST_STREAM_TIMEOUT, XtreamChannelProbe,
+        build_server_test_client, probe_concurrency, server_test_get, stream_probe_succeeded,
     };
 
     fn empty_probe() -> XtreamChannelProbe {
@@ -773,6 +792,20 @@ mod tests {
         let mut probe = empty_probe();
         probe.codec = Some("h264".to_string());
         assert!(stream_probe_succeeded(&probe));
+    }
+
+    #[test]
+    fn probes_stay_within_the_account_connection_limit() {
+        assert_eq!(probe_concurrency([Some(2), None, Some(1)]), 1);
+        assert_eq!(
+            probe_concurrency([Some(10)]),
+            SERVER_TEST_MAX_CONCURRENT_SERVERS
+        );
+        // Unknown or "0" limits leave the default.
+        assert_eq!(
+            probe_concurrency([None, Some(0)]),
+            SERVER_TEST_MAX_CONCURRENT_SERVERS
+        );
     }
 
     #[tokio::test]

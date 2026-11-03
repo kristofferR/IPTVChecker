@@ -259,11 +259,11 @@ export default {
     providerDown: {
       allFailed: {
         other:
-          "{account} 的全部 {count} 个流均因{cause}而失败。服务商可能已宕机；修正顺序时会保留其流。",
+          "{account} 的全部 {count} 个流均因{cause}而失败。服务商或其服务器 URL 可能已宕机；修正顺序时会保留其流。",
       },
       someFailed: {
         other:
-          "{account} 的 {count} 个流中有 {failed} 个因{cause}而失败。服务商可能已宕机；修正顺序时会保留其流。",
+          "{account} 的 {count} 个流中有 {failed} 个因{cause}而失败。服务商或其服务器 URL 可能已宕机；修正顺序时会保留其流。",
       },
       causes: {
         timeouts: "超时",
@@ -271,6 +271,11 @@ export default {
       },
       refreshing: "Dispatcharr 正在刷新；完成后请重新加载以获取新的流 URL。",
       refreshFailed: "刷新失败：{error}",
+      testServers: "测试服务器",
+      confirmSwitch:
+        "要在 Dispatcharr 中将 {account} 切换到 {server} 吗？Dispatcharr 随后会刷新该账号以重建其流 URL。频道会保留其流。",
+      switched: "已切换到 {server}。Dispatcharr 正在刷新该账号；完成后请重新加载以获取新的流 URL。",
+      switchFailed: "切换服务器失败：{error}",
       refresh: "在 Dispatcharr 中刷新",
       reload: "重新加载",
       rescan: "重新扫描",
@@ -1105,6 +1110,8 @@ export default {
       accountStatus: "账户：{status}",
       accountExpires: "{date} 到期",
       selectHint: "点击服务器以选择它并返回登录表单。",
+      current: "当前",
+      switchHint: "点击服务器，在 Dispatcharr 中将 {account} 切换到该服务器。",
     },
   },
   saved: {
