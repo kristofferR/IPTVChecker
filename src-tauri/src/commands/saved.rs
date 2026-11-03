@@ -716,6 +716,7 @@ pub async fn open_saved_playlist(
             }
 
             let mut errors = Vec::new();
+            let mut account_error = None;
             let mut winning_server = None;
             let mut preview = None;
             for server in ordered_servers {
@@ -738,8 +739,10 @@ pub async fn open_saved_playlist(
                         preview = Some(result);
                         break;
                     }
-                    // Every mirror shares the account, so the others fail too.
-                    Err(error @ AppError::XtreamAccount(_)) => return Err(error),
+                    Err(error @ AppError::XtreamAccount(_)) => {
+                        // A mirror can reject credentials that another still accepts.
+                        account_error.get_or_insert(error);
+                    }
                     Err(error) => {
                         errors.push(format!("{}: {}", server, error));
                     }
@@ -747,6 +750,9 @@ pub async fn open_saved_playlist(
             }
 
             let Some(preview) = preview else {
+                if let Some(error) = account_error {
+                    return Err(error);
+                }
                 return Err(AppError::Other(format!(
                     "Failed to open saved Xtream playlist \"{}\". {}",
                     entry.display_name,
