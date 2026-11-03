@@ -1987,6 +1987,13 @@ export default {
       moveDown: "نقل لأسفل",
       removeFromChannel: "إزالة من القناة",
     },
+    findings: {
+      mislabeled: "{actual}، وليس {expected}",
+      unlabeled4k: "4K بلا وسم",
+      lowBitrate: "معدل بت منخفض",
+      frozen: "متجمد",
+      noMediaInfo: "لا معلومات وسائط",
+    },
     find: {
       queueProgress: "لا يوجد بث يعمل · {position} من {total}",
       nextChannel: "القناة التالية التي لا يوجد بها بث يعمل",

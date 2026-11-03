@@ -1882,6 +1882,13 @@ export default {
       moveDown: "Перемістити вниз",
       removeFromChannel: "Прибрати з каналу",
     },
+    findings: {
+      mislabeled: "{actual}, не {expected}",
+      unlabeled4k: "4K без позначки",
+      lowBitrate: "Низький бітрейт",
+      frozen: "Застигло",
+      noMediaInfo: "Немає даних про медіа",
+    },
     find: {
       queueProgress: "Немає робочого потоку · {position} з {total}",
       nextChannel: "Наступний канал без робочого потоку",

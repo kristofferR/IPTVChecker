@@ -1753,6 +1753,13 @@ export default {
       moveDown: "Mover para baixo",
       removeFromChannel: "Remover do canal",
     },
+    findings: {
+      mislabeled: "{actual}, não {expected}",
+      unlabeled4k: "4K sem rótulo",
+      lowBitrate: "Bitrate baixo",
+      frozen: "Congelado",
+      noMediaInfo: "Sem info de mídia",
+    },
     find: {
       queueProgress: "Sem stream funcionando · {position} de {total}",
       nextChannel: "Próximo canal sem stream funcionando",

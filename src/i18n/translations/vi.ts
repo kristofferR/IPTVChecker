@@ -1571,6 +1571,13 @@ export default {
       moveDown: "Chuyển xuống",
       removeFromChannel: "Gỡ khỏi kênh",
     },
+    findings: {
+      mislabeled: "{actual}, không phải {expected}",
+      unlabeled4k: "4K không ghi nhãn",
+      lowBitrate: "Bitrate thấp",
+      frozen: "Đứng hình",
+      noMediaInfo: "Không có thông tin media",
+    },
     find: {
       queueProgress: "Không có luồng hoạt động · {position}/{total}",
       nextChannel: "Kênh tiếp theo không có luồng hoạt động",

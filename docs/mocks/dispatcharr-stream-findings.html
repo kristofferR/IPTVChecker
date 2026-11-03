@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dispatcharr: findings on stream rows</title>
+<style>
+  :root{
+    --ov:#18181b; --pn:#27272a; --bd:#3f3f46; --bd3:rgba(63,63,70,.35); --btn:#3f3f46;
+    --t1:#f4f4f5; --t2:#a1a1aa; --t3:#71717a;
+    --g5:#22c55e; --r5:#ef4444; --r4:#f87171; --o5:#f97316; --a4:#fbbf24; --a3:#fcd34d; --z5:#71717a;
+    --sky4:#38bdf8; --or4:#fb923c; --blue4:#60a5fa;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#0f0f11;color:#ececee;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px 16px 80px}
+  main{max-width:1120px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 4px}
+  h2{font-size:16px;margin:44px 0 6px;padding-top:18px;border-top:1px solid #26262a}
+  h3{font-size:15px;margin:30px 0 4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .tag{background:#2563eb;color:#fff;border-radius:5px;padding:1px 7px;font-size:12px}
+  .rec{background:#16a34a;color:#fff;border-radius:5px;padding:1px 7px;font-size:11px;font-weight:600}
+  p,li{color:#c9c9cf;max-width:86ch}
+  p{margin:6px 0} ul{margin:6px 0;padding-left:20px} li{margin:2px 0}
+  code{background:#1c1c1f;border:1px solid #2c2c30;border-radius:4px;padding:1px 5px;font-size:12px}
+  .panel{background:#18181b;border:1px solid #26262a;border-radius:12px;padding:14px 16px;margin:12px 0}
+  .pc{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;font-size:13px;margin:8px 0 0}
+  .pc b{font-weight:600;margin-right:4px}
+  .pc .p b{color:#4ade80} .pc .c b{color:#f87171}
+  .frame{overflow-x:auto;margin:12px 0 4px;padding:14px;background:#09090b;border:1px solid #1f1f22;border-radius:12px}
+  .cap{color:#8b8b93;font-size:12px;margin:4px 0 0}
+  table.v{border-collapse:collapse;font-size:13px;margin:8px 0}
+  table.v td,table.v th{border-bottom:1px solid #26262a;padding:5px 12px 5px 0;text-align:start;vertical-align:top}
+  table.v th{color:#8b8b93;font-weight:600;font-size:12px}
+  @media (max-width:720px){.pc{grid-template-columns:1fr}}
+
+  /* ---------- product mock (mirrors the app's Tailwind classes) ---------- */
+  .app{width:1040px;background:var(--ov);border:1px solid var(--bd);border-radius:10px;overflow:hidden;color:var(--t1);font-size:13px;line-height:1.3}
+  .row{display:grid;grid-template-columns:44px 150px minmax(0,1fr) 74px 50px 92px;align-items:center;height:38px;border-bottom:1px solid var(--bd3);gap:0}
+  .row.c{background:transparent}
+  .row.s{background:rgba(0,0,0,.15)}
+  .row.sel{background:rgba(37,99,235,.28)}
+  .hd{height:30px;background:rgba(39,39,42,.5);border-bottom:1px solid var(--bd);font-size:11px;font-weight:600;color:var(--t2)}
+  .num{color:var(--t3);font-variant-numeric:tabular-nums;padding-inline-start:12px}
+  .row.s .num{padding-inline-start:24px}
+  .cell{display:flex;align-items:center;gap:8px;min-width:0;padding:0 8px}
+  .val{color:var(--t2);font-variant-numeric:tabular-nums;padding:0 8px;display:flex;align-items:center;gap:4px;white-space:nowrap}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .alive{background:var(--g5)} .dead{background:var(--r5)} .pend{background:var(--z5)} .ph{background:var(--o5)}
+  .bar{display:flex;height:12px;width:64px;gap:2px;flex:none}
+  .bar i{flex:1;max-width:4px;min-width:1px;border-radius:1px}
+  .bar i:first-child{width:6px;max-width:6px;flex:none;margin-inline-end:3px}
+  .cnt{font-size:12px;color:var(--t2);font-variant-numeric:tabular-nums}
+  .logo{width:26px;height:20px;border-radius:4px;background:linear-gradient(135deg,#1e3a8a,#be123c);flex:none;display:grid;place-items:center;font-size:8px;font-weight:800;color:#fff}
+  .chev{color:var(--t3);width:14px;flex:none}
+  .acct{color:var(--t1);flex:none}
+  .sname{color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .prim{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--t3);flex:none}
+  .btn{flex:none;border:1px solid var(--bd);background:var(--btn);border-radius:6px;padding:2px 8px;font-size:11px;color:var(--t1)}
+  .push{margin-inline-start:auto}
+  .chip{flex:none;border-radius:4px;padding:1px 6px;font-size:10.5px;font-weight:600;letter-spacing:.02em;white-space:nowrap;box-shadow:inset 0 0 0 1px}
+  .chip.w{background:rgba(245,158,11,.14);color:var(--a3);box-shadow:inset 0 0 0 1px rgba(245,158,11,.3)}
+  .chip.e{background:rgba(239,68,68,.14);color:#fca5a5;box-shadow:inset 0 0 0 1px rgba(239,68,68,.3)}
+  .chip.i{background:rgba(56,189,248,.12);color:#7dd3fc;box-shadow:inset 0 0 0 1px rgba(56,189,248,.3)}
+  .ic{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+  .amb{color:var(--a4)} .sky{color:var(--sky4)} .org{color:var(--or4)} .red{color:var(--r4)}
+  .warnval{color:var(--a4)}
+  .sup{font-size:10px;color:var(--a4);opacity:.85}
+  .why{font-size:11px;color:var(--r4);white-space:nowrap}
+  .tip{position:relative}
+  .tipbox{position:absolute;top:22px;inset-inline-start:0;z-index:2;background:#09090b;border:1px solid var(--bd);border-radius:6px;padding:6px 9px;font-size:11.5px;color:var(--t1);white-space:nowrap;box-shadow:0 8px 20px rgba(0,0,0,.5);line-height:1.5}
+  .tipbox span{color:var(--t2)}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#a1a1aa;margin-top:8px}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+</style>
+</head>
+<body>
+<main>
+<h1>Dispatcharr: findings on stream rows</h1>
+<p>In the channel-first table, a stream row shows only its status dot, account and stream name. Findings such as a mislabel or low FPS show up only in the side panel or the status filter. Frozen video and low bitrate appear as icons in the Bitrate column, which usually sits off-screen while the side panel is open. These mocks place each stream's findings on its own row.</p>
+<div class="panel">
+  <b>Already decided:</b> the label check reads the stream name (<code>x-dispatcharr-stream-name</code>), not the channel name. A stream named "US: DEMO NEWS 4K" that probes as 720p is therefore mislabeled, whatever the Dispatcharr channel is called. That fix ships with whichever option you pick.
+</div>
+
+<h2>Findings in scope</h2>
+<table class="v">
+  <tr><th>Finding</th><th>Source field</th><th>Short text</th><th>Tone</th></tr>
+  <tr><td>Mislabeled</td><td><code>label_mismatches</code></td><td>720p, not 4K</td><td class="amb">warning</td></tr>
+  <tr><td>Low frame rate</td><td><code>low_framerate</code></td><td>12 fps</td><td class="amb">warning</td></tr>
+  <tr><td>Low bitrate</td><td><code>low_bitrate</code></td><td>Low bitrate</td><td class="org">warning</td></tr>
+  <tr><td>Frozen video</td><td><code>frozen_video</code></td><td>Frozen</td><td class="sky">info-ish, same blue as today</td></tr>
+  <tr><td>No media info</td><td><code>probe_error_reason</code></td><td>No media info</td><td class="amb">warning</td></tr>
+  <tr><td>Dead reason</td><td><code>error_reason</code></td><td>HTTP 404</td><td class="red">error</td></tr>
+</table>
+<p class="cap">Every mock uses the same synthetic channel: Demo News with eight streams. Stream 2 is the case from the report: named 4K, probed 720p.</p>
+
+<!-- ================= A ================= -->
+<h3><span class="tag">A</span> Chips after the stream name <span class="rec">Anbefalt</span></h3>
+<p>Short text chips sit right after the stream name and before PRIMARY and the hover actions. Mislabel shows the measured value against the claimed one. A dead stream gets its reason as a red chip. On hover, the chips step aside for the action buttons, the same way the buttons work today.</p>
+<div class="frame"><div class="app">
+  <div class="row hd"><span class="num"># ↑</span><span class="cell">Status</span><span class="cell">Channel Name</span><span class="val">Resolution</span><span class="val">FPS</span><span class="val">Bitrate</span></div>
+  <div class="row c"><span class="num">5</span><span class="cell"><span class="bar"><i class="pend"></i><i class="alive"></i><i class="alive"></i><i class="alive"></i><i class="alive"></i><i class="ph"></i><i class="alive"></i><i class="dead"></i></span><span class="cnt">6/8</span></span><span class="cell"><svg class="ic chev" viewBox="0 0 24 24" style="transform:rotate(90deg)"><path d="m9 18 6-6-6-6"/></svg><span class="logo">DN</span><b style="font-weight:500">Demo News</b><span class="push"></span><span class="btn">Fix order</span></span><span class="val">—</span><span class="val">—</span><span class="val">—</span></div>
+  <div class="row s"><span class="num">1</span><span class="cell"><span class="dot pend"></span></span><span class="cell"><span class="acct">Provider B</span><span class="sname">US: DEMO NEWS 4K</span><span class="prim">Primary</span></span><span class="val">—</span><span class="val">—</span><span class="val">—</span></div>
+  <div class="row s sel"><span class="num">2</span><span class="cell"><span class="dot alive"></span></span><span class="cell"><span class="acct">Provider A</span><span class="sname">US: DEMO NEWS 4K</span><span class="chip w">720p, not 4K</span></span><span class="val">720p</span><span class="val">60</span><span class="val">4.1 Mbps</span></div>
+  <div class="row s"><span class="num">3</span><span class="cell"><span class="dot alive"></span></span><span class="cell"><span class="acct">Provider C</span><span class="sname">UK: Demo News HD</span></span><span class="val">1080p</span><span class="val">50</span><span class="val">6.0 Mbps</span></div>
+  <div class="row s"><span class="num">4</span><span class="cell"><span class="dot alive"></span></span><span class="cell"><span class="acct">Provider C</span><span class="sname">PT: Demo News</span><span class="chip w">12 fps</span></span><span class="val">576p</span><span class="val">12</span><span class="val">1.8 Mbps</span></div>
+  <div class="row s"><span class="num">5</span><span class="cell"><span class="dot alive"></span></span><span class="cell"><span class="acct">Provider A</span><span class="sname">US: DEMO NEWS UHD</span><span class="chip w">1080p, not 4K</span><span class="chip w">Low bitrate</span></span><span class="val">1080p</span><span class="val">25</span><span class="val">0.9 Mbps</span></div>
+  <div class="row s"><span class="num">6</span><span class="cell"><span class="dot ph"></span></span><span class="cell"><span class="acct">Provider A</span><span class="sname">CA: DEMO NEWS</span></span><span class="val">720p</span><span class="val">25</span><span class="val">0.3 Mbps</span></div>
+  <div class="row s"><span class="num">7</span><span class="cell"><span class="dot alive"></span></span><span class="cell"><span class="acct">Provider A</span><span class="sname">US: DEMO NEWS HD</span><span class="chip i">Frozen</span></span><span class="val">1080p</span><span class="val">30</span><span class="val">5.2 Mbps</span></div>
+  <div class="row s"><span class="num">8</span><span class="cell"><span class="dot dead"></span></span><span class="cell"><span class="acct">Provider B</span><span class="sname">US: Demo News</span><span class="chip e">HTTP 404</span></span><span class="val">—</span><span class="val">—</span><span class="val">—</span></div>
+</div></div>
+<div class="pc">
+  <div class="p"><b>+</b>Reads without a tooltip and stays visible however the columns are set</div>
+  <div class="c"><b>−</b>Long stream names truncate sooner</div>
+  <div class="p"><b>+</b>Mislabel shows both values, so you can see what's wrong without opening the side panel</div>
+  <div class="c"><b>−</b>Noisiest option when many streams have findings</div>
+  <div class="p"><b>+</b>Reuses the app's existing chip style (Duplicate, catch-up)</div>
+  <div class="c"><b>−</b>Each chip needs translated short text in 14 languages</div>
+</div>
+
+<!-- ================= B ================= -->
+<h3><span class="tag">B</span> Icons beside the status dot</h3>
+<p>Stream rows leave the Status column empty apart from the dot, since the channel's health bar fills that column on the channel row. B places finding icons there. A tooltip shows the details. A dead stream shows its reason as short red text.</p>
+<div class="frame"><div class="app">
+  <div class="row hd"><span class="num"># ↑</span><span class="cell">Status</span><span class="cell">Channel Name</span><span class="val">Resolution</span><span class="val">FPS</span><span class="val">Bitrate</span></div>
+  <div class="row c"><span class="num">5</span><span class="cell"><span class="bar"><i class="pend"></i><i class="alive"></i><i class="alive"></i><i class="alive"></i><i class="alive"></i><i class="ph"></i><i class="alive"></i><i class="dead"></i></span><span class="cnt">6/8</span></span><span class="cell"><svg class="ic chev" viewBox="0 0 24 24" style="transform:rotate(90deg)"><path d="m9 18 6-6-6-6"/></svg><span class="logo">DN</span><b style="font-weight:500">Demo News</b><span class="push"></span><span class="btn">Fix order</span></span><span class="val">—</span><span class="val">—</span><span class="val">—</span></div>
+  <div class="row s"><span class="num">1</span><span class="cell"><span class="dot pend"></span></span><span class="cell"><span class="acct">Provider B</span><span class="sname">US: DEMO NEWS 4K</span><span class="prim">Primary</span></span><span class="val">—</span><span class="val">—</span><span class="val">—</span></div>
+  <div class="row s sel"><span class="num">2</span><span class="cell tip"><span class="dot alive"></span>
+      <svg class="ic amb" viewBox="0 0 24 24"><path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r="1"/></svg>
+      <span class="tipbox">Mislabeled<br><span>Name says 4K, stream is 720p</span></span></span>
+    <span class="cell"><span class="acct">Provider A</span><span class="sname">US: DEMO NEWS 4K</span></span><span class="val">720p</span><span class="val">60</span><span class="val">4.1 Mbps</span></div>
+  <div class="row s"><span class="num">3</span><span class="cell"><span class="dot alive"></span></span><span class="cell"><span class="acct">Provider C</span><span class="sname">UK: Demo News HD</span></span><span class="val">1080p</span><span class="val">50</span><span class="val">6.0 Mbps</span></div>
+  <div class="row s"><span class="num">4</span><span class="cell"><span class="dot alive"></span><svg class="ic amb" viewBox="0 0 24 24"><path d="M12 13V8"/><path d="M4 13a8 8 0 1 1 16 0"/><circle cx="12" cy="13" r="1.5"/><path d="M8 18h8"/></svg></span><span class="cell"><span class="acct">Provider C</span><span class="sname">PT: Demo News</span></span><span class="val">576p</span><span class="val">12</span><span class="val">1.8 Mbps</span></div>
+  <div class="row s"><span class="num">5</span><span class="cell"><span class="dot alive"></span><svg class="ic amb" viewBox="0 0 24 24"><path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r="1"/></svg><svg class="ic org" viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.3 19a10 10 0 1 1 17.4 0"/></svg></span><span class="cell"><span class="acct">Provider A</span><span class="sname">US: DEMO NEWS UHD</span></span><span class="val">1080p</span><span class="val">25</span><span class="val">0.9 Mbps</span></div>
+  <div class="row s"><span class="num">6</span><span class="cell"><span class="dot ph"></span></span><span class="cell"><span class="acct">Provider A</span><span class="sname">CA: DEMO NEWS</span></span><span class="val">720p</span><span class="val">25</span><span class="val">0.3 Mbps</span></div>
+  <div class="row s"><span class="num">7</span><span class="cell"><span class="dot alive"></span><svg class="ic sky" viewBox="0 0 24 24"><path d="M2 12h20M12 2v20m-8-4 16-12M4 6l16 12"/></svg></span><span class="cell"><span class="acct">Provider A</span><span class="sname">US: DEMO NEWS HD</span></span><span class="val">1080p</span><span class="val">30</span><span class="val">5.2 Mbps</span></div>
+  <div class="row s"><span class="num">8</span><span class="cell"><span class="dot dead"></span><span class="why">HTTP 404</span></span><span class="cell"><span class="acct">Provider B</span><span class="sname">US: Demo News</span></span><span class="val">—</span><span class="val">—</span><span class="val">—</span></div>
+</div></div>
+<div class="legend"><span><svg class="ic amb" viewBox="0 0 24 24"><path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z"/><circle cx="7.5" cy="7.5" r="1"/></svg>Mislabeled</span><span><svg class="ic amb" viewBox="0 0 24 24"><path d="M12 13V8"/><path d="M4 13a8 8 0 1 1 16 0"/><circle cx="12" cy="13" r="1.5"/><path d="M8 18h8"/></svg>Low FPS</span><span><svg class="ic org" viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.3 19a10 10 0 1 1 17.4 0"/></svg>Low bitrate</span><span><svg class="ic sky" viewBox="0 0 24 24"><path d="M2 12h20M12 2v20m-8-4 16-12M4 6l16 12"/></svg>Frozen</span></div>
+<div class="pc">
+  <div class="p"><b>+</b>Leaves the name column untouched, so names stay long and hover actions have room</div>
+  <div class="c"><b>−</b>You have to learn the icons, and the details are behind a hover</div>
+  <div class="p"><b>+</b>Findings line up in one column, which is easy to scan down a long channel</div>
+  <div class="c"><b>−</b>Mislabel can't show 720p vs 4K at a glance</div>
+  <div class="p"><b>+</b>Reuses the Snowflake and Gauge icons from the Bitrate column</div>
+  <div class="c"><b>−</b>Tooltips don't work on touch, and screen readers need aria labels on each icon</div>
+</div>
+
+<!-- ================= C ================= -->
+<h3><span class="tag">C</span> Mark the measured values</h3>
+<p>C flags each finding on the value it describes: the resolution turns amber with the claimed label beside it, the FPS turns amber, and the Bitrate column keeps today's icons. The name column gets a small amber dot so the stream still stands out when those columns are scrolled away.</p>
+<div class="frame"><div class="app">
+  <div class="row hd"><span class="num"># ↑</span><span class="cell">Status</span><span class="cell">Channel Name</span><span class="val">Resolution</span><span class="val">FPS</span><span class="val">Bitrate</span></div>
+  <div class="row c"><span class="num">5</span><span class="cell"><span class="bar"><i class="pend"></i><i class="alive"></i><i class="alive"></i><i class="alive"></i><i class="alive"></i><i class="ph"></i><i class="alive"></i><i class="dead"></i></span><span class="cnt">6/8</span></span><span class="cell"><svg class="ic chev" viewBox="0 0 24 24" style="transform:rotate(90deg)"><path d="m9 18 6-6-6-6"/></svg><span class="logo">DN</span><b style="font-weight:500">Demo News</b><span class="push"></span><span class="btn">Fix order</span></span><span class="val">—</span><span class="val">—</span><span class="val">—</span></div>
+  <div class="row s"><span class="num">1</span><span class="cell"><span class="dot pend"></span></span><span class="cell"><span class="acct">Provider B</span><span class="sname">US: DEMO NEWS 4K</span><span class="prim">Primary</span></span><span class="val">—</span><span class="val">—</span><span class="val">—</span></div>
+  <div class="row s sel"><span class="num">2</span><span class="cell"><span class="dot alive"></span></span><span class="cell"><span class="acct">Provider A</span><span class="sname">US: DEMO NEWS 4K</span><span class="dot" style="background:var(--a4);width:6px;height:6px"></span></span><span class="val"><span class="warnval">720p</span><span class="sup">≠ 4K</span></span><span class="val">60</span><span class="val">4.1 Mbps</span></div>
+  <div class="row s"><span class="num">3</span><span class="cell"><span class="dot alive"></span></span><span class="cell"><span class="acct">Provider C</span><span class="sname">UK: Demo News HD</span></span><span class="val">1080p</span><span class="val">50</span><span class="val">6.0 Mbps</span></div>
+  <div class="row s"><span class="num">4</span><span class="cell"><span class="dot alive"></span></span><span class="cell"><span class="acct">Provider C</span><span class="sname">PT: Demo News</span><span class="dot" style="background:var(--a4);width:6px;height:6px"></span></span><span class="val">576p</span><span class="val warnval">12</span><span class="val">1.8 Mbps</span></div>
+  <div class="row s"><span class="num">5</span><span class="cell"><span class="dot alive"></span></span><span class="cell"><span class="acct">Provider A</span><span class="sname">US: DEMO NEWS UHD</span><span class="dot" style="background:var(--a4);width:6px;height:6px"></span></span><span class="val"><span class="warnval">1080p</span><span class="sup">≠ 4K</span></span><span class="val">25</span><span class="val"><svg class="ic org" viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.3 19a10 10 0 1 1 17.4 0"/></svg>0.9 Mbps</span></div>
+  <div class="row s"><span class="num">6</span><span class="cell"><span class="dot ph"></span></span><span class="cell"><span class="acct">Provider A</span><span class="sname">CA: DEMO NEWS</span></span><span class="val">720p</span><span class="val">25</span><span class="val">0.3 Mbps</span></div>
+  <div class="row s"><span class="num">7</span><span class="cell"><span class="dot alive"></span></span><span class="cell"><span class="acct">Provider A</span><span class="sname">US: DEMO NEWS HD</span><span class="dot" style="background:var(--a4);width:6px;height:6px"></span></span><span class="val">1080p</span><span class="val">30</span><span class="val"><svg class="ic sky" viewBox="0 0 24 24"><path d="M2 12h20M12 2v20m-8-4 16-12M4 6l16 12"/></svg>5.2 Mbps</span></div>
+  <div class="row s"><span class="num">8</span><span class="cell"><span class="dot dead"></span></span><span class="cell"><span class="acct">Provider B</span><span class="sname">US: Demo News</span></span><span class="val">—</span><span class="val">—</span><span class="val">—</span></div>
+</div></div>
+<div class="pc">
+  <div class="p"><b>+</b>The quietest option, and it keeps each finding beside the value it describes</div>
+  <div class="c"><b>−</b>With the side panel open these columns are usually off-screen, which is how this bug went unnoticed</div>
+  <div class="p"><b>+</b>Works the same in the flat table for non-Dispatcharr playlists</div>
+  <div class="c"><b>−</b>The amber dot alone doesn't say what's wrong</div>
+  <div class="p"><b>+</b>Needs almost no new copy</div>
+  <div class="c"><b>−</b>Dead reasons still live only in the Error column or a tooltip</div>
+</div>
+
+<h2>Smaller decisions</h2>
+<ul>
+  <li><b>Channel health bar:</b> keep it status-only and add each stream's findings to its tooltip line ("2. Provider A: Alive, 720p, not 4K"). Adding a bar color for "alive with issues" would make a fifth tone next to geoblocked, placeholder and provider down.</li>
+  <li><b>Unlabeled 4K:</b> today a stream that is 4K but not named as such counts as mislabeled. I suggest showing it as a neutral blue "4K" chip that doesn't count toward Mislabeled, since it is good news.</li>
+  <li><b>Fix order:</b> out of scope here. Ranking mislabeled streams lower can come later if you want it.</li>
+</ul>
+</main>
+</body>
+</html>

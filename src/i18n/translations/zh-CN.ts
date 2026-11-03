@@ -1535,6 +1535,13 @@ export default {
       moveDown: "下移",
       removeFromChannel: "从频道中移除",
     },
+    findings: {
+      mislabeled: "{actual}，非 {expected}",
+      unlabeled4k: "未标注 4K",
+      lowBitrate: "低码率",
+      frozen: "画面冻结",
+      noMediaInfo: "无媒体信息",
+    },
     find: {
       queueProgress: "无可用流 · 第 {position} 个，共 {total} 个",
       nextChannel: "下一个无可用流的频道",

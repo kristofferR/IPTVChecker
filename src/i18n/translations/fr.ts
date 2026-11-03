@@ -1772,6 +1772,13 @@ export default {
       moveDown: "Descendre",
       removeFromChannel: "Retirer de la chaîne",
     },
+    findings: {
+      mislabeled: "{actual}, pas {expected}",
+      unlabeled4k: "4K non indiqué",
+      lowBitrate: "Débit faible",
+      frozen: "Figé",
+      noMediaInfo: "Aucune info média",
+    },
     find: {
       queueProgress: "Aucun flux fonctionnel · {position} sur {total}",
       nextChannel: "Chaîne suivante sans flux fonctionnel",

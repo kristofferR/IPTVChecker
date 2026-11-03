@@ -1655,6 +1655,13 @@ export default {
       moveDown: "Aşağı taşı",
       removeFromChannel: "Kanaldan kaldır",
     },
+    findings: {
+      mislabeled: "{actual}, {expected} değil",
+      unlabeled4k: "Etiketsiz 4K",
+      lowBitrate: "Düşük bit hızı",
+      frozen: "Donmuş",
+      noMediaInfo: "Medya bilgisi yok",
+    },
     find: {
       queueProgress: "Çalışan yayın yok · {position}/{total}",
       nextChannel: "Çalışan yayını olmayan sonraki kanal",

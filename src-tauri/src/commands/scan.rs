@@ -2412,7 +2412,9 @@ fn build_channel_result(channel: &Channel, shared: &SharedUrlResult) -> ChannelR
     if result.status == ChannelStatus::Alive
         && let Some(ref resolution) = result.resolution
     {
-        result.label_mismatches = ffmpeg::check_label_mismatch(&channel.name, resolution);
+        let label = crate::engine::dispatcharr::stream_name(&channel.extinf_line);
+        result.label_mismatches =
+            ffmpeg::check_label_mismatch(label.as_deref().unwrap_or(&channel.name), resolution);
     }
 
     result
@@ -4266,6 +4268,21 @@ mod tests {
         assert_eq!(summary.low_framerate, 1);
         assert_eq!(summary.mislabeled, 1);
         assert!(summary.playlist_score.is_none());
+    }
+
+    #[test]
+    fn label_check_reads_the_dispatcharr_stream_name() {
+        let mut channel = make_channel(0);
+        channel.name = "Demo News".to_string();
+        channel.extinf_line =
+            "#EXTINF:-1 x-dispatcharr-stream-id=\"7\" x-dispatcharr-stream-name=\"US: DEMO NEWS 4K\",Demo News"
+                .to_string();
+        let mut shared = make_shared_result();
+        shared.resolution = Some("720p".to_string());
+
+        let result = build_channel_result(&channel, &shared);
+
+        assert_eq!(result.label_mismatches, vec!["Expected 4K, got 720p"]);
     }
 
     #[test]

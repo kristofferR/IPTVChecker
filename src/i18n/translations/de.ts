@@ -1654,6 +1654,13 @@ export default {
       moveDown: "Nach unten",
       removeFromChannel: "Aus Sender entfernen",
     },
+    findings: {
+      mislabeled: "{actual}, nicht {expected}",
+      unlabeled4k: "4K ohne Kennzeichnung",
+      lowBitrate: "Niedrige Bitrate",
+      frozen: "Standbild",
+      noMediaInfo: "Keine Medieninfo",
+    },
     find: {
       queueProgress: "Kein funktionierender Stream · {position} von {total}",
       nextChannel: "Nächster Sender ohne funktionierenden Stream",
