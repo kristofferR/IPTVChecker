@@ -129,6 +129,13 @@ export default {
       expectedHd: "انتظار می‌رفت 720p یا 1080p باشد، اما {actual} است",
       unlabeled4k: "کانال 4K برچسب 4K ندارد",
     },
+    unreachable: {
+      one: "اتصال به سرور ممکن نشد ({reason})",
+      mirrors: {
+        one: "به هیچ‌یک از {count} سرورِ «{name}» نمی‌توان متصل شد ({reasons})",
+        other: "به هیچ‌یک از {count} سرورِ «{name}» نمی‌توان متصل شد ({reasons})",
+      },
+    },
     xtream: {
       rejected: "سرور Xtream نام کاربری یا گذرواژه را رد کرد",
       expired: "اشتراک Xtream منقضی شده است",

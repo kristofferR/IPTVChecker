@@ -130,6 +130,12 @@ export default {
       expectedHd: "Mong đợi 720p hoặc 1080p, thực tế {actual}",
       unlabeled4k: "Kênh 4K không được gắn nhãn 4K",
     },
+    unreachable: {
+      one: "Không thể kết nối tới máy chủ ({reason})",
+      mirrors: {
+        other: 'Không thể kết nối tới máy chủ nào trong {count} máy chủ của "{name}" ({reasons})',
+      },
+    },
     xtream: {
       rejected: "Máy chủ Xtream đã từ chối tên người dùng hoặc mật khẩu",
       expired: "Gói đăng ký Xtream đã hết hạn",

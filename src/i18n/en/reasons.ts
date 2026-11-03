@@ -78,6 +78,14 @@ export default {
     expectedHd: "Expected 720p or 1080p, got {actual}",
     unlabeled4k: "4K channel not labeled as such",
   },
+  /** No server answered a playlist download (error.rs, commands/saved.rs). */
+  unreachable: {
+    one: "Could not reach the server ({reason})",
+    mirrors: {
+      one: 'Could not reach the {count} server for "{name}" ({reasons})',
+      other: 'Could not reach any of the {count} servers for "{name}" ({reasons})',
+    },
+  },
   /** The Xtream panel refused the account (engine/xtream.rs). */
   xtream: {
     rejected: "Xtream server rejected the username or password",

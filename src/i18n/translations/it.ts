@@ -131,6 +131,14 @@ export default {
       expectedHd: "Previsto 720p o 1080p, rilevato {actual}",
       unlabeled4k: "Canale 4K non indicato come tale",
     },
+    unreachable: {
+      one: "Impossibile raggiungere il server ({reason})",
+      mirrors: {
+        one: 'Impossibile raggiungere il server di "{name}" ({reasons})',
+        many: 'Nessuno dei {count} server di "{name}" è raggiungibile ({reasons})',
+        other: 'Nessuno dei {count} server di "{name}" è raggiungibile ({reasons})',
+      },
+    },
     xtream: {
       rejected: "Il server Xtream ha rifiutato nome utente o password",
       expired: "Abbonamento Xtream scaduto",

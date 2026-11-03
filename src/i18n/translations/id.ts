@@ -128,6 +128,12 @@ export default {
       expectedHd: "Diharapkan 720p atau 1080p, didapat {actual}",
       unlabeled4k: "Saluran 4K tidak diberi label 4K",
     },
+    unreachable: {
+      one: "Tidak dapat menjangkau server ({reason})",
+      mirrors: {
+        other: 'Tidak dapat menjangkau satu pun dari {count} server untuk "{name}" ({reasons})',
+      },
+    },
     xtream: {
       rejected: "Server Xtream menolak nama pengguna atau kata sandi",
       expired: "Langganan Xtream sudah kedaluwarsa",

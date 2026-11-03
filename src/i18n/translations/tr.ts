@@ -130,6 +130,13 @@ export default {
       expectedHd: "Beklenen 720p veya 1080p, gelen {actual}",
       unlabeled4k: "4K kanal 4K olarak etiketlenmemiş",
     },
+    unreachable: {
+      one: "Sunucuya ulaşılamadı ({reason})",
+      mirrors: {
+        one: '"{name}" için {count} sunucunun hiçbirine ulaşılamadı ({reasons})',
+        other: '"{name}" için {count} sunucunun hiçbirine ulaşılamadı ({reasons})',
+      },
+    },
     xtream: {
       rejected: "Xtream sunucusu kullanıcı adını veya parolayı reddetti",
       expired: "Xtream aboneliğinin süresi doldu",

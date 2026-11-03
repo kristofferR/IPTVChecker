@@ -858,6 +858,13 @@ pub(crate) async fn open_playlist_xtream_inner(
     let (cached_path, archive_task) = match m3u_result {
         Ok(path) => (path, Some(live_streams_task)),
         Err(get_php_error) => {
+            // No account info means player_api didn't answer either, so the
+            // JSON fallback on the same host could only fail the same way.
+            if xtream_account_info.is_none() && matches!(get_php_error, AppError::Unreachable(_)) {
+                live_streams_task.abort();
+                archive_enrichment.complete(HashMap::new()).await;
+                return Err(get_php_error);
+            }
             log::info!(
                 "Xtream /get.php download failed ({}), falling back to JSON API",
                 get_php_error

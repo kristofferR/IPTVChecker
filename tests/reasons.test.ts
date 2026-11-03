@@ -51,6 +51,19 @@ describe("translateReason", () => {
     );
   });
 
+  it("renders unreachable-server errors from error.rs and commands/saved.rs", () => {
+    expect(translateReason("Could not reach the server (Timeout)")).toBe(
+      "Could not reach the server (Timeout)",
+    );
+    expect(
+      translateReason(
+        'Could not reach any of the 6 servers for "Test Provider" (DNS failure, Timeout)',
+      ),
+    ).toBe(
+      'Could not reach any of the 6 servers for "\u2068Test Provider\u2069" (DNS failure, Timeout)',
+    );
+  });
+
   it("passes unknown text through unchanged", () => {
     expect(translateReason("Connection reset by peer (os error 104)")).toBe(
       "Connection reset by peer (os error 104)",

@@ -132,6 +132,14 @@ export default {
       expectedHd: "Se esperaba 720p o 1080p, se obtuvo {actual}",
       unlabeled4k: "Canal 4K no etiquetado como tal",
     },
+    unreachable: {
+      one: "No se pudo conectar con el servidor ({reason})",
+      mirrors: {
+        one: 'No se pudo conectar con el servidor de "{name}" ({reasons})',
+        many: 'No se pudo conectar con ninguno de los {count} servidores de "{name}" ({reasons})',
+        other: 'No se pudo conectar con ninguno de los {count} servidores de "{name}" ({reasons})',
+      },
+    },
     xtream: {
       rejected: "El servidor Xtream rechazó el usuario o la contraseña",
       expired: "La suscripción de Xtream caducó",

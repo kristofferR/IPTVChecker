@@ -140,6 +140,17 @@ export default {
       expectedHd: "المتوقع 720p أو 1080p، والفعلي {actual}",
       unlabeled4k: "قناة 4K غير موسومة بذلك",
     },
+    unreachable: {
+      one: "تعذّر الوصول إلى الخادم ({reason})",
+      mirrors: {
+        zero: "تعذّر الوصول إلى أيٍّ من خوادم «{name}» البالغ عددها {count} ({reasons})",
+        one: "تعذّر الوصول إلى أيٍّ من خوادم «{name}» البالغ عددها {count} ({reasons})",
+        two: "تعذّر الوصول إلى أيٍّ من خوادم «{name}» البالغ عددها {count} ({reasons})",
+        few: "تعذّر الوصول إلى أيٍّ من خوادم «{name}» البالغ عددها {count} ({reasons})",
+        many: "تعذّر الوصول إلى أيٍّ من خوادم «{name}» البالغ عددها {count} ({reasons})",
+        other: "تعذّر الوصول إلى أيٍّ من خوادم «{name}» البالغ عددها {count} ({reasons})",
+      },
+    },
     xtream: {
       rejected: "رفض خادم Xtream اسم المستخدم أو كلمة المرور",
       expired: "انتهى اشتراك Xtream",

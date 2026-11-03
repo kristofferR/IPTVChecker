@@ -128,6 +128,12 @@ export default {
       expectedHd: "应为 720p 或 1080p，实际为 {actual}",
       unlabeled4k: "4K 频道未标注为 4K",
     },
+    unreachable: {
+      one: "无法连接到服务器（{reason}）",
+      mirrors: {
+        other: "“{name}”的 {count} 个服务器均无法连接（{reasons}）",
+      },
+    },
     xtream: {
       rejected: "Xtream 服务器拒绝了用户名或密码",
       expired: "Xtream 订阅已到期",

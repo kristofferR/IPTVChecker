@@ -136,6 +136,15 @@ export default {
       expectedHd: "Ожидалось 720p или 1080p, получено {actual}",
       unlabeled4k: "4K-канал не помечен как 4K",
     },
+    unreachable: {
+      one: "Не удалось подключиться к серверу ({reason})",
+      mirrors: {
+        one: "Не удалось подключиться ни к одному из {count} сервера для «{name}» ({reasons})",
+        few: "Не удалось подключиться ни к одному из {count} серверов для «{name}» ({reasons})",
+        many: "Не удалось подключиться ни к одному из {count} серверов для «{name}» ({reasons})",
+        other: "Не удалось подключиться ни к одному из {count} сервера для «{name}» ({reasons})",
+      },
+    },
     xtream: {
       rejected: "Сервер Xtream отклонил имя пользователя или пароль",
       expired: "Подписка Xtream истекла",

@@ -136,6 +136,15 @@ export default {
       expectedHd: "Oczekiwano 720p lub 1080p, jest {actual}",
       unlabeled4k: "Kanał 4K nie jest oznaczony jako 4K",
     },
+    unreachable: {
+      one: "Nie można połączyć się z serwerem ({reason})",
+      mirrors: {
+        one: "Nie można połączyć się z serwerem dla „{name}” ({reasons})",
+        few: "Nie można połączyć się z żadnym z {count} serwerów dla „{name}” ({reasons})",
+        many: "Nie można połączyć się z żadnym z {count} serwerów dla „{name}” ({reasons})",
+        other: "Nie można połączyć się z żadnym z {count} serwerów dla „{name}” ({reasons})",
+      },
+    },
     xtream: {
       rejected: "Serwer Xtream odrzucił nazwę użytkownika lub hasło",
       expired: "Subskrypcja Xtream wygasła",

@@ -118,6 +118,40 @@ pub(crate) fn path_source_identity(path: &str) -> String {
     format!("path:{}", normalized)
 }
 
+/// The error for a saved Xtream playlist that no mirror could open. When no
+/// mirror answered at all, say so once instead of once per server.
+fn saved_xtream_failure(display_name: &str, mut errors: Vec<(String, AppError)>) -> AppError {
+    let unreachable: Option<Vec<&'static str>> = errors
+        .iter()
+        .map(|(_, error)| match error {
+            AppError::Unreachable(reason) => Some(*reason),
+            _ => None,
+        })
+        .collect();
+    match unreachable {
+        Some(_) if errors.len() == 1 => errors.remove(0).1,
+        Some(mut reasons) if !reasons.is_empty() => {
+            reasons.sort_unstable();
+            reasons.dedup();
+            AppError::Other(format!(
+                "Could not reach any of the {} servers for \"{}\" ({})",
+                errors.len(),
+                display_name,
+                reasons.join(", ")
+            ))
+        }
+        _ => AppError::Other(format!(
+            "Failed to open saved Xtream playlist \"{}\". {}",
+            display_name,
+            errors
+                .iter()
+                .map(|(server, error)| format!("{server}: {error}"))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        )),
+    }
+}
+
 fn normalized_url_string(url: &str) -> Result<String, AppError> {
     let trimmed = url.trim();
     let parsed =
@@ -743,9 +777,7 @@ pub async fn open_saved_playlist(
                         // A mirror can reject credentials that another still accepts.
                         account_error.get_or_insert(error);
                     }
-                    Err(error) => {
-                        errors.push(format!("{}: {}", server, error));
-                    }
+                    Err(error) => errors.push((server, error)),
                 }
             }
 
@@ -753,11 +785,7 @@ pub async fn open_saved_playlist(
                 if let Some(error) = account_error {
                     return Err(error);
                 }
-                return Err(AppError::Other(format!(
-                    "Failed to open saved Xtream playlist \"{}\". {}",
-                    entry.display_name,
-                    errors.join(" | ")
-                )));
+                return Err(saved_xtream_failure(&entry.display_name, errors));
             };
 
             if let Some(server) = winning_server {
@@ -839,8 +867,40 @@ pub async fn open_saved_playlist(
 mod tests {
     use super::{
         SavedPlaylistEntry, SavedPlaylistSource, default_display_name, path_source_identity,
-        sanitize_saved_playlist_entry, sanitize_saved_playlists,
+        sanitize_saved_playlist_entry, sanitize_saved_playlists, saved_xtream_failure,
     };
+    use crate::error::AppError;
+
+    #[test]
+    fn saved_xtream_failure_says_once_when_no_mirror_answered() {
+        let server = |n: u8| format!("http://mirror{n}.example.com");
+        let unreachable = vec![
+            (server(1), AppError::Unreachable("Timeout")),
+            (server(2), AppError::Unreachable("DNS failure")),
+            (server(3), AppError::Unreachable("Timeout")),
+        ];
+        assert_eq!(
+            saved_xtream_failure("Test Provider", unreachable).to_string(),
+            "Could not reach any of the 3 servers for \"Test Provider\" (DNS failure, Timeout)"
+        );
+        assert_eq!(
+            saved_xtream_failure(
+                "Test Provider",
+                vec![(server(1), AppError::Unreachable("Timeout"))]
+            )
+            .to_string(),
+            "Could not reach the server (Timeout)"
+        );
+        // A mirror that answered keeps the per-server detail.
+        let mixed = vec![
+            (server(1), AppError::Unreachable("Timeout")),
+            (server(2), AppError::Other("HTTP 404".to_string())),
+        ];
+        assert_eq!(
+            saved_xtream_failure("Test Provider", mixed).to_string(),
+            "Failed to open saved Xtream playlist \"Test Provider\". http://mirror1.example.com: Could not reach the server (Timeout) | http://mirror2.example.com: HTTP 404"
+        );
+    }
 
     /// A tightened validation rule must never delete playlists the user saved:
     /// this list is persisted verbatim, so a dropped entry is gone for good.

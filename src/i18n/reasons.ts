@@ -1,4 +1,4 @@
-import { type EnglishCatalog, formatCount, getFormatLocale, type MessageKey, t } from ".";
+import { type EnglishCatalog, formatCount, getFormatLocale, isolate, type MessageKey, t } from ".";
 import type { MessageAt, ParamArgs } from "./types";
 
 /** Keys of `reasons.*` messages that take no params. */
@@ -184,6 +184,21 @@ const PATTERNS: ReadonlyArray<readonly [RegExp, (match: string[]) => string]> = 
     },
   ],
   [/^Xtream account is (.+)$/, ([, status]) => t("reasons.xtream.disabled", { status })],
+  [
+    /^Could not reach the server \((.+)\)$/,
+    ([, reason]) => t("reasons.unreachable.one", { reason: translateReason(reason) }),
+  ],
+  [
+    /^Could not reach any of the (\d+) servers for "(.*)" \((.+)\)$/s,
+    ([, count, name, reasons]) =>
+      t("reasons.unreachable.mirrors", {
+        count: Number(count),
+        name: isolate(name),
+        reasons: new Intl.ListFormat(getFormatLocale(), { type: "unit" }).format(
+          reasons.split(", ").map(translateReason),
+        ),
+      }),
+  ],
 ];
 
 /**
