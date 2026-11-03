@@ -27,7 +27,7 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.13", features = ["stream", "socks", "cookies"] }
 url = "2"
 regex = "1"
-fancy-regex = "0.19"
+fancy-regex = "0.20"
 csv = "1"
 futures = "0.3"
 thiserror = "2"
@@ -53,7 +53,7 @@ tauri-plugin-window-state = "2"
 # Rust Chromecast crate that doesn't go through rustls — rustls's webpki parser
 # rejects Chromecast's self-signed certs with UnsupportedCertVersion before any
 # verifier runs, which makes rust_cast 0.19+ unusable against real devices.
-cast-sender = "0.3"
+cast-sender = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 mdns-sd = "0.21"
 local-ip-address = "0.6"
