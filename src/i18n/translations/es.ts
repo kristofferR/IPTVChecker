@@ -267,16 +267,16 @@ export default {
     },
     providerDown: {
       allFailed: {
-        one: "Falló el único stream de {account} con {cause}. Puede que el proveedor esté caído; Corregir orden conserva sus streams.",
-        many: "Los {count} streams de {account} fallaron con {cause}. Puede que el proveedor esté caído; Corregir orden conserva sus streams.",
+        one: "Falló el único stream de {account} con {cause}. Puede que el proveedor o la URL de su servidor estén caídos; Corregir orden conserva sus streams.",
+        many: "Los {count} streams de {account} fallaron con {cause}. Puede que el proveedor o la URL de su servidor estén caídos; Corregir orden conserva sus streams.",
         other:
-          "Los {count} streams de {account} fallaron con {cause}. Puede que el proveedor esté caído; Corregir orden conserva sus streams.",
+          "Los {count} streams de {account} fallaron con {cause}. Puede que el proveedor o la URL de su servidor estén caídos; Corregir orden conserva sus streams.",
       },
       someFailed: {
-        one: "{failed} de {count} stream de {account} falló con {cause}. Puede que el proveedor esté caído; Corregir orden conserva sus streams.",
-        many: "{failed} de {count} streams de {account} fallaron con {cause}. Puede que el proveedor esté caído; Corregir orden conserva sus streams.",
+        one: "{failed} de {count} stream de {account} falló con {cause}. Puede que el proveedor o la URL de su servidor estén caídos; Corregir orden conserva sus streams.",
+        many: "{failed} de {count} streams de {account} fallaron con {cause}. Puede que el proveedor o la URL de su servidor estén caídos; Corregir orden conserva sus streams.",
         other:
-          "{failed} de {count} streams de {account} fallaron con {cause}. Puede que el proveedor esté caído; Corregir orden conserva sus streams.",
+          "{failed} de {count} streams de {account} fallaron con {cause}. Puede que el proveedor o la URL de su servidor estén caídos; Corregir orden conserva sus streams.",
       },
       causes: {
         timeouts: "tiempos de espera agotados",
@@ -285,6 +285,12 @@ export default {
       refreshing:
         "Dispatcharr lo está actualizando; recarga cuando termine para obtener las nuevas URL de los streams.",
       refreshFailed: "Error al actualizar: {error}",
+      testServers: "Probar servidores",
+      confirmSwitch:
+        "¿Cambiar {account} a {server} en Dispatcharr? Después, Dispatcharr actualiza la cuenta para regenerar las URL de sus streams. Los canales conservan sus streams.",
+      switched:
+        "Cambiado a {server}. Dispatcharr está actualizando la cuenta; recarga cuando termine para obtener las nuevas URL de los streams.",
+      switchFailed: "Error al cambiar de servidor: {error}",
       refresh: "Actualizar en Dispatcharr",
       reload: "Recargar",
       rescan: "Reescanear",
@@ -1280,6 +1286,8 @@ export default {
       noImage: "Sin imagen",
       selectHint:
         "Haz clic en un servidor para seleccionarlo y volver al formulario de inicio de sesión.",
+      current: "Actual",
+      switchHint: "Haz clic en un servidor para cambiar {account} a él en Dispatcharr.",
     },
   },
   saved: {

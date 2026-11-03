@@ -1,8 +1,9 @@
 //! Dispatcharr write-back commands: push probe stats into each stream's
-//! `stream_stats`, rewrite a channel's ordered stream list, and find provider
-//! streams to link. Batches report per-item outcomes; one failure never
+//! `stream_stats`, rewrite a channel's ordered stream list, find provider
+//! streams to link, and move an Xtream Codes account to another server. Batches report per-item outcomes; one failure never
 //! aborts the rest.
 
+use crate::commands::server_test::{XtreamServerTestReport, test_xtream_servers};
 use crate::engine::dispatcharr::{
     CandidateMatch, DispatcharrAuth, DispatcharrChannel, DispatcharrClient,
     build_dispatcharr_source_key, build_m3u, dispatcharr_ids_from_extinf, get_session, keyed_lock,
@@ -351,6 +352,56 @@ pub async fn dispatcharr_refresh_account(
 ) -> Result<(), AppError> {
     let client = resolve_session(&app, &source_identity, &connection).await?;
     client.refresh_m3u_account(account_id).await
+}
+
+/// The server an Xtream Codes account streams from, or None for an account
+/// whose server can't be switched.
+#[tauri::command]
+pub async fn dispatcharr_account_server(
+    app: tauri::AppHandle,
+    source_identity: String,
+    connection: String,
+    account_id: i64,
+) -> Result<Option<String>, AppError> {
+    let client = resolve_session(&app, &source_identity, &connection).await?;
+    let login = client.fetch_account_login(account_id).await?;
+    Ok(login.xtream_server().map(ToString::to_string))
+}
+
+/// Run the server test with an Xtream Codes account's own login.
+#[tauri::command]
+pub async fn dispatcharr_test_account_servers(
+    app: tauri::AppHandle,
+    source_identity: String,
+    connection: String,
+    account_id: i64,
+    servers: Vec<String>,
+) -> Result<XtreamServerTestReport, AppError> {
+    let client = resolve_session(&app, &source_identity, &connection).await?;
+    let login = client.fetch_account_login(account_id).await?;
+    let (username, password) = login.xtream_credentials()?;
+    test_xtream_servers(app, servers, username.to_string(), password.to_string()).await
+}
+
+/// Switch an Xtream Codes account to another server and refresh it. Refused
+/// when the account no longer uses `expected`. Returns the server in use.
+#[tauri::command]
+pub async fn dispatcharr_set_account_server(
+    app: tauri::AppHandle,
+    source_identity: String,
+    connection: String,
+    account_id: i64,
+    server: String,
+    expected: String,
+) -> Result<String, AppError> {
+    let client = resolve_session(&app, &source_identity, &connection).await?;
+    // Check and write as one step per account, across windows.
+    let _writing = keyed_lock(format!("account:{connection}#{account_id}"))
+        .lock_owned()
+        .await;
+    client
+        .switch_account_server(account_id, &server, &expected)
+        .await
 }
 
 #[cfg(test)]

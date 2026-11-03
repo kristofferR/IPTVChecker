@@ -255,11 +255,11 @@ export default {
     providerDown: {
       allFailed: {
         other:
-          "Tất cả {count} luồng từ {account} đều thất bại do {cause}. Nhà cung cấp có thể đang gặp sự cố; Sửa thứ tự sẽ giữ lại các luồng của họ.",
+          "Tất cả {count} luồng từ {account} đều thất bại do {cause}. Nhà cung cấp hoặc URL máy chủ của họ có thể đang gặp sự cố; Sửa thứ tự sẽ giữ lại các luồng của họ.",
       },
       someFailed: {
         other:
-          "{failed}/{count} luồng từ {account} thất bại do {cause}. Nhà cung cấp có thể đang gặp sự cố; Sửa thứ tự sẽ giữ lại các luồng của họ.",
+          "{failed}/{count} luồng từ {account} thất bại do {cause}. Nhà cung cấp hoặc URL máy chủ của họ có thể đang gặp sự cố; Sửa thứ tự sẽ giữ lại các luồng của họ.",
       },
       causes: {
         timeouts: "hết thời gian chờ",
@@ -267,6 +267,12 @@ export default {
       },
       refreshing: "Dispatcharr đang làm mới; hãy tải lại khi xong để nhận URL luồng mới.",
       refreshFailed: "Làm mới thất bại: {error}",
+      testServers: "Kiểm tra máy chủ",
+      confirmSwitch:
+        "Chuyển {account} sang {server} trong Dispatcharr? Sau đó Dispatcharr sẽ làm mới tài khoản để tạo lại URL luồng. Các kênh vẫn giữ luồng của chúng.",
+      switched:
+        "Đã chuyển sang {server}. Dispatcharr đang làm mới tài khoản; hãy tải lại khi xong để nhận URL luồng mới.",
+      switchFailed: "Chuyển máy chủ thất bại: {error}",
       refresh: "Làm mới trong Dispatcharr",
       reload: "Tải lại",
       rescan: "Quét lại",
@@ -1101,6 +1107,8 @@ export default {
       channelScreenshotAlt: "Kênh {id}",
       noImage: "Không có ảnh",
       selectHint: "Nhấp vào một máy chủ để chọn và quay lại biểu mẫu đăng nhập.",
+      current: "Hiện tại",
+      switchHint: "Nhấp vào một máy chủ để chuyển {account} sang máy chủ đó trong Dispatcharr.",
     },
   },
   saved: {

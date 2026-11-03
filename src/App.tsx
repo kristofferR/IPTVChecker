@@ -63,6 +63,7 @@ import {
   openChannelInPlayer,
   quickCheckChannel,
   readScreenshot,
+  testXtreamServers,
 } from "./lib/tauri";
 import type {
   AppSettings,
@@ -78,11 +79,7 @@ const KeyboardShortcutsDialog = lazy(() => import("./components/KeyboardShortcut
 const LanguagePromptDialog = lazy(() => import("./components/LanguagePromptDialog"));
 const HistoryPanel = lazy(() => import("./components/HistoryPanel"));
 const OpenSourceDialog = lazy(() => import("./components/OpenSourceDialog"));
-const XtreamServerTestDialog = lazy(() =>
-  import("./components/OpenSourceDialog").then((module) => ({
-    default: module.ServerTestModal,
-  })),
-);
+const ServerTestModal = lazy(() => import("./components/ServerTestModal"));
 const SavedPlaylistsDialog = lazy(() => import("./components/SavedPlaylistsDialog"));
 const SavedPlaylistEditorDialog = lazy(() => import("./components/SavedPlaylistEditorDialog"));
 
@@ -2059,13 +2056,21 @@ export default function App() {
 
       {savedXtreamTestEntry?.kind === "xtream" && (
         <Suspense fallback={null}>
-          <XtreamServerTestDialog
+          <ServerTestModal
+            eyebrow="Xtream"
             initialServersText={savedXtreamTestEntry.servers.join("\n")}
-            username={savedXtreamTestEntry.username}
-            password={savedXtreamTestEntry.password ?? ""}
-            onSelectServer={(server) =>
-              void handlePreferSavedXtreamServer(savedXtreamTestEntry, server)
+            currentServer={savedXtreamTestEntry.preferred_server}
+            runTest={(servers) =>
+              testXtreamServers(
+                servers,
+                savedXtreamTestEntry.username,
+                savedXtreamTestEntry.password ?? "",
+              )
             }
+            onSelectServer={(server) => {
+              setSavedXtreamTestEntry(null);
+              void handlePreferSavedXtreamServer(savedXtreamTestEntry, server);
+            }}
             onClose={() => setSavedXtreamTestEntry(null)}
           />
         </Suspense>

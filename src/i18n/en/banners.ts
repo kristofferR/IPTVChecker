@@ -17,14 +17,14 @@ export default {
   },
   providerDown: {
     allFailed: {
-      one: "All {count} stream from {account} failed with {cause}. The provider may be down; Fix order keeps its streams.",
+      one: "All {count} stream from {account} failed with {cause}. The provider or its server URL may be down; Fix order keeps its streams.",
       other:
-        "All {count} streams from {account} failed with {cause}. The provider may be down; Fix order keeps its streams.",
+        "All {count} streams from {account} failed with {cause}. The provider or its server URL may be down; Fix order keeps its streams.",
     },
     someFailed: {
-      one: "{failed} of {count} stream from {account} failed with {cause}. The provider may be down; Fix order keeps its streams.",
+      one: "{failed} of {count} stream from {account} failed with {cause}. The provider or its server URL may be down; Fix order keeps its streams.",
       other:
-        "{failed} of {count} streams from {account} failed with {cause}. The provider may be down; Fix order keeps its streams.",
+        "{failed} of {count} streams from {account} failed with {cause}. The provider or its server URL may be down; Fix order keeps its streams.",
     },
     causes: {
       timeouts: "timeouts",
@@ -32,6 +32,12 @@ export default {
     },
     refreshing: "Dispatcharr is refreshing it; reload once it finishes to get the new stream URLs.",
     refreshFailed: "Refresh failed: {error}",
+    testServers: "Test servers",
+    confirmSwitch:
+      "Switch {account} to {server} in Dispatcharr? Dispatcharr then refreshes the account to rebuild its stream URLs. Channels keep their streams.",
+    switched:
+      "Switched to {server}. Dispatcharr is refreshing the account; reload once it finishes to get the new stream URLs.",
+    switchFailed: "Switching servers failed: {error}",
     refresh: "Refresh in Dispatcharr",
     reload: "Reload",
     rescan: "Rescan",

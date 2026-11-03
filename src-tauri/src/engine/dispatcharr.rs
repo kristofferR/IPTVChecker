@@ -12,6 +12,7 @@ use crate::engine::parser::{escape_extinf_value, flatten_extinf_title, parse_ext
 use crate::engine::remote_cache::{
     PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT, PLAYLIST_DOWNLOAD_USER_AGENT, parse_http_url,
 };
+use crate::engine::xtream::normalize_xtream_server;
 use crate::error::AppError;
 use crate::models::channel::ChannelResult;
 use futures::stream::{self, StreamExt};
@@ -372,6 +373,54 @@ impl DispatcharrM3uAccount {
                 .map(str::trim)
                 .filter(|zone| !zone.is_empty())
         })
+    }
+}
+
+/// An M3U account's provider login. Dispatcharr includes the password only
+/// for admins. Not `Debug`, so the password can't end up in a log.
+#[derive(Clone, Default, Deserialize)]
+#[serde(default)]
+pub(crate) struct DispatcharrAccountLogin {
+    pub server_url: Option<String>,
+    /// "XC" for Xtream Codes; "STD" for a plain M3U URL or file.
+    pub account_type: String,
+    pub username: Option<String>,
+    pub password: Option<String>,
+}
+
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+impl DispatcharrAccountLogin {
+    /// The server of an Xtream Codes account, the only kind whose server can
+    /// be switched safely: Dispatcharr keys their streams by provider stream
+    /// ID, so a refresh rewrites the URLs in place. A plain M3U account's
+    /// streams may be keyed by URL and would come back as new streams,
+    /// unlinked from their channels.
+    pub(crate) fn xtream_server(&self) -> Option<&str> {
+        if self.account_type != "XC" {
+            return None;
+        }
+        non_empty(self.server_url.as_deref())
+    }
+
+    /// Username and password to test the account's servers with.
+    pub(crate) fn xtream_credentials(&self) -> Result<(&str, &str), AppError> {
+        if self.xtream_server().is_none() {
+            return Err(AppError::Validation(
+                "Only Xtream Codes accounts can switch servers".to_string(),
+            ));
+        }
+        let username = non_empty(self.username.as_deref())
+            .ok_or_else(|| AppError::Validation("This account has no username".to_string()))?;
+        let password = non_empty(self.password.as_deref()).ok_or_else(|| {
+            AppError::Validation(
+                "Dispatcharr shares account passwords only with admins. Connect with an admin account to test servers."
+                    .to_string(),
+            )
+        })?;
+        Ok((username, password))
     }
 }
 
@@ -812,6 +861,77 @@ impl DispatcharrClient {
         )
         .await?;
         Ok(())
+    }
+
+    /// One M3U account's provider login, read fresh.
+    pub(crate) async fn fetch_account_login(
+        &self,
+        account_id: i64,
+    ) -> Result<DispatcharrAccountLogin, AppError> {
+        self.json(
+            Method::GET,
+            &format!("/api/m3u/accounts/{}/", account_id),
+            None,
+        )
+        .await
+    }
+
+    /// Point an M3U account at another provider server. Returns the server
+    /// Dispatcharr stored.
+    async fn set_account_server(
+        &self,
+        account_id: i64,
+        server_url: &str,
+    ) -> Result<Option<String>, AppError> {
+        let account: DispatcharrAccountLogin = self
+            .json(
+                Method::PATCH,
+                &format!("/api/m3u/accounts/{}/", account_id),
+                Some(&json!({ "server_url": server_url })),
+            )
+            .await?;
+        Ok(account.server_url)
+    }
+
+    /// Move an Xtream Codes account to `server` and have Dispatcharr refresh
+    /// it, which rewrites its stream URLs in place. Refused when the account
+    /// no longer uses `expected`. Returns the server now in use.
+    pub(crate) async fn switch_account_server(
+        &self,
+        account_id: i64,
+        server: &str,
+        expected: &str,
+    ) -> Result<String, AppError> {
+        let target = normalize_xtream_server(server)?;
+        let current = self.fetch_account_login(account_id).await?;
+        let Some(in_use) = current.xtream_server() else {
+            return Err(AppError::Validation(
+                "Only Xtream Codes accounts can switch servers".to_string(),
+            ));
+        };
+        if in_use != expected.trim() {
+            return Err(AppError::Other(
+                "Changed in Dispatcharr. Reload first.".to_string(),
+            ));
+        }
+        let wanted = target.as_str().trim_end_matches('/').to_string();
+        let stored = self.set_account_server(account_id, &wanted).await?;
+        if non_empty(stored.as_deref()).and_then(|stored| normalize_xtream_server(stored).ok())
+            != Some(target)
+        {
+            return Err(AppError::Other(
+                "Dispatcharr stored a different server".to_string(),
+            ));
+        }
+        self.refresh_m3u_account(account_id)
+            .await
+            .map_err(|error| {
+                AppError::Other(format!(
+                    "Switched the server, but Dispatcharr did not start a refresh: {}",
+                    error
+                ))
+            })?;
+        Ok(wanted)
     }
 
     pub(crate) async fn fetch_streams_by_ids(
@@ -1921,6 +2041,114 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(viewers, HashMap::from([(7, 2)]));
+    }
+
+    /// Serves account 7 as `account` and records every request.
+    async fn account_server(account: Value) -> (String, Arc<Mutex<Vec<(String, String, String)>>>) {
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&requests);
+        let account = Mutex::new(account);
+        let base = spawn_server(Arc::new(move |req: &Request| {
+            seen.lock()
+                .unwrap()
+                .push((req.method.clone(), req.path.clone(), req.body.clone()));
+            let mut account = account.lock().unwrap();
+            match (req.method.as_str(), req.path.as_str()) {
+                ("GET", "/api/m3u/accounts/7/") => (200, account.to_string()),
+                ("PATCH", "/api/m3u/accounts/7/") => {
+                    let body: Value = serde_json::from_str(&req.body).unwrap();
+                    account["server_url"] = body["server_url"].clone();
+                    (200, account.to_string())
+                }
+                ("POST", "/api/m3u/refresh/7/") => (202, r#"{"success":true}"#.into()),
+                _ => (404, "{}".into()),
+            }
+        }))
+        .await;
+        (base, requests)
+    }
+
+    #[tokio::test]
+    async fn switching_an_account_server_writes_it_and_refreshes() {
+        let (base, requests) = account_server(json!({
+            "id": 7, "account_type": "XC", "server_url": "http://old.example:8080",
+            "username": "u", "password": "p"
+        }))
+        .await;
+        let client = client(&base, DispatcharrAuth::ApiKey("k".into()));
+        let stored = client
+            .switch_account_server(
+                7,
+                " http://new.example:8080/get.php ",
+                "http://old.example:8080",
+            )
+            .await
+            .unwrap();
+        assert_eq!(stored, "http://new.example:8080");
+        let requests = requests.lock().unwrap();
+        let calls = requests
+            .iter()
+            .map(|(method, path, _)| format!("{method} {path}"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            calls,
+            [
+                "GET /api/m3u/accounts/7/",
+                "PATCH /api/m3u/accounts/7/",
+                "POST /api/m3u/refresh/7/"
+            ]
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&requests[1].2).unwrap(),
+            json!({ "server_url": "http://new.example:8080" })
+        );
+    }
+
+    #[tokio::test]
+    async fn switching_refuses_a_server_changed_meanwhile_or_a_plain_m3u_account() {
+        let (base, requests) = account_server(json!({
+            "id": 7, "account_type": "XC", "server_url": "http://other.example"
+        }))
+        .await;
+        let error = client(&base, DispatcharrAuth::ApiKey("k".into()))
+            .switch_account_server(7, "http://new.example", "http://old.example")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("Reload first"));
+        assert_eq!(requests.lock().unwrap().len(), 1, "nothing is written");
+
+        let (base, _) = account_server(json!({
+            "id": 7, "account_type": "STD", "server_url": "http://old.example/get.php?x=1"
+        }))
+        .await;
+        let error = client(&base, DispatcharrAuth::ApiKey("k".into()))
+            .switch_account_server(7, "http://new.example", "http://old.example/get.php?x=1")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("Xtream Codes"));
+    }
+
+    #[test]
+    fn server_test_credentials_need_an_xtream_login_with_password() {
+        let login = |account_type: &str, password: Option<&str>| DispatcharrAccountLogin {
+            server_url: Some("http://x.example".into()),
+            account_type: account_type.into(),
+            username: Some("u".into()),
+            password: password.map(Into::into),
+        };
+        assert_eq!(
+            login("XC", Some("p")).xtream_credentials().unwrap(),
+            ("u", "p")
+        );
+        // Non-admins get no password.
+        assert!(
+            login("XC", None)
+                .xtream_credentials()
+                .unwrap_err()
+                .to_string()
+                .contains("admin")
+        );
+        assert!(login("STD", Some("p")).xtream_credentials().is_err());
     }
 
     #[tokio::test]
