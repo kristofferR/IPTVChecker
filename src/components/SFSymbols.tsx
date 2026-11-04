@@ -37,6 +37,7 @@ interface SFIconDef {
 }
 
 function makeSFIcon(icon: SFIconDef) {
+  // biome-ignore lint/correctness/noComponentHookFactories: called only at module level to build the exported icons, so each component is created once.
   return function SFIconComponent(props: IconProps) {
     return (
       <svg xmlns="http://www.w3.org/2000/svg" viewBox={icon.viewBox} fill="currentColor" {...props}>

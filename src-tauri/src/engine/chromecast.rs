@@ -275,7 +275,11 @@ async fn run_session_worker(
 ) {
     let receiver = Receiver::new();
 
-    if let Err(err) = receiver.connect(&device.host).await {
+    let connected = match device.host.parse() {
+        Ok(addr) => receiver.connect(addr).await.map_err(|err| err.to_string()),
+        Err(err) => Err(format!("invalid device address {}: {err}", device.host)),
+    };
+    if let Err(err) = connected {
         let _ = ready_tx.send(Err(AppError::Other(format!(
             "Cast connect handshake failed: {err}"
         ))));
