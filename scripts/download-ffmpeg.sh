@@ -103,26 +103,6 @@ download_macos_riedl() {
     done
 }
 
-download_macos_evermeet() {
-    for name in ffmpeg ffprobe; do
-        local output="${BIN_DIR}/${name}-${TARGET}${EXT}"
-        if ! should_replace_existing_binary "${name}" "${output}"; then
-            echo "  ${name}: already exists, skipping (delete to re-download)"
-            continue
-        fi
-
-        local url="https://evermeet.cx/ffmpeg/getrelease/${name}/zip"
-        echo "  ${name}: downloading from ${url}"
-        local tmpzip
-        tmpzip="$(mktemp)"
-        curl -fSL "${url}" -o "${tmpzip}"
-        unzip -o -j "${tmpzip}" "${name}" -d "${BIN_DIR}/"
-        mv "${BIN_DIR}/${name}" "${output}"
-        chmod +x "${output}"
-        rm -f "${tmpzip}"
-    done
-}
-
 download_btbn() {
     local platform="$1"
     local base="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest"
@@ -178,7 +158,7 @@ case "${TARGET}" in
         download_macos_riedl "arm64"
         ;;
     x86_64-apple-darwin)
-        download_macos_evermeet
+        download_macos_riedl "amd64"
         ;;
     x86_64-unknown-linux-gnu)
         download_btbn "linux64"
