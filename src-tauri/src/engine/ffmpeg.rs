@@ -201,12 +201,34 @@ fn resolve_binary_from_path(name: &str, ext: &str) -> Option<String> {
     None
 }
 
+/// System CA bundles, most common first. The static macOS ffmpeg looks for
+/// roots under its build machine's OpenSSL path, so every HTTPS input failed
+/// certificate verification. The bundle must come from `SSL_CERT_FILE`: HLS
+/// opens variant playlists and segments without `-ca_file`.
+#[cfg(unix)]
+const SYSTEM_CA_BUNDLES: &[&str] = &[
+    "/etc/ssl/cert.pem",                  // macOS, Arch, Alpine
+    "/etc/ssl/certs/ca-certificates.crt", // Debian, Ubuntu
+    "/etc/pki/tls/certs/ca-bundle.crt",   // Fedora, RHEL
+    "/etc/ssl/ca-bundle.pem",             // openSUSE
+];
+
+/// Prepares an ffmpeg/ffprobe spawn: no console window on Windows, and a
+/// system CA bundle on Unix unless the user set `SSL_CERT_FILE` themselves.
 pub(crate) fn configure_background_process(_command: &mut tokio::process::Command) {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
 
         _command.as_std_mut().creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(unix)]
+    if std::env::var_os("SSL_CERT_FILE").is_none()
+        && let Some(bundle) = SYSTEM_CA_BUNDLES
+            .iter()
+            .find(|path| Path::new(path).is_file())
+    {
+        _command.env("SSL_CERT_FILE", bundle);
     }
 }
 
