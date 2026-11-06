@@ -3119,7 +3119,7 @@ async fn execute_scan_run(
                     .latency_ms
                     .map(|ms| format!("{ms} ms"))
                     .unwrap_or_else(|| "—".to_string()),
-                channel.url,
+                stream_proxy::redact_url(&channel.url),
             );
 
             shared.channel_log.channel_index = channel.index;
