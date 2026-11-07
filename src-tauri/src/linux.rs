@@ -60,6 +60,22 @@ fn is_tiling_desktop(value: &str) -> bool {
         .any(|segment| TILERS.contains(&segment.as_str()))
 }
 
+/// NVIDIA's proprietary driver gained Wayland explicit sync in 555; before
+/// that, WebKit's DMA-BUF renderer could paint blank, black or garbled frames.
+/// `version` is `/sys/module/nvidia/version`. It is `None` for every other GPU
+/// vendor (AMD, Intel, nouveau), which never counts as old. Only an NVIDIA
+/// version that is present but unparsable is treated as old.
+pub fn nvidia_driver_predates_explicit_sync(version: Option<&str>) -> bool {
+    version.is_some_and(|version| {
+        version
+            .trim()
+            .split('.')
+            .next()
+            .and_then(|major| major.parse::<u32>().ok())
+            .is_none_or(|major| major < 555)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,6 +94,20 @@ mod tests {
         assert!(!is_tiling_desktop(""));
         // Substrings must not match — only whole identifiers.
         assert!(!is_tiling_desktop("swayed"));
+    }
+
+    #[test]
+    fn only_nvidia_drivers_before_explicit_sync_count_as_old() {
+        for old in ["550.144.03", "470.256.02\n", "", "garbage"] {
+            assert!(nvidia_driver_predates_explicit_sync(Some(old)), "{old:?}");
+        }
+        for current in ["555.42.02", "615.78.08\n"] {
+            assert!(
+                !nvidia_driver_predates_explicit_sync(Some(current)),
+                "{current:?}"
+            );
+        }
+        assert!(!nvidia_driver_predates_explicit_sync(None));
     }
 
     #[test]
