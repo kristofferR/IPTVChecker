@@ -563,12 +563,20 @@ fn emit_open_paths_to_focused_window(app: &tauri::AppHandle, paths: &[String]) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[cfg(not(fuzzing))]
 pub fn run() {
-    // Workaround for webkit2gtk DMABUF rendering issues on Wayland (common with
-    // NVIDIA and some Intel GPUs). Must be set before any GTK/webkit2gtk init.
+    // Without WebKit's DMA-BUF renderer, every frame (video included) is
+    // painted on the CPU and copied into shared memory. Keep it on, except on
+    // Wayland with an NVIDIA driver that predates explicit sync, where it can
+    // paint blank frames. An explicit WEBKIT_DISABLE_DMABUF_RENDERER wins.
+    // Must be set before any GTK/webkit2gtk init.
     #[cfg(target_os = "linux")]
     {
-        if std::env::var("WAYLAND_DISPLAY").is_ok()
-            && std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").is_err()
+        if std::env::var_os("WAYLAND_DISPLAY").is_some()
+            && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()
+            && linux::nvidia_driver_predates_explicit_sync(
+                std::fs::read_to_string("/sys/module/nvidia/version")
+                    .ok()
+                    .as_deref(),
+            )
         {
             // SAFETY: `main` calls `run` first, before any other thread exists.
             unsafe { std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1") };
