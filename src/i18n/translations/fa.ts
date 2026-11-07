@@ -931,6 +931,7 @@ export default {
         bitrate: "نرخ بیت ویدیو",
         latency: "تأخیر کم",
         audioBitrate: "نرخ بیت صدا",
+        codec: "کدک ویدیو",
       },
       deadStreams: {
         label: "استریم‌های قطع",

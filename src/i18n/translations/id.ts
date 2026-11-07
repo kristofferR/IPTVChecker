@@ -902,6 +902,7 @@ export default {
         bitrate: "Bitrate video",
         latency: "Latensi rendah",
         audioBitrate: "Bitrate audio",
+        codec: "Codec video",
       },
       deadStreams: {
         label: "Stream mati",

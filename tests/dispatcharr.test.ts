@@ -92,6 +92,7 @@ function channelRows(
     kbps?: number;
     latency?: number;
     audioKbps?: number;
+    codec?: string;
     catchup?: boolean;
     lowBitrate?: boolean;
     frozen?: boolean;
@@ -110,6 +111,7 @@ function channelRows(
         video_bitrate: stream.kbps == null ? null : `${stream.kbps} kbps`,
         latency_ms: stream.latency ?? null,
         audio_bitrate: stream.audioKbps == null ? null : `${stream.audioKbps}`,
+        codec: stream.codec ?? null,
         catchup: stream.catchup ? "xc" : null,
         low_bitrate: stream.lowBitrate ?? false,
         frozen_video: stream.frozen ?? false,
@@ -393,6 +395,7 @@ describe("dispatcharr helpers", () => {
       "resolution",
       "frame_rate",
       "audio_bitrate",
+      "codec",
     ]);
     expect(ids(proposeFixOrder(channel, bitrateFirst))).toEqual([3, 4, 2, 1]);
     // Defaults: resolution first, dead stream unlinked.
@@ -461,6 +464,24 @@ describe("dispatcharr helpers", () => {
     });
     // 95 and 96 kbps tie, so latency decides; no audio bitrate ranks last.
     expect(ids(proposeFixOrder(channel, audioFirst))).toEqual([2, 3, 1, 4]);
+  });
+
+  it("ranks newer video codecs first, unknown codecs last", () => {
+    const results = channelRows(10, "News One", [
+      { id: 1, height: 1080, codec: "H264" },
+      { id: 2, height: 1080 },
+      { id: 3, height: 1080, codec: "MPEG2" },
+      { id: 4, height: 1080, codec: "hev1.1.6.L120" },
+      { id: 5, height: 1080, codec: "AV1" },
+    ]);
+    const channel = getDispatcharrView(results, {})?.byChannelId.get(10);
+    if (!channel) throw new Error("missing channel");
+    const codecFirst = fixPreferencesFrom({
+      dispatcharr_rank_order: ["codec"],
+      dispatcharr_dead_streams: "unlink",
+      dispatcharr_low_quality_as_dead: false,
+    });
+    expect(ids(proposeFixOrder(channel, codecFirst))).toEqual([5, 4, 1, 3, 2]);
   });
 
   it("finds catch-up channels by any stream, not just the primary", () => {

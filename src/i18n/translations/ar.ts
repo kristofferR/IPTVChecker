@@ -1049,6 +1049,7 @@ export default {
         bitrate: "معدل بت الفيديو",
         latency: "زمن استجابة منخفض",
         audioBitrate: "معدل بت الصوت",
+        codec: "ترميز الفيديو",
       },
       deadStreams: {
         label: "البثوث التي لا تعمل",

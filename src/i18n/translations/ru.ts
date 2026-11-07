@@ -1014,6 +1014,7 @@ export default {
         bitrate: "Битрейт видео",
         latency: "Низкая задержка",
         audioBitrate: "Битрейт аудио",
+        codec: "Видеокодек",
       },
       deadStreams: {
         label: "Нерабочие потоки",

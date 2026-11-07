@@ -224,6 +224,7 @@ export default {
       bitrate: "Video bitrate",
       latency: "Low latency",
       audioBitrate: "Audio bitrate",
+      codec: "Video codec",
     },
     deadStreams: {
       label: "Dead streams",
