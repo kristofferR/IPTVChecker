@@ -336,7 +336,8 @@ function CastMenuInline({ chromecast, castRequest, onCastStart }: Omit<CastMenuP
                   {t("cast.refresh")}
                 </button>
               </div>
-              <div className="border-t border-border-subtle">
+              {/* The sidebar header doesn't scroll, so the list must scroll on its own. */}
+              <div className="max-h-[min(16rem,35vh)] overflow-y-auto border-t border-border-subtle">
                 {chromecast.devices.length === 0 ? (
                   <div className="px-3 py-3 text-center text-[11px] text-text-tertiary">
                     {chromecast.discovering ? t("cast.searching") : t("cast.noChromecastDevices")}
