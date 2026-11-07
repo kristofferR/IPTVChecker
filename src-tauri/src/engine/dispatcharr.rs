@@ -250,9 +250,9 @@ impl DispatcharrChannel {
         self.effective_channel_group_id.or(self.channel_group_id)
     }
 
-    /// The channel's ID in Dispatcharr's `/output/epg`, which by default
-    /// (`tvg_id_source=channel_number`) keys channels by number, falling back
-    /// to the channel ID.
+    /// The channel's ID in Dispatcharr's `/output/epg`, which with
+    /// `tvg_id_source=channel_number` (requested in `build_m3u`) keys channels
+    /// by number, falling back to the channel ID.
     fn guide_id(&self) -> String {
         self.number()
             .map(format_channel_number)
@@ -1458,6 +1458,11 @@ fn format_channel_number(number: f64) -> String {
     }
 }
 
+/// Days back the guide view can show (`MAX_GUIDE_DEPTH_DAYS` in GuideView).
+const GUIDE_MAX_PREV_DAYS: u32 = 14;
+/// Days ahead requested from Dispatcharr's guide export.
+const GUIDE_DAYS: u32 = 2;
+
 /// Build an M3U with one entry per channel x stream, in channel-number order
 /// and failover order within each channel.
 pub(crate) fn build_m3u(
@@ -1477,8 +1482,9 @@ pub(crate) fn build_m3u(
     });
 
     // Dispatcharr's guide leaves out ended programmes unless asked for them
-    // (`prev_days`, capped by the server). Ask for the deepest catch-up archive,
-    // and at least a day so earlier programmes still show without catch-up.
+    // (`prev_days`, capped by the server). Ask for the deepest catch-up archive
+    // the guide view can show, and at least a day so earlier programmes still
+    // show without catch-up.
     let prev_days = ordered
         .iter()
         .flat_map(|channel| &channel.streams)
@@ -1487,10 +1493,16 @@ pub(crate) fn build_m3u(
         .map(|stream| stream.catchup_days)
         .max()
         .unwrap_or(0)
-        .max(1);
+        .clamp(1, GUIDE_MAX_PREV_DAYS);
+    // By default it also sends every stored future programme, while the guide
+    // view ends with today; two days cover that in any timezone. The ID source
+    // is Dispatcharr's default, pinned because `guide_id` depends on it.
     let mut m3u = format!(
         "#EXTM3U x-tvg-url=\"{}\"\n",
-        escape_extinf_value(&format!("{}/output/epg?prev_days={}", base, prev_days))
+        escape_extinf_value(&format!(
+            "{}/output/epg?prev_days={}&days={}&tvg_id_source=channel_number",
+            base, prev_days, GUIDE_DAYS
+        ))
     );
     for channel in ordered {
         let count = channel.streams.len();
@@ -2386,7 +2398,7 @@ mod tests {
         let base = Url::parse("http://dvr.example:9191/").unwrap();
         let m3u = build_m3u(&base, &channels, &streams, &HashMap::new(), &accounts);
         // The guide reaches back as far as the deepest archive.
-        assert!(m3u.contains("/output/epg?prev_days=7\""));
+        assert!(m3u.contains("/output/epg?prev_days=7&"));
         let preview = crate::engine::parser::parse_m3u(m3u.as_bytes(), "t", &None, &None).unwrap();
 
         let archived = &preview.channels[0];
@@ -2417,8 +2429,11 @@ mod tests {
         )]);
         let base = Url::parse("http://dvr.example:9191/").unwrap();
         let m3u = build_m3u(&base, &channels, &streams, &groups, &accounts);
-        assert!(
-            m3u.starts_with("#EXTM3U x-tvg-url=\"http://dvr.example:9191/output/epg?prev_days=1\"")
+        assert_eq!(
+            crate::engine::parser::parse_m3u(m3u.as_bytes(), "t", &None, &None)
+                .unwrap()
+                .epg_sources,
+            ["http://dvr.example:9191/output/epg?prev_days=1&days=2&tvg_id_source=channel_number"]
         );
 
         let dir = std::env::temp_dir().join(format!("dispatcharr-m3u-{}", std::process::id()));

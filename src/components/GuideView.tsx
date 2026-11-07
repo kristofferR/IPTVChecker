@@ -54,6 +54,7 @@ const ROW_HEIGHT_PX = 32;
 const AXIS_HEIGHT_PX = 22;
 const CHANNEL_COL_PX = 180;
 const PX_PER_HOUR = 240;
+// Dispatcharr guide downloads stop here too (`GUIDE_MAX_PREV_DAYS` in dispatcharr.rs).
 const MAX_GUIDE_DEPTH_DAYS = 14;
 const GUIDE_CLOCK_INTERVAL_MS = 30_000;
 /** Programmes outside the viewport by more than this are not rendered. */
