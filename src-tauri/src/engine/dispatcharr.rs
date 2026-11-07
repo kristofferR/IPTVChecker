@@ -1460,8 +1460,6 @@ fn format_channel_number(number: f64) -> String {
 
 /// Days back the guide view can show (`MAX_GUIDE_DEPTH_DAYS` in GuideView).
 const GUIDE_MAX_PREV_DAYS: u32 = 14;
-/// Days ahead requested from Dispatcharr's guide export.
-const GUIDE_DAYS: u32 = 2;
 
 /// Build an M3U with one entry per channel x stream, in channel-number order
 /// and failover order within each channel.
@@ -1494,14 +1492,13 @@ pub(crate) fn build_m3u(
         .max()
         .unwrap_or(0)
         .clamp(1, GUIDE_MAX_PREV_DAYS);
-    // By default it also sends every stored future programme, while the guide
-    // view ends with today; two days cover that in any timezone. The ID source
-    // is Dispatcharr's default, pinned because `guide_id` depends on it.
+    // The ID source is Dispatcharr's default, pinned because `guide_id`
+    // depends on it.
     let mut m3u = format!(
         "#EXTM3U x-tvg-url=\"{}\"\n",
         escape_extinf_value(&format!(
-            "{}/output/epg?prev_days={}&days={}&tvg_id_source=channel_number",
-            base, prev_days, GUIDE_DAYS
+            "{}/output/epg?prev_days={}&tvg_id_source=channel_number",
+            base, prev_days
         ))
     );
     for channel in ordered {
@@ -2433,7 +2430,7 @@ mod tests {
             crate::engine::parser::parse_m3u(m3u.as_bytes(), "t", &None, &None)
                 .unwrap()
                 .epg_sources,
-            ["http://dvr.example:9191/output/epg?prev_days=1&days=2&tvg_id_source=channel_number"]
+            ["http://dvr.example:9191/output/epg?prev_days=1&tvg_id_source=channel_number"]
         );
 
         let dir = std::env::temp_dir().join(format!("dispatcharr-m3u-{}", std::process::id()));
