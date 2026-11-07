@@ -1476,9 +1476,21 @@ pub(crate) fn build_m3u(
             .then_with(|| a.display_name().cmp(b.display_name()))
     });
 
+    // Dispatcharr's guide leaves out ended programmes unless asked for them
+    // (`prev_days`, capped by the server). Ask for the deepest catch-up archive,
+    // and at least a day so earlier programmes still show without catch-up.
+    let prev_days = ordered
+        .iter()
+        .flat_map(|channel| &channel.streams)
+        .filter_map(|id| streams.get(id))
+        .filter(|stream| stream.is_catchup)
+        .map(|stream| stream.catchup_days)
+        .max()
+        .unwrap_or(0)
+        .max(1);
     let mut m3u = format!(
         "#EXTM3U x-tvg-url=\"{}\"\n",
-        escape_extinf_value(&format!("{}/output/epg", base))
+        escape_extinf_value(&format!("{}/output/epg?prev_days={}", base, prev_days))
     );
     for channel in ordered {
         let count = channel.streams.len();
@@ -2373,6 +2385,8 @@ mod tests {
         )]);
         let base = Url::parse("http://dvr.example:9191/").unwrap();
         let m3u = build_m3u(&base, &channels, &streams, &HashMap::new(), &accounts);
+        // The guide reaches back as far as the deepest archive.
+        assert!(m3u.contains("/output/epg?prev_days=7\""));
         let preview = crate::engine::parser::parse_m3u(m3u.as_bytes(), "t", &None, &None).unwrap();
 
         let archived = &preview.channels[0];
@@ -2403,7 +2417,9 @@ mod tests {
         )]);
         let base = Url::parse("http://dvr.example:9191/").unwrap();
         let m3u = build_m3u(&base, &channels, &streams, &groups, &accounts);
-        assert!(m3u.starts_with("#EXTM3U x-tvg-url=\"http://dvr.example:9191/output/epg\""));
+        assert!(
+            m3u.starts_with("#EXTM3U x-tvg-url=\"http://dvr.example:9191/output/epg?prev_days=1\"")
+        );
 
         let dir = std::env::temp_dir().join(format!("dispatcharr-m3u-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
