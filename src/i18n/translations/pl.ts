@@ -1018,6 +1018,7 @@ export default {
         bitrate: "Bitrate wideo",
         latency: "Niskie opóźnienie",
         audioBitrate: "Bitrate audio",
+        codec: "Kodek wideo",
       },
       deadStreams: {
         label: "Niedziałające strumienie",

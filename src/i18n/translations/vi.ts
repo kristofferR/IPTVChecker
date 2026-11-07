@@ -886,6 +886,7 @@ export default {
         bitrate: "Bitrate video",
         latency: "Độ trễ thấp",
         audioBitrate: "Bitrate âm thanh",
+        codec: "Codec video",
       },
       deadStreams: {
         label: "Luồng hỏng",

@@ -169,7 +169,8 @@ export type DispatcharrRankSignal =
   | "frame_rate"
   | "bitrate"
   | "latency"
-  | "audio_bitrate";
+  | "audio_bitrate"
+  | "codec";
 
 /** API key wins when both are set. */
 export interface DispatcharrOpenRequest {

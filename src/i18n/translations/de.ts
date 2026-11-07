@@ -942,6 +942,7 @@ export default {
         bitrate: "Video-Bitrate",
         latency: "Niedrige Latenz",
         audioBitrate: "Audio-Bitrate",
+        codec: "Videocodec",
       },
       deadStreams: {
         label: "Offline-Streams",

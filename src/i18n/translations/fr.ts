@@ -990,6 +990,7 @@ export default {
         bitrate: "Débit vidéo",
         latency: "Faible latence",
         audioBitrate: "Débit audio",
+        codec: "Codec vidéo",
       },
       deadStreams: {
         label: "Flux hors ligne",

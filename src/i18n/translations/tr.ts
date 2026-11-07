@@ -950,6 +950,7 @@ export default {
         bitrate: "Video bit hızı",
         latency: "Düşük gecikme",
         audioBitrate: "Ses bit hızı",
+        codec: "Video kodeği",
       },
       deadStreams: {
         label: "Çalışmayan yayınlar",

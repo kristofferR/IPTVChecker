@@ -2,6 +2,7 @@ import { archiveSortValue, hasArchive } from "./archive";
 import type { ArchiveProbeEntry } from "./archiveProbe";
 import { type ArchiveVerdict, archiveVerdict } from "./archiveVerification";
 import { getChannelErrorReason } from "./channelResults";
+import { codecRank } from "./format";
 import type { ChannelResult, ChannelStatus } from "./types";
 
 export type ArchiveProbes = Record<number, ArchiveProbeEntry>;
@@ -100,6 +101,7 @@ function parseAudioLayout(value: string | null | undefined): number | null {
 }
 
 const PARSED_SORT_VALUES = {
+  codec: (result: ChannelResult) => codecRank(result.codec),
   bitrate: (result: ChannelResult) => parseBitrateKbps(result.video_bitrate),
   audio: (result: ChannelResult) => parseBitrateKbps(result.audio_bitrate),
   audio_layout: (result: ChannelResult) => parseAudioLayout(result.audio_channel_layout),
@@ -242,7 +244,7 @@ export function sortResults(
 
   const dir = direction === "asc" ? 1 : -1;
 
-  if (field === "bitrate" || field === "audio" || field === "audio_layout") {
+  if (field === "codec" || field === "bitrate" || field === "audio" || field === "audio_layout") {
     // Parse once per channel instead of twice per comparison (O(n log n)).
     const valueFor = PARSED_SORT_VALUES[field];
     const keyed = results.map((result) => ({ result, value: valueFor(result) }));
@@ -278,8 +280,6 @@ export function sortResults(
         const bVal = resOrder[b.resolution ?? "Unknown"] ?? 4;
         return (aVal - bVal) * dir;
       }
-      case "codec":
-        return (a.codec ?? "").localeCompare(b.codec ?? "") * dir;
       case "hdr":
         return compareOptionalText(a.hdr_format, b.hdr_format, dir, a.index, b.index);
       case "fps":

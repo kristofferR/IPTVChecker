@@ -6,6 +6,7 @@ import {
   filterResultsShared,
   matchesStatusFilter,
 } from "./filters";
+import { codecRank } from "./format";
 import type {
   AppSettings,
   ChannelResult,
@@ -609,6 +610,7 @@ const RANK_SIGNALS: DispatcharrRankSignal[] = [
   "bitrate",
   "latency",
   "audio_bitrate",
+  "codec",
 ];
 
 export const DEFAULT_FIX_PREFERENCES: FixPreferences = {
@@ -653,6 +655,7 @@ const SIGNAL_SCORE: Record<DispatcharrRankSignal, (result: ChannelResult) => num
   latency: (result) =>
     result.latency_ms == null ? -Number.MAX_SAFE_INTEGER : -Math.floor(result.latency_ms / 250),
   audio_bitrate: (result) => Math.round(kbps(result.audio_bitrate) / 32),
+  codec: (result) => -(codecRank(result.codec) ?? Number.MAX_SAFE_INTEGER),
 };
 
 /** Working streams first, ranked by the preferred signals (remaining ties

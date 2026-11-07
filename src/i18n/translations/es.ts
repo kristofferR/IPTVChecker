@@ -993,6 +993,7 @@ export default {
         bitrate: "Bitrate de vídeo",
         latency: "Baja latencia",
         audioBitrate: "Bitrate de audio",
+        codec: "Códec de vídeo",
       },
       deadStreams: {
         label: "Streams caídos",

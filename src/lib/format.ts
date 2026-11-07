@@ -175,6 +175,31 @@ export function normalizeCodecName(raw: string): string {
   return raw.toUpperCase();
 }
 
+// Newest generation first. Names are matched as prefixes after uppercasing and
+// dropping punctuation, so "hevc", "hev1", "H.265" and "avc1.64001f" all rank.
+const CODEC_GENERATIONS: string[][] = [
+  ["AV2"],
+  ["AV1", "AV01"],
+  ["VVC", "H266"],
+  ["HEVC", "HEV1", "HVC1", "H265"],
+  ["VP9", "VP09"],
+  ["H264", "AVC"],
+  ["VP8", "VP08"],
+  ["MPEG4"],
+  ["MPEG2"],
+  ["MPEG1"],
+];
+
+/** Sort rank for a video codec: lower is newer. Unlisted codecs rank after listed ones. */
+export function codecRank(value: string | null): number | null {
+  const normalized = value?.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!normalized || normalized === "UNKNOWN") return null;
+  const rank = CODEC_GENERATIONS.findIndex((names) =>
+    names.some((name) => normalized.startsWith(name)),
+  );
+  return rank === -1 ? CODEC_GENERATIONS.length : rank;
+}
+
 const fixedFormats = new Map<number, Intl.NumberFormat>();
 
 /** Locale-aware `value.toFixed(digits)`, without digit grouping. */

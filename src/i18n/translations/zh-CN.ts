@@ -859,6 +859,7 @@ export default {
         bitrate: "视频码率",
         latency: "低延迟",
         audioBitrate: "音频码率",
+        codec: "视频编码",
       },
       deadStreams: {
         label: "失效流",

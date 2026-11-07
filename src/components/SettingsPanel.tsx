@@ -47,6 +47,7 @@ const RANK_SIGNAL_LABELS = {
   bitrate: "settings.dispatcharr.rankSignals.bitrate",
   latency: "settings.dispatcharr.rankSignals.latency",
   audio_bitrate: "settings.dispatcharr.rankSignals.audioBitrate",
+  codec: "settings.dispatcharr.rankSignals.codec",
 } as const satisfies Record<DispatcharrRankSignal, MessageKey>;
 
 interface SettingsPanelProps {
