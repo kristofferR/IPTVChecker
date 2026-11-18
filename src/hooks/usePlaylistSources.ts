@@ -317,7 +317,7 @@ export function usePlaylistSources({
       }
 
       state.setSelectedChannel(null);
-      state.setSelectedChannelIndices([]);
+      state.setSelectedChannelIndices([], 0);
       state.clearArchiveProbes();
       // Re-applying a source filter keeps session edits (reset above for a
       // fresh open): its cached preview predates them.
@@ -536,7 +536,7 @@ export function usePlaylistSources({
           }
           // Keep app interaction predictable after a failed fresh open attempt.
           getStore().setSelectedChannel(null);
-          getStore().setSelectedChannelIndices([]);
+          getStore().setSelectedChannelIndices([], 0);
           getStore().clearArchiveProbes();
           getStore().setPendingPlaybackChannel(null);
           getStore().setShowHistory(false);
@@ -603,7 +603,14 @@ export function usePlaylistSources({
       state.clearArchiveProbes();
       state.setPlaylist(nextPreview);
       state.setGroupFilter(resolvePreservedGroupFilter(state.groupFilter, nextPreview.groups));
-      state.setSelectedChannelIndices(nextSelectedIndices);
+      // The table recounts its rows once some drop out; until then the count
+      // only has to stay within what is left.
+      state.setSelectedChannelIndices(
+        nextSelectedIndices,
+        nextSelectedIndices.length === state.selectedChannelIndices.length
+          ? state.selectedRowCount
+          : Math.min(state.selectedRowCount, nextSelectedIndices.length),
+      );
 
       if (selectedIndex == null || !visibleIndices.has(selectedIndex)) {
         state.setSelectedChannel(null);

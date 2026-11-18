@@ -49,7 +49,7 @@ import {
   isDispatcharrPreview,
   matchesDispatcharrChannel,
 } from "../lib/dispatcharr";
-import type { ExportScope } from "../lib/exportScope";
+import { defaultExportScope, type ExportScope } from "../lib/exportScope";
 import {
   CATCHUP_VERDICT_FILTERS,
   countStatusOptions,
@@ -158,6 +158,7 @@ export const Toolbar = memo(function Toolbar({
   const playlistPath = useAppStore((s) => s.playlist?.file_path ?? "");
   const groups = useAppStore((s) => s.playlist?.groups ?? EMPTY_GROUPS);
   const selectedIndices = useAppStore((s) => s.selectedChannelIndices);
+  const exportDefaultScope = useAppStore((s) => defaultExportScope(s.selectedRowCount));
   const separatePlaceholder = useAppStore((s) => s.settings.separate_placeholder_status);
   const showHeaderButtonText = useAppStore((s) => s.settings.show_header_button_text);
   const openMenuRef = useRef<HTMLDivElement | null>(null);
@@ -986,6 +987,7 @@ export const Toolbar = memo(function Toolbar({
         >
           <ExportMenu
             scopeCounts={exportScopeCounts}
+            defaultScope={exportDefaultScope}
             resolveScopeResults={resolveExportScopeResults}
             playlistName={playlistName}
             playlistPath={playlistPath}

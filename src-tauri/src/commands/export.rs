@@ -3,7 +3,7 @@ use crate::error::AppError;
 use crate::models::channel::{ChannelResult, ChannelStatus};
 use crate::models::scan_log::ScanDebugLog;
 use crate::state::AppState;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::Manager;
@@ -31,18 +31,43 @@ fn now_epoch_ms() -> u64 {
 struct ScanLogJsonExport {
     version: u32,
     exported_at_epoch_ms: u64,
+    /// Channels a scoped export left out. `summary` still covers the whole run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    channels_omitted_by_scope: Option<usize>,
     #[serde(flatten)]
     scan_log: ScanDebugLog,
 }
 
-fn serialize_scan_log_json_with_version(scan_log: ScanDebugLog) -> Result<Vec<u8>, AppError> {
+fn serialize_scan_log_json_with_version(
+    scan_log: ScanDebugLog,
+    channels_omitted_by_scope: Option<usize>,
+) -> Result<Vec<u8>, AppError> {
     let payload = ScanLogJsonExport {
         version: EXPORT_FORMAT_VERSION,
         exported_at_epoch_ms: now_epoch_ms(),
+        channels_omitted_by_scope,
         scan_log,
     };
     serde_json::to_vec_pretty(&payload)
         .map_err(|error| AppError::Parse(format!("Failed to serialize scan log JSON: {}", error)))
+}
+
+/// Narrows the log to the given channels. A scope the last scan never covered
+/// is an error rather than an export with no channels in it.
+fn scope_scan_log(
+    mut scan_log: ScanDebugLog,
+    channel_indices: &[usize],
+) -> Result<ScanDebugLog, AppError> {
+    let wanted: HashSet<usize> = channel_indices.iter().copied().collect();
+    scan_log
+        .channels
+        .retain(|channel| wanted.contains(&channel.channel_index));
+    if scan_log.channels.is_empty() {
+        return Err(AppError::Other(
+            "The last scan has no log entries for those channels.".to_string(),
+        ));
+    }
+    Ok(scan_log)
 }
 
 async fn run_blocking_export<T: Send + 'static>(
@@ -317,6 +342,7 @@ pub async fn export_scan_log_json(
     app: tauri::AppHandle,
     window: tauri::Window,
     path: String,
+    channel_indices: Option<Vec<usize>>,
 ) -> Result<(), AppError> {
     let state = app.state::<Arc<AppState>>();
     let scan_log = state
@@ -327,7 +353,16 @@ pub async fn export_scan_log_json(
         })?;
 
     run_blocking_export("export_scan_log_json", move || {
-        let bytes = serialize_scan_log_json_with_version(scan_log)?;
+        let logged = scan_log.channels.len();
+        let (scan_log, omitted) = match channel_indices {
+            Some(indices) => {
+                let scoped = scope_scan_log(scan_log, &indices)?;
+                let omitted = logged - scoped.channels.len();
+                (scoped, Some(omitted))
+            }
+            None => (scan_log, None),
+        };
+        let bytes = serialize_scan_log_json_with_version(scan_log, omitted)?;
         std::fs::write(path, bytes).map_err(AppError::Io)?;
         Ok(())
     })
@@ -470,6 +505,7 @@ fn format_audio_info(r: &ChannelResult) -> String {
 mod tests {
     use super::*;
     use crate::models::scan::ScanSummary;
+    use crate::models::scan_log::ChannelDebugLog;
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -762,9 +798,8 @@ mod tests {
         std::fs::remove_dir_all(dir).expect("temporary dir should be removable");
     }
 
-    #[test]
-    fn scan_log_json_export_includes_version_marker() {
-        let scan_log = ScanDebugLog {
+    fn sample_scan_log(channel_indices: &[usize]) -> ScanDebugLog {
+        ScanDebugLog {
             run_id: "run-1".to_string(),
             playlist_path: "/tmp/sample.m3u8".to_string(),
             source_identity: Some("url:https://example.com/sample.m3u8".to_string()),
@@ -781,10 +816,33 @@ mod tests {
                 mislabeled: 0,
                 playlist_score: None,
             },
-            channels: Vec::new(),
-        };
+            channels: channel_indices
+                .iter()
+                .map(|&channel_index| ChannelDebugLog {
+                    channel_index,
+                    ..ChannelDebugLog::default()
+                })
+                .collect(),
+        }
+    }
 
-        let bytes = serialize_scan_log_json_with_version(scan_log)
+    #[test]
+    fn scan_log_scope_keeps_only_the_requested_channels() {
+        let scoped = scope_scan_log(sample_scan_log(&[0, 1, 2, 3]), &[3, 1, 9])
+            .expect("two of the requested channels were scanned");
+        let kept: Vec<usize> = scoped
+            .channels
+            .iter()
+            .map(|channel| channel.channel_index)
+            .collect();
+        assert_eq!(kept, vec![1, 3]);
+
+        assert!(scope_scan_log(sample_scan_log(&[0, 1]), &[7]).is_err());
+    }
+
+    #[test]
+    fn scan_log_json_export_includes_version_marker() {
+        let bytes = serialize_scan_log_json_with_version(sample_scan_log(&[]), None)
             .expect("scan log export serialization should succeed");
         let value: serde_json::Value =
             serde_json::from_slice(&bytes).expect("scan log export should be valid JSON");
@@ -803,6 +861,8 @@ mod tests {
             value.get("run_id").and_then(|field| field.as_str()),
             Some("run-1")
         );
+        // Only scoped exports carry the marker.
+        assert!(value.get("channels_omitted_by_scope").is_none());
     }
 }
 

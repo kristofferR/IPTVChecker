@@ -240,7 +240,7 @@ const GuideRow = memo(function GuideRow({
             const view = getDispatcharrView(state.flatResults, state.dispatcharrOrders);
             const primary = channelPrimary(view, result);
             state.setSelectedChannel(primary);
-            state.setSelectedChannelIndices(expandDispatcharrSelection(view, [primary.index]));
+            state.setSelectedChannelIndices(expandDispatcharrSelection(view, [primary.index]), 1);
           }}
           onDoubleClick={() => onPlayLive(result)}
           onKeyDown={(event) => {
