@@ -69,7 +69,8 @@ impl InstallSource {
 /// The install affordance the UI should offer. `button_label` and
 /// `instructions` are only set for installations that must be updated by their
 /// own package manager.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateInstallMode {
     kind: UpdateInstallKind,
@@ -77,7 +78,8 @@ pub struct UpdateInstallMode {
     instructions: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "kebab-case")]
 enum UpdateInstallKind {
     BuiltIn,
@@ -365,7 +367,8 @@ impl Drop for UpdateInstallGuard<'_> {
 }
 
 /// Result of a discovery request. `version` is `None` when already up to date.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCheckResult {
     pub version: Option<String>,

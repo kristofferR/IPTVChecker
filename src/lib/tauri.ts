@@ -9,6 +9,7 @@ import type {
   Channel,
   ChannelResult,
   ChromecastDevice,
+  DispatcharrCandidate,
   DispatcharrOpenRequest,
   DispatcharrStatsPushReport,
   DispatcharrTarget,
@@ -138,19 +139,6 @@ export async function dispatcharrSetChannelStreams(
     expected,
     allowEmpty,
   });
-}
-
-/** A provider stream offered for a channel, as the row it would load as. */
-export interface DispatcharrCandidate {
-  channel: Channel;
-  stream_id: number;
-  /** Carries the channel's EPG ID. */
-  epg: boolean;
-  /** Name similarity with the channel, 0 to 100. */
-  similarity: number;
-  /** Country tag of the stream when it differs from the channel's; the same
-   *  name in another country is often a different channel. */
-  other_country: string | null;
 }
 
 export async function dispatcharrFindStreams(
@@ -309,8 +297,12 @@ export async function exportM3u(results: ChannelResult[], path: string): Promise
   });
 }
 
-export async function exportScanLogJson(path: string): Promise<void> {
-  return invoke("export_scan_log_json", { path });
+/** `channelIndices` narrows the log to those channels; `null` keeps all of it. */
+export async function exportScanLogJson(
+  path: string,
+  channelIndices: number[] | null,
+): Promise<void> {
+  return invoke("export_scan_log_json", { path, channelIndices });
 }
 
 export async function exportAppLog(text: string): Promise<void> {

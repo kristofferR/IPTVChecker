@@ -70,13 +70,15 @@ async fn resolve_session(
     ))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct DispatcharrItemFailure {
     pub id: i64,
     pub error: String,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct DispatcharrStatsPushReport {
     pub updated: Vec<i64>,
     pub failed: Vec<DispatcharrItemFailure>,
@@ -272,7 +274,8 @@ pub async fn dispatcharr_set_channel_streams(
 }
 
 /// A provider stream offered for a channel, as the row it would load as.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct DispatcharrCandidate {
     pub(crate) channel: Channel,
     pub(crate) stream_id: i64,

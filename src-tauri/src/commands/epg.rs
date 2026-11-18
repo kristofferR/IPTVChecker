@@ -33,7 +33,8 @@ fn superseded_error() -> AppError {
     AppError::Other("EPG load superseded".to_string())
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct EpgLoadSummary {
     pub sources_requested: usize,
     pub sources_loaded: usize,

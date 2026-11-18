@@ -1,10 +1,18 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.6.4/schema.json",
   "files": {
-    // Only the hand-written frontend and its tests. dist/ is generated, and
-    // agent worktrees under .worktrees/ carry their own root configs. scripts/
-    // is narrowed to .ts because the rest of it is shell and plain text.
-    "includes": ["src/**", "tests/**", "scripts/**/*.ts", "!!**/.worktrees", "!!dist"]
+    // Only the hand-written frontend and its tests. dist/ and the ts-rs
+    // bindings are generated, and agent worktrees under .worktrees/ carry
+    // their own root configs. scripts/ is narrowed to .ts because the rest of
+    // it is shell and plain text.
+    "includes": [
+      "src/**",
+      "tests/**",
+      "scripts/**/*.ts",
+      "!!**/.worktrees",
+      "!!dist",
+      "!!src/lib/bindings"
+    ]
   },
   "formatter": {
     "enabled": true,

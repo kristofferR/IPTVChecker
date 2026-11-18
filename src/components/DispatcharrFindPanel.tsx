@@ -17,13 +17,13 @@ import { linkStreams } from "../lib/dispatcharrEdits";
 import { errorToString } from "../lib/errors";
 import { isSingleConnectionPlaylist } from "../lib/playback";
 import { isScanActive } from "../lib/scanState";
-import {
-  cancelQuickCheck,
-  type DispatcharrCandidate,
-  dispatcharrFindStreams,
-  dispatcharrProbeStreams,
-} from "../lib/tauri";
-import type { Channel, ChannelResult } from "../lib/types";
+import { cancelQuickCheck, dispatcharrFindStreams, dispatcharrProbeStreams } from "../lib/tauri";
+import type {
+  CandidateProbeEvent,
+  Channel,
+  ChannelResult,
+  DispatcharrCandidate,
+} from "../lib/types";
 import { useAppStore } from "../store";
 
 const getStore = () => useAppStore.getState();
@@ -185,15 +185,12 @@ export function DispatcharrFindPanel() {
   }, [playing]);
 
   useEffect(() => {
-    const unlisten = listen<{ request_id: string; result: ChannelResult }>(
-      "dispatcharr://probe-result",
-      (event) => {
-        if (event.payload.request_id !== requestRef.current) return;
-        const ref = parseDispatcharrIds(event.payload.result.extinf_line);
-        if (!ref) return;
-        setProbed((previous) => new Map(previous).set(ref.streamId, event.payload.result));
-      },
-    );
+    const unlisten = listen<CandidateProbeEvent>("dispatcharr://probe-result", (event) => {
+      if (event.payload.request_id !== requestRef.current) return;
+      const ref = parseDispatcharrIds(event.payload.result.extinf_line);
+      if (!ref) return;
+      setProbed((previous) => new Map(previous).set(ref.streamId, event.payload.result));
+    });
     return () => {
       void unlisten.then((off) => off());
     };

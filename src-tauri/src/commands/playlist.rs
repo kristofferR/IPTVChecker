@@ -42,7 +42,8 @@ pub(crate) use crate::engine::xtream::{
 pub(crate) use crate::urlnorm::normalize_url_identity;
 
 /// Live progress events emitted during playlist loading.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(tag = "stage")]
 pub enum PlaylistLoadProgress {
     Connecting {
@@ -66,7 +67,8 @@ pub enum PlaylistLoadProgress {
     },
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 struct XtreamArchiveChannelUpdate {
     index: usize,
     catchup: Option<String>,
@@ -83,7 +85,8 @@ struct XtreamArchiveChannelSnapshot {
     extinf_line: String,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 struct XtreamArchiveEnrichment {
     source_identity: String,
     channels: Vec<XtreamArchiveChannelUpdate>,
@@ -242,14 +245,16 @@ pub(crate) fn emit_load_progress(app: Option<&AppHandle>, progress: PlaylistLoad
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct XtreamOpenRequest {
     pub server: String,
     pub username: String,
     pub password: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, optional_fields = nullable)]
 pub struct DispatcharrOpenRequest {
     pub server: String,
     #[serde(default)]
@@ -260,7 +265,8 @@ pub struct DispatcharrOpenRequest {
     pub api_key: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct StalkerOpenRequest {
     pub portal: String,
     pub mac: String,

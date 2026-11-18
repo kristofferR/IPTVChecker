@@ -15,6 +15,8 @@ import { SFChevronDown, SFSquareArrowUp } from "./SFSymbols";
 
 interface ExportMenuProps {
   scopeCounts: Record<ExportScope, number>;
+  /** Scope the menu opens with, and the one File menu exports use. */
+  defaultScope: ExportScope;
   resolveScopeResults: (scope: ExportScope) => ChannelResult[];
   playlistName: string;
   playlistPath: string;
@@ -38,6 +40,7 @@ interface ExportFeedback {
 
 export function ExportMenu({
   scopeCounts,
+  defaultScope,
   resolveScopeResults,
   playlistName,
   playlistPath,
@@ -58,7 +61,8 @@ export function ExportMenu({
   const [feedback, setFeedback] = useState<ExportFeedback | null>(null);
   const [scope, setScope] = useState<ExportScope>("all");
   const ref = useRef<HTMLDivElement>(null);
-  const lastMenuRequestId = useRef<number | null>(null);
+  // A request older than this menu is never replayed.
+  const lastMenuRequestId = useRef(menuRequest?.id ?? null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -99,166 +103,172 @@ export function ExportMenu({
     }
   }, []);
 
-  const resolveScopedResults = useCallback((): ChannelResult[] | null => {
-    const scoped = resolveScopeResults(scope);
-    if (scoped.length > 0) {
-      return scoped;
-    }
+  const resolveScopedResults = useCallback(
+    (scope: ExportScope): ChannelResult[] | null => {
+      const scoped = resolveScopeResults(scope);
+      if (scoped.length > 0) {
+        return scoped;
+      }
 
-    if (scope === "selected") {
       showFeedback({
         kind: "info",
-        message: t("exportMenu.feedback.noSelected"),
+        message:
+          scope === "selected"
+            ? t("exportMenu.feedback.noSelected")
+            : scope === "filtered"
+              ? t("exportMenu.feedback.noFiltered")
+              : t("exportMenu.feedback.noChannels"),
       });
       return null;
-    }
-    if (scope === "filtered") {
-      showFeedback({
-        kind: "info",
-        message: t("exportMenu.feedback.noFiltered"),
+    },
+    [resolveScopeResults, showFeedback],
+  );
+
+  const handleExportCsv = useCallback(
+    async (scope: ExportScope) => {
+      const scoped = resolveScopedResults(scope);
+      if (!scoped) return;
+
+      setOpen(false);
+      const path = await save({
+        defaultPath: `${playlistName}_${exportScopeFileSuffix(scope)}${partialSuffix}.csv`,
+        filters: [{ name: "CSV", extensions: ["csv"] }],
       });
-      return null;
-    }
-    showFeedback({
-      kind: "info",
-      message: t("exportMenu.feedback.noChannels"),
-    });
-    return null;
-  }, [scope, resolveScopeResults, showFeedback]);
+      if (!path) {
+        showFeedback({ kind: "info", message: t("exportMenu.feedback.csvCancelled") });
+        return;
+      }
 
-  const handleExportCsv = useCallback(async () => {
-    const scoped = resolveScopedResults();
-    if (!scoped) return;
+      setBusyAction("csv");
+      logger.info(`[Export] Starting ${scope} CSV export: channels=${scoped.length}, path=${path}`);
+      try {
+        await exportCsv(
+          scoped,
+          path,
+          playlistName,
+          readStoredVisibleColumnOrder().includes("latency"),
+        );
+        showFeedback({
+          kind: "success",
+          message: t(`exportMenu.feedback.csvExported.${scope}`, { count: scoped.length, path }),
+        });
+        void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
+      } catch (err) {
+        showFeedback({
+          kind: "error",
+          message: t("exportMenu.feedback.csvFailed", { error: String(err) }),
+        });
+      } finally {
+        setBusyAction(null);
+      }
+    },
+    [playlistName, partialSuffix, resolveScopedResults, showFeedback],
+  );
 
-    setOpen(false);
-    const path = await save({
-      defaultPath: `${playlistName}_${exportScopeFileSuffix(scope)}${partialSuffix}.csv`,
-      filters: [{ name: "CSV", extensions: ["csv"] }],
-    });
-    if (!path) {
-      showFeedback({ kind: "info", message: t("exportMenu.feedback.csvCancelled") });
-      return;
-    }
+  const handleExportSplit = useCallback(
+    async (scope: ExportScope) => {
+      const scoped = resolveScopedResults(scope);
+      if (!scoped) return;
 
-    setBusyAction("csv");
-    logger.info(`[Export] Starting ${scope} CSV export: channels=${scoped.length}, path=${path}`);
-    try {
-      await exportCsv(
-        scoped,
-        path,
-        playlistName,
-        readStoredVisibleColumnOrder().includes("latency"),
+      setOpen(false);
+      setBusyAction("split");
+      logger.info(
+        `[Export] Starting ${scope} split export: channels=${scoped.length}, source=${playlistPath}`,
       );
-      showFeedback({
-        kind: "success",
-        message: t(`exportMenu.feedback.csvExported.${scope}`, { count: scoped.length, path }),
-      });
-      void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
-    } catch (err) {
-      showFeedback({
-        kind: "error",
-        message: t("exportMenu.feedback.csvFailed", { error: String(err) }),
-      });
-    } finally {
-      setBusyAction(null);
-    }
-  }, [playlistName, scope, resolveScopedResults, showFeedback]);
+      try {
+        await exportSplit(scoped, playlistPath);
+        showFeedback({
+          kind: "success",
+          message: t(`exportMenu.feedback.splitExported.${scope}`, {
+            count: scoped.length,
+            path: sourceDir,
+          }),
+        });
+        void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
+      } catch (err) {
+        showFeedback({
+          kind: "error",
+          message: t("exportMenu.feedback.splitFailed", { error: String(err) }),
+        });
+      } finally {
+        setBusyAction(null);
+      }
+    },
+    [playlistPath, sourceDir, resolveScopedResults, showFeedback],
+  );
 
-  const handleExportSplit = useCallback(async () => {
-    const scoped = resolveScopedResults();
-    if (!scoped) return;
+  const handleExportRenamed = useCallback(
+    async (scope: ExportScope) => {
+      const scoped = resolveScopedResults(scope);
+      if (!scoped) return;
 
-    setOpen(false);
-    setBusyAction("split");
-    logger.info(
-      `[Export] Starting ${scope} split export: channels=${scoped.length}, source=${playlistPath}`,
-    );
-    try {
-      await exportSplit(scoped, playlistPath);
-      showFeedback({
-        kind: "success",
-        message: t(`exportMenu.feedback.splitExported.${scope}`, {
-          count: scoped.length,
-          path: sourceDir,
-        }),
+      setOpen(false);
+      setBusyAction("renamed");
+      logger.info(
+        `[Export] Starting ${scope} renamed-playlist export: channels=${scoped.length}, source=${playlistPath}`,
+      );
+      try {
+        await exportRenamed(scoped, playlistPath);
+        showFeedback({
+          kind: "success",
+          message: t(`exportMenu.feedback.renamedExported.${scope}`, {
+            count: scoped.length,
+            path: `${sourceDir}/${sourceStem}_renamed.m3u8`,
+          }),
+        });
+        void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
+      } catch (err) {
+        showFeedback({
+          kind: "error",
+          message: t("exportMenu.feedback.renamedFailed", { error: String(err) }),
+        });
+      } finally {
+        setBusyAction(null);
+      }
+    },
+    [playlistPath, sourceDir, sourceStem, resolveScopedResults, showFeedback],
+  );
+
+  const handleExportM3u = useCallback(
+    async (scope: ExportScope) => {
+      const scoped = resolveScopedResults(scope);
+      if (!scoped) return;
+
+      setOpen(false);
+
+      const path = await save({
+        defaultPath: `${sourceStem}_${exportScopeFileSuffix(scope)}${partialSuffix}.m3u8`,
+        filters: [{ name: t("exportMenu.dialogFilterM3u"), extensions: ["m3u8", "m3u"] }],
       });
-      void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
-    } catch (err) {
-      showFeedback({
-        kind: "error",
-        message: t("exportMenu.feedback.splitFailed", { error: String(err) }),
-      });
-    } finally {
-      setBusyAction(null);
-    }
-  }, [playlistPath, scope, sourceDir, resolveScopedResults, showFeedback]);
+      if (!path) {
+        showFeedback({ kind: "info", message: t("exportMenu.feedback.m3uCancelled") });
+        return;
+      }
 
-  const handleExportRenamed = useCallback(async () => {
-    const scoped = resolveScopedResults();
-    if (!scoped) return;
-
-    setOpen(false);
-    setBusyAction("renamed");
-    logger.info(
-      `[Export] Starting ${scope} renamed-playlist export: channels=${scoped.length}, source=${playlistPath}`,
-    );
-    try {
-      await exportRenamed(scoped, playlistPath);
-      showFeedback({
-        kind: "success",
-        message: t(`exportMenu.feedback.renamedExported.${scope}`, {
-          count: scoped.length,
-          path: `${sourceDir}/${sourceStem}_renamed.m3u8`,
-        }),
-      });
-      void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
-    } catch (err) {
-      showFeedback({
-        kind: "error",
-        message: t("exportMenu.feedback.renamedFailed", { error: String(err) }),
-      });
-    } finally {
-      setBusyAction(null);
-    }
-  }, [playlistPath, scope, sourceDir, sourceStem, resolveScopedResults, showFeedback]);
-
-  const handleExportM3u = useCallback(async () => {
-    const scoped = resolveScopedResults();
-    if (!scoped) return;
-
-    setOpen(false);
-
-    const path = await save({
-      defaultPath: `${sourceStem}_${exportScopeFileSuffix(scope)}${partialSuffix}.m3u8`,
-      filters: [{ name: t("exportMenu.dialogFilterM3u"), extensions: ["m3u8", "m3u"] }],
-    });
-    if (!path) {
-      showFeedback({ kind: "info", message: t("exportMenu.feedback.m3uCancelled") });
-      return;
-    }
-
-    setBusyAction("m3u");
-    logger.info(`[Export] Starting ${scope} M3U export: channels=${scoped.length}, path=${path}`);
-    try {
-      await exportM3u(scoped, path);
-      showFeedback({
-        kind: "success",
-        message: t(`exportMenu.feedback.m3uExported.${scope}`, { count: scoped.length, path }),
-      });
-      void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
-    } catch (err) {
-      showFeedback({
-        kind: "error",
-        message: t("exportMenu.feedback.m3uFailed", { error: String(err) }),
-      });
-    } finally {
-      setBusyAction(null);
-    }
-  }, [scope, sourceStem, resolveScopedResults, showFeedback]);
+      setBusyAction("m3u");
+      logger.info(`[Export] Starting ${scope} M3U export: channels=${scoped.length}, path=${path}`);
+      try {
+        await exportM3u(scoped, path);
+        showFeedback({
+          kind: "success",
+          message: t(`exportMenu.feedback.m3uExported.${scope}`, { count: scoped.length, path }),
+        });
+        void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
+      } catch (err) {
+        showFeedback({
+          kind: "error",
+          message: t("exportMenu.feedback.m3uFailed", { error: String(err) }),
+        });
+      } finally {
+        setBusyAction(null);
+      }
+    },
+    [sourceStem, partialSuffix, resolveScopedResults, showFeedback],
+  );
 
   const exportCatchupPlaylist = useCallback(
-    async (variant: "real" | "stripped") => {
-      const scoped = resolveScopedResults();
+    async (variant: "real" | "stripped", scope: ExportScope) => {
+      const scoped = resolveScopedResults(scope);
       if (!scoped) return;
       setOpen(false);
       const probes = archiveProbes ?? {};
@@ -298,68 +308,77 @@ export function ExportMenu({
         setBusyAction(null);
       }
     },
-    [archiveProbes, resolveScopedResults, scope, showFeedback, sourceStem],
+    [archiveProbes, resolveScopedResults, showFeedback, sourceStem],
   );
 
-  const handleExportScanLog = useCallback(async () => {
-    if (scanState === "idle") {
-      showFeedback({
-        kind: "info",
-        message: t("exportMenu.feedback.scanLogNeedsScan"),
-      });
-      return;
-    }
+  const handleExportScanLog = useCallback(
+    async (scope: ExportScope) => {
+      if (scanState === "idle") {
+        showFeedback({
+          kind: "info",
+          message: t("exportMenu.feedback.scanLogNeedsScan"),
+        });
+        return;
+      }
+      // "All" keeps the whole log, including channels no longer listed.
+      const scoped = scope === "all" ? null : resolveScopedResults(scope);
+      if (scope !== "all" && !scoped) return;
 
-    setOpen(false);
-    const path = await save({
-      defaultPath: `${sourceStem}_scan-log${partialSuffix}.json`,
-      filters: [{ name: "JSON", extensions: ["json"] }],
-    });
-    if (!path) {
-      showFeedback({ kind: "info", message: t("exportMenu.feedback.scanLogCancelled") });
-      return;
-    }
+      setOpen(false);
+      const scopeSuffix = scope === "all" ? "" : `_${exportScopeFileSuffix(scope)}`;
+      const path = await save({
+        defaultPath: `${sourceStem}_scan-log${scopeSuffix}${partialSuffix}.json`,
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!path) {
+        showFeedback({ kind: "info", message: t("exportMenu.feedback.scanLogCancelled") });
+        return;
+      }
 
-    setBusyAction("scanlog");
-    logger.info(`[Export] Starting structured scan log export: path=${path}`);
-    try {
-      await exportScanLogJson(path);
-      showFeedback({
-        kind: "success",
-        message: t("exportMenu.feedback.scanLogExported", { path }),
-      });
-      void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
-    } catch (err) {
-      showFeedback({
-        kind: "error",
-        message: t("exportMenu.feedback.scanLogFailed", { error: String(err) }),
-      });
-    } finally {
-      setBusyAction(null);
-    }
-  }, [scanState, sourceStem, showFeedback]);
+      setBusyAction("scanlog");
+      logger.info(`[Export] Starting ${scope} structured scan log export: path=${path}`);
+      try {
+        await exportScanLogJson(path, scoped?.map((result) => result.index) ?? null);
+        showFeedback({
+          kind: "success",
+          message: t("exportMenu.feedback.scanLogExported", { path }),
+        });
+        void triggerHaptic(HapticFeedbackPattern.Generic, PerformanceTime.Now);
+      } catch (err) {
+        showFeedback({
+          kind: "error",
+          message: t("exportMenu.feedback.scanLogFailed", { error: String(err) }),
+        });
+      } finally {
+        setBusyAction(null);
+      }
+    },
+    [scanState, sourceStem, partialSuffix, resolveScopedResults, showFeedback],
+  );
 
   const exporting = busyAction !== null;
 
   useEffect(() => {
-    if (!menuRequest || disabled || exporting) return;
-    if (lastMenuRequestId.current === menuRequest.id) return;
+    if (!menuRequest || lastMenuRequestId.current === menuRequest.id) return;
+    // Taken even when it cannot run, so it never fires later on its own.
     lastMenuRequestId.current = menuRequest.id;
+    if (exporting) return;
 
     if (menuRequest.action === "csv") {
-      void handleExportCsv();
+      void handleExportCsv(defaultScope);
     } else if (menuRequest.action === "split") {
-      void handleExportSplit();
+      void handleExportSplit(defaultScope);
     } else if (menuRequest.action === "renamed") {
-      void handleExportRenamed();
+      void handleExportRenamed(defaultScope);
     } else if (menuRequest.action === "m3u") {
-      void handleExportM3u();
+      // The File menu names this one "Export Filtered M3U/M3U8".
+      void handleExportM3u("filtered");
     } else if (menuRequest.action === "scanlog") {
-      void handleExportScanLog();
+      void handleExportScanLog(defaultScope);
     }
   }, [
     menuRequest,
-    disabled,
+    defaultScope,
     exporting,
     handleExportCsv,
     handleExportSplit,
@@ -371,7 +390,10 @@ export function ExportMenu({
   return (
     <div ref={ref} className="relative">
       <button
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          if (!open) setScope(defaultScope);
+          setOpen(!open);
+        }}
         disabled={disabled || exporting}
         title={t("exportMenu.button")}
         className={
@@ -435,28 +457,28 @@ export function ExportMenu({
             </div>
           </div>
           <button
-            onClick={handleExportCsv}
+            onClick={() => void handleExportCsv(scope)}
             disabled={exporting}
             className="w-full text-start px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
           >
             {t("exportMenu.actions.csv")}
           </button>
           <button
-            onClick={handleExportSplit}
+            onClick={() => void handleExportSplit(scope)}
             disabled={exporting}
             className="w-full text-start px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
           >
             {t("exportMenu.actions.split")}
           </button>
           <button
-            onClick={handleExportRenamed}
+            onClick={() => void handleExportRenamed(scope)}
             disabled={exporting}
             className="w-full text-start px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
           >
             {t("exportMenu.actions.renamed")}
           </button>
           <button
-            onClick={handleExportM3u}
+            onClick={() => void handleExportM3u(scope)}
             disabled={exporting}
             className="w-full text-start px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
           >
@@ -465,7 +487,7 @@ export function ExportMenu({
           {catchupVerdictsAvailable && (
             <>
               <button
-                onClick={() => void exportCatchupPlaylist("real")}
+                onClick={() => void exportCatchupPlaylist("real", scope)}
                 disabled={exporting}
                 className="w-full text-start px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
                 title={t("exportMenu.actions.realCatchupHint")}
@@ -473,7 +495,7 @@ export function ExportMenu({
                 {t("exportMenu.actions.realCatchup")}
               </button>
               <button
-                onClick={() => void exportCatchupPlaylist("stripped")}
+                onClick={() => void exportCatchupPlaylist("stripped", scope)}
                 disabled={exporting}
                 className="w-full text-start px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
                 title={t("exportMenu.actions.strippedCatchupHint")}
@@ -483,7 +505,7 @@ export function ExportMenu({
             </>
           )}
           <button
-            onClick={handleExportScanLog}
+            onClick={() => void handleExportScanLog(scope)}
             disabled={exporting || scanState === "idle"}
             className="w-full text-start px-3 py-2.5 min-h-10 text-[14px] hover:bg-btn-hover disabled:opacity-50 disabled:pointer-events-none"
             title={scanState === "idle" ? t("exportMenu.actions.scanLogNeedsScan") : undefined}

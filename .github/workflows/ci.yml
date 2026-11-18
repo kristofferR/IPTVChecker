@@ -94,6 +94,53 @@ jobs:
 
       - name: Run Rust tests
         working-directory: src-tauri
+        # The tests regenerate src/lib/bindings. Starting from nothing also
+        # exposes files left behind by types that no longer exist.
+        run: |
+          rm -rf ../src/lib/bindings
+          cargo test
+
+      - name: Check generated TypeScript bindings
+        run: |
+          if [ -n "$(git status --porcelain -- src/lib/bindings)" ]; then
+            git status --short -- src/lib/bindings
+            git diff -- src/lib/bindings
+            echo "::error::src/lib/bindings is out of date. Run 'bun run bindings' and commit the result."
+            exit 1
+          fi
+
+  rust-windows:
+    name: Rust Tests (Windows)
+    # Most downloads are Windows builds. Without this job, Windows-only code
+    # is first compiled when a release is tagged.
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          components: clippy
+
+      - name: Download ffmpeg binaries
+        shell: bash
+        run: |
+          TARGET="$(rustc -vV | sed -n 's/^host: //p')"
+          bash scripts/download-ffmpeg.sh "$TARGET"
+          echo "FFMPEG_TEST_BINARY=${GITHUB_WORKSPACE}/src-tauri/binaries/ffmpeg-$TARGET.exe" >> "$GITHUB_ENV"
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run Rust tests
+        working-directory: src-tauri
         run: cargo test
 
   parser-fuzz:

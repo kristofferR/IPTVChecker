@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  defaultExportScope,
   type ExportScope,
   exportScopeFileSuffix,
   exportScopeLabel,
@@ -66,6 +67,12 @@ describe("export scope resolution", () => {
     for (const scope of cases) {
       expect(resolveExportScopeResults(scope, all, filtered, selected)).toEqual(byScope[scope]);
     }
+  });
+
+  it("starts from the selection only when several rows are selected", () => {
+    expect(defaultExportScope(0)).toBe("all");
+    expect(defaultExportScope(1)).toBe("all");
+    expect(defaultExportScope(2)).toBe("selected");
   });
 
   it("maps scope labels and filename suffixes", () => {

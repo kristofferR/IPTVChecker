@@ -1,0 +1,5 @@
+[env]
+# ts-rs writes the generated TypeScript types here on `cargo test`.
+TS_RS_EXPORT_DIR = { value = "src/lib/bindings", relative = true }
+# Tauri's IPC is JSON, so 64-bit integers arrive as numbers, not bigints.
+TS_RS_LARGE_INT = "number"

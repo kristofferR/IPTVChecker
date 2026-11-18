@@ -17,7 +17,8 @@ const MAX_DOWNLOAD_DURATION_S: u64 = 24 * 3600;
 /// Give up when the provider stalls for this long (microseconds, ffmpeg units).
 const RW_TIMEOUT_US: &str = "30000000";
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ArchiveDownloadRequest {
     pub id: String,
     pub url: String,
@@ -25,7 +26,8 @@ pub struct ArchiveDownloadRequest {
     pub duration_s: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ArchiveDownloadProgress {
     pub id: String,
     pub out_time_s: f64,

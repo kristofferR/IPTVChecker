@@ -57,7 +57,8 @@ async fn server_test_get(
     fetch_with_hop_validation(url, false, |target| client.get(target)).await
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct XtreamChannelProbe {
     pub stream_id: String,
     pub latency_ms: Option<u64>,
@@ -68,7 +69,8 @@ pub struct XtreamChannelProbe {
     pub screenshot: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct XtreamServerTestResult {
     pub server: String,
     pub success: bool,
@@ -80,7 +82,8 @@ pub struct XtreamServerTestResult {
     pub max_connections: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct XtreamServerTestReport {
     pub results: Vec<XtreamServerTestResult>,
     pub same_cdn: bool,

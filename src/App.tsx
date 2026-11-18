@@ -1417,13 +1417,18 @@ export default function App() {
   const handlePlayInApp = useCallback(
     (result: ChannelResult) => {
       getStore().setSelectedChannel(result);
-      // A Dispatcharr channel stands for all of its streams (Guide playback).
-      getStore().setSelectedChannelIndices(
-        expandDispatcharrSelection(
-          getDispatcharrView(getStore().flatResults, getStore().dispatcharrOrders),
-          [result.index],
-        ),
-      );
+      // Playing a row of the current selection keeps that selection: the table
+      // still shows it, and scans and exports of "selected" follow the store.
+      if (!getStore().selectedChannelIndices.includes(result.index)) {
+        // A Dispatcharr channel stands for all of its streams (Guide playback).
+        getStore().setSelectedChannelIndices(
+          expandDispatcharrSelection(
+            getDispatcharrView(getStore().flatResults, getStore().dispatcharrOrders),
+            [result.index],
+          ),
+          1,
+        );
+      }
       getStore().setSidebarHidden(false);
       pendingArchivePlaybackRef.current = null;
       if (isDispatcharrPlaceholder(result)) return;
@@ -1513,7 +1518,7 @@ export default function App() {
       const view = getDispatcharrView(getStore().flatResults, getStore().dispatcharrOrders);
       const primary = channelPrimary(view, result);
       getStore().setSelectedChannel(primary);
-      getStore().setSelectedChannelIndices(expandDispatcharrSelection(view, [primary.index]));
+      getStore().setSelectedChannelIndices(expandDispatcharrSelection(view, [primary.index]), 1);
       getStore().setSidebarHidden(false);
       const state = getStore();
       const singleConnection = isSingleConnectionPlaylist(state.playlist);
