@@ -302,7 +302,8 @@ pub async fn quick_check_channel(
 }
 
 /// One probed candidate, sent as `dispatcharr://probe-result`.
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export)]
 struct CandidateProbeEvent {
     request_id: String,
     result: ChannelResult,

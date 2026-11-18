@@ -551,7 +551,7 @@ export function ChannelTable({
 
   const emitSelection = useCallback(
     (next: Set<number>) => {
-      onSelectionChange?.(selectionIndices(dispatcharrViewRef.current, next));
+      onSelectionChange?.(selectionIndices(dispatcharrViewRef.current, next), next.size);
     },
     [onSelectionChange],
   );

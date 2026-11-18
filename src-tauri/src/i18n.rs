@@ -39,7 +39,8 @@ fn catalog_source(locale: &str) -> Option<&'static str> {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct UiLocale {
     pub locale: &'static str,
     /// A supported system language to offer when none has been chosen yet.

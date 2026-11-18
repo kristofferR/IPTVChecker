@@ -1,287 +1,79 @@
-export type ChannelStatus =
-  | "pending"
-  | "checking"
-  | "alive"
-  | "drm"
-  | "dead"
-  | "placeholder"
-  | "geoblocked"
-  | "geoblocked_confirmed"
-  | "geoblocked_unconfirmed";
+// The types that cross the IPC boundary are generated from the Rust
+// definitions into ./bindings (`bun run bindings`); never edit them by hand.
+// Frontend-only types follow the re-exports.
 
-export type ContentType = "live" | "movie" | "series";
+export type { AppSettings } from "./bindings/AppSettings";
+export type { ArchiveDownloadProgress } from "./bindings/ArchiveDownloadProgress";
+export type { ArchiveDownloadRequest } from "./bindings/ArchiveDownloadRequest";
+export type { CandidateProbeEvent } from "./bindings/CandidateProbeEvent";
+export type { CastMediaRequest } from "./bindings/CastMediaRequest";
+export type { CastSession } from "./bindings/CastSession";
+export type { CastSessionState } from "./bindings/CastSessionState";
+export type { CastStreamKind } from "./bindings/CastStreamKind";
+export type { Channel } from "./bindings/Channel";
+export type { ChannelLogoSize } from "./bindings/ChannelLogoSize";
+export type { ChannelResult } from "./bindings/ChannelResult";
+export type { ChannelStatus } from "./bindings/ChannelStatus";
+export type { ChromecastDevice } from "./bindings/ChromecastDevice";
+export type { ContentType } from "./bindings/ContentType";
+export type { DiskSpaceInfo } from "./bindings/DiskSpaceInfo";
+export type { DiskSpaceTier } from "./bindings/DiskSpaceTier";
+export type { DispatcharrCandidate } from "./bindings/DispatcharrCandidate";
+export type { DispatcharrDeadStreams } from "./bindings/DispatcharrDeadStreams";
+export type { DispatcharrItemFailure } from "./bindings/DispatcharrItemFailure";
+export type { DispatcharrOpenRequest } from "./bindings/DispatcharrOpenRequest";
+export type { DispatcharrRankSignal } from "./bindings/DispatcharrRankSignal";
+export type { DispatcharrStatsPushReport } from "./bindings/DispatcharrStatsPushReport";
+export type { EpgLoadSummary } from "./bindings/EpgLoadSummary";
+export type { EpgProgramme } from "./bindings/EpgProgramme";
+export type { PlaylistLoadProgress } from "./bindings/PlaylistLoadProgress";
+export type { PlaylistPreview } from "./bindings/PlaylistPreview";
+export type { PlaylistScore } from "./bindings/PlaylistScore";
+export type { RecentPlaylistEntry } from "./bindings/RecentPlaylistEntry";
+export type { RecentPlaylistKind } from "./bindings/RecentPlaylistKind";
+export type { RenamePlaylistSourceInput } from "./bindings/RenamePlaylistSourceInput";
+export type { RenameSourceDescriptor } from "./bindings/RenameSourceDescriptor";
+export type { RetryBackoff } from "./bindings/RetryBackoff";
+export type { SampleClip } from "./bindings/SampleClip";
+export type { SampleClipFormat } from "./bindings/SampleClipFormat";
+export type { SavedPlaylistDraft } from "./bindings/SavedPlaylistDraft";
+export type { SavedPlaylistEntry } from "./bindings/SavedPlaylistEntry";
+export type { SavedPlaylistKind } from "./bindings/SavedPlaylistKind";
+export type { SavedPlaylistUpsertResult } from "./bindings/SavedPlaylistUpsertResult";
+export type { ScanClientCapabilities } from "./bindings/ScanClientCapabilities";
+export type { ScanConfig } from "./bindings/ScanConfig";
+export type { ScanErrorPayload } from "./bindings/ScanErrorPayload";
+export type { ScanEvent } from "./bindings/ScanEvent";
+export type { ScanHistoryDiff } from "./bindings/ScanHistoryDiff";
+export type { ScanHistoryItem } from "./bindings/ScanHistoryItem";
+export type { ScanPresetCollection } from "./bindings/ScanPresetCollection";
+export type { ScanPresetConfig } from "./bindings/ScanPresetConfig";
+export type { ScanProgress } from "./bindings/ScanProgress";
+export type { ScanResultBatchPayload } from "./bindings/ScanResultBatchPayload";
+export type { ScanSettingsPreset } from "./bindings/ScanSettingsPreset";
+export type { ScanSummary } from "./bindings/ScanSummary";
+export type { ScreenshotCacheStats } from "./bindings/ScreenshotCacheStats";
+export type { ScreenshotFormat } from "./bindings/ScreenshotFormat";
+export type { StalkerOpenRequest } from "./bindings/StalkerOpenRequest";
+export type { StreamingProxy } from "./bindings/StreamingProxy";
+export type { ThemePreference } from "./bindings/ThemePreference";
+export type { TitleBarPreference } from "./bindings/TitleBarPreference";
+export type { UiLocale } from "./bindings/UiLocale";
+export type { UpdateCheckResult } from "./bindings/UpdateCheckResult";
+export type { UpdateInstallKind } from "./bindings/UpdateInstallKind";
+export type { UpdateInstallMode } from "./bindings/UpdateInstallMode";
+export type { XtreamAccountInfo } from "./bindings/XtreamAccountInfo";
+export type { XtreamAccountState } from "./bindings/XtreamAccountState";
+export type { XtreamArchiveChannelUpdate } from "./bindings/XtreamArchiveChannelUpdate";
+export type { XtreamArchiveEnrichment } from "./bindings/XtreamArchiveEnrichment";
+export type { XtreamChannelProbe } from "./bindings/XtreamChannelProbe";
+export type { XtreamOpenRequest } from "./bindings/XtreamOpenRequest";
+export type { XtreamServerTestReport } from "./bindings/XtreamServerTestReport";
+export type { XtreamServerTestResult } from "./bindings/XtreamServerTestResult";
 
-export interface Channel {
-  index: number;
-  playlist: string;
-  name: string;
-  group: string;
-  language: string | null;
-  tvg_id: string | null;
-  tvg_name: string | null;
-  tvg_logo: string | null;
-  tvg_chno: string | null;
-  catchup: string | null;
-  catchup_days: number | null;
-  catchup_source: string | null;
-  url: string;
-  content_type: ContentType;
-  extinf_line: string;
-  metadata_lines: string[];
-}
-
-export interface ChannelResult {
-  index: number;
-  playlist: string;
-  name: string;
-  group: string;
-  language: string | null;
-  tvg_id: string | null;
-  tvg_name: string | null;
-  tvg_logo: string | null;
-  tvg_chno: string | null;
-  catchup: string | null;
-  catchup_days: number | null;
-  catchup_source: string | null;
-  url: string;
-  content_type: ContentType;
-  status: ChannelStatus;
-  codec: string | null;
-  resolution: string | null;
-  width: number | null;
-  height: number | null;
-  fps: number | null;
-  latency_ms: number | null;
-  hdr_format: string | null;
-  video_bitrate: string | null;
-  audio_bitrate: string | null;
-  audio_codec: string | null;
-  audio_channel_layout: string | null;
-  audio_only: boolean;
-  screenshot_path: string | null;
-  screenshot_error_reason?: string | null;
-  probe_error_reason?: string | null;
-  sample_clip_path?: string | null;
-  sample_clip_format?: SampleClipFormat | null;
-  label_mismatches: string[];
-  low_framerate: boolean;
-  /** The picture stayed still through the bitrate profiling sample. */
-  frozen_video: boolean;
-  /** Bitrate profiling measured the video below the minimum bitrate setting. */
-  low_bitrate: boolean;
-  error_message: string | null;
-  channel_id: string;
-  extinf_line: string;
-  metadata_lines: string[];
-  stream_url: string | null;
-  retry_count?: number | null;
-  error_reason?: string | null;
-  drm_system?: string | null;
-}
-
-export interface PlaylistPreview {
-  file_path: string;
-  file_name: string;
-  source_identity: string | null;
-  saved_playlist_id: string | null;
-  server_location: string | null;
-  single_provider: boolean;
-  xtream_max_connections: number | null;
-  xtream_account_info: XtreamAccountInfo | null;
-  /** Server and account a Dispatcharr source was loaded from. */
-  dispatcharr_connection?: string | null;
-  /** Dispatcharr provider accounts cap concurrent streams, so playback
-   *  shares their slots with a running scan. */
-  dispatcharr_limited_accounts?: boolean;
-  total_channels: number;
-  live_count: number;
-  movie_count: number;
-  series_count: number;
-  groups: string[];
-  epg_sources: string[];
-  epg_sources_by_playlist: Record<string, string[]>;
-  channels: Channel[];
-}
-
-export interface EpgProgramme {
-  start: number;
-  stop: number;
-  title: string;
-}
-
-export interface EpgLoadSummary {
-  sources_requested: number;
-  sources_loaded: number;
-  failed_sources: string[];
-  channels_matched: number;
-  programme_count: number;
-}
-
-export interface ArchiveDownloadRequest {
-  id: string;
-  url: string;
-  path: string;
-  duration_s: number;
-}
-
-export interface ArchiveDownloadProgress {
-  id: string;
-  out_time_s: number;
-  bytes: number;
-}
-
-export interface XtreamArchiveChannelUpdate {
-  index: number;
-  catchup: string | null;
-  catchup_days: number | null;
-  extinf_line: string;
-}
-
-export interface XtreamArchiveEnrichment {
-  source_identity: string;
-  channels: XtreamArchiveChannelUpdate[];
-}
-
-/** Mirrors `XtreamAccountState` in `models/playlist.rs`, judged at fetch time. */
-export type XtreamAccountState = "ok" | "expiring_soon" | "expired" | "disabled" | "rejected";
-
-export interface XtreamAccountInfo {
-  state: XtreamAccountState;
-  auth: boolean | null;
-  status: string | null;
-  expires_at_epoch: number | null;
-  created_at_epoch: number | null;
-  is_trial: boolean | null;
-  active_connections: number | null;
-  max_connections: number | null;
-  timezone: string | null;
-}
-
-export interface XtreamOpenRequest {
-  server: string;
-  username: string;
-  password: string;
-}
-
-/** Scan signals Fix order ranks working Dispatcharr streams by. */
-export type DispatcharrRankSignal =
-  | "resolution"
-  | "frame_rate"
-  | "bitrate"
-  | "latency"
-  | "audio_bitrate"
-  | "codec";
-
-/** API key wins when both are set. */
-export interface DispatcharrOpenRequest {
-  server: string;
-  username?: string | null;
-  password?: string | null;
-  api_key?: string | null;
-}
-
-export type SavedPlaylistKind = "file" | "url" | "xtream" | "dispatcharr";
-
-export type RenameSourceDescriptor =
-  | {
-      kind: "path";
-      path: string;
-    }
-  | {
-      kind: "url";
-      url: string;
-    }
-  | {
-      kind: "xtream";
-      server: string;
-      username: string;
-    }
-  | {
-      kind: "dispatcharr";
-      server: string;
-      username?: string | null;
-      api_key?: string | null;
-    };
-
-export type SavedPlaylistEntry =
-  | {
-      id: string;
-      kind: "file";
-      display_name: string;
-      path: string;
-    }
-  | {
-      id: string;
-      kind: "url";
-      display_name: string;
-      url: string;
-    }
-  | {
-      id: string;
-      kind: "xtream";
-      display_name: string;
-      servers: string[];
-      preferred_server: string | null;
-      username: string;
-      password: string | null;
-    }
-  | {
-      id: string;
-      kind: "dispatcharr";
-      display_name: string;
-      server: string;
-      username: string | null;
-      password: string | null;
-      api_key: string | null;
-    };
-
-export type SavedPlaylistDraft =
-  | {
-      id?: string | null;
-      kind: "file";
-      display_name: string;
-      path: string;
-    }
-  | {
-      id?: string | null;
-      kind: "url";
-      display_name: string;
-      url: string;
-    }
-  | {
-      id?: string | null;
-      kind: "xtream";
-      display_name: string;
-      servers: string[];
-      preferred_server?: string | null;
-      username: string;
-      password: string | null;
-    }
-  | {
-      id?: string | null;
-      kind: "dispatcharr";
-      display_name: string;
-      server: string;
-      username: string | null;
-      password: string | null;
-      api_key: string | null;
-    };
-
-export interface SavedPlaylistUpsertResult {
-  entry: SavedPlaylistEntry;
-  entries: SavedPlaylistEntry[];
-}
-
-export interface RenamePlaylistSourceInput {
-  saved_playlist_id?: string | null;
-  descriptor?: RenameSourceDescriptor | null;
-  display_name: string;
-}
-
-export interface StalkerOpenRequest {
-  portal: string;
-  mac: string;
-}
+import type { DispatcharrOpenRequest } from "./bindings/DispatcharrOpenRequest";
+import type { StalkerOpenRequest } from "./bindings/StalkerOpenRequest";
+import type { XtreamOpenRequest } from "./bindings/XtreamOpenRequest";
 
 export type CurrentSourceDescriptor =
   | {
@@ -312,343 +104,7 @@ export interface XtreamRecentSource {
   password?: string;
 }
 
-export interface ScanConfig {
-  file_path: string;
-  source_identity: string | null;
-  playlist_display_name: string | null;
-  group_filter: string | null;
-  channel_search: string | null;
-  selected_indices: number[] | null;
-  hide_vod_content: boolean;
-  timeout: number;
-  extended_timeout: number | null;
-  concurrency: number;
-  retries: number;
-  retry_backoff: RetryBackoff;
-  user_agent: string;
-  skip_screenshots: boolean;
-  profile_bitrate: boolean;
-  ffprobe_timeout_secs: number;
-  ffmpeg_bitrate_timeout_secs: number;
-  accept_invalid_certs: boolean;
-  proxy_file: string | null;
-  test_geoblock: boolean;
-  screenshots_dir: string | null;
-  auto_capture_sample_clips: boolean;
-  sample_clip_duration_secs: number;
-  client_capabilities?: ScanClientCapabilities | null;
-}
-
-export interface ScanClientCapabilities {
-  event_batch_v1: boolean;
-}
-
-export interface ScanProgress {
-  completed: number;
-  total: number;
-  alive: number;
-  dead: number;
-  placeholder: number;
-  geoblocked: number;
-  drm: number;
-}
-
-export interface ScanSummary {
-  total: number;
-  alive: number;
-  dead: number;
-  placeholder: number;
-  geoblocked: number;
-  drm: number;
-  low_framerate: number;
-  mislabeled: number;
-  playlist_score: PlaylistScore | null;
-}
-
-export interface PlaylistScore {
-  overall: number;
-  ping: number;
-  content: number;
-  quality: number;
-}
-
-export interface ScanEvent<T> {
-  run_id: string;
-  payload: T;
-}
-
-export interface ScanResultBatchPayload {
-  items: ChannelResult[];
-  progress: ScanProgress;
-}
-
-// Shared payload contract for scan://error events.
-export interface ScanErrorPayload {
-  message: string;
-}
-
-export type PlaylistLoadProgress =
-  | { stage: "Connecting"; detail: string }
-  | { stage: "Downloading"; bytes_downloaded: number; elapsed_secs: number }
-  | { stage: "Saving"; detail: string }
-  | {
-      stage: "Parsing";
-      channels_found: number;
-      live_found: number;
-      movie_found: number;
-      series_found: number;
-    }
-  | { stage: "Processing"; detail: string };
-
-export type ScreenshotFormat = "webp" | "png";
-export type SampleClipFormat = "mp4" | "ts";
-
-export interface SampleClip {
-  path: string;
-  format: SampleClipFormat;
-}
-export type ChannelLogoSize = "small" | "medium" | "large" | "huge";
-
-export interface AppSettings {
-  timeout: number;
-  extended_timeout: number | null;
-  concurrency: number;
-  retries: number;
-  retry_backoff: RetryBackoff;
-  user_agent: string;
-  skip_screenshots: boolean;
-  profile_bitrate: boolean;
-  ffprobe_timeout_secs: number;
-  ffmpeg_bitrate_timeout_secs: number;
-  accept_invalid_certs: boolean;
-  proxy_file: string | null;
-  test_geoblock: boolean;
-  screenshots_dir: string | null;
-  scan_history_limit: number;
-  scan_notifications: boolean;
-  low_fps_threshold: number;
-  /** Profiled streams below this video bitrate are flagged; null is off. */
-  min_video_bitrate_kbps: number | null;
-  theme: ThemePreference;
-  /** UI language tag; null until chosen (English). Applies after a restart. */
-  language: string | null;
-  title_bar: TitleBarPreference;
-  log_level: string;
-  show_prescan_filter: boolean;
-  hide_vod_content: boolean;
-  report_auto_reveal: boolean;
-  channel_logo_size: ChannelLogoSize;
-  screenshot_format: ScreenshotFormat;
-  auto_capture_sample_clips: boolean;
-  sample_clip_duration_secs: number;
-  screenshot_retention_count: number;
-  low_space_threshold_gb: number;
-  separate_placeholder_status: boolean;
-  show_header_button_text: boolean;
-  external_player_path: string | null;
-  persistent_xtream_connection_notice: boolean;
-  dispatcharr_write_stats: boolean;
-  dispatcharr_rank_order: DispatcharrRankSignal[];
-  dispatcharr_dead_streams: "unlink" | "move_to_end";
-  /** Fix order handles streams flagged low bitrate or frozen like dead ones. */
-  dispatcharr_low_quality_as_dead: boolean;
-  automatic_update_checks: boolean;
-}
-
-export interface ScanPresetConfig {
-  timeout: number;
-  extended_timeout: number | null;
-  concurrency: number;
-  retries: number;
-  retry_backoff: RetryBackoff;
-  user_agent: string;
-  skip_screenshots: boolean;
-  profile_bitrate: boolean;
-  ffprobe_timeout_secs: number;
-  ffmpeg_bitrate_timeout_secs: number;
-  accept_invalid_certs: boolean;
-  proxy_file: string | null;
-  test_geoblock: boolean;
-  screenshots_dir: string | null;
-  low_fps_threshold: number;
-  min_video_bitrate_kbps: number | null;
-  screenshot_format: ScreenshotFormat;
-  auto_capture_sample_clips: boolean;
-  sample_clip_duration_secs: number;
-}
-
-export interface ScanSettingsPreset {
-  name: string;
-  config: ScanPresetConfig;
-}
-
-export interface ScanPresetCollection {
-  presets: ScanSettingsPreset[];
-  default_preset: string | null;
-}
-
-export interface ScanHistoryDiff {
-  channels_gained: number;
-  channels_lost: number;
-  status_changed: number;
-  became_alive: number;
-  became_dead: number;
-}
-
-export interface ScanHistoryItem {
-  id: string;
-  scanned_at_epoch_ms: number;
-  summary: ScanSummary;
-  group_filter: string | null;
-  channel_search: string | null;
-  selected_count: number;
-  diff: ScanHistoryDiff | null;
-}
-
-export type DiskSpaceTier = "plenty" | "moderate" | "low" | "critical";
-
-export interface DiskSpaceInfo {
-  available_bytes: number;
-  tier: DiskSpaceTier;
-}
-
-export interface ScreenshotCacheStats {
-  file_count: number;
-  total_bytes: number;
-  cache_dir: string;
-  disk_space: DiskSpaceInfo | null;
-}
-
-export type RecentPlaylistKind = "file" | "url" | "xtream" | "dispatcharr";
-
-export interface RecentPlaylistEntry {
-  kind: RecentPlaylistKind;
-  value: string;
-  label: string;
-  saved_playlist_id?: string | null;
-}
-
-export interface XtreamChannelProbe {
-  stream_id: string;
-  latency_ms: number | null;
-  resolved_url: string | null;
-  codec: string | null;
-  resolution: string | null;
-  fps: number | null;
-  screenshot: string | null;
-}
-
-export interface XtreamServerTestResult {
-  server: string;
-  success: boolean;
-  api_latency_ms: number | null;
-  avg_stream_latency_ms: number | null;
-  resolved_host: string | null;
-  channel_probes: XtreamChannelProbe[];
-  error: string | null;
-  max_connections: number | null;
-}
-
-export interface XtreamServerTestReport {
-  results: XtreamServerTestResult[];
-  same_cdn: boolean;
-  channels_probed: number;
-  account: XtreamAccountInfo | null;
-}
-
-export type RetryBackoff = "none" | "linear" | "exponential";
-export type ThemePreference = "system" | "light" | "dark";
-
-/** The UI language this process launched with. */
-export interface UiLocale {
-  locale: string;
-  /** A supported system language to offer when none has been chosen yet. */
-  suggested: string | null;
-  /** The system's preferred locale, for regional date and number formats. */
-  system: string | null;
-}
-
-/** Linux only: "auto" hides the title bar on tiling window managers. */
-export type TitleBarPreference = "auto" | "show" | "hide";
-
-/** The localhost streaming proxy. Its key lets `/stream` URLs reach LAN hosts. */
-export interface StreamingProxy {
-  port: number;
-  key: string;
-}
-
-export interface ChromecastDevice {
-  id: string;
-  friendlyName: string;
-  model: string | null;
-  host: string;
-  port: number;
-}
-
-export type CastSessionState =
-  | "connecting"
-  | "loading"
-  | "playing"
-  | "paused"
-  | "stopped"
-  | "error";
-
-export interface CastSession {
-  deviceId: string;
-  deviceName: string;
-  state: CastSessionState;
-  streamUrl: string;
-  channelName: string | null;
-  channelLogo: string | null;
-  errorMessage: string | null;
-}
-
-export type CastStreamKind = "hls" | "mpeg_ts" | "other";
-
-export interface CastMediaRequest {
-  originalUrl: string;
-  channelName: string | null;
-  channelLogo: string | null;
-  streamKind: CastStreamKind;
-  isFinite: boolean;
-}
-
-export type UpdateInstallKind = "built-in" | "manual";
-
-/** Mirrors the Rust `UpdateInstallMode`. `buttonLabel`/`instructions` are only
- *  set for installations that must be updated by their own package manager. */
-export interface UpdateInstallMode {
-  kind: UpdateInstallKind;
-  buttonLabel: string | null;
-  instructions: string | null;
-}
-
-/** Result of a `check_for_updates` call. `version` is null when up to date. */
-export interface UpdateCheckResult {
-  version: string | null;
-  notes: string | null;
-}
-
-// ---------------------------------------------------------------------------
-// Dispatcharr write-back
-// ---------------------------------------------------------------------------
-
-/** Where Dispatcharr writes go: the loaded source and its connection. */
 export interface DispatcharrTarget {
   sourceIdentity: string;
   connection: string;
-}
-
-export interface DispatcharrItemFailure {
-  id: number;
-  error: string;
-}
-
-export interface DispatcharrStatsPushReport {
-  updated: number[];
-  failed: DispatcharrItemFailure[];
-  /** Results that were not alive, had no Dispatcharr IDs, or no stats. */
-  skipped: number;
-  /** Dispatcharr accepted the first write but did not store the stats. */
-  rejected: boolean;
 }

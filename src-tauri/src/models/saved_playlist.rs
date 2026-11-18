@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum SavedPlaylistKind {
     File,
@@ -16,7 +17,7 @@ pub enum SavedPlaylistKind {
 /// provider logins already embedded in M3U URLs), and keychain prompts on
 /// every launch would hurt more than they protect. Revisit if the app ever
 /// stores credentials that unlock anything beyond the playlists themselves.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SavedPlaylistSource {
     File {
@@ -55,7 +56,8 @@ impl SavedPlaylistSource {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct SavedPlaylistEntry {
     pub id: String,
     pub display_name: String,
@@ -63,7 +65,8 @@ pub struct SavedPlaylistEntry {
     pub source: SavedPlaylistSource,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, optional_fields = nullable)]
 pub struct SavedPlaylistDraft {
     #[serde(default)]
     pub id: Option<String>,
@@ -72,7 +75,8 @@ pub struct SavedPlaylistDraft {
     pub source: SavedPlaylistSource,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct SavedPlaylistUpsertResult {
     pub entry: SavedPlaylistEntry,
     pub entries: Vec<SavedPlaylistEntry>,

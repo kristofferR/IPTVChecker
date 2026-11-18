@@ -1172,7 +1172,7 @@ const CANDIDATE_LIMIT: usize = 40;
 const CANDIDATE_MIN_SIMILARITY: u8 = 60;
 
 /// Why a provider stream is offered for a channel.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 pub(crate) struct CandidateMatch {
     /// Carries the channel's EPG ID.
     pub epg: bool,

@@ -95,7 +95,8 @@ pub fn decode_proxy_url(encoded: &str) -> Option<String> {
 static STREAM_KEY: LazyLock<String> = LazyLock::new(crate::engine::cast_proxy::generate_token);
 
 /// The streaming proxy's port and key, for building `/stream` URLs.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct StreamingProxy {
     pub port: u16,
     pub key: &'static str,

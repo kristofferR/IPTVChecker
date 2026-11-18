@@ -53,7 +53,8 @@ pub fn apply_theme_preference(
     Ok(())
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ScreenshotCacheStats {
     pub file_count: usize,
     pub total_bytes: u64,

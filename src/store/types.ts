@@ -151,9 +151,12 @@ export interface ArchiveSlice {
 export interface SelectionSlice {
   selectedChannel: ChannelResult | null;
   selectedChannelIndices: number[];
+  /** Table rows the selection was made of. A Dispatcharr channel row stands
+   *  for all of its streams, so this can be lower than the index count. */
+  selectedRowCount: number;
 
   setSelectedChannel: (channel: ChannelResult | null) => void;
-  setSelectedChannelIndices: (indices: number[]) => void;
+  setSelectedChannelIndices: (indices: number[], rowCount: number) => void;
 }
 
 // ---------------------------------------------------------------------------

@@ -18,7 +18,8 @@ pub fn validate_sample_clip_duration(secs: u32) -> Result<(), AppError> {
     )))
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
 pub enum ThemePreference {
@@ -32,7 +33,8 @@ pub enum ThemePreference {
 /// managers (where the compositor moves/closes windows and the GTK header
 /// bar is dead weight) and keeps it on floating desktops, where it is also
 /// how you drag and close the window.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
 pub enum TitleBarPreference {
@@ -43,7 +45,8 @@ pub enum TitleBarPreference {
 }
 
 /// Scan signals Dispatcharr's Fix order ranks working streams by.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum DispatcharrRankSignal {
     Resolution,
@@ -55,7 +58,8 @@ pub enum DispatcharrRankSignal {
 }
 
 /// What Fix order does with dead streams.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum DispatcharrDeadStreams {
     /// Remove them from the channel (they stay in Dispatcharr).
@@ -64,7 +68,8 @@ pub enum DispatcharrDeadStreams {
     MoveToEnd,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
 pub enum ScreenshotFormat {
@@ -82,7 +87,8 @@ impl ScreenshotFormat {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
 pub enum ChannelLogoSize {
@@ -93,7 +99,8 @@ pub enum ChannelLogoSize {
     Huge,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(default)]
 pub struct AppSettings {
     pub timeout: f64,
@@ -164,7 +171,8 @@ pub struct AppSettings {
 /// disagrees) fails to compile.
 macro_rules! scan_preset_fields {
     ($($field:ident: $ty:ty,)*) => {
-        #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+        #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
+        #[ts(export)]
         #[serde(default)]
         pub struct ScanPresetConfig {
             $(pub $field: $ty,)*
@@ -219,13 +227,15 @@ impl Default for ScanPresetConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
+#[ts(export)]
 pub struct ScanSettingsPreset {
     pub name: String,
     pub config: ScanPresetConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, ts_rs::TS)]
+#[ts(export)]
 #[serde(default)]
 pub struct ScanPresetCollection {
     pub presets: Vec<ScanSettingsPreset>,

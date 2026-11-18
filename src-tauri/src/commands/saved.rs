@@ -19,7 +19,8 @@ const SOURCE_DISPLAY_NAMES_STORE_KEY: &str = "source_display_names";
 const SAVED_SLOT_COUNT: usize = 10;
 static NEXT_SAVED_ID: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RenameSourceDescriptor {
     Path {
@@ -35,13 +36,16 @@ pub enum RenameSourceDescriptor {
     Dispatcharr {
         server: String,
         #[serde(default)]
+        #[ts(optional = nullable)]
         username: Option<String>,
         #[serde(default)]
+        #[ts(optional = nullable)]
         api_key: Option<String>,
     },
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, optional_fields = nullable)]
 pub struct RenamePlaylistSourceInput {
     #[serde(default)]
     pub saved_playlist_id: Option<String>,

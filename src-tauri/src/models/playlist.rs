@@ -6,7 +6,8 @@ use super::channel::Channel;
 
 /// Whether an Xtream account can still be used, as judged when its account
 /// info was fetched.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum XtreamAccountState {
     /// Nothing in the account info points to a problem.
@@ -22,7 +23,8 @@ pub enum XtreamAccountState {
     Rejected,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export)]
 pub struct XtreamAccountInfo {
     #[serde(default)]
     pub state: XtreamAccountState,
@@ -47,7 +49,8 @@ pub struct XtreamAccountInfo {
     pub timezone: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct PlaylistPreview {
     pub file_path: String,
     pub file_name: String,

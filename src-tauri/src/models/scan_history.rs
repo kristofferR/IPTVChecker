@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use super::scan::ScanSummary;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ScanHistoryDiff {
     pub channels_gained: usize,
     pub channels_lost: usize,
@@ -11,7 +12,8 @@ pub struct ScanHistoryDiff {
     pub became_dead: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ScanHistoryItem {
     pub id: String,
     pub scanned_at_epoch_ms: u64,

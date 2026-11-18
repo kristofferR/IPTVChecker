@@ -76,6 +76,7 @@ const TARGET_TRIPLE: &str = "aarch64-pc-windows-msvc";
 
 /// Send SIGTERM (Unix) and wait up to `grace` for the process to exit.
 /// Falls back to SIGKILL if the grace period expires or on Windows.
+#[cfg_attr(not(unix), allow(unused_variables))]
 pub(crate) async fn graceful_kill(child: &mut tokio::process::Child, grace: std::time::Duration) {
     #[cfg(unix)]
     {
@@ -1523,7 +1524,8 @@ pub async fn capture_screenshot(
 }
 
 /// A validated sample clip on disk.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct SampleClip {
     pub path: String,
     pub format: SampleClipFormat,
@@ -2533,26 +2535,30 @@ pub fn check_label_mismatch(channel_name: &str, resolution: &str) -> Vec<String>
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
         MAX_SCREENSHOT_STEM_LEN, ScreenshotFormat, TARGET_TRIPLE, append_screenshot_output_args,
-        binary_candidate_names, build_screenshot_file_name,
-        capture_screenshot_with_format_using_binary, check_label_mismatch, contains_word,
-        format_ffmpeg_exit_reason, is_output_name_for_stem, normalize_superscript,
-        parse_bytes_read, parse_ffmpeg_stderr, parse_ffprobe_fps, parse_frozen_video,
-        parse_probe_snapshot, parse_stream_track_presence, proxy_upstream_source_url,
-        resolution_label, resolve_binary_from_dir, sanitize_ffmpeg_stderr_line,
-        sanitize_screenshot_stem, screenshot_header_is_valid, should_retry_screenshot_as_png,
-        should_route_tool_through_stream_proxy, should_route_tool_through_stream_proxy_with_hint,
-        stderr_excerpt, unique_screenshot_output_path, validate_captured_screenshot,
+        binary_candidate_names, build_screenshot_file_name, check_label_mismatch, contains_word,
+        format_ffmpeg_exit_reason, normalize_superscript, parse_bytes_read, parse_ffmpeg_stderr,
+        parse_ffprobe_fps, parse_frozen_video, parse_probe_snapshot, parse_stream_track_presence,
+        proxy_upstream_source_url, resolution_label, resolve_binary_from_dir,
+        sanitize_ffmpeg_stderr_line, sanitize_screenshot_stem, screenshot_header_is_valid,
+        should_retry_screenshot_as_png, should_route_tool_through_stream_proxy,
+        should_route_tool_through_stream_proxy_with_hint, stderr_excerpt,
+        unique_screenshot_output_path, validate_captured_screenshot,
     };
     #[cfg(unix)]
     use super::{
-        SampleClipFormat, capture_sample_clip_using_binary, run_combined_diagnostics_using_binary,
+        SampleClipFormat, capture_sample_clip_using_binary,
+        capture_screenshot_with_format_using_binary, is_output_name_for_stem,
+        run_combined_diagnostics_using_binary,
     };
+    #[cfg(unix)]
     use crate::error::AppError;
+    #[cfg(unix)]
     use tokio_util::sync::CancellationToken;
 
     #[cfg(unix)]

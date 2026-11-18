@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum ContentType {
     #[default]
@@ -12,7 +13,8 @@ pub enum ContentType {
 /// Container of a captured sample clip. Clips are stream-copied, so MP4 is
 /// only produced when the source packets remux cleanly; otherwise the raw
 /// MPEG-TS capture is kept.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum SampleClipFormat {
     Mp4,
@@ -106,7 +108,8 @@ impl ContentType {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum ChannelStatus {
     Pending,
@@ -136,7 +139,8 @@ impl std::fmt::Display for ChannelStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Channel {
     pub index: usize,
     pub playlist: String,
@@ -168,7 +172,8 @@ pub struct Channel {
     pub metadata_lines: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ChannelResult {
     pub index: usize,
     pub playlist: String,
