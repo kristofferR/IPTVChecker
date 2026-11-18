@@ -3,10 +3,10 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Deserialize;
-use tauri::Manager;
 use tauri_plugin_store::StoreExt;
 use url::Url;
 
+use crate::engine::host::Host;
 use crate::error::AppError;
 use crate::models::playlist::PlaylistPreview;
 use crate::models::saved_playlist::{
@@ -374,11 +374,8 @@ fn sanitize_saved_playlists(entries: Vec<SavedPlaylistEntry>) -> Vec<SavedPlayli
     sanitized
 }
 
-fn load_saved_playlists_raw(app: &tauri::AppHandle) -> Result<Vec<SavedPlaylistEntry>, AppError> {
-    let Ok(store) = app.store("settings.json") else {
-        return Ok(Vec::new());
-    };
-    let Some(value) = store.get(SAVED_PLAYLISTS_STORE_KEY) else {
+fn load_saved_playlists_raw(host: &dyn Host) -> Result<Vec<SavedPlaylistEntry>, AppError> {
+    let Some(value) = host.stored(SAVED_PLAYLISTS_STORE_KEY) else {
         return Ok(Vec::new());
     };
     serde_json::from_value::<Vec<SavedPlaylistEntry>>(value)
@@ -394,10 +391,8 @@ fn save_saved_playlists(app: &tauri::AppHandle, entries: &[SavedPlaylistEntry]) 
     }
 }
 
-pub(crate) fn load_saved_playlists(
-    app: &tauri::AppHandle,
-) -> Result<Vec<SavedPlaylistEntry>, AppError> {
-    Ok(sanitize_saved_playlists(load_saved_playlists_raw(app)?))
+pub(crate) fn load_saved_playlists(host: &dyn Host) -> Result<Vec<SavedPlaylistEntry>, AppError> {
+    Ok(sanitize_saved_playlists(load_saved_playlists_raw(host)?))
 }
 
 fn persist_saved_playlists(
@@ -410,11 +405,8 @@ fn persist_saved_playlists(
     sanitized
 }
 
-fn load_source_display_names(app: &tauri::AppHandle) -> HashMap<String, String> {
-    let Ok(store) = app.store("settings.json") else {
-        return HashMap::new();
-    };
-    let Some(value) = store.get(SOURCE_DISPLAY_NAMES_STORE_KEY) else {
+fn load_source_display_names(host: &dyn Host) -> HashMap<String, String> {
+    let Some(value) = host.stored(SOURCE_DISPLAY_NAMES_STORE_KEY) else {
         return HashMap::new();
     };
     let raw = serde_json::from_value::<HashMap<String, String>>(value).unwrap_or_default();
@@ -441,27 +433,27 @@ fn save_source_display_names(app: &tauri::AppHandle, names: &HashMap<String, Str
 }
 
 pub(crate) fn saved_playlist_by_id(
-    app: &tauri::AppHandle,
+    host: &dyn Host,
     id: &str,
 ) -> Result<Option<SavedPlaylistEntry>, AppError> {
     let target = id.trim();
     if target.is_empty() {
         return Ok(None);
     }
-    Ok(load_saved_playlists(app)?
+    Ok(load_saved_playlists(host)?
         .into_iter()
         .find(|entry| entry.id == target))
 }
 
 pub(crate) fn resolve_source_display_name(
-    app: &tauri::AppHandle,
+    host: &dyn Host,
     saved_playlist_id: Option<&str>,
     source_identity: Option<&str>,
     path: Option<&str>,
     fallback: &str,
 ) -> String {
     if let Some(id) = saved_playlist_id {
-        match saved_playlist_by_id(app, id) {
+        match saved_playlist_by_id(host, id) {
             Ok(Some(entry)) => return entry.display_name,
             Ok(None) => {}
             Err(error) => {
@@ -470,7 +462,7 @@ pub(crate) fn resolve_source_display_name(
         }
     }
 
-    let names = load_source_display_names(app);
+    let names = load_source_display_names(host);
     if let Some(identity) = source_identity.and_then(|value| names.get(value).cloned()) {
         return identity;
     }
@@ -485,7 +477,7 @@ pub(crate) fn resolve_source_display_name(
 }
 
 pub(crate) fn apply_persisted_playlist_metadata(
-    app: &tauri::AppHandle,
+    host: &dyn Host,
     preview: &mut PlaylistPreview,
     saved_playlist_id: Option<&str>,
     display_name_override: Option<&str>,
@@ -496,7 +488,7 @@ pub(crate) fn apply_persisted_playlist_metadata(
         .map(ToString::to_string)
         .unwrap_or_else(|| {
             resolve_source_display_name(
-                app,
+                host,
                 saved_playlist_id,
                 preview.source_identity.as_deref(),
                 Some(&preview.file_path),
@@ -702,7 +694,50 @@ pub async fn open_saved_playlist(
 ) -> Result<PlaylistPreview, AppError> {
     let entry = saved_playlist_by_id(&app, &id)?
         .ok_or_else(|| AppError::Other("Saved playlist not found".to_string()))?;
+    let opened = open_saved_entry(&app, &entry, group_filter, channel_search).await?;
 
+    if let Some(server) = opened.xtream_server {
+        match load_saved_playlists(&app) {
+            Ok(mut entries) => {
+                if let Some(saved_entry) = entries.iter_mut().find(|value| value.id == entry.id) {
+                    if let SavedPlaylistSource::Xtream {
+                        preferred_server, ..
+                    } = &mut saved_entry.source
+                    {
+                        *preferred_server = Some(server);
+                    }
+                    let _ = persist_saved_playlists(&app, entries);
+                }
+            }
+            Err(error) => {
+                log::warn!(
+                    "Failed to update preferred server for saved playlist '{}': {}",
+                    entry.id,
+                    error
+                );
+            }
+        }
+    }
+
+    Ok(opened.preview)
+}
+
+/// A saved playlist opened from its stored source.
+pub(crate) struct OpenedSavedPlaylist {
+    pub preview: PlaylistPreview,
+    /// The Xtream mirror that answered, to try first next time.
+    pub xtream_server: Option<String>,
+}
+
+/// Open a saved playlist from its stored source and seed the scan's preview
+/// cache with it.
+pub(crate) async fn open_saved_entry(
+    host: &dyn Host,
+    entry: &SavedPlaylistEntry,
+    group_filter: Option<String>,
+    channel_search: Option<String>,
+) -> Result<OpenedSavedPlaylist, AppError> {
+    let mut xtream_server = None;
     let mut preview = match &entry.source {
         SavedPlaylistSource::File { path } => {
             if !Path::new(path).exists() {
@@ -712,7 +747,7 @@ pub async fn open_saved_playlist(
                 )));
             }
             crate::commands::playlist::open_playlist_path_inner(
-                &app,
+                host,
                 path.clone(),
                 group_filter.clone(),
                 channel_search.clone(),
@@ -720,12 +755,9 @@ pub async fn open_saved_playlist(
             .await?
         }
         SavedPlaylistSource::Url { url } => {
-            let data_dir = app.path().app_data_dir().map_err(|error| {
-                AppError::Other(format!("Failed to resolve app data directory: {}", error))
-            })?;
             crate::commands::playlist::open_playlist_url_from_data_dir(
-                Some(&app),
-                &data_dir,
+                Some(host),
+                &host.app_data_dir()?,
                 url,
                 group_filter.clone(),
                 channel_search.clone(),
@@ -764,7 +796,7 @@ pub async fn open_saved_playlist(
                     password: password.clone(),
                 };
                 match crate::commands::playlist::open_playlist_xtream_inner(
-                    &app,
+                    host,
                     &source,
                     group_filter.clone(),
                     channel_search.clone(),
@@ -792,31 +824,7 @@ pub async fn open_saved_playlist(
                 return Err(saved_xtream_failure(&entry.display_name, errors));
             };
 
-            if let Some(server) = winning_server {
-                match load_saved_playlists(&app) {
-                    Ok(mut entries) => {
-                        if let Some(saved_entry) =
-                            entries.iter_mut().find(|value| value.id == entry.id)
-                        {
-                            if let SavedPlaylistSource::Xtream {
-                                preferred_server, ..
-                            } = &mut saved_entry.source
-                            {
-                                *preferred_server = Some(server);
-                            }
-                            let _ = persist_saved_playlists(&app, entries);
-                        }
-                    }
-                    Err(error) => {
-                        log::warn!(
-                            "Failed to update preferred server for saved playlist '{}': {}",
-                            entry.id,
-                            error
-                        );
-                    }
-                }
-            }
-
+            xtream_server = winning_server;
             preview
         }
         SavedPlaylistSource::Dispatcharr {
@@ -832,7 +840,7 @@ pub async fn open_saved_playlist(
                 api_key: api_key.clone(),
             };
             crate::commands::playlist::open_playlist_dispatcharr_inner(
-                &app,
+                host,
                 &source,
                 group_filter.clone(),
                 channel_search.clone(),
@@ -849,13 +857,13 @@ pub async fn open_saved_playlist(
     };
 
     apply_persisted_playlist_metadata(
-        &app,
+        host,
         &mut preview,
         Some(&entry.id),
         Some(&entry.display_name),
     )?;
-    crate::commands::scan::seed_cached_playlist_preview(
-        &app,
+    crate::engine::scan::seed_cached_playlist_preview(
+        host,
         &preview.file_path,
         preview.source_identity.as_deref(),
         Some(&preview.file_name),
@@ -864,7 +872,10 @@ pub async fn open_saved_playlist(
         &preview,
     )
     .await;
-    Ok(preview)
+    Ok(OpenedSavedPlaylist {
+        preview,
+        xtream_server,
+    })
 }
 
 #[cfg(test)]

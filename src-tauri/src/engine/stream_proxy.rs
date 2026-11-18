@@ -3,13 +3,14 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use reqwest::header::{CONTENT_TYPE, HeaderValue, LOCATION, RANGE, USER_AGENT};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, LazyLock};
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 use url::{Host, Url};
 
 use crate::engine::ffmpeg::{
     GRACEFUL_KILL_TIMEOUT, configure_background_process, graceful_kill, resolve_binary,
     sanitize_ffmpeg_stderr_line,
 };
+use crate::engine::host::Host as EngineHost;
 use crate::state::AppState;
 
 /// Fail fast if upstream's TCP/TLS handshake stalls.
@@ -136,8 +137,8 @@ async fn streaming_proxy_port_is_alive(port: u16) -> bool {
     )
 }
 
-pub async fn ensure_streaming_proxy_port(app: tauri::AppHandle) -> u16 {
-    let state = app.state::<Arc<AppState>>();
+pub async fn ensure_streaming_proxy_port(host: &dyn EngineHost) -> u16 {
+    let state = host.app_state();
     let port = state.streaming_proxy_port.load(Ordering::Relaxed);
     if streaming_proxy_port_is_alive(port).await {
         return port;
@@ -155,7 +156,7 @@ pub async fn ensure_streaming_proxy_port(app: tauri::AppHandle) -> u16 {
         return port;
     }
 
-    match start_streaming_proxy(app.clone()).await {
+    match start_streaming_proxy(host.share()).await {
         Ok(port) => {
             state.streaming_proxy_port.store(port, Ordering::Relaxed);
             log::info!(
@@ -702,17 +703,17 @@ struct PlaybackTransportEvent {
 
 #[derive(Clone)]
 struct PlaybackTransport {
-    app: tauri::AppHandle,
+    host: Arc<dyn EngineHost>,
     pending: Arc<std::sync::Mutex<PlaybackTransportEvent>>,
 }
 impl PlaybackTransport {
-    fn new(app: tauri::AppHandle, id: PlaybackTransportId) -> Self {
+    fn new(host: Arc<dyn EngineHost>, id: PlaybackTransportId) -> Self {
         let pending = Arc::new(std::sync::Mutex::new(PlaybackTransportEvent {
             id,
             counters: Default::default(),
         }));
         let weak = Arc::downgrade(&pending);
-        let emitter = app.clone();
+        let emitter = Arc::clone(&host);
         tokio::spawn(async move {
             let mut previous = std::collections::BTreeMap::new();
             loop {
@@ -723,12 +724,12 @@ impl PlaybackTransport {
                 if let Ok(pending) = pending.lock()
                     && pending.counters != previous
                 {
-                    let _ = emitter.emit("playback://transport", &*pending);
+                    emitter.emit("playback://transport", &*pending);
                     previous = pending.counters.clone();
                 };
             }
         });
-        Self { app, pending }
+        Self { host, pending }
     }
     fn record(&self, kind: &'static str) {
         if let Ok(mut pending) = self.pending.lock() {
@@ -737,7 +738,7 @@ impl PlaybackTransport {
     }
     fn flush(&self) {
         if let Ok(pending) = self.pending.lock() {
-            let _ = self.app.emit("playback://transport", &*pending);
+            self.host.emit("playback://transport", &*pending);
         }
     }
     fn outcome(&self, outcome: StreamForwardOutcome) {
@@ -874,7 +875,7 @@ impl TransportStreamPacer {
 }
 
 fn spawn_playback_remux(
-    app: &tauri::AppHandle,
+    host: &dyn EngineHost,
     upstream_url: &str,
     user_agent: &str,
     accept_invalid_certs: bool,
@@ -882,7 +883,7 @@ fn spawn_playback_remux(
     transcode_audio: bool,
     transcode_video: bool,
 ) -> std::io::Result<tokio::process::Child> {
-    let ffmpeg = resolve_binary(app, "ffmpeg");
+    let ffmpeg = resolve_binary(host, "ffmpeg");
     let mut command = tokio::process::Command::new(&ffmpeg);
     configure_background_process(&mut command);
     command
@@ -1338,7 +1339,7 @@ async fn wait_for_stream_reconnect(
 
 /// Start a localhost HTTP proxy that streams upstream responses.
 /// Returns the port the server is listening on.
-pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16> {
+pub async fn start_streaming_proxy(host: Arc<dyn EngineHost>) -> std::io::Result<u16> {
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpListener;
 
@@ -1359,7 +1360,7 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                 }
             };
 
-            let app_handle = app.clone();
+            let host = Arc::clone(&host);
             tokio::spawn(async move {
                 // Read the full request head to extract the URL — the
                 // request line and headers can arrive split across segments.
@@ -1373,7 +1374,7 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                 let request_str = String::from_utf8_lossy(&request_bytes);
 
                 if crate::commands::media::try_serve_preview_request(
-                    &app_handle,
+                    host.as_ref(),
                     &request_str,
                     &mut socket,
                 )
@@ -1393,7 +1394,7 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                 };
                 let telemetry = request
                     .telemetry
-                    .map(|id| PlaybackTransport::new(app_handle.clone(), id));
+                    .map(|id| PlaybackTransport::new(Arc::clone(&host), id));
                 let url = request.url;
                 let reconnect = request.reconnect;
                 let allow_private = allows_private_hosts(&url, request.trusted).await;
@@ -1420,7 +1421,7 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                 log::info!("[StreamProxy] Streaming {}", redact_url(&url));
 
                 // Fetch upstream with streaming body using settings-aware client
-                let state = app_handle.state::<Arc<AppState>>();
+                let state = host.app_state();
                 let (user_agent, accept_invalid_certs) = {
                     let settings = state.settings.lock().await;
                     (settings.user_agent.clone(), settings.accept_invalid_certs)
@@ -1443,7 +1444,7 @@ pub async fn start_streaming_proxy(app: tauri::AppHandle) -> std::io::Result<u16
                     let user_agent_text =
                         user_agent.to_str().unwrap_or("TiviMate/5.1.6 (Android 12)");
                     let child = match spawn_playback_remux(
-                        &app_handle,
+                        host.as_ref(),
                         &url,
                         user_agent_text,
                         accept_invalid_certs,

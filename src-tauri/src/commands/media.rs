@@ -11,12 +11,13 @@ use tauri_plugin_opener::OpenerExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::commands::player::open_local_media;
-use crate::commands::scan::ffmpeg_target_url;
 use crate::commands::settings::{
     ArtifactKind, allowed_artifact_roots, media_cache_root, register_media_root,
     validate_artifact_path,
 };
+use crate::engine::host::Host;
 use crate::engine::proxy_common::parse_byte_range;
+use crate::engine::scan::ffmpeg_target_url;
 use crate::engine::{cast_proxy, checker, disk, ffmpeg, stream_proxy};
 use crate::error::AppError;
 use crate::models::channel::SampleClipFormat;
@@ -236,11 +237,11 @@ pub(crate) fn remove_other_channel_clips(dir: &Path, stem: &str, keep: &Path) {
 }
 
 async fn validated_media_path(
-    app: &tauri::AppHandle,
+    host: &dyn Host,
     path: &str,
     kinds: &[ArtifactKind],
 ) -> Result<(PathBuf, ArtifactKind), AppError> {
-    let allowed_roots = allowed_artifact_roots(app).await;
+    let allowed_roots = allowed_artifact_roots(host).await;
     validate_artifact_path(Path::new(path.trim()), &allowed_roots, kinds)
 }
 
@@ -275,7 +276,7 @@ pub async fn get_sample_clip_preview_url(
     path: String,
 ) -> Result<String, AppError> {
     let (path, _) = validated_media_path(&app, &path, &[ArtifactKind::SampleClip]).await?;
-    let port = stream_proxy::ensure_streaming_proxy_port(app.clone()).await;
+    let port = stream_proxy::ensure_streaming_proxy_port(&app).await;
     if port == 0 {
         return Err(AppError::Other("Preview server is unavailable".to_string()));
     }
@@ -362,7 +363,7 @@ async fn stream_file_span(
 /// Serve a preview request on the localhost streaming proxy. Returns `false`
 /// when the request is not for the preview route, leaving it to the proxy.
 pub async fn try_serve_preview_request(
-    app: &tauri::AppHandle,
+    host: &dyn Host,
     request: &str,
     socket: &mut tokio::net::TcpStream,
 ) -> bool {
@@ -379,7 +380,7 @@ pub async fn try_serve_preview_request(
         write_status(socket, "400 Bad Request").await;
         return true;
     };
-    let path = match validated_media_path(app, &path, &[ArtifactKind::SampleClip]).await {
+    let path = match validated_media_path(host, &path, &[ArtifactKind::SampleClip]).await {
         Ok((path, _)) => path,
         Err(error) => {
             log::warn!("Media preview request rejected: {}", error);

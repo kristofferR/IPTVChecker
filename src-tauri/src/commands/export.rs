@@ -220,61 +220,72 @@ pub async fn export_csv(
 #[tauri::command]
 pub async fn export_split(results: Vec<ChannelResult>, base_path: String) -> Result<(), AppError> {
     run_blocking_export("export_split", move || {
-        #[derive(Default)]
-        struct SplitBuckets {
-            working: Vec<String>,
-            low_quality: Vec<String>,
-            dead: Vec<String>,
-            geoblocked: Vec<String>,
-            drm: Vec<String>,
-        }
-
-        let mut playlists: BTreeMap<String, SplitBuckets> = BTreeMap::new();
-
-        for r in &results {
-            let playlist_key = playlist_file_key(&r.playlist);
-            let buckets = playlists.entry(playlist_key).or_default();
-            let entry = build_m3u_entry(r);
-            match r.status {
-                // Same rule as Dispatcharr Fix all's low-quality policy.
-                ChannelStatus::Alive if r.low_bitrate || r.frozen_video => {
-                    buckets.low_quality.push(entry)
-                }
-                ChannelStatus::Alive => buckets.working.push(entry),
-                ChannelStatus::Dead | ChannelStatus::Placeholder => buckets.dead.push(entry),
-                ChannelStatus::Drm => buckets.drm.push(entry),
-                ChannelStatus::Geoblocked
-                | ChannelStatus::GeoblockedConfirmed
-                | ChannelStatus::GeoblockedUnconfirmed => buckets.geoblocked.push(entry),
-                _ => {}
-            }
-        }
-
-        let split_by_playlist = playlists.len() > 1;
-
-        for (playlist, buckets) in playlists {
-            for (bucket, entries) in [
-                ("working", buckets.working),
-                ("low_quality", buckets.low_quality),
-                ("dead", buckets.dead),
-                ("geoblocked", buckets.geoblocked),
-                ("drm", buckets.drm),
-            ] {
-                if entries.is_empty() {
-                    continue;
-                }
-                let suffix = if split_by_playlist {
-                    format!("{playlist}_{bucket}")
-                } else {
-                    bucket.to_string()
-                };
-                write_m3u_file(&export_target_path(&base_path, &suffix), &entries)?;
-            }
-        }
-
-        Ok(())
+        write_split_playlists(&results, &base_path, false)
     })
     .await
+}
+
+/// Write one playlist per status. With `keep_empty`, a status with no
+/// channels still gets its (empty) playlist, so a folder that is exported to
+/// again and again never keeps one from an earlier run.
+pub(crate) fn write_split_playlists(
+    results: &[ChannelResult],
+    base_path: &str,
+    keep_empty: bool,
+) -> Result<(), AppError> {
+    #[derive(Default)]
+    struct SplitBuckets {
+        working: Vec<String>,
+        low_quality: Vec<String>,
+        dead: Vec<String>,
+        geoblocked: Vec<String>,
+        drm: Vec<String>,
+    }
+
+    let mut playlists: BTreeMap<String, SplitBuckets> = BTreeMap::new();
+
+    for r in results {
+        let playlist_key = playlist_file_key(&r.playlist);
+        let buckets = playlists.entry(playlist_key).or_default();
+        let entry = build_m3u_entry(r);
+        match r.status {
+            // Same rule as Dispatcharr Fix all's low-quality policy.
+            ChannelStatus::Alive if r.low_bitrate || r.frozen_video => {
+                buckets.low_quality.push(entry)
+            }
+            ChannelStatus::Alive => buckets.working.push(entry),
+            ChannelStatus::Dead | ChannelStatus::Placeholder => buckets.dead.push(entry),
+            ChannelStatus::Drm => buckets.drm.push(entry),
+            ChannelStatus::Geoblocked
+            | ChannelStatus::GeoblockedConfirmed
+            | ChannelStatus::GeoblockedUnconfirmed => buckets.geoblocked.push(entry),
+            _ => {}
+        }
+    }
+
+    let split_by_playlist = playlists.len() > 1;
+
+    for (playlist, buckets) in playlists {
+        for (bucket, entries) in [
+            ("working", buckets.working),
+            ("low_quality", buckets.low_quality),
+            ("dead", buckets.dead),
+            ("geoblocked", buckets.geoblocked),
+            ("drm", buckets.drm),
+        ] {
+            if entries.is_empty() && !keep_empty {
+                continue;
+            }
+            let suffix = if split_by_playlist {
+                format!("{playlist}_{bucket}")
+            } else {
+                bucket.to_string()
+            };
+            write_m3u_file(&export_target_path(base_path, &suffix), &entries)?;
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]

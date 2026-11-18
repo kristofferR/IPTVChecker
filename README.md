@@ -136,6 +136,39 @@ The buttons above link to the default installer for each OS. Every architecture 
 | Windows | x64 / ARM | `.exe` installer or portable `.zip` |
 | Linux | x64 / ARM | `.AppImage`, `.deb`, `.rpm` |
 
+## Scan from the command line
+
+`iptv-checker scan` checks a playlist without opening a window, so it also runs on a server with no display, from cron or a systemd timer. It uses the app's saved settings and playlists, and the run appears in the app's scan history.
+
+```bash
+# A saved playlist, by its name in the app
+iptv-checker scan "My Provider"
+
+# An M3U file, a folder of playlists, or a URL
+iptv-checker scan ~/playlists/channels.m3u
+iptv-checker scan https://example.com/playlist.m3u
+
+# Write the CSV report, a playlist per status and the renamed playlist to a folder
+iptv-checker scan "My Provider" --export ~/iptv-exports
+
+# Override saved scan settings for one run
+iptv-checker scan "My Provider" --skip-screenshots --timeout 5 --concurrency 2
+```
+
+`iptv-checker scan --help` lists every option. The exit code is `0` when the scan completed, `1` when it failed, `2` for invalid arguments and `130` when it was interrupted, so cron and systemd can alert on a failure. A playlist with no channels counts as a failure, and so does a network outage the scan notices.
+
+A nightly scan from cron:
+
+```cron
+0 4 * * * iptv-checker scan "My Provider" --quiet --export /srv/iptv
+```
+
+- Every run checks the whole playlist again and replaces the previous exports in the folder.
+- Two runs against the same provider compete for its connections, so do not let them overlap. systemd timers never do; with cron, wrap the command in `flock -n`.
+- On macOS the binary is `/Applications/IPTV Checker.app/Contents/MacOS/iptv-checker`.
+- On Windows the app has no console, so redirect the output to a file to read it.
+- Saved playlists and settings live in the app's `settings.json`. On a machine the app never ran on there are none, so pass a file or URL and set what you need with flags.
+
 ## Building from source
 
 ### Prerequisites
@@ -194,9 +227,10 @@ src/                    Frontend (React + TypeScript)
 └── lib/                Types, Tauri IPC wrappers, formatting, sort/filter logic
 
 src-tauri/src/          Backend (Rust)
-├── engine/             Core logic: parser, checker, ffmpeg, proxy, resume, disk
+├── engine/             Core logic: scan, parser, checker, ffmpeg, proxy, resume, disk
 ├── commands/           Tauri IPC commands: playlist, scan, export, settings
 ├── models/             Data types: Channel, ChannelResult, AppSettings, etc.
+├── cli.rs              Headless `scan` command
 ├── state.rs            App state management
 └── error.rs            Error types
 ```

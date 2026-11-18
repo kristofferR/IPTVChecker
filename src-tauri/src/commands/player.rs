@@ -353,7 +353,7 @@ pub(crate) async fn open_local_media(app: &tauri::AppHandle, path: &Path) -> Res
 pub async fn get_streaming_proxy(
     app: tauri::AppHandle,
 ) -> Option<crate::engine::stream_proxy::StreamingProxy> {
-    let port = crate::engine::stream_proxy::ensure_streaming_proxy_port(app).await;
+    let port = crate::engine::stream_proxy::ensure_streaming_proxy_port(&app).await;
     (port > 0).then(|| crate::engine::stream_proxy::streaming_proxy(port))
 }
 

@@ -7,11 +7,11 @@
 //! source (plain URL, Xtream, Stalker, server tester) uses them.
 
 use crate::commands::playlist::{PROGRESS_THROTTLE, PlaylistLoadProgress, emit_load_progress};
+use crate::engine::host::Host;
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::time::{Duration, Instant};
-use tauri::AppHandle;
 use url::Url;
 
 pub(crate) const PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -184,7 +184,7 @@ fn map_download_error(
 }
 
 async fn download_playlist_to_file(
-    app: Option<&AppHandle>,
+    host: Option<&dyn Host>,
     download_url: &Url,
     error_label: &str,
     connect_timeout: Duration,
@@ -209,7 +209,7 @@ async fn download_playlist_to_file(
             ))
         })?;
     emit_load_progress(
-        app,
+        host,
         PlaylistLoadProgress::Connecting {
             detail: "Initializing HTTP client",
         },
@@ -226,7 +226,7 @@ async fn download_playlist_to_file(
         }
     }
     emit_load_progress(
-        app,
+        host,
         PlaylistLoadProgress::Connecting {
             detail: "Waiting for server",
         },
@@ -290,7 +290,7 @@ async fn download_playlist_to_file(
             file.write_all(&chunk).await.map_err(AppError::Io)?;
             if last_progress.elapsed() >= PROGRESS_THROTTLE {
                 emit_load_progress(
-                    app,
+                    host,
                     PlaylistLoadProgress::Downloading {
                         bytes_downloaded: total,
                         elapsed_secs: download_start.elapsed().as_secs_f64(),
@@ -304,7 +304,7 @@ async fn download_playlist_to_file(
         // Final progress emission to ensure the UI shows the complete size.
         let elapsed = download_start.elapsed().as_secs_f64();
         emit_load_progress(
-            app,
+            host,
             PlaylistLoadProgress::Downloading {
                 bytes_downloaded: total,
                 elapsed_secs: elapsed,
@@ -328,7 +328,7 @@ async fn download_playlist_to_file(
 }
 
 async fn download_playlist_to_cache(
-    app: Option<&AppHandle>,
+    host: Option<&dyn Host>,
     cache_path: std::path::PathBuf,
     download_url: &Url,
     error_label: &str,
@@ -339,7 +339,7 @@ async fn download_playlist_to_cache(
     let tmp_path = build_cache_tmp_path(&cache_path);
 
     let download = download_playlist_to_file(
-        app,
+        host,
         download_url,
         error_label,
         PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT,
@@ -357,7 +357,7 @@ async fn download_playlist_to_cache(
                 return Ok(cache_path.to_string_lossy().to_string());
             }
             match download_playlist_to_file(
-                app,
+                host,
                 download_url,
                 error_label,
                 PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT,
@@ -382,7 +382,7 @@ async fn download_playlist_to_cache(
     };
 
     emit_load_progress(
-        app,
+        host,
         PlaylistLoadProgress::Saving {
             detail: "Writing to disk",
         },
@@ -409,7 +409,7 @@ async fn download_playlist_to_cache(
 }
 
 pub(crate) async fn download_playlist_to_cache_in_data_dir(
-    app: Option<&AppHandle>,
+    host: Option<&dyn Host>,
     data_dir: &std::path::Path,
     source_key: &str,
     download_url: &Url,
@@ -418,7 +418,7 @@ pub(crate) async fn download_playlist_to_cache_in_data_dir(
 ) -> Result<String, AppError> {
     let cache_path = remote_playlist_cache_path_from_data_dir(data_dir, source_key)?;
     download_playlist_to_cache(
-        app,
+        host,
         cache_path,
         download_url,
         error_label,

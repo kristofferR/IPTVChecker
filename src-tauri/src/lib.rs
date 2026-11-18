@@ -4,6 +4,7 @@
 // the app and does not belong to the lint gate that introduced this allow.
 #![allow(clippy::too_many_arguments)]
 
+pub mod cli;
 pub mod commands;
 pub mod engine;
 pub mod error;
@@ -1000,7 +1001,7 @@ pub fn run() {
                 let handle_for_proxy = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
                     let port =
-                        engine::stream_proxy::ensure_streaming_proxy_port(handle_for_proxy).await;
+                        engine::stream_proxy::ensure_streaming_proxy_port(&handle_for_proxy).await;
                     if port == 0 {
                         log::error!("Failed to start streaming proxy at startup");
                     }

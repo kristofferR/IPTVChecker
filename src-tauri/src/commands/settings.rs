@@ -6,6 +6,7 @@ use tauri::Manager;
 use tauri_plugin_store::StoreExt;
 
 use crate::engine::disk;
+use crate::engine::host::Host;
 use crate::error::AppError;
 use crate::models::settings::{
     AppSettings, ScanPresetCollection, ScanPresetConfig, ScanSettingsPreset, ThemePreference,
@@ -63,11 +64,8 @@ pub struct ScreenshotCacheStats {
 
 /// Root of the temp media cache shared by screenshots and sample clips. The
 /// directory keeps its original name so existing caches stay evictable.
-pub(crate) fn media_cache_root(app: &tauri::AppHandle) -> std::path::PathBuf {
-    app.path()
-        .temp_dir()
-        .unwrap_or_else(|_| std::env::temp_dir())
-        .join("iptv-checker-screenshots")
+pub(crate) fn media_cache_root(host: &dyn Host) -> std::path::PathBuf {
+    host.temp_dir().join("iptv-checker-screenshots")
 }
 
 fn canonicalize_root_if_exists(path: &Path) -> Option<std::path::PathBuf> {
@@ -165,14 +163,14 @@ pub(crate) fn validate_artifact_path(
     ))
 }
 
-pub(crate) async fn allowed_artifact_roots(app: &tauri::AppHandle) -> Vec<std::path::PathBuf> {
+pub(crate) async fn allowed_artifact_roots(host: &dyn Host) -> Vec<std::path::PathBuf> {
     let mut roots: HashSet<std::path::PathBuf> = HashSet::new();
 
-    if let Some(path) = canonicalize_root_if_exists(&media_cache_root(app)) {
+    if let Some(path) = canonicalize_root_if_exists(&media_cache_root(host)) {
         roots.insert(path);
     }
 
-    let state = app.state::<Arc<AppState>>();
+    let state = host.app_state();
     let session_roots: Vec<std::path::PathBuf> = state
         .media_roots
         .lock()
@@ -198,8 +196,8 @@ pub(crate) async fn allowed_artifact_roots(app: &tauri::AppHandle) -> Vec<std::p
 
 /// Remember a folder media was written to, so it stays an allowed root for
 /// the rest of the session.
-pub(crate) fn register_media_root(app: &tauri::AppHandle, dir: &Path) {
-    app.state::<Arc<AppState>>()
+pub(crate) fn register_media_root(host: &dyn Host, dir: &Path) {
+    host.app_state()
         .media_roots
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)

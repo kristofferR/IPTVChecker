@@ -892,7 +892,7 @@ where
 }
 
 pub async fn check_channel_status_with_ffprobe_debug(
-    app: &tauri::AppHandle,
+    host: &dyn crate::engine::host::Host,
     url: &str,
     timeout: f64,
     retries: u32,
@@ -969,7 +969,6 @@ pub async fn check_channel_status_with_ffprobe_debug(
     let attempts = total_attempts(retries);
 
     let attempt_check = |current_timeout: f64, attempt_offset: u32| {
-        let app = app.clone();
         let url = url.to_string();
         let cancel = cancel_token.clone();
         async move {
@@ -989,7 +988,7 @@ pub async fn check_channel_status_with_ffprobe_debug(
                 let timeout_duration = Duration::from_secs_f64(current_timeout.max(0.5));
 
                 let probe_result = crate::engine::ffmpeg::collect_probe_snapshot_with_timeout(
-                    &app,
+                    host,
                     &url,
                     None,
                     &cancel,
