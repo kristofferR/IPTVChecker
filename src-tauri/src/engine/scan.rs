@@ -79,9 +79,30 @@ impl SharedUrlResult {
         error_reason: Option<String>,
         channel_log: ChannelDebugLog,
     ) -> Self {
+        Self::checked(
+            ChannelStatus::Dead,
+            None,
+            stream_url,
+            latency_ms,
+            retry_count,
+            error_reason,
+            channel_log,
+        )
+    }
+
+    /// A liveness verdict, before any diagnostics have run.
+    fn checked(
+        status: ChannelStatus,
+        drm_system: Option<String>,
+        stream_url: Option<String>,
+        latency_ms: Option<u64>,
+        retry_count: Option<u32>,
+        error_reason: Option<String>,
+        channel_log: ChannelDebugLog,
+    ) -> Self {
         Self {
-            status: ChannelStatus::Dead,
-            drm_system: None,
+            status,
+            drm_system,
             latency_ms,
             codec: None,
             resolution: None,
@@ -259,14 +280,37 @@ pub(crate) struct SharedCheckContext<'a> {
     pub(crate) clip_write_lock: &'a tokio::sync::Mutex<()>,
 }
 
-pub(crate) async fn compute_shared_url_result(
+/// What to probe and capture for one stream URL.
+struct ProbeTarget<'a> {
+    channel_url: &'a str,
+    /// The URL handed to ffmpeg; see [`ffmpeg_target_url`].
+    target_url: &'a str,
+    redacted_target_url: &'a str,
+    /// The diagnostics pass is also the liveness check (Dispatcharr).
+    dispatcharr_single_pass: bool,
+    want_screenshot: bool,
+    sample_clip_secs: Option<u32>,
+    screenshots_dir: Option<&'a String>,
+    screenshot_file_name: &'a str,
+}
+
+impl SharedCheckContext<'_> {
+    /// Re-checked right before every clip write (after the liveness check,
+    /// the diagnostics queue, screenshots, and retry backoff), so workers
+    /// approved earlier cannot keep writing clips once space is critical.
+    fn has_space_for_clip(&self, dir: &str) -> bool {
+        disk::classify_space(std::path::Path::new(dir), self.low_space_threshold_gb)
+            != disk::DiskSpaceTier::Critical
+    }
+}
+
+/// Whether the stream answers, and how long that took to find out (in ms).
+/// Diagnostics are left to the caller.
+async fn check_liveness(
     ctx: &SharedCheckContext<'_>,
     channel_url: &str,
-    skip_screenshots: bool,
-    sample_clip_secs: Option<u32>,
-    screenshots_dir: Option<&String>,
-    screenshot_file_name: &str,
-) -> Result<(SharedUrlResult, WorkerTiming), AppError> {
+    dispatcharr_single_pass: bool,
+) -> Result<(SharedUrlResult, f64), AppError> {
     let &SharedCheckContext {
         host,
         client,
@@ -278,27 +322,16 @@ pub(crate) async fn compute_shared_url_result(
         cancel,
         proxy_list,
         test_geoblock,
-        ffmpeg_ok,
         ffprobe_ok,
-        profile_bitrate_flag,
         ffprobe_timeout_secs,
-        ffmpeg_bitrate_timeout_secs,
-        low_fps_threshold,
-        min_video_bitrate_kbps,
-        screenshot_format,
-        diagnostics_semaphore,
-        single_connection_mode,
-        prune_superseded_clips,
-        low_space_threshold_gb,
-        clip_write_lock,
+        ..
     } = ctx;
-    let dispatcharr_single_pass = ffmpeg_ok && checker::is_dispatcharr_proxy_url(channel_url);
     let check_started_at = Instant::now();
     let check_outcome = if dispatcharr_single_pass {
         // Dispatcharr returns 503 while tearing down a channel after its last
         // client disconnects. Do not consume one connection for an HTTP byte
         // check and then race teardown with a second ffmpeg connection. The
-        // combined diagnostics pass below is both the liveness check and the
+        // combined diagnostics pass is both the liveness check and the
         // metadata/screenshot/bitrate probe.
         Ok(checker::ChannelCheckOutcome {
             status: ChannelStatus::Alive,
@@ -394,6 +427,484 @@ pub(crate) async fn compute_shared_url_result(
         channel_log.final_reason = error_reason.clone();
     }
 
+    Ok((
+        SharedUrlResult::checked(
+            status,
+            // Only alive and DRM-protected streams report a DRM system.
+            drm_system.filter(|_| matches!(status, ChannelStatus::Alive | ChannelStatus::Drm)),
+            stream_url,
+            latency_ms,
+            (retry_count > 0).then_some(retry_count),
+            error_reason,
+            channel_log,
+        ),
+        check_ms,
+    ))
+}
+
+/// Metadata, screenshot, sample clip and bitrate over one ffmpeg connection,
+/// for providers that count connections. Returns the container bitrate.
+async fn probe_over_one_connection(
+    ctx: &SharedCheckContext<'_>,
+    probe: &ProbeTarget<'_>,
+    shared: &mut SharedUrlResult,
+    mut diagnostics_permit: Option<OwnedSemaphorePermit>,
+) -> Result<Option<u32>, AppError> {
+    let &SharedCheckContext {
+        host,
+        retries,
+        retry_backoff,
+        user_agent,
+        cancel,
+        profile_bitrate_flag,
+        ffprobe_timeout_secs,
+        ffmpeg_bitrate_timeout_secs,
+        low_fps_threshold,
+        screenshot_format,
+        diagnostics_semaphore,
+        clip_write_lock,
+        ..
+    } = ctx;
+    let &ProbeTarget {
+        channel_url,
+        target_url,
+        redacted_target_url,
+        dispatcharr_single_pass,
+        want_screenshot,
+        sample_clip_secs,
+        screenshots_dir,
+        screenshot_file_name,
+    } = probe;
+    let mut format_bitrate_kbps = None;
+
+    // Single-provider: one ffmpeg process for metadata + screenshot + bitrate.
+    // Avoids 5XX rejections from single-connection IPTV servers.
+    let diag_timeout = if profile_bitrate_flag {
+        ffmpeg_bitrate_timeout_secs
+    } else if want_screenshot {
+        ffprobe_timeout_secs.max(MIN_SCREENSHOT_DIAGNOSTIC_TIMEOUT_SECS)
+    } else {
+        ffprobe_timeout_secs
+    };
+    let mut combined_retries_used = 0u32;
+    let (combined_result, final_attempt_elapsed) = loop {
+        let attempt_started_at = Instant::now();
+        let clip_guard = match sample_clip_secs {
+            Some(_) => Some(clip_write_lock.lock().await),
+            None => None,
+        };
+        let result = ffmpeg::run_combined_diagnostics(
+            host,
+            target_url,
+            Some(channel_url),
+            user_agent,
+            screenshots_dir.unwrap_or(&String::new()),
+            screenshot_file_name,
+            screenshot_format,
+            want_screenshot,
+            sample_clip_secs
+                .filter(|_| screenshots_dir.is_some_and(|dir| ctx.has_space_for_clip(dir))),
+            profile_bitrate_flag,
+            diag_timeout,
+            cancel,
+        )
+        .await;
+        drop(clip_guard);
+        let attempt_elapsed = attempt_started_at.elapsed();
+
+        let no_tracks_yet = matches!(
+            &result,
+            Ok(diag) if !(diag.track_presence.has_audio || diag.track_presence.has_video)
+        );
+        if !no_tracks_yet || combined_retries_used >= retries {
+            break (result, attempt_elapsed);
+        }
+
+        combined_retries_used = combined_retries_used.saturating_add(1);
+        // The semaphore limits active diagnostics, not channels waiting for
+        // a provider to free a connection. Release it during the backoff.
+        drop(diagnostics_permit.take());
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                return Err(AppError::Cancelled);
+            }
+            _ = tokio::time::sleep(probe_retry_delay(retry_backoff, combined_retries_used)) => {}
+        }
+        diagnostics_permit = tokio::select! {
+            _ = cancel.cancelled() => return Err(AppError::Cancelled),
+            permit = diagnostics_semaphore.clone().acquire_owned() => permit.ok(),
+        };
+    };
+    if dispatcharr_single_pass {
+        shared.latency_ms =
+            Some(final_attempt_elapsed.as_millis().min(u128::from(u64::MAX)) as u64);
+        shared.retry_count = (combined_retries_used > 0).then_some(combined_retries_used);
+    }
+
+    match combined_result {
+        Ok(diag) => {
+            let has_tracks = diag.track_presence.has_audio || diag.track_presence.has_video;
+            if !has_tracks {
+                let reason = diag.input_error_reason.clone().unwrap_or_else(|| {
+                    "No decodable audio/video tracks reported by ffmpeg".to_string()
+                });
+                // The Dispatcharr pass is also the liveness check.
+                if dispatcharr_single_pass {
+                    shared.status = ChannelStatus::Dead;
+                    shared.error_reason = Some(reason.clone());
+                    shared.channel_log.final_verdict = "Dead".to_string();
+                    shared.channel_log.final_reason = Some(reason);
+                } else {
+                    shared.probe_error_reason = Some(reason);
+                }
+            }
+            shared.audio_only = diag.track_presence.has_audio && !diag.track_presence.has_video;
+            if let Some(info) = diag.video_info
+                && !shared.audio_only
+            {
+                shared.codec = Some(info.codec);
+                shared.resolution = Some(info.resolution.clone());
+                shared.width = info.width;
+                shared.height = info.height;
+                shared.fps = info.fps;
+                shared.hdr_format = info.hdr_format;
+                shared.low_framerate = info
+                    .fps
+                    .map(|fps| (fps as f64) <= low_fps_threshold)
+                    .unwrap_or(false);
+            }
+            if let Some(audio) = diag.audio_info {
+                shared.audio_codec = Some(audio.codec);
+                shared.audio_bitrate = audio.bitrate_kbps.map(|b| format!("{}", b));
+                shared.audio_channel_layout = audio.channel_layout;
+            }
+            if let Some(kbps) = diag.profiled_bitrate_kbps {
+                shared.video_bitrate = Some(format!("{kbps} kbps"));
+            }
+            shared.frozen_video = diag.frozen_video && !shared.audio_only;
+            format_bitrate_kbps = diag.format_bitrate_kbps;
+            shared.sample_clip = diag.sample_clip;
+            shared.channel_log.diagnostics_output = Some(
+                crate::models::scan_log::cap_diagnostics_output(diag.diagnostics_output),
+            );
+
+            let png_fallback_result = if diag.screenshot_path.is_none()
+                && want_screenshot
+                && !dispatcharr_single_pass
+                && screenshot_format == ScreenshotFormat::Webp
+                && ffmpeg::should_retry_screenshot_as_png(diag.screenshot_error_reason.as_deref())
+                && !cancel.is_cancelled()
+            {
+                Some(
+                    ffmpeg::capture_screenshot(
+                        host,
+                        target_url,
+                        Some(channel_url),
+                        screenshots_dir.unwrap(),
+                        screenshot_file_name,
+                        user_agent,
+                        ScreenshotFormat::Png,
+                        cancel,
+                    )
+                    .await,
+                )
+            } else {
+                None
+            };
+            apply_combined_screenshot_outcome(
+                shared,
+                diag.screenshot_path,
+                diag.screenshot_error_reason,
+                png_fallback_result,
+            );
+
+            // A screenshot output that cannot start (no video track, a
+            // missing encoder) aborts the whole combined run, clip
+            // included. The stream opened, so record the clip on its own.
+            // Dispatcharr is skipped: a second connection right after the
+            // first hits its channel teardown.
+            if let (Some(secs), Some(dir)) = (sample_clip_secs, screenshots_dir)
+                && shared.sample_clip.is_none()
+                && has_tracks
+                && want_screenshot
+                && !dispatcharr_single_pass
+                && !cancel.is_cancelled()
+            {
+                let _clip_guard = clip_write_lock.lock().await;
+                if ctx.has_space_for_clip(dir) {
+                    shared.sample_clip = ffmpeg::capture_sample_clip(
+                        host,
+                        target_url,
+                        Some(channel_url),
+                        dir,
+                        screenshot_file_name,
+                        user_agent,
+                        secs,
+                        cancel,
+                    )
+                    .await
+                    .ok();
+                }
+            }
+        }
+        Err(AppError::Cancelled) => {
+            drop(diagnostics_permit);
+            return Err(AppError::Cancelled);
+        }
+        Err(err) => {
+            log::warn!(
+                "Combined diagnostics failed for {}: {}",
+                redacted_target_url,
+                err
+            );
+            if want_screenshot {
+                set_screenshot_capture_error(shared, err.to_string());
+            }
+            if dispatcharr_single_pass {
+                shared.status = ChannelStatus::Dead;
+                shared.error_reason = Some(err.to_string());
+                shared.channel_log.final_verdict = "Dead".to_string();
+                shared.channel_log.final_reason = Some(err.to_string());
+            } else {
+                shared.probe_error_reason = Some(err.to_string());
+            }
+        }
+    }
+    drop(diagnostics_permit);
+    Ok(format_bitrate_kbps)
+}
+
+/// The same diagnostics as separate connections: an ffprobe snapshot beside
+/// the media capture, then bitrate profiling. Returns the container bitrate.
+async fn probe_in_parallel(
+    ctx: &SharedCheckContext<'_>,
+    probe: &ProbeTarget<'_>,
+    shared: &mut SharedUrlResult,
+    mut diagnostics_permit: Option<OwnedSemaphorePermit>,
+) -> Option<u32> {
+    let &SharedCheckContext {
+        host,
+        retries,
+        retry_backoff,
+        user_agent,
+        cancel,
+        ffmpeg_ok,
+        ffprobe_ok,
+        profile_bitrate_flag,
+        ffprobe_timeout_secs,
+        ffmpeg_bitrate_timeout_secs,
+        low_fps_threshold,
+        screenshot_format,
+        diagnostics_semaphore,
+        clip_write_lock,
+        ..
+    } = ctx;
+    let &ProbeTarget {
+        channel_url,
+        target_url,
+        redacted_target_url,
+        want_screenshot,
+        sample_clip_secs,
+        screenshots_dir,
+        screenshot_file_name,
+        ..
+    } = probe;
+    let ffprobe_timeout_duration =
+        std::time::Duration::from_secs_f64(ffprobe_timeout_secs.clamp(1.0, 300.0));
+    let mut format_bitrate_kbps = None;
+
+    // One probe: its snapshot and, when it found no track, why. None
+    // when cancelled.
+    let probe_once = || async {
+        if !ffprobe_ok {
+            return Some((None, None));
+        }
+        match ffmpeg::collect_probe_snapshot_with_timeout(
+            host,
+            target_url,
+            Some(channel_url),
+            cancel,
+            Some(ffprobe_timeout_duration),
+        )
+        .await
+        {
+            Err(AppError::Cancelled) => None,
+            Err(error) => Some((None, Some(error.to_string()))),
+            Ok(snapshot)
+                if snapshot.track_presence.has_audio || snapshot.track_presence.has_video =>
+            {
+                Some((Some(snapshot), None))
+            }
+            Ok(snapshot) => Some((
+                Some(snapshot),
+                Some("No decodable audio/video tracks reported by ffprobe".to_string()),
+            )),
+        }
+    };
+
+    let screenshot_fut = async {
+        if !want_screenshot || cancel.is_cancelled() {
+            return Ok(None);
+        }
+        let dir = screenshots_dir.unwrap();
+        ffmpeg::capture_screenshot(
+            host,
+            target_url,
+            Some(channel_url),
+            dir,
+            screenshot_file_name,
+            user_agent,
+            screenshot_format,
+            cancel,
+        )
+        .await
+        .map(Some)
+    };
+
+    // The clip follows the screenshot rather than running beside it, so a
+    // channel never holds more than the two connections it used before.
+    let media_fut = async {
+        let screenshot_result = screenshot_fut.await;
+        let sample_clip = match (sample_clip_secs, screenshots_dir) {
+            (Some(secs), Some(dir)) if !cancel.is_cancelled() => {
+                let _clip_guard = clip_write_lock.lock().await;
+                if ctx.has_space_for_clip(dir) {
+                    ffmpeg::capture_sample_clip(
+                        host,
+                        target_url,
+                        Some(channel_url),
+                        dir,
+                        screenshot_file_name,
+                        user_agent,
+                        secs,
+                        cancel,
+                    )
+                    .await
+                    .ok()
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        (screenshot_result, sample_clip)
+    };
+
+    // The first probe runs beside the media capture, which keeps scans of
+    // unlimited servers fast. Retries wait until the capture is done, so a
+    // single-connection server in a mixed playlist is not asked for two
+    // streams at once.
+    let (first_probe, (screenshot_result, sample_clip)) = tokio::join!(probe_once(), media_fut);
+    let (mut probe_result, mut probe_failure) = first_probe.unwrap_or((None, None));
+    let mut probe_retries_used = 0u32;
+    while probe_failure.is_some() && probe_retries_used < retries && !cancel.is_cancelled() {
+        probe_retries_used += 1;
+        drop(diagnostics_permit.take());
+        tokio::select! {
+            _ = cancel.cancelled() => break,
+            _ = tokio::time::sleep(probe_retry_delay(retry_backoff, probe_retries_used)) => {}
+        }
+        diagnostics_permit = tokio::select! {
+            _ = cancel.cancelled() => break,
+            permit = diagnostics_semaphore.clone().acquire_owned() => permit.ok(),
+        };
+        let Some(next) = probe_once().await else {
+            break;
+        };
+        (probe_result, probe_failure) = next;
+    }
+    shared.sample_clip = sample_clip;
+    shared.probe_error_reason = probe_failure;
+
+    if let Some(snapshot) = probe_result {
+        shared.audio_only = snapshot.track_presence.has_audio && !snapshot.track_presence.has_video;
+        if let Some(info) = snapshot.video_info
+            && !shared.audio_only
+        {
+            shared.codec = Some(info.codec);
+            shared.resolution = Some(info.resolution.clone());
+            shared.width = info.width;
+            shared.height = info.height;
+            shared.fps = info.fps;
+            shared.hdr_format = info.hdr_format;
+            shared.low_framerate = info
+                .fps
+                .map(|fps| (fps as f64) <= low_fps_threshold)
+                .unwrap_or(false);
+            if let Some(kbps) = info.bitrate_kbps {
+                shared.video_bitrate = Some(format!("{kbps} kbps"));
+            }
+        }
+        if let Some(audio) = snapshot.audio_info {
+            shared.audio_codec = Some(audio.codec);
+            shared.audio_bitrate = audio.bitrate_kbps.map(|b| format!("{}", b));
+            shared.audio_channel_layout = audio.channel_layout;
+        }
+        format_bitrate_kbps = snapshot.format_bitrate_kbps;
+        shared.channel_log.diagnostics_output = Some(
+            crate::models::scan_log::cap_diagnostics_output(snapshot.ffprobe_output),
+        );
+    }
+
+    apply_parallel_screenshot_outcome(shared, screenshot_result);
+
+    // Release permit before bitrate profiling to avoid starving other channels.
+    drop(diagnostics_permit);
+
+    if ffprobe_ok && !cancel.is_cancelled() && profile_bitrate_flag && ffmpeg_ok {
+        match ffmpeg::profile_bitrate(
+            host,
+            target_url,
+            Some(channel_url),
+            user_agent,
+            ffmpeg_bitrate_timeout_secs,
+            cancel,
+        )
+        .await
+        {
+            Ok(profile) => {
+                shared.video_bitrate = Some(
+                    profile
+                        .bitrate_kbps
+                        .map_or_else(|| "N/A".to_string(), |kbps| format!("{kbps} kbps")),
+                );
+                shared.frozen_video = profile.frozen_video && !shared.audio_only;
+            }
+            Err(AppError::Cancelled) => {}
+            Err(err) => {
+                log::warn!(
+                    "Bitrate profiling failed for {}: {}",
+                    redacted_target_url,
+                    err
+                );
+            }
+        }
+    }
+    format_bitrate_kbps
+}
+
+/// Check one stream URL: liveness first, then (for alive streams) metadata,
+/// screenshot, sample clip and bitrate.
+pub(crate) async fn compute_shared_url_result(
+    ctx: &SharedCheckContext<'_>,
+    channel_url: &str,
+    skip_screenshots: bool,
+    sample_clip_secs: Option<u32>,
+    screenshots_dir: Option<&String>,
+    screenshot_file_name: &str,
+) -> Result<(SharedUrlResult, WorkerTiming), AppError> {
+    let &SharedCheckContext {
+        cancel,
+        ffmpeg_ok,
+        profile_bitrate_flag,
+        min_video_bitrate_kbps,
+        diagnostics_semaphore,
+        single_connection_mode,
+        prune_superseded_clips,
+        ..
+    } = ctx;
+    let dispatcharr_single_pass = ffmpeg_ok && checker::is_dispatcharr_proxy_url(channel_url);
+    let (mut shared, check_ms) = check_liveness(ctx, channel_url, dispatcharr_single_pass).await?;
     let mut timing = WorkerTiming {
         check_ms,
         diagnostics_ms: 0.0,
@@ -407,456 +918,30 @@ pub(crate) async fn compute_shared_url_result(
         return Err(AppError::Cancelled);
     }
 
-    if !matches!(status, ChannelStatus::Alive | ChannelStatus::Drm) {
-        return Ok((
-            SharedUrlResult {
-                status,
-                drm_system: None,
-                latency_ms,
-                codec: None,
-                resolution: None,
-                width: None,
-                height: None,
-                fps: None,
-                hdr_format: None,
-                video_bitrate: None,
-                audio_bitrate: None,
-                audio_codec: None,
-                audio_channel_layout: None,
-                audio_only: false,
-                screenshot_path: None,
-                screenshot_error_reason: None,
-                probe_error_reason: None,
-                sample_clip: None,
-                low_framerate: false,
-                frozen_video: false,
-                low_bitrate: false,
-                stream_url,
-                retry_count: (retry_count > 0).then_some(retry_count),
-                error_reason,
-                channel_log,
-            },
-            timing,
-        ));
-    }
-
-    let target_url = ffmpeg_target_url(channel_url, stream_url.as_deref());
-    let redacted_target_url = stream_proxy::redact_url(&target_url);
-    let mut shared = SharedUrlResult {
-        status,
-        drm_system,
-        latency_ms,
-        codec: None,
-        resolution: None,
-        width: None,
-        height: None,
-        fps: None,
-        hdr_format: None,
-        video_bitrate: None,
-        audio_bitrate: None,
-        audio_codec: None,
-        audio_channel_layout: None,
-        audio_only: false,
-        screenshot_path: None,
-        screenshot_error_reason: None,
-        probe_error_reason: None,
-        sample_clip: None,
-        low_framerate: false,
-        frozen_video: false,
-        low_bitrate: false,
-        stream_url,
-        retry_count: (retry_count > 0).then_some(retry_count),
-        error_reason,
-        channel_log,
-    };
-
-    // DRM-protected streams are reported distinctly without expensive diagnostics.
-    if status == ChannelStatus::Drm {
+    // Only alive streams get diagnostics. DRM-protected ones are reported
+    // distinctly without the expensive part.
+    if shared.status != ChannelStatus::Alive {
         return Ok((shared, timing));
     }
-    let diagnostics_started_at = Instant::now();
-    let mut diagnostics_permit = diagnostics_semaphore.clone().acquire_owned().await.ok();
-    let ffprobe_timeout_duration =
-        std::time::Duration::from_secs_f64(ffprobe_timeout_secs.clamp(1.0, 300.0));
 
-    let want_screenshot = !skip_screenshots && ffmpeg_ok && screenshots_dir.is_some();
-    // Re-checked right before every clip write (after the liveness check,
-    // the diagnostics queue, screenshots, and retry backoff), so workers
-    // approved earlier cannot keep writing clips once space is critical.
-    let has_space_for_clip = |dir: &str| {
-        disk::classify_space(std::path::Path::new(dir), low_space_threshold_gb)
-            != disk::DiskSpaceTier::Critical
+    let target_url = ffmpeg_target_url(channel_url, shared.stream_url.as_deref());
+    let probe = ProbeTarget {
+        channel_url,
+        target_url: &target_url,
+        redacted_target_url: &stream_proxy::redact_url(&target_url),
+        dispatcharr_single_pass,
+        want_screenshot: !skip_screenshots && ffmpeg_ok && screenshots_dir.is_some(),
+        sample_clip_secs: sample_clip_secs.filter(|_| ffmpeg_ok && screenshots_dir.is_some()),
+        screenshots_dir,
+        screenshot_file_name,
     };
-    let sample_clip_secs = sample_clip_secs.filter(|_| ffmpeg_ok && screenshots_dir.is_some());
-    let mut format_bitrate_kbps: Option<u32> = None;
-
-    if (single_connection_mode || dispatcharr_single_pass) && ffmpeg_ok {
-        // Single-provider: one ffmpeg process for metadata + screenshot + bitrate.
-        // Avoids 5XX rejections from single-connection IPTV servers.
-        let diag_timeout = if profile_bitrate_flag {
-            ffmpeg_bitrate_timeout_secs
-        } else if want_screenshot {
-            ffprobe_timeout_secs.max(MIN_SCREENSHOT_DIAGNOSTIC_TIMEOUT_SECS)
-        } else {
-            ffprobe_timeout_secs
-        };
-        let mut combined_retries_used = 0u32;
-        let (combined_result, final_attempt_elapsed) = loop {
-            let attempt_started_at = Instant::now();
-            let clip_guard = match sample_clip_secs {
-                Some(_) => Some(clip_write_lock.lock().await),
-                None => None,
-            };
-            let result = ffmpeg::run_combined_diagnostics(
-                host,
-                &target_url,
-                Some(channel_url),
-                user_agent,
-                screenshots_dir.unwrap_or(&String::new()),
-                screenshot_file_name,
-                screenshot_format,
-                want_screenshot,
-                sample_clip_secs
-                    .filter(|_| screenshots_dir.is_some_and(|dir| has_space_for_clip(dir))),
-                profile_bitrate_flag,
-                diag_timeout,
-                cancel,
-            )
-            .await;
-            drop(clip_guard);
-            let attempt_elapsed = attempt_started_at.elapsed();
-
-            let no_tracks_yet = matches!(
-                &result,
-                Ok(diag) if !(diag.track_presence.has_audio || diag.track_presence.has_video)
-            );
-            if !no_tracks_yet || combined_retries_used >= retries {
-                break (result, attempt_elapsed);
-            }
-
-            combined_retries_used = combined_retries_used.saturating_add(1);
-            // The semaphore limits active diagnostics, not channels waiting for
-            // a provider to free a connection. Release it during the backoff.
-            drop(diagnostics_permit.take());
-            tokio::select! {
-                _ = cancel.cancelled() => {
-                    return Err(AppError::Cancelled);
-                }
-                _ = tokio::time::sleep(probe_retry_delay(retry_backoff, combined_retries_used)) => {}
-            }
-            diagnostics_permit = tokio::select! {
-                _ = cancel.cancelled() => return Err(AppError::Cancelled),
-                permit = diagnostics_semaphore.clone().acquire_owned() => permit.ok(),
-            };
-        };
-        if dispatcharr_single_pass {
-            shared.latency_ms =
-                Some(final_attempt_elapsed.as_millis().min(u128::from(u64::MAX)) as u64);
-            shared.retry_count = (combined_retries_used > 0).then_some(combined_retries_used);
-        }
-
-        match combined_result {
-            Ok(diag) => {
-                let has_tracks = diag.track_presence.has_audio || diag.track_presence.has_video;
-                if !has_tracks {
-                    let reason = diag.input_error_reason.clone().unwrap_or_else(|| {
-                        "No decodable audio/video tracks reported by ffmpeg".to_string()
-                    });
-                    // The Dispatcharr pass is also the liveness check.
-                    if dispatcharr_single_pass {
-                        shared.status = ChannelStatus::Dead;
-                        shared.error_reason = Some(reason.clone());
-                        shared.channel_log.final_verdict = "Dead".to_string();
-                        shared.channel_log.final_reason = Some(reason);
-                    } else {
-                        shared.probe_error_reason = Some(reason);
-                    }
-                }
-                shared.audio_only = diag.track_presence.has_audio && !diag.track_presence.has_video;
-                if let Some(info) = diag.video_info
-                    && !shared.audio_only
-                {
-                    shared.codec = Some(info.codec);
-                    shared.resolution = Some(info.resolution.clone());
-                    shared.width = info.width;
-                    shared.height = info.height;
-                    shared.fps = info.fps;
-                    shared.hdr_format = info.hdr_format;
-                    shared.low_framerate = info
-                        .fps
-                        .map(|fps| (fps as f64) <= low_fps_threshold)
-                        .unwrap_or(false);
-                }
-                if let Some(audio) = diag.audio_info {
-                    shared.audio_codec = Some(audio.codec);
-                    shared.audio_bitrate = audio.bitrate_kbps.map(|b| format!("{}", b));
-                    shared.audio_channel_layout = audio.channel_layout;
-                }
-                if let Some(kbps) = diag.profiled_bitrate_kbps {
-                    shared.video_bitrate = Some(format!("{kbps} kbps"));
-                }
-                shared.frozen_video = diag.frozen_video && !shared.audio_only;
-                format_bitrate_kbps = diag.format_bitrate_kbps;
-                shared.sample_clip = diag.sample_clip;
-                shared.channel_log.diagnostics_output = Some(
-                    crate::models::scan_log::cap_diagnostics_output(diag.diagnostics_output),
-                );
-
-                let png_fallback_result = if diag.screenshot_path.is_none()
-                    && want_screenshot
-                    && !dispatcharr_single_pass
-                    && screenshot_format == ScreenshotFormat::Webp
-                    && ffmpeg::should_retry_screenshot_as_png(
-                        diag.screenshot_error_reason.as_deref(),
-                    )
-                    && !cancel.is_cancelled()
-                {
-                    Some(
-                        ffmpeg::capture_screenshot(
-                            host,
-                            &target_url,
-                            Some(channel_url),
-                            screenshots_dir.unwrap(),
-                            screenshot_file_name,
-                            user_agent,
-                            ScreenshotFormat::Png,
-                            cancel,
-                        )
-                        .await,
-                    )
-                } else {
-                    None
-                };
-                apply_combined_screenshot_outcome(
-                    &mut shared,
-                    diag.screenshot_path,
-                    diag.screenshot_error_reason,
-                    png_fallback_result,
-                );
-
-                // A screenshot output that cannot start (no video track, a
-                // missing encoder) aborts the whole combined run, clip
-                // included. The stream opened, so record the clip on its own.
-                // Dispatcharr is skipped: a second connection right after the
-                // first hits its channel teardown.
-                if let (Some(secs), Some(dir)) = (sample_clip_secs, screenshots_dir)
-                    && shared.sample_clip.is_none()
-                    && has_tracks
-                    && want_screenshot
-                    && !dispatcharr_single_pass
-                    && !cancel.is_cancelled()
-                {
-                    let _clip_guard = clip_write_lock.lock().await;
-                    if has_space_for_clip(dir) {
-                        shared.sample_clip = ffmpeg::capture_sample_clip(
-                            host,
-                            &target_url,
-                            Some(channel_url),
-                            dir,
-                            screenshot_file_name,
-                            user_agent,
-                            secs,
-                            cancel,
-                        )
-                        .await
-                        .ok();
-                    }
-                }
-            }
-            Err(AppError::Cancelled) => {
-                drop(diagnostics_permit);
-                return Err(AppError::Cancelled);
-            }
-            Err(err) => {
-                log::warn!(
-                    "Combined diagnostics failed for {}: {}",
-                    redacted_target_url,
-                    err
-                );
-                if want_screenshot {
-                    set_screenshot_capture_error(&mut shared, err.to_string());
-                }
-                if dispatcharr_single_pass {
-                    shared.status = ChannelStatus::Dead;
-                    shared.error_reason = Some(err.to_string());
-                    shared.channel_log.final_verdict = "Dead".to_string();
-                    shared.channel_log.final_reason = Some(err.to_string());
-                } else {
-                    shared.probe_error_reason = Some(err.to_string());
-                }
-            }
-        }
-        drop(diagnostics_permit);
+    let diagnostics_started_at = Instant::now();
+    let diagnostics_permit = diagnostics_semaphore.clone().acquire_owned().await.ok();
+    let format_bitrate_kbps = if (single_connection_mode || dispatcharr_single_pass) && ffmpeg_ok {
+        probe_over_one_connection(ctx, &probe, &mut shared, diagnostics_permit).await?
     } else {
-        // One probe: its snapshot and, when it found no track, why. None
-        // when cancelled.
-        let probe_once = || async {
-            if !ffprobe_ok {
-                return Some((None, None));
-            }
-            match ffmpeg::collect_probe_snapshot_with_timeout(
-                host,
-                &target_url,
-                Some(channel_url),
-                cancel,
-                Some(ffprobe_timeout_duration),
-            )
-            .await
-            {
-                Err(AppError::Cancelled) => None,
-                Err(error) => Some((None, Some(error.to_string()))),
-                Ok(snapshot)
-                    if snapshot.track_presence.has_audio || snapshot.track_presence.has_video =>
-                {
-                    Some((Some(snapshot), None))
-                }
-                Ok(snapshot) => Some((
-                    Some(snapshot),
-                    Some("No decodable audio/video tracks reported by ffprobe".to_string()),
-                )),
-            }
-        };
-
-        let screenshot_fut = async {
-            if !want_screenshot || cancel.is_cancelled() {
-                return Ok(None);
-            }
-            let dir = screenshots_dir.unwrap();
-            ffmpeg::capture_screenshot(
-                host,
-                &target_url,
-                Some(channel_url),
-                dir,
-                screenshot_file_name,
-                user_agent,
-                screenshot_format,
-                cancel,
-            )
-            .await
-            .map(Some)
-        };
-
-        // The clip follows the screenshot rather than running beside it, so a
-        // channel never holds more than the two connections it used before.
-        let media_fut = async {
-            let screenshot_result = screenshot_fut.await;
-            let sample_clip = match (sample_clip_secs, screenshots_dir) {
-                (Some(secs), Some(dir)) if !cancel.is_cancelled() => {
-                    let _clip_guard = clip_write_lock.lock().await;
-                    if has_space_for_clip(dir) {
-                        ffmpeg::capture_sample_clip(
-                            host,
-                            &target_url,
-                            Some(channel_url),
-                            dir,
-                            screenshot_file_name,
-                            user_agent,
-                            secs,
-                            cancel,
-                        )
-                        .await
-                        .ok()
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            };
-            (screenshot_result, sample_clip)
-        };
-
-        // The first probe runs beside the media capture, which keeps scans of
-        // unlimited servers fast. Retries wait until the capture is done, so a
-        // single-connection server in a mixed playlist is not asked for two
-        // streams at once.
-        let (first_probe, (screenshot_result, sample_clip)) = tokio::join!(probe_once(), media_fut);
-        let (mut probe_result, mut probe_failure) = first_probe.unwrap_or((None, None));
-        let mut probe_retries_used = 0u32;
-        while probe_failure.is_some() && probe_retries_used < retries && !cancel.is_cancelled() {
-            probe_retries_used += 1;
-            drop(diagnostics_permit.take());
-            tokio::select! {
-                _ = cancel.cancelled() => break,
-                _ = tokio::time::sleep(probe_retry_delay(retry_backoff, probe_retries_used)) => {}
-            }
-            diagnostics_permit = tokio::select! {
-                _ = cancel.cancelled() => break,
-                permit = diagnostics_semaphore.clone().acquire_owned() => permit.ok(),
-            };
-            let Some(next) = probe_once().await else {
-                break;
-            };
-            (probe_result, probe_failure) = next;
-        }
-        shared.sample_clip = sample_clip;
-        shared.probe_error_reason = probe_failure;
-
-        if let Some(snapshot) = probe_result {
-            shared.audio_only =
-                snapshot.track_presence.has_audio && !snapshot.track_presence.has_video;
-            if let Some(info) = snapshot.video_info
-                && !shared.audio_only
-            {
-                shared.codec = Some(info.codec);
-                shared.resolution = Some(info.resolution.clone());
-                shared.width = info.width;
-                shared.height = info.height;
-                shared.fps = info.fps;
-                shared.hdr_format = info.hdr_format;
-                shared.low_framerate = info
-                    .fps
-                    .map(|fps| (fps as f64) <= low_fps_threshold)
-                    .unwrap_or(false);
-                if let Some(kbps) = info.bitrate_kbps {
-                    shared.video_bitrate = Some(format!("{kbps} kbps"));
-                }
-            }
-            if let Some(audio) = snapshot.audio_info {
-                shared.audio_codec = Some(audio.codec);
-                shared.audio_bitrate = audio.bitrate_kbps.map(|b| format!("{}", b));
-                shared.audio_channel_layout = audio.channel_layout;
-            }
-            format_bitrate_kbps = snapshot.format_bitrate_kbps;
-            shared.channel_log.diagnostics_output = Some(
-                crate::models::scan_log::cap_diagnostics_output(snapshot.ffprobe_output),
-            );
-        }
-
-        apply_parallel_screenshot_outcome(&mut shared, screenshot_result);
-
-        // Release permit before bitrate profiling to avoid starving other channels.
-        drop(diagnostics_permit);
-
-        if ffprobe_ok && !cancel.is_cancelled() && profile_bitrate_flag && ffmpeg_ok {
-            match ffmpeg::profile_bitrate(
-                host,
-                &target_url,
-                Some(channel_url),
-                user_agent,
-                ffmpeg_bitrate_timeout_secs,
-                cancel,
-            )
-            .await
-            {
-                Ok(profile) => {
-                    shared.video_bitrate = Some(
-                        profile
-                            .bitrate_kbps
-                            .map_or_else(|| "N/A".to_string(), |kbps| format!("{kbps} kbps")),
-                    );
-                    shared.frozen_video = profile.frozen_video && !shared.audio_only;
-                }
-                Err(AppError::Cancelled) => {}
-                Err(err) => {
-                    log::warn!(
-                        "Bitrate profiling failed for {}: {}",
-                        redacted_target_url,
-                        err
-                    );
-                }
-            }
-        }
-    }
+        probe_in_parallel(ctx, &probe, &mut shared, diagnostics_permit).await
+    };
 
     // Fallback: use format-level bitrate when video_bitrate is missing or N/A.
     if profile_bitrate_flag
@@ -2578,6 +2663,331 @@ async fn finish_empty_scan(
     summary
 }
 
+/// Handles and settings shared by every channel worker of one scan.
+struct ScanWorkers {
+    host: Arc<dyn Host>,
+    state: Arc<AppState>,
+    run_id: String,
+    scan_scope: String,
+    config: ScanConfig,
+    cancel: CancellationToken,
+    client: reqwest::Client,
+    proxy_list: Option<Vec<String>>,
+    ffmpeg_ok: bool,
+    ffprobe_ok: bool,
+    low_fps_threshold: f64,
+    min_video_bitrate_kbps: Option<u32>,
+    screenshot_format: ScreenshotFormat,
+    low_space_threshold_gb: f64,
+    screenshots_dir: Option<String>,
+    single_provider: bool,
+    /// Viewer counts come through the session this source was loaded with.
+    dispatcharr_connection: Option<String>,
+    scan_semaphore: Arc<Semaphore>,
+    diagnostics_semaphore: Arc<Semaphore>,
+    clip_write_lock: tokio::sync::Mutex<()>,
+    disk_guard: ScreenshotDiskGuard,
+    consecutive_net_failures: AtomicU32,
+    adaptive_throttle: AdaptiveThrottle,
+    busy_accounts: BusyAccounts,
+    results: tokio::sync::mpsc::Sender<WorkerOutput>,
+    checkpoints: tokio::sync::mpsc::Sender<resume::CheckpointWriteEntryWithLog>,
+}
+
+/// One playlist row handed to a worker.
+struct ChannelJob {
+    channel: Channel,
+    /// Held until the worker ends: the account's queue slot, a scan slot, or
+    /// a waiting-pool slot for a duplicate URL.
+    dispatch_permit: OwnedSemaphorePermit,
+    /// The probe shared by every row with this URL.
+    probe: Arc<SharedUrlProbe>,
+    /// Another row registered the probe first.
+    duplicate_url: bool,
+    account_limit: Option<(i64, usize)>,
+    account_semaphore: Option<Arc<Semaphore>>,
+    prune_superseded_clips: bool,
+}
+
+impl ScanWorkers {
+    /// Check one row and report its result. A cancelled row reports nothing,
+    /// so it stays unscanned and a resumed scan checks it again.
+    async fn check_channel(self: Arc<Self>, job: ChannelJob) {
+        let ChannelJob {
+            channel,
+            dispatch_permit: _dispatch_permit,
+            probe: result_cell,
+            duplicate_url,
+            account_limit,
+            account_semaphore,
+            prune_superseded_clips,
+        } = job;
+        let config = &self.config;
+        let cancel = &self.cancel;
+        if cancel.is_cancelled() {
+            return;
+        }
+
+        let screenshot_file_name = ffmpeg::build_screenshot_file_name(channel.index, &channel.name);
+
+        // Check disk space periodically (every ~20 channels)
+        let media_paused = self.disk_guard.effective_skip(
+            self.host.as_ref(),
+            &self.run_id,
+            config.skip_screenshots && !config.auto_capture_sample_clips,
+            self.screenshots_dir.as_ref(),
+        );
+        let effective_skip_screenshots = config.skip_screenshots || media_paused;
+        let sample_clip_secs = (config.auto_capture_sample_clips && !media_paused)
+            .then_some(config.sample_clip_duration_secs);
+
+        let check_ctx = SharedCheckContext {
+            host: self.host.as_ref(),
+            client: &self.client,
+            timeout: config.timeout,
+            retries: config.retries,
+            retry_backoff: config.retry_backoff,
+            extended_timeout: config.extended_timeout,
+            user_agent: &config.user_agent,
+            cancel,
+            proxy_list: &self.proxy_list,
+            test_geoblock: config.test_geoblock,
+            ffmpeg_ok: self.ffmpeg_ok,
+            ffprobe_ok: self.ffprobe_ok,
+            profile_bitrate_flag: config.profile_bitrate,
+            ffprobe_timeout_secs: config.ffprobe_timeout_secs,
+            ffmpeg_bitrate_timeout_secs: config.ffmpeg_bitrate_timeout_secs,
+            low_fps_threshold: self.low_fps_threshold,
+            min_video_bitrate_kbps: self.min_video_bitrate_kbps,
+            screenshot_format: self.screenshot_format,
+            diagnostics_semaphore: &self.diagnostics_semaphore,
+            // A limited provider account counts every connection, so its rows
+            // probe over one connection like a single-provider playlist.
+            single_connection_mode: self.single_provider || account_limit.is_some(),
+            prune_superseded_clips,
+            low_space_threshold_gb: self.low_space_threshold_gb,
+            clip_write_lock: &self.clip_write_lock,
+        };
+        let owner = (!duplicate_url).then(|| SharedUrlOwner(Arc::clone(&result_cell)));
+        if duplicate_url {
+            let mut owner_done = result_cell.owner_done.subscribe();
+            tokio::select! {
+                _ = owner_done.wait_for(|done| *done) => {}
+                _ = cancel.cancelled() => return,
+            }
+        }
+        let shared_result = result_cell
+            .cell
+            .get_or_init(|| {
+                self.probe_shared_url(
+                    &check_ctx,
+                    &channel,
+                    duplicate_url,
+                    account_limit,
+                    account_semaphore.as_ref(),
+                    effective_skip_screenshots,
+                    sample_clip_secs,
+                    &screenshot_file_name,
+                )
+            })
+            .await;
+        drop(owner);
+
+        let (mut shared, timing) = match shared_result {
+            Ok(value) => value.clone(),
+            Err(AppError::Cancelled) => return,
+            Err(error) => {
+                let reason = error.to_string();
+                (
+                    SharedUrlResult::dead(
+                        None,
+                        None,
+                        None,
+                        Some(reason.clone()),
+                        ChannelDebugLog {
+                            final_verdict: "Dead".to_string(),
+                            final_reason: Some(reason),
+                            ..ChannelDebugLog::default()
+                        },
+                    ),
+                    WorkerTiming::default(),
+                )
+            }
+        };
+
+        track_worker_signals(
+            &shared,
+            &self.consecutive_net_failures,
+            &self.adaptive_throttle,
+        );
+
+        if timing.check_ms > 0.0 {
+            record_backend_perf(
+                self.host.as_ref(),
+                &self.state,
+                "scan.worker.check_ms",
+                timing.check_ms,
+                Some(&self.run_id),
+            )
+            .await;
+        }
+        if timing.diagnostics_ms > 0.0 {
+            record_backend_perf(
+                self.host.as_ref(),
+                &self.state,
+                "scan.worker.diagnostics_ms",
+                timing.diagnostics_ms,
+                Some(&self.run_id),
+            )
+            .await;
+        }
+
+        log::info!(
+            "[Scan] #{} {} → {} (bitrate: {}, latency: {}, url: {})",
+            channel.index,
+            channel.name,
+            shared.status,
+            shared.video_bitrate.as_deref().unwrap_or("—"),
+            shared
+                .latency_ms
+                .map(|ms| format!("{ms} ms"))
+                .unwrap_or_else(|| "—".to_string()),
+            stream_proxy::redact_url(&channel.url),
+        );
+
+        shared.channel_log.channel_index = channel.index;
+        shared.channel_log.channel_name = channel.name.clone();
+        shared.channel_log.channel_url = channel.url.clone();
+
+        let result = build_channel_result(&channel, &shared);
+
+        let _ = self
+            .checkpoints
+            .send(resume::CheckpointWriteEntryWithLog {
+                log_entry: format!("{} - {} {}", channel.index + 1, channel.name, channel.url),
+                result: result.clone(),
+                channel_log: shared.channel_log.clone(),
+            })
+            .await;
+        let _ = self
+            .results
+            .send(WorkerOutput {
+                result,
+                channel_log: shared.channel_log.clone(),
+            })
+            .await;
+    }
+
+    /// Probe the URL a row owns. Rows of a connection-limited provider
+    /// account hold one of the account's connections for the probe, and wait
+    /// while Dispatcharr's viewers fill the account.
+    async fn probe_shared_url(
+        &self,
+        check_ctx: &SharedCheckContext<'_>,
+        channel: &Channel,
+        duplicate_url: bool,
+        account_limit: Option<(i64, usize)>,
+        account_semaphore: Option<&Arc<Semaphore>>,
+        effective_skip_screenshots: bool,
+        sample_clip_secs: Option<u32>,
+        screenshot_file_name: &str,
+    ) -> Result<(SharedUrlResult, WorkerTiming), AppError> {
+        let cancel = &self.cancel;
+        // Dispatcharr's viewers use the same provider connections.
+        let viewers = account_limit.and_then(|_| {
+            self.dispatcharr_connection
+                .as_deref()
+                .and_then(crate::engine::dispatcharr::account_viewers)
+        });
+        let account_label = crate::engine::dispatcharr::account_label(&channel.extinf_line);
+
+        let mut busy_retries = 0;
+        loop {
+            let _probe_permits = match account_semaphore {
+                Some(account) => {
+                    // Rows queued for a busy account passed the dispatch
+                    // pause check long ago. Honour a pause without holding
+                    // the account's shared slot, so a paused window never
+                    // blocks another scan of the same provider.
+                    let permits = loop {
+                        if !wait_if_paused(&self.state, &self.scan_scope, cancel).await {
+                            return Err(AppError::Cancelled);
+                        }
+                        let permits =
+                            acquire_account_then_scan(account, &self.scan_semaphore, cancel)
+                                .await?;
+                        if is_scan_paused(&self.state, &self.scan_scope).await {
+                            continue;
+                        }
+                        // Viewers watching through Dispatcharr hold
+                        // connections too. Wait, holding no slot, until the
+                        // account has one free.
+                        if let (Some(viewers), Some((account_id, limit))) =
+                            (&viewers, account_limit)
+                        {
+                            let ours = limit.saturating_sub(account.available_permits());
+                            if ours + viewers.on_account(account_id, false).await > limit {
+                                drop(permits);
+                                self.busy_accounts.set(&account_label, true);
+                                // Rows that backed off together come back at
+                                // different times, so one takes a free
+                                // connection instead of all retreating.
+                                let stagger =
+                                    Duration::from_millis((channel.index % 8) as u64 * 400);
+                                tokio::select! {
+                                    _ = tokio::time::sleep(BUSY_ACCOUNT_RECHECK + stagger) => {}
+                                    _ = cancel.cancelled() => {
+                                        return Err(AppError::Cancelled);
+                                    }
+                                }
+                                continue;
+                            }
+                            self.busy_accounts.set(&account_label, false);
+                        }
+                        break permits;
+                    };
+                    vec![permits.0, permits.1]
+                }
+                // A duplicate only probes when the owning row stopped before
+                // probing; it holds no scan slot yet.
+                None if duplicate_url => vec![tokio::select! {
+                    permit = Arc::clone(&self.scan_semaphore).acquire_owned() => {
+                        permit.map_err(|_| AppError::Cancelled)?
+                    }
+                    _ = cancel.cancelled() => return Err(AppError::Cancelled),
+                }],
+                None => Vec::new(),
+            };
+            let outcome = compute_shared_url_result(
+                check_ctx,
+                &channel.url,
+                effective_skip_screenshots,
+                sample_clip_secs,
+                self.screenshots_dir.as_ref(),
+                screenshot_file_name,
+            )
+            .await;
+            // A probe refused while a viewer holds the account says nothing
+            // about the stream: probe again once a connection is free.
+            if let (Ok((shared, _)), Some(viewers), Some((account_id, limit)), Some(account)) =
+                (&outcome, &viewers, account_limit, account_semaphore)
+            {
+                // Only when viewers filled the account: this probe's own slot
+                // is still held, so it counts in `ours`.
+                let ours = limit.saturating_sub(account.available_permits());
+                if shared.status == ChannelStatus::Dead
+                    && busy_retries < BUSY_ACCOUNT_RETRIES
+                    && ours + viewers.on_account(account_id, true).await > limit
+                {
+                    busy_retries += 1;
+                    continue;
+                }
+            }
+            break outcome;
+        }
+    }
+}
+
 async fn execute_scan_run(
     host: Arc<dyn Host>,
     state: Arc<AppState>,
@@ -2703,7 +3113,7 @@ async fn execute_scan_run(
     let has_account_limits = channels.iter().any(|channel| {
         crate::engine::dispatcharr::dispatcharr_connection_limit(&channel.extinf_line).is_some()
     });
-    let client = Arc::new({
+    let client = {
         let mut builder = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(5))
             .danger_accept_invalid_certs(config.accept_invalid_certs)
@@ -2715,7 +3125,7 @@ async fn execute_scan_run(
             builder = builder.pool_max_idle_per_host(0);
         }
         builder.build().unwrap_or_default()
-    });
+    };
     let semaphore = Arc::new(Semaphore::new(config.concurrency as usize));
     // Duplicates of a URL another row probes are dispatched against this
     // bounded pool and take a scan slot only if they end up probing, so they
@@ -2728,7 +3138,7 @@ async fn execute_scan_run(
         usize::max(1, usize::min(config.concurrency as usize, 4))
     };
     let diagnostics_semaphore = Arc::new(Semaphore::new(diagnostics_limit));
-    let (low_fps_threshold_setting, min_video_bitrate_kbps, screenshot_format_setting) = {
+    let (low_fps_threshold, min_video_bitrate_kbps, screenshot_format) = {
         let settings = state.settings.lock().await;
         (
             settings.low_fps_threshold,
@@ -2765,35 +3175,55 @@ async fn execute_scan_run(
         rx,
     ));
 
-    let proxy_list = Arc::new(proxy_list);
     let shared_url_results: SharedUrlResultCache =
         Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
-    // Disk space tracking for screenshot pause
-    let clip_write_lock = Arc::new(tokio::sync::Mutex::new(()));
     let full_scope_scan = config
         .selected_indices
         .as_ref()
         .is_none_or(|indices| indices.is_empty());
-    let disk_guard = ScreenshotDiskGuard::new(
-        using_custom_screenshots_dir,
+
+    let workers = Arc::new(ScanWorkers {
+        host: Arc::clone(&host),
+        state: Arc::clone(&state),
+        run_id: run_id.clone(),
+        scan_scope: scan_scope.clone(),
+        config: config.clone(),
+        cancel: cancel_token.clone(),
+        client,
+        proxy_list,
+        ffmpeg_ok: ffmpeg_available,
+        ffprobe_ok: ffprobe_available,
+        low_fps_threshold,
+        min_video_bitrate_kbps,
+        screenshot_format,
         low_space_threshold_gb,
-        config.auto_capture_sample_clips,
-    );
-
-    // Network connectivity tracking — consecutive network-level failures trigger a check
-    let consecutive_net_failures = Arc::new(AtomicU32::new(0));
-
-    // Adaptive concurrency — track pressure signals and successes to throttle dispatch
-    let adaptive_throttle = AdaptiveThrottle::new();
+        screenshots_dir: screenshots_dir.clone(),
+        single_provider,
+        dispatcharr_connection,
+        scan_semaphore: Arc::clone(&semaphore),
+        diagnostics_semaphore,
+        clip_write_lock: tokio::sync::Mutex::new(()),
+        // Disk space tracking for screenshot pause
+        disk_guard: ScreenshotDiskGuard::new(
+            using_custom_screenshots_dir,
+            low_space_threshold_gb,
+            config.auto_capture_sample_clips,
+        ),
+        // Network connectivity tracking — consecutive network-level failures trigger a check
+        consecutive_net_failures: AtomicU32::new(0),
+        // Adaptive concurrency — track pressure signals and successes to throttle dispatch
+        adaptive_throttle: AdaptiveThrottle::new(),
+        busy_accounts: BusyAccounts {
+            host: Arc::clone(&host),
+            run_id: run_id.clone(),
+            names: std::sync::Mutex::new(Default::default()),
+        },
+        results: tx,
+        checkpoints: checkpoint_tx,
+    });
 
     let mut handles = Vec::new();
-
-    let busy_accounts = Arc::new(BusyAccounts {
-        host: Arc::clone(&host),
-        run_id: run_id.clone(),
-        names: std::sync::Mutex::new(Default::default()),
-    });
     let mut dispatch_queue = DispatchQueue::new(channels);
     while let Some((channel, account_queue_slot)) = dispatch_queue.next(&cancel_token).await {
         if cancel_token.is_cancelled() {
@@ -2821,7 +3251,7 @@ async fn execute_scan_run(
             host.as_ref(),
             &run_id,
             &cancel_token,
-            &consecutive_net_failures,
+            &workers.consecutive_net_failures,
         )
         .await
         {
@@ -2829,7 +3259,8 @@ async fn execute_scan_run(
         }
 
         // Adaptive concurrency throttle — slow down dispatch when servers show pressure
-        adaptive_throttle
+        workers
+            .adaptive_throttle
             .before_dispatch(host.as_ref(), &run_id)
             .await;
 
@@ -2890,293 +3321,22 @@ async fn execute_scan_run(
                 }
             }
         };
-        let tx = tx.clone();
-        let checkpoint_tx = checkpoint_tx.clone();
-        let cancel = cancel_token.clone();
-        let client = Arc::clone(&client);
-        let user_agent = config.user_agent.clone();
-        let timeout = config.timeout;
-        let retries = config.retries;
-        let retry_backoff = config.retry_backoff;
-        let extended_timeout = config.extended_timeout;
-        let proxy_list = Arc::clone(&proxy_list);
-        let test_geoblock = config.test_geoblock;
-        let skip_screenshots = config.skip_screenshots;
-        let auto_capture_sample_clips = config.auto_capture_sample_clips;
-        let sample_clip_duration_secs = config.sample_clip_duration_secs;
-        let profile_bitrate_flag = config.profile_bitrate;
-        let ffprobe_timeout_secs = config.ffprobe_timeout_secs;
-        let ffmpeg_bitrate_timeout_secs = config.ffmpeg_bitrate_timeout_secs;
-        let low_fps_threshold = low_fps_threshold_setting;
-        let screenshot_format = screenshot_format_setting;
-        let screenshots_dir = screenshots_dir.clone();
-        let ffmpeg_ok = ffmpeg_available;
-        let ffprobe_ok = ffprobe_available;
-        let task_host = Arc::clone(&host);
-        let state_for_perf = state.clone();
-        let run_id_for_perf = run_id.clone();
-        let pause_scope = scan_scope.to_string();
-        let diagnostics_semaphore = Arc::clone(&diagnostics_semaphore);
-        let clip_write_lock = Arc::clone(&clip_write_lock);
-        // A limited provider account counts every connection, so its rows
-        // probe over one connection like a single-provider playlist.
-        let single_connection_mode = single_provider || account_limit.is_some();
-        let disk_guard = disk_guard.clone();
-        let consecutive_net_failures = Arc::clone(&consecutive_net_failures);
-        let adaptive_throttle = adaptive_throttle.clone();
-
-        // Dispatcharr's viewers use the same provider connections.
-        let viewers = account_limit.and_then(|_| {
-            dispatcharr_connection
-                .as_deref()
-                .and_then(crate::engine::dispatcharr::account_viewers)
-        });
-        let account_label = crate::engine::dispatcharr::account_label(&channel.extinf_line);
-        let busy_accounts = Arc::clone(&busy_accounts);
-
-        let scan_semaphore = Arc::clone(&semaphore);
-        let handle = tokio::spawn(async move {
-            let _dispatch_permit = permit;
-            if cancel.is_cancelled() {
-                return;
-            }
-
-            let screenshot_file_name =
-                ffmpeg::build_screenshot_file_name(channel.index, &channel.name);
-
-            // Check disk space periodically (every ~20 channels)
-            let media_paused = disk_guard.effective_skip(
-                task_host.as_ref(),
-                &run_id_for_perf,
-                skip_screenshots && !auto_capture_sample_clips,
-                screenshots_dir.as_ref(),
-            );
-            let effective_skip_screenshots = skip_screenshots || media_paused;
-            let sample_clip_secs =
-                (auto_capture_sample_clips && !media_paused).then_some(sample_clip_duration_secs);
-
-            let check_ctx = SharedCheckContext {
-                host: task_host.as_ref(),
-                client: &client,
-                timeout,
-                retries,
-                retry_backoff,
-                extended_timeout,
-                user_agent: &user_agent,
-                cancel: &cancel,
-                proxy_list: &proxy_list,
-                test_geoblock,
-                ffmpeg_ok,
-                ffprobe_ok,
-                profile_bitrate_flag,
-                ffprobe_timeout_secs,
-                ffmpeg_bitrate_timeout_secs,
-                low_fps_threshold,
-                min_video_bitrate_kbps,
-                screenshot_format,
-                diagnostics_semaphore: &diagnostics_semaphore,
-                single_connection_mode,
+        handles.push(tokio::spawn(Arc::clone(&workers).check_channel(
+            ChannelJob {
+                channel,
+                dispatch_permit: permit,
+                probe: result_cell,
+                duplicate_url,
+                account_limit,
+                account_semaphore,
                 prune_superseded_clips,
-                low_space_threshold_gb,
-                clip_write_lock: &clip_write_lock,
-            };
-            let owner = (!duplicate_url).then(|| SharedUrlOwner(Arc::clone(&result_cell)));
-            if duplicate_url {
-                let mut owner_done = result_cell.owner_done.subscribe();
-                tokio::select! {
-                    _ = owner_done.wait_for(|done| *done) => {}
-                    _ = cancel.cancelled() => return,
-                }
-            }
-            let shared_result = result_cell
-                .cell
-                .get_or_init(|| async {
-                    let mut busy_retries = 0;
-                    loop {
-                        let _probe_permits = match &account_semaphore {
-                            Some(account) => {
-                                // Rows queued for a busy account passed the
-                                // dispatch pause check long ago. Honour a
-                                // pause without holding the account's shared
-                                // slot, so a paused window never blocks
-                                // another scan of the same provider.
-                                let permits = loop {
-                                    if !wait_if_paused(&state_for_perf, &pause_scope, &cancel).await
-                                    {
-                                        return Err(AppError::Cancelled);
-                                    }
-                                    let permits = acquire_account_then_scan(
-                                        account,
-                                        &scan_semaphore,
-                                        &cancel,
-                                    )
-                                    .await?;
-                                    if is_scan_paused(&state_for_perf, &pause_scope).await {
-                                        continue;
-                                    }
-                                    // Viewers watching through Dispatcharr hold
-                                    // connections too. Wait, holding no slot,
-                                    // until the account has one free.
-                                    if let (Some(viewers), Some((account_id, limit))) =
-                                        (&viewers, account_limit)
-                                    {
-                                        let ours =
-                                            limit.saturating_sub(account.available_permits());
-                                        if ours + viewers.on_account(account_id, false).await
-                                            > limit
-                                        {
-                                            drop(permits);
-                                            busy_accounts.set(&account_label, true);
-                                            // Rows that backed off together come back
-                                            // at different times, so one takes a free
-                                            // connection instead of all retreating.
-                                            let stagger = Duration::from_millis(
-                                                (channel.index % 8) as u64 * 400,
-                                            );
-                                            tokio::select! {
-                                                _ = tokio::time::sleep(BUSY_ACCOUNT_RECHECK + stagger) => {}
-                                                _ = cancel.cancelled() => {
-                                                    return Err(AppError::Cancelled);
-                                                }
-                                            }
-                                            continue;
-                                        }
-                                        busy_accounts.set(&account_label, false);
-                                    }
-                                    break permits;
-                                };
-                                vec![permits.0, permits.1]
-                            }
-                            // A duplicate only probes when the owning row
-                            // stopped before probing; it holds no scan slot
-                            // yet.
-                            None if duplicate_url => vec![tokio::select! {
-                                permit = Arc::clone(&scan_semaphore).acquire_owned() => {
-                                    permit.map_err(|_| AppError::Cancelled)?
-                                }
-                                _ = cancel.cancelled() => return Err(AppError::Cancelled),
-                            }],
-                            None => Vec::new(),
-                        };
-                        let outcome = compute_shared_url_result(
-                            &check_ctx,
-                            &channel.url,
-                            effective_skip_screenshots,
-                            sample_clip_secs,
-                            screenshots_dir.as_ref(),
-                            &screenshot_file_name,
-                        )
-                        .await;
-                        // A probe refused while a viewer holds the account
-                        // says nothing about the stream: probe again once a
-                        // connection is free.
-                        if let (
-                            Ok((shared, _)),
-                            Some(viewers),
-                            Some((account_id, limit)),
-                            Some(account),
-                        ) = (&outcome, &viewers, account_limit, &account_semaphore)
-                        {
-                            // Only when viewers filled the account: this probe's
-                            // own slot is still held, so it counts in `ours`.
-                            let ours = limit.saturating_sub(account.available_permits());
-                            if shared.status == ChannelStatus::Dead
-                                && busy_retries < BUSY_ACCOUNT_RETRIES
-                                && ours + viewers.on_account(account_id, true).await > limit
-                            {
-                                busy_retries += 1;
-                                continue;
-                            }
-                        }
-                        break outcome;
-                    }
-                })
-                .await;
-            drop(owner);
-
-            let (mut shared, timing) = match shared_result {
-                Ok(value) => value.clone(),
-                Err(AppError::Cancelled) => return,
-                Err(error) => {
-                    let reason = error.to_string();
-                    (
-                        SharedUrlResult::dead(
-                            None,
-                            None,
-                            None,
-                            Some(reason.clone()),
-                            ChannelDebugLog {
-                                final_verdict: "Dead".to_string(),
-                                final_reason: Some(reason),
-                                ..ChannelDebugLog::default()
-                            },
-                        ),
-                        WorkerTiming::default(),
-                    )
-                }
-            };
-
-            track_worker_signals(&shared, &consecutive_net_failures, &adaptive_throttle);
-
-            if timing.check_ms > 0.0 {
-                record_backend_perf(
-                    task_host.as_ref(),
-                    &state_for_perf,
-                    "scan.worker.check_ms",
-                    timing.check_ms,
-                    Some(&run_id_for_perf),
-                )
-                .await;
-            }
-            if timing.diagnostics_ms > 0.0 {
-                record_backend_perf(
-                    task_host.as_ref(),
-                    &state_for_perf,
-                    "scan.worker.diagnostics_ms",
-                    timing.diagnostics_ms,
-                    Some(&run_id_for_perf),
-                )
-                .await;
-            }
-
-            log::info!(
-                "[Scan] #{} {} → {} (bitrate: {}, latency: {}, url: {})",
-                channel.index,
-                channel.name,
-                shared.status,
-                shared.video_bitrate.as_deref().unwrap_or("—"),
-                shared
-                    .latency_ms
-                    .map(|ms| format!("{ms} ms"))
-                    .unwrap_or_else(|| "—".to_string()),
-                stream_proxy::redact_url(&channel.url),
-            );
-
-            shared.channel_log.channel_index = channel.index;
-            shared.channel_log.channel_name = channel.name.clone();
-            shared.channel_log.channel_url = channel.url.clone();
-
-            let result = build_channel_result(&channel, &shared);
-
-            let _ = checkpoint_tx
-                .send(resume::CheckpointWriteEntryWithLog {
-                    log_entry: format!("{} - {} {}", channel.index + 1, channel.name, channel.url),
-                    result: result.clone(),
-                    channel_log: shared.channel_log.clone(),
-                })
-                .await;
-            let _ = tx
-                .send(WorkerOutput {
-                    result,
-                    channel_log: shared.channel_log.clone(),
-                })
-                .await;
-        });
-        handles.push(handle);
+            },
+        )));
     }
 
-    drop(tx);
-    drop(checkpoint_tx);
+    // The workers hold the only other handles: once the last one ends, the
+    // result and checkpoint channels close.
+    drop(workers);
 
     let mut panicked_workers = 0u32;
     for handle in handles {
@@ -3196,7 +3356,7 @@ async fn execute_scan_run(
         log::warn!("Checkpoint writer task failed for {}: {}", run_id, error);
     }
 
-    let mut completed_scan = match event_result {
+    let completed_scan = match event_result {
         Ok(data) => data,
         Err(error) => {
             log::error!("Scan failed while dispatching progress events: {}", error);
@@ -3211,10 +3371,42 @@ async fn execute_scan_run(
     // A completed full-scope scan saw every channel of this cache folder, so
     // clips none of its results reference (removed, renamed, now dead, or
     // failed recapture) can never be reached again.
+    let sweepable_clips_dir = (full_scope_scan && !using_custom_screenshots_dir)
+        .then_some(screenshots_dir)
+        .flatten();
+    Ok(finish_scan(
+        host.as_ref(),
+        &state,
+        &scan_scope,
+        &run_id,
+        scan_started_at_epoch_ms,
+        &config,
+        &cancel_token,
+        sweepable_clips_dir,
+        &log_file,
+        &checkpoint_file,
+        completed_scan,
+    )
+    .await)
+}
+
+/// Close a scan whose workers have all ended: sweep stale clips, score the
+/// playlist, write history (unless cancelled) and report the outcome.
+async fn finish_scan(
+    host: &dyn Host,
+    state: &Arc<AppState>,
+    scan_scope: &str,
+    run_id: &str,
+    scan_started_at_epoch_ms: u64,
+    config: &ScanConfig,
+    cancel_token: &CancellationToken,
+    sweepable_clips_dir: Option<String>,
+    log_file: &str,
+    checkpoint_file: &str,
+    mut completed_scan: CompletedScanData,
+) -> ScanOutcome {
     if !cancel_token.is_cancelled()
-        && full_scope_scan
-        && !using_custom_screenshots_dir
-        && let Some(dir) = screenshots_dir.clone()
+        && let Some(dir) = sweepable_clips_dir
     {
         let referenced: HashSet<std::path::PathBuf> = completed_scan
             .results
@@ -3253,45 +3445,45 @@ async fn execute_scan_run(
         summary.total,
     );
     if cancel_token.is_cancelled() {
-        log_scan_summary("cancelled", &run_id, scan_started_at_epoch_ms, &summary);
+        log_scan_summary("cancelled", run_id, scan_started_at_epoch_ms, &summary);
         host.emit(
             "scan://cancelled",
             ScanEvent {
-                run_id: run_id.clone(),
+                run_id: run_id.to_string(),
                 payload: summary.clone(),
             },
         );
         state
-            .with_window_scan_state(&scan_scope, |scan_state| {
+            .with_window_scan_state(scan_scope, |scan_state| {
                 scan_state.scan_log = None;
             })
             .await;
-        cleanup_resume_files(&log_file, &checkpoint_file);
-        return Ok(ScanOutcome {
+        cleanup_resume_files(log_file, checkpoint_file);
+        return ScanOutcome {
             summary,
             results: completed_scan.results,
             cancelled: true,
-        });
+        };
     }
 
     // Serializing and writing the full results Vec (plus reading the previous
     // run for the diff) is blocking file IO — keep it off the runtime.
     let results = append_history_blocking(
-        host.as_ref(),
-        &state,
-        &run_id,
-        &config,
+        host,
+        state,
+        run_id,
+        config,
         &summary,
         completed_scan.results,
     )
     .await;
 
-    log_scan_summary("completed", &run_id, scan_started_at_epoch_ms, &summary);
+    log_scan_summary("completed", run_id, scan_started_at_epoch_ms, &summary);
 
     host.emit(
         "scan://complete",
         ScanEvent {
-            run_id: run_id.clone(),
+            run_id: run_id.to_string(),
             payload: summary.clone(),
         },
     );
@@ -3299,21 +3491,21 @@ async fn execute_scan_run(
     let mut channel_logs = completed_scan.channel_logs;
     channel_logs.sort_by_key(|entry| entry.channel_index);
     store_scan_log(
-        &state,
-        &scan_scope,
-        &run_id,
-        &config,
+        state,
+        scan_scope,
+        run_id,
+        config,
         scan_started_at_epoch_ms,
         summary.clone(),
         channel_logs,
     )
     .await;
-    cleanup_resume_files(&log_file, &checkpoint_file);
-    Ok(ScanOutcome {
+    cleanup_resume_files(log_file, checkpoint_file);
+    ScanOutcome {
         summary,
         results,
         cancelled: false,
-    })
+    }
 }
 
 /// How a scan ended and what it found.
