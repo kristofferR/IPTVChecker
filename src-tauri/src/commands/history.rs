@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
-use tauri::Manager;
-
+use crate::engine::host::Host;
 use crate::error::AppError;
 use crate::models::channel::{ChannelResult, ChannelStatus};
 use crate::models::scan::{ScanConfig, ScanSummary};
 use crate::models::scan_history::{ScanHistoryDiff, ScanHistoryItem};
+use serde::{Deserialize, Serialize};
 
 const MIN_HISTORY_LIMIT: usize = 1;
 const MAX_HISTORY_LIMIT: usize = 200;
@@ -288,26 +287,35 @@ fn save_v2_index(base_dir: &Path, index: &HistoryIndexV2) -> Result<(), AppError
 fn write_run_file(
     base_dir: &Path,
     run_id: &str,
-    mut results: Vec<ChannelResult>,
+    results: &[ChannelResult],
 ) -> Result<(), AppError> {
+    use serde::Serializer;
+
     let runs_dir = v2_runs_dir(base_dir);
     std::fs::create_dir_all(&runs_dir).map_err(AppError::Io)?;
 
     let run_path = v2_run_file_path(base_dir, run_id);
-    for result in &mut results {
+    // Credentials are stripped one result at a time, so a large scan is
+    // never copied whole.
+    let persisted = results.iter().map(|result| {
+        let mut result = result.clone();
         result.catchup_source = result
             .catchup_source
             .as_deref()
             .map(crate::engine::resume::sanitize_url_for_persistence);
         result.extinf_line =
             crate::engine::resume::sanitize_extinf_for_persistence(&result.extinf_line);
-    }
-    let bytes = serde_json::to_vec(&results).map_err(|error| {
-        AppError::Parse(format!(
-            "Failed to serialize run file {}: {}",
-            run_id, error
-        ))
-    })?;
+        result
+    });
+    let mut bytes = Vec::new();
+    serde_json::Serializer::new(&mut bytes)
+        .collect_seq(persisted)
+        .map_err(|error| {
+            AppError::Parse(format!(
+                "Failed to serialize run file {}: {}",
+                run_id, error
+            ))
+        })?;
     std::fs::write(&run_path, bytes).map_err(AppError::Io)?;
     Ok(())
 }
@@ -368,7 +376,7 @@ fn migrate_v1_to_v2(base_dir: &Path) -> Result<(), AppError> {
 
     // Write per-run files
     for entry in &v1_store.entries {
-        if let Err(error) = write_run_file(base_dir, &entry.id, entry.results.clone()) {
+        if let Err(error) = write_run_file(base_dir, &entry.id, &entry.results) {
             log::warn!(
                 "Failed to write per-run file during migration for {}: {}",
                 entry.id,
@@ -486,23 +494,21 @@ fn enforce_playlist_retention_v2(
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
-fn history_base_dir(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
-    let data_dir = app.path().app_data_dir().map_err(|error| {
-        AppError::Other(format!("Failed to resolve app data directory: {}", error))
-    })?;
+fn history_base_dir(host: &dyn Host) -> Result<PathBuf, AppError> {
+    let data_dir = host.app_data_dir()?;
     std::fs::create_dir_all(&data_dir).map_err(AppError::Io)?;
     Ok(data_dir)
 }
 
 pub fn append_scan_history(
-    app: &tauri::AppHandle,
+    host: &dyn Host,
     run_id: &str,
     config: &ScanConfig,
     summary: &ScanSummary,
-    results: Vec<ChannelResult>,
+    results: &[ChannelResult],
     history_limit: usize,
 ) -> Result<(), AppError> {
-    let base_dir = history_base_dir(app)?;
+    let base_dir = history_base_dir(host)?;
     append_scan_history_at_dir(&base_dir, run_id, config, summary, results, history_limit)
 }
 
@@ -511,7 +517,7 @@ fn append_scan_history_at_dir(
     run_id: &str,
     config: &ScanConfig,
     summary: &ScanSummary,
-    results: Vec<ChannelResult>,
+    results: &[ChannelResult],
     history_limit: usize,
 ) -> Result<(), AppError> {
     ensure_v2(base_dir)?;
@@ -530,7 +536,7 @@ fn append_scan_history_at_dir(
 
     let diff = if let Some(prev_entry) = candidates.first() {
         match load_run_file(base_dir, &prev_entry.id) {
-            Ok(prev_results) => Some(compute_history_diff_from_results(&results, &prev_results)),
+            Ok(prev_results) => Some(compute_history_diff_from_results(results, &prev_results)),
             Err(error) => {
                 log::warn!(
                     "Failed to load previous run file {} for diff computation: {}",
@@ -953,7 +959,7 @@ mod tests {
         ];
         let summary1 = make_summary(1, 1);
 
-        append_scan_history_at_dir(&test_root, "run-1", &config, &summary1, results1, 20).unwrap();
+        append_scan_history_at_dir(&test_root, "run-1", &config, &summary1, &results1, 20).unwrap();
 
         let history = get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
         assert_eq!(history.len(), 1);
@@ -968,7 +974,7 @@ mod tests {
         let summary2 = make_summary(1, 1);
 
         std::thread::sleep(Duration::from_millis(2));
-        append_scan_history_at_dir(&test_root, "run-2", &config, &summary2, results2, 20).unwrap();
+        append_scan_history_at_dir(&test_root, "run-2", &config, &summary2, &results2, 20).unwrap();
 
         let history = get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
         assert_eq!(history.len(), 2);
@@ -1002,7 +1008,7 @@ mod tests {
         );
         result.extinf_line = "#EXTINF:-1 catchup-source='https://archive:extinf-secret@example.com/timeshift?token=extinf-token',Channel".to_string();
 
-        write_run_file(&test_root, "run-1", vec![result]).unwrap();
+        write_run_file(&test_root, "run-1", &[result]).unwrap();
 
         let persisted = std::fs::read_to_string(v2_run_file_path(&test_root, "run-1")).unwrap();
         assert!(!persisted.contains("secret"));
@@ -1040,7 +1046,7 @@ mod tests {
                 &format!("run-{}", i),
                 &config,
                 &summary,
-                results.clone(),
+                &results,
                 3, // only keep 3
             )
             .unwrap();
@@ -1069,10 +1075,9 @@ mod tests {
         let results = vec![sample_result("http://example.com/a", ChannelStatus::Alive)];
         let summary = make_summary(1, 0);
 
-        append_scan_history_at_dir(&test_root, "run-1", &config, &summary, results.clone(), 20)
-            .unwrap();
+        append_scan_history_at_dir(&test_root, "run-1", &config, &summary, &results, 20).unwrap();
         std::thread::sleep(Duration::from_millis(2));
-        append_scan_history_at_dir(&test_root, "run-2", &config, &summary, results, 20).unwrap();
+        append_scan_history_at_dir(&test_root, "run-2", &config, &summary, &results, 20).unwrap();
 
         let removed = clear_scan_history_at_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
         assert_eq!(removed, 2);
@@ -1167,10 +1172,9 @@ mod tests {
         let results = vec![sample_result("http://example.com/a", ChannelStatus::Alive)];
         let summary = make_summary(1, 0);
 
-        append_scan_history_at_dir(&test_root, "run-1", &config1, &summary, results.clone(), 20)
-            .unwrap();
+        append_scan_history_at_dir(&test_root, "run-1", &config1, &summary, &results, 20).unwrap();
         std::thread::sleep(Duration::from_millis(2));
-        append_scan_history_at_dir(&test_root, "run-2", &config2, &summary, results, 20).unwrap();
+        append_scan_history_at_dir(&test_root, "run-2", &config2, &summary, &results, 20).unwrap();
 
         let history = get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
         assert_eq!(history.len(), 2);
@@ -1194,10 +1198,9 @@ mod tests {
         let results = vec![sample_result("http://example.com/a", ChannelStatus::Alive)];
         let summary = make_summary(1, 0);
 
-        append_scan_history_at_dir(&test_root, "run-1", &config1, &summary, results.clone(), 20)
-            .unwrap();
+        append_scan_history_at_dir(&test_root, "run-1", &config1, &summary, &results, 20).unwrap();
         std::thread::sleep(Duration::from_millis(2));
-        append_scan_history_at_dir(&test_root, "run-2", &config2, &summary, results, 20).unwrap();
+        append_scan_history_at_dir(&test_root, "run-2", &config2, &summary, &results, 20).unwrap();
 
         let history = get_scan_history_from_dir(&test_root, "/tmp/sample.m3u8", None).unwrap();
         assert_eq!(history.len(), 2);
@@ -1225,14 +1228,14 @@ mod tests {
                 &format!("a-run-{}", i),
                 &config_a,
                 &summary,
-                results.clone(),
+                &results,
                 2, // keep 2
             )
             .unwrap();
         }
 
         // Add 1 entry for playlist-b
-        append_scan_history_at_dir(&test_root, "b-run-1", &config_b, &summary, results, 20)
+        append_scan_history_at_dir(&test_root, "b-run-1", &config_b, &summary, &results, 20)
             .unwrap();
 
         // playlist-a should have 2 entries
@@ -1357,7 +1360,7 @@ http://streams.example.com/c.m3u8
             "url-run-1",
             &build_scan_config(&first_preview),
             &summarize_results(&first_results),
-            first_results,
+            &first_results,
             20,
         )
         .expect("first history append should succeed");
@@ -1369,7 +1372,7 @@ http://streams.example.com/c.m3u8
             "url-run-2",
             &build_scan_config(&second_preview),
             &summarize_results(&second_results),
-            second_results,
+            &second_results,
             20,
         )
         .expect("second history append should succeed");

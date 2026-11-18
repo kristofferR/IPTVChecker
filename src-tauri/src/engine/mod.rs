@@ -6,6 +6,7 @@ pub mod disk;
 pub mod dispatcharr;
 pub mod epg;
 pub mod ffmpeg;
+pub mod host;
 #[cfg(target_os = "macos")]
 pub mod macos_dmg_update;
 pub mod parser;
@@ -14,6 +15,7 @@ pub mod proxy;
 pub mod proxy_common;
 pub mod remote_cache;
 pub mod resume;
+pub mod scan;
 pub mod search_pattern;
 pub mod stalker;
 pub mod stream_proxy;

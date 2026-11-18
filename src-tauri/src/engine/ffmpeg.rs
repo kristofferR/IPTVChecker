@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::engine::host::Host;
 use serde::Deserialize;
-use tauri::{AppHandle, Manager};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
@@ -122,7 +122,7 @@ fn resolve_binary_from_dir(dir: &Path, candidates: &[String]) -> Option<String> 
     None
 }
 
-fn resolve_bundled_binary(app: &AppHandle, candidates: &[String]) -> Option<String> {
+fn resolve_bundled_binary(host: &dyn Host, candidates: &[String]) -> Option<String> {
     #[cfg(debug_assertions)]
     {
         // In `tauri dev`, prefer the project sidecar inputs directly so debug
@@ -142,8 +142,8 @@ fn resolve_bundled_binary(app: &AppHandle, candidates: &[String]) -> Option<Stri
         return Some(path);
     }
 
-    // Also check the Tauri resource directory.
-    if let Ok(dir) = app.path().resource_dir()
+    // Also check the host's resource directory.
+    if let Some(dir) = host.resource_dir()
         && let Some(path) = resolve_binary_from_dir(&dir, candidates)
     {
         return Some(path);
@@ -155,7 +155,7 @@ fn resolve_bundled_binary(app: &AppHandle, candidates: &[String]) -> Option<Stri
 /// Resolve the path to an executable, preferring bundled sidecar binaries over
 /// the system PATH so debug and production use the same ffmpeg build. Results
 /// are cached per binary name for the session.
-pub(crate) fn resolve_binary(app: &AppHandle, name: &str) -> String {
+pub(crate) fn resolve_binary(host: &dyn Host, name: &str) -> String {
     let cache = match name {
         "ffmpeg" => Some(&FFMPEG_PATH),
         "ffprobe" => Some(&FFPROBE_PATH),
@@ -163,13 +163,13 @@ pub(crate) fn resolve_binary(app: &AppHandle, name: &str) -> String {
     };
     if let Some(lock) = cache {
         return lock
-            .get_or_init(|| resolve_binary_uncached(app, name))
+            .get_or_init(|| resolve_binary_uncached(host, name))
             .clone();
     }
-    resolve_binary_uncached(app, name)
+    resolve_binary_uncached(host, name)
 }
 
-fn resolve_binary_uncached(app: &AppHandle, name: &str) -> String {
+fn resolve_binary_uncached(host: &dyn Host, name: &str) -> String {
     let ext = if cfg!(target_os = "windows") {
         ".exe"
     } else {
@@ -178,7 +178,7 @@ fn resolve_binary_uncached(app: &AppHandle, name: &str) -> String {
 
     let candidates = binary_candidate_names(name, ext);
 
-    if let Some(path) = resolve_bundled_binary(app, &candidates) {
+    if let Some(path) = resolve_bundled_binary(host, &candidates) {
         return path;
     }
 
@@ -436,7 +436,7 @@ fn proxy_upstream_source_url<'a>(url: &'a str, route_hint_url: Option<&'a str>) 
 }
 
 async fn prepare_stream_tool_url(
-    app: &AppHandle,
+    host: &dyn Host,
     url: &str,
     route_hint_url: Option<&str>,
 ) -> String {
@@ -445,7 +445,7 @@ async fn prepare_stream_tool_url(
     }
 
     let proxy_source_url = proxy_upstream_source_url(url, route_hint_url);
-    let port = crate::engine::stream_proxy::ensure_streaming_proxy_port(app.clone()).await;
+    let port = crate::engine::stream_proxy::ensure_streaming_proxy_port(host).await;
     if port == 0 {
         log::debug!(
             "Streaming proxy unavailable for ffmpeg/ffprobe input, using raw URL: {}",
@@ -865,24 +865,24 @@ async fn run_resolved_tool_command(
 }
 
 async fn run_tool_command_with_output(
-    app: &AppHandle,
+    host: &dyn Host,
     name: &str,
     args: &[&str],
     cancel: &CancellationToken,
     timeout: Option<std::time::Duration>,
 ) -> Result<ToolCommandOutput, AppError> {
-    let resolved_bin = resolve_binary(app, name);
+    let resolved_bin = resolve_binary(host, name);
     run_resolved_tool_command(resolved_bin, name, args, cancel, timeout).await
 }
 
 async fn run_tool_command(
-    app: &AppHandle,
+    host: &dyn Host,
     name: &str,
     args: &[&str],
     cancel: &CancellationToken,
     timeout: Option<std::time::Duration>,
 ) -> Result<(String, String), AppError> {
-    let output = run_tool_command_with_output(app, name, args, cancel, timeout).await?;
+    let output = run_tool_command_with_output(host, name, args, cancel, timeout).await?;
 
     if !output.success {
         return Err(AppError::Other(format!(
@@ -898,7 +898,7 @@ async fn run_tool_command(
 }
 
 /// Check if ffmpeg and ffprobe sidecars are available.
-pub async fn check_availability(app: &AppHandle) -> (bool, bool) {
+pub async fn check_availability(host: &dyn Host) -> (bool, bool) {
     if let Some(&cached) = FFTOOLS_AVAILABLE.get() {
         return cached;
     }
@@ -906,8 +906,8 @@ pub async fn check_availability(app: &AppHandle) -> (bool, bool) {
     let no_cancel = CancellationToken::new();
     let version_timeout = Some(std::time::Duration::from_secs(5));
     let (ffmpeg_result, ffprobe_result) = tokio::join!(
-        run_tool_command(app, "ffmpeg", &["-version"], &no_cancel, version_timeout),
-        run_tool_command(app, "ffprobe", &["-version"], &no_cancel, version_timeout),
+        run_tool_command(host, "ffmpeg", &["-version"], &no_cancel, version_timeout),
+        run_tool_command(host, "ffprobe", &["-version"], &no_cancel, version_timeout),
     );
     let result = (ffmpeg_result.is_ok(), ffprobe_result.is_ok());
     log::debug!(
@@ -1286,12 +1286,12 @@ fn resolution_label(width: Option<u32>, height: Option<u32>) -> String {
 
 /// Capture raw ffprobe JSON output for diagnostic export logs.
 pub async fn collect_ffprobe_output(
-    app: &AppHandle,
+    host: &dyn Host,
     url: &str,
     cancel: &CancellationToken,
 ) -> Result<String, AppError> {
     let (stdout, _stderr) = run_tool_command(
-        app,
+        host,
         "ffprobe",
         &[
             "-v",
@@ -1313,25 +1313,25 @@ pub async fn collect_ffprobe_output(
 /// Collect stream diagnostics from one ffprobe run (track presence, video, audio,
 /// and raw output for debug logs).
 pub async fn collect_probe_snapshot(
-    app: &AppHandle,
+    host: &dyn Host,
     url: &str,
     cancel: &CancellationToken,
 ) -> Result<ProbeSnapshot, AppError> {
-    collect_probe_snapshot_with_timeout(app, url, None, cancel, Some(FFPROBE_TIMEOUT)).await
+    collect_probe_snapshot_with_timeout(host, url, None, cancel, Some(FFPROBE_TIMEOUT)).await
 }
 
 /// Collect stream diagnostics from one ffprobe run (track presence, video, audio,
 /// and raw output for debug logs) with an explicit timeout.
 pub async fn collect_probe_snapshot_with_timeout(
-    app: &AppHandle,
+    host: &dyn Host,
     url: &str,
     route_hint_url: Option<&str>,
     cancel: &CancellationToken,
     timeout: Option<std::time::Duration>,
 ) -> Result<ProbeSnapshot, AppError> {
-    let input_url = prepare_stream_tool_url(app, url, route_hint_url).await;
+    let input_url = prepare_stream_tool_url(host, url, route_hint_url).await;
     let (stdout, stderr) = run_tool_command(
-        app,
+        host,
         "ffprobe",
         &[
             "-v",
@@ -1437,7 +1437,7 @@ async fn capture_screenshot_with_format_using_binary(
 }
 
 async fn capture_screenshot_with_format(
-    app: &AppHandle,
+    host: &dyn Host,
     url: &str,
     route_hint_url: Option<&str>,
     output_dir: &str,
@@ -1446,8 +1446,8 @@ async fn capture_screenshot_with_format(
     format: ScreenshotFormat,
     cancel: &CancellationToken,
 ) -> Result<String, AppError> {
-    let resolved_bin = resolve_binary(app, "ffmpeg");
-    let input_url = prepare_stream_tool_url(app, url, route_hint_url).await;
+    let resolved_bin = resolve_binary(host, "ffmpeg");
+    let input_url = prepare_stream_tool_url(host, url, route_hint_url).await;
     capture_screenshot_with_format_using_binary(
         resolved_bin,
         &input_url,
@@ -1463,7 +1463,7 @@ async fn capture_screenshot_with_format(
 /// Capture a screenshot frame from a stream via ffmpeg.
 /// Automatically retries as PNG when WebP capture fails.
 pub async fn capture_screenshot(
-    app: &AppHandle,
+    host: &dyn Host,
     url: &str,
     route_hint_url: Option<&str>,
     output_dir: &str,
@@ -1477,7 +1477,7 @@ pub async fn capture_screenshot(
     }
 
     match capture_screenshot_with_format(
-        app,
+        host,
         url,
         route_hint_url,
         output_dir,
@@ -1499,7 +1499,7 @@ pub async fn capture_screenshot(
                 reason
             );
             capture_screenshot_with_format(
-                app,
+                host,
                 url,
                 route_hint_url,
                 output_dir,
@@ -1718,7 +1718,7 @@ async fn capture_sample_clip_using_binary(
 /// Record a `duration_secs` stream-copied sample clip from a stream. Prefers
 /// MP4 and falls back to the raw MPEG-TS capture when remuxing fails.
 pub async fn capture_sample_clip(
-    app: &AppHandle,
+    host: &dyn Host,
     url: &str,
     route_hint_url: Option<&str>,
     output_dir: &str,
@@ -1730,8 +1730,8 @@ pub async fn capture_sample_clip(
     if cancel.is_cancelled() {
         return Err(AppError::Cancelled);
     }
-    let resolved_bin = resolve_binary(app, "ffmpeg");
-    let input_url = prepare_stream_tool_url(app, url, route_hint_url).await;
+    let resolved_bin = resolve_binary(host, "ffmpeg");
+    let input_url = prepare_stream_tool_url(host, url, route_hint_url).await;
     capture_sample_clip_using_binary(
         resolved_bin,
         &input_url,
@@ -1821,7 +1821,7 @@ pub struct BitrateProfile {
 ///   as an error.
 /// - We only need the "Statistics:" line from stderr, regardless of exit code.
 pub async fn profile_bitrate(
-    app: &AppHandle,
+    host: &dyn Host,
     url: &str,
     route_hint_url: Option<&str>,
     user_agent: &str,
@@ -1838,8 +1838,8 @@ pub async fn profile_bitrate(
         FFMPEG_BITRATE_TIMEOUT
     };
 
-    let resolved_bin = resolve_binary(app, "ffmpeg");
-    let input_url = prepare_stream_tool_url(app, url, route_hint_url).await;
+    let resolved_bin = resolve_binary(host, "ffmpeg");
+    let input_url = prepare_stream_tool_url(host, url, route_hint_url).await;
 
     // Leave at least 15s of headroom within the timeout for connection
     // setup and graceful shutdown. Minimum streaming duration is 3s.
@@ -2105,7 +2105,7 @@ fn parse_bytes_read(stderr: &str, sample_secs: u64) -> Option<u64> {
 /// adds a screenshot, a sample clip, and/or a bitrate-profiling output to one
 /// ffmpeg command, so every artifact shares a single connection to the server.
 pub async fn run_combined_diagnostics(
-    app: &AppHandle,
+    host: &dyn Host,
     url: &str,
     route_hint_url: Option<&str>,
     user_agent: &str,
@@ -2122,8 +2122,8 @@ pub async fn run_combined_diagnostics(
         return Err(AppError::Cancelled);
     }
 
-    let resolved_bin = resolve_binary(app, "ffmpeg");
-    let input_url = prepare_stream_tool_url(app, url, route_hint_url).await;
+    let resolved_bin = resolve_binary(host, "ffmpeg");
+    let input_url = prepare_stream_tool_url(host, url, route_hint_url).await;
     run_combined_diagnostics_using_binary(
         resolved_bin,
         &input_url,

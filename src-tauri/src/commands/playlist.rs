@@ -6,6 +6,7 @@
 //! the `open_playlist*` commands and enriches previews with server metadata
 //! (single-provider detection and server location lookup).
 
+use crate::engine::host::Host;
 use crate::engine::parser;
 use crate::engine::remote_cache::{
     PLAYLIST_DOWNLOAD_CONNECT_TIMEOUT, PLAYLIST_DOWNLOAD_USER_AGENT,
@@ -31,7 +32,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::AppHandle;
 use url::Url;
 
 // Re-exported for callers elsewhere in the crate (saved.rs, recent.rs, scan.rs)
@@ -97,9 +98,9 @@ struct XtreamArchiveEnrichmentGuard {
 }
 
 impl XtreamArchiveEnrichmentGuard {
-    fn new(app: &tauri::AppHandle, source_identity: String, generation: u64) -> Self {
+    fn new(host: &dyn Host, source_identity: String, generation: u64) -> Self {
         Self {
-            state: app.state::<Arc<AppState>>().inner().clone(),
+            state: Arc::clone(host.app_state()),
             source_identity,
             generation,
             completed: false,
@@ -176,7 +177,7 @@ fn playlist_progress_log_state() -> &'static Mutex<PlaylistProgressLogState> {
     PLAYLIST_PROGRESS_LOG_STATE.get_or_init(|| Mutex::new(PlaylistProgressLogState::default()))
 }
 
-pub(crate) fn emit_load_progress(app: Option<&AppHandle>, progress: PlaylistLoadProgress) {
+pub(crate) fn emit_load_progress(host: Option<&dyn Host>, progress: PlaylistLoadProgress) {
     match &progress {
         PlaylistLoadProgress::Connecting { detail } => {
             log::info!("[playlist-load] Connecting: {}", detail);
@@ -237,8 +238,8 @@ pub(crate) fn emit_load_progress(app: Option<&AppHandle>, progress: PlaylistLoad
             log::info!("[playlist-load] Processing: {}", detail);
         }
     }
-    if let Some(app) = app {
-        let _ = app.emit("playlist://load-progress", progress);
+    if let Some(host) = host {
+        host.emit("playlist://load-progress", progress);
     }
 }
 
@@ -465,9 +466,9 @@ async fn lookup_ip_location(ip: IpAddr) -> Option<String> {
 
 /// Populate both server_location and single_provider in one pass over the
 /// channel URLs, avoiding redundant `Url::parse()` calls on every channel.
-async fn populate_server_metadata(app: Option<&AppHandle>, preview: &mut PlaylistPreview) {
+async fn populate_server_metadata(host: Option<&dyn Host>, preview: &mut PlaylistPreview) {
     emit_load_progress(
-        app,
+        host,
         PlaylistLoadProgress::Processing {
             detail: "Analyzing channel URLs",
         },
@@ -478,27 +479,27 @@ async fn populate_server_metadata(app: Option<&AppHandle>, preview: &mut Playlis
 
     // server_location — only look up when ≥90% of channels share the same host
     if one_host
-        && let Some(host) = dominant_host_from_counts(&counts)
-        && !host.eq_ignore_ascii_case("localhost")
+        && let Some(server) = dominant_host_from_counts(&counts)
+        && !server.eq_ignore_ascii_case("localhost")
     {
         if let Ok(cache) = server_location_cache().lock()
-            && let Some(cached) = cache.get(&host)
+            && let Some(cached) = cache.get(&server)
         {
             preview.server_location = cached.clone();
             return;
         }
         emit_load_progress(
-            app,
+            host,
             PlaylistLoadProgress::Processing {
                 detail: "Looking up server location",
             },
         );
-        let location = match resolve_host_ip(&host).await {
+        let location = match resolve_host_ip(&server).await {
             Some(ip) => lookup_ip_location(ip).await,
             None => None,
         };
         if let Ok(mut cache) = server_location_cache().lock() {
-            cache.insert(host, location.clone());
+            cache.insert(server, location.clone());
         }
         preview.server_location = location;
     }
@@ -520,21 +521,11 @@ pub(crate) fn friendly_name_from_url(url: &Url) -> String {
     url.host_str().unwrap_or("Playlist").to_string()
 }
 
-fn app_data_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, AppError> {
-    app.path().app_data_dir().map_err(|error| {
-        AppError::Other(format!("Failed to resolve app data directory: {}", error))
-    })
-}
-
-async fn accepts_invalid_certs(app: Option<&AppHandle>) -> bool {
-    let Some(app) = app else {
+async fn accepts_invalid_certs(host: Option<&dyn Host>) -> bool {
+    let Some(host) = host else {
         return false;
     };
-    app.state::<Arc<AppState>>()
-        .settings
-        .lock()
-        .await
-        .accept_invalid_certs
+    host.app_state().settings.lock().await.accept_invalid_certs
 }
 
 #[tauri::command]
@@ -597,7 +588,7 @@ pub async fn open_playlist_stalker(
         }
 
         populate_server_metadata(Some(&app), &mut preview).await;
-        crate::commands::scan::seed_cached_playlist_preview(
+        crate::engine::scan::seed_cached_playlist_preview(
             &app,
             &preview.file_path,
             preview.source_identity.as_deref(),
@@ -633,7 +624,7 @@ pub async fn open_playlist(
     let cache_channel_search = channel_search.clone();
     let mut preview = open_playlist_path_inner(&app, path, group_filter, channel_search).await?;
     crate::commands::saved::apply_persisted_playlist_metadata(&app, &mut preview, None, None)?;
-    crate::commands::scan::seed_cached_playlist_preview(
+    crate::engine::scan::seed_cached_playlist_preview(
         &app,
         &preview.file_path,
         preview.source_identity.as_deref(),
@@ -650,13 +641,13 @@ pub async fn open_playlist(
 /// progress events. Parsing a large (up to 200 MB) playlist is seconds of
 /// CPU-bound work that must not stall a tokio runtime worker.
 async fn parse_playlist_off_thread(
-    app: Option<&AppHandle>,
+    host: Option<&dyn Host>,
     path: String,
     group_filter: Option<String>,
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
     emit_load_progress(
-        app,
+        host,
         PlaylistLoadProgress::Parsing {
             channels_found: 0,
             live_found: 0,
@@ -664,13 +655,13 @@ async fn parse_playlist_off_thread(
             series_found: 0,
         },
     );
-    let app_for_progress = app.cloned();
+    let host_for_progress = host.map(|host| host.share());
     tokio::task::spawn_blocking(move || {
         let last_emit = std::cell::Cell::new(Instant::now() - PROGRESS_THROTTLE);
         let on_progress = |progress: parser::ParseProgress| {
             if last_emit.get().elapsed() >= PROGRESS_THROTTLE {
                 emit_load_progress(
-                    app_for_progress.as_ref(),
+                    host_for_progress.as_deref(),
                     PlaylistLoadProgress::Parsing {
                         channels_found: progress.channels_found,
                         live_found: progress.live_found,
@@ -681,7 +672,7 @@ async fn parse_playlist_off_thread(
                 last_emit.set(Instant::now());
             }
         };
-        let cb: Option<&dyn Fn(parser::ParseProgress)> = if app_for_progress.is_some() {
+        let cb: Option<&dyn Fn(parser::ParseProgress)> = if host_for_progress.is_some() {
             Some(&on_progress)
         } else {
             None
@@ -693,14 +684,14 @@ async fn parse_playlist_off_thread(
 }
 
 pub(crate) async fn open_playlist_path_inner(
-    app: &AppHandle,
+    host: &dyn Host,
     path: String,
     group_filter: Option<String>,
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
     let mut preview =
-        parse_playlist_off_thread(Some(app), path.clone(), group_filter, channel_search).await?;
-    populate_server_metadata(Some(app), &mut preview).await;
+        parse_playlist_off_thread(Some(host), path.clone(), group_filter, channel_search).await?;
+    populate_server_metadata(Some(host), &mut preview).await;
     Ok(preview)
 }
 
@@ -713,12 +704,12 @@ pub async fn open_playlist_url(
 ) -> Result<PlaylistPreview, AppError> {
     let cache_group_filter = group_filter.clone();
     let cache_channel_search = channel_search.clone();
-    let data_dir = app_data_dir(&app)?;
+    let data_dir = app.app_data_dir()?;
     let mut preview =
         open_playlist_url_from_data_dir(Some(&app), &data_dir, &url, group_filter, channel_search)
             .await?;
     crate::commands::saved::apply_persisted_playlist_metadata(&app, &mut preview, None, None)?;
-    crate::commands::scan::seed_cached_playlist_preview(
+    crate::engine::scan::seed_cached_playlist_preview(
         &app,
         &preview.file_path,
         preview.source_identity.as_deref(),
@@ -732,7 +723,7 @@ pub async fn open_playlist_url(
 }
 
 pub(crate) async fn open_playlist_url_from_data_dir(
-    app: Option<&AppHandle>,
+    host: Option<&dyn Host>,
     data_dir: &std::path::Path,
     url: &str,
     group_filter: Option<String>,
@@ -743,19 +734,19 @@ pub(crate) async fn open_playlist_url_from_data_dir(
     let normalized_identity = normalize_url_identity(&parsed);
     let source_key = format!("url:{}", normalized_identity);
     let cached_path = download_playlist_to_cache_in_data_dir(
-        app,
+        host,
         data_dir,
         &source_key,
         &parsed,
         "playlist URL",
-        accepts_invalid_certs(app).await,
+        accepts_invalid_certs(host).await,
     )
     .await?;
     let mut preview =
-        parse_playlist_off_thread(app, cached_path.clone(), group_filter, channel_search).await?;
+        parse_playlist_off_thread(host, cached_path.clone(), group_filter, channel_search).await?;
     preview.file_name = friendly_name_from_url(&parsed);
     preview.source_identity = Some(format!("url:{}", normalized_identity));
-    populate_server_metadata(app, &mut preview).await;
+    populate_server_metadata(host, &mut preview).await;
     Ok(preview)
 }
 
@@ -771,7 +762,7 @@ pub async fn open_playlist_xtream(
     let mut preview =
         open_playlist_xtream_inner(&app, &source, group_filter, channel_search, None).await?;
     crate::commands::saved::apply_persisted_playlist_metadata(&app, &mut preview, None, None)?;
-    crate::commands::scan::seed_cached_playlist_preview(
+    crate::engine::scan::seed_cached_playlist_preview(
         &app,
         &preview.file_path,
         preview.source_identity.as_deref(),
@@ -785,7 +776,7 @@ pub async fn open_playlist_xtream(
 }
 
 pub(crate) async fn open_playlist_xtream_inner(
-    app: &tauri::AppHandle,
+    host: &dyn Host,
     source: &XtreamOpenRequest,
     group_filter: Option<String>,
     channel_search: Option<String>,
@@ -808,20 +799,20 @@ pub(crate) async fn open_playlist_xtream_inner(
     let server = normalize_xtream_server(&source.server)?;
     let source_key = build_xtream_source_key(&server, &username);
     let source_identity = source_identity_override.unwrap_or_else(|| source_key.clone());
-    let archive_generation = app
-        .state::<Arc<AppState>>()
+    let archive_generation = host
+        .app_state()
         .begin_xtream_archive_enrichment(source_identity.clone())
         .await;
     let mut archive_enrichment =
-        XtreamArchiveEnrichmentGuard::new(app, source_identity.clone(), archive_generation);
-    let _ = app.emit(
+        XtreamArchiveEnrichmentGuard::new(host, source_identity.clone(), archive_generation);
+    host.emit(
         "playlist://xtream-archive-enrichment-started",
         source_identity.clone(),
     );
     let download_url = build_xtream_download_url(&server, &username, &password);
-    let data_dir = app_data_dir(app)?;
+    let data_dir = host.app_data_dir()?;
     let cache_path = remote_playlist_cache_path_from_data_dir(&data_dir, &source_key)?;
-    let accept_invalid_certs = accepts_invalid_certs(Some(app)).await;
+    let accept_invalid_certs = accepts_invalid_certs(Some(host)).await;
 
     // Keep the potentially large live-stream catalog running independently so
     // it can enrich the parsed playlist without imposing its full timeout.
@@ -836,7 +827,7 @@ pub(crate) async fn open_playlist_xtream_inner(
     let (account_result, m3u_result) = tokio::join!(
         fetch_xtream_account_info(&server, &username, &password, accept_invalid_certs),
         download_playlist_to_cache_in_data_dir(
-            Some(app),
+            Some(host),
             &data_dir,
             &source_key,
             &download_url,
@@ -907,7 +898,7 @@ pub(crate) async fn open_playlist_xtream_inner(
     };
 
     let mut preview = match parse_playlist_off_thread(
-        Some(app),
+        Some(host),
         cached_path.clone(),
         group_filter,
         channel_search,
@@ -943,7 +934,7 @@ pub(crate) async fn open_playlist_xtream_inner(
         archive_enrichment.complete(archive_flags).await;
     }
     if let Some(task) = pending_archive_task {
-        let app = app.clone();
+        let host = host.share();
         let source_identity = source_identity.clone();
         let mut channels = preview
             .channels
@@ -967,7 +958,7 @@ pub(crate) async fn open_playlist_xtream_inner(
                         apply_xtream_archive_flags_with_updates(&mut channels, &archive_flags);
                     let is_current = archive_enrichment.complete(archive_flags).await;
                     if is_current && !updates.is_empty() {
-                        let _ = app.emit(
+                        host.emit(
                             "playlist://xtream-archive-enrichment",
                             XtreamArchiveEnrichment {
                                 source_identity,
@@ -1003,7 +994,7 @@ pub(crate) async fn open_playlist_xtream_inner(
         .as_ref()
         .and_then(|account| account.max_connections);
     preview.xtream_account_info = xtream_account_info;
-    populate_server_metadata(Some(app), &mut preview).await;
+    populate_server_metadata(Some(host), &mut preview).await;
     Ok(preview)
 }
 
@@ -1019,7 +1010,7 @@ pub async fn open_playlist_dispatcharr(
     let mut preview =
         open_playlist_dispatcharr_inner(&app, &source, group_filter, channel_search, None).await?;
     crate::commands::saved::apply_persisted_playlist_metadata(&app, &mut preview, None, None)?;
-    crate::commands::scan::seed_cached_playlist_preview(
+    crate::engine::scan::seed_cached_playlist_preview(
         &app,
         &preview.file_path,
         preview.source_identity.as_deref(),
@@ -1033,7 +1024,7 @@ pub async fn open_playlist_dispatcharr(
 }
 
 pub(crate) async fn open_playlist_dispatcharr_inner(
-    app: &tauri::AppHandle,
+    host: &dyn Host,
     source: &DispatcharrOpenRequest,
     group_filter: Option<String>,
     channel_search: Option<String>,
@@ -1057,11 +1048,11 @@ pub(crate) async fn open_playlist_dispatcharr_inner(
     let client = Arc::new(dispatcharr::DispatcharrClient::new(
         base.clone(),
         auth,
-        accepts_invalid_certs(Some(app)).await,
+        accepts_invalid_certs(Some(host)).await,
     )?);
 
     emit_load_progress(
-        Some(app),
+        Some(host),
         PlaylistLoadProgress::Connecting {
             detail: "Fetching Dispatcharr channels",
         },
@@ -1092,7 +1083,7 @@ pub(crate) async fn open_playlist_dispatcharr_inner(
         .collect::<HashMap<_, _>>();
 
     emit_load_progress(
-        Some(app),
+        Some(host),
         PlaylistLoadProgress::Connecting {
             detail: "Fetching Dispatcharr streams",
         },
@@ -1106,12 +1097,12 @@ pub(crate) async fn open_playlist_dispatcharr_inner(
     );
 
     emit_load_progress(
-        Some(app),
+        Some(host),
         PlaylistLoadProgress::Saving {
             detail: "Caching Dispatcharr playlist",
         },
     );
-    let cache_path = remote_playlist_cache_path_from_data_dir(&app_data_dir(app)?, &source_key)?;
+    let cache_path = remote_playlist_cache_path_from_data_dir(&host.app_data_dir()?, &source_key)?;
     {
         let cache_path = cache_path.clone();
         tokio::task::spawn_blocking(move || write_bytes_to_cache(&cache_path, m3u.as_bytes()))
@@ -1120,7 +1111,7 @@ pub(crate) async fn open_playlist_dispatcharr_inner(
     }
 
     let mut preview = parse_playlist_off_thread(
-        Some(app),
+        Some(host),
         cache_path.to_string_lossy().to_string(),
         group_filter,
         channel_search,
@@ -1130,7 +1121,7 @@ pub(crate) async fn open_playlist_dispatcharr_inner(
         "{} (Dispatcharr)",
         dispatcharr::dispatcharr_host_label(&base)
     );
-    populate_server_metadata(Some(app), &mut preview).await;
+    populate_server_metadata(Some(host), &mut preview).await;
     // Sessions are keyed by connection, not source identity: a saved source's
     // identity stays the same when its server or account is edited.
     dispatcharr::register_session(&source_key, client);
