@@ -83,3 +83,68 @@ impl Host for tauri::AppHandle {
         Arc::new(self.clone())
     }
 }
+
+/// A host with no window: the CLI's, and what tests run the engine under.
+/// Its store is a snapshot and is never written back, so a running app's
+/// settings are not overwritten.
+#[derive(Clone)]
+pub struct HeadlessHost(Arc<Headless>);
+
+/// Receives an event's name and JSON payload.
+type EventHandler = Box<dyn Fn(&str, &str) + Send + Sync>;
+
+struct Headless {
+    state: Arc<AppState>,
+    data_dir: PathBuf,
+    store: serde_json::Map<String, serde_json::Value>,
+    on_event: EventHandler,
+}
+
+impl HeadlessHost {
+    /// `store` is the settings store's content. Events arrive at `on_event`
+    /// as their name and JSON payload.
+    pub fn new(
+        data_dir: PathBuf,
+        store: serde_json::Map<String, serde_json::Value>,
+        on_event: impl Fn(&str, &str) + Send + Sync + 'static,
+    ) -> Self {
+        Self(Arc::new(Headless {
+            state: AppState::new(),
+            data_dir,
+            store,
+            on_event: Box::new(on_event),
+        }))
+    }
+}
+
+impl Host for HeadlessHost {
+    fn app_state(&self) -> &Arc<AppState> {
+        &self.0.state
+    }
+
+    fn emit_json(&self, event: &str, payload: String) {
+        (self.0.on_event)(event, &payload);
+    }
+
+    fn app_data_dir(&self) -> Result<PathBuf, AppError> {
+        Ok(self.0.data_dir.clone())
+    }
+
+    fn temp_dir(&self) -> PathBuf {
+        std::env::temp_dir()
+    }
+
+    // Bundled ffmpeg sits beside the executable on every platform, which the
+    // binary lookup checks before asking the host.
+    fn resource_dir(&self) -> Option<PathBuf> {
+        None
+    }
+
+    fn stored(&self, key: &str) -> Option<serde_json::Value> {
+        self.0.store.get(key).cloned()
+    }
+
+    fn share(&self) -> Arc<dyn Host> {
+        Arc::new(self.clone())
+    }
+}

@@ -50,8 +50,9 @@ Ports all functionality from the CLI tool at `/Users/kristoffer/Code/Scripts/IPT
 ### Rust Backend (`src-tauri/src/`)
 ```
 models/     — Data types: Channel, ChannelResult, AppSettings, ScanConfig, etc.
-engine/     — Core logic: parser.rs, checker.rs, ffmpeg.rs, proxy.rs, resume.rs
+engine/     — Core logic: scan.rs, host.rs, parser.rs, checker.rs, ffmpeg.rs, proxy.rs, resume.rs
 commands/   — Tauri IPC commands: playlist, scan, export, settings
+cli.rs      — Headless `iptv-checker scan` command; returns before Tauri starts
 state.rs    — AppState (settings, cancel token, scanning flag)
 error.rs    — AppError enum (thiserror)
 lib.rs      — Plugin registration and command handler setup
@@ -67,6 +68,7 @@ lib/        — Types, Tauri invoke wrappers, formatting helpers, sort/filter lo
 ## Key Architecture Decisions
 - **Concurrency defaults to 1** (sequential) — most IPTV servers enforce single-connection limits
 - **Event-driven scanning** — Rust emits `scan://channel-result` events per channel, batched with requestAnimationFrame
+- **Engine code is window-free** — scans, playlist loading and ffmpeg reach events, state, directories and the settings store through `engine::host::Host`, never a `tauri::AppHandle`. The app's handle implements it; the CLI uses `HeadlessHost`. New engine code that needs the app takes `&dyn Host`.
 - **Virtualized table** — @tanstack/react-virtual for 1000+ channel playlists
 - **ffmpeg via system PATH** — sidecars optional, graceful degradation if missing
 

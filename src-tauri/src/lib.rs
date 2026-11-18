@@ -4,6 +4,7 @@
 // the app and does not belong to the lint gate that introduced this allow.
 #![allow(clippy::too_many_arguments)]
 
+pub mod cli;
 pub mod commands;
 pub mod engine;
 pub mod error;

@@ -620,12 +620,23 @@ pub async fn open_playlist(
     group_filter: Option<String>,
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
+    open_playlist_path(&app, path, group_filter, channel_search).await
+}
+
+/// Open a playlist file or folder: parse it, apply its saved display name
+/// and seed the scan's preview cache.
+pub(crate) async fn open_playlist_path(
+    host: &dyn Host,
+    path: String,
+    group_filter: Option<String>,
+    channel_search: Option<String>,
+) -> Result<PlaylistPreview, AppError> {
     let cache_group_filter = group_filter.clone();
     let cache_channel_search = channel_search.clone();
-    let mut preview = open_playlist_path_inner(&app, path, group_filter, channel_search).await?;
-    crate::commands::saved::apply_persisted_playlist_metadata(&app, &mut preview, None, None)?;
+    let mut preview = open_playlist_path_inner(host, path, group_filter, channel_search).await?;
+    crate::commands::saved::apply_persisted_playlist_metadata(host, &mut preview, None, None)?;
     crate::engine::scan::seed_cached_playlist_preview(
-        &app,
+        host,
         &preview.file_path,
         preview.source_identity.as_deref(),
         Some(&preview.file_name),
@@ -702,15 +713,26 @@ pub async fn open_playlist_url(
     group_filter: Option<String>,
     channel_search: Option<String>,
 ) -> Result<PlaylistPreview, AppError> {
+    open_playlist_from_url(&app, url, group_filter, channel_search).await
+}
+
+/// Open a playlist URL: download it to the cache, parse it, apply its saved
+/// display name and seed the scan's preview cache.
+pub(crate) async fn open_playlist_from_url(
+    host: &dyn Host,
+    url: String,
+    group_filter: Option<String>,
+    channel_search: Option<String>,
+) -> Result<PlaylistPreview, AppError> {
     let cache_group_filter = group_filter.clone();
     let cache_channel_search = channel_search.clone();
-    let data_dir = app.app_data_dir()?;
+    let data_dir = host.app_data_dir()?;
     let mut preview =
-        open_playlist_url_from_data_dir(Some(&app), &data_dir, &url, group_filter, channel_search)
+        open_playlist_url_from_data_dir(Some(host), &data_dir, &url, group_filter, channel_search)
             .await?;
-    crate::commands::saved::apply_persisted_playlist_metadata(&app, &mut preview, None, None)?;
+    crate::commands::saved::apply_persisted_playlist_metadata(host, &mut preview, None, None)?;
     crate::engine::scan::seed_cached_playlist_preview(
-        &app,
+        host,
         &preview.file_path,
         preview.source_identity.as_deref(),
         Some(&preview.file_name),

@@ -1013,9 +1013,11 @@ fn sanitize_scope_suffix(value: &str) -> String {
     }
 }
 
-fn cleanup_resume_files(log_file: &str, checkpoint_file: &str) {
-    let _ = std::fs::remove_file(log_file);
-    let _ = std::fs::remove_file(checkpoint_file);
+fn cleanup_resume_files(checkpoint: Option<&CheckpointFiles>) {
+    if let Some(checkpoint) = checkpoint {
+        let _ = std::fs::remove_file(&checkpoint.log_file);
+        let _ = std::fs::remove_file(&checkpoint.checkpoint_file);
+    }
 }
 
 fn emit_scan_error_event(host: &dyn Host, run_id: &str, message: impl Into<String>) {
@@ -1368,12 +1370,25 @@ fn filter_channels_by_content_type(channels: &mut Vec<Channel>, hide_vod_content
     }
 }
 
-/// Run ids name the history files, so they have to stay unique across
-/// launches: every CLI scan is a new process.
+/// The rows of `preview` a scan with `config` checks.
+pub(crate) fn scannable_channels(preview: &PlaylistPreview, config: &ScanConfig) -> Vec<Channel> {
+    let mut channels = preview.channels.clone();
+    filter_channels_by_selection(&mut channels, &config.selected_indices);
+    filter_channels_by_content_type(&mut channels, config.hide_vod_content);
+    // A Dispatcharr channel's no-streams row has nothing to probe.
+    channels
+        .retain(|channel| !crate::engine::dispatcharr::is_empty_channel_row(&channel.extinf_line));
+    channels
+}
+
+/// Run ids name the history files, so they have to be unique across
+/// processes and launches: every CLI scan is a new process, and several can
+/// start in the same moment.
 fn next_scan_run_id() -> String {
     format!(
-        "scan-run-{}-{}",
+        "scan-run-{}-{}-{}",
         now_epoch_ms(),
+        std::process::id(),
         NEXT_SCAN_RUN_ID.fetch_add(1, Ordering::Relaxed)
     )
 }
@@ -1770,10 +1785,18 @@ async fn run_checkpoint_writer(
     .await;
 }
 
-/// Resume/checkpoint state derived from the on-disk files for a scan scope.
-struct ResumeState {
+/// Where a scan records its results as it goes, so an interrupted one can
+/// be resumed.
+struct CheckpointFiles {
     log_file: String,
     checkpoint_file: String,
+}
+
+/// Resume/checkpoint state derived from the on-disk files for a scan scope.
+struct ResumeState {
+    /// `None` for a scan that neither resumes nor can be resumed: it leaves
+    /// the files of other scans of this playlist alone.
+    checkpoint: Option<CheckpointFiles>,
     resumed_entries: Vec<resume::CheckpointResumeEntry>,
     base_name: String,
     scope_suffix: String,
@@ -1803,13 +1826,15 @@ fn refresh_resumed_playlist_metadata(
 /// Derive the resume file paths for this scan scope, load any checkpoint
 /// entries that match the current channel set, and prune already-checked
 /// channels from `channels`. Starts fresh (truncates the log and removes the
-/// checkpoint) when nothing is resumable.
+/// checkpoint) when nothing is resumable. With `resume` off, the files are
+/// neither read nor written.
 async fn load_resume_state(
     host: &dyn Host,
     state: &Arc<AppState>,
     config: &ScanConfig,
     run_id: &str,
     channels: &mut Vec<Channel>,
+    resume: bool,
 ) -> ResumeState {
     let resume_started_at = Instant::now();
     let playlist_path = std::path::Path::new(&config.file_path);
@@ -1842,6 +1867,15 @@ async fn load_resume_state(
         "{}/{}_{}_checkpoint.jsonl",
         playlist_dir, base_name, scope_suffix
     );
+
+    if !resume {
+        return ResumeState {
+            checkpoint: None,
+            resumed_entries: Vec::new(),
+            base_name,
+            scope_suffix,
+        };
+    }
 
     let channel_indices: HashSet<usize> = channels.iter().map(|channel| channel.index).collect();
     let checkpoint_entries = {
@@ -1889,8 +1923,10 @@ async fn load_resume_state(
     .await;
 
     ResumeState {
-        log_file,
-        checkpoint_file,
+        checkpoint: Some(CheckpointFiles {
+            log_file,
+            checkpoint_file,
+        }),
         resumed_entries,
         base_name,
         scope_suffix,
@@ -2514,7 +2550,7 @@ pub(crate) fn build_channel_result(channel: &Channel, shared: &SharedUrlResult) 
 /// Read the history limit from settings and append this run to scan history
 /// on a blocking thread — serializing and writing the full results Vec (plus
 /// reading the previous run for the diff) is blocking file IO. Hands the
-/// results back.
+/// results back, with the reason when the run could not be written.
 async fn append_history_blocking(
     host: &dyn Host,
     state: &Arc<AppState>,
@@ -2522,7 +2558,7 @@ async fn append_history_blocking(
     config: &ScanConfig,
     summary: &ScanSummary,
     results: Vec<ChannelResult>,
-) -> Vec<ChannelResult> {
+) -> (Vec<ChannelResult>, Option<String>) {
     let history_limit = {
         let settings = state.settings.lock().await;
         settings.scan_history_limit as usize
@@ -2533,21 +2569,23 @@ async fn append_history_blocking(
     let summary = summary.clone();
     let results = Arc::new(results);
     let persisted = Arc::clone(&results);
-    let _ = tokio::task::spawn_blocking(move || {
-        if let Err(error) = history::append_scan_history(
+    let written = tokio::task::spawn_blocking(move || {
+        history::append_scan_history(
             host.as_ref(),
             &run_id,
             &config,
             &summary,
             &persisted,
             history_limit,
-        ) {
-            log::warn!("Failed to write scan history for {}: {}", run_id, error);
-        }
+        )
+        .inspect_err(|error| log::warn!("Failed to write scan history for {run_id}: {error}"))
+        .map_err(|error| error.to_string())
     })
-    .await;
+    .await
+    .unwrap_or_else(|error| Err(format!("The history task failed: {error}")));
     // The task has ended, so this is the only handle left.
-    Arc::try_unwrap(results).unwrap_or_else(|shared| shared.as_ref().clone())
+    let results = Arc::try_unwrap(results).unwrap_or_else(|shared| shared.as_ref().clone());
+    (results, written.err())
 }
 
 fn redact_channel_debug_log(mut channel_log: ChannelDebugLog) -> ChannelDebugLog {
@@ -2627,7 +2665,7 @@ async fn finish_empty_scan(
     run_id: &str,
     scan_started_at_epoch_ms: u64,
     config: &ScanConfig,
-) -> ScanSummary {
+) -> ScanOutcome {
     let summary = ScanSummary {
         total: 0,
         alive: 0,
@@ -2649,7 +2687,8 @@ async fn finish_empty_scan(
             payload: summary.clone(),
         },
     );
-    append_history_blocking(host, state, run_id, config, &summary, Vec::new()).await;
+    let (results, history_error) =
+        append_history_blocking(host, state, run_id, config, &summary, Vec::new()).await;
     store_scan_log(
         state,
         scan_scope,
@@ -2660,7 +2699,12 @@ async fn finish_empty_scan(
         Vec::new(),
     )
     .await;
-    summary
+    ScanOutcome {
+        summary,
+        results,
+        cancelled: false,
+        history_error,
+    }
 }
 
 /// Handles and settings shared by every channel worker of one scan.
@@ -2691,7 +2735,8 @@ struct ScanWorkers {
     adaptive_throttle: AdaptiveThrottle,
     busy_accounts: BusyAccounts,
     results: tokio::sync::mpsc::Sender<WorkerOutput>,
-    checkpoints: tokio::sync::mpsc::Sender<resume::CheckpointWriteEntryWithLog>,
+    /// `None` when the scan keeps no checkpoint.
+    checkpoints: Option<tokio::sync::mpsc::Sender<resume::CheckpointWriteEntryWithLog>>,
 }
 
 /// One playlist row handed to a worker.
@@ -2861,14 +2906,15 @@ impl ScanWorkers {
 
         let result = build_channel_result(&channel, &shared);
 
-        let _ = self
-            .checkpoints
-            .send(resume::CheckpointWriteEntryWithLog {
-                log_entry: format!("{} - {} {}", channel.index + 1, channel.name, channel.url),
-                result: result.clone(),
-                channel_log: shared.channel_log.clone(),
-            })
-            .await;
+        if let Some(checkpoints) = &self.checkpoints {
+            let _ = checkpoints
+                .send(resume::CheckpointWriteEntryWithLog {
+                    log_entry: format!("{} - {} {}", channel.index + 1, channel.name, channel.url),
+                    result: result.clone(),
+                    channel_log: shared.channel_log.clone(),
+                })
+                .await;
+        }
         let _ = self
             .results
             .send(WorkerOutput {
@@ -2996,6 +3042,7 @@ async fn execute_scan_run(
     scan_started_at_epoch_ms: u64,
     config: ScanConfig,
     cancel_token: CancellationToken,
+    resume: bool,
 ) -> Result<ScanOutcome, AppError> {
     log::info!(
         "Starting scan {} for scope '{}': {} (concurrency: {}, retries: {}, retry_backoff: {:?})",
@@ -3025,16 +3072,11 @@ async fn execute_scan_run(
     );
     // Viewer counts come through the session this source was loaded with.
     let dispatcharr_connection = preview.dispatcharr_connection.clone();
-    let mut channels = preview.channels.clone();
-    filter_channels_by_selection(&mut channels, &config.selected_indices);
-    filter_channels_by_content_type(&mut channels, config.hide_vod_content);
-    // A Dispatcharr channel's no-streams row has nothing to probe.
-    channels
-        .retain(|channel| !crate::engine::dispatcharr::is_empty_channel_row(&channel.extinf_line));
+    let mut channels = scannable_channels(&preview, &config);
     let total = channels.len();
 
     if total == 0 {
-        let summary = finish_empty_scan(
+        return Ok(finish_empty_scan(
             host.as_ref(),
             &state,
             &scan_scope,
@@ -3042,22 +3084,24 @@ async fn execute_scan_run(
             scan_started_at_epoch_ms,
             &config,
         )
-        .await;
-        return Ok(ScanOutcome {
-            summary,
-            results: Vec::new(),
-            cancelled: false,
-        });
+        .await);
     }
 
     // Resume support
     let ResumeState {
-        log_file,
-        checkpoint_file,
+        checkpoint,
         resumed_entries,
         base_name,
         scope_suffix,
-    } = load_resume_state(host.as_ref(), &state, &config, &run_id, &mut channels).await;
+    } = load_resume_state(
+        host.as_ref(),
+        &state,
+        &config,
+        &run_id,
+        &mut channels,
+        resume,
+    )
+    .await;
 
     // Compute single_provider from the filtered (and resume-pruned) channel set.
     let single_provider = if preview_single_provider {
@@ -3147,17 +3191,21 @@ async fn execute_scan_run(
         )
     };
     let (tx, rx) = tokio::sync::mpsc::channel::<WorkerOutput>(256);
-    let (checkpoint_tx, checkpoint_rx) =
-        tokio::sync::mpsc::channel::<resume::CheckpointWriteEntryWithLog>(1024);
-
-    let checkpoint_task = tokio::spawn(run_checkpoint_writer(
-        checkpoint_rx,
-        log_file.clone(),
-        checkpoint_file.clone(),
-        Arc::clone(&host),
-        state.clone(),
-        run_id.clone(),
-    ));
+    let (checkpoint_tx, checkpoint_task) = match &checkpoint {
+        Some(files) => {
+            let (tx, rx) = tokio::sync::mpsc::channel::<resume::CheckpointWriteEntryWithLog>(1024);
+            let task = tokio::spawn(run_checkpoint_writer(
+                rx,
+                files.log_file.clone(),
+                files.checkpoint_file.clone(),
+                Arc::clone(&host),
+                state.clone(),
+                run_id.clone(),
+            ));
+            (Some(tx), Some(task))
+        }
+        None => (None, None),
+    };
 
     let batch_events_enabled = config
         .client_capabilities
@@ -3352,7 +3400,9 @@ async fn execute_scan_run(
     }
 
     let event_result = event_task.await;
-    if let Err(error) = checkpoint_task.await {
+    if let Some(task) = checkpoint_task
+        && let Err(error) = task.await
+    {
         log::warn!("Checkpoint writer task failed for {}: {}", run_id, error);
     }
 
@@ -3360,7 +3410,7 @@ async fn execute_scan_run(
         Ok(data) => data,
         Err(error) => {
             log::error!("Scan failed while dispatching progress events: {}", error);
-            cleanup_resume_files(&log_file, &checkpoint_file);
+            cleanup_resume_files(checkpoint.as_ref());
             return Err(AppError::Other(format!(
                 "Scan failed while dispatching progress events: {}",
                 error
@@ -3383,8 +3433,7 @@ async fn execute_scan_run(
         &config,
         &cancel_token,
         sweepable_clips_dir,
-        &log_file,
-        &checkpoint_file,
+        checkpoint.as_ref(),
         completed_scan,
     )
     .await)
@@ -3401,8 +3450,7 @@ async fn finish_scan(
     config: &ScanConfig,
     cancel_token: &CancellationToken,
     sweepable_clips_dir: Option<String>,
-    log_file: &str,
-    checkpoint_file: &str,
+    checkpoint: Option<&CheckpointFiles>,
     mut completed_scan: CompletedScanData,
 ) -> ScanOutcome {
     if !cancel_token.is_cancelled()
@@ -3458,17 +3506,18 @@ async fn finish_scan(
                 scan_state.scan_log = None;
             })
             .await;
-        cleanup_resume_files(log_file, checkpoint_file);
+        cleanup_resume_files(checkpoint);
         return ScanOutcome {
             summary,
             results: completed_scan.results,
             cancelled: true,
+            history_error: None,
         };
     }
 
     // Serializing and writing the full results Vec (plus reading the previous
     // run for the diff) is blocking file IO — keep it off the runtime.
-    let results = append_history_blocking(
+    let (results, history_error) = append_history_blocking(
         host,
         state,
         run_id,
@@ -3500,11 +3549,12 @@ async fn finish_scan(
         channel_logs,
     )
     .await;
-    cleanup_resume_files(log_file, checkpoint_file);
+    cleanup_resume_files(checkpoint);
     ScanOutcome {
         summary,
         results,
         cancelled: false,
+        history_error,
     }
 }
 
@@ -3516,6 +3566,8 @@ pub struct ScanOutcome {
     pub results: Vec<ChannelResult>,
     /// Stopped before the end. A cancelled scan is not written to history.
     pub cancelled: bool,
+    /// Why a finished scan could not be written to history, when it could not.
+    pub history_error: Option<String>,
 }
 
 /// A scan that holds its scope and is ready to run.
@@ -3525,6 +3577,7 @@ pub struct PendingScan {
     started_at_epoch_ms: u64,
     config: ScanConfig,
     cancel: CancellationToken,
+    resume: bool,
 }
 
 /// Validate `config` and claim `scope` (a window's label, or the CLI's) for a
@@ -3557,12 +3610,21 @@ pub async fn begin_scan(
         started_at_epoch_ms,
         config,
         cancel,
+        resume: true,
     })
 }
 
 impl PendingScan {
     pub fn run_id(&self) -> &str {
         &self.run_id
+    }
+
+    /// Check every channel again and keep no checkpoint. An unattended run
+    /// must not report an interrupted scan's old results as its own, and
+    /// then has no use for a checkpoint of its own.
+    pub fn fresh(mut self) -> Self {
+        self.resume = false;
+        self
     }
 
     /// Cancelling this stops the run; it then ends as a cancelled outcome.
@@ -3582,6 +3644,7 @@ impl PendingScan {
             self.started_at_epoch_ms,
             self.config,
             self.cancel,
+            self.resume,
         )
         .await;
         if let Err(error) = &outcome {

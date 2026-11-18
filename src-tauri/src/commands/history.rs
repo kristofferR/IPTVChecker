@@ -13,6 +13,7 @@ const MAX_HISTORY_LIMIT: usize = 200;
 const HISTORY_FILE_NAME: &str = "scan-history.json";
 const V2_DIR_NAME: &str = "scan-history-v2";
 const V2_INDEX_FILE_NAME: &str = "index.json";
+const V2_LOCK_FILE_NAME: &str = "index.lock";
 const V2_RUNS_DIR_NAME: &str = "runs";
 
 // ── V1 types (for migration) ──────────────────────────────────────────────
@@ -248,6 +249,20 @@ fn v1_backup_path(base_dir: &Path) -> PathBuf {
 }
 
 // ── V2 IO operations ──────────────────────────────────────────────────────
+
+/// Held while the index is read, changed and written back. The app and a CLI
+/// scan are separate processes writing the same history; without this, two
+/// scans finishing together would each drop the other's entry. History is
+/// still written when the lock cannot be taken.
+fn lock_history(base_dir: &Path) -> Option<std::fs::File> {
+    let dir = v2_dir(base_dir);
+    std::fs::create_dir_all(&dir).ok()?;
+    let file = std::fs::File::create(dir.join(V2_LOCK_FILE_NAME)).ok()?;
+    file.lock()
+        .inspect_err(|error| log::warn!("Could not lock scan history: {error}"))
+        .ok()?;
+    Some(file)
+}
 
 fn load_v2_index(base_dir: &Path) -> Result<HistoryIndexV2, AppError> {
     let index_path = v2_index_path(base_dir);
@@ -520,6 +535,7 @@ fn append_scan_history_at_dir(
     results: &[ChannelResult],
     history_limit: usize,
 ) -> Result<(), AppError> {
+    let _lock = lock_history(base_dir);
     ensure_v2(base_dir)?;
 
     let mut index = load_v2_index(base_dir)?;
@@ -594,6 +610,7 @@ fn get_scan_history_from_dir(
         return Ok(Vec::new());
     }
 
+    let _lock = lock_history(base_dir);
     ensure_v2(base_dir)?;
     let index = load_v2_index(base_dir)?;
 
@@ -630,6 +647,7 @@ fn clear_scan_history_at_dir(
         return Ok(0);
     }
 
+    let _lock = lock_history(base_dir);
     ensure_v2(base_dir)?;
     let mut index = load_v2_index(base_dir)?;
 
