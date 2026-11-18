@@ -77,6 +77,7 @@ lib/        — Types, Tauri invoke wrappers, formatting helpers, sort/filter lo
 - `bun tauri build` — production build
 - `cd src-tauri && cargo test` — run Rust tests
 - `bun run typecheck` — TypeScript type checking via tsc
+- `bun run bindings` — regenerate `src/lib/bindings/` from the Rust types
 
 **IMPORTANT:** Before launching `bun tauri dev` after Rust code changes, always run `cargo clean -p iptv-checker && cargo build --features mcp` in `src-tauri/` first to ensure a fresh binary. The dev server's file watcher does not always trigger a rebuild, leading to stale cached binaries.
 
@@ -101,7 +102,12 @@ This is safe — it just rebuilds on next `bun tauri dev` or `bun tauri build`. 
 
 ## Coding Conventions
 - Rust: snake_case, 4-space indentation, thiserror for errors, serde for serialization
-- TypeScript: strict mode, no unused locals/params, types in `lib/types.ts` mirror Rust models
+- TypeScript: strict mode, no unused locals/params
+- Types that cross the IPC boundary are generated from Rust by ts-rs into
+  `src/lib/bindings/` and re-exported from `lib/types.ts`; never edit them by
+  hand. For a new one, add `#[derive(ts_rs::TS)]` and `#[ts(export)]` to the
+  Rust type, run `bun run bindings`, commit the result and re-export it. CI
+  fails when the committed bindings are stale.
 - Components: functional with hooks, Tailwind for styling, no CSS-in-JS
 
 ## Localization

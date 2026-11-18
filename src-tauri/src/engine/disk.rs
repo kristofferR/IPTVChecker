@@ -38,7 +38,8 @@ pub fn atomic_rename(path: &Path, tmp_path: &Path) -> Result<(), AppError> {
     result
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum DiskSpaceTier {
     Plenty,
@@ -47,7 +48,8 @@ pub enum DiskSpaceTier {
     Critical,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct DiskSpaceInfo {
     pub available_bytes: u64,
     pub tier: DiskSpaceTier,

@@ -80,7 +80,8 @@ impl<R: Read> Read for LimitedReader<R> {
 }
 
 /// One XMLTV programme; times are unix epoch seconds.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export)]
 pub struct EpgProgramme {
     pub start: i64,
     pub stop: i64,

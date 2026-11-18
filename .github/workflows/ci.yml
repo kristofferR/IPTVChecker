@@ -94,7 +94,20 @@ jobs:
 
       - name: Run Rust tests
         working-directory: src-tauri
-        run: cargo test
+        # The tests regenerate src/lib/bindings. Starting from nothing also
+        # exposes files left behind by types that no longer exist.
+        run: |
+          rm -rf ../src/lib/bindings
+          cargo test
+
+      - name: Check generated TypeScript bindings
+        run: |
+          if [ -n "$(git status --porcelain -- src/lib/bindings)" ]; then
+            git status --short -- src/lib/bindings
+            git diff -- src/lib/bindings
+            echo "::error::src/lib/bindings is out of date. Run 'bun run bindings' and commit the result."
+            exit 1
+          fi
 
   rust-windows:
     name: Rust Tests (Windows)

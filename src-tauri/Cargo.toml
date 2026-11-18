@@ -57,6 +57,9 @@ cast-sender = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 mdns-sd = "0.21"
 local-ip-address = "0.6"
+# Generates src/lib/bindings/*.ts from the types that cross the IPC boundary
+# (`cargo test export_bindings`).
+ts-rs = { version = "12", features = ["no-serde-warnings"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

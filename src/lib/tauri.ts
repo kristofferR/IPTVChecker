@@ -9,6 +9,7 @@ import type {
   Channel,
   ChannelResult,
   ChromecastDevice,
+  DispatcharrCandidate,
   DispatcharrOpenRequest,
   DispatcharrStatsPushReport,
   DispatcharrTarget,
@@ -138,19 +139,6 @@ export async function dispatcharrSetChannelStreams(
     expected,
     allowEmpty,
   });
-}
-
-/** A provider stream offered for a channel, as the row it would load as. */
-export interface DispatcharrCandidate {
-  channel: Channel;
-  stream_id: number;
-  /** Carries the channel's EPG ID. */
-  epg: boolean;
-  /** Name similarity with the channel, 0 to 100. */
-  similarity: number;
-  /** Country tag of the stream when it differs from the channel's; the same
-   *  name in another country is often a different channel. */
-  other_country: string | null;
 }
 
 export async function dispatcharrFindStreams(

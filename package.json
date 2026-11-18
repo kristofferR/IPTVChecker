@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "tauri": "bun scripts/run-tauri.ts",
     "typecheck": "tsc --noEmit",
+    "bindings": "rm -rf src/lib/bindings && cd src-tauri && cargo test export_bindings",
     "test:frontend": "bun test tests",
     "perf:ui-filter": "bun run scripts/benchmark-ui-filter.ts",
     "perf:backend-scan": "cd src-tauri && cargo run --release --example backend_bench --",

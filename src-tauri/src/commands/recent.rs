@@ -16,7 +16,8 @@ const DEFAULT_PLAYLIST_LABEL: &str = "iptv-org — Full index";
 const LEGACY_DEFAULT_PLAYLIST_URL: &str = "https://iptv-org.github.io/iptv/categories/news.m3u";
 const LEGACY_DEFAULT_PLAYLIST_LABEL: &str = "iptv-org — News channels";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum RecentPlaylistKind {
     File,
@@ -128,7 +129,8 @@ fn credential_dedup_key(kind: &RecentPlaylistKind, value: &str) -> Option<(Strin
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct RecentPlaylistEntry {
     pub kind: RecentPlaylistKind,
     pub value: String,

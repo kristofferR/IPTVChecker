@@ -17,7 +17,8 @@ pub const MAX_CONCURRENCY: u32 = 20;
 pub const MIN_RETRIES: u32 = 0;
 pub const MAX_RETRIES: u32 = 10;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
 pub enum RetryBackoff {
@@ -27,7 +28,8 @@ pub enum RetryBackoff {
     Exponential,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ScanConfig {
     pub file_path: String,
     pub source_identity: Option<String>,
@@ -64,7 +66,8 @@ fn default_sample_clip_duration_secs() -> u32 {
     MIN_SAMPLE_CLIP_DURATION_SECS
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export)]
 pub struct ScanClientCapabilities {
     #[serde(default)]
     pub event_batch_v1: bool,
@@ -131,7 +134,8 @@ impl ScanConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ScanProgress {
     pub completed: usize,
     pub total: usize,
@@ -144,7 +148,8 @@ pub struct ScanProgress {
     pub drm: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ScanSummary {
     pub total: usize,
     pub alive: usize,
@@ -160,7 +165,8 @@ pub struct ScanSummary {
     pub playlist_score: Option<PlaylistScore>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export)]
 pub struct PlaylistScore {
     pub overall: f64,
     pub ping: f64,
@@ -168,20 +174,23 @@ pub struct PlaylistScore {
     pub quality: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ScanEvent<T> {
     pub run_id: String,
     pub payload: T,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ScanResultBatchPayload {
     pub items: Vec<ChannelResult>,
     pub progress: ScanProgress,
 }
 
 /// Payload contract for `scan://error`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ScanErrorPayload {
     pub message: String,
 }

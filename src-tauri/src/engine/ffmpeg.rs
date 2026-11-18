@@ -1524,7 +1524,8 @@ pub async fn capture_screenshot(
 }
 
 /// A validated sample clip on disk.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct SampleClip {
     pub path: String,
     pub format: SampleClipFormat,
@@ -2534,8 +2535,8 @@ pub fn check_label_mismatch(channel_name: &str, resolution: &str) -> Vec<String>
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
     #[cfg(unix)]
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
@@ -2555,10 +2556,10 @@ mod tests {
         capture_screenshot_with_format_using_binary, is_output_name_for_stem,
         run_combined_diagnostics_using_binary,
     };
+    #[cfg(unix)]
     use crate::error::AppError;
     #[cfg(unix)]
     use tokio_util::sync::CancellationToken;
-    #[cfg(unix)]
 
     #[cfg(unix)]
     fn temp_dir(prefix: &str) -> PathBuf {
