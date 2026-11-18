@@ -978,7 +978,10 @@ mod tests {
         std::fs::write(&oldest, [0; 4]).expect("write oldest");
         std::fs::write(&newest, [0; 4]).expect("write newest");
         std::fs::write(&keep, [0; 4]).expect("write keep");
-        std::fs::File::open(&oldest)
+        // Windows only changes a file's time through a writable handle.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&oldest)
             .expect("open oldest")
             .set_modified(std::time::SystemTime::UNIX_EPOCH)
             .expect("age oldest");
@@ -1005,7 +1008,10 @@ mod tests {
         let unrelated = dir.join("other-stale.part");
         std::fs::write(&stale, [0; 4]).expect("write stale partial");
         std::fs::write(&unrelated, [0; 4]).expect("write unrelated partial");
-        std::fs::File::open(&stale)
+        // Windows only changes a file's time through a writable handle.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&stale)
             .expect("open stale partial")
             .set_modified(std::time::SystemTime::UNIX_EPOCH)
             .expect("age stale partial");
